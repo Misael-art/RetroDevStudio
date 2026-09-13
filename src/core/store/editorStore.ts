@@ -128,6 +128,13 @@ export interface StoreState {
    * registrada antes do IPC. Prova que o handler rodou — NÃO prova entrega.
    * null = nada solicitado desde a abertura. */
   lastJoypadRequest: JoypadObservation | null;
+  /** true durante carga/stop do emulador: a época está invalidada e envios de
+   * input são bloqueados (contados) até a nova sessão existir. */
+  joypadSessionHold: boolean;
+  joypadBlockedCount: number;
+  /** Época do core no backend: inputs são enviados com este valor e o
+   * backend recusa época obsoleta (recarga aconteceu no meio do voo). */
+  coreEpoch: number | null;
   /** Última intenção CONFIRMADA pelo backend (`ok: true`). Este é o único
    * campo que demonstra entrega aceita pelo emulador. Acks cuja sequência não
    * corresponde à solicitação corrente são descartados (ack atrasado). */
@@ -242,6 +249,12 @@ export interface StoreActions {
   recordJoypadRequest: (sessionId: string, seq: number, joypad: Record<string, boolean>) => void;
   recordJoypadAck: (sessionId: string, seq: number, joypad: Record<string, boolean>) => void;
   recordJoypadSendError: (sessionId: string, seq: number, message: string) => void;
+  /** Invalida a época ANTES de qualquer await da carga/stop: durante o hold,
+   * envios são bloqueados e contados — nada antigo é aceito na janela. */
+  beginJoypadSessionHold: () => void;
+  releaseJoypadSessionHold: () => void;
+  recordJoypadBlocked: () => void;
+  setCoreEpoch: (epoch: number | null) => void;
   setViewportZoom: (zoom: number) => void;
   resetViewportZoom: () => void;
   setProjectSourceKind: (kind: string) => void;
@@ -820,10 +833,27 @@ export const useEditorStore = create<EditorState>((set) => ({
   lastJoypadAck: null,
   lastJoypadSendError: null,
   joypadSessionId: null,
+  joypadSessionHold: false,
+  joypadBlockedCount: 0,
+  coreEpoch: null,
   setEmulPaused: (paused) => set({ emulPaused: paused }),
+  beginJoypadSessionHold: () =>
+    set({
+      joypadSessionHold: true,
+      // Invalidação ANTES de qualquer await da operação: a época corrente
+      // deixa de existir aqui, não quando a resposta chegar.
+      joypadSessionId: null,
+      lastJoypadRequest: null,
+      lastJoypadAck: null,
+      lastJoypadSendError: null,
+    }),
+  releaseJoypadSessionHold: () => set({ joypadSessionHold: false }),
+  recordJoypadBlocked: () =>
+    set((state) => ({ joypadBlockedCount: state.joypadBlockedCount + 1 })),
+  setCoreEpoch: (epoch) => set({ coreEpoch: epoch }),
   recordJoypadRequest: (sessionId, seq, joypad) =>
     set((state) =>
-      state.joypadSessionId === sessionId
+      !state.joypadSessionHold && state.joypadSessionId === sessionId
         ? { lastJoypadRequest: { sessionId, seq, joypad }, lastJoypadSendError: null }
         : {},
     ),

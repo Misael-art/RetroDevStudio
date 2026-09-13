@@ -126,6 +126,11 @@ pub struct GenerateResult {
     pub build_source_map: Option<BuildSourceMap>,
 }
 
+/// Época do core: incrementa a cada `emulator_load_rom`. Um `send_input`
+/// emitido numa época anterior é RECUSADO pelo backend (não é aplicado ao
+/// core novo) — fecha a corrida de um input em voo atravessar uma recarga.
+static CORE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[derive(serde::Serialize)]
 pub struct EmulatorCommandResult {
     pub ok: bool,
@@ -428,15 +433,25 @@ fn emulator_load_rom(rom_path: String, emu: State<EmulatorCoreState>) -> Emulato
     };
 
     match core.load_rom(Path::new(&rom_path)) {
-        Ok(()) => EmulatorCommandResult {
-            ok: true,
-            message: match core.loaded_core_label() {
-                Some(label) if !label.is_empty() => {
-                    format!("ROM carregada: {} ({})", rom_path, label)
-                }
-                _ => format!("ROM carregada: {}", rom_path),
-            },
-        },
+        Ok(()) => {
+            // Nova época: inputs emitidos antes da recarga passam a ser
+            // recusados pelo send_input (ver CORE_EPOCH).
+            CORE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // Política de carga: controles voltam ao neutro. Um `send_input`
+            // que tenha atravessado a recarga (mutex serializa com o load)
+            // é neutralizado aqui — o core novo nunca herda joypad da
+            // sessão anterior.
+            let _ = core.set_joypad(crate::emulator::libretro_ffi::JoypadState::default());
+            EmulatorCommandResult {
+                ok: true,
+                message: match core.loaded_core_label() {
+                    Some(label) if !label.is_empty() => {
+                        format!("ROM carregada: {} ({})", rom_path, label)
+                    }
+                    _ => format!("ROM carregada: {}", rom_path),
+                },
+            }
+        }
         Err(e) => EmulatorCommandResult {
             ok: false,
             message: e,
@@ -1560,8 +1575,20 @@ fn emulator_get_execution_trace(
 #[tauri::command]
 fn emulator_send_input(
     joypad: JoypadState,
+    session_epoch: Option<u64>,
     emu: State<EmulatorCoreState>,
 ) -> EmulatorCommandResult {
+    if let Some(epoch) = session_epoch {
+        let current = CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
+        if epoch != current {
+            return EmulatorCommandResult {
+                ok: false,
+                message: format!(
+                    "sessão de input obsoleta: emitida na época {epoch}, corrente é {current}"
+                ),
+            };
+        }
+    }
     let core = match emu.0.lock() {
         Ok(c) => c,
         Err(e) => {
@@ -1582,6 +1609,12 @@ fn emulator_send_input(
             message: e,
         },
     }
+}
+
+/// Época corrente do core (incrementa a cada carga de ROM).
+#[tauri::command]
+fn emulator_get_core_epoch() -> u64 {
+    CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Para o emulador e limpa o framebuffer.
@@ -4423,6 +4456,7 @@ pub fn run() {
             parity_run_reference_candidate,
             parity_run_cycle_report,
             emulator_read_memory,
+            emulator_get_core_epoch,
             emulator_get_execution_trace,
             emulator_send_input,
             emulator_stop,

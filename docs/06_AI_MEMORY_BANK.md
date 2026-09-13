@@ -1,5 +1,18 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Re-revisão e905e20 — REV-05 fechado na rodada 4 (2026-09-12)
+
+Três lacunas fechadas: (1) hold de sessão na primeira linha da carga/stop (invalidação antes do await; envios bloqueados e contados); (2) negativos reais novos — blocked-during-load (teclas na janela pendente: hold, sessão nula, 4 bloqueios, sem ack, canvas inalterado) e inflight-across-reload (request A atravessa a transição sem crédito e sem vazamento — A/B 20/20 no mesmo processo); (3) corrida de resposta antiga coberta pelo inflight; stale-session preservado com rótulo preciso. Política no backend: `CORE_EPOCH` (load incrementa, send recusa obsoleta, drain de controles). Achado: vazamento real de send_input através da recarga (frame 0, estável em 3 execuções) fechado pela época. Store 86/86.
+
+### Re-revisão e905e20 — 2026-09-12: REV-05 parcial
+
+Host diagnose READY; 83 testes do store passaram; PR #63 e905e20 OPEN com 8 checks verdes consultados. ACK ok:true e geração frontend são melhorias confirmadas, mas aceite integral não sustentado. `loadRomIntoEmulator` só invalida/troca sessão depois de await emulatorLoadRom: a sessão antiga permanece válida durante a carga pendente. Probe de ordem sobre handler real preservado em `/home/misael/RetroDevStudio/review-e905e20/load-order.cjs` e `.json`.
+
+Harness atualizado tem negativos sem teclas e sessão divergente; faltam teclas presentes com backend recusando/pendente e prova de nenhum Step após falha de ACK. Negativo de sessão envia input novo após recarga completa e cobra época velha, não resolve ACK antigo atrasado numa troca A→B. Corrigir invalidação no início/ordenação e medir esses negativos reais. Relatório completo `/home/misael/RetroDevStudio/review-e905e20/REVIEW.md`.
+
+Diferença 614/3 versus 611/6 consistente com pré-requisitos condicionais no código, mas conjunto exato de IDs não comparado nesta revisão. Sem reexecução de certify completo/UI; nenhuma alteração de produto ou merge. Experimental; REV-01..04 mantêm aceites anteriores.
+
+
 ### Re-revisão 2026-09-12 — REV-04 aceito; REV-05 parcial
 
 Revisados b09772a / 87108bb e HEAD documental 7873886. Host diagnose READY. **REV-04: 15 testes focados passaram**, incluindo regiões vazias, índices divergentes e sequência não canônica. Aceite local desses achados; não equivalência universal.

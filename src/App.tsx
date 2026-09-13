@@ -15,7 +15,11 @@ import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
 import LayerPanel from "./components/hierarchy/LayerPanel";
 import type { ToolTab, ToolWorkspace } from "./components/tools/ToolsPanel";
 import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
-import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
+import {
+  emulatorGetCoreEpoch,
+  emulatorLoadRom,
+  emulatorStop,
+} from "./core/ipc/emulatorService";
 import { inspectRomMastering } from "./core/ipc/projectCapabilityService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
@@ -1454,6 +1458,8 @@ type AutomationApi = {
     lastJoypadAck: JoypadObservation | null;
     lastJoypadSendError: { sessionId: string; seq: number; message: string } | null;
     joypadSessionId: string | null;
+    joypadSessionHold: boolean;
+    joypadBlockedCount: number;
   };
   /** Para o emulador pelo mesmo caminho do controle visível "Parar",
    * desligando o runtime do core — a carga seguinte parte de power-on real.
@@ -2467,13 +2473,18 @@ export default function App() {
   ];
 
   async function resetEmulatorSession(switchToScene = false) {
+    // Invalidação antes do await do stop: a época morre aqui, não na resposta.
+    useEditorStore.getState().beginJoypadSessionHold();
     try {
+      useEditorStore.getState().releaseJoypadSessionHold();
       await emulatorStop();
     } catch {
+      useEditorStore.getState().releaseJoypadSessionHold();
       // Project and target transitions should still reset local editor state even if the core is already stopped.
     }
 
     setEmulatorLoaded(false);
+    useEditorStore.getState().setCoreEpoch(null);
     setEmulPaused(false);
 
     if (switchToScene) {
@@ -3079,6 +3090,21 @@ export default function App() {
     romPath: string,
     options?: { startPaused?: boolean }
   ) {
+    // Invalidação ANTES de qualquer await: durante a carga em voo a época
+    // antiga já não existe — inputs da sessão velha são bloqueados (e
+    // contados), nunca aceitos na janela de transição.
+    useEditorStore.getState().beginJoypadSessionHold();
+    try {
+      await loadRomIntoEmulatorInner(romPath, options);
+    } finally {
+      useEditorStore.getState().releaseJoypadSessionHold();
+    }
+  }
+
+  async function loadRomIntoEmulatorInner(
+    romPath: string,
+    options?: { startPaused?: boolean }
+  ) {
     const romDependency = await detectRomDependency(romPath);
     if (romDependency.dependency_id) {
       const ready = await ensureDependencies(
@@ -3108,6 +3134,10 @@ export default function App() {
     }
 
     setEmulatorLoaded(true);
+    // Ancora a época do core para os envios de input (o backend recusa época
+    // obsoleta — ver CORE_EPOCH em lib.rs).
+    const coreEpoch = await emulatorGetCoreEpoch().catch(() => null);
+    useEditorStore.getState().setCoreEpoch(coreEpoch);
     trackProductMetric({ kind: "rom_loaded" });
     logMessage("success", `ROM carregada: ${romPath}`);
     setActiveViewportTab("game");
@@ -3833,6 +3863,9 @@ export default function App() {
           lastJoypadAck: state.lastJoypadAck,
           lastJoypadSendError: state.lastJoypadSendError,
           joypadSessionId: state.joypadSessionId,
+          joypadSessionHold: state.joypadSessionHold,
+          joypadBlockedCount: state.joypadBlockedCount,
+          coreEpoch: state.coreEpoch,
         };
       },
       stopEmulator: async () => {

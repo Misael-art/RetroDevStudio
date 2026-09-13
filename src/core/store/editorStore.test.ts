@@ -1158,4 +1158,62 @@ describe("observação de joypad correlacionada por sessão e sequência", () =>
 
     expect(useEditorStore.getState().lastJoypadRequest).toBeNull();
   });
+
+  // ── Janela de hold: invalidação ANTES do await da carga/stop ──────────────
+
+  it("hold no início da operação invalida a época corrente antes da resposta", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+
+    // Primeiro ato da carga: invalidação imediata (não pós-await).
+    useEditorStore.getState().beginJoypadSessionHold();
+
+    const state = useEditorStore.getState();
+    expect(state.joypadSessionHold).toBe(true);
+    expect(state.joypadSessionId).toBeNull();
+    expect(state.lastJoypadRequest).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+
+    // Resposta da época antiga chegando durante o hold: descartada.
+    useEditorStore.getState().recordJoypadAck(s, 1, { right: true });
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+  });
+
+  it("hold bloqueia registro de request e conta o bloqueio", () => {
+    beginSession();
+    useEditorStore.getState().beginJoypadSessionHold();
+    const before = useEditorStore.getState().joypadBlockedCount;
+
+    useEditorStore.getState().recordJoypadBlocked();
+    // Tentativa de request durante o hold: nunca vira observação.
+    useEditorStore
+      .getState()
+      .recordJoypadRequest("joypad-session-qualquer", 9, { right: true });
+
+    const state = useEditorStore.getState();
+    expect(state.joypadBlockedCount).toBe(before + 1);
+    expect(state.lastJoypadRequest).toBeNull();
+  });
+
+  it("release abre época nova e descarta o histórico da anterior", () => {
+    const antiga = beginSession();
+    useEditorStore.getState().recordJoypadRequest(antiga, 1, { right: true });
+    useEditorStore.getState().beginJoypadSessionHold();
+
+    // setEmulatorLoaded é a âncora de rotação do produto (sucesso ou stop).
+    useEditorStore.getState().releaseJoypadSessionHold();
+    useEditorStore.getState().setEmulatorLoaded(true);
+
+    const state = useEditorStore.getState();
+    expect(state.joypadSessionHold).toBe(false);
+    expect(state.joypadSessionId).not.toBeNull();
+    expect(state.joypadSessionId).not.toBe(antiga);
+    expect(state.lastJoypadRequest).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+
+    // Request da época antiga não é aceito na época nova.
+    useEditorStore.getState().recordJoypadRequest(antiga, 1, { right: true });
+    expect(useEditorStore.getState().lastJoypadRequest).toBeNull();
+  });
 });
+

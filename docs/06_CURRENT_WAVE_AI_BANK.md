@@ -1,5 +1,14 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 
+### Re-revisão e905e20 — 2026-09-12: REV-05 parcial
+
+Host diagnose READY; 83 testes do store passaram; PR #63 e905e20 OPEN com 8 checks verdes consultados. ACK ok:true e geração frontend são melhorias confirmadas, mas aceite integral não sustentado. `loadRomIntoEmulator` só invalida/troca sessão depois de await emulatorLoadRom: a sessão antiga permanece válida durante a carga pendente. Probe de ordem sobre handler real preservado em `/home/misael/RetroDevStudio/review-e905e20/load-order.cjs` e `.json`.
+
+Harness atualizado tem negativos sem teclas e sessão divergente; faltam teclas presentes com backend recusando/pendente e prova de nenhum Step após falha de ACK. Negativo de sessão envia input novo após recarga completa e cobra época velha, não resolve ACK antigo atrasado numa troca A→B. Corrigir invalidação no início/ordenação e medir esses negativos reais. Relatório completo `/home/misael/RetroDevStudio/review-e905e20/REVIEW.md`.
+
+Diferença 614/3 versus 611/6 consistente com pré-requisitos condicionais no código, mas conjunto exato de IDs não comparado nesta revisão. Sem reexecução de certify completo/UI; nenhuma alteração de produto ou merge. Experimental; REV-01..04 mantêm aceites anteriores.
+
+
 ### Re-revisão 2026-09-12 — REV-04 aceito; REV-05 parcial
 
 Revisados b09772a / 87108bb e HEAD documental 7873886. Host diagnose READY. **REV-04: 15 testes focados passaram**, incluindo regiões vazias, índices divergentes e sequência não canônica. Aceite local desses achados; não equivalência universal.
@@ -45,6 +54,18 @@ Os dois achados remanescentes da re-revisão foram corrigidos com oráculos que 
 - **REV-05 (input/UI):** o bug raiz era o mapeamento — campos do JoypadState (`start`/`right`) comparados contra códigos de tecla (`Enter`/`ArrowRight`); zero teclas eram emitidas. Agora: mapeamento campo→código explícito (KEY_MAP do produto invertido), teclas simultâneas, **ações WebDriver de teclado nativas** (codepoints Unicode; fallback sintético declarado), cliques nativos W3C (hit-testing), confirmação **por observação do produto** — `editorStore.lastSentJoypad`/`lastJoypadSendError` registrados pelo manipulador de teclado e expostos em `__RDS_E2E__.getLastInputObservation` — com as 180 verificações por frame, contagens 2 press/2 release exatas e auto-teste negativo que suprime teclas e exige zero transições (exit 1).
 - **Achados novos medidos:** (1) recarga em core quente (`emulator_load_rom` sem stop) NÃO equivale a power-on — 14 frames iniciais com conteúdo inexistente na timeline fresca; o protocolo passou a ser warm-up → pause → **stop (power-off real)** → carga `startPaused`; (2) o loop livre do produto iniciava 1-2 frames fantasma mesmo com sessão pausada — gate `pausedRef` adicionado em `startEmulatorLoop`; (3) WRAM entre passagens consecutivas carrega efeito de ordem do core no processo — registro A/B mantido como corroboração, não como oráculo; (4) no título do HAMOOPIG o efeito de input é de ESTADO (WRAM input `c5f5dba8…` ≠ ociosa `7b10c5b4…`), não de framebuffer — timelines ociosa e com input registradas por frame no backend.
 - **Resultado:** positivo com 180/180 observações por frame, 166/180 frames coincidindo com a timeline backend (janela de boot 0..13 documentada), WRAM A/B registrada; negativo com teclas suprimidas detectado (exit 1). Gates no HEAD: Rust 560/36, frontend 601/6, tsc/lint/clippy/fmt/check:tree OK; app rebuildado com hash no relatório.
+
+#### Rodada 4 (2026-09-12): janela de carga invalidada cedo + negativos de recusa/pendência/corrida pelo caminho real
+
+As três lacunas da rodada 3 fechadas:
+
+- **Invalidação cedo (P1):** `loadRomIntoEmulator` abre um **hold de sessão na primeira linha** (antes de qualquer await): a época morre no início da operação; envios durante a carga são bloqueados e contados (`joypadSessionHold`, `joypadBlockedCount`; guard no `sendJoypad`). O stop invalida pelo mesmo caminho. **Política no backend:** `emulator_load_rom` incrementa `CORE_EPOCH` e reseta os controles (drain); `emulator_send_input` recebe a época e **RECUSA obsoleta** (`ok:false`) — input em voo não é aplicado ao core novo.
+- **Negativos reais (P1):** `--self-test-send-blocked-during-load` (teclas durante a carga pendente: hold ativo, sessão nula, 4 bloqueios contados, sem ack, canvas inalterado) e `--self-test-inflight-across-reload` (request A in-flight atravessando a transição A→B: nenhum ack da época antiga, canal S2 confirmado, 20/20 frames idênticos ao controle sem request A).
+- **Corrida de resposta antiga (P2):** stale-session preservado com rótulo preciso ("incompatibilidade de sessão por época"); o novo inflight cobre request A pendente + transição real + resolução tardia sem crédito a A.
+- **Achado medido:** vazamento REAL de `send_input` através da recarga (frame 0 A-vs-controle divergente, estável em 3 execuções, ANTES da época) — fechado por `CORE_EPOCH` (A/B 20/20 pós-época). Recarga pura por stop também tem 15 frames de ambiente da .so no processo (sem gate; comparado A-vs-controle no mesmo processo).
+- **Recusa por stop puro é inalcançável por teclado real** (o produto sai da aba Jogo ao parar) — documentado; a recusa real do backend é exercida pelo inflight (`sendError` "obsoleta" quando o request cruza a recarga).
+
+Gates: Rust fmt/clippy/560-36; store 86/86 (3 testes novos da janela de hold); tsc OK; harness com 5 passagens em `run-proof.sh`; evidências em `/home/misael/RetroDevStudio/rex-evidence-2026-09-12/`.
 
 #### Rodada 3 (2026-09-12): REV-05 reaberto — a observação media intenção, não entrega
 

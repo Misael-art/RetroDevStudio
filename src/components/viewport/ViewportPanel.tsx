@@ -2005,12 +2005,20 @@ export default function ViewportPanel({
       // A sessão é capturada aqui, no fechamento do envio: se um stop ou uma
       // recarga de ROM ocorrer antes da resolução, a resposta chega carregando
       // a época antiga e é descartada pelo store.
-      const sessionId = useEditorStore.getState().joypadSessionId;
-      if (!sessionId) return;
+      const inputState = useEditorStore.getState();
+      const sessionId = inputState.joypadSessionId;
+      if (!sessionId || inputState.joypadSessionHold) {
+        // Envio durante carga/stop: bloqueado e contado — nunca registrado
+        // como request nem aceito como ack na janela de transição.
+        inputState.recordJoypadBlocked();
+        return;
+      }
       const seq = (joypadSeqRef.current += 1);
       const snapshot: Record<string, boolean> = { ...updated };
       useEditorStore.getState().recordJoypadRequest(sessionId, seq, snapshot);
-      emulatorSendInput(updated).then(
+      // A época do core vai junto: se uma recarga acontecer no meio do voo,
+      // o backend RECUSA (ok: false) em vez de aplicar input ao core novo.
+      emulatorSendInput(updated, useEditorStore.getState().coreEpoch ?? undefined).then(
         (result) => {
           if (result?.ok) {
             useEditorStore.getState().recordJoypadAck(sessionId, seq, snapshot);
