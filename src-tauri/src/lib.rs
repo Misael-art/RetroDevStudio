@@ -142,7 +142,7 @@ impl EmulatorCoreState {
         session_epoch: Option<u64>,
         joypad: JoypadState,
     ) -> EmulatorCommandResult {
-        let mut core = match self.0.lock() {
+        let core = match self.0.lock() {
             Ok(c) => c,
             Err(e) => {
                 return EmulatorCommandResult {
