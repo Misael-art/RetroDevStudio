@@ -156,7 +156,7 @@ fn canonical_catalog_dir(work_dir: &Path, normalized_sha256: &str) -> Result<Pat
         .map_err(|error| format!("falha ao canonicalizar diretório de extração: {error}"))?;
     let escapes = dir_canonical
         .components()
-        .any(|piece| matches!(piece, Component::ParentDir | Component::Prefix(_)))
+        .any(|piece| matches!(piece, Component::ParentDir))
         || !dir_canonical.starts_with(&work_canonical);
     if escapes {
         return Err(format!(
