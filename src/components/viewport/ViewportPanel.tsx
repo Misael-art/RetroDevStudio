@@ -521,6 +521,9 @@ export default function ViewportPanel({
   const audioUnlistenRef = useRef<(() => void) | null>(null);
   const audioQueueRef = useRef<QueuedAudioChunk[]>([]);
   const assetCacheRef = useRef<Map<string, ViewportAssetCacheEntry>>(new Map());
+  // Fallback Image() e benigno (assets acabam renderizando); um unico aviso evita
+  // poluir o console com uma linha por asset em cenas importadas densas.
+  const assetFallbackWarnedRef = useRef(false);
   const dragRef = useRef<{
     mode: "move" | "resize";
     entityId: string;
@@ -1372,10 +1375,13 @@ export default function ViewportPanel({
             markFailure("missing", `fetch retornou 404 para ${assetUrl}.`);
             return;
           }
-          logMessage(
-            "warn",
-            `[Viewport] fetch do asset '${relativePath}' falhou (${detail}); tentando fallback Image().`
-          );
+          if (!assetFallbackWarnedRef.current) {
+            assetFallbackWarnedRef.current = true;
+            logMessage(
+              "warn",
+              `[Viewport] fetch de asset falhou (${detail}); usando fallback Image() automaticamente. Primeiro asset: '${relativePath}'. Demais avisos identicos agregados.`
+            );
+          }
           loadImageElement(assetUrl);
         });
       return cacheEntry;
