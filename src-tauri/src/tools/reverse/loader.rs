@@ -93,6 +93,16 @@ pub fn rex_identify_rom(rom_path: &Path) -> Result<RexRomIdentity, String> {
     rex_identify_bytes(&raw)
 }
 
+/// Lê o arquivo uma única vez e retorna identidade + bytes brutos — para
+/// consumidores que precisam do conteúdo além da identidade (REX-04: catálogo
+/// de extração). Mesma validação de `rex_identify_rom`.
+pub fn rex_read_rom(rom_path: &Path) -> Result<(RexRomIdentity, Vec<u8>), String> {
+    let raw = fs::read(rom_path)
+        .map_err(|error| format!("Falha ao ler ROM '{}': {}", rom_path.display(), error))?;
+    let identity = rex_identify_bytes(&raw)?;
+    Ok((identity, raw))
+}
+
 /// Desfaz a normalização passo a passo (ordem inversa). Valida a identidade
 /// COMPLETA antes de produzir saída (REX-REV-03): os bytes de entrada devem
 /// corresponder ao `normalized_sha256`/`normalized_size` gravados (mesmo com

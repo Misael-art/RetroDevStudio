@@ -13,6 +13,7 @@
 #![allow(dead_code)]
 
 pub mod decomp_orch;
+pub mod extract;
 pub mod fingerprint;
 pub mod ghidra_bridge;
 pub mod object_diff;
