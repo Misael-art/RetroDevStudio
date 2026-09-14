@@ -8383,17 +8383,16 @@ pub extern "C" fn retro_run() {
     }
 
     /// Regressão da ORDEM DEFETUOSA com o comando REAL e sincronização
-    /// determinística via gate: o teste ativa o gate, spawna o sender (que
-    /// pausa imediatamente antes de adquirir o mutex do core), incrementa a
-    /// época, libera o gate, e o sender adquire o mutex e valida — vendo a
-    /// época já incrementada. No código com validação antes do lock, a
-    /// validação roda ANTES do gate (na entrada), com a época ainda 1, e o
-    /// input é aplicado quando o lock é liberado — o teste FALHA com o
-    /// vazamento capturado.
+    /// determinística via gate de canais instalado antes do spawn: o sender
+    /// pausa dentro de `send_input_if_current` imediatamente antes de
+    /// adquirir o mutex do core, o teste confirma a chegada, incrementa a
+    /// época e libera o gate — o sender então valida sob o lock, vendo a
+    /// época já incrementada, e recusa. No código com validação antes do
+    /// lock (regressão), a validação roda ANTES do gate, com a época ainda
+    /// 1, e o input é aplicado quando o lock é adquirido — o teste FALHA.
     #[test]
     fn send_input_command_disputes_mutex_and_refuses_epoch_bumped_under_lock() {
         use std::sync::mpsc;
-        use std::time::Duration;
 
         let _epoch_guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
         let state = std::sync::Arc::new(EmulatorCoreState(std::sync::Mutex::new(
@@ -8402,9 +8401,15 @@ pub extern "C" fn retro_run() {
         CORE_EPOCH.store(1, Ordering::SeqCst);
         let captured_before_reload = Some(1u64);
 
-        // Ativa o gate e sinaliza o canal de chegada ao gate.
+        // Instala AMBAS as metades do gate ANTES de spawnar o sender:
+        // - chegada: TX vai no gate (o sender sinaliza), RX fica com o teste;
+        // - liberação: RX vai no gate (o sender aguarda), TX fica com o teste.
+        // Se a metade de liberação fosse instalada depois, o sender passaria
+        // direto pelo gate (RX ausente) e o teste não pausaria nada.
         let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
         *EPOCH_TEST_GATE_TX.lock().unwrap() = Some(gate_tx);
+        *EPOCH_TEST_GATE_RX.lock().unwrap() = Some(release_rx);
 
         // Sender: chama o comando REAL. No código corrigido, pausa no gate,
         // adquire o mutex após a liberação, valida 1 vs 2 → recusa.
@@ -8421,15 +8426,15 @@ pub extern "C" fn retro_run() {
         });
 
         // Aguarda confirmação EXPLÍCITA de que o sender atingiu o gate.
-        let _ = gate_rx
+        gate_rx
             .recv()
             .expect("sender não sinalizou chegada ao gate");
 
-        // Incrementa a época com o gate ativo (o sender ainda pausado).
+        // Incrementa a época com o sender pausado no gate (antes do mutex).
         CORE_EPOCH.store(2, Ordering::SeqCst);
 
-        // Libera o gate: o sender adquire o mutex e valida.
-        *EPOCH_TEST_GATE_RX.lock().unwrap() = Some(mpsc::channel().1);
+        // Libera o gate: o sender adquire o mutex e valida contra a época 2.
+        release_tx.send(()).expect("gate já encerrado");
 
         let result = sender.join().unwrap();
 
