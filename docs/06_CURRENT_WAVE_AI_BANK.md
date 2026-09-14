@@ -1,6 +1,16 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 
-### Estado corrente — 2026-09-14: pilha REX fatias 1+2 INTEGRADA em `codex/import-decomp-review` `ff476a3`; REX-04 autorizada como próxima frente
+### Estado corrente — 2026-09-14 (2): REX-04 fatia 1 INTEGRADA em `codex/import-decomp-review` `8605998`
+
+**REX-04 fatia 1 (catálogo de extração organizada, Mega Drive) aceita pelo revisor em `b5c3cc2` e integrada:** merge **#64 → `8605998`** em `codex/import-decomp-review` (NÃO em `main` — consolidação segue via #61, outra linha). Gates no destino: check:tree, tsc, lint, npm test, cargo test --lib **576/38**, clippy, fmt, host READY; **provas reais reexecutadas no destino 2/2** (HAMOOPIG + Taiketsu) — e os artefatos imutáveis foram REUTILIZADOS por hash (mesmos `catalog-<sha>.json` dos runs anteriores, idempotência por conteúdo provada no destino); CI remota 4/4 no push do merge. Mimosa selado `sha256:bd4d117f…` (mesmos 2 FPs conhecidos de `NodeGraphEditor.tsx`).
+
+**Entrega:** `ExtractionCatalog` rex-extraction-catalog/v1 — regiões com offset/tamanho/método ancorados no SHA-256; invariante `identificado + desconhecido = total`; header parseia SOMENTE offsets provados no REX-02 (unknown = 916.992/917.504 ≈ 99,944% dos bytes, explícito); artefatos IMUTÁVEIS endereçados pelo hash do catálogo (duas origens com a mesma normalização nunca sobrescrevem um ao outro); links simbólicos rejeitados antes de criar/ler, arquivo final via `create_new`, reutilização só de arquivo regular com hash correto (revisão cobre links preexistentes — **substituição concorrente de caminhos NÃO coberta**, limitação registrada). 13 unitários + 2 provas BYOR.
+
+**Limites:** Experimental — catálogo de layout MD; sem extração de sprites, sem lógica, sem IPC/UI. Próxima fatia da frente REX-04 (scanners de conteúdo) ainda NÃO iniciada; depende de nova rodada de revisão.
+
+---
+
+### [HISTÓRICO] Estado corrente — 2026-09-14: pilha REX fatias 1+2 INTEGRADA em `codex/import-decomp-review` `ff476a3`; REX-04 autorizada como próxima frente
 
 > **Aviso de leitura:** TODAS as seções abaixo desta são **HISTÓRICAS** — registram estados de revisão e de ausência de merge válidos apenas na data de cada seção. O estado operacional corrente é exclusivamente esta seção.
 
