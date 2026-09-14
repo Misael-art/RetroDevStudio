@@ -145,13 +145,40 @@ fn sha256_path_component(sha: &str) -> Result<&str, String> {
 /// caminho resolvido (symlinks e sobe-diretórios eliminados por
 /// `canonicalize`) e contenção verificada sob o diretório de trabalho
 /// canônico. Toda escrita de artefato passa por aqui.
+/// Link simbólico já plantado num ponto da cadeia = rejeição ANTES de
+/// qualquer criação (nada é criado fora do work_dir por nossa causa).
+fn reject_if_symlink(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
+            "caminho do catálogo é link simbólico (rejeitado): {}",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "falha ao inspecionar '{}': {error}",
+            path.display()
+        )),
+    }
+}
+
+/// Diretório canônico do catálogo de uma imagem: componente hex validado,
+/// sem seguir links (checados ANTES de criar qualquer diretório), caminho
+/// resolvido por `canonicalize` e contenção verificada sob o work_dir
+/// canônico. Toda escrita de artefato passa por aqui.
 fn canonical_catalog_dir(work_dir: &Path, normalized_sha256: &str) -> Result<PathBuf, String> {
     let component = sha256_path_component(normalized_sha256)?;
-    let requested = work_dir.join("extract").join(component);
-    fs::create_dir_all(&requested)
-        .map_err(|error| format!("falha ao criar diretório de extração: {error}"))?;
+    fs::create_dir_all(work_dir).map_err(|error| format!("falha ao criar work_dir: {error}"))?;
     let work_canonical = fs::canonicalize(work_dir)
         .map_err(|error| format!("falha ao canonicalizar work_dir: {error}"))?;
+
+    let extract_dir = work_dir.join("extract");
+    reject_if_symlink(&extract_dir)?;
+    let requested = extract_dir.join(component);
+    reject_if_symlink(&requested)?;
+
+    fs::create_dir_all(&requested)
+        .map_err(|error| format!("falha ao criar diretório de extração: {error}"))?;
     let dir_canonical = fs::canonicalize(&requested)
         .map_err(|error| format!("falha ao canonicalizar diretório de extração: {error}"))?;
     let escapes = dir_canonical
@@ -261,18 +288,58 @@ pub fn build_md_extraction_catalog(
 /// execuções no mesmo segundo colidiriam.
 static EXTRACTION_RUN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Persiste o catálogo como artefato (`extract/<sha>/catalog.json`) e registra
-/// a execução no ledger (append-only). Retorna (run_id, artifact).
+/// Escrita IMUTÁVEL endereçada por conteúdo: `create_new` nunca segue um
+/// entry preexistente (symlink inclusive — falha sem tocar o alvo). Colisão
+/// de nome só é aceitável se o conteúdo existente for IDÊNTICO (re-execução
+/// do mesmo catálogo); bytes divergentes = adulteração detectada.
+fn write_catalog_immutable(path: &Path, bytes: &[u8], expected_sha: &str) -> Result<(), String> {
+    use std::io::Write;
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut file) => file
+            .write_all(bytes)
+            .map_err(|error| format!("falha ao escrever catálogo '{}': {error}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let existing = fs::read(path).map_err(|error| {
+                format!(
+                    "falha ao ler catálogo existente '{}': {error}",
+                    path.display()
+                )
+            })?;
+            if sha256_hex(&existing) == expected_sha {
+                Ok(())
+            } else {
+                Err(format!(
+                    "catálogo existente diverge do conteúdo endereçado por hash — \
+                     recusado (possível adulteração): {}",
+                    path.display()
+                ))
+            }
+        }
+        Err(error) => Err(format!(
+            "falha ao abrir catálogo '{}': {error}",
+            path.display()
+        )),
+    }
+}
+
+/// Persiste o catálogo como artefato IMUTÁVEL endereçado pelo hash do PRÓPRIO
+/// catálogo (`extract/<normalized_sha>/catalog-<catalog_sha>.json`) — dois
+/// runs com catálogos distintos nunca sobrescrevem o artefato um do outro,
+/// mesmo compartilhando a normalização — e registra a execução no ledger
+/// (append-only). Retorna (run_id, artifact).
 pub fn record_extraction_run(
     work_dir: &Path,
     catalog: &ExtractionCatalog,
 ) -> Result<(String, ArtifactRef), String> {
     let dir = canonical_catalog_dir(work_dir, &catalog.normalized_sha256)?;
-    let path = dir.join("catalog.json");
     let catalog_json = serde_json::to_vec_pretty(catalog).map_err(|error| error.to_string())?;
     let catalog_sha = sha256_hex(&catalog_json);
-    fs::write(&path, &catalog_json)
-        .map_err(|error| format!("falha ao escrever catálogo '{}': {error}", path.display()))?;
+    let path = dir.join(format!("catalog-{catalog_sha}.json"));
+    write_catalog_immutable(&path, &catalog_json, &catalog_sha)?;
 
     let seq = EXTRACTION_RUN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let artifact = ArtifactRef {
@@ -550,7 +617,16 @@ mod tests {
         assert_eq!(run.verdict, "cataloged");
         assert_eq!(run.artifacts.len(), 1);
         assert_eq!(run.artifacts[0].sha256, artifact.sha256);
-        assert!(run.artifacts[0].path.ends_with("catalog.json"));
+        let stored_name = run.artifacts[0]
+            .path
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            stored_name.starts_with("catalog-") && stored_name.ends_with(".json"),
+            "artefato endereçado por hash: {stored_name}"
+        );
 
         let _ = std::fs::remove_dir_all(&work);
     }
@@ -578,6 +654,159 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// REGRESSÃO do achado P1 da revisão (f904f74): duas origens legítimas com
+    /// a MESMA normalização (raw e SMD interleaved) geram catálogos distintos
+    /// (original_sha/variant diferem) e NENHUM artefato pode sobrescrever o
+    /// outro — artefatos são imutáveis, endereçados pelo hash do próprio
+    /// catálogo.
+    #[test]
+    fn two_sources_same_normalization_keep_both_artifacts() {
+        let work = std::env::temp_dir().join(format!(
+            "rex04-extract-two-src-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        // Tamanho múltiplo do frame SMD (0x4000): raw e interleaved legítimos.
+        let raw = synthetic_rom(0x8000);
+        let interleaved = crate::tools::reverse::platform::interleave_smd(&raw);
+
+        let identity_raw = identity_of(&raw);
+        let identity_smd = identity_of(&interleaved);
+        assert_eq!(
+            identity_raw.normalized_sha256, identity_smd.normalized_sha256,
+            "as duas origens normalizam para os mesmos bytes"
+        );
+        assert_ne!(
+            identity_raw.original_sha256, identity_smd.original_sha256,
+            "origens legítimas distintas"
+        );
+
+        let catalog_raw = build_md_extraction_catalog(&identity_raw, &raw).expect("catálogo raw");
+        // O builder consome os bytes NORMALIZADOS — a origem smd chega aos
+        // mesmos bytes normalizados por outro caminho (deinterleave).
+        let catalog_smd = build_md_extraction_catalog(&identity_smd, &raw).expect("catálogo smd");
+        assert_ne!(catalog_raw, catalog_smd, "catálogos distinguem a origem");
+
+        let (_, artifact_raw) = record_extraction_run(&work, &catalog_raw).expect("run raw");
+        let (_, artifact_smd) = record_extraction_run(&work, &catalog_smd).expect("run smd");
+
+        assert_ne!(
+            artifact_raw.path, artifact_smd.path,
+            "catálogos distintos nunca compartilham arquivo"
+        );
+        // Nenhum sobrescreveu o outro: ambos intactos, cada um com o hash
+        // registrado no seu run.
+        for artifact in [&artifact_raw, &artifact_smd] {
+            let stored = fs::read(&artifact.path).expect("artefato legível");
+            assert_eq!(sha256_hex(&stored), artifact.sha256, "hash íntegro");
+        }
+        // Conteúdo do raw continua o MESMO depois do run do smd.
+        let raw_again = fs::read(&artifact_raw.path).expect("artefato raw persistente");
+        let reparsed: ExtractionCatalog =
+            serde_json::from_slice(&raw_again).expect("catálogo raw reparseável");
+        assert_eq!(reparsed, catalog_raw);
+
+        let ledger =
+            crate::tools::reverse::decomp::rom_library::load_ledger(&work).expect("ledger");
+        assert_eq!(ledger.scenario_runs.len(), 2);
+        assert_eq!(
+            ledger.scenario_runs[0].artifacts[0].sha256,
+            artifact_raw.sha256
+        );
+        assert_eq!(
+            ledger.scenario_runs[1].artifacts[0].sha256,
+            artifact_smd.sha256
+        );
+
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// REGRESSÃO do achado P1 (escrita segue symlink): um `catalog-*.json`
+    /// preexistente como link simbólico NÃO pode redirecionar a escrita para
+    /// fora do work_dir; o sentinela externo deve permanecer intacto e o run
+    /// deve falhar. Unix: criar symlinks no Windows exige privilégio.
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_catalog_file_cannot_redirect_write() {
+        let work = std::env::temp_dir().join(format!(
+            "rex04-symlink-file-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let rom = synthetic_rom(0x800);
+        let identity = identity_of(&rom);
+        let catalog = build_md_extraction_catalog(&identity, &rom).expect("catálogo");
+        let catalog_sha =
+            sha256_hex(&serde_json::to_vec_pretty(&catalog).expect("serialização determinística"));
+
+        // Cria a cadeia de diretórios via caminho legítimo e planta o link
+        // simbólico no NOME FINAL endereçado pelo hash.
+        let dir = canonical_catalog_dir(&work, &catalog.normalized_sha256).expect("diretório");
+        let outside = work.parent().unwrap().join(format!(
+            "rex04-sentinel-{}-{}.txt",
+            std::process::id(),
+            now_unix()
+        ));
+        fs::write(&outside, b"SENTINEL-INTEGRO").expect("sentinela externa");
+        let link = dir.join(format!("catalog-{catalog_sha}.json"));
+        std::os::unix::fs::symlink(&outside, &link).expect("plantar symlink");
+
+        let error = record_extraction_run(&work, &catalog).expect_err("escrita via link rejeitada");
+        assert!(
+            error.contains("diverge") || error.contains("existe"),
+            "erro esperado de colisão/adulteração: {error}"
+        );
+        assert_eq!(
+            fs::read(&outside).expect("sentinela legível"),
+            b"SENTINEL-INTEGRO",
+            "sentinela externa INTOCADA pela escrita"
+        );
+
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    /// REGRESSÃO do achado P1 (create_dir_all antes da contenção): um link
+    /// simbólico em `extract/<sha>` é rejeitado ANTES de qualquer criação —
+    /// nada é escrito no diretório externo apontado.
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_sha_dir_is_rejected_before_creation() {
+        let work = std::env::temp_dir().join(format!(
+            "rex04-symlink-dir-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let rom = synthetic_rom(0x800);
+        let identity = identity_of(&rom);
+        let catalog = build_md_extraction_catalog(&identity, &rom).expect("catálogo");
+
+        let outside = work.parent().unwrap().join(format!(
+            "rex04-outside-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        fs::create_dir_all(&outside).expect("diretório externo");
+        let extract_dir = work.join("extract");
+        fs::create_dir_all(&extract_dir).expect("extract");
+        let sha_dir = extract_dir.join(&catalog.normalized_sha256);
+        std::os::unix::fs::symlink(&outside, &sha_dir).expect("plantar symlink no dir");
+
+        let error = record_extraction_run(&work, &catalog)
+            .expect_err("diretório via symlink deve ser rejeitado");
+        assert!(error.contains("link simbólico"), "{error}");
+        assert!(
+            fs::read_dir(&outside)
+                .expect("diretório externo")
+                .next()
+                .is_none(),
+            "nada foi criado no diretório externo"
+        );
+
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     /// Prova real: catálogo do HAMOOPIG com proveniência completa. A divergência
