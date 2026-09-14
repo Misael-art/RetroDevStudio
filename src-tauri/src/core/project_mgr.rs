@@ -24301,6 +24301,568 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         .expect("write Taiketsu Markdown report");
     }
 
+    /// Input script determinístico compartilhado pelas provas REX-00: 180
+    /// frames — 60 ociosos, Start por 10, Direita por 60, ocioso final.
+    fn rex_input_script_180f(label: &'static str) -> crate::core::parity_harness::InputScript {
+        use crate::emulator::libretro_ffi::JoypadState;
+        let mut frames = Vec::with_capacity(180);
+        for _ in 0..60 {
+            frames.push(JoypadState::default());
+        }
+        for _ in 0..10 {
+            frames.push(JoypadState {
+                start: true,
+                ..JoypadState::default()
+            });
+        }
+        for _ in 0..60 {
+            frames.push(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            });
+        }
+        while frames.len() < 180 {
+            frames.push(JoypadState::default());
+        }
+        crate::core::parity_harness::InputScript {
+            schema: crate::core::parity_harness::INPUT_SCRIPT_SCHEMA.to_string(),
+            name: Some(label.to_string()),
+            target: Some("megadrive".to_string()),
+            description: Some(
+                "REX-00: 60 idle, Start 10 frames, Right 60 frames, idle final; \
+                 definido antes da execucao e registrado por hash no ledger."
+                    .to_string(),
+            ),
+            frames,
+        }
+    }
+
+    /// Resolve a ROM de referência BYOR: override por env; default é o snapshot
+    /// imutável da investigação (hash verificado), nunca o doador original.
+    /// Retorna `None` apenas para skip explícito (sem arquivo configurado).
+    fn rex_reference_rom(
+        env_key: &str,
+        default_path: &str,
+        expected_sha256: &str,
+        test_name: &str,
+    ) -> Option<(PathBuf, String)> {
+        let configured = std::env::var(env_key).ok();
+        let path = match &configured {
+            Some(value) => PathBuf::from(value),
+            None => PathBuf::from(default_path),
+        };
+        if !path.is_file() {
+            if configured.is_some() {
+                panic!(
+                    "{test_name}: {env_key} aponta para arquivo inexistente em {}",
+                    path.display()
+                );
+            }
+            eprintln!(
+                "SKIP {test_name}: ROM de referencia ausente em {} (configure {env_key}); \
+                 skip explicito, nunca sucesso silencioso",
+                path.display()
+            );
+            return None;
+        }
+        let bytes = fs::read(&path).unwrap_or_else(|error| {
+            panic!("{test_name}: falha ao ler '{}': {error}", path.display())
+        });
+        let sha256 = crate::tools::reverse::decomp::rom_library::sha256_hex(&bytes);
+        assert_eq!(
+            sha256, expected_sha256,
+            "{test_name}: ROM de referencia mudou de revisao; preservar a proveniencia \
+             anterior e registrar revisao nova, nao reusar a captura antiga"
+        );
+        Some((path, sha256))
+    }
+
+    fn rex_register_reference_corpus(
+        sha256: &str,
+        size_bytes: u64,
+        label: &str,
+        source_path: &Path,
+        notes: &str,
+    ) {
+        use crate::tools::reverse::decomp::rom_library::{
+            corpus_identity, decomp_work_dir, register_corpus_entry, CorpusEntry,
+            CORPUS_ROLE_REFERENCE,
+        };
+        let work_dir = decomp_work_dir();
+        let _ = register_corpus_entry(
+            &work_dir,
+            CorpusEntry {
+                id: corpus_identity(sha256),
+                sha256: sha256.to_string(),
+                size_bytes,
+                role: CORPUS_ROLE_REFERENCE.to_string(),
+                label: label.to_string(),
+                source_path: Some(source_path.to_string_lossy().to_string()),
+                provenance: "sgdkforge-homebrew (snapshot imutavel fora do repo)".to_string(),
+                registered_at_unix: crate::tools::reverse::decomp::rom_library::now_unix(),
+                notes: Some(notes.to_string()),
+            },
+        )
+        .unwrap_or_else(|error| panic!("rex: registrar corpus no ledger: {error}"));
+        let inserted = crate::tools::reverse::decomp::rom_library::ensure_capability_records(
+            &work_dir,
+            crate::tools::reverse::equivalence::default_md_capability_records(
+                crate::tools::reverse::decomp::rom_library::now_unix(),
+            ),
+        )
+        .unwrap_or_else(|error| panic!("rex: registrar capacidades default: {error}"));
+        eprintln!("REX capabilities: {inserted} registros default inseridos");
+    }
+
+    fn rex_write_json(path: &Path, value: &serde_json::Value) {
+        fs::write(
+            path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(value).expect("serialize json")
+            ),
+        )
+        .unwrap_or_else(|error| panic!("gravar '{}': {error}", path.display()));
+    }
+
+    /// REX-00: prova mesma-ROM no caminho canônico (parity harness + core real
+    /// Genesis Plus GX) com input definido, dupla execução para determinismo,
+    /// run ocioso para discriminação de input, checkpoints de framebuffer e
+    /// registro completo no ledger v2.
+    #[ignore]
+    #[test]
+    fn rex00_hamoopig_same_rom_equivalence_with_defined_inputs() {
+        use crate::core::parity_harness::{compare_runs, run_parity_capture};
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+        use crate::tools::reverse::decomp::rom_library::{
+            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, ArtifactRef,
+            ScenarioRunRecord, CORPUS_ROLE_REFERENCE, SCENARIO_VERDICT_PASSED,
+        };
+        use crate::tools::reverse::equivalence::{
+            evaluate_identical_equivalence, scenario_input_discrimination,
+        };
+
+        let test_name = "rex00_hamoopig_same_rom_equivalence_with_defined_inputs";
+        let Some((rom_path, rom_sha)) = rex_reference_rom(
+            "RDS_REX_HAMOOPIG_ROM",
+            "/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/hamoopig/reference.bin",
+            "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+            test_name,
+        ) else {
+            return;
+        };
+
+        let artifact_root = validation_artifact_dir("rex-hamoopig-same-rom");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create rex artifact dir");
+
+        let script = rex_input_script_180f("rex00-hamoopig-180f");
+        let script_path = artifact_root.join("input-script.rds-input.json");
+        rex_write_json(
+            &script_path,
+            &serde_json::to_value(&script).expect("serialize input script"),
+        );
+
+        // Cada captura parte de um core fresco (power-on + load), pois a
+        // restauração de savestate NÃO se mostrou fiel ao power-on neste
+        // core/título: duas execuções restauradas do mesmo snapshot divergem
+        // de forma constante (achado registrado no run do ledger). Reset
+        // fresco é a definição de determinismo do gate REX 5.
+        let run_fresh_capture = |label: &'static str,
+                                 frames: &[crate::emulator::libretro_ffi::JoypadState]|
+         -> (
+            crate::core::parity_harness::ParityReport,
+            String,
+            Option<String>,
+        ) {
+            let mut core = EmulatorCore::new(None);
+            core.load_rom(&rom_path)
+                .unwrap_or_else(|error| panic!("{test_name}: carregar ROM ({label}): {error}"));
+            let initial_state = core
+                .capture_runtime_state_bytes()
+                .unwrap_or_else(|error| panic!("{test_name}: estado inicial ({label}): {error}"));
+            let core_label = core.loaded_core_label().unwrap_or("unknown").to_string();
+            let core_sha = core
+                .loaded_core_file()
+                .and_then(|path| fs::read(path).ok())
+                .map(|bytes| crate::tools::reverse::decomp::rom_library::sha256_hex(&bytes));
+            let report = run_parity_capture(&mut core, &rom_path, &rom_sha, &initial_state, frames)
+                .unwrap_or_else(|error| panic!("{test_name}: captura {label}: {error}"));
+            core.stop()
+                .unwrap_or_else(|error| panic!("{test_name}: parar core ({label}): {error}"));
+            (report, core_label, core_sha)
+        };
+
+        // Capturas A e B: power-on fresco, mesma ROM, mesmo script — determinismo.
+        let (report_a, core_label, core_sha) = run_fresh_capture("A", &script.frames);
+        let (report_b, _, _) = run_fresh_capture("B", &script.frames);
+        let determinism = compare_runs(&report_a, &report_b);
+        assert!(
+            determinism.is_empty(),
+            "{test_name}: mesma ROM em power-on fresco deve ser deterministica: {determinism:?}"
+        );
+
+        // Run ocioso (zero input) para medir discriminação do input definido.
+        let idle_frames = vec![JoypadState::default(); 180];
+        let (report_idle, _, _) = run_fresh_capture("idle", &idle_frames);
+
+        let discrimination = scenario_input_discrimination(&report_a, &report_idle);
+        eprintln!(
+            "REX HAMOOPIG input_discrimination: {} — {}",
+            discrimination.status, discrimination.detail
+        );
+
+        // Identidade mesma-ROM: oráculos sobre A (referência) vs B (reexecução).
+        let equivalence = evaluate_identical_equivalence(&report_a, &report_b);
+        assert_ne!(
+            equivalence.verdict,
+            crate::tools::reverse::equivalence::VERDICT_REJECTED,
+            "{test_name}: mesma ROM não pode ser rejeitada: {:?}",
+            equivalence.oracles
+        );
+        eprintln!(
+            "REX HAMOOPIG equivalence: verdict={} core={core_label} frames={}",
+            equivalence.verdict, report_a.frames_run
+        );
+
+        // Checkpoints de framebuffer em janela dedicada (mesmo script). O hash
+        // RGBA permite cruzar com a prova de UI desktop, cujo evento
+        // emulator://frame entrega os mesmos bytes convertidos por
+        // framebuffer_to_rgba.
+        let checkpoint_frames: [u32; 4] = [59, 69, 129, 179];
+        let mut checkpoint_artifacts = Vec::new();
+        let mut checkpoint_rgba_hashes = serde_json::Map::new();
+        {
+            let mut core_cp = EmulatorCore::new(None);
+            core_cp.load_rom(&rom_path).unwrap_or_else(|error| {
+                panic!("{test_name}: recarregar ROM p/ checkpoints: {error}")
+            });
+            for (index, joypad) in script.frames.iter().enumerate() {
+                let index = index as u32;
+                core_cp
+                    .set_joypad(joypad.clone())
+                    .unwrap_or_else(|error| panic!("{test_name}: set_joypad: {error}"));
+                core_cp
+                    .run_frame()
+                    .unwrap_or_else(|error| panic!("{test_name}: frame {index}: {error}"));
+                if checkpoint_frames.contains(&index) {
+                    let (buffer, size, format) = core_cp.get_framebuffer().expect("framebuffer");
+                    let frame = framebuffer_to_rgba(&buffer, size, format);
+                    let path = artifact_root.join(format!("checkpoint-{index:03}.ppm"));
+                    write_rgba_ppm(&path, frame.width, frame.height, &frame.rgba);
+                    checkpoint_artifacts.push(path);
+                    checkpoint_rgba_hashes.insert(
+                        index.to_string(),
+                        serde_json::Value::String(
+                            crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba),
+                        ),
+                    );
+                }
+            }
+            core_cp.stop().expect("parar core de checkpoints");
+        }
+        let rgba_hashes_path = artifact_root.join("checkpoint-rgba-hashes.json");
+        rex_write_json(
+            &rgba_hashes_path,
+            &serde_json::Value::Object(checkpoint_rgba_hashes),
+        );
+
+        let report_a_path = artifact_root.join("capture-a.json");
+        rex_write_json(
+            &report_a_path,
+            &serde_json::to_value(&report_a).expect("report a"),
+        );
+        let equivalence_path = artifact_root.join("equivalence-report.json");
+        rex_write_json(
+            &equivalence_path,
+            &serde_json::to_value(&equivalence).expect("serialize equivalence"),
+        );
+
+        rex_register_reference_corpus(
+            &rom_sha,
+            rom_path.metadata().expect("rom metadata").len(),
+            "HAMOOPIG [VER.001] [SGDK 211] referencia padrao",
+            &rom_path,
+            "Referencia padrao escolhida pelo operador (GUARD-SGDK-EQUIVALENCE-01)",
+        );
+
+        let mut artifacts = vec![
+            crate::tools::reverse::equivalence::artifact_ref("input-script", &script_path)
+                .expect("artifact input script"),
+            crate::tools::reverse::equivalence::artifact_ref("capture-a", &report_a_path)
+                .expect("artifact capture a"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "equivalence-report",
+                &equivalence_path,
+            )
+            .expect("artifact equivalence"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "checkpoint-rgba-hashes",
+                &rgba_hashes_path,
+            )
+            .expect("artifact rgba hashes"),
+        ];
+        for checkpoint in &checkpoint_artifacts {
+            artifacts.push(
+                crate::tools::reverse::equivalence::artifact_ref(
+                    &checkpoint
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .unwrap_or("checkpoint-frame"),
+                    checkpoint,
+                )
+                .expect("artifact checkpoint"),
+            );
+        }
+
+        let mut gaps = equivalence.gaps.clone();
+        if discrimination.status != "pass" {
+            gaps.push(format!(
+                "input_discrimination={}: {}",
+                discrimination.status, discrimination.detail
+            ));
+        }
+        let run_id = format!("rex00-hamoopig-{}", now_unix());
+        record_scenario_run(
+            &decomp_work_dir(),
+            ScenarioRunRecord {
+                run_id: run_id.clone(),
+                scenario_id: "rex00-hamoopig-same-rom-180f-input-v1".to_string(),
+                kind: "equivalence".to_string(),
+                reference_sha256: rom_sha.clone(),
+                candidate_sha256: Some(rom_sha.clone()),
+                input_script_sha256: Some(crate::tools::reverse::decomp::rom_library::sha256_hex(
+                    &fs::read(&script_path).expect("read script"),
+                )),
+                core_label: core_label.clone(),
+                core_sha256: core_sha.clone(),
+                frames: report_a.frames_run,
+                verdict: if equivalence.verdict == "passed" {
+                    SCENARIO_VERDICT_PASSED.to_string()
+                } else {
+                    equivalence.verdict.clone()
+                },
+                oracle_results: serde_json::to_value(&equivalence).expect("oracles"),
+                gaps,
+                artifacts,
+                executed_at_unix: now_unix(),
+                previous_run_id: None,
+                notes: "Prova mesma-ROM com input definido no caminho canonico; determinismo \
+                     exigido entre power-ons frescos (mesma ROM/core/script). ACHADO MEDIDO: \
+                     re-execucoes restauradas do mesmo savestate divergem de forma constante \
+                     neste core/titulo, entao restore de savestate NAO e gate de equivalencia. \
+                     NAO prova UI, gameplay completo, 60 FPS sustentados, decompilacao ou \
+                     reconstrucao por nos."
+                    .to_string(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: registrar run no ledger: {error}"));
+        eprintln!(
+            "REX HAMOOPIG ledger run: {run_id} (corpus {})",
+            corpus_identity(&rom_sha)
+        );
+    }
+
+    /// REX-00 negativo: a prévia regenerada do Taiketsu (import + build real,
+    /// cópia em tmp — o doador nunca é compilado no lugar) tem imagem não preta
+    /// e heartbeat, e AINDA ASSIM deve ser REJEITADA pelos oráculos contra a
+    /// referência. É a reprodução da perda aceita em GUARD-SGDK-EQUIVALENCE-01.
+    #[ignore]
+    #[test]
+    fn rex00_taiketsu_preview_rejected_by_equivalence_oracles() {
+        use crate::core::parity_harness::run_parity_capture;
+        use crate::emulator::libretro_ffi::EmulatorCore;
+        use crate::tools::reverse::decomp::rom_library::{
+            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, ArtifactRef,
+            ScenarioRunRecord, SCENARIO_VERDICT_REJECTED,
+        };
+        use crate::tools::reverse::equivalence::{
+            artifact_ref, evaluate_identical_equivalence, VERDICT_REJECTED,
+        };
+
+        let test_name = "rex00_taiketsu_preview_rejected_by_equivalence_oracles";
+        let Some((reference_path, reference_sha)) = rex_reference_rom(
+            "RDS_REX_TAIKETSU_ROM",
+            "/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/taiketsu/reference.bin",
+            "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c",
+            test_name,
+        ) else {
+            return;
+        };
+
+        // Regenera a prévia pelo fluxo existente da matriz (import + build SGDK
+        // real em projeto temporário; doador apenas lido).
+        let donor = sgdk_matrix_corpus_donor_path("TaiketsuUltraHeroGenesis/src");
+        let Some(preview_rom) = run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "rex00_taiketsu_preview_rejected_by_equivalence_oracles",
+            &donor,
+            "rex-taiketsu-preview",
+            "REX Taiketsu Preview",
+            "REX_TUH",
+        ) else {
+            return; // skip autorizado (doador ausente + RDS_SGDK_MATRIX_CORPUS_SKIP=1)
+        };
+        let preview_bytes = fs::read(&preview_rom).expect("read preview rom");
+        let preview_sha = crate::tools::reverse::decomp::rom_library::sha256_hex(&preview_bytes);
+        assert_ne!(
+            preview_sha, reference_sha,
+            "prévia regenerada não pode ser idêntica à referência para este negativo"
+        );
+
+        let artifact_root = validation_artifact_dir("rex-taiketsu-negative");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create rex negative artifact dir");
+
+        let script = rex_input_script_180f("rex00-taiketsu-negative-180f");
+        let script_path = artifact_root.join("input-script.rds-input.json");
+        rex_write_json(
+            &script_path,
+            &serde_json::to_value(&script).expect("serialize input script"),
+        );
+
+        let mut core = EmulatorCore::new(None);
+        core.load_rom(&reference_path)
+            .unwrap_or_else(|error| panic!("{test_name}: carregar referência: {error}"));
+        let initial_reference = core
+            .capture_runtime_state_bytes()
+            .expect("estado inicial ref");
+        let core_label = core.loaded_core_label().unwrap_or("unknown").to_string();
+        let core_sha = core
+            .loaded_core_file()
+            .and_then(|path| fs::read(path).ok())
+            .map(|bytes| crate::tools::reverse::decomp::rom_library::sha256_hex(&bytes));
+        let report_reference = run_parity_capture(
+            &mut core,
+            &reference_path,
+            &reference_sha,
+            &initial_reference,
+            &script.frames,
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: captura referência: {error}"));
+        core.stop().expect("parar core da referência");
+
+        let mut core_candidate = EmulatorCore::new(None);
+        core_candidate
+            .load_rom(&preview_rom)
+            .unwrap_or_else(|error| panic!("{test_name}: carregar prévia: {error}"));
+        let initial_candidate = core_candidate
+            .capture_runtime_state_bytes()
+            .expect("estado inicial prévia");
+        let report_candidate = run_parity_capture(
+            &mut core_candidate,
+            &preview_rom,
+            &preview_sha,
+            &initial_candidate,
+            &script.frames,
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: captura prévia: {error}"));
+        core_candidate.stop().expect("parar core da prévia");
+
+        let equivalence = evaluate_identical_equivalence(&report_reference, &report_candidate);
+        assert_eq!(
+            equivalence.verdict, VERDICT_REJECTED,
+            "prévia regenerada DEVE ser rejeitada pelos oráculos: {:?}",
+            equivalence.oracles
+        );
+        let behavior = equivalence
+            .oracles
+            .iter()
+            .find(|oracle| oracle.name == "behavior_frames")
+            .expect("behavior oracle");
+        assert_eq!(
+            behavior.status,
+            crate::tools::reverse::equivalence::ORACLE_STATUS_FAIL,
+            "comportamento deve divergir frame a frame"
+        );
+        // A superfície "viva" é o ponto do negativo: não-preto + heartbeat
+        // presentes e ainda assim rejeitada.
+        assert!(
+            equivalence.surface_evidence.candidate_max_non_black_pixels > 0,
+            "prévia precisa de framebuffer não preto para o negativo ter valor"
+        );
+        assert!(
+            equivalence.surface_evidence.candidate_distinct_framebuffers > 1,
+            "prévia precisa de heartbeat (frames evoluindo) para o negativo ter valor"
+        );
+        eprintln!(
+            "REX TAIKETSU negative: verdict={} behavior='{}' surface(non_black={}, distinct_frames={})",
+            equivalence.verdict,
+            behavior.detail,
+            equivalence.surface_evidence.candidate_max_non_black_pixels,
+            equivalence.surface_evidence.candidate_distinct_framebuffers
+        );
+
+        let report_reference_path = artifact_root.join("capture-reference.json");
+        rex_write_json(
+            &report_reference_path,
+            &serde_json::to_value(&report_reference).expect("serialize ref"),
+        );
+        let report_candidate_path = artifact_root.join("capture-preview.json");
+        rex_write_json(
+            &report_candidate_path,
+            &serde_json::to_value(&report_candidate).expect("serialize cand"),
+        );
+        let equivalence_path = artifact_root.join("equivalence-report.json");
+        rex_write_json(
+            &equivalence_path,
+            &serde_json::to_value(&equivalence).expect("serialize equivalence"),
+        );
+
+        rex_register_reference_corpus(
+            &reference_sha,
+            reference_path.metadata().expect("ref metadata").len(),
+            "TAIKETSU ULTRA HERO GENESIS [VER.001] [SGDK 211] referencia complementar",
+            &reference_path,
+            "Referencia complementar escolhida pelo operador (GUARD-SGDK-EQUIVALENCE-01)",
+        );
+
+        let run_id = format!("rex00-taiketsu-negative-{}", now_unix());
+        record_scenario_run(
+            &decomp_work_dir(),
+            ScenarioRunRecord {
+                run_id: run_id.clone(),
+                scenario_id: "rex00-taiketsu-preview-negative-180f-input-v1".to_string(),
+                kind: "negative".to_string(),
+                reference_sha256: reference_sha.clone(),
+                candidate_sha256: Some(preview_sha.clone()),
+                input_script_sha256: Some(crate::tools::reverse::decomp::rom_library::sha256_hex(
+                    &fs::read(&script_path).expect("read script"),
+                )),
+                core_label,
+                core_sha256: core_sha,
+                frames: report_reference.frames_run,
+                verdict: SCENARIO_VERDICT_REJECTED.to_string(),
+                oracle_results: serde_json::to_value(&equivalence).expect("oracles"),
+                gaps: equivalence.gaps.clone(),
+                artifacts: vec![
+                    artifact_ref("input-script", &script_path).expect("artifact script"),
+                    artifact_ref("capture-reference", &report_reference_path)
+                        .expect("artifact ref"),
+                    artifact_ref("capture-preview", &report_candidate_path).expect("artifact cand"),
+                    artifact_ref("equivalence-report", &equivalence_path)
+                        .expect("artifact equivalence"),
+                ],
+                executed_at_unix: now_unix(),
+                previous_run_id: None,
+                notes: format!(
+                    "Reproducao da perda da previa importada (GUARD-SGDK-EQUIVALENCE-01): \
+                     previa com non_black={} e heartbeat={} rejeitada pelos oraculos \
+                     independentes; previa sha256 {preview_sha}; corrida anterior: \
+                     target-test/validation/sgdk-taiketsu-real (heartbeat insuficiente).",
+                    equivalence.surface_evidence.candidate_max_non_black_pixels,
+                    equivalence.surface_evidence.candidate_distinct_framebuffers
+                ),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: registrar run no ledger: {error}"));
+        eprintln!(
+            "REX TAIKETSU ledger run: {run_id} (ref {}, previa {})",
+            corpus_identity(&reference_sha),
+            corpus_identity(&preview_sha)
+        );
+    }
+
     #[derive(Debug, serde::Serialize, Clone)]
     struct SgdkCorpusRealBuildEntry {
         project_name: String,
