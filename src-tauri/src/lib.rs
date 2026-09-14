@@ -131,19 +131,15 @@ pub struct GenerateResult {
 /// core novo) — fecha a corrida de um input em voo atravessar uma recarga.
 static CORE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// Test-only: quando `true`, `send_input_if_current` pausa imediatamente
-/// antes de adquirir o mutex do core e aguarda a liberação pelo teste via
-/// `CORE_EPOCH_TEST_RELEASE`. Permite ao teste de corrida posicionar o send
-/// num ponto determinístico da janela entre captura e aquisição.
+/// Test-only: canais de sincronização para o gate de época em
+/// `send_input_if_current`. O sender sinaliza "atingiu o gate" via TX e
+/// aguarda a liberação via RX — sem sleep nem timing.
 #[cfg(test)]
-static EPOCH_TEST_PAUSE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static EPOCH_TEST_GATE_TX: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>> =
+    std::sync::Mutex::new(None);
 #[cfg(test)]
-static EPOCH_TEST_RELEASE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-#[cfg(test)]
-static EPOCH_TEST_CV: std::sync::Condvar = std::sync::Condvar::new();
-#[cfg(test)]
-static EPOCH_TEST_CV_MTX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static EPOCH_TEST_GATE_RX: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>> =
+    std::sync::Mutex::new(None);
 
 impl EmulatorCoreState {
     /// Aplica o joypad somente se a época do core ainda for `session_epoch`.
@@ -156,15 +152,19 @@ impl EmulatorCoreState {
         session_epoch: Option<u64>,
         joypad: JoypadState,
     ) -> EmulatorCommandResult {
-        // Test-only gate: quando ativado, pausa aqui (antes de adquirir o
-        // mutex) para que o teste de corrida posicione o send num ponto
-        // determinístico da janela entre captura e aquisição.
+        // Test-only gate: quando ativado, sinaliza "atingiu o ponto pré-lock"
+        // via canal e aguarda a liberação pelo teste em outro canal — sem
+        // depender de sleep nem de timing. Os canais são instalados pelo
+        // teste antes de spawnar o sender.
         #[cfg(test)]
-        if EPOCH_TEST_PAUSE.load(std::sync::atomic::Ordering::SeqCst) {
-            let guard = EPOCH_TEST_CV_MTX.lock().unwrap();
-            let _unused = EPOCH_TEST_CV
-                .wait_timeout(guard, std::time::Duration::from_secs(5))
-                .unwrap();
+        {
+            let arrived = EPOCH_TEST_GATE_TX.lock().unwrap().take();
+            if let Some(tx) = arrived {
+                let _ = tx.send(());
+                if let Some(rx) = EPOCH_TEST_GATE_RX.lock().unwrap().take() {
+                    let _ = rx.recv().unwrap(); // bloqueia até o teste liberar
+                }
+            }
         }
 
         let core = match self.0.lock() {
@@ -8402,8 +8402,9 @@ pub extern "C" fn retro_run() {
         CORE_EPOCH.store(1, Ordering::SeqCst);
         let captured_before_reload = Some(1u64);
 
-        // Ativa o gate: o send pausa imediatamente antes de adquirir o mutex.
-        EPOCH_TEST_PAUSE.store(true, Ordering::SeqCst);
+        // Ativa o gate e sinaliza o canal de chegada ao gate.
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        *EPOCH_TEST_GATE_TX.lock().unwrap() = Some(gate_tx);
 
         // Sender: chama o comando REAL. No código corrigido, pausa no gate,
         // adquire o mutex após a liberação, valida 1 vs 2 → recusa.
@@ -8419,15 +8420,16 @@ pub extern "C" fn retro_run() {
             )
         });
 
-        // Aguarda o sender atingir o gate (o sender sinaliza via pausa).
-        std::thread::sleep(Duration::from_millis(100));
+        // Aguarda confirmação EXPLÍCITA de que o sender atingiu o gate.
+        let _ = gate_rx
+            .recv()
+            .expect("sender não sinalizou chegada ao gate");
 
         // Incrementa a época com o gate ativo (o sender ainda pausado).
         CORE_EPOCH.store(2, Ordering::SeqCst);
 
         // Libera o gate: o sender adquire o mutex e valida.
-        EPOCH_TEST_PAUSE.store(false, Ordering::SeqCst);
-        EPOCH_TEST_CV.notify_all();
+        *EPOCH_TEST_GATE_RX.lock().unwrap() = Some(mpsc::channel().1);
 
         let result = sender.join().unwrap();
 
