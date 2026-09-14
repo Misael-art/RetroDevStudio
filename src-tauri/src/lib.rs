@@ -8384,14 +8384,16 @@ pub extern "C" fn retro_run() {
 
     /// Regressão da ORDEM DEFETUOSA com o comando REAL e sincronização
     /// determinística via gate de canais instalado antes do spawn: o sender
-    /// pausa dentro de `send_input_if_current` imediatamente antes de
-    /// adquirir o mutex do core, o teste confirma a chegada, incrementa a
-    /// época e libera o gate — o sender então valida sob o lock, vendo a
-    /// época já incrementada, e recusa. No código com validação antes do
-    /// lock (regressão), a validação roda ANTES do gate, com a época ainda
-    /// 1, e o input é aplicado quando o lock é adquirido — o teste FALHA.
+    /// pausa no hook pré-lock dentro de `send_input_if_current` (imediatamente
+    /// antes de adquirir o mutex do core), o teste confirma a chegada,
+    /// incrementa a época — SEM segurar o mutex do core: a ordem é controlada
+    /// pelo hook, não pelo lock — e libera o gate. O sender então adquire o
+    /// mutex, valida sob o lock vendo a época já incrementada e recusa. No
+    /// código com validação antes do lock (regressão), a validação roda ANTES
+    /// do hook, com a época ainda 1, e o input é aplicado quando o lock é
+    /// adquirido — o teste FALHA.
     #[test]
-    fn send_input_command_disputes_mutex_and_refuses_epoch_bumped_under_lock() {
+    fn send_input_command_refuses_epoch_bumped_after_prelock_hook() {
         use std::sync::mpsc;
 
         let _epoch_guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
