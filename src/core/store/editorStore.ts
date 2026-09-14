@@ -101,12 +101,50 @@ export interface ActiveBrush {
   tileIndex?: number;
 }
 
+/** Observação de joypad correlacionada por sessão de emulação + sequência
+ * monotônica, para que uma confirmação atrasada — da mesma carga ou de uma
+ * carga anterior — não seja confundida com a da transição corrente.
+ *
+ * A sessão é gerada no frontend, não pelo backend, e isso é suficiente: o par
+ * (sessão, seq) é capturado no fechamento do envio e reconferido na resolução,
+ * de modo que um ack que atravesse um stop/recarga carrega a sessão antiga e é
+ * descartado. Um eco do backend não acrescentaria garantia — quem define a
+ * época da carga é o próprio frontend. */
+export interface JoypadObservation {
+  sessionId: string;
+  seq: number;
+  joypad: Record<string, boolean>;
+}
+
+let joypadSessionCounter = 0;
+
 export interface StoreState {
   activeProjectDir: string;
   activeProjectName: string;
   activeTarget: "megadrive" | "snes";
   activeScenePath: string;
   emulatorLoaded: boolean;
+  /** Última INTENÇÃO de joypad formada pelo caminho de teclado do produto,
+   * registrada antes do IPC. Prova que o handler rodou — NÃO prova entrega.
+   * null = nada solicitado desde a abertura. */
+  lastJoypadRequest: JoypadObservation | null;
+  /** true durante carga/stop do emulador: a época está invalidada e envios de
+   * input são bloqueados (contados) até a nova sessão existir. */
+  joypadSessionHold: boolean;
+  joypadBlockedCount: number;
+  /** Época do core no backend: inputs são enviados com este valor e o
+   * backend recusa época obsoleta (recarga aconteceu no meio do voo). */
+  coreEpoch: number | null;
+  /** Última intenção CONFIRMADA pelo backend (`ok: true`). Este é o único
+   * campo que demonstra entrega aceita pelo emulador. Acks cuja sequência não
+   * corresponde à solicitação corrente são descartados (ack atrasado). */
+  lastJoypadAck: JoypadObservation | null;
+  /** Falha da última solicitação: `ok: false` (resolve normal da IPC) ou
+   * exceção. Correlacionado por sequência. */
+  lastJoypadSendError: { sessionId: string; seq: number; message: string } | null;
+  /** Época da carga corrente do emulador. Muda a cada carga e vira null ao
+   * parar; solicitações e confirmações de sessões anteriores são descartadas. */
+  joypadSessionId: string | null;
   selectedEntityId: string | null;
   /** ID da camada ativa no LayerPanel. null = sem camada selecionada. */
   activeLayerId: string | null;
@@ -208,6 +246,15 @@ export interface StoreActions {
   undo: () => void;
   redo: () => void;
   setEmulPaused: (paused: boolean) => void;
+  recordJoypadRequest: (sessionId: string, seq: number, joypad: Record<string, boolean>) => void;
+  recordJoypadAck: (sessionId: string, seq: number, joypad: Record<string, boolean>) => void;
+  recordJoypadSendError: (sessionId: string, seq: number, message: string) => void;
+  /** Invalida a época ANTES de qualquer await da carga/stop: durante o hold,
+   * envios são bloqueados e contados — nada antigo é aceito na janela. */
+  beginJoypadSessionHold: () => void;
+  releaseJoypadSessionHold: () => void;
+  recordJoypadBlocked: () => void;
+  setCoreEpoch: (epoch: number | null) => void;
   setViewportZoom: (zoom: number) => void;
   resetViewportZoom: () => void;
   setProjectSourceKind: (kind: string) => void;
@@ -414,7 +461,18 @@ export const useEditorStore = create<EditorState>((set) => ({
   activeScenePath: "",
   setActiveScenePath: (path) => set({ activeScenePath: path }),
   emulatorLoaded: false,
-  setEmulatorLoaded: (loaded) => set({ emulatorLoaded: loaded }),
+  setEmulatorLoaded: (loaded) =>
+    set(() => ({
+      emulatorLoaded: loaded,
+      // Toda transição de carga abre uma época nova (ou nenhuma, ao parar):
+      // solicitações e confirmações da carga anterior deixam de ser aceitáveis.
+      // Ancorar aqui — e não em cada call site — torna a invalidação por
+      // stop/recarga impossível de esquecer.
+      joypadSessionId: loaded ? `joypad-session-${(joypadSessionCounter += 1)}` : null,
+      lastJoypadRequest: null,
+      lastJoypadAck: null,
+      lastJoypadSendError: null,
+    })),
 
   selectedEntityId: null,
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
@@ -771,7 +829,53 @@ export const useEditorStore = create<EditorState>((set) => ({
     }),
 
   emulPaused: false,
+  lastJoypadRequest: null,
+  lastJoypadAck: null,
+  lastJoypadSendError: null,
+  joypadSessionId: null,
+  joypadSessionHold: false,
+  joypadBlockedCount: 0,
+  coreEpoch: null,
   setEmulPaused: (paused) => set({ emulPaused: paused }),
+  beginJoypadSessionHold: () =>
+    set({
+      joypadSessionHold: true,
+      // Invalidação ANTES de qualquer await da operação: a época corrente
+      // deixa de existir aqui, não quando a resposta chegar.
+      joypadSessionId: null,
+      lastJoypadRequest: null,
+      lastJoypadAck: null,
+      lastJoypadSendError: null,
+    }),
+  releaseJoypadSessionHold: () => set({ joypadSessionHold: false }),
+  recordJoypadBlocked: () =>
+    set((state) => ({ joypadBlockedCount: state.joypadBlockedCount + 1 })),
+  setCoreEpoch: (epoch) => set({ coreEpoch: epoch }),
+  recordJoypadRequest: (sessionId, seq, joypad) =>
+    set((state) =>
+      !state.joypadSessionHold && state.joypadSessionId === sessionId
+        ? { lastJoypadRequest: { sessionId, seq, joypad }, lastJoypadSendError: null }
+        : {},
+    ),
+  recordJoypadAck: (sessionId, seq, joypad) =>
+    set((state) =>
+      // Só confirma o ack da solicitação corrente, na sessão corrente. Um ack
+      // que chega depois de uma transição mais nova, ou que atravessa um
+      // stop/recarga, refere-se a estado obsoleto e é descartado.
+      state.joypadSessionId === sessionId &&
+      state.lastJoypadRequest?.sessionId === sessionId &&
+      state.lastJoypadRequest?.seq === seq
+        ? { lastJoypadAck: { sessionId, seq, joypad } }
+        : {},
+    ),
+  recordJoypadSendError: (sessionId, seq, message) =>
+    set((state) =>
+      state.joypadSessionId === sessionId &&
+      state.lastJoypadRequest?.sessionId === sessionId &&
+      state.lastJoypadRequest?.seq === seq
+        ? { lastJoypadSendError: { sessionId, seq, message } }
+        : {},
+    ),
 
   viewportZoom: 1.75,
   setViewportZoom: (zoom) =>

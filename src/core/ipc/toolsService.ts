@@ -286,6 +286,20 @@ export interface ProjectionStatus {
   message: string;
 }
 
+export interface RomContainerInfo {
+  kind: string;
+  member?: string | null;
+  note: string;
+}
+
+export interface NormalizationStep {
+  name: string;
+  parameters: string;
+  input_sha256: string;
+  output_sha256: string;
+  reversible: boolean;
+}
+
 export interface RomAnalysisManifest {
   ok: boolean;
   error: string;
@@ -295,6 +309,10 @@ export interface RomAnalysisManifest {
   stripped_header_bytes: number;
   total_size: number;
   hashes: RomHashes;
+  /** REX-02: contêiner de origem e passos de normalização reversíveis; ausentes
+   * em manifestos antigos. */
+  container?: RomContainerInfo;
+  normalization?: NormalizationStep[];
   header: RomHeader;
   mapper: string;
   special_chips: string[];

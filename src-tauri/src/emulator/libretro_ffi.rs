@@ -1054,6 +1054,16 @@ impl EmulatorCore {
         Ok(())
     }
 
+    /// Estado corrente do joypad (leitura; usado por testes de regressão da
+    /// corrida de época e por observabilidade).
+    #[allow(dead_code)]
+    pub fn current_joypad(&self) -> JoypadState {
+        self.handle
+            .lock()
+            .map(|state| state.joypad.clone())
+            .unwrap_or_default()
+    }
+
     pub fn stop(&mut self) -> Result<(), String> {
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown();
