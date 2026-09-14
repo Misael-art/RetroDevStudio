@@ -130,7 +130,7 @@ fn parse_md_header(normalized: &[u8]) -> MdHeaderDetail {
 /// Componente de caminho a partir de um SHA-256: aceito APENAS se hex de 64
 /// caracteres — impossibilita traversal (separadores, pontinhos-de-subida)
 /// mesmo se um catálogo manipulado chegar aqui.
-fn sha256_path_component(sha: &str) -> Result<&str, String> {
+pub(crate) fn sha256_path_component(sha: &str) -> Result<&str, String> {
     let is_hex64 = sha.len() == 64 && sha.bytes().all(|byte| byte.is_ascii_hexdigit());
     if !is_hex64 {
         return Err(format!(
@@ -141,13 +141,9 @@ fn sha256_path_component(sha: &str) -> Result<&str, String> {
     Ok(sha)
 }
 
-/// Diretório canônico do catálogo de uma imagem: componente hex validado,
-/// caminho resolvido (symlinks e sobe-diretórios eliminados por
-/// `canonicalize`) e contenção verificada sob o diretório de trabalho
-/// canônico. Toda escrita de artefato passa por aqui.
 /// Link simbólico já plantado num ponto da cadeia = rejeição ANTES de
 /// qualquer criação (nada é criado fora do work_dir por nossa causa).
-fn reject_if_symlink(path: &Path) -> Result<(), String> {
+pub(crate) fn reject_if_symlink(path: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
             "caminho do catálogo é link simbólico (rejeitado): {}",
@@ -162,20 +158,30 @@ fn reject_if_symlink(path: &Path) -> Result<(), String> {
     }
 }
 
-/// Diretório canônico do catálogo de uma imagem: componente hex validado,
-/// sem seguir links (checados ANTES de criar qualquer diretório), caminho
-/// resolvido por `canonicalize` e contenção verificada sob o work_dir
-/// canônico. Toda escrita de artefato passa por aqui.
-fn canonical_catalog_dir(work_dir: &Path, normalized_sha256: &str) -> Result<PathBuf, String> {
-    let component = sha256_path_component(normalized_sha256)?;
+/// Componentes de caminho FIXOS aceitos sem validação hex — qualquer outro
+/// componente é obrigatoriamente hex64 (sha256). Nada de passagem livre.
+const LITERAL_COMPONENTS: [&str; 2] = ["extract", "previews"];
+
+/// Diretório canônico sob `work_dir` para um caminho relativo de componentes
+/// fixos mais componentes hex validáveis: cada componente existente é checado
+/// contra symlink ANTES de criar, o resultado é canonicalizado e a contenção
+/// sob o work_dir canônico é verificada. Toda escrita de artefato REX-04
+/// passa por aqui (diretamente ou via `canonical_catalog_dir`).
+pub(crate) fn canonical_dir_under(work_dir: &Path, relative: &[&str]) -> Result<PathBuf, String> {
     fs::create_dir_all(work_dir).map_err(|error| format!("falha ao criar work_dir: {error}"))?;
     let work_canonical = fs::canonicalize(work_dir)
         .map_err(|error| format!("falha ao canonicalizar work_dir: {error}"))?;
 
-    let extract_dir = work_dir.join("extract");
-    reject_if_symlink(&extract_dir)?;
-    let requested = extract_dir.join(component);
-    reject_if_symlink(&requested)?;
+    let mut requested = work_dir.to_path_buf();
+    for piece in relative {
+        let validated = if LITERAL_COMPONENTS.contains(piece) {
+            piece
+        } else {
+            sha256_path_component(piece)?
+        };
+        requested = requested.join(validated);
+        reject_if_symlink(&requested)?;
+    }
 
     fs::create_dir_all(&requested)
         .map_err(|error| format!("falha ao criar diretório de extração: {error}"))?;
@@ -192,6 +198,14 @@ fn canonical_catalog_dir(work_dir: &Path, normalized_sha256: &str) -> Result<Pat
         ));
     }
     Ok(dir_canonical)
+}
+
+/// Diretório canônico do catálogo de uma imagem: componente hex validado,
+/// sem seguir links (checados ANTES de criar qualquer diretório), caminho
+/// resolvido por `canonicalize` e contenção verificada sob o work_dir
+/// canônico. Toda escrita de artefato passa por aqui.
+fn canonical_catalog_dir(work_dir: &Path, normalized_sha256: &str) -> Result<PathBuf, String> {
+    canonical_dir_under(work_dir, &["extract", normalized_sha256])
 }
 
 /// Constrói o catálogo de extração da fatia 1 a partir da identidade REX-02 e
@@ -294,7 +308,11 @@ static EXTRACTION_RUN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 /// tipo de entry é rejeitado MESMO com conteúdo idêntico — o histórico não
 /// pode passar a depender de arquivo fora do work_dir. Conteúdo divergente
 /// num arquivo regular = adulteração detectada.
-fn write_catalog_immutable(path: &Path, bytes: &[u8], expected_sha: &str) -> Result<(), String> {
+pub(crate) fn write_file_immutable(
+    path: &Path,
+    bytes: &[u8],
+    expected_sha: &str,
+) -> Result<(), String> {
     use std::io::Write;
     match fs::OpenOptions::new()
         .write(true)
@@ -356,7 +374,7 @@ pub fn record_extraction_run(
     let catalog_json = serde_json::to_vec_pretty(catalog).map_err(|error| error.to_string())?;
     let catalog_sha = sha256_hex(&catalog_json);
     let path = dir.join(format!("catalog-{catalog_sha}.json"));
-    write_catalog_immutable(&path, &catalog_json, &catalog_sha)?;
+    write_file_immutable(&path, &catalog_json, &catalog_sha)?;
 
     let seq = EXTRACTION_RUN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let artifact = ArtifactRef {
