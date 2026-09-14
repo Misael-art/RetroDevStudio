@@ -1,6 +1,16 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 
-### Re-revisão e905e20 — 2026-09-12: REV-05 parcial
+### Estado corrente — 2026-09-14: pilha REX fatias 1+2 INTEGRADA em `codex/import-decomp-review` `ff476a3`; REX-04 autorizada como próxima frente
+
+> **Aviso de leitura:** TODAS as seções abaixo desta são **HISTÓRICAS** — registram estados de revisão e de ausência de merge válidos apenas na data de cada seção. O estado operacional corrente é exclusivamente esta seção.
+
+**Integração (executada e confirmada pelo revisor):** REV-01..05 aceitos no escopo revisado de `ac3b13f` ([review-ac3b13f.md], fora da árvore); ajuste de precisão aplicado — teste renomeado para `send_input_command_refuses_epoch_bumped_after_prelock_hook` (`0d0493c`, o incremento não segura o mutex: a ordem é controlada pelo hook pré-lock). Merges na ordem: **#62 → `327b822`** e **#63 → `ff476a3`**, ambos em `codex/import-decomp-review` (NÃO em `main` — a consolidação em `main` segue via **#61**, outra linha de trabalho). Gates verificados EM CADA DESTINO: bateria local completa (check:tree, tsc, lint, npm test, cargo test --lib, clippy, fmt) + CI remoto verde em todos os pushes (ff476a3: 4/4) + `host:certify` READY no destino final (cargo test 563/36; npm test 601/6). Incidente de processo registrado: deletar `codex/rex-00-oraculos` (base de #63) fechou o PR colateralmente; recuperado restaurando o branch, reabrindo, retargetando a base e esperando a suíte completa. Auditoria Mimosa: scans completos e selados sobre os tips (`sha256:0484b7d5…` e `sha256:59bb7aed…`), 2 achados HIGH CWE-78 em `NodeGraphEditor.tsx` avaliados como falsos positivos de nomenclatura de domínio — análise atribuída ao executor, não reexecutada pelo revisor.
+
+**Próxima frente — REX-04 (extração organizada), autorizada pelo revisor com critérios:** extração organizada com **origem e localização dos dados** (proveniência por offset/região/hash), **identificação explícita de conteúdo desconhecido** (o que não foi reconhecido fica marcado, nunca descartado) e **validação com ROMs reais**. Classificação obrigatória: **NÃO é recuperação completa da lógica nem edição integral por nós** — programa permanece **Experimental**.
+
+---
+
+### [HISTÓRICO] Re-revisão e905e20 — 2026-09-12: REV-05 parcial
 
 Host diagnose READY; 83 testes do store passaram; PR #63 e905e20 OPEN com 8 checks verdes consultados. ACK ok:true e geração frontend são melhorias confirmadas, mas aceite integral não sustentado. `loadRomIntoEmulator` só invalida/troca sessão depois de await emulatorLoadRom: a sessão antiga permanece válida durante a carga pendente. Probe de ordem sobre handler real preservado em `/home/misael/RetroDevStudio/review-e905e20/load-order.cjs` e `.json`.
 
