@@ -289,9 +289,11 @@ pub fn build_md_extraction_catalog(
 static EXTRACTION_RUN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Escrita IMUTÁVEL endereçada por conteúdo: `create_new` nunca segue um
-/// entry preexistente (symlink inclusive — falha sem tocar o alvo). Colisão
-/// de nome só é aceitável se o conteúdo existente for IDÊNTICO (re-execução
-/// do mesmo catálogo); bytes divergentes = adulteração detectada.
+/// entry preexistente (symlink inclusive — falha sem tocar o alvo). Na
+/// reutilização, apenas arquivo REGULAR é aceitável: link simbólico ou outro
+/// tipo de entry é rejeitado MESMO com conteúdo idêntico — o histórico não
+/// pode passar a depender de arquivo fora do work_dir. Conteúdo divergente
+/// num arquivo regular = adulteração detectada.
 fn write_catalog_immutable(path: &Path, bytes: &[u8], expected_sha: &str) -> Result<(), String> {
     use std::io::Write;
     match fs::OpenOptions::new()
@@ -303,6 +305,21 @@ fn write_catalog_immutable(path: &Path, bytes: &[u8], expected_sha: &str) -> Res
             .write_all(bytes)
             .map_err(|error| format!("falha ao escrever catálogo '{}': {error}", path.display())),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Rejeita link e entry não regular ANTES de ler — a leitura a
+            // seguir só acontece em arquivo regular verificado.
+            reject_if_symlink(path)?;
+            let metadata = fs::symlink_metadata(path).map_err(|error| {
+                format!(
+                    "falha ao inspecionar catálogo existente '{}': {error}",
+                    path.display()
+                )
+            })?;
+            if !metadata.file_type().is_file() {
+                return Err(format!(
+                    "catálogo existente não é arquivo regular — rejeitado: {}",
+                    path.display()
+                ));
+            }
             let existing = fs::read(path).map_err(|error| {
                 format!(
                     "falha ao ler catálogo existente '{}': {error}",
@@ -755,8 +772,8 @@ mod tests {
 
         let error = record_extraction_run(&work, &catalog).expect_err("escrita via link rejeitada");
         assert!(
-            error.contains("diverge") || error.contains("existe"),
-            "erro esperado de colisão/adulteração: {error}"
+            error.contains("link simbólico") || error.contains("diverge"),
+            "erro esperado de link/divergência: {error}"
         );
         assert_eq!(
             fs::read(&outside).expect("sentinela legível"),
@@ -807,6 +824,86 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&work);
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// REGRESSÃO do achado P2 (1a287c3): link simbólico no arquivo final é
+    /// rejeitado MESMO apontando para conteúdo IDÊNTICO — a reutilização não
+    /// pode seguir links nem fazer o histórico depender de arquivo externo.
+    /// Exige: rejeição, NENHUM run anexado ao ledger e alvo intacto.
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_catalog_file_with_identical_content_is_rejected() {
+        let work = std::env::temp_dir().join(format!(
+            "rex04-symlink-same-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let rom = synthetic_rom(0x800);
+        let identity = identity_of(&rom);
+        let catalog = build_md_extraction_catalog(&identity, &rom).expect("catálogo");
+        let catalog_json =
+            serde_json::to_vec_pretty(&catalog).expect("serialização determinística");
+        let catalog_sha = sha256_hex(&catalog_json);
+
+        let dir = canonical_catalog_dir(&work, &catalog.normalized_sha256).expect("diretório");
+        let outside = work.parent().unwrap().join(format!(
+            "rex04-sentinel-same-{}-{}.json",
+            std::process::id(),
+            now_unix()
+        ));
+        // Alvo externo com o conteúdo ESPERADO — a rejeição precisa ser por
+        // ser link, não por divergência de bytes.
+        fs::write(&outside, &catalog_json).expect("alvo externo com conteúdo idêntico");
+        let link = dir.join(format!("catalog-{catalog_sha}.json"));
+        std::os::unix::fs::symlink(&outside, &link).expect("plantar symlink");
+
+        let error = record_extraction_run(&work, &catalog).expect_err("link deve ser rejeitado");
+        assert!(error.contains("link simbólico"), "{error}");
+
+        assert_eq!(
+            fs::read(&outside).expect("alvo legível"),
+            catalog_json,
+            "alvo externo INTOCADO"
+        );
+        let ledger =
+            crate::tools::reverse::decomp::rom_library::load_ledger(&work).expect("ledger");
+        assert_eq!(
+            ledger.scenario_runs.len(),
+            0,
+            "nenhum run pode ser anexado quando o artefato é link"
+        );
+
+        let _ = std::fs::remove_dir_all(&work);
+        let _ = std::fs::remove_file(&outside);
+    }
+
+    /// Reutilização LEGÍTIMA preservada: arquivo regular com o hash correto
+    /// aceita a re-execução do mesmo catálogo (idempotente por conteúdo).
+    #[test]
+    fn regular_file_with_correct_hash_is_reused() {
+        let work = std::env::temp_dir().join(format!(
+            "rex04-reuse-ok-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let rom = synthetic_rom(0x800);
+        let identity = identity_of(&rom);
+        let catalog = build_md_extraction_catalog(&identity, &rom).expect("catálogo");
+
+        let (_, first_artifact) = record_extraction_run(&work, &catalog).expect("primeiro run");
+        let (_, second_artifact) = record_extraction_run(&work, &catalog).expect("segundo run");
+        assert_eq!(first_artifact.path, second_artifact.path, "mesmo artefato");
+        assert_eq!(first_artifact.sha256, second_artifact.sha256);
+
+        let stored = fs::read(&second_artifact.path).expect("artefato legível");
+        let expected_sha = sha256_hex(&serde_json::to_vec_pretty(&catalog).expect("serialização"));
+        assert_eq!(sha256_hex(&stored), expected_sha);
+
+        let ledger =
+            crate::tools::reverse::decomp::rom_library::load_ledger(&work).expect("ledger");
+        assert_eq!(ledger.scenario_runs.len(), 2, "os dois runs registrados");
+
+        let _ = std::fs::remove_dir_all(&work);
     }
 
     /// Prova real: catálogo do HAMOOPIG com proveniência completa. A divergência
