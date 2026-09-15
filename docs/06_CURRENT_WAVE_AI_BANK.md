@@ -1,3 +1,13 @@
+### Estado corrente — 2026-09-15 (5): REX-04 fatia 2 ACEITA e INTEGRADA em `codex/import-decomp-review` `3fed085`; scanners de conteúdo são a próxima frente
+
+**REX-04 fatia 2 (descoberta gráfica parcial) aceita pelo revisor em `382f9f4` e integrada:** merge **#65 → `3fed085`** em `codex/import-decomp-review` (NÃO em `main` — consolidação segue via #61, outra linha). Gates no destino: check:tree, tsc, lint, npm test, cargo test --lib **588/40**, clippy, fmt, **host:certify READY** (fingerprint 77bbc2a7…), **provas reais reexecutadas no destino 2/2** (Taiketsu: 5 chunks de `spr_*_tileset_data` NONE com cobertura medida 53,1–100%; HAMOOPIG: 4 regiões de código EXECINSTR com ZERO candidatos — positivo pulado por ausência de build do doador, documentado); CI remota 4/4 no push do merge. Mimosa selado `sha256:95e9142a…` (mesmos 2 FPs conhecidos de NodeGraphEditor).
+
+**Limitações preservadas (do aceite):** cobertura mínima de 50% é PARCIAL (medida por chunk no ledger: 53,1–100% — dithering denso é parcialmente alcançável pela heurística); positivo de HAMOOPIG não medido (sem build do doador); NENHUMA certificação de extração completa, lógica ou edição por nós; compressão ≠NONE/ausente e BIN ficam Unknown (podem conter tiles ou não — sem prova); descritores de tileset não são payload. **Experimental.**
+
+**Próxima frente:** scanners de conteúdo adicionais (reduzir os ~99,9% de unknown) — NÃO iniciada; depende de GO.
+
+---
+
 ### Estado corrente — 2026-09-15 (4): REX-04 fatia 2 — classificação endurecida (payload `tileset_data` + compressão NONE + tokenizer com aspas), PR #65 aguardando re-revisão
 
 **Bloco da revisão de 2375d77 resolvido — classificação endurecida:** (1) BIN NÃO prova ausência de tiles (pode conter dados gráficos brutos) → BIN vai para **Unknown** e não alimenta o negativo; (2) compressão ausente ou ≠NONE → **Unknown** (não Other) — sem verificar o formato efetivamente compilado não há prova; (3) exigido o símbolo de PAYLOAD (`<recurso>..._tileset_data`, sufixo exato) — descritores (`..._tileset`) vão para Unknown; intervalo comprovado pela fronteira do próximo símbolo da seção ELF; (4) parser `.res` com tokenizer que respeita ASPAS — caminhos com espaços não deslocam a compressão (regressão dedicada). Regressões novas: BIN com tiles → Unknown; descritor de tileset → Unknown; compressão FAST/ausente → Unknown; caminho com espaços → compressão NONE corretamente classificada. Positivo: gate **≥50%** por chunk de Tiles comprovado (cobertura parcial medida e registrada no ledger — não demonstra extração completa).
