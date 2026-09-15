@@ -111,15 +111,22 @@ pub fn graphic_score_tile(tile: &[u8]) -> f32 {
             continue;
         }
         if i > 0 {
-            let previous = rows[i - 1];
-            if previous == *row {
-                good += 1; // flat exato
-                continue;
-            }
-            // QUASE-FLAT: difere da anterior em ≤2 bits no total. Dados que
-            // apenas seguem uma linha de zeros não recebem o crédito
-            // (padding/string tem variação maior que arte).
-            if previous != [0, 0, 0, 0] {
+            // QUASE-FLAT: linha igual ou difere em ≤2 bits (somados nos 4
+            // bytes) de uma das DUAS linhas anteriores não-vazias — arte
+            // repete estrutura em passos de 1 e 2 linhas; dados que apenas
+            // seguem uma linha de zeros não recebem o crédito.
+            for back in 1..=2usize {
+                if i < back {
+                    break;
+                }
+                let previous = rows[i - back];
+                if previous == [0, 0, 0, 0] {
+                    continue;
+                }
+                if previous == *row {
+                    good += 1;
+                    break;
+                }
                 let xor_bits: u32 = previous
                     .iter()
                     .zip(row.iter())
@@ -127,6 +134,7 @@ pub fn graphic_score_tile(tile: &[u8]) -> f32 {
                     .sum();
                 if xor_bits <= NEAR_FLAT_MAX_BITS {
                     good += 1;
+                    break;
                 }
             }
         }
@@ -180,7 +188,7 @@ fn tile_plausibility_score(data: &[u8], offset: u64) -> f32 {
         .copied()
         .collect::<std::collections::HashSet<u8>>()
         .len();
-    if distinct <= 12 && nibble_repeat_ratio(tile) >= 0.5 {
+    if distinct <= 16 && nibble_repeat_ratio(tile) >= 0.5 {
         return MIN_TILE_SCORE;
     }
     base
@@ -1133,7 +1141,7 @@ mod tests {
 
     /// Declarações de recursos dos `.res` do doador (BYOR): env
     /// `RDS_REX_TAIKETSU_RES_DIR` ou o caminho do corpus.
-    fn load_donor_res_decls(test_name: &str) -> Vec<(String, String)> {
+    fn load_donor_res_decls(test_name: &str) -> Vec<ResDecl> {
         let dir = std::env::var("RDS_REX_TAIKETSU_RES_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
@@ -1404,9 +1412,18 @@ mod tests {
     /// tipo (som, binário, paleta pura, sem declaração) é NÃO-gráfico.
     const GRAPHIC_RESOURCE_TYPES: [&str; 4] = ["IMAGE", "TILESET", "SPRITE", "BITMAP"];
 
+    /// Declaração de recurso do `.res`: tipo, nome e compressão (quando o
+    /// formato a expõe — SPRITE no 6º token, IMAGE/TILESET no 4º).
+    #[derive(Debug, Clone, PartialEq)]
+    struct ResDecl {
+        declared_type: String,
+        name: String,
+        compression: Option<String>,
+    }
+
     /// Parse das declarações de recursos de um arquivo `.res` do rescomp:
     /// linhas `TIPO nome "arquivo" ...` (comentários `//` e vazias ignorados).
-    fn parse_res_decls(bytes: &[u8]) -> Vec<(String, String)> {
+    fn parse_res_decls(bytes: &[u8]) -> Vec<ResDecl> {
         let text = String::from_utf8_lossy(bytes);
         let mut decls = Vec::new();
         for line in text.lines() {
@@ -1415,9 +1432,23 @@ mod tests {
                 continue;
             }
             let tokens: Vec<&str> = line.split_whitespace().collect();
-            if tokens.len() >= 2 {
-                decls.push((tokens[0].to_ascii_uppercase(), tokens[1].to_string()));
+            if tokens.len() < 2 {
+                continue;
             }
+            let declared_type = tokens[0].to_ascii_uppercase();
+            let name = tokens[1].to_string();
+            let compression = match declared_type.as_str() {
+                "SPRITE" => tokens.get(5).map(|token| token.to_ascii_uppercase()),
+                "IMAGE" | "TILESET" | "BITMAP" | "PALETTE" => {
+                    tokens.get(3).map(|token| token.to_ascii_uppercase())
+                }
+                _ => None,
+            };
+            decls.push(ResDecl {
+                declared_type,
+                name,
+                compression,
+            });
         }
         decls
     }
@@ -1427,27 +1458,80 @@ mod tests {
         object: String,
         symbol: String,
         declared_type: String,
-        graphic: bool,
+        /// Classe de PROVA do conteúdo (revisão de 9f5a51f):
+        /// - `Tiles`: tiles 4bpp COMPROVADOS (recurso gráfico declarado +
+        ///   sufixo de dados de tileset no símbolo);
+        /// - `Other`: outro conteúdo COMPROVADO (paleta de recurso gráfico,
+        ///   ou recurso não-gráfico declarado — som/binário);
+        /// - `Unknown`: structs/metadata/sem declaração — NUNCA alimenta
+        ///   os oráculos.
+        proven: ProvenClass,
         /// [início, fim) dos bytes do símbolo no payload do objeto.
         range: (usize, usize),
         sha256: String,
         data: Vec<u8>,
     }
 
-    /// Classificação independente: o nome do SÍMBOLO é casado por prefixo
-    /// contra os recursos DECLARADOS no `.res` (maior prefixo vence). Sem
-    /// declaração correspondente = NÃO-gráfico.
-    fn classify_symbol<'a>(symbol_name: &str, res_decls: &'a [(String, String)]) -> (String, bool) {
-        let best = res_decls
-            .iter()
-            .filter(|(_, name)| symbol_name.starts_with(name.as_str()))
-            .max_by_key(|(_, name)| name.len());
-        match best {
-            Some((declared_type, _)) => {
-                let graphic = GRAPHIC_RESOURCE_TYPES.contains(&declared_type.as_str());
-                (declared_type.clone(), graphic)
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ProvenClass {
+        Tiles,
+        Other,
+        Unknown,
+    }
+
+    impl ProvenClass {
+        fn label(&self) -> &'static str {
+            match self {
+                ProvenClass::Tiles => "tiles_4bpp_comprovado",
+                ProvenClass::Other => "outro_conteudo_comprovado",
+                ProvenClass::Unknown => "desconhecido",
             }
-            None => ("SEM_DECLARACAO".to_string(), false),
+        }
+    }
+
+    /// Classificação independente com FRONTIERA DE NOME: o símbolo casa o
+    /// recurso declarado somente se for igual ou o restante do nome começa
+    /// com `_` (impede `spr_point2` casar com `spr_point`). Classe de prova
+    /// pelo restante do nome + tipo declarado:
+    /// - restante contém `tileset` e o tipo é gráfico → Tiles (dados 4bpp
+    ///   comprovados);
+    /// - restante contém `palette` → Other (paleta comprovada — conteúdo
+    ///   NÃO-tile);
+    /// - tipo declarado não-gráfico (BIN/XGM/WAV/...) → Other (conteúdo
+    ///   comprovado não-gráfico);
+    /// - todo o resto (structs, metadata, sem declaração) → Unknown.
+    fn classify_symbol<'a>(symbol_name: &str, res_decls: &'a [ResDecl]) -> (String, ProvenClass) {
+        let mut best: Option<&ResDecl> = None;
+        for decl in res_decls {
+            let boundary = symbol_name.starts_with(decl.name.as_str())
+                && (symbol_name == decl.name.as_str()
+                    || symbol_name[decl.name.len()..].starts_with('_'));
+            if boundary && best.map(|b| decl.name.len() > b.name.len()).unwrap_or(true) {
+                best = Some(decl);
+            }
+        }
+        match best {
+            Some(decl) => {
+                let remainder = &symbol_name[decl.name.len()..];
+                let graphic = GRAPHIC_RESOURCE_TYPES.contains(&decl.declared_type.as_str());
+                if graphic && remainder.contains("tileset") {
+                    // tiles comprovados exigem dados NÃO comprimidos
+                    // (compressão NONE): bytes comprimidos não são tiles
+                    // brutos verificados.
+                    if decl.compression.as_deref() == Some("NONE") {
+                        (decl.declared_type.clone(), ProvenClass::Tiles)
+                    } else {
+                        (decl.declared_type.clone(), ProvenClass::Other)
+                    }
+                } else if remainder.contains("palette") {
+                    (decl.declared_type.clone(), ProvenClass::Other)
+                } else if !graphic {
+                    (decl.declared_type.clone(), ProvenClass::Other)
+                } else {
+                    (decl.declared_type.clone(), ProvenClass::Unknown)
+                }
+            }
+            None => ("SEM_DECLARACAO".to_string(), ProvenClass::Unknown),
         }
     }
 
@@ -1458,7 +1542,7 @@ mod tests {
     /// seção) e SHA-256 dos bytes. Extensões < 512B são ignoradas.
     fn build_graphic_inventory(
         donor_objects: &[(String, Vec<u8>)],
-        res_decls: &[(String, String)],
+        res_decls: &[ResDecl],
     ) -> Vec<InventoryEntry> {
         let mut entries = Vec::new();
         for (object_name, payload) in donor_objects {
@@ -1503,12 +1587,12 @@ mod tests {
                 if range_start + extent > payload.len() {
                     continue;
                 }
-                let (declared_type, graphic) = classify_symbol(&symbol.name, res_decls);
+                let (declared_type, proven) = classify_symbol(&symbol.name, res_decls);
                 entries.push(InventoryEntry {
                     object: object_name.clone(),
                     symbol: symbol.name.clone(),
                     declared_type,
-                    graphic,
+                    proven,
                     range: (range_start, range_start + extent),
                     sha256: sha256_hex(&payload[range_start..range_start + extent]),
                     data: payload[range_start..range_start + extent].to_vec(),
@@ -1539,7 +1623,7 @@ mod tests {
         bytes: &[u8],
         lib: &[u8],
         donor_objects: &[(String, Vec<u8>)],
-        res_decls: &[(String, String)],
+        res_decls: &[ResDecl],
     ) {
         let identity = rex_identify_bytes(bytes).expect("ROM identificável (REX-02)");
         let (catalog, catalog_sha) = {
@@ -1564,7 +1648,7 @@ mod tests {
                     "object": entry.object,
                     "symbol": entry.symbol,
                     "declared_type": entry.declared_type,
-                    "graphic": entry.graphic,
+                    "proven": entry.proven.label(),
                     "range_in_object": [entry.range.0, entry.range.1],
                     "sha256": entry.sha256,
                     "bytes": entry.data.len(),
@@ -1599,16 +1683,20 @@ mod tests {
             located.len()
         );
 
-        // ---- POSITIVO: entradas GRÁFICAS devem ter cobertura medida ----
-        // O detector é heurístico: arte densa (dithering, todas as
-        // bitplanos) não é 100% alcançável por regras de suavidade. A
-        // asserção é de PRESENÇA (todo chunk gráfico conhecido tem ao
-        // menos um candidato sobreposto); a cobertura medida de cada chunk
-        // vai para a evidência do run — nunca vira "confirmado".
-        let mut graphic_chunk_results: Vec<serde_json::Value> = Vec::new();
+        // ---- POSITIVO: chunks de TILES 4bpp COMPROVADOS ----
+        // Só entradas com prova de conteúdo de tile (recurso gráfico
+        // declarado + sufixo `tileset` no símbolo, fronteira de nome
+        // verificada) alimentam o positivo: cada chunk localizado deve ter
+        // ≥50% dos bytes cobertos por candidatos — localização e extração
+        // substantivas, não presença de 1 byte. A cobertura medida vai
+        // integralmente para a evidência do run (dithering denso é
+        // parcialmente alcançável pela heurística) e nunca vira
+        // "confirmado".
+        let mut tile_chunk_results: Vec<serde_json::Value> = Vec::new();
+        let mut poor_coverage = 0usize;
         for (rom_offset, matched, index) in &located {
             let entry = &inventory[*index];
-            if !entry.graphic {
+            if entry.proven != ProvenClass::Tiles {
                 continue;
             }
             let region_end = rom_offset + *matched as u64;
@@ -1624,16 +1712,20 @@ mod tests {
                 }
             }
             let fraction = covered as f32 / *matched as f32;
-            graphic_chunk_results.push(serde_json::json!({
+            tile_chunk_results.push(serde_json::json!({
                 "symbol": entry.symbol,
                 "rom_offset": rom_offset,
                 "coverage": fraction,
             }));
             eprintln!(
-                "{test_name}: recurso gráfico {} em 0x{rom_offset:X}: cobertura {:.1}%",
+                "{test_name}: recurso de tiles comprovado {} em 0x{rom_offset:X}: \
+                 cobertura {:.1}%",
                 entry.symbol,
                 fraction * 100.0
             );
+            if fraction < 0.5 {
+                poor_coverage += 1;
+            }
         }
         if donor_objects.is_empty() {
             eprintln!(
@@ -1644,15 +1736,14 @@ mod tests {
             assert!(
                 located
                     .iter()
-                    .any(|(_, _, index)| inventory[*index].graphic),
-                "com objetos do doador, esperava ≥1 recurso GRÁFICO localizado na ROM"
+                    .any(|(_, _, index)| inventory[*index].proven == ProvenClass::Tiles),
+                "com objetos do doador, esperava ≥1 recurso de TILES comprovado \
+                 localizado na ROM"
             );
-            assert!(
-                graphic_chunk_results
-                    .iter()
-                    .all(|chunk| chunk["coverage"].as_f64().unwrap_or(0.0) > 0.0),
-                "todo chunk de recurso gráfico conhecido deve ter ao menos um \
-                 candidato sobreposto"
+            assert_eq!(
+                poor_coverage, 0,
+                "chunks de tiles comprovados devem estar ≥50% cobertos por \
+                 candidatos (localização e extração substantivas)"
             );
         }
 
@@ -1703,7 +1794,7 @@ mod tests {
         // ---- NEGATIVO 2: entradas NÃO-gráficas do inventário ----
         let mut non_graphic_regions: Vec<(u64, usize, String)> = Vec::new();
         for (rom_offset, matched, index) in &located {
-            if !inventory[*index].graphic {
+            if inventory[*index].proven == ProvenClass::Other {
                 non_graphic_regions.push((*rom_offset, *matched, inventory[*index].symbol.clone()));
             }
         }
@@ -1767,11 +1858,11 @@ mod tests {
                 serde_json::json!({
                     "rom_offset": offset,
                     "verified_bytes": length,
-                    "graphic": inventory[*index].graphic,
+                    "proven": inventory[*index].proven.label(),
                     "symbol": inventory[*index].symbol,
                 })
             }).collect::<Vec<_>>(),
-            "graphic_chunks": graphic_chunk_results,
+            "tile_chunks": tile_chunk_results,
         });
         let (run_id, artifact) = record_discovery_run(&work, &discovery, confrontation_evidence)
             .expect("run no ledger real");
@@ -1783,8 +1874,8 @@ mod tests {
     }
 
     /// O inventário independente classifica recursos pelo TIPO declarado no
-    /// `.res` (gráfico = IMAGE/TILESET/SPRITE/BITMAP) casado por prefixo do
-    /// nome do símbolo; sem declaração = NÃO-gráfico.
+    /// `.res` e pela COMPRESSÃO (só NONE prova tiles brutos), com
+    /// FRONTIERA DE NOME no casamento de símbolos.
     #[test]
     fn res_decls_and_symbol_classification() {
         let res_file = b"\
@@ -1792,42 +1883,50 @@ ALIGN\n\
 //tipo / nome / localizacao_arquivo / ...\n\
 IMAGE room_0_bga \"gfx/room_0_bga.png\" BEST\n\
 SPRITE spr_point  \"sprite/point.png\"  1  1 BEST 0\n\
+SPRITE spr_spark0  \"sprite/spark.png\"  4  4 NONE 4\n\
 BIN snd_xgm \"sound/xgm.bin\" 2 2 0 NONE FALSE\n";
         let decls = parse_res_decls(res_file);
-        assert_eq!(
-            decls,
-            vec![
-                ("IMAGE".to_string(), "room_0_bga".to_string()),
-                ("SPRITE".to_string(), "spr_point".to_string()),
-                ("BIN".to_string(), "snd_xgm".to_string()),
-            ]
-        );
+        assert_eq!(decls.len(), 4);
+        assert_eq!(decls[0].declared_type, "IMAGE");
+        assert_eq!(decls[0].compression.as_deref(), Some("BEST"));
+        assert_eq!(decls[2].declared_type, "SPRITE");
+        assert_eq!(decls[2].compression.as_deref(), Some("NONE"));
+        assert_eq!(decls[3].declared_type, "BIN");
 
-        let graphic_decls: Vec<(String, String)> = decls
-            .iter()
-            .filter(|(t, _)| GRAPHIC_RESOURCE_TYPES.contains(&t.as_str()))
-            .cloned()
-            .collect();
-        let (t1, g1) = classify_symbol("spr_point_palette_data", &graphic_decls);
+        // fronteira de nome: `spr_point2` NÃO casa com `spr_point`.
+        let (t0, p0) = classify_symbol("spr_point2_tileset_data", &decls);
+        assert_eq!(t0, "SEM_DECLARACAO");
+        assert_eq!(p0, ProvenClass::Unknown);
+
+        // SPRITE comprimido (BEST): tiles NÃO comprovados como brutos.
+        let (t1, p1) = classify_symbol("spr_point_animation0_frame0_tileset_data", &decls);
         assert_eq!(t1, "SPRITE");
-        assert!(g1);
-        let (t2, g2) = classify_symbol("spr_point", &graphic_decls);
+        assert_eq!(p1, ProvenClass::Other);
+
+        // SPRITE sem compressão (NONE): tiles 4bpp COMPROVADOS.
+        let (t2, p2) = classify_symbol("spr_spark0_animation0_frame0_tileset_data", &decls);
         assert_eq!(t2, "SPRITE");
-        assert!(g2);
-        // Contra as declarações GRÁFICAS, som não casa → não-gráfico.
-        let (t3, g3) = classify_symbol("snd_xgm_data", &graphic_decls);
-        assert_eq!(t3, "SEM_DECLARACAO");
-        assert!(!g3);
-        // Contra TODAS as declarações, o tipo declarado é BIN (não-gráfico).
-        let (t3b, g3b) = classify_symbol("snd_xgm_data", &decls);
-        assert_eq!(t3b, "BIN");
-        assert!(!g3b);
-        let (t4, g4) = classify_symbol("alguma_coisa_sem_declaracao", &graphic_decls);
-        assert_eq!(t4, "SEM_DECLARACAO");
-        assert!(!g4);
-        let (t5, g5) = classify_symbol("room_0_bga_tiles", &graphic_decls);
-        assert_eq!(t5, "IMAGE");
-        assert!(g5);
+        assert_eq!(p2, ProvenClass::Tiles);
+
+        // paleta de recurso gráfico = OUTRO conteúdo comprovado (não-tile).
+        let (t3, p3) = classify_symbol("spr_point_palette_data", &decls);
+        assert_eq!(t3, "SPRITE");
+        assert_eq!(p3, ProvenClass::Other);
+
+        // struct do recurso (sem sufixo de dados) = desconhecido.
+        let (t4, p4) = classify_symbol("spr_point", &decls);
+        assert_eq!(t4, "SPRITE");
+        assert_eq!(p4, ProvenClass::Unknown);
+
+        // recurso não-gráfico declarado = outro conteúdo comprovado.
+        let (t5, p5) = classify_symbol("snd_xgm_data", &decls);
+        assert_eq!(t5, "BIN");
+        assert_eq!(p5, ProvenClass::Other);
+
+        // sem declaração = desconhecido.
+        let (t6, p6) = classify_symbol("alguma_coisa_sem_declaracao", &decls);
+        assert_eq!(t6, "SEM_DECLARACAO");
+        assert_eq!(p6, ProvenClass::Unknown);
     }
 
     /// O parser ar+ELF32-BE é o backbone dos oráculos independentes —
