@@ -1413,7 +1413,8 @@ mod tests {
     const GRAPHIC_RESOURCE_TYPES: [&str; 4] = ["IMAGE", "TILESET", "SPRITE", "BITMAP"];
 
     /// Declaração de recurso do `.res`: tipo, nome e compressão (quando o
-    /// formato a expõe — SPRITE no 6º token, IMAGE/TILESET no 4º).
+    /// formato a expõe — SPRITE no 6º token, IMAGE/TILESET no 4º, APÓS o
+    /// caminho entre aspas).
     #[derive(Debug, Clone, PartialEq)]
     struct ResDecl {
         declared_type: String,
@@ -1421,8 +1422,35 @@ mod tests {
         compression: Option<String>,
     }
 
+    /// Tokeniza uma linha `.res` respeitando ASPAS DUPLAS (caminhos com
+    /// espaços formam UM token) — split_whitespace deslocaria os campos.
+    fn tokenize_res_line(line: &str) -> Vec<String> {
+        let mut tokens = Vec::new();
+        let mut current = String::new();
+        let mut in_quotes = false;
+        for character in line.chars() {
+            match character {
+                '"' => {
+                    in_quotes = !in_quotes;
+                    current.push('"');
+                }
+                c if c.is_whitespace() && !in_quotes => {
+                    if !current.is_empty() {
+                        tokens.push(std::mem::take(&mut current));
+                    }
+                }
+                c => current.push(c),
+            }
+        }
+        if !current.is_empty() {
+            tokens.push(current);
+        }
+        tokens
+    }
+
     /// Parse das declarações de recursos de um arquivo `.res` do rescomp:
-    /// linhas `TIPO nome "arquivo" ...` (comentários `//` e vazias ignorados).
+    /// linhas `TIPO nome "arquivo ..." ...` (comentários `//` e vazias
+    /// ignorados; caminhos entre aspas com espaços suportados).
     fn parse_res_decls(bytes: &[u8]) -> Vec<ResDecl> {
         let text = String::from_utf8_lossy(bytes);
         let mut decls = Vec::new();
@@ -1431,17 +1459,24 @@ mod tests {
             if line.is_empty() || line.starts_with("//") {
                 continue;
             }
-            let tokens: Vec<&str> = line.split_whitespace().collect();
+            let tokens = tokenize_res_line(line);
             if tokens.len() < 2 {
                 continue;
             }
             let declared_type = tokens[0].to_ascii_uppercase();
-            let name = tokens[1].to_string();
+            let name = tokens[1].clone();
+            // Remove o caminho (token entre aspas, 3º campo) para localizar
+            // a compressão: SPRITE = [largura, altura, compressão, ...],
+            // IMAGE/TILESET/BITMAP/PALETTE = [compressão].
+            let without_path: Vec<String> = tokens
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != 2)
+                .map(|(_, token)| token.clone())
+                .collect();
             let compression = match declared_type.as_str() {
-                "SPRITE" => tokens.get(5).map(|token| token.to_ascii_uppercase()),
-                "IMAGE" | "TILESET" | "BITMAP" | "PALETTE" => {
-                    tokens.get(3).map(|token| token.to_ascii_uppercase())
-                }
+                "SPRITE" => without_path.get(4).cloned(),
+                "IMAGE" | "TILESET" | "BITMAP" | "PALETTE" => without_path.get(2).cloned(),
                 _ => None,
             };
             decls.push(ResDecl {
@@ -1458,13 +1493,16 @@ mod tests {
         object: String,
         symbol: String,
         declared_type: String,
-        /// Classe de PROVA do conteúdo (revisão de 9f5a51f):
-        /// - `Tiles`: tiles 4bpp COMPROVADOS (recurso gráfico declarado +
-        ///   sufixo de dados de tileset no símbolo);
-        /// - `Other`: outro conteúdo COMPROVADO (paleta de recurso gráfico,
-        ///   ou recurso não-gráfico declarado — som/binário);
-        /// - `Unknown`: structs/metadata/sem declaração — NUNCA alimenta
-        ///   os oráculos.
+        /// Classe de PROVA do conteúdo (revisões de 9f5a51f e 2375d77):
+        /// - `Tiles`: tiles 4bpp COMPROVADOS — recurso gráfico declarado +
+        ///   símbolo de DADOS de tileset (`<recurso>..._tileset_data`) +
+        ///   compressão declarada NONE (bytes brutos verificados);
+        /// - `Other`: outro conteúdo COMPROVADO NÃO-tile (paleta de recurso
+        ///   gráfico);
+        /// - `Unknown`: compressão não-NONE/desconhecida (bytes comprimidos
+        ///   não são tiles brutos), descritores, recurso BIN (pode conter
+        ///   dados gráficos brutos — não prova ausência), structs/metadata/
+        ///   sem declaração — NUNCA alimenta os oráculos.
         proven: ProvenClass,
         /// [início, fim) dos bytes do símbolo no payload do objeto.
         range: (usize, usize),
@@ -1514,20 +1552,27 @@ mod tests {
             Some(decl) => {
                 let remainder = &symbol_name[decl.name.len()..];
                 let graphic = GRAPHIC_RESOURCE_TYPES.contains(&decl.declared_type.as_str());
-                if graphic && remainder.contains("tileset") {
-                    // tiles comprovados exigem dados NÃO comprimidos
-                    // (compressão NONE): bytes comprimidos não são tiles
-                    // brutos verificados.
+                // PAYLOAD de tileset (dados brutos), não o descritor: o
+                // restante do nome deve terminar exatamente em
+                // `_tileset_data` (descritores terminam em `_tileset`).
+                let is_tileset_payload = remainder.ends_with("_tileset_data");
+                if graphic && is_tileset_payload {
+                    // Tiles comprovados exigem compressão declarada NONE:
+                    // bytes comprimidos (BEST/FAST) ou compressão não
+                    // declarada NÃO são tiles brutos verificados → Unknown.
                     if decl.compression.as_deref() == Some("NONE") {
                         (decl.declared_type.clone(), ProvenClass::Tiles)
                     } else {
-                        (decl.declared_type.clone(), ProvenClass::Other)
+                        (decl.declared_type.clone(), ProvenClass::Unknown)
                     }
-                } else if remainder.contains("palette") {
-                    (decl.declared_type.clone(), ProvenClass::Other)
-                } else if !graphic {
+                } else if remainder.contains("palette") && graphic {
+                    // Paleta de recurso gráfico = conteúdo comprovado
+                    // NÃO-tile (alimenta o negativo).
                     (decl.declared_type.clone(), ProvenClass::Other)
                 } else {
+                    // Recurso não-gráfico (BIN pode conter qualquer coisa —
+                    // não prova ausência de tiles), metadata, structs e sem
+                    // declaração: Unknown.
                     (decl.declared_type.clone(), ProvenClass::Unknown)
                 }
             }
@@ -1884,24 +1929,29 @@ ALIGN\n\
 IMAGE room_0_bga \"gfx/room_0_bga.png\" BEST\n\
 SPRITE spr_point  \"sprite/point.png\"  1  1 BEST 0\n\
 SPRITE spr_spark0  \"sprite/spark.png\"  4  4 NONE 4\n\
+SPRITE spr_path_ws  \"meus sprites/com espaco.png\"  2  2 NONE 2\n\
 BIN snd_xgm \"sound/xgm.bin\" 2 2 0 NONE FALSE\n";
         let decls = parse_res_decls(res_file);
-        assert_eq!(decls.len(), 4);
+        assert_eq!(decls.len(), 5);
         assert_eq!(decls[0].declared_type, "IMAGE");
         assert_eq!(decls[0].compression.as_deref(), Some("BEST"));
         assert_eq!(decls[2].declared_type, "SPRITE");
         assert_eq!(decls[2].compression.as_deref(), Some("NONE"));
-        assert_eq!(decls[3].declared_type, "BIN");
+        // caminho com espaços: compressão correta (NONE) e não deslocada.
+        assert_eq!(decls[3].name, "spr_path_ws");
+        assert_eq!(decls[3].compression.as_deref(), Some("NONE"));
+        assert_eq!(decls[4].declared_type, "BIN");
 
         // fronteira de nome: `spr_point2` NÃO casa com `spr_point`.
         let (t0, p0) = classify_symbol("spr_point2_tileset_data", &decls);
         assert_eq!(t0, "SEM_DECLARACAO");
         assert_eq!(p0, ProvenClass::Unknown);
 
-        // SPRITE comprimido (BEST): tiles NÃO comprovados como brutos.
+        // SPRITE comprimido (BEST): bytes comprimidos não são tiles brutos
+        // verificados → desconhecido (não Other).
         let (t1, p1) = classify_symbol("spr_point_animation0_frame0_tileset_data", &decls);
         assert_eq!(t1, "SPRITE");
-        assert_eq!(p1, ProvenClass::Other);
+        assert_eq!(p1, ProvenClass::Unknown);
 
         // SPRITE sem compressão (NONE): tiles 4bpp COMPROVADOS.
         let (t2, p2) = classify_symbol("spr_spark0_animation0_frame0_tileset_data", &decls);
@@ -1918,10 +1968,21 @@ BIN snd_xgm \"sound/xgm.bin\" 2 2 0 NONE FALSE\n";
         assert_eq!(t4, "SPRITE");
         assert_eq!(p4, ProvenClass::Unknown);
 
-        // recurso não-gráfico declarado = outro conteúdo comprovado.
+        // descritor de tileset (sem `_data`) = desconhecido — não é payload.
+        let (t4b, p4b) = classify_symbol("spr_spark0_animation0_frame0_tileset", &decls);
+        assert_eq!(t4b, "SPRITE");
+        assert_eq!(p4b, ProvenClass::Unknown);
+
+        // caminho com espaços: tiles comprovados pela compressão NONE correta.
+        let (t4c, p4c) = classify_symbol("spr_path_ws_animation0_frame0_tileset_data", &decls);
+        assert_eq!(t4c, "SPRITE");
+        assert_eq!(p4c, ProvenClass::Tiles);
+
+        // BIN pode conter dados gráficos brutos — NÃO prova ausência de
+        // tiles: desconhecido, não alimenta o negativo.
         let (t5, p5) = classify_symbol("snd_xgm_data", &decls);
         assert_eq!(t5, "BIN");
-        assert_eq!(p5, ProvenClass::Other);
+        assert_eq!(p5, ProvenClass::Unknown);
 
         // sem declaração = desconhecido.
         let (t6, p6) = classify_symbol("alguma_coisa_sem_declaracao", &decls);
