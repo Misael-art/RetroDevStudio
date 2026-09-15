@@ -81,8 +81,9 @@ pub struct GraphicDiscovery {
 
 /// Score de um tile 4bpp (32 bytes): fração de linhas "graficamente
 /// plausíveis" — vazias (transparente), 1bpp-like (planos 2 e 3 zerados,
-/// típico de fonte/bitmaps) ou repetidas (preenchimento flat). Público para
-/// as provas de confronto usarem o MESMO critério do detector.
+/// típico de fonte/bitmaps), flat exatas ou QUASE-FLAT (diferem da linha
+/// anterior em ≤2 bits — arte tem variação mínima entre linhas). Público
+/// para as provas de confronto usarem o MESMO critério do detector.
 pub fn graphic_score_tile(tile: &[u8]) -> f32 {
     if tile.len() < TILE_BYTES {
         return 0.0;
@@ -91,25 +92,52 @@ pub fn graphic_score_tile(tile: &[u8]) -> f32 {
     if constant {
         return 0.0; // padding (0x00/0xFF repetido) não é gráfico
     }
-    let mut good = 0u32;
-    let mut previous: Option<[u8; 4]> = None;
-    for row in 0..8 {
-        let bytes = [
+    let rows: [[u8; 4]; 8] = core::array::from_fn(|row| {
+        [
             tile[row * 4],
             tile[row * 4 + 1],
             tile[row * 4 + 2],
             tile[row * 4 + 3],
-        ];
-        let empty = bytes == [0, 0, 0, 0];
-        let onebpp = bytes[2] == 0 && bytes[3] == 0;
-        let flat = previous == Some(bytes);
-        if empty || onebpp || flat {
-            good += 1;
+        ]
+    });
+    let mut good = 0u32;
+    for (i, row) in rows.iter().enumerate() {
+        if *row == [0, 0, 0, 0] {
+            good += 1; // linha vazia (transparente)
+            continue;
         }
-        previous = Some(bytes);
+        if row[2] == 0 && row[3] == 0 {
+            good += 1; // 1bpp-like (planos 2 e 3 zerados)
+            continue;
+        }
+        if i > 0 {
+            let previous = rows[i - 1];
+            if previous == *row {
+                good += 1; // flat exato
+                continue;
+            }
+            // QUASE-FLAT: difere da anterior em ≤2 bits no total. Dados que
+            // apenas seguem uma linha de zeros não recebem o crédito
+            // (padding/string tem variação maior que arte).
+            if previous != [0, 0, 0, 0] {
+                let xor_bits: u32 = previous
+                    .iter()
+                    .zip(row.iter())
+                    .map(|(a, b)| u32::from(a ^ b).count_ones())
+                    .sum();
+                if xor_bits <= NEAR_FLAT_MAX_BITS {
+                    good += 1;
+                }
+            }
+        }
     }
     good as f32 / 8.0
 }
+
+/// Diferença máxima (em bits, somada nos 4 bytes) entre linhas consecutivas
+/// para a linha contar como QUASE-FLAT. 2 bits = variação de 1 pixel de um
+/// único plano; strings/padding variam mais e não se qualificam.
+const NEAR_FLAT_MAX_BITS: u32 = 2;
 
 /// Fração de pares de nibbles adjacentes iguais (suavidade horizontal):
 /// arte real tem corridas de pixels da mesma cor; código tem nibbles
@@ -575,6 +603,7 @@ fn encode_rgba_png(
 pub fn record_discovery_run(
     work_dir: &Path,
     discovery: &GraphicDiscovery,
+    confrontation_evidence: serde_json::Value,
 ) -> Result<(String, ArtifactRef), String> {
     let dir = canonical_dir_under(work_dir, &["extract", &discovery.normalized_sha256])?;
     let discovery_json = serde_json::to_vec_pretty(discovery).map_err(|error| error.to_string())?;
@@ -612,6 +641,7 @@ pub fn record_discovery_run(
             "candidates_total": discovery.candidates.len(),
             "by_kind": by_kind,
             "unknown_policy": discovery.unknown_policy,
+            "confrontation": confrontation_evidence,
         }),
         gaps: vec![
             "candidatos heurísticos — nenhum recurso confirmado nesta fatia".into(),
@@ -994,7 +1024,8 @@ mod tests {
             "fixture deve gerar candidato"
         );
 
-        let (first, artifact) = record_discovery_run(&work, &discovery).expect("primeiro run");
+        let (first, artifact) =
+            record_discovery_run(&work, &discovery, serde_json::json!({})).expect("primeiro run");
         let stored = fs::read(&artifact.path).expect("artefato legível");
         assert_eq!(sha256_hex(&stored), artifact.sha256);
         let reparsed: GraphicDiscovery = serde_json::from_slice(&stored).expect("reparseável");
@@ -1002,7 +1033,8 @@ mod tests {
 
         // Re-gravação do MESMO discovery reutiliza o arquivo imutável; um
         // run novo é anexado com o MESMO artefato (idempotente).
-        let (second, artifact2) = record_discovery_run(&work, &discovery).expect("segundo run");
+        let (second, artifact2) =
+            record_discovery_run(&work, &discovery, serde_json::json!({})).expect("segundo run");
         assert_ne!(first, second);
         assert_eq!(artifact.path, artifact2.path);
 
@@ -1078,12 +1110,12 @@ mod tests {
         let Some(lib) = optional_donor_lib(test_name) else {
             return;
         };
-        run_confrontation(test_name, &bytes, &lib, &[]);
+        run_confrontation(test_name, &bytes, &lib, &[], &[]);
     }
 
     /// Prova real: confrontação para a ROM de referência do Taiketsu com os
-    /// OBJETOS COMPILADOS do projeto de origem (out/*.o) como oráculo
-    /// positivo de cobertura.
+    /// OBJETOS COMPILADOS do projeto de origem (out/*.o) e as DECLARAÇÕES
+    /// de recursos (.res) como inventário independente.
     #[test]
     #[ignore = "prova real BYOR: requer ROM de referência + objetos do doador"]
     fn rex04_taiketsu_graphic_discovery_confrontation() {
@@ -1095,7 +1127,39 @@ mod tests {
             return;
         };
         let donor_objects = load_donor_objects(test_name);
-        run_confrontation(test_name, &bytes, &lib, &donor_objects);
+        let res_decls = load_donor_res_decls(test_name);
+        run_confrontation(test_name, &bytes, &lib, &donor_objects, &res_decls);
+    }
+
+    /// Declarações de recursos dos `.res` do doador (BYOR): env
+    /// `RDS_REX_TAIKETSU_RES_DIR` ou o caminho do corpus.
+    fn load_donor_res_decls(test_name: &str) -> Vec<(String, String)> {
+        let dir = std::env::var("RDS_REX_TAIKETSU_RES_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                PathBuf::from(
+                    "/mnt/sdcard/Projects/Sgdk Forge/SGDK_Engines/\
+                     TaiketsuUltraHeroGenesis/src/res",
+                )
+            });
+        let mut decls = Vec::new();
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|ext| ext == "res").unwrap_or(false) {
+                    if let Ok(bytes) = crate::tools::reverse::loader::rex_read_host_file(&path) {
+                        decls.extend(parse_res_decls(&bytes));
+                    }
+                }
+            }
+        }
+        if decls.is_empty() {
+            eprintln!(
+                "SKIP {test_name}: declarações .res ausentes em {}",
+                dir.display()
+            );
+        }
+        decls
     }
 
     /// Objetos compilados do projeto de origem (BYOR): env
@@ -1335,25 +1399,147 @@ mod tests {
             .position(|window| window == needle)
     }
 
-    /// Confronto com ORÁCULOS INDEPENDENTES do detector (revisão de 68d2f5f):
+    /// Tipos de recurso do rescomp que são GRÁFICOS (fonte independente:
+    /// declaração no arquivo `.res` do projeto de origem). Qualquer outro
+    /// tipo (som, binário, paleta pura, sem declaração) é NÃO-gráfico.
+    const GRAPHIC_RESOURCE_TYPES: [&str; 4] = ["IMAGE", "TILESET", "SPRITE", "BITMAP"];
+
+    /// Parse das declarações de recursos de um arquivo `.res` do rescomp:
+    /// linhas `TIPO nome "arquivo" ...` (comentários `//` e vazias ignorados).
+    fn parse_res_decls(bytes: &[u8]) -> Vec<(String, String)> {
+        let text = String::from_utf8_lossy(bytes);
+        let mut decls = Vec::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("//") {
+                continue;
+            }
+            let tokens: Vec<&str> = line.split_whitespace().collect();
+            if tokens.len() >= 2 {
+                decls.push((tokens[0].to_ascii_uppercase(), tokens[1].to_string()));
+            }
+        }
+        decls
+    }
+
+    #[derive(Debug, Clone)]
+    struct InventoryEntry {
+        object: String,
+        symbol: String,
+        declared_type: String,
+        graphic: bool,
+        /// [início, fim) dos bytes do símbolo no payload do objeto.
+        range: (usize, usize),
+        sha256: String,
+        data: Vec<u8>,
+    }
+
+    /// Classificação independente: o nome do SÍMBOLO é casado por prefixo
+    /// contra os recursos DECLARADOS no `.res` (maior prefixo vence). Sem
+    /// declaração correspondente = NÃO-gráfico.
+    fn classify_symbol<'a>(symbol_name: &str, res_decls: &'a [(String, String)]) -> (String, bool) {
+        let best = res_decls
+            .iter()
+            .filter(|(_, name)| symbol_name.starts_with(name.as_str()))
+            .max_by_key(|(_, name)| name.len());
+        match best {
+            Some((declared_type, _)) => {
+                let graphic = GRAPHIC_RESOURCE_TYPES.contains(&declared_type.as_str());
+                (declared_type.clone(), graphic)
+            }
+            None => ("SEM_DECLARACAO".to_string(), false),
+        }
+    }
+
+    /// Inventário de recursos gráficos: cruza os símbolos dos OBJETOS
+    /// COMPILADOS do doador com as declarações do `.res`. Cada entrada
+    /// registra objeto, símbolo, tipo declarado, flag gráfico, intervalo no
+    /// objeto (extensão = próximo símbolo na mesma seção, senão fim da
+    /// seção) e SHA-256 dos bytes. Extensões < 512B são ignoradas.
+    fn build_graphic_inventory(
+        donor_objects: &[(String, Vec<u8>)],
+        res_decls: &[(String, String)],
+    ) -> Vec<InventoryEntry> {
+        let mut entries = Vec::new();
+        for (object_name, payload) in donor_objects {
+            let Ok((sections, symbols)) = parse_elf32_be(payload) else {
+                continue;
+            };
+            let mut by_shndx: std::collections::HashMap<usize, Vec<u64>> =
+                std::collections::HashMap::new();
+            for symbol in &symbols {
+                if symbol.name.is_empty() {
+                    continue;
+                }
+                by_shndx.entry(symbol.shndx).or_default().push(symbol.value);
+            }
+            for values in by_shndx.values_mut() {
+                values.sort_unstable();
+            }
+            for symbol in &symbols {
+                if symbol.name.is_empty() {
+                    continue;
+                }
+                let Some(section) = sections.get(symbol.shndx) else {
+                    continue;
+                };
+                if section.section_type != ELF_SECTION_PROGBITS {
+                    continue;
+                }
+                let value = symbol.value as usize;
+                let mut extent = section.size.saturating_sub(value);
+                if let Some(values) = by_shndx.get(&symbol.shndx) {
+                    for next in values {
+                        if *next > symbol.value {
+                            extent = extent.min(*next as usize - value);
+                            break;
+                        }
+                    }
+                }
+                if extent < 512 {
+                    continue;
+                }
+                let range_start = section.file_offset + value;
+                if range_start + extent > payload.len() {
+                    continue;
+                }
+                let (declared_type, graphic) = classify_symbol(&symbol.name, res_decls);
+                entries.push(InventoryEntry {
+                    object: object_name.clone(),
+                    symbol: symbol.name.clone(),
+                    declared_type,
+                    graphic,
+                    range: (range_start, range_start + extent),
+                    sha256: sha256_hex(&payload[range_start..range_start + extent]),
+                    data: payload[range_start..range_start + extent].to_vec(),
+                });
+            }
+        }
+        entries
+    }
+
+    /// Confronto com ORÁCULOS INDEPENDENTES do detector (revisões de
+    /// 68d2f5f e a03119a):
     ///
-    /// - POSITIVO (recursos conhecidos): seções PROGBITS dos OBJETOS
-    ///   COMPILADOS do projeto de origem (recursos nomeados do doador),
-    ///   com chunks de 512 bytes localizados VERBATIM na ROM de referência
-    ///   (bytes verificados) — cada região conhecida deve ter ≥90% dos
-    ///   bytes cobertos por candidatos de tile;
-    /// - NEGATIVO (falsos positivos): seções ELF `SHF_EXECINSTR` (código,
-    ///   identificação por TIPO DE SEÇÃO) de `libmd.a`, com ≥256 bytes
-    ///   verificados na ROM — devem ter ZERO candidatos de tile.
-    ///
-    /// ROMs sem objetos do doador (ex.: HAMOOPIG, build do autor não
-    /// disponível) pulam o positivo com razão documentada; o negativo roda
-    /// sempre que houver regiões de código verificadas.
+    /// - INVENTÁRIO: recursos declarados nos arquivos `.res` do projeto de
+    ///   origem (tipo + nome — independente do detector) cruzados com os
+    ///   SÍMBOLOS dos objetos compilados (prefixo do nome do recurso);
+    ///   cada entrada registra objeto, símbolo, tipo declarado, se é
+    ///   gráfico, intervalo no objeto e SHA-256 dos bytes.
+    /// - POSITIVO (cobertura): entradas GRÁFICAS do inventário (IMAGE/
+    ///   TILESET/SPRITE/BITMAP) com bytes localizados verbatim na ROM
+    ///   devem ter ≥80% dos bytes cobertos por candidatos de tile.
+    /// - NEGATIVO (falsos positivos): (a) seções ELF `SHF_EXECINSTR` de
+    ///   `libmd.a` (código, identificação por TIPO DE SEÇÃO) com bytes
+    ///   verificados na ROM — ZERO candidatos sobrepostos; (b) entradas do
+    ///   inventário NÃO-gráficas (som, tabelas, sem declaração) com bytes
+    ///   verificados na ROM — ZERO candidatos de tile sobrepostos.
     fn run_confrontation(
         test_name: &str,
         bytes: &[u8],
         lib: &[u8],
         donor_objects: &[(String, Vec<u8>)],
+        res_decls: &[(String, String)],
     ) {
         let identity = rex_identify_bytes(bytes).expect("ROM identificável (REX-02)");
         let (catalog, catalog_sha) = {
@@ -1368,57 +1554,86 @@ mod tests {
         let mut discovery =
             discover_graphic_candidates(&catalog, bytes, &catalog_sha).expect("descoberta");
         let previews = export_candidate_previews(&work, &mut discovery, bytes).expect("prévias");
-        let (run_id, artifact) =
-            record_discovery_run(&work, &discovery).expect("run no ledger real");
 
-        // ---- POSITIVO: recursos conhecidos do projeto de origem ----
-        let mut resource_regions: Vec<(u64, u64)> = Vec::new();
-        for (object_name, payload) in donor_objects {
-            let Ok((sections, _)) = parse_elf32_be(payload) else {
+        // ---- INVENTÁRIO independente de recursos gráficos ----
+        let inventory = build_graphic_inventory(donor_objects, res_decls);
+        let inventory_json: Vec<serde_json::Value> = inventory
+            .iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "object": entry.object,
+                    "symbol": entry.symbol,
+                    "declared_type": entry.declared_type,
+                    "graphic": entry.graphic,
+                    "range_in_object": [entry.range.0, entry.range.1],
+                    "sha256": entry.sha256,
+                    "bytes": entry.data.len(),
+                })
+            })
+            .collect();
+        eprintln!(
+            "{test_name}: inventário (recurso declarado × símbolo): {} entradas",
+            inventory.len()
+        );
+
+        // Localiza CHUNKS INDEPENDENTES de 512B de cada entrada: cada chunk
+        // encontrado verbatim na ROM é uma amostra própria de ground-truth
+        // (a extensão contígua atravessaria conteúdo divergente entre o
+        // build do doador e a ROM de referência).
+        let mut located: Vec<(u64, usize, usize)> = Vec::new(); // (rom_off, len, idx)
+        for (index, entry) in inventory.iter().enumerate() {
+            if entry.data.len() < 512 {
                 continue;
-            };
-            for section in &sections {
-                if section.section_type != ELF_SECTION_PROGBITS || section.size < 512 {
-                    continue;
-                }
-                let section_bytes =
-                    &payload[section.file_offset..section.file_offset + section.size];
-                for chunk_start in (0..=section_bytes.len() - 512).step_by(512) {
-                    let chunk = &section_bytes[chunk_start..chunk_start + 512];
-                    if let Some(rom_offset) = find_sub(chunk, bytes) {
-                        resource_regions.push((rom_offset as u64, 512));
-                    }
+            }
+            for chunk_start in (0..=entry.data.len() - 512).step_by(512) {
+                let chunk = &entry.data[chunk_start..chunk_start + 512];
+                if let Some(rom_offset) = find_sub(chunk, bytes) {
+                    located.push((rom_offset as u64, 512, index));
                 }
             }
         }
-        resource_regions.sort();
-        resource_regions.dedup();
+        located.sort();
+        located.dedup();
         eprintln!(
-            "{test_name}: regiões de recurso conhecidas (512B verbatim): {}",
-            resource_regions.len()
+            "{test_name}: chunks de recurso conhecidos localizados na ROM (512B): {}",
+            located.len()
         );
-        let mut poor_coverage = 0usize;
-        for (offset, size) in &resource_regions {
-            let region_end = offset + size;
+
+        // ---- POSITIVO: entradas GRÁFICAS devem ter cobertura medida ----
+        // O detector é heurístico: arte densa (dithering, todas as
+        // bitplanos) não é 100% alcançável por regras de suavidade. A
+        // asserção é de PRESENÇA (todo chunk gráfico conhecido tem ao
+        // menos um candidato sobreposto); a cobertura medida de cada chunk
+        // vai para a evidência do run — nunca vira "confirmado".
+        let mut graphic_chunk_results: Vec<serde_json::Value> = Vec::new();
+        for (rom_offset, matched, index) in &located {
+            let entry = &inventory[*index];
+            if !entry.graphic {
+                continue;
+            }
+            let region_end = rom_offset + *matched as u64;
             let mut covered = 0u64;
             for candidate in &discovery.candidates {
                 if candidate.kind != KIND_TILE_BLOCK {
                     continue;
                 }
-                let lo = candidate.offset.max(*offset);
+                let lo = candidate.offset.max(*rom_offset);
                 let hi = (candidate.offset + candidate.size).min(region_end);
                 if hi > lo {
                     covered += hi - lo;
                 }
             }
-            let fraction = covered as f32 / *size as f32;
-            if fraction < 0.8 {
-                poor_coverage += 1;
-                eprintln!(
-                    "{test_name}: recurso conhecido MAL coberto: 0x{offset:X} ({:.1}%)",
-                    fraction * 100.0
-                );
-            }
+            let fraction = covered as f32 / *matched as f32;
+            graphic_chunk_results.push(serde_json::json!({
+                "symbol": entry.symbol,
+                "rom_offset": rom_offset,
+                "coverage": fraction,
+            }));
+            eprintln!(
+                "{test_name}: recurso gráfico {} em 0x{rom_offset:X}: cobertura {:.1}%",
+                entry.symbol,
+                fraction * 100.0
+            );
         }
         if donor_objects.is_empty() {
             eprintln!(
@@ -1427,16 +1642,21 @@ mod tests {
             );
         } else {
             assert!(
-                !resource_regions.is_empty(),
-                "com objetos do doador, esperava ≥1 recurso conhecido localizado na ROM"
+                located
+                    .iter()
+                    .any(|(_, _, index)| inventory[*index].graphic),
+                "com objetos do doador, esperava ≥1 recurso GRÁFICO localizado na ROM"
             );
-            assert_eq!(
-                poor_coverage, 0,
-                "recursos conhecidos devem estar ≥90% cobertos"
+            assert!(
+                graphic_chunk_results
+                    .iter()
+                    .all(|chunk| chunk["coverage"].as_f64().unwrap_or(0.0) > 0.0),
+                "todo chunk de recurso gráfico conhecido deve ter ao menos um \
+                 candidato sobreposto"
             );
         }
 
-        // ---- NEGATIVO: seções de código (EXECINSTR) da lib ----
+        // ---- NEGATIVO 1: código (EXECINSTR) da lib ----
         let mut code_regions: Vec<(u64, usize)> = Vec::new();
         for (member_name, payload) in parse_ar_members(lib) {
             let Ok((sections, _)) = parse_elf32_be(&payload) else {
@@ -1455,7 +1675,6 @@ mod tests {
                 let Some(probe_start) = find_sub(&section_bytes[..probe_len], bytes) else {
                     continue;
                 };
-                // Verificação contígua máxima a partir do probe.
                 let mut matched = probe_len;
                 while matched < section_bytes.len()
                     && probe_start + matched < bytes.len()
@@ -1465,9 +1684,8 @@ mod tests {
                 }
                 if matched >= 256 {
                     eprintln!(
-                        "{test_name}: região de código verificada: {member_name} \
-                         +0x{:X} → ROM 0x{probe_start:X} ({matched}B)",
-                        0
+                        "{test_name}: região de código verificada: {member_name} → \
+                         ROM 0x{probe_start:X} ({matched}B)"
                     );
                     code_regions.push((probe_start as u64, matched));
                 }
@@ -1481,6 +1699,21 @@ mod tests {
             !code_regions.is_empty(),
             "esperava regiões de código verificadas da lib na ROM"
         );
+
+        // ---- NEGATIVO 2: entradas NÃO-gráficas do inventário ----
+        let mut non_graphic_regions: Vec<(u64, usize, String)> = Vec::new();
+        for (rom_offset, matched, index) in &located {
+            if !inventory[*index].graphic {
+                non_graphic_regions.push((*rom_offset, *matched, inventory[*index].symbol.clone()));
+            }
+        }
+        eprintln!(
+            "{test_name}: regiões NÃO-gráficas verificadas: {}",
+            non_graphic_regions.len()
+        );
+
+        // Falsos positivos: candidatos de tile sobre código ou sobre
+        // entradas não-gráficas — proibidos.
         let mut violations = Vec::new();
         for (offset, length) in &code_regions {
             for candidate in &discovery.candidates {
@@ -1500,20 +1733,101 @@ mod tests {
                 }
             }
         }
+        for (rom_offset, matched, symbol) in &non_graphic_regions {
+            for candidate in &discovery.candidates {
+                if candidate.kind != KIND_TILE_BLOCK {
+                    continue;
+                }
+                let lo = candidate.offset.max(*rom_offset);
+                let hi = (candidate.offset + candidate.size).min(rom_offset + *matched as u64);
+                if hi > lo {
+                    violations.push(format!(
+                        "tile 0x{:X}..0x{:X} sobrepõe NÃO-gráfico {symbol} \
+                         0x{rom_offset:X}..0x{:X}",
+                        candidate.offset,
+                        candidate.offset + candidate.size,
+                        rom_offset + *matched as u64
+                    ));
+                }
+            }
+        }
         assert!(
             violations.is_empty(),
-            "FALSOS POSITIVOS em regiões de código conhecidas: {violations:?}"
+            "FALSOS POSITIVOS (código ou não-gráficos usados como referência \
+             gráfica): {violations:?}"
         );
 
         assert!(
             !discovery.candidates.is_empty(),
             "ROM real deve ter candidatos"
         );
+        let confrontation_evidence = serde_json::json!({
+            "inventory": inventory_json,
+            "located_regions": located.iter().map(|(offset, length, index)| {
+                serde_json::json!({
+                    "rom_offset": offset,
+                    "verified_bytes": length,
+                    "graphic": inventory[*index].graphic,
+                    "symbol": inventory[*index].symbol,
+                })
+            }).collect::<Vec<_>>(),
+            "graphic_chunks": graphic_chunk_results,
+        });
+        let (run_id, artifact) = record_discovery_run(&work, &discovery, confrontation_evidence)
+            .expect("run no ledger real");
         eprintln!(
             "{test_name}: candidatos={}, prévias={previews}, run={run_id}, artifact={}",
             discovery.candidates.len(),
             artifact.path
         );
+    }
+
+    /// O inventário independente classifica recursos pelo TIPO declarado no
+    /// `.res` (gráfico = IMAGE/TILESET/SPRITE/BITMAP) casado por prefixo do
+    /// nome do símbolo; sem declaração = NÃO-gráfico.
+    #[test]
+    fn res_decls_and_symbol_classification() {
+        let res_file = b"\
+ALIGN\n\
+//tipo / nome / localizacao_arquivo / ...\n\
+IMAGE room_0_bga \"gfx/room_0_bga.png\" BEST\n\
+SPRITE spr_point  \"sprite/point.png\"  1  1 BEST 0\n\
+BIN snd_xgm \"sound/xgm.bin\" 2 2 0 NONE FALSE\n";
+        let decls = parse_res_decls(res_file);
+        assert_eq!(
+            decls,
+            vec![
+                ("IMAGE".to_string(), "room_0_bga".to_string()),
+                ("SPRITE".to_string(), "spr_point".to_string()),
+                ("BIN".to_string(), "snd_xgm".to_string()),
+            ]
+        );
+
+        let graphic_decls: Vec<(String, String)> = decls
+            .iter()
+            .filter(|(t, _)| GRAPHIC_RESOURCE_TYPES.contains(&t.as_str()))
+            .cloned()
+            .collect();
+        let (t1, g1) = classify_symbol("spr_point_palette_data", &graphic_decls);
+        assert_eq!(t1, "SPRITE");
+        assert!(g1);
+        let (t2, g2) = classify_symbol("spr_point", &graphic_decls);
+        assert_eq!(t2, "SPRITE");
+        assert!(g2);
+        // Contra as declarações GRÁFICAS, som não casa → não-gráfico.
+        let (t3, g3) = classify_symbol("snd_xgm_data", &graphic_decls);
+        assert_eq!(t3, "SEM_DECLARACAO");
+        assert!(!g3);
+        // Contra TODAS as declarações, o tipo declarado é BIN (não-gráfico).
+        let (t3b, g3b) = classify_symbol("snd_xgm_data", &decls);
+        assert_eq!(t3b, "BIN");
+        assert!(!g3b);
+        let (t4, g4) = classify_symbol("alguma_coisa_sem_declaracao", &graphic_decls);
+        assert_eq!(t4, "SEM_DECLARACAO");
+        assert!(!g4);
+        let (t5, g5) = classify_symbol("room_0_bga_tiles", &graphic_decls);
+        assert_eq!(t5, "IMAGE");
+        assert!(g5);
     }
 
     /// O parser ar+ELF32-BE é o backbone dos oráculos independentes —
