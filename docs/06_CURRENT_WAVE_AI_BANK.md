@@ -1,4 +1,254 @@
-# 06 - CURRENT WAVE AI BANK (Wave S+)
+### Estado corrente — 2026-09-15 (5): REX-04 fatia 2 ACEITA e INTEGRADA em `codex/import-decomp-review` `3fed085`; scanners de conteúdo são a próxima frente
+
+**REX-04 fatia 2 (descoberta gráfica parcial) aceita pelo revisor em `382f9f4` e integrada:** merge **#65 → `3fed085`** em `codex/import-decomp-review` (NÃO em `main` — consolidação segue via #61, outra linha). Gates no destino: check:tree, tsc, lint, npm test, cargo test --lib **588/40**, clippy, fmt, **host:certify READY** (fingerprint 77bbc2a7…), **provas reais reexecutadas no destino 2/2** (Taiketsu: 5 chunks de `spr_*_tileset_data` NONE com cobertura medida 53,1–100%; HAMOOPIG: 4 regiões de código EXECINSTR com ZERO candidatos — positivo pulado por ausência de build do doador, documentado); CI remota 4/4 no push do merge. Mimosa selado `sha256:95e9142a…` (mesmos 2 FPs conhecidos de NodeGraphEditor).
+
+**Limitações preservadas (do aceite):** cobertura mínima de 50% é PARCIAL (medida por chunk no ledger: 53,1–100% — dithering denso é parcialmente alcançável pela heurística); positivo de HAMOOPIG não medido (sem build do doador); NENHUMA certificação de extração completa, lógica ou edição por nós; compressão ≠NONE/ausente e BIN ficam Unknown (podem conter tiles ou não — sem prova); descritores de tileset não são payload. **Experimental.**
+
+**Próxima frente:** scanners de conteúdo adicionais (reduzir os ~99,9% de unknown) — NÃO iniciada; depende de GO.
+
+---
+
+### Estado corrente — 2026-09-15 (4): REX-04 fatia 2 — classificação endurecida (payload `tileset_data` + compressão NONE + tokenizer com aspas), PR #65 aguardando re-revisão
+
+**Bloco da revisão de 2375d77 resolvido — classificação endurecida:** (1) BIN NÃO prova ausência de tiles (pode conter dados gráficos brutos) → BIN vai para **Unknown** e não alimenta o negativo; (2) compressão ausente ou ≠NONE → **Unknown** (não Other) — sem verificar o formato efetivamente compilado não há prova; (3) exigido o símbolo de PAYLOAD (`<recurso>..._tileset_data`, sufixo exato) — descritores (`..._tileset`) vão para Unknown; intervalo comprovado pela fronteira do próximo símbolo da seção ELF; (4) parser `.res` com tokenizer que respeita ASPAS — caminhos com espaços não deslocam a compressão (regressão dedicada). Regressões novas: BIN com tiles → Unknown; descritor de tileset → Unknown; compressão FAST/ausente → Unknown; caminho com espaços → compressão NONE corretamente classificada. Positivo: gate **≥50%** por chunk de Tiles comprovado (cobertura parcial medida e registrada no ledger — não demonstra extração completa).
+
+Provas reais 2/2 (Taiketsu: 5 chunks de `spr_*_tileset_data` com compressão NONE localizados — 100/65,6/100/67,2/53,1% de cobertura medida; HAMOOPIG: positivo pulado por ausência de build, documentado; código EXECINSTR 0 FP nas duas ROMs). Gates: cargo test --lib **588/40**, clippy, fmt, check:tree, tsc, lint, npm test, CI, Mimosa selado. **Experimental.**
+
+---
+
+### Estado corrente — 2026-09-15 (3): REX-04 fatia 2 — classificação de PROVA em 3 classes (Tiles/Other/Unknown), PR #65 aguardando re-revisão
+
+**Bloco remanescente da revisão de 9f5a51f resolvido:** o inventário agora classifica cada entrada em TRÊS classes de prova — **Tiles** (recurso gráfico declarado + sufixo `tileset` no símbolo + compressão NONE = tiles 4bpp brutos comprovados), **Other** (paleta comprovada, ou recurso não-gráfico declarado — conteúdo comprovado NÃO-tile) e **Unknown** (structs/metadata/sem declaração — NUNCA alimenta os oráculos). FRONTIERA DE NOME verificada (`spr_point2` não casa com `spr_point`). **POSUTIVO:** só chunks de Tiles comprovados — gate de cobertura **≥50%** por chunk (localização e extração substantivas; alinhado com o relato). **NEGATIVO:** chunks Other comprovados e regiões `EXECINSTR` têm ZERO candidatos sobrepostos. Cobertura medida por chunk gravada na evidência do ledger (HAMOOPIG: positivo pulado por ausência de build — documentado; Taiketsu: 5 chunks 100%/65,6%/100%/67,2%/53,1% — dithering denso é parcialmente alcançável, registrado sem maquiagem). QUASE-FLAT ≤2 bits vs 1-2 linhas anteriores não-vazias (eliminou FP de string/padding em `.text` verificado).
+
+Gates: cargo test --lib **588/40**, clippy, fmt, check:tree, tsc, lint, npm test, Mimosa selado, CI. **Experimental.**
+
+---
+
+### Estado corrente — 2026-09-15 (2): REX-04 fatia 2 — oráculo positivo por INVENTÁRIO independente (`.res` × símbolos), PR #65 aguardando re-revisão
+
+**Bloco remanescente da revisão de a03119a (positivo gráfico) resolvido com inventário independente:** as referências positivas agora vêm do CRUZAMENTO entre (a) recursos DECLARADOS nos arquivos `.res` do projeto de origem (tipo + nome — IMAGE/TILESET/SPRITE/BITMAP = gráficos; som/binário/palette pura/sem declaração = NÃO-gráfico) e (b) SÍMBOLOS dos objetos compilados (casamento por prefixo do nome). Cada entrada registra objeto, símbolo, tipo declarado, flag gráfico, intervalo no objeto e SHA-256. Localização por CHUNKS INDEPENDENTES de 512B verbatim na ROM. Asserções: todo chunk de recurso GRÁFICO localizado tem ≥1 candidato sobreposto (presença; cobertura medida por chunk vai para a evidência do run — arte densa/dithering tem cobertura parcial honesta, 52–100%); entradas NÃO-gráficas localizadas e regiões `EXECINSTR` de `libmd.a` têm ZERO candidatos sobrepostos (falsos positivos em código/tabelas bloqueiam o aceite). `record_discovery_run` grava a evidência de confronto no ledger.
+
+**Refinamento do detector:** regra QUASE-FLAT (linha difere da anterior em ≤2 bits no total, excluindo linhas de zeros como referência) — eliminou o falso positivo em dados de string/padding dentro de `.text` verificado (error_a.o). Provas reais 2/2: HAMOOPIG (4 regiões de código, 0 FP; positivo pulado por ausência de build do doador — documentado) e Taiketsu (inventário com 201 entradas; 5 chunks gráficos localizados, todos com cobertura >0; 4 regiões de código, 0 FP). Gates: cargo test --lib 588/40, clippy, fmt, check:tree, tsc, lint, npm test, CI 8/8, Mimosa selado.
+
+---
+
+### Estado corrente — 2026-09-15: REX-04 fatia 2 corrigida (P1×2 da revisão) em `6775da2`, PR #65 aguardando re-revisão
+
+**Dois P1 da revisão de 68d2f5f corrigidos:** (1) **formato de paleta canônico** — validade `(w & 0xF111)==0` (bits reservados 0/4/8/12..15 rejeitam o run) e renderização com canais em **1/5/9** (SGDK `pal.h`); azul 0x0E00 e branco 0x0EEE aceitos; fixtures migradas para `md_color(r,g,b)`; **teste independente por pixels**: vermelho/verde/azul/branco → PNG decodificado com `image::load_from_memory` e pixels asseridos. (2) **confronto com oráculos independentes** — parser ar+ELF32-BE próprio (testado contra ELF sintético): NEGATIVO = seções ELF `SHF_EXECINSTR` de `libmd.a` (identificação por TIPO DE SEÇÃO) com bytes verificados na ROM e asserção explícita de ZERO candidatos sobrepostos (8 regiões, 0 falsos positivos); POSITIVO = seções de recursos dos objetos compilados do doador (sprite.o `.rodata_binf`) com chunks de 512B verbatim na ROM (5 regiões no Taiketsu) e cobertura ≥80% asserida; HAMOOPIG sem build do doador → positivo pulado com razão documentada. Removida a classificação "plausível" baseada no próprio detector (era circular); tiles densos (≤12 valores distintos + suavidade de nibbles ≥0.5; constante nunca passa) com 1 tile de gap tolerado e registrado na evidência.
+
+Gates: cargo test --lib **587/40** (16 unitários da fatia + parser sintético), clippy, fmt, check:tree, tsc, lint, npm test, CI 8/8, Mimosa selado `sha256:2f0d1168…` (mesmos 2 FPs conhecidos). Limitações da fatia inalteradas (compressão/dinâmico/streaming/montagem de sprites = unknown); confronto cobre links preexistentes, não substituição concorrente. **Experimental.**
+
+---
+
+### [HISTÓRICO] Estado corrente — 2026-09-14 (3): REX-04 fatia 2 (candidatos gráficos) aberta em PR #65, aguardando revisão
+
+**REX-04 fatia 2 — descoberta organizada de candidatos gráficos (Mega Drive), branch `codex/rex04-fatia2` head `b53e944`, PR #65 (base `codex/import-decomp-review`), CI 7/7 verde, merge pendente de revisão.** Escopo autorizado pelo revisor e entregue: candidatos a tiles 4bpp não comprimidos e paletas com offset/tamanho/método/evidência/confiança; **heurístico ≠ confirmado** (status sempre `candidate`, confiança ≤ 0.95); **bytes interpretáveis como pixels continuam unknown** — candidatos vivem em artefato próprio `rex-graphic-discovery/v1` vinculado ao SHA da ROM e ao SHA do catálogo (catálogo da fatia 1 byte-idêntico, testado); prévias PNG (crate `image`, já dependência) imutáveis por hash referenciadas por ArtifactRef; runs append-only no ledger com gaps declarados.
+
+**Validação:** fixtures de localização conhecida (tiles/paletas em offsets exatos; snap de grade ±30B corrige sequestro de início por janela desalinhada); negativos (junk LCG → zero candidatos; bit 15 quebra run de paleta); catálogo imutável à descoberta. **Provas reais 2/2 com confronto:** regiões conhecidas = dados compartilhados do SGDK (`libmd.a` do corpus, presentes verbatim nas ROMs por busca de conteúdo com verificação de bytes) — HAMOOPIG 3/3 regiões plausíveis cobertas (28 regiões de código corretamente NÃO candidatas), Taiketsu 3/3 cobertas (26 rejeitadas). Critério de confronto: cobertura ≥90% dos bytes da região (contenção borda-a-borda é irrealista — grid de chunks da lib ≠ grid de tiles). Gates: cargo test --lib 584/40 (13 testes novos), clippy/fmt/check:tree/tsc/lint/npm test, Mimosa selado `sha256:429e6cd6…` (mesmos 2 FPs conhecidos).
+
+**Limitações documentadas:** compressão, dados dinâmicos, streaming e montagem de sprites permanecem unknown; alinhamento ímpar não varrido; paletas fora do formato 0BGR 3x3x3 não detectadas; confronto cobre links preexistentes (substituição concorrente fora do escopo). **A aceite dependerá da correção dos recursos e da rastreabilidade — não da redução artificial de unknown.** Fora da fatia: lógica, nós, edição/rebuild, descompressão, IPC/UI. Programa permanece **Experimental**.
+
+---
+
+### [HISTÓRICO] Estado corrente — 2026-09-14 (2): REX-04 fatia 1 INTEGRADA em `codex/import-decomp-review` `8605998`
+
+**REX-04 fatia 1 (catálogo de extração organizada, Mega Drive) aceita pelo revisor em `b5c3cc2` e integrada:** merge **#64 → `8605998`** em `codex/import-decomp-review` (NÃO em `main` — consolidação segue via #61, outra linha). Gates no destino: check:tree, tsc, lint, npm test, cargo test --lib **576/38**, clippy, fmt, host READY; **provas reais reexecutadas no destino 2/2** (HAMOOPIG + Taiketsu) — e os artefatos imutáveis foram REUTILIZADOS por hash (mesmos `catalog-<sha>.json` dos runs anteriores, idempotência por conteúdo provada no destino); CI remota 4/4 no push do merge. Mimosa selado `sha256:bd4d117f…` (mesmos 2 FPs conhecidos de `NodeGraphEditor.tsx`).
+
+**Entrega:** `ExtractionCatalog` rex-extraction-catalog/v1 — regiões com offset/tamanho/método ancorados no SHA-256; invariante `identificado + desconhecido = total`; header parseia SOMENTE offsets provados no REX-02 (unknown = 916.992/917.504 ≈ 99,944% dos bytes, explícito); artefatos IMUTÁVEIS endereçados pelo hash do catálogo (duas origens com a mesma normalização nunca sobrescrevem um ao outro); links simbólicos rejeitados antes de criar/ler, arquivo final via `create_new`, reutilização só de arquivo regular com hash correto (revisão cobre links preexistentes — **substituição concorrente de caminhos NÃO coberta**, limitação registrada). 13 unitários + 2 provas BYOR.
+
+**Limites:** Experimental — catálogo de layout MD; sem extração de sprites, sem lógica, sem IPC/UI. Próxima fatia da frente REX-04 (scanners de conteúdo) ainda NÃO iniciada; depende de nova rodada de revisão.
+
+---
+
+### [HISTÓRICO] Estado corrente — 2026-09-14: pilha REX fatias 1+2 INTEGRADA em `codex/import-decomp-review` `ff476a3`; REX-04 autorizada como próxima frente
+
+> **Aviso de leitura:** TODAS as seções abaixo desta são **HISTÓRICAS** — registram estados de revisão e de ausência de merge válidos apenas na data de cada seção. O estado operacional corrente é exclusivamente esta seção.
+
+**Integração (executada e confirmada pelo revisor):** REV-01..05 aceitos no escopo revisado de `ac3b13f` ([review-ac3b13f.md], fora da árvore); ajuste de precisão aplicado — teste renomeado para `send_input_command_refuses_epoch_bumped_after_prelock_hook` (`0d0493c`, o incremento não segura o mutex: a ordem é controlada pelo hook pré-lock). Merges na ordem: **#62 → `327b822`** e **#63 → `ff476a3`**, ambos em `codex/import-decomp-review` (NÃO em `main` — a consolidação em `main` segue via **#61**, outra linha de trabalho). Gates verificados EM CADA DESTINO: bateria local completa (check:tree, tsc, lint, npm test, cargo test --lib, clippy, fmt) + CI remoto verde em todos os pushes (ff476a3: 4/4) + `host:certify` READY no destino final (cargo test 563/36; npm test 601/6). Incidente de processo registrado: deletar `codex/rex-00-oraculos` (base de #63) fechou o PR colateralmente; recuperado restaurando o branch, reabrindo, retargetando a base e esperando a suíte completa. Auditoria Mimosa: scans completos e selados sobre os tips (`sha256:0484b7d5…` e `sha256:59bb7aed…`), 2 achados HIGH CWE-78 em `NodeGraphEditor.tsx` avaliados como falsos positivos de nomenclatura de domínio — análise atribuída ao executor, não reexecutada pelo revisor.
+
+**Próxima frente — REX-04 (extração organizada), autorizada pelo revisor com critérios:** extração organizada com **origem e localização dos dados** (proveniência por offset/região/hash), **identificação explícita de conteúdo desconhecido** (o que não foi reconhecido fica marcado, nunca descartado) e **validação com ROMs reais**. Classificação obrigatória: **NÃO é recuperação completa da lógica nem edição integral por nós** — programa permanece **Experimental**.
+
+---
+
+### [HISTÓRICO] Re-revisão e905e20 — 2026-09-12: REV-05 parcial
+
+Host diagnose READY; 83 testes do store passaram; PR #63 e905e20 OPEN com 8 checks verdes consultados. ACK ok:true e geração frontend são melhorias confirmadas, mas aceite integral não sustentado. `loadRomIntoEmulator` só invalida/troca sessão depois de await emulatorLoadRom: a sessão antiga permanece válida durante a carga pendente. Probe de ordem sobre handler real preservado em `/home/misael/RetroDevStudio/review-e905e20/load-order.cjs` e `.json`.
+
+Harness atualizado tem negativos sem teclas e sessão divergente; faltam teclas presentes com backend recusando/pendente e prova de nenhum Step após falha de ACK. Negativo de sessão envia input novo após recarga completa e cobra época velha, não resolve ACK antigo atrasado numa troca A→B. Corrigir invalidação no início/ordenação e medir esses negativos reais. Relatório completo `/home/misael/RetroDevStudio/review-e905e20/REVIEW.md`.
+
+Diferença 614/3 versus 611/6 consistente com pré-requisitos condicionais no código, mas conjunto exato de IDs não comparado nesta revisão. Sem reexecução de certify completo/UI; nenhuma alteração de produto ou merge. Experimental; REV-01..04 mantêm aceites anteriores.
+
+
+### Re-revisão 2026-09-12 — REV-04 aceito; REV-05 parcial
+
+Revisados b09772a / 87108bb e HEAD documental 7873886. Host diagnose READY. **REV-04: 15 testes focados passaram**, incluindo regiões vazias, índices divergentes e sequência não canônica. Aceite local desses achados; não equivalência universal.
+
+**REV-05 ainda não prova entrega aceita:** o handler atualiza lastSentJoypad antes de emulatorSendInput e ignora resposta estruturada ok:false (só captura Promise rejection). Probe com handler real extraído/transpilado e backend recusando retornou right:true, erro null, predicado do harness aprovado. Isso comprova falso positivo do oráculo, não falha espontânea do runtime. Solicitação, confirmação e consumo não devem compartilhar rótulo. Corrigir ACK ok:true correlacionado à sequência/sessão; cobrir recusado, pendente, resposta tardia e reset entre cargas. Manter prova de teclado e canvas real, mas repetir o positivo com confirmação antes de cada Step.
+
+Evidências duráveis: `/home/misael/RetroDevStudio/review-rex-2026-09-12/REVIEW.md`, `input-ack-probe.cjs`, `input-ack-probe.json`. PR #62 checks principais verdes; PR #63 em novo HEAD 7873886 com checks ainda em execução na consulta. Nenhum merge. Sem alterações de produto; sem reexecução de UI real, suíte integral ou host:certify nesta revisão. Classificação Experimental/fatias iniciais.
+
+
+### Re-revisão REX — 2026-09-11: aceite parcial de d3e8f11
+
+REX-REV-01/02/03 corrigidos no escopo testado: SMD padrão, parsing de header curto e undo com identidade. Execução independente do núcleo reverso: **94 passed / 1 ignored**, incluindo as cinco regressões anteriores. Host diagnose READY. PR #62 cc88bb3 e #63 d3e8f11 com checks validate/linux-validate/desktop-smoke verdes consultados; nenhum merge realizado.
+
+**REX-REV-04 ainda parcial:** dois probes independentes adicionais reprovaram (0 passed / 2 failed, exit 101). `evaluate_identical_equivalence` aprova regiões vazias e índices de frame incompatíveis (0 versus 999) com hashes iguais. Corrigir completude e identidade das observações; os testes anteriores misturavam múltiplas ausências e não isolavam esses casos.
+
+**REX-REV-05 permanece bloqueado:** desktop-ui-proof.py itera chaves right/start do roteiro contra keymap com ArrowRight/Enter. Reprodução da expressão em JavaScript: 180 frames, 70 com input solicitado, **zero teclas selecionadas**. Assim os checkpoints não certificam o roteiro declarado. Corrigir mapeamento joypad→teclas, simultâneos/press/release, observar input real e confirmar conclusão de cada frame; delay de 4ms e DOM click não provam contagem exata/hit-testing. Carga compartilhada e canvas do produto são melhorias, mas não fecham o aceite.
+
+Evidências: `/home/misael/RetroDevStudio/re-review-rex-2026-09-11/REVIEW.md`, `input-probe.json`, `oracle-probes.log`, snapshot isolado `source/`. Apenas testes adicionais na cópia externa; produto intocado. Não reexecutados UI real, suíte completa, build oficial ou host:certify nesta revisão. Classificação: **Experimental**, fatias iniciais; extração REX-04 e reconstrução por nós continuam pendentes.
+
+
+### Revisão independente REX — 2026-09-11: aceite reprovado
+
+Avaliado `cdf9a24b44c5d4d02e4cc6670a76cba47d07f1d3` (PR #63 sobre #62). Host diagnose READY; checks remotos validate/linux-validate/desktop-smoke consultados verdes, mas não cobrem os defeitos abaixo. **Não aceitar REX-02 como robusto/concluído; endurecer oráculos REX-00/03.** Não houve entrega ROM→jogo editável por nós.
+
+Prova independente em cópia isolada de git archive: **83 testes existentes passaram, 5 regressões novas falharam, 1 ignorado, exit 101**. Implementação preservada; só testes acrescentados na cópia externa. Evidência durável: `/home/misael/RetroDevStudio/review-rex-2026-09-11/REVIEW.md`, `review-tests.log`, `manifest.json` e `source/`.
+
+- REX-REV-01 (P1): SMD usa erroneamente blocos 512 e transformação própria; fixture independente do formato padrão de 16KiB é rejeitada. Os testes do executor geram entradas com o próprio interleave errado, inclusive a prova sobre bytes reais. Corrigir algoritmo e golden independente; referência primária Genesis Plus GX `core/loadrom.c`, `deinterleave_block`.
+- REX-REV-02 (P1): 272 bytes com assinatura SEGA são aceitos pela identificação e causam panic no slicing do header (`loader.rs:82`). Validar tamanho antes de indexar em todos os entrypoints.
+- REX-REV-03 (P1): `rex_undo_normalization` aceita raw alterada porque zero passos significa zero verificação; falta checar hashes/tamanhos de entrada e saída e cadeia inteira.
+- REX-REV-04 (P1): equivalência retorna passed para 180 frames declarados sem framebuffer/regiões/estado final e para regiões com IDs/tamanhos diferentes. Ambos reproduzidos. Exigir completude e identidade dos dados antes de comparar.
+- REX-REV-05 (P2): desktop-ui-proof.py usa IPC/canvas independente e binário anterior, sem teste dos controles visíveis; imprime matches sem reprovar por divergência. Reclassificar como probe IPC; criar teste da UI real com asserções no HEAD final.
+
+Preservados código do executor, corpus e ROMs. Nenhum merge. Revisão não reexecutou suíte completa, UI desktop ou host:certify; não certifica release. Próximo: corrigir REX-REV-01..05 com negativos independentes e gates no destino antes de prosseguir à extração REX-04.
+
+
+### Programa REX — REX-REV-04 fechado; REV-05 REABERTO na rodada 3 (2026-09-11/12)
+
+> **Correção de registro (2026-09-12):** o título original desta seção dizia "REX-REV-04/05 fechados". A rodada 3 da re-revisão derrubou o fechamento do REV-05 — ver a subseção "Rodada 3" abaixo. O REV-04 permanece aceito no escopo dos casos corrigidos.
+
+Os dois achados remanescentes da re-revisão foram corrigidos com oráculos que não dependem de pressupostos não verificados:
+
+- **REV-04 (oráculo):** lista de regiões vazia nos dois lados virá `missing` com lacuna registrada (nunca pass); o `frame_index` faz parte da identidade da observação — mesma posição com índice divergente reprova, e a sequência de índices da captura deve ser canônica 0..n-1. Probes da re-revisão adotados verbatim (`rereview_empty_region_list_is_missing`, `rereview_frame_indices_must_match`) + recusa de sequência não canônica. Commit `b09772a` no PR #62.
+- **REV-05 (input/UI):** o bug raiz era o mapeamento — campos do JoypadState (`start`/`right`) comparados contra códigos de tecla (`Enter`/`ArrowRight`); zero teclas eram emitidas. Agora: mapeamento campo→código explícito (KEY_MAP do produto invertido), teclas simultâneas, **ações WebDriver de teclado nativas** (codepoints Unicode; fallback sintético declarado), cliques nativos W3C (hit-testing), confirmação **por observação do produto** — `editorStore.lastSentJoypad`/`lastJoypadSendError` registrados pelo manipulador de teclado e expostos em `__RDS_E2E__.getLastInputObservation` — com as 180 verificações por frame, contagens 2 press/2 release exatas e auto-teste negativo que suprime teclas e exige zero transições (exit 1).
+- **Achados novos medidos:** (1) recarga em core quente (`emulator_load_rom` sem stop) NÃO equivale a power-on — 14 frames iniciais com conteúdo inexistente na timeline fresca; o protocolo passou a ser warm-up → pause → **stop (power-off real)** → carga `startPaused`; (2) o loop livre do produto iniciava 1-2 frames fantasma mesmo com sessão pausada — gate `pausedRef` adicionado em `startEmulatorLoop`; (3) WRAM entre passagens consecutivas carrega efeito de ordem do core no processo — registro A/B mantido como corroboração, não como oráculo; (4) no título do HAMOOPIG o efeito de input é de ESTADO (WRAM input `c5f5dba8…` ≠ ociosa `7b10c5b4…`), não de framebuffer — timelines ociosa e com input registradas por frame no backend.
+- **Resultado:** positivo com 180/180 observações por frame, 166/180 frames coincidindo com a timeline backend (janela de boot 0..13 documentada), WRAM A/B registrada; negativo com teclas suprimidas detectado (exit 1). Gates no HEAD: Rust 560/36, frontend 601/6, tsc/lint/clippy/fmt/check:tree OK; app rebuildado com hash no relatório.
+
+#### Rodada 4b (2026-09-13): corrida de época no backend fechada sob o mutex + 5 passagens de UI com motivo correto
+
+A re-revisão de `1a1fc65` reproduziu uma corrida P1: a conferência de época do `emulator_send_input` acontecia ANTES de adquirir o mutex — input antigo validava, a recarga trocava o core e incrementava a época, e o input aplicava controles antigos ao core novo (probe isolado: `stale_accepted=true`).
+
+- **Correção:** a conferência de época mudou para DENTRO da seção crítica — extraída em `emulator_send_input_locked(&mut core, ...)` chamada com o lock adquirido e mantido até o `set_joypad`. Como a recarga incrementa `CORE_EPOCH` sob o mesmo mutex, as duas ordens ficam seguras: send antes do load aplica ao core velho (destruído no stop + drain na carga); send depois do load é recusado por época.
+- **Teste determinístico da corrida:** `send_input_epoch_race_is_refused_under_lock_without_applying` em lib.rs força a interleaving (época muda entre a captura e a execução) e exige recusa sem aplicação, com controle de época corrente aplicando normalmente. Acessor `EmulatorCore::current_joypad` (leitura) para o oráculo.
+- **5 passagens de UI no binário canônico rebuildado** (`run-proof.sh`, hashes de ROM e binário preservados): positivo (exit 0, acks confirmados), no-input (exit 1 — zero transições), stale-session (exit 1 pelo MOTIVO CERTO — ack de sessão estranha; foi necessário navegar de volta para a aba Jogo pelo botão visível e fechar o drawer de Console, que abre sozinho com erros e cobria a toolbar), blocked-load (exit 0 — 4 bloqueios contados), inflight (exit 0 — nenhum ack de época antiga, canal S2 confirmado).
+- **Limitação documentada:** a comparação A-vs-controle no inflight não é gate — cores consecutivos no mesmo processo carregam ambiente da .so nos primeiros frames (frame 0 diverge mesmo sem request A); a recusa sem aplicação é garantida por construção no backend e pelo teste determinístico.
+
+Gates: Rust fmt/clippy/561 passed/36 ignored; store 86/86; frontend 614/6; tsc/check:tree OK.
+
+#### Rodada 4 (2026-09-12): janela de carga invalidada cedo + negativos de recusa/pendência/corrida pelo caminho real
+
+As três lacunas da rodada 3 fechadas:
+
+- **Invalidação cedo (P1):** `loadRomIntoEmulator` abre um **hold de sessão na primeira linha** (antes de qualquer await): a época morre no início da operação; envios durante a carga são bloqueados e contados (`joypadSessionHold`, `joypadBlockedCount`; guard no `sendJoypad`). O stop invalida pelo mesmo caminho. **Política no backend:** `emulator_load_rom` incrementa `CORE_EPOCH` e reseta os controles (drain); `emulator_send_input` recebe a época e **RECUSA obsoleta** (`ok:false`) — input em voo não é aplicado ao core novo.
+- **Negativos reais (P1):** `--self-test-send-blocked-during-load` (teclas durante a carga pendente: hold ativo, sessão nula, 4 bloqueios contados, sem ack, canvas inalterado) e `--self-test-inflight-across-reload` (request A in-flight atravessando a transição A→B: nenhum ack da época antiga, canal S2 confirmado, 20/20 frames idênticos ao controle sem request A).
+- **Corrida de resposta antiga (P2):** stale-session preservado com rótulo preciso ("incompatibilidade de sessão por época"); o novo inflight cobre request A pendente + transição real + resolução tardia sem crédito a A.
+- **Achado medido:** vazamento REAL de `send_input` através da recarga (frame 0 A-vs-controle divergente, estável em 3 execuções, ANTES da época) — fechado por `CORE_EPOCH` (A/B 20/20 pós-época). Recarga pura por stop também tem 15 frames de ambiente da .so no processo (sem gate; comparado A-vs-controle no mesmo processo).
+- **Recusa por stop puro é inalcançável por teclado real** (o produto sai da aba Jogo ao parar) — documentado; a recusa real do backend é exercida pelo inflight (`sendError` "obsoleta" quando o request cruza a recarga).
+
+Gates: Rust fmt/clippy/560-36; store 86/86 (3 testes novos da janela de hold); tsc OK; harness com 5 passagens em `run-proof.sh`; evidências em `/home/misael/RetroDevStudio/rex-evidence-2026-09-12/`.
+
+#### Rodada 3 (2026-09-12): REV-05 reaberto — a observação media intenção, não entrega
+
+A re-revisão independente reproduziu um **novo falso positivo** e o aceite do REV-05 foi retirado. Confirmado por leitura direta do código nos dois lados:
+
+- `ViewportPanel.tsx` gravava `lastSentJoypad` **antes** de `emulatorSendInput`, incondicionalmente.
+- O único tratamento era `.catch()`, que só dispara em *rejection* de Promise.
+- `emulator_send_input` (`lib.rs`) sinaliza falha por **valor resolvido** `{ ok: false }` — lock envenenado ou erro de `set_joypad`. O `catch` era código morto para o modo de falha real.
+
+Consequência: os 180/180 provavam que o handler rodou e formou a intenção correta; **não** provavam aceitação pelo emulador. Injetando `{ok:false}`, a observação seguia `right:true` com erro `null` e o harness aceitava. É a **mesma classe** do bug raiz original do REV-05 — asserção sobre algo adjacente à verdade; a rodada 2 corrigiu a instância e não a classe.
+
+**Correção aplicada (escopo: ack + sequência, sem sessão):**
+
+- O store passa a distinguir `lastJoypadRequest` (intenção, pré-IPC) de `lastJoypadAck` (**única prova de entrega**, gravado só com `ok: true`). `lastJoypadSendError` vira `{ seq, message }` e cobre tanto `ok:false` quanto exceção.
+- Correlação por **sequência monotônica**: um ack cuja `seq` não é a da solicitação corrente é descartado, de modo que confirmação atrasada de transição anterior não seja aceita como a atual.
+- `__RDS_E2E__.getLastInputObservation` expõe os três campos; asserções de E2E devem usar o **ack**, nunca a request.
+- Cobertura: 5 testes em `editorStore.test.ts` — intenção sem confirmação, ack da seq corrente, ack atrasado descartado, `ok:false` sem ack com erro registrado, solicitação pendente não herda ack.
+
+**Limitação conhecida e deliberada:** não há identificador de sessão em nenhum dos lados (nem no store, nem em `emulator_load_rom`). A correlação protege contra ack atrasado *dentro* de uma carga; um ack cruzando uma recarga de ROM não é detectável sem introduzir session id no contrato IPC, o que foi mantido fora deste escopo.
+
+#### Rodada 3 — fechamento: isolamento por sessão e reexecução pela UI real
+
+**Isolamento por sessão (exigência do revisor).** Avaliada primeiro a geração no frontend, ela se mostrou suficiente e o contrato Rust/TS **não** foi alterado: a época é capturada no fechamento do envio e reconferida na resolução, logo um ack que atravesse stop/recarga carrega a época antiga e é descartado. Um eco do backend não acrescentaria garantia — quem define a época da carga é o próprio frontend. O ciclo de vida ficou ancorado em `setEmulatorLoaded` (6 call sites auditados, todas transições reais), de modo que parar ou carregar outra ROM invalida sessão, request e ack sem depender de call site.
+
+**Cobertura determinística:** 10 testes em `editorStore.test.ts`, incluindo envio recusado (`ok:false`), pendente, ack atrasado e ack de sessão anterior.
+
+**Reexecução pela UI real** (binário `856cc431…`, ROM HAMOOPIG `558bea6c…`, evidências em `rex-evidence-2026-09-12/`):
+
+| passagem | exit | veredito | acks |
+|---|---|---|---|
+| positivo | 0 | PASS | 3 confirmados (frames 60/70/130, seq 1/3/4, sessão `joypad-session-3`) |
+| negativo sem teclas | 1 | FAIL-AS-EXPECTED | 0 |
+| negativo sessão obsoleta | 1 | FAIL-AS-EXPECTED | 0 — recusado por `ack de sessão estranha: joypad-session-4 != joypad-session-3` |
+
+O negativo de sessão emite as teclas de verdade e recarrega a ROM, mantendo a UI viva: a reprovação é do **oráculo**, não de controle ausente.
+
+**Números honestos, e por que mudaram.** O positivo confirma **3 transições**, não 180. O "180/180" anterior contava uma verificação por frame, e em ~177 deles o estado esperado era `{}` — `all()` sobre dicionário vazio passa vacuamente. O roteiro tem 3 transições reais (press `start`, troca para `right`, release), com 2 press/2 release. A coincidência de framebuffer segue 166/180 e **não discrimina input** (o negativo marca os mesmos 166).
+
+**Limitações declaradas:**
+- O ack confirma a **última** transição de cada frame. No frame 70 há dois envios (solta `start`, aperta `right`); o store guarda só a solicitação corrente, então o ack da seq 2 é descartado pela seq 3 — daí a sequência 1/3/4. Envios intermediários dentro do mesmo frame não são confirmados individualmente.
+- O ack prova **aceitação pelo backend**, não consumo pelo jogo. O efeito de runtime é registrado à parte (`runtime_effect`: WRAM com input `c5f5dba8…` ≠ ociosa `7b10c5b4…`) e nunca derivado do ack.
+
+**Armadilha de build encontrada e neutralizada.** `cargo build` não executa o `beforeBuildCommand` do Tauri, então o binário embutia o `dist` antigo: um E2E lançado assim exercitaria o frontend anterior e poderia "passar" sem testar a correção. Verificação por `grep` no binário é inconclusiva (assets comprimidos — até marcadores existentes dão zero). O harness passou a ter preflight de **contrato em runtime** (`observation_contract`), que reprova se a superfície não expuser as chaves novas. O binário medido veio do caminho canônico `npm run build:debug`.
+
+**Gates no HEAD:** `host:certify` READY (Rust 560 passed/36 ignored, frontend 614 passed/3 skipped, SGDK e PVSnesLib oficiais), tsc/lint/check:tree OK.
+
+Classificação permanece **Experimental**; REX-04 não iniciado; nenhum merge.
+
+### Programa REX — correções da revisão independente REX-REV-01..05 (2026-09-11)
+
+Todos os cinco achados do aceite reprovado foram corrigidos e reprovados com testes; regressões do revisor adotadas verbatim na suíte (com asserções preservadas):
+
+- **REV-01 (SMD 16 KiB):** `deinterleave_smd`/`interleave_smd` reimplementados no formato padrão (frame de 0x4000; primeira metade = bytes ímpares, segunda = pares), idêntico a `deinterleave_block` do Genesis Plus GX `core/loadrom.c`; detecção alinhada ao GPGX (header de 512 ⇒ múltiplo de 512 com contagem ímpar; sem header ⇒ múltiplo de 0x4000; "SEGA" raw em 0x100 tem precedência; deinterleave precisa produzir header SEGA — forma sozinha não identifica). Golden independente mão-escrito + construtor externo nos testes e na prova real (o encoder do produto deixou de ser padrão de si mesmo). Passo renomeado para `deinterleave_smd_frame16k` (frame=0x4000); manifests antigos com o passo de 512 são rejeitados sem reinterpretar.
+- **REV-02 (parsing seguro):** `identify_md` exige 0x200 bytes (header canônico) antes de qualquer indexação; entradas curtas com "SEGA" retornam erro estruturado sem panic, cobrindo todas as fronteiras (0x10F/0x110/0x1A8/0x1FF/0x200; SMD só-header; byteswap ímpar) nos dois entrypoints.
+- **REV-03 (undo com identidade):** `rex_undo_normalization` valida `normalized_sha256`/`normalized_size` da entrada (inclusive raw, zero passos), `input_sha256` após cada inversão e `original_sha256`/`original_size` no fim; byte alterado ⇒ erro, nunca Ok.
+- **REV-04 (oráculos, na branch `rex-00-oraculos`/PR #62 `cc88bb3`):** cenário exige frames presentes correspondentes às contagens + ROM/core não vazios e iguais; estado final vazio é missing; audio com stream vazio não é observado; regiões comparam `region_id` e `size` (contrato divergente rejeita mesmo com hash igual).
+- **REV-05 (UI real):** `App.tsx` expõe `__RDS_E2E__.loadRomForEmulation` (o mesmo caminho do controle visível "Carregar ROM", sem o diálogo nativo indrivável); a prova carrega por esse caminho, avança os 180 frames pelo botão visível "Step 1 frame" após clicar em "Pausar" (transições de estado dos botões assertadas), input entra pelo manipulador de teclado do produto (ArrowRight/Enter → keyToJoypad) e os pixels vêm do canvas real `viewport-game-canvas` — 4/4 checkpoints byte-idênticos ao backend, com SHA-256 do binário no relatório. Auto-teste negativo: expectativa corrompida ⇒ exit 1. O probe antigo de IPC foi preservado como `backend-ipc-proof.py`, com rótulo próprio.
+
+Gates no HEAD das correções: Rust 557 passed/36 ignored (incl. 5 regressões do revisor), frontend 601/6, tsc/lint/clippy/fmt/check:tree OK; app debug rebuildado com o hook. Runs novos no ledger (`rex00-*`, `rex02-md-identification-v1` pós-correção). Evidências UI em `/home/misael/RetroDevStudio/rex-evidence-2026-09-10/desktop-ui/` e `desktop-ui-negative/`.
+
+### Programa REX — REX-02 executado: identificação MD reversível (2026-09-11)
+
+Branch `codex/rex-02-normalizacao` (base `codex/rex-00-oraculos`, PR #62). O loader MD agora identifica a variante física **por conteúdo** (extensão ignorada) e normaliza de forma reversível:
+
+- **Variantes suportadas:** raw (`.bin`/`.md`/`.gen` — mesmo layout), `.smd` intercalado em blocos de 512 bytes com e sem header de 512, e byteswap 16. Contêineres zip/7z/gzip: erro explícito de não-suportado (nenhuma dependência nova aprovada; matrix REX 3 trata empacotamento como onda contínua).
+- **Transformações com proveniência:** `NormalizationStep` (nome, parâmetros, input/output SHA-256, reversível) e `RomContainerInfo` entraram no `RomAnalysisManifest` (e no contrato TS opcional); `rex_identify_rom`/`rex_undo_normalization` dão a API pública — desfazer verifica a cadeia de hashes e restitui o arquivo original byte a byte.
+- **Semântica de truncamento calibrada por evidência real:** o HAMOOPIG declara fim de ROM em 0xFFFFF com arquivo de 0xE0000 bytes — fim-de-ROM além do arquivo é comum em dumps reais e ficou **nota** (`md_size_note`), não erro. Truncamento provável (conteúdo SMD reconhecido com bloco final incompleto) é erro acionável. Ambíguo (duas variantes com header plausível, fixture patológica por construção) é erro sem escolha arbitrária.
+- **Provas:** 12 testes unitários (fixtures sintéticas por variante, round-trip por SHA, truncado provável, ambíguo, fora de perfil, independência de extensão, roteamento via `load_rom` com manifesto). Prova real `#[ignore]` com as duas referências: identificadas raw por conteúdo (SHAs `558bea6c…`/`3967996a…`), extensões erradas (`.smd`/`.gen`/`.tmp`) identificam idêntico, e round-trip SMD sobre bytes reais é byte-exato. Run `rex02-md-identification-v1` no ledger com lacunas registradas (contêineres, SRAM/EEPROM, mapeamentos). Evidências: `target-test/validation/rex-md-identification/` e `/home/misael/RetroDevStudio/rex-evidence-2026-09-10/rex02-identification/`.
+
+**Limites:** identificar/normalizar não é extrair nem editar (REX-04+); SRAM/EEPROM, regiões e mappers continuam não inventariados; contêineres exigem seleção explícita de membro quando existirem.
+
+### Programa REX — primeira fatia REX-00/01/03 executada (2026-09-10)
+
+Branch `codex/rex-00-oraculos` (base `codex/import-decomp-review` `a75fd30`, PR #61 — CI verde no head, segue draft). Entregue e medida a fatia de baseline/oráculos/ledger, sem anunciar recuperação que não existe:
+
+- **Oráculos de equivalência** (`src-tauri/src/tools/reverse/equivalence.rs`, schema `rex-equivalence/v1`) sobre o `parity_harness` existente: comportamento por frame, estado final, recursos por região de memória com comparação simétrica (missing nunca é igualdade; região disponível em só um lado rejeita), áudio observado e `input_discrimination` de cenário. "Não preto" e heartbeat são registrados como `surface_evidence` e nunca entram no critério de aprovação. 16 testes unitários cobrindo o caso da prévia (vivo → rejeitado), missing simétrico (indeterminado + lacuna), cenário vazio e matriz de capacidades.
+- **Ledger v2** (`decomp-ledger/v2` em `rom_library.rs`): corpus com identidade por conteúdo (`sha256:<hex>`, renomear arquivo não muda id), registros de capacidade por perfil e runs de cenário append-only com `previous_run_id`. Migração v1→v2 por defaults preservando histórico; corrupção preserva arquivo; lock de concorrência mantido. Testes de round-trip, migração, identidade estável, upsert sem downgrade e append-only.
+- **Capacidades MD registradas (REX-00, honestas):** `identify`/`inspect_code`/`emulate` = `experimental` (com lacunas: contêineres, IR, tracing PC/VDP/DMA); `extract`/`edit_asset`/`edit_logic`/`rebuild`/`export_patch` = `unsupported`. Nada `verified_for_profile`.
+- **Positivo HAMOOPIG mesma-ROM com input definido** (teste `#[ignore]` `rex00_hamoopig_same_rom_equivalence_with_defined_inputs`): snapshot `558bea6c…29be9` verificado por hash; 180 frames (60 idle, Start 10, Right 60, idle) no Genesis Plus GX v1.7.4 46a5521; determinismo exigido entre power-ons frescos (0 divergências em 180 frames, estado final e áudio idênticos). **Veredito `indeterminate`, não `passed`**: este core não expõe VRAM/SRAM via `retro_get_memory_data` — registrado como missing, não igualdade. `input_discrimination` passou (inputs alteraram a observação). **Achado medido novo: restauração de savestate NÃO é fiel ao power-on neste core/título** (duas execuções restauradas do mesmo snapshot divergem de forma constante) — restore não é gate de equivalência; reset fresco é.
+- **Negativo Taiketsu reproduzido como teste** (`rex00_taiketsu_preview_rejected_by_equivalence_oracles`): prévia regenerada pelo fluxo existente (import + build SGDK real, cópia em tmp; doador apenas lido em `RDS_SGDK_MATRIX_CORPUS_ROOT=/mnt/sdcard/SGDKForge/SGDK_Engines`) tem **12.620 pixels não pretos e heartbeat de 150 frames distintos** e ainda assim é **REJEITADA** pelos oráculos: 150/180 frames divergentes (primeira no frame 30), WRAM divergente, estado final divergente. Áudio idêntico entre referência e prévia — nenhuma evidência isolada basta. Fecha a reprodução formal da perda aceita em GUARD-SGDK-EQUIVALENCE-01.
+- **Prova de UI desktop separada**: app real via tauri-driver + WebKitWebDriver (binário debug de 2026-09-10 06:40, anterior à fatia — a prova usa só o IPC canônico existente), mesma ROM, mesmo input script (por hash), 180 eventos de frame; **4/4 checkpoints byte-idênticos** entre framebuffer do evento `emulator://frame` e o harness backend (mesma conversão `framebuffer_to_rgba`). Script e evidências fora do repo: `/home/misael/RetroDevStudio/rex-evidence-2026-09-10/` (backend, negativo, desktop-ui, snapshot do ledger); ledger real em `~/.retrodev/decomp_work/ledger.json` (`decomp-ledger/v2`, 2 entradas de corpus, 8 capacidades, runs `rex00-hamoopig-*` e `rex00-taiketsu-negative-*`).
+
+**Limites que continuam valendo:** não há decompilação recuperada, reconstrução por nós, edição de recurso, patch ou jogo novo; HAMOOPIG não provou gameplay, 60 FPS sustentados ou hardware real; a prova de UI não clicou em widgets do painel de emulação (usa o IPC que os widgets usam). Próximo ticket: REX-02 (identificação/normalização MD reversível) e REX-04 (extração visual organizada), conforme dependências do plano.
+
+
+### Planejamento Programa REX — 2026-09-10
+
+A pedido do operador, o plano canônico `12_DECOMPILACAO_PAREADA_PLANO.md` foi ampliado com o Programa REX: 17 tickets (REX-00 a REX-16), dependências, contratos, corpus/holdout, migração SGDK 1.60/1.80/2.00→2.11, extração/editabilidade, patches, IR/nodes, jogo novo e expansão por plataformas. Prompt vigente: `PROMPT_AGENTE_RECONSTRUCAO_ROM.md`. É planejamento, não implementação ou promoção. Estimativa inicial de 24 semanas refere-se somente a um perfil MD delimitado e deve ser recalibrada após corpus/gates; não há prazo ou garantia universal. Primeiro trabalho do executor: baseline/proveniência/oráculos, incluindo mesma-ROM com input e UI. PR #61 permanece draft sob investigação. Não há autorização nova de merge, dependências ou envio externo de ROM. Host diagnose desta rodada: READY, fingerprint d68f75b76d036d7cd200befab0255bd9479604798bf9c0fcbea892c7ce2ceef1.
+
+
+### GUARD-SGDK-EQUIVALENCE-01 — aceite suspenso (2026-09-10)
+
+O usuário contestou a fidelidade da prévia importada; PR #61 permanece draft e não deve ser integrado como conversão fiel. Execução sem exceção e heartbeat não certificam preservação do jogo original. Os candidatos anteriores abaixo são históricos, não entrega final aceita.
+
+Referência padrão escolhida pelo usuário: `/mnt/sdcard/SGDKForge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/out/rom.bin`, 917504 bytes, SHA-256 `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`. Cópia imutável local e relatório em `/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/`.
+
+Prova independente: exatamente essa ROM carregada no backend real do desktop, Genesis Plus GX v1.7.4 46a5521, 180 comandos de frame e 180 eventos recebidos, framebuffer 320x224. `hamoopig/backend-reference-180.png` mostra título completo, personagem, logo e textos, visualmente coerente com a imagem externa fornecida. Não é comparação pixel a pixel sincronizada, certificação de gameplay, desempenho ou carregamento via botão. Harness `backend-reference.py`; relatório `hamoopig/backend-reference.json`. Tentativas anteriores `same-rom-desktop.py` falharam: override de invoke não funciona porque a propriedade é não gravável; suas capturas/status não certificam carregamento.
+
+A prévia importada foi regenerada de recursos com lógica parcial, não corresponde aos bytes da referência. Próximos gates separados: (1) ROM idêntica, input e frames nos caminhos externo/interno; (2) migração de fonte SGDK preservando comportamento e origem; (3) fonte → IR/nodes → C com estados, paletas, planos e criação/liberação de sprites preservados; (4) métricas de decompilação pareadas com fonte/ELF. Recursos de estados alternativos não podem ser contabilizados como atores simultâneos; catálogo total não equivale a residência em VRAM.
+
+Compatibilidade 1.60/1.80/2.00 → 2.11 solicitada: pendente de fixtures e validação por versão; os dois projetos fornecidos já portados para 2.11 não demonstram migração automática dessas versões. Não substituir assets ausentes por arte/áudio inventados. Preservar doadores e créditos. Nenhuma promoção de Experimental.
+
 
 **Atualização ativa (2026-09-09 — GUARD-ANIM-01):** PR #57 integrada em `10d15f6` após CI verde. A prova anterior de framebuffer não preto não certificava gameplay: entrada Direita revelou `ADDRESS ERROR` do SGDK. Causa reproduzida: `SPR_setAnim(..., 1)` sem segunda linha de animação no atlas rescomp. Correção materializa sequências por linha, preserva tempos individuais e rejeita frames inexistentes. Teste oficial agora exige a cena verde conhecida após 60 frames com Direita pressionada: passou com 42.496 pixels de cena; o framebuffer antigo tinha zero. Não extrapolar esta prova dirigida para todos os jogos, nem para paridade de importações. Validação integral e integração desta correção ainda em andamento; #58/#59 seguem em revisão.
 
@@ -2018,3 +2268,13 @@ Preservar o pacote interno auditavel sem inflar status de release publica. A rod
   - **Stage mais legivel:** o canvas de runtime agora fica dentro de um palco dedicado com moldura, sombra e badge `320x224 @ Nx`, melhorando leitura espacial e sensacao de ferramenta final.
   - **Cobertura adicionada:** `src/App.test.tsx` agora valida o helper puro `getGameViewportScale` para garantir que a escala sempre caia em inteiros seguros.
   - **Validacao focada reexecutada no workspace atual:** `npx tsc --noEmit` OK, `npx eslint src/components/viewport/ViewportPanel.tsx src/App.test.tsx` OK e `npx vitest run src/App.test.tsx` OK (33 testes).
+
+
+### Revisão do guardião — 2026-09-10 (integração rastreada no PR #61)
+
+- #60 integrado em main `616abdbcceb787879a7a1f2071c46919ed71bb06`.
+- GUARD-DECOMP-DETERMINISM-01: Etapa A real passou; SMOKE/BLUE 14/14 objetos exatos por par e ROM idêntica em dois builds limpos; contagens nm 876/778. Original Taiketsu continua bloqueado por boot/registerState; não confundir com preview importado.
+- GUARD-IMPORT-RUNTIME-01: correção validada localmente em `c042ecf`. Antigo smoke aceitava ADDRESS ERROR como framebuffer não preto. Residência de sprites visíveis e tratamento de NULL corrigiram a prévia local: heartbeat 52→112, erro 0, 150 frames reais. Ainda **não é equivalência do gameplay original**; import mantém pontes/lógica não convertida.
+- Gates locais de `c042ecf`: host:certify READY, 604 frontend, 524 Rust, clippy completo, fmt, build desktop e Build & Run MD/SNES; input Right chegou à RAM da ROM MD. Integração somente após checks remotos verdes. Estado remoto final e hashes em `/home/misael/RetroDevStudio/verified-2026-09-10-c042ecf/evidence/provenance.json`; limitações e reprodução em LEIA-ME e Memory Bank. Nenhuma declaração de produto inteiro finalizado.
+
+- GUARD-SPRITE-PRIORITY-01: corrigir prioridade no argumento correto de TILE_ATTR (prioridade estava espelhando o sprite). Regressão negativa reproduzida em `c042ecf`; revalidação do candidato final rastreada no PR #61 e em `evidence/provenance.json`, mantendo o baseline anterior para comparação.
