@@ -103,6 +103,13 @@ pub fn rex_read_rom(rom_path: &Path) -> Result<(RexRomIdentity, Vec<u8>), String
     Ok((identity, raw))
 }
 
+/// Lê um arquivo hospedeiro arbitrário (BYOR) sem interpretar conteúdo —
+/// para insumos de provas que não são ROMs (ex.: `libmd.a` do corpus para
+/// confronto de recursos conhecidos na fatia REX-04/2).
+pub fn rex_read_host_file(path: &Path) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|error| format!("Falha ao ler '{}': {}", path.display(), error))
+}
+
 /// Desfaz a normalização passo a passo (ordem inversa). Valida a identidade
 /// COMPLETA antes de produzir saída (REX-REV-03): os bytes de entrada devem
 /// corresponder ao `normalized_sha256`/`normalized_size` gravados (mesmo com

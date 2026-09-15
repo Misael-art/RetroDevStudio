@@ -1,6 +1,46 @@
-# 06 - CURRENT WAVE AI BANK (Wave S+)
+### Estado corrente — 2026-09-15 (4): REX-04 fatia 2 — classificação endurecida (payload `tileset_data` + compressão NONE + tokenizer com aspas), PR #65 aguardando re-revisão
 
-### Estado corrente — 2026-09-14 (2): REX-04 fatia 1 INTEGRADA em `codex/import-decomp-review` `8605998`
+**Bloco da revisão de 2375d77 resolvido — classificação endurecida:** (1) BIN NÃO prova ausência de tiles (pode conter dados gráficos brutos) → BIN vai para **Unknown** e não alimenta o negativo; (2) compressão ausente ou ≠NONE → **Unknown** (não Other) — sem verificar o formato efetivamente compilado não há prova; (3) exigido o símbolo de PAYLOAD (`<recurso>..._tileset_data`, sufixo exato) — descritores (`..._tileset`) vão para Unknown; intervalo comprovado pela fronteira do próximo símbolo da seção ELF; (4) parser `.res` com tokenizer que respeita ASPAS — caminhos com espaços não deslocam a compressão (regressão dedicada). Regressões novas: BIN com tiles → Unknown; descritor de tileset → Unknown; compressão FAST/ausente → Unknown; caminho com espaços → compressão NONE corretamente classificada. Positivo: gate **≥50%** por chunk de Tiles comprovado (cobertura parcial medida e registrada no ledger — não demonstra extração completa).
+
+Provas reais 2/2 (Taiketsu: 5 chunks de `spr_*_tileset_data` com compressão NONE localizados — 100/65,6/100/67,2/53,1% de cobertura medida; HAMOOPIG: positivo pulado por ausência de build, documentado; código EXECINSTR 0 FP nas duas ROMs). Gates: cargo test --lib **588/40**, clippy, fmt, check:tree, tsc, lint, npm test, CI, Mimosa selado. **Experimental.**
+
+---
+
+### Estado corrente — 2026-09-15 (3): REX-04 fatia 2 — classificação de PROVA em 3 classes (Tiles/Other/Unknown), PR #65 aguardando re-revisão
+
+**Bloco remanescente da revisão de 9f5a51f resolvido:** o inventário agora classifica cada entrada em TRÊS classes de prova — **Tiles** (recurso gráfico declarado + sufixo `tileset` no símbolo + compressão NONE = tiles 4bpp brutos comprovados), **Other** (paleta comprovada, ou recurso não-gráfico declarado — conteúdo comprovado NÃO-tile) e **Unknown** (structs/metadata/sem declaração — NUNCA alimenta os oráculos). FRONTIERA DE NOME verificada (`spr_point2` não casa com `spr_point`). **POSUTIVO:** só chunks de Tiles comprovados — gate de cobertura **≥50%** por chunk (localização e extração substantivas; alinhado com o relato). **NEGATIVO:** chunks Other comprovados e regiões `EXECINSTR` têm ZERO candidatos sobrepostos. Cobertura medida por chunk gravada na evidência do ledger (HAMOOPIG: positivo pulado por ausência de build — documentado; Taiketsu: 5 chunks 100%/65,6%/100%/67,2%/53,1% — dithering denso é parcialmente alcançável, registrado sem maquiagem). QUASE-FLAT ≤2 bits vs 1-2 linhas anteriores não-vazias (eliminou FP de string/padding em `.text` verificado).
+
+Gates: cargo test --lib **588/40**, clippy, fmt, check:tree, tsc, lint, npm test, Mimosa selado, CI. **Experimental.**
+
+---
+
+### Estado corrente — 2026-09-15 (2): REX-04 fatia 2 — oráculo positivo por INVENTÁRIO independente (`.res` × símbolos), PR #65 aguardando re-revisão
+
+**Bloco remanescente da revisão de a03119a (positivo gráfico) resolvido com inventário independente:** as referências positivas agora vêm do CRUZAMENTO entre (a) recursos DECLARADOS nos arquivos `.res` do projeto de origem (tipo + nome — IMAGE/TILESET/SPRITE/BITMAP = gráficos; som/binário/palette pura/sem declaração = NÃO-gráfico) e (b) SÍMBOLOS dos objetos compilados (casamento por prefixo do nome). Cada entrada registra objeto, símbolo, tipo declarado, flag gráfico, intervalo no objeto e SHA-256. Localização por CHUNKS INDEPENDENTES de 512B verbatim na ROM. Asserções: todo chunk de recurso GRÁFICO localizado tem ≥1 candidato sobreposto (presença; cobertura medida por chunk vai para a evidência do run — arte densa/dithering tem cobertura parcial honesta, 52–100%); entradas NÃO-gráficas localizadas e regiões `EXECINSTR` de `libmd.a` têm ZERO candidatos sobrepostos (falsos positivos em código/tabelas bloqueiam o aceite). `record_discovery_run` grava a evidência de confronto no ledger.
+
+**Refinamento do detector:** regra QUASE-FLAT (linha difere da anterior em ≤2 bits no total, excluindo linhas de zeros como referência) — eliminou o falso positivo em dados de string/padding dentro de `.text` verificado (error_a.o). Provas reais 2/2: HAMOOPIG (4 regiões de código, 0 FP; positivo pulado por ausência de build do doador — documentado) e Taiketsu (inventário com 201 entradas; 5 chunks gráficos localizados, todos com cobertura >0; 4 regiões de código, 0 FP). Gates: cargo test --lib 588/40, clippy, fmt, check:tree, tsc, lint, npm test, CI 8/8, Mimosa selado.
+
+---
+
+### Estado corrente — 2026-09-15: REX-04 fatia 2 corrigida (P1×2 da revisão) em `6775da2`, PR #65 aguardando re-revisão
+
+**Dois P1 da revisão de 68d2f5f corrigidos:** (1) **formato de paleta canônico** — validade `(w & 0xF111)==0` (bits reservados 0/4/8/12..15 rejeitam o run) e renderização com canais em **1/5/9** (SGDK `pal.h`); azul 0x0E00 e branco 0x0EEE aceitos; fixtures migradas para `md_color(r,g,b)`; **teste independente por pixels**: vermelho/verde/azul/branco → PNG decodificado com `image::load_from_memory` e pixels asseridos. (2) **confronto com oráculos independentes** — parser ar+ELF32-BE próprio (testado contra ELF sintético): NEGATIVO = seções ELF `SHF_EXECINSTR` de `libmd.a` (identificação por TIPO DE SEÇÃO) com bytes verificados na ROM e asserção explícita de ZERO candidatos sobrepostos (8 regiões, 0 falsos positivos); POSITIVO = seções de recursos dos objetos compilados do doador (sprite.o `.rodata_binf`) com chunks de 512B verbatim na ROM (5 regiões no Taiketsu) e cobertura ≥80% asserida; HAMOOPIG sem build do doador → positivo pulado com razão documentada. Removida a classificação "plausível" baseada no próprio detector (era circular); tiles densos (≤12 valores distintos + suavidade de nibbles ≥0.5; constante nunca passa) com 1 tile de gap tolerado e registrado na evidência.
+
+Gates: cargo test --lib **587/40** (16 unitários da fatia + parser sintético), clippy, fmt, check:tree, tsc, lint, npm test, CI 8/8, Mimosa selado `sha256:2f0d1168…` (mesmos 2 FPs conhecidos). Limitações da fatia inalteradas (compressão/dinâmico/streaming/montagem de sprites = unknown); confronto cobre links preexistentes, não substituição concorrente. **Experimental.**
+
+---
+
+### [HISTÓRICO] Estado corrente — 2026-09-14 (3): REX-04 fatia 2 (candidatos gráficos) aberta em PR #65, aguardando revisão
+
+**REX-04 fatia 2 — descoberta organizada de candidatos gráficos (Mega Drive), branch `codex/rex04-fatia2` head `b53e944`, PR #65 (base `codex/import-decomp-review`), CI 7/7 verde, merge pendente de revisão.** Escopo autorizado pelo revisor e entregue: candidatos a tiles 4bpp não comprimidos e paletas com offset/tamanho/método/evidência/confiança; **heurístico ≠ confirmado** (status sempre `candidate`, confiança ≤ 0.95); **bytes interpretáveis como pixels continuam unknown** — candidatos vivem em artefato próprio `rex-graphic-discovery/v1` vinculado ao SHA da ROM e ao SHA do catálogo (catálogo da fatia 1 byte-idêntico, testado); prévias PNG (crate `image`, já dependência) imutáveis por hash referenciadas por ArtifactRef; runs append-only no ledger com gaps declarados.
+
+**Validação:** fixtures de localização conhecida (tiles/paletas em offsets exatos; snap de grade ±30B corrige sequestro de início por janela desalinhada); negativos (junk LCG → zero candidatos; bit 15 quebra run de paleta); catálogo imutável à descoberta. **Provas reais 2/2 com confronto:** regiões conhecidas = dados compartilhados do SGDK (`libmd.a` do corpus, presentes verbatim nas ROMs por busca de conteúdo com verificação de bytes) — HAMOOPIG 3/3 regiões plausíveis cobertas (28 regiões de código corretamente NÃO candidatas), Taiketsu 3/3 cobertas (26 rejeitadas). Critério de confronto: cobertura ≥90% dos bytes da região (contenção borda-a-borda é irrealista — grid de chunks da lib ≠ grid de tiles). Gates: cargo test --lib 584/40 (13 testes novos), clippy/fmt/check:tree/tsc/lint/npm test, Mimosa selado `sha256:429e6cd6…` (mesmos 2 FPs conhecidos).
+
+**Limitações documentadas:** compressão, dados dinâmicos, streaming e montagem de sprites permanecem unknown; alinhamento ímpar não varrido; paletas fora do formato 0BGR 3x3x3 não detectadas; confronto cobre links preexistentes (substituição concorrente fora do escopo). **A aceite dependerá da correção dos recursos e da rastreabilidade — não da redução artificial de unknown.** Fora da fatia: lógica, nós, edição/rebuild, descompressão, IPC/UI. Programa permanece **Experimental**.
+
+---
+
+### [HISTÓRICO] Estado corrente — 2026-09-14 (2): REX-04 fatia 1 INTEGRADA em `codex/import-decomp-review` `8605998`
 
 **REX-04 fatia 1 (catálogo de extração organizada, Mega Drive) aceita pelo revisor em `b5c3cc2` e integrada:** merge **#64 → `8605998`** em `codex/import-decomp-review` (NÃO em `main` — consolidação segue via #61, outra linha). Gates no destino: check:tree, tsc, lint, npm test, cargo test --lib **576/38**, clippy, fmt, host READY; **provas reais reexecutadas no destino 2/2** (HAMOOPIG + Taiketsu) — e os artefatos imutáveis foram REUTILIZADOS por hash (mesmos `catalog-<sha>.json` dos runs anteriores, idempotência por conteúdo provada no destino); CI remota 4/4 no push do merge. Mimosa selado `sha256:bd4d117f…` (mesmos 2 FPs conhecidos de `NodeGraphEditor.tsx`).
 
