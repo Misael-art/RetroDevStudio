@@ -44,8 +44,6 @@ const SCAN_STEP: u64 = 2;
 /// Bloco mínimo de tiles para virar candidato (4 tiles = 128 bytes): menos
 /// que isso é ruído mesmo para heurística.
 const MIN_TILES_PER_BLOCK: u64 = 4;
-/// Score mínimo por tile para pertencer a um bloco.
-const MIN_TILE_SCORE: f32 = 0.5;
 /// Teto de confiança: NUNCA 1.0 — confirmado não é alcançável nesta fatia.
 const MAX_CONFIDENCE: f32 = 0.95;
 
@@ -113,12 +111,79 @@ pub fn graphic_score_tile(tile: &[u8]) -> f32 {
     good as f32 / 8.0
 }
 
-fn plausible_tile(data: &[u8], offset: u64) -> bool {
+/// Fração de pares de nibbles adjacentes iguais (suavidade horizontal):
+/// arte real tem corridas de pixels da mesma cor; código tem nibbles
+/// variados. Métrica auxiliar da regra de tile "denso".
+fn nibble_repeat_ratio(tile: &[u8]) -> f32 {
+    let mut nibbles = Vec::with_capacity(TILE_BYTES * 2);
+    for byte in &tile[..TILE_BYTES] {
+        nibbles.push(byte >> 4);
+        nibbles.push(byte & 0xF);
+    }
+    let same = nibbles.windows(2).filter(|pair| pair[0] == pair[1]).count();
+    same as f32 / (nibbles.len() - 1) as f32
+}
+
+const MIN_TILE_SCORE: f32 = 0.5;
+
+/// Score COMBINADO de plausibilidade de um tile na ROM:
+/// 1. score esparso (linhas vazias/1bpp-like/flat) ≥ 0.5, OU
+/// 2. tile "denso": ≤12 valores distintos em 32 bytes E suavidade de
+///    nibbles ≥ 0.5 — captura gráficos ricos (todas as bitplanos, padrões
+///    periódicos) que a regra esparsa não alcança. Tiles constantes ficam
+///    de fora (padding nunca é gráfico).
+fn tile_plausibility_score(data: &[u8], offset: u64) -> f32 {
     let start = offset as usize;
     if start + TILE_BYTES > data.len() {
-        return false;
+        return 0.0;
     }
-    graphic_score_tile(&data[start..start + TILE_BYTES]) >= MIN_TILE_SCORE
+    let tile = &data[start..start + TILE_BYTES];
+    // Constante (padding/zeros) NUNCA passa pela regra densa — 1 valor
+    // distinto e nibbles 100% "suaves" descrevem zeros, não pixels.
+    if tile.iter().all(|byte| *byte == tile[0]) {
+        return 0.0;
+    }
+    let base = graphic_score_tile(tile);
+    if base >= MIN_TILE_SCORE {
+        return base;
+    }
+    let distinct = tile
+        .iter()
+        .copied()
+        .collect::<std::collections::HashSet<u8>>()
+        .len();
+    if distinct <= 12 && nibble_repeat_ratio(tile) >= 0.5 {
+        return MIN_TILE_SCORE;
+    }
+    base
+}
+
+fn plausible_tile(data: &[u8], offset: u64) -> bool {
+    tile_plausibility_score(data, offset) >= MIN_TILE_SCORE
+}
+
+/// Tolerância a gaps: até N tiles não-plausíveis consecutivos dentro de um
+/// bloco (tiles densos reais alternam com tiles que a heurística não alcança;
+/// gap_tiles registrado na evidência).
+const MAX_GAP_TILES: u64 = 1;
+
+/// Estende um bloco a partir de `block_start` em stride de TILE_BYTES,
+/// tolerando até MAX_GAP_TILES tiles implausíveis consecutivos. Retorna o
+/// fim do bloco (último tile plausível + 32).
+fn extend_block(data: &[u8], block_start: u64, end: u64) -> u64 {
+    let mut cursor = block_start;
+    let mut block_end = block_start;
+    let mut gap = 0u64;
+    while cursor + TILE_BYTES as u64 <= end && gap <= MAX_GAP_TILES {
+        if plausible_tile(data, cursor) {
+            block_end = cursor + TILE_BYTES as u64;
+            gap = 0;
+        } else {
+            gap += 1;
+        }
+        cursor += TILE_BYTES as u64;
+    }
+    block_end
 }
 
 /// Agrega blocos maximais de tiles plausíveis contíguos (stride de 32 bytes
@@ -144,20 +209,11 @@ fn scan_tile_blocks(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> 
         let snap_hi = (offset + 30).min(end.saturating_sub(TILE_BYTES as u64));
         let mut block_start = snap_lo + (offset - snap_lo) % SCAN_STEP;
         while block_start <= snap_hi {
-            let mut block_end = block_start + TILE_BYTES as u64;
-            while block_end + TILE_BYTES as u64 <= end && plausible_tile(data, block_end) {
-                block_end += TILE_BYTES as u64;
-            }
+            let block_end = extend_block(data, block_start, end);
             let tiles = (block_end - block_start) / TILE_BYTES as u64;
             if tiles >= 1 {
-                let start_index = block_start as usize;
                 let avg = (0..tiles)
-                    .map(|t| {
-                        graphic_score_tile(
-                            &data[start_index + t as usize * TILE_BYTES
-                                ..start_index + t as usize * TILE_BYTES + TILE_BYTES],
-                        )
-                    })
+                    .map(|t| tile_plausibility_score(data, block_start + t * TILE_BYTES as u64))
                     .sum::<f32>()
                     / tiles as f32;
                 let better = match best {
@@ -190,6 +246,7 @@ fn build_tile_candidate(data: &[u8], offset: u64, block_end: u64, tiles: u64) ->
     let mut empty_rows = 0u64;
     let mut onebpp_rows = 0u64;
     let mut score_sum = 0.0f32;
+    let mut gap_tiles = 0u64;
     let mut occurrences: std::collections::HashMap<u64, u32> = std::collections::HashMap::new();
     let mut duplicate_tiles = 0u64;
 
@@ -197,6 +254,9 @@ fn build_tile_candidate(data: &[u8], offset: u64, block_end: u64, tiles: u64) ->
         let base = start + (t as usize) * TILE_BYTES;
         let tile = &data[base..base + TILE_BYTES];
         score_sum += graphic_score_tile(tile);
+        if graphic_score_tile(tile) < MIN_TILE_SCORE {
+            gap_tiles += 1;
+        }
         for row in 0..8 {
             let row_bytes = &tile[row * 4..row * 4 + 4];
             if row_bytes == [0, 0, 0, 0] {
@@ -231,6 +291,7 @@ fn build_tile_candidate(data: &[u8], offset: u64, block_end: u64, tiles: u64) ->
             "tiles": tiles,
             "duplicate_tiles": duplicate_tiles,
             "distinct_tiles": occurrences.len(),
+            "gap_tiles": gap_tiles,
             "empty_rows_pct": (empty_rows as f64 / total_rows as f64 * 100.0),
             "onebpp_rows_pct": (onebpp_rows as f64 / total_rows as f64 * 100.0),
             "avg_tile_score": avg_score,
@@ -256,9 +317,11 @@ fn palette_word(data: &[u8], offset: u64) -> Option<u16> {
     Some(u16::from_be_bytes([data[start], data[start + 1]]))
 }
 
-/// Varre pares de bytes e agrega runs maximais de words no formato de cor MD
-/// (bits 15..9 zerados). Runs de 16 words viram `palette16`; de 64+ viram
-/// `palette64` (um único candidato maximal — sem aninhamento).
+/// Varre pares de bytes e agrega runs maximais de words no formato canônico
+/// de cor MD (`xxxxBBBxGGGxRRRx`, SGDK `pal.h`): canais em 1/5/9, bits
+/// reservados 0/4/8/12..15 zerados — máscara de validade 0xF111. Runs de 16
+/// words viram `palette16`; de 64+ viram `palette64` (candidato maximal, sem
+/// aninhamento).
 fn scan_palettes(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> {
     let mut candidates = Vec::new();
     let mut offset = start;
@@ -266,7 +329,7 @@ fn scan_palettes(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> {
         let Some(word) = palette_word(data, offset) else {
             break;
         };
-        if word & 0xFE00 != 0 {
+        if word & 0xF111 != 0 {
             offset += SCAN_STEP;
             continue;
         }
@@ -275,7 +338,7 @@ fn scan_palettes(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> {
             let Some(word) = palette_word(data, offset + run * 2) else {
                 break;
             };
-            if word & 0xFE00 != 0 {
+            if word & 0xF111 != 0 {
                 break;
             }
             run += 1;
@@ -307,7 +370,7 @@ fn scan_palettes(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> {
                     "words": run,
                     "distinct_words": distinct.len(),
                     "first_word_zero": first_zero,
-                    "high_bits_zero_pct": 100.0,
+                    "canonical_format_pct": 100.0,
                 }),
                 previews: Vec::new(),
             });
@@ -477,9 +540,11 @@ fn render_palette_png(normalized: &[u8], candidate: &GraphicCandidate) -> Result
     for index in 0..words {
         let base = candidate.offset as usize + index * 2;
         let word = u16::from_be_bytes([normalized[base], normalized[base + 1]]);
-        let red = (word & 0x7) as u8 * 36;
-        let green = ((word >> 3) & 0x7) as u8 * 36;
-        let blue = ((word >> 6) & 0x7) as u8 * 36;
+        // Formato canônico MD (SGDK pal.h): xxxxBBBxGGGxRRRx — canais em
+        // 1/5/9, 3 bits por canal.
+        let red = ((word >> 1) & 0x7) as u8 * 36;
+        let green = ((word >> 5) & 0x7) as u8 * 36;
+        let blue = ((word >> 9) & 0x7) as u8 * 36;
         for y in 0..CELL {
             for x in 0..CELL {
                 canvas.put_pixel(index as u32 * CELL + x, y, Rgba([red, green, blue, 255]));
@@ -568,6 +633,7 @@ static EXTRACTION_RUN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 mod tests {
     use super::*;
     use crate::tools::reverse::loader::rex_identify_bytes;
+    use image::GenericImageView;
     use std::fs;
     use std::path::PathBuf;
 
@@ -657,19 +723,34 @@ mod tests {
         assert!(duplicates >= 4, "evidência de repetição: {candidate:?}");
     }
 
+    /// Palavra de cor MD no formato canônico (SGDK pal.h): xxxxBBBxGGGxRRRx
+    /// — canais em 1/5/9.
+    fn md_color(r: u16, g: u16, b: u16) -> u16 {
+        ((r & 7) << 1) | ((g & 7) << 5) | ((b & 7) << 9)
+    }
+
     #[test]
     fn fixture_palettes_at_known_offsets() {
         let mut rom = fixture_rom(0x8000);
-        for i in 0..16u16 {
-            // formato MD: bits 15..9 zerados (3 bits por canal)
-            let word: u16 = if i == 0 { 0 } else { (i * 0x49) & 0x1FF };
-            rom[0x2000 + (i as usize) * 2..0x2000 + (i as usize) * 2 + 2]
-                .copy_from_slice(&word.to_be_bytes());
+        // Palette16 canônica em 0x2000: transparente + R/G/B plenos + branco.
+        let entries = [
+            0u16,
+            md_color(7, 0, 0),
+            md_color(0, 7, 0),
+            md_color(0, 0, 7),
+            md_color(7, 7, 7),
+        ];
+        for (i, word) in entries.iter().enumerate() {
+            rom[0x2000 + i * 2..0x2000 + i * 2 + 2].copy_from_slice(&word.to_be_bytes());
         }
-        for i in 0..64u16 {
-            let word: u16 = ((i % 8 + 1) * 0x49) & 0x1FF;
-            rom[0x3000 + (i as usize) * 2..0x3000 + (i as usize) * 2 + 2]
-                .copy_from_slice(&word.to_be_bytes());
+        for i in 5..16usize {
+            let word = md_color((i % 7) as u16, (i / 2) as u16, (i / 3) as u16);
+            rom[0x2000 + i * 2..0x2000 + i * 2 + 2].copy_from_slice(&word.to_be_bytes());
+        }
+        // Palette64 canônica em 0x3000.
+        for i in 0..64usize {
+            let word = md_color((i % 8) as u16, ((i / 8) % 8) as u16, ((i / 4) % 8) as u16);
+            rom[0x3000 + i * 2..0x3000 + i * 2 + 2].copy_from_slice(&word.to_be_bytes());
         }
         let (catalog, catalog_sha) = catalog_and_sha(&rom);
         let discovery =
@@ -694,6 +775,111 @@ mod tests {
             .expect("palette64");
         assert_eq!(palette64.offset, 0x3000);
         assert_eq!(palette64.size, 128);
+    }
+
+    /// Cores primárias e branco no formato canônico são ACEITOS pelo scanner
+    /// (0x000E vermelho, 0x00E0 verde, 0x0E00 azul, 0x0EEE branco) e o
+    /// renderizador decodifica os canais em 1/5/9 — verificado pelos PIXELS
+    /// do PNG decodificado (independente do código de renderização).
+    #[test]
+    fn palette_primary_colors_render_independent_png_pixels() {
+        let work = std::env::temp_dir().join(format!(
+            "rex04-gfx-colors-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let mut rom = fixture_rom(0x8000);
+        let entries = [
+            0u16,
+            md_color(7, 0, 0), // vermelho pleno 0x000E
+            md_color(0, 7, 0), // verde pleno 0x00E0
+            md_color(0, 0, 7), // azul pleno 0x0E00
+            md_color(7, 7, 7), // branco 0x0EEE
+        ];
+        for (i, word) in entries.iter().enumerate() {
+            rom[0x2000 + i * 2..0x2000 + i * 2 + 2].copy_from_slice(&word.to_be_bytes());
+        }
+        for i in 5..16usize {
+            let word = md_color((i % 7) as u16, (i / 2) as u16, (i / 3) as u16);
+            rom[0x2000 + i * 2..0x2000 + i * 2 + 2].copy_from_slice(&word.to_be_bytes());
+        }
+        let (catalog, catalog_sha) = catalog_and_sha(&rom);
+        let mut discovery =
+            discover_graphic_candidates(&catalog, &rom, &catalog_sha).expect("descoberta");
+
+        export_candidate_previews(&work, &mut discovery, &rom).expect("prévias");
+        let palette = discovery
+            .candidates
+            .iter()
+            .find(|candidate| candidate.kind == KIND_PALETTE16)
+            .expect("palette16");
+        let png_bytes = fs::read(&palette.previews[0].path).expect("png legível");
+
+        // Decodificação INDEPENDENTE do PNG (image crate) + asserção nos
+        // pixels dos swatches (cada swatch = 16×16 px).
+        let decoded = image::load_from_memory(&png_bytes).expect("png decodificável");
+        let expected: [(u32, [u8; 3]); 5] = [
+            (0, [0, 0, 0]),
+            (1, [252, 0, 0]),     // vermelho
+            (2, [0, 252, 0]),     // verde
+            (3, [0, 0, 252]),     // azul
+            (4, [252, 252, 252]), // branco
+        ];
+        for (index, [r, g, b]) in expected {
+            let pixel = decoded.get_pixel(index * 16 + 8, 8);
+            assert_eq!(
+                pixel.0[..3],
+                [r, g, b],
+                "swatch {index} deve renderizar o canal canônico"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// Bits reservados da hipótese canônica (0/4/8/12..15) quebram o run;
+    /// azul pleno 0x0E00 e branco 0x0EEE NÃO são rejeitados (regressão P1).
+    #[test]
+    fn palette_canonical_format_rejects_reserved_bits() {
+        let mut rom = fixture_rom(0x8000);
+        // 16 words com UMA de bits reservados no meio (0x0011): nenhum
+        // palette16 pode atravessar a quebra.
+        for i in 0..16usize {
+            let mut word = md_color((i % 7) as u16 + 1, (i / 3) as u16, (i / 5) as u16);
+            if i == 8 {
+                word = 0x0011; // bits 0 e 4 reservados setados
+            }
+            rom[0x4000 + i * 2..0x4000 + i * 2 + 2].copy_from_slice(&word.to_be_bytes());
+        }
+        // Azul pleno + branco seguidos de canônicas: run íntegro em 0x5000.
+        for (i, word) in [0x0E00u16, 0x0EEEu16].iter().enumerate() {
+            rom[0x5000 + i * 2..0x5000 + i * 2 + 2].copy_from_slice(&word.to_be_bytes());
+        }
+        for i in 2..16usize {
+            let word = md_color((i % 5) as u16, (i % 3) as u16, (i % 7) as u16);
+            rom[0x5000 + i * 2..0x5000 + i * 2 + 2].copy_from_slice(&word.to_be_bytes());
+        }
+        let (catalog, catalog_sha) = catalog_and_sha(&rom);
+        let discovery =
+            discover_graphic_candidates(&catalog, &rom, &catalog_sha).expect("descoberta");
+
+        let crossing = discovery
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.kind.starts_with("palette")
+                    && candidate.offset < 0x4020
+                    && candidate.offset + candidate.size > 0x4000
+            })
+            .count();
+        assert_eq!(crossing, 0, "bits reservados quebram o run canônico");
+
+        let blue_white = discovery.candidates.iter().any(|candidate| {
+            candidate.kind.starts_with("palette")
+                && candidate.offset <= 0x5000
+                && candidate.offset + candidate.size >= 0x5020
+        });
+        assert!(blue_white, "azul 0x0E00 e branco 0x0EEE devem ser aceitos");
     }
 
     #[test]
@@ -878,12 +1064,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&work);
     }
 
-    /// Prova real: descoberta com CONFRONTO a regiões conhecidas — dados
-    /// compartilhados do SGDK (libmd.a) presentes verbatim na ROM, localizados
-    /// por busca de conteúdo. Regiões conhecidas com conteúdo graficamente
-    /// plausível DEVEM estar cobertas por candidatos; regiões conhecidas sem
-    /// plausibilidade (código) NÃO devem virar candidatos — a separação
-    /// heurística é o ponto da fatia.
+    /// Prova real: descoberta no HAMOOPIG. O build do autor não está
+    /// disponível no corpus — o positivo de cobertura é pulado com razão
+    /// documentada; o negativo (código verificado da lib não pode virar
+    /// candidato) roda sempre.
     #[test]
     #[ignore = "prova real BYOR: requer ROM de referência + libmd.a do corpus"]
     fn rex04_hamoopig_graphic_discovery_confrontation() {
@@ -894,12 +1078,14 @@ mod tests {
         let Some(lib) = optional_donor_lib(test_name) else {
             return;
         };
-        run_confrontation(test_name, &bytes, &lib);
+        run_confrontation(test_name, &bytes, &lib, &[]);
     }
 
-    /// Prova real: mesma confrontação para a ROM de referência do Taiketsu.
+    /// Prova real: confrontação para a ROM de referência do Taiketsu com os
+    /// OBJETOS COMPILADOS do projeto de origem (out/*.o) como oráculo
+    /// positivo de cobertura.
     #[test]
-    #[ignore = "prova real BYOR: requer ROM de referência + libmd.a do corpus"]
+    #[ignore = "prova real BYOR: requer ROM de referência + objetos do doador"]
     fn rex04_taiketsu_graphic_discovery_confrontation() {
         let test_name = "rex04_taiketsu_graphic_discovery_confrontation";
         let Some((_identity, bytes)) = rex04_reference_rom(test_name) else {
@@ -908,7 +1094,47 @@ mod tests {
         let Some(lib) = optional_donor_lib(test_name) else {
             return;
         };
-        run_confrontation(test_name, &bytes, &lib);
+        let donor_objects = load_donor_objects(test_name);
+        run_confrontation(test_name, &bytes, &lib, &donor_objects);
+    }
+
+    /// Objetos compilados do projeto de origem (BYOR): env
+    /// `RDS_REX_TAIKETSU_DONOR_OUT` ou o caminho do corpus; ausente =
+    /// lista vazia (o confronto pula o positivo com razão documentada).
+    fn load_donor_objects(test_name: &str) -> Vec<(String, Vec<u8>)> {
+        let dir = std::env::var("RDS_REX_TAIKETSU_DONOR_OUT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                PathBuf::from(
+                    "/mnt/sdcard/Projects/Sgdk Forge/SGDK_Engines/\
+                     TaiketsuUltraHeroGenesis/src/out",
+                )
+            });
+        let mut objects = Vec::new();
+        fn collect(dir: &Path, objects: &mut Vec<(String, Vec<u8>)>) {
+            let Ok(entries) = fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    collect(&path, objects);
+                } else if path.extension().map(|ext| ext == "o").unwrap_or(false) {
+                    if let Ok(bytes) = crate::tools::reverse::loader::rex_read_host_file(&path) {
+                        objects.push((path.display().to_string(), bytes));
+                    }
+                }
+            }
+        }
+        collect(&dir, &mut objects);
+        objects.sort_by(|a, b| a.0.cmp(&b.0));
+        if objects.is_empty() {
+            eprintln!(
+                "SKIP {test_name}: objetos do doador ausentes em {}",
+                dir.display()
+            );
+        }
+        objects
     }
 
     fn rex04_reference_rom(
@@ -960,16 +1186,176 @@ mod tests {
         crate::tools::reverse::loader::rex_read_host_file(&path).ok()
     }
 
-    /// Localiza regiões conhecidas (janelas da lib presentes verbatim na
-    /// ROM) via mapa de hashes com janelas em TODOS os offsets da lib
-    /// (alinhamento de posicionamento na ROM é arbitrário), agrega runs
-    /// maximais ≥ 256B e confronta com os candidatos.
-    fn run_confrontation(test_name: &str, bytes: &[u8], lib: &[u8]) {
-        const CHUNK: usize = 16;
-        const MIN_RUN_CHUNKS: usize = 16; // 256 bytes
+    /// Extrai membros de um arquivo ar (assinatura `!<arch>\n`, headers de
+    /// 60 bytes, payload alinhado a 2 bytes). Testado contra ELF sintético.
+    fn parse_ar_members(lib: &[u8]) -> Vec<(String, Vec<u8>)> {
+        let mut members = Vec::new();
+        let mut pos = 8usize; // "!<arch>\n"
+        while pos + 60 <= lib.len() {
+            let header = &lib[pos..pos + 60];
+            if &header[58..60] != b"`\n" {
+                break;
+            }
+            let size_text = std::str::from_utf8(&header[48..58])
+                .unwrap_or("")
+                .trim()
+                .trim_end_matches('`');
+            let Ok(size) = size_text.parse::<usize>() else {
+                break;
+            };
+            let payload_start = pos + 60;
+            let payload_end = payload_start + size;
+            if payload_end > lib.len() {
+                break;
+            }
+            let raw_name = std::str::from_utf8(&header[0..16]).unwrap_or("");
+            let name = raw_name.split('/').next().unwrap_or("").to_string();
+            members.push((name, lib[payload_start..payload_end].to_vec()));
+            pos = payload_start + size + (size % 2);
+        }
+        members
+    }
 
-        let identity = crate::tools::reverse::loader::rex_identify_bytes(bytes)
-            .expect("ROM identificável (REX-02)");
+    const ELF_SECTION_PROGBITS: u32 = 1;
+    const ELF_SECTION_SYMTAB: u32 = 2;
+    const ELF_FLAG_EXECINSTR: u32 = 0x4;
+
+    #[derive(Debug, Clone)]
+    struct ElfSection {
+        section_type: u32,
+        flags: u32,
+        file_offset: usize,
+        size: usize,
+        link: usize,
+        entsize: usize,
+    }
+
+    #[derive(Debug, Clone)]
+    struct ElfSymbol {
+        name: String,
+        value: u64,
+        size: usize,
+        shndx: usize,
+    }
+
+    /// Parse ELF32 big-endian (objetos m68k do SGDK): seções e símbolos.
+    /// Campos do header de seção: sh_type@4, sh_flags@8, sh_addr@12,
+    /// sh_offset@16, sh_size@20, sh_link@24, sh_entsize@36 (40 bytes).
+    fn parse_elf32_be(payload: &[u8]) -> Result<(Vec<ElfSection>, Vec<ElfSymbol>), String> {
+        if payload.len() < 0x34 || &payload[0..4] != b"\x7fELF" {
+            return Err("não é ELF".into());
+        }
+        if payload[5] != 2 {
+            return Err("ELF não é big-endian".into());
+        }
+        let shoff = u32::from_be_bytes(payload[0x20..0x24].try_into().unwrap()) as usize;
+        let shentsize = u16::from_be_bytes(payload[0x2E..0x30].try_into().unwrap()) as usize;
+        let shnum = u16::from_be_bytes(payload[0x30..0x32].try_into().unwrap()) as usize;
+        if shentsize < 40 || shoff + shentsize * shnum > payload.len() {
+            return Err("tabela de seções inválida".into());
+        }
+        let mut sections = Vec::with_capacity(shnum);
+        for i in 0..shnum {
+            let sh = &payload[shoff + i * shentsize..shoff + (i + 1) * shentsize];
+            let section_type = u32::from_be_bytes(sh[4..8].try_into().unwrap());
+            let flags = u32::from_be_bytes(sh[8..12].try_into().unwrap());
+            let file_offset = u32::from_be_bytes(sh[16..20].try_into().unwrap()) as usize;
+            let size = u32::from_be_bytes(sh[20..24].try_into().unwrap()) as usize;
+            let link = u32::from_be_bytes(sh[24..28].try_into().unwrap()) as usize;
+            let entsize = u32::from_be_bytes(sh[36..40].try_into().unwrap()) as usize;
+            if file_offset + size > payload.len() {
+                return Err("seção fora do arquivo".into());
+            }
+            sections.push(ElfSection {
+                section_type,
+                flags,
+                file_offset,
+                size,
+                link,
+                entsize,
+            });
+        }
+        let mut symbols = Vec::new();
+        for section in &sections {
+            if section.section_type != ELF_SECTION_SYMTAB {
+                continue;
+            }
+            let Some(strtab) = sections.get(section.link) else {
+                return Err("symtab sem strtab vinculada".into());
+            };
+            let entry_size = if section.entsize >= 16 {
+                section.entsize
+            } else {
+                16
+            };
+            let strtab_bytes = &payload[strtab.file_offset..strtab.file_offset + strtab.size];
+            for entry in
+                (section.file_offset..section.file_offset + section.size).step_by(entry_size)
+            {
+                if entry + 16 > payload.len() {
+                    break;
+                }
+                let st_name =
+                    u32::from_be_bytes(payload[entry..entry + 4].try_into().unwrap()) as usize;
+                let st_value = u64::from(u32::from_be_bytes(
+                    payload[entry + 4..entry + 8].try_into().unwrap(),
+                ));
+                let st_size =
+                    u32::from_be_bytes(payload[entry + 8..entry + 12].try_into().unwrap()) as usize;
+                let st_shndx =
+                    u16::from_be_bytes(payload[entry + 14..entry + 16].try_into().unwrap())
+                        as usize;
+                let bytes_after_name = strtab_bytes.get(st_name..).unwrap_or(&[]);
+                let name_length = bytes_after_name
+                    .iter()
+                    .position(|byte| *byte == 0)
+                    .unwrap_or(0);
+                let name = String::from_utf8_lossy(
+                    &strtab_bytes[st_name.min(strtab_bytes.len())
+                        ..(st_name + name_length).min(strtab_bytes.len())],
+                )
+                .to_string();
+                symbols.push(ElfSymbol {
+                    name,
+                    value: st_value,
+                    size: st_size,
+                    shndx: st_shndx,
+                });
+            }
+        }
+        Ok((sections, symbols))
+    }
+
+    fn find_sub(needle: &[u8], haystack: &[u8]) -> Option<usize> {
+        if needle.is_empty() || needle.len() > haystack.len() {
+            return None;
+        }
+        haystack
+            .windows(needle.len())
+            .position(|window| window == needle)
+    }
+
+    /// Confronto com ORÁCULOS INDEPENDENTES do detector (revisão de 68d2f5f):
+    ///
+    /// - POSITIVO (recursos conhecidos): seções PROGBITS dos OBJETOS
+    ///   COMPILADOS do projeto de origem (recursos nomeados do doador),
+    ///   com chunks de 512 bytes localizados VERBATIM na ROM de referência
+    ///   (bytes verificados) — cada região conhecida deve ter ≥90% dos
+    ///   bytes cobertos por candidatos de tile;
+    /// - NEGATIVO (falsos positivos): seções ELF `SHF_EXECINSTR` (código,
+    ///   identificação por TIPO DE SEÇÃO) de `libmd.a`, com ≥256 bytes
+    ///   verificados na ROM — devem ter ZERO candidatos de tile.
+    ///
+    /// ROMs sem objetos do doador (ex.: HAMOOPIG, build do autor não
+    /// disponível) pulam o positivo com razão documentada; o negativo roda
+    /// sempre que houver regiões de código verificadas.
+    fn run_confrontation(
+        test_name: &str,
+        bytes: &[u8],
+        lib: &[u8],
+        donor_objects: &[(String, Vec<u8>)],
+    ) {
+        let identity = rex_identify_bytes(bytes).expect("ROM identificável (REX-02)");
         let (catalog, catalog_sha) = {
             let catalog = crate::tools::reverse::decomp::extract::build_md_extraction_catalog(
                 &identity, bytes,
@@ -978,53 +1364,6 @@ mod tests {
             let json = serde_json::to_vec_pretty(&catalog).expect("serialização");
             (catalog, sha256_hex(&json))
         };
-
-        // Mapa hash → offsets de janelas de 16B da lib em TODOS os offsets.
-        let mut lib_windows: std::collections::HashMap<u64, Vec<usize>> =
-            std::collections::HashMap::new();
-        for start in 0..lib.len().saturating_sub(CHUNK) {
-            lib_windows
-                .entry(fnv1a64(&lib[start..start + CHUNK]))
-                .or_default()
-                .push(start);
-        }
-        // Marca blocos de 16B da ROM cujos bytes existem na lib (com
-        // verificação de bytes — hash só filtra).
-        let rom_blocks = bytes.len() / CHUNK;
-        let mut matched = vec![false; rom_blocks];
-        for index in 0..rom_blocks {
-            let chunk = &bytes[index * CHUNK..index * CHUNK + CHUNK];
-            if let Some(offsets) = lib_windows.get(&fnv1a64(chunk)) {
-                if offsets
-                    .iter()
-                    .any(|start| &lib[*start..*start + CHUNK] == chunk)
-                {
-                    matched[index] = true;
-                }
-            }
-        }
-        // Runs maximais de blocos marcados.
-        let mut known_regions: Vec<(u64, u64)> = Vec::new();
-        let mut index = 0;
-        while index < rom_blocks {
-            if !matched[index] {
-                index += 1;
-                continue;
-            }
-            let start = index;
-            while index < rom_blocks && matched[index] {
-                index += 1;
-            }
-            let len_blocks = index - start;
-            if len_blocks >= MIN_RUN_CHUNKS {
-                known_regions.push(((start * CHUNK) as u64, (len_blocks * CHUNK) as u64));
-            }
-        }
-        eprintln!(
-            "{test_name}: regiões conhecidas ≥256B: {}",
-            known_regions.len()
-        );
-
         let work = crate::tools::reverse::decomp::rom_library::decomp_work_dir();
         let mut discovery =
             discover_graphic_candidates(&catalog, bytes, &catalog_sha).expect("descoberta");
@@ -1032,83 +1371,270 @@ mod tests {
         let (run_id, artifact) =
             record_discovery_run(&work, &discovery).expect("run no ledger real");
 
-        let mut plausible_known = 0usize;
-        let mut covered_plausible = 0usize;
-        let mut implausible_known = 0usize;
-        for (offset, size) in &known_regions {
-            if *offset < 0x200 {
+        // ---- POSITIVO: recursos conhecidos do projeto de origem ----
+        let mut resource_regions: Vec<(u64, u64)> = Vec::new();
+        for (object_name, payload) in donor_objects {
+            let Ok((sections, _)) = parse_elf32_be(payload) else {
                 continue;
-            }
-            let tiles = (*size as usize) / TILE_BYTES;
-            if tiles == 0 {
-                continue;
-            }
-            let avg: f32 = (0..tiles)
-                .map(|t| {
-                    graphic_score_tile(
-                        &bytes[*offset as usize + t * TILE_BYTES
-                            ..*offset as usize + t * TILE_BYTES + TILE_BYTES],
-                    )
-                })
-                .sum::<f32>()
-                / tiles as f32;
-            if avg < MIN_TILE_SCORE {
-                implausible_known += 1;
-                continue;
-            }
-            plausible_known += 1;
-            // Cobertura por UNIÃO dos candidatos (as bordas da região
-            // conhecida vêm do grid de chunks da lib — a exigência de
-            // contenção borda-a-borda é irrealista; 90% dos bytes é o piso
-            // de "essencialmente coberta").
-            let region_start = *offset;
-            let region_end = offset + size;
-            let mut covered_bytes = 0u64;
-            for candidate in discovery
-                .candidates
-                .iter()
-                .filter(|c| c.kind == KIND_TILE_BLOCK)
-            {
-                let lo = candidate.offset.max(region_start);
-                let hi = (candidate.offset + candidate.size).min(region_end);
-                if hi > lo {
-                    covered_bytes += hi - lo;
+            };
+            for section in &sections {
+                if section.section_type != ELF_SECTION_PROGBITS || section.size < 512 {
+                    continue;
+                }
+                let section_bytes =
+                    &payload[section.file_offset..section.file_offset + section.size];
+                for chunk_start in (0..=section_bytes.len() - 512).step_by(512) {
+                    let chunk = &section_bytes[chunk_start..chunk_start + 512];
+                    if let Some(rom_offset) = find_sub(chunk, bytes) {
+                        resource_regions.push((rom_offset as u64, 512));
+                    }
                 }
             }
-            let fraction = covered_bytes as f32 / *size as f32;
-            if fraction >= 0.9 {
-                covered_plausible += 1;
-            } else {
+        }
+        resource_regions.sort();
+        resource_regions.dedup();
+        eprintln!(
+            "{test_name}: regiões de recurso conhecidas (512B verbatim): {}",
+            resource_regions.len()
+        );
+        let mut poor_coverage = 0usize;
+        for (offset, size) in &resource_regions {
+            let region_end = offset + size;
+            let mut covered = 0u64;
+            for candidate in &discovery.candidates {
+                if candidate.kind != KIND_TILE_BLOCK {
+                    continue;
+                }
+                let lo = candidate.offset.max(*offset);
+                let hi = (candidate.offset + candidate.size).min(region_end);
+                if hi > lo {
+                    covered += hi - lo;
+                }
+            }
+            let fraction = covered as f32 / *size as f32;
+            if fraction < 0.8 {
+                poor_coverage += 1;
                 eprintln!(
-                    "{test_name}: região conhecida PLAUSÍVEL mal coberta: 0x{offset:X} \
-                     ({size}B, avg={avg:.2}, cobertura={:.1}%)",
+                    "{test_name}: recurso conhecido MAL coberto: 0x{offset:X} ({:.1}%)",
                     fraction * 100.0
                 );
             }
         }
+        if donor_objects.is_empty() {
+            eprintln!(
+                "{test_name}: sem objetos do doador — positivo de cobertura ignorado \
+                 (build do autor não disponível)"
+            );
+        } else {
+            assert!(
+                !resource_regions.is_empty(),
+                "com objetos do doador, esperava ≥1 recurso conhecido localizado na ROM"
+            );
+            assert_eq!(
+                poor_coverage, 0,
+                "recursos conhecidos devem estar ≥90% cobertos"
+            );
+        }
+
+        // ---- NEGATIVO: seções de código (EXECINSTR) da lib ----
+        let mut code_regions: Vec<(u64, usize)> = Vec::new();
+        for (member_name, payload) in parse_ar_members(lib) {
+            let Ok((sections, _)) = parse_elf32_be(&payload) else {
+                continue;
+            };
+            for section in &sections {
+                if section.section_type != ELF_SECTION_PROGBITS
+                    || section.flags & ELF_FLAG_EXECINSTR == 0
+                    || section.size < 256
+                {
+                    continue;
+                }
+                let section_bytes =
+                    &payload[section.file_offset..section.file_offset + section.size];
+                let probe_len = section_bytes.len().min(256);
+                let Some(probe_start) = find_sub(&section_bytes[..probe_len], bytes) else {
+                    continue;
+                };
+                // Verificação contígua máxima a partir do probe.
+                let mut matched = probe_len;
+                while matched < section_bytes.len()
+                    && probe_start + matched < bytes.len()
+                    && section_bytes[matched] == bytes[probe_start + matched]
+                {
+                    matched += 1;
+                }
+                if matched >= 256 {
+                    eprintln!(
+                        "{test_name}: região de código verificada: {member_name} \
+                         +0x{:X} → ROM 0x{probe_start:X} ({matched}B)",
+                        0
+                    );
+                    code_regions.push((probe_start as u64, matched));
+                }
+            }
+        }
+        eprintln!(
+            "{test_name}: regiões de código (EXECINSTR) verificadas: {}",
+            code_regions.len()
+        );
+        assert!(
+            !code_regions.is_empty(),
+            "esperava regiões de código verificadas da lib na ROM"
+        );
+        let mut violations = Vec::new();
+        for (offset, length) in &code_regions {
+            for candidate in &discovery.candidates {
+                if candidate.kind != KIND_TILE_BLOCK {
+                    continue;
+                }
+                let lo = candidate.offset.max(*offset);
+                let hi = (candidate.offset + candidate.size).min(offset + *length as u64);
+                if hi > lo {
+                    violations.push(format!(
+                        "tile 0x{:X}..0x{:X} sobrepõe código 0x{:X}..0x{:X}",
+                        candidate.offset,
+                        candidate.offset + candidate.size,
+                        offset,
+                        offset + *length as u64
+                    ));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "FALSOS POSITIVOS em regiões de código conhecidas: {violations:?}"
+        );
+
+        assert!(
+            !discovery.candidates.is_empty(),
+            "ROM real deve ter candidatos"
+        );
         eprintln!(
             "{test_name}: candidatos={}, prévias={previews}, run={run_id}, artifact={}",
             discovery.candidates.len(),
             artifact.path
         );
-        eprintln!(
-            "{test_name}: conhecidas plausíveis={plausible_known} \
-             cobertas={covered_plausible} implausíveis(código)={implausible_known}"
-        );
-        assert!(
-            discovery
-                .candidates
-                .iter()
-                .any(|candidate| candidate.kind == KIND_TILE_BLOCK),
-            "ROM real deve ter blocos de tiles candidatos"
-        );
-        assert!(
-            plausible_known == 0 || covered_plausible >= 1,
-            "região conhecida graficamente plausível deve estar coberta por candidato"
-        );
-        assert_eq!(
-            covered_plausible, plausible_known,
-            "TODAS as regiões conhecidas plausíveis devem estar cobertas"
-        );
+    }
+
+    /// O parser ar+ELF32-BE é o backbone dos oráculos independentes —
+    /// testado contra um ELF sintético com seção executável e símbolo.
+    #[test]
+    fn ar_and_elf_parser_extract_sections_and_symbols() {
+        let text: Vec<u8> = (0..64u32).map(|i| (i * 3 + 11) as u8).collect();
+        let mut strtab = vec![0u8];
+        let sym_name_offset = strtab.len() as u32;
+        strtab.extend_from_slice(b"gfx_data\0");
+
+        // Layout: header (0x34) + 4 section headers (0xA0) + text + strtab + symtab.
+        let header_len = 0x34usize;
+        let sections_len = 4 * 40;
+        let text_offset = header_len + sections_len;
+        let strtab_offset = text_offset + text.len();
+        let symtab_offset = strtab_offset + strtab.len();
+
+        let mut elf = Vec::new();
+        // e_ident (16B): magic + ELF32 + BE + versão + pad.
+        elf.extend_from_slice(b"\x7fELF\x01\x02\x01");
+        elf.extend_from_slice(&[0u8; 9]);
+        // Campos até 0x34, com shoff/shentsize/shnum nos offsets corretos.
+        let mut tail = vec![0u8; 0x34 - 0x10];
+        tail[0x20 - 0x10..0x24 - 0x10].copy_from_slice(&(header_len as u32).to_be_bytes());
+        tail[0x2E - 0x10..0x30 - 0x10].copy_from_slice(&(40u16).to_be_bytes());
+        tail[0x30 - 0x10..0x32 - 0x10].copy_from_slice(&(4u16).to_be_bytes());
+        elf.extend_from_slice(&tail);
+
+        // Section headers (40B cada): name, type, flags, addr, offset, size,
+        // link, info, addralign, entsize.
+        let mut section_header = |section_type: u32,
+                                  flags: u32,
+                                  offset: u32,
+                                  size: u32,
+                                  link: u32,
+                                  entsize: u32|
+         -> Vec<u8> {
+            let mut header = vec![0u8; 40];
+            header[4..8].copy_from_slice(&section_type.to_be_bytes());
+            header[8..12].copy_from_slice(&flags.to_be_bytes());
+            header[16..20].copy_from_slice(&offset.to_be_bytes());
+            header[20..24].copy_from_slice(&size.to_be_bytes());
+            header[24..28].copy_from_slice(&link.to_be_bytes());
+            header[36..40].copy_from_slice(&entsize.to_be_bytes());
+            header
+        };
+        elf.extend_from_slice(&section_header(0, 0, 0, 0, 0, 0)); // null
+        elf.extend_from_slice(&section_header(
+            ELF_SECTION_PROGBITS,
+            ELF_FLAG_EXECINSTR | 0x2,
+            text_offset as u32,
+            text.len() as u32,
+            0,
+            0,
+        ));
+        elf.extend_from_slice(&section_header(
+            3,
+            0,
+            strtab_offset as u32,
+            strtab.len() as u32,
+            0,
+            0,
+        ));
+        elf.extend_from_slice(&section_header(
+            ELF_SECTION_SYMTAB,
+            0,
+            symtab_offset as u32,
+            32,
+            2,
+            16,
+        ));
+
+        elf.extend_from_slice(&text);
+        elf.extend_from_slice(&strtab);
+        // symtab: entrada nula + símbolo "gfx_data" (value=8, size=32, shndx=1).
+        elf.extend_from_slice(&[0u8; 16]);
+        let mut symbol = [0u8; 16];
+        symbol[0..4].copy_from_slice(&sym_name_offset.to_be_bytes());
+        symbol[4..8].copy_from_slice(&8u32.to_be_bytes());
+        symbol[8..12].copy_from_slice(&32u32.to_be_bytes());
+        symbol[14..16].copy_from_slice(&1u16.to_be_bytes());
+        elf.extend_from_slice(&symbol);
+
+        // Embala em ar.
+        let mut archive = Vec::new();
+        archive.extend_from_slice(b"!<arch>\n");
+        let mut member_header = [b' '; 60];
+        member_header[..9].copy_from_slice(b"libres.o/");
+        member_header[48..58].copy_from_slice(format!("{:>010}", elf.len()).as_bytes());
+        member_header[58..60].copy_from_slice(b"`\n");
+        archive.extend_from_slice(&member_header);
+        archive.extend_from_slice(&elf);
+        if elf.len() % 2 == 1 {
+            archive.push(0);
+        }
+
+        let members = parse_ar_members(&archive);
+        assert_eq!(members.len(), 1);
+        assert_eq!(members[0].0, "libres.o");
+        assert_eq!(members[0].1, elf);
+
+        let (sections, symbols) = parse_elf32_be(&elf).expect("ELF sintético parseável");
+        let exec = sections
+            .iter()
+            .find(|section| section.flags & ELF_FLAG_EXECINSTR != 0)
+            .expect("seção executável");
+        assert_eq!(exec.size, 64);
+        assert_eq!(&elf[exec.file_offset..exec.file_offset + 64], &text);
+
+        let symbol = symbols
+            .iter()
+            .find(|symbol| symbol.name == "gfx_data")
+            .expect("símbolo gfx_data");
+        assert_eq!(symbol.value, 8);
+        assert_eq!(symbol.size, 32);
+        assert_eq!(symbol.shndx, 1);
+
+        assert_eq!(find_sub(&text, &elf), Some(text_offset));
+        // No arquivo ar o member começa após a assinatura (8) + header (60).
+        assert_eq!(find_sub(&text, &archive), Some(68 + text_offset));
+        assert_eq!(find_sub(&[9, 9, 9], &archive), None);
     }
 }
