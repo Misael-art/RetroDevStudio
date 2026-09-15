@@ -1,6 +1,12 @@
-# 06 - CURRENT WAVE AI BANK (Wave S+)
+### Estado corrente — 2026-09-15: REX-04 fatia 2 corrigida (P1×2 da revisão) em `6775da2`, PR #65 aguardando re-revisão
 
-### Estado corrente — 2026-09-14 (3): REX-04 fatia 2 (candidatos gráficos) aberta em PR #65, aguardando revisão
+**Dois P1 da revisão de 68d2f5f corrigidos:** (1) **formato de paleta canônico** — validade `(w & 0xF111)==0` (bits reservados 0/4/8/12..15 rejeitam o run) e renderização com canais em **1/5/9** (SGDK `pal.h`); azul 0x0E00 e branco 0x0EEE aceitos; fixtures migradas para `md_color(r,g,b)`; **teste independente por pixels**: vermelho/verde/azul/branco → PNG decodificado com `image::load_from_memory` e pixels asseridos. (2) **confronto com oráculos independentes** — parser ar+ELF32-BE próprio (testado contra ELF sintético): NEGATIVO = seções ELF `SHF_EXECINSTR` de `libmd.a` (identificação por TIPO DE SEÇÃO) com bytes verificados na ROM e asserção explícita de ZERO candidatos sobrepostos (8 regiões, 0 falsos positivos); POSITIVO = seções de recursos dos objetos compilados do doador (sprite.o `.rodata_binf`) com chunks de 512B verbatim na ROM (5 regiões no Taiketsu) e cobertura ≥80% asserida; HAMOOPIG sem build do doador → positivo pulado com razão documentada. Removida a classificação "plausível" baseada no próprio detector (era circular); tiles densos (≤12 valores distintos + suavidade de nibbles ≥0.5; constante nunca passa) com 1 tile de gap tolerado e registrado na evidência.
+
+Gates: cargo test --lib **587/40** (16 unitários da fatia + parser sintético), clippy, fmt, check:tree, tsc, lint, npm test, CI 8/8, Mimosa selado `sha256:2f0d1168…` (mesmos 2 FPs conhecidos). Limitações da fatia inalteradas (compressão/dinâmico/streaming/montagem de sprites = unknown); confronto cobre links preexistentes, não substituição concorrente. **Experimental.**
+
+---
+
+### [HISTÓRICO] Estado corrente — 2026-09-14 (3): REX-04 fatia 2 (candidatos gráficos) aberta em PR #65, aguardando revisão
 
 **REX-04 fatia 2 — descoberta organizada de candidatos gráficos (Mega Drive), branch `codex/rex04-fatia2` head `b53e944`, PR #65 (base `codex/import-decomp-review`), CI 7/7 verde, merge pendente de revisão.** Escopo autorizado pelo revisor e entregue: candidatos a tiles 4bpp não comprimidos e paletas com offset/tamanho/método/evidência/confiança; **heurístico ≠ confirmado** (status sempre `candidate`, confiança ≤ 0.95); **bytes interpretáveis como pixels continuam unknown** — candidatos vivem em artefato próprio `rex-graphic-discovery/v1` vinculado ao SHA da ROM e ao SHA do catálogo (catálogo da fatia 1 byte-idêntico, testado); prévias PNG (crate `image`, já dependência) imutáveis por hash referenciadas por ArtifactRef; runs append-only no ledger com gaps declarados.
 
