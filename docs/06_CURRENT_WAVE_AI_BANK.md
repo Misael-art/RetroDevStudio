@@ -1,6 +1,16 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 
-### Estado corrente — 2026-09-14 (2): REX-04 fatia 1 INTEGRADA em `codex/import-decomp-review` `8605998`
+### Estado corrente — 2026-09-14 (3): REX-04 fatia 2 (candidatos gráficos) aberta em PR #65, aguardando revisão
+
+**REX-04 fatia 2 — descoberta organizada de candidatos gráficos (Mega Drive), branch `codex/rex04-fatia2` head `b53e944`, PR #65 (base `codex/import-decomp-review`), CI 7/7 verde, merge pendente de revisão.** Escopo autorizado pelo revisor e entregue: candidatos a tiles 4bpp não comprimidos e paletas com offset/tamanho/método/evidência/confiança; **heurístico ≠ confirmado** (status sempre `candidate`, confiança ≤ 0.95); **bytes interpretáveis como pixels continuam unknown** — candidatos vivem em artefato próprio `rex-graphic-discovery/v1` vinculado ao SHA da ROM e ao SHA do catálogo (catálogo da fatia 1 byte-idêntico, testado); prévias PNG (crate `image`, já dependência) imutáveis por hash referenciadas por ArtifactRef; runs append-only no ledger com gaps declarados.
+
+**Validação:** fixtures de localização conhecida (tiles/paletas em offsets exatos; snap de grade ±30B corrige sequestro de início por janela desalinhada); negativos (junk LCG → zero candidatos; bit 15 quebra run de paleta); catálogo imutável à descoberta. **Provas reais 2/2 com confronto:** regiões conhecidas = dados compartilhados do SGDK (`libmd.a` do corpus, presentes verbatim nas ROMs por busca de conteúdo com verificação de bytes) — HAMOOPIG 3/3 regiões plausíveis cobertas (28 regiões de código corretamente NÃO candidatas), Taiketsu 3/3 cobertas (26 rejeitadas). Critério de confronto: cobertura ≥90% dos bytes da região (contenção borda-a-borda é irrealista — grid de chunks da lib ≠ grid de tiles). Gates: cargo test --lib 584/40 (13 testes novos), clippy/fmt/check:tree/tsc/lint/npm test, Mimosa selado `sha256:429e6cd6…` (mesmos 2 FPs conhecidos).
+
+**Limitações documentadas:** compressão, dados dinâmicos, streaming e montagem de sprites permanecem unknown; alinhamento ímpar não varrido; paletas fora do formato 0BGR 3x3x3 não detectadas; confronto cobre links preexistentes (substituição concorrente fora do escopo). **A aceite dependerá da correção dos recursos e da rastreabilidade — não da redução artificial de unknown.** Fora da fatia: lógica, nós, edição/rebuild, descompressão, IPC/UI. Programa permanece **Experimental**.
+
+---
+
+### [HISTÓRICO] Estado corrente — 2026-09-14 (2): REX-04 fatia 1 INTEGRADA em `codex/import-decomp-review` `8605998`
 
 **REX-04 fatia 1 (catálogo de extração organizada, Mega Drive) aceita pelo revisor em `b5c3cc2` e integrada:** merge **#64 → `8605998`** em `codex/import-decomp-review` (NÃO em `main` — consolidação segue via #61, outra linha). Gates no destino: check:tree, tsc, lint, npm test, cargo test --lib **576/38**, clippy, fmt, host READY; **provas reais reexecutadas no destino 2/2** (HAMOOPIG + Taiketsu) — e os artefatos imutáveis foram REUTILIZADOS por hash (mesmos `catalog-<sha>.json` dos runs anteriores, idempotência por conteúdo provada no destino); CI remota 4/4 no push do merge. Mimosa selado `sha256:bd4d117f…` (mesmos 2 FPs conhecidos de `NodeGraphEditor.tsx`).
 
