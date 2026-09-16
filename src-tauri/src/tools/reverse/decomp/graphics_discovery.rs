@@ -1104,12 +1104,96 @@ mod tests {
         let _ = std::fs::remove_dir_all(&work);
     }
 
-    /// Prova real: descoberta no HAMOOPIG. O build do autor não está
-    /// disponível no corpus — o positivo de cobertura é pulado com razão
-    /// documentada; o negativo (código verificado da lib não pode virar
-    /// candidato) roda sempre.
+    /// Verificação INDEPENDENTE da prévia: cada tile do bloco recebe um
+    /// padrão com UM byte de plano setado (índice de pixel 1/2/4/8) e o
+    /// PNG decodificado deve mostrar exatamente o tom esperado (índice ×
+    /// 17) no centro de cada célula — além das bordas/limites da imagem.
     #[test]
-    #[ignore = "prova real BYOR: requer ROM de referência + libmd.a do corpus"]
+    fn preview_pixels_offsets_and_boundaries_match_reference() {
+        let work = std::env::temp_dir().join(format!(
+            "rex04-preview-ref-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        // 8 tiles com índices distinguíveis: tile t preenche TODOS os
+        // pixels com o valor (t+1) — plano 0..3 codificam (t%8)+1 nos
+        // bytes adequados. Construção manual independente do renderer.
+        let mut rom = fixture_rom(0x8000);
+        let block_offset = 0x6000usize;
+        let tile_count = 8usize;
+        for t in 0..tile_count {
+            let index_value = (t % 8) + 1; // 1..=8
+            let mut tile = [0u8; 32];
+            for row in 0..8 {
+                for plane in 0..4 {
+                    let bit = if (index_value >> plane) & 1 == 1 {
+                        0xFF
+                    } else {
+                        0
+                    };
+                    tile[row * 4 + plane] = bit;
+                }
+            }
+            rom[block_offset + t * 32..block_offset + (t + 1) * 32].copy_from_slice(&tile);
+        }
+
+        let identity = rex_identify_bytes(&rom).expect("identidade");
+        let catalog =
+            crate::tools::reverse::decomp::extract::build_md_extraction_catalog(&identity, &rom)
+                .expect("catálogo");
+        let catalog_json = serde_json::to_vec_pretty(&catalog).expect("serialização");
+        let mut discovery = discover_graphic_candidates(&catalog, &rom, &sha256_hex(&catalog_json))
+            .expect("descoberta");
+
+        export_candidate_previews(&work, &mut discovery, &rom).expect("prévias");
+        let block_candidate = discovery
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate.kind == KIND_TILE_BLOCK && candidate.offset == block_offset as u64
+            })
+            .expect("candidato do bloco conhecido");
+        let artifact = &block_candidate.previews[0];
+        let png_bytes = fs::read(&artifact.path).expect("png legível");
+
+        // Decodificação independente: cada célula (tile) tem 8×8 px ×2 de
+        // escala; o pixel central da célula t deve ser o tom uniforme do
+        // tile (índice × 17).
+        let decoded = image::load_from_memory(&png_bytes).expect("png decodificável");
+        for t in 0..tile_count {
+            let index_value = (t % 8) + 1;
+            let expected_shade = (index_value * 17) as u8;
+            let center_x = (t % 16) * 16 + 8;
+            let center_y = (t / 16) * 16 + 8;
+            let pixel = decoded.get_pixel(center_x as u32, center_y as u32);
+            assert_eq!(
+                pixel[0], expected_shade,
+                "tile {t}: tom esperado {expected_shade}"
+            );
+        }
+
+        // Borda do PRIMEIRO tile: pixel (1,1) e (14,14) na célula 0 também
+        // têm o tom (toda a célula é uniforme).
+        assert_eq!(decoded.get_pixel(1u32, 1u32)[0], 17);
+        assert_eq!(decoded.get_pixel(14u32, 14u32)[0], 17);
+
+        // Limites: grade fixa de 16 colunas (8 px × escala 2 = 16 px por
+        // célula), 1 linha para 8 tiles.
+        assert_eq!(decoded.width(), 16 * 16);
+        assert_eq!(decoded.height(), 16);
+
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// Prova real: descoberta no HAMOOPIG. Os recursos COMPARTILHADOS do
+    /// motor (sprite.o da família HAMOOPIG/Taiketsu) aparecem verbatim na
+    /// ROM de referência — 3 chunks de tiles comprovados (compressão NONE)
+    /// localizados e ≥50% cobertos; divergência de build registrada
+    /// (spr_jack_550 casa verbatim só nos primeiros 512B de 2688B). O
+    /// negativo (código verificado da lib não pode virar candidato) roda
+    /// sempre.
+    #[test]
+    #[ignore = "prova real BYOR: requer ROM de referência + libmd.a + objetos do doador"]
     fn rex04_hamoopig_graphic_discovery_confrontation() {
         let test_name = "rex04_hamoopig_graphic_discovery_confrontation";
         let Some((_identity, bytes)) = rex04_reference_rom(test_name) else {
@@ -1118,7 +1202,9 @@ mod tests {
         let Some(lib) = optional_donor_lib(test_name) else {
             return;
         };
-        run_confrontation(test_name, &bytes, &lib, &[], &[]);
+        let donor_objects = load_donor_objects(test_name);
+        let res_decls = load_donor_res_decls(test_name);
+        run_confrontation(test_name, &bytes, &lib, &donor_objects, &res_decls);
     }
 
     /// Prova real: confrontação para a ROM de referência do Taiketsu com os
