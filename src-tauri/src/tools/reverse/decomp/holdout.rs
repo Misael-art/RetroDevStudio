@@ -193,7 +193,7 @@ fn audio_bytes(len: usize) -> Vec<u8> {
     (0..len).map(|i| period[i % period.len()]).collect()
 }
 
-/// Bytes "comprimido" (família NOVA): alterna runs literais (LCG fresco)
+/// Bytes "padrao_comprimidolike" (família NOVA): alterna runs literais (LCG fresco)
 /// com cópias de 16 bytes de 64 posições atrás — modelo aplib-like.
 fn compressed_bytes(seed: u64, len: usize) -> Vec<u8> {
     let mut out = vec![0u8; len];
@@ -260,28 +260,28 @@ pub fn build_holdout_rom() -> (Vec<u8>, Vec<HoldoutRegion>) {
         };
     let regions = vec![
         region(
-            "tiles_esparsos",
+            "padrao_tiles_esparsos",
             OFFSET_SPARSE,
             REGION_TILES_BYTES,
             "rotacoes 1bpp com linhas vazias, seed HOLDOUT^0xA1",
             &sparse,
         ),
         region(
-            "tiles_densos",
+            "padrao_tiles_densos",
             OFFSET_DENSE,
             REGION_TILES_BYTES,
             "gradiente 3 valores com delta ±1 por linha, seed HOLDOUT^0xB2",
             &dense,
         ),
         region(
-            "tiles_dithering",
+            "padrao_tiles_dithering",
             OFFSET_DITHER,
             REGION_TILES_BYTES,
             "xadrez 2x2 AA/55/CC/33/F0/0F/81/42 com flip, seed HOLDOUT^0xC3",
             &dither,
         ),
         region(
-            "paleta",
+            "padrao_paleta",
             OFFSET_PALETTE,
             REGION_PALETTE_BYTES,
             "64 words canonicas xxxxBBBxGGGxRRRx rampa",
@@ -291,21 +291,21 @@ pub fn build_holdout_rom() -> (Vec<u8>, Vec<HoldoutRegion>) {
                 .collect::<Vec<u8>>(),
         ),
         region(
-            "codigo",
+            "padrao_codigolike",
             OFFSET_CODE,
             REGION_OTHER_BYTES,
             "distribuicao opcodish m68k, seed HOLDOUT^0xD4",
             &code,
         ),
         region(
-            "audio",
+            "padrao_audiolike",
             OFFSET_AUDIO,
             REGION_OTHER_BYTES,
             "onda triangular periodo 8 amostras",
             &audio,
         ),
         region(
-            "comprimido",
+            "padrao_comprimidolike",
             OFFSET_COMPRESSED,
             REGION_OTHER_BYTES,
             "runs literais LCG + copias de 16B em -64, seed HOLDOUT^0xE5",
@@ -362,19 +362,24 @@ pub fn measure_holdout(
         discovery_candidates
             .iter()
             .filter(|(kind, _, _)| {
-                (category.starts_with("tiles") && kind == KIND_TILE_BLOCK)
-                    || (category == "paleta" && (kind == KIND_PALETTE16 || kind == KIND_PALETTE64))
+                (category.starts_with("padrao_tiles") && kind == KIND_TILE_BLOCK)
+                    || (category == "padrao_paleta"
+                        && (kind == KIND_PALETTE16 || kind == KIND_PALETTE64))
             })
             .map(|(_, offset, size)| (*offset, offset + size))
             .collect()
     };
     let gate_for = |category: &str| -> (&'static str, fn(f32) -> bool) {
         match category {
-            "tiles_esparsos" => ("cobertura >= 0.80", |c: f32| c >= 0.80),
-            "tiles_densos" => ("cobertura >= 0.50", |c: f32| c >= 0.50),
-            "tiles_dithering" => ("cobertura > 0.00", |c: f32| c > 0.0),
-            "paleta" => ("offset/tamanho exatos", |_| true), // checagem própria
-            _ => ("zero candidatos", |_| true),              // checagem própria
+            "padrao_tiles_esparsos" => ("cobertura >= 0.80", |c: f32| c >= 0.80),
+            // tiles_densos: SEM gate numérico — limitação conhecida
+            // documentada (gradiente ±1/byte não é detectável sem FPs em
+            // código); gate_passed=false é a FALHA esperada, separada do
+            // baseline que deve passar.
+            "padrao_tiles_densos" => ("LIMITAÇÃO: cobertura não atendida (sem gate)", |_| false),
+            "padrao_tiles_dithering" => ("cobertura > 0.00", |c: f32| c > 0.0),
+            "padrao_paleta" => ("offset/tamanho exatos", |_| true), // checagem própria
+            _ => ("zero candidatos", |_| true),                     // checagem própria
         }
     };
 
@@ -384,11 +389,14 @@ pub fn measure_holdout(
         let (covered, fraction) = covered_fraction(&candidates, region.offset, region.size);
         let (gate_label, gate_check) = gate_for(&region.category);
         let region_end = region.offset + region.size;
-        let passed = if region.category == "paleta" {
+        let passed = if region.category == "padrao_paleta" {
             candidates
                 .iter()
                 .any(|(start, end)| *start == region.offset && *end == region_end)
-        } else if matches!(region.category.as_str(), "codigo" | "audio" | "comprimido") {
+        } else if matches!(
+            region.category.as_str(),
+            "padrao_codigolike" | "padrao_audiolike" | "padrao_comprimidolike"
+        ) {
             candidates.is_empty()
         } else {
             gate_check(fraction)
@@ -443,9 +451,9 @@ mod tests {
                 .expect("categoria presente")
                 .offset
         };
-        assert_eq!(by_category("tiles_esparsos"), OFFSET_SPARSE);
-        assert_eq!(by_category("paleta"), OFFSET_PALETTE);
-        assert_eq!(by_category("comprimido"), OFFSET_COMPRESSED);
+        assert_eq!(by_category("padrao_tiles_esparsos"), OFFSET_SPARSE);
+        assert_eq!(by_category("padrao_paleta"), OFFSET_PALETTE);
+        assert_eq!(by_category("padrao_comprimidolike"), OFFSET_COMPRESSED);
         // Hash re-derivado dos bytes confere (origem verificável)
         for region in &regions {
             let start = region.offset as usize;
@@ -490,23 +498,33 @@ mod tests {
                 .find(|measurement| measurement.category == name)
                 .expect("medição presente")
         };
-        assert!(by_category("tiles_esparsos").gate_passed, "esparsos ≥80%");
-        // PIN de limitação conhecida: gradiente ±1/byte entre linhas = 0%
-        // (documentado no topo do módulo; detectá-lo exigiria quase-flat
-        // ≤8 bits que gera 1-2 FPs em código verificado). Alterar este
-        // valor exige justificativa explícita na revisão.
+        assert!(
+            by_category("padrao_tiles_esparsos").gate_passed,
+            "esparsos ≥80%"
+        );
+        // FALHA CONHECIDA separada do baseline: tiles_densos (gradiente
+        // ±1/byte) NÃO atende ao gate — não é "gate atendido". O PIN da
+        // cobertura 0% documenta a limitação; alterar exige justificativa.
+        assert!(
+            !by_category("padrao_tiles_densos").gate_passed,
+            "gate de densos é limitação conhecida, deve permanecer reprovado"
+        );
         assert_eq!(
-            by_category("tiles_densos").coverage,
+            by_category("padrao_tiles_densos").coverage,
             0.0,
             "gradiente denso não detectável sem FP em código (limitação registrada)"
         );
         assert!(
-            by_category("tiles_dithering").gate_passed,
+            by_category("padrao_tiles_dithering").gate_passed,
             "dithering >0 (limitação conhecida, medida)"
         );
-        assert!(by_category("paleta").gate_passed, "paleta exata");
+        assert!(by_category("padrao_paleta").gate_passed, "paleta exata");
 
-        for negative in ["codigo", "audio", "comprimido"] {
+        for negative in [
+            "padrao_codigolike",
+            "padrao_audiolike",
+            "padrao_comprimidolike",
+        ] {
             let measurement = by_category(negative);
             assert_eq!(
                 measurement.overlapping_candidates, 0,

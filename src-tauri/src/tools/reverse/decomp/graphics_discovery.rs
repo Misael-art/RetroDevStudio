@@ -540,17 +540,15 @@ fn render_tile_block_png(
         let row = tile_index / COLS;
         for pixel_y in 0..8u32 {
             for pixel_x in 0..8u32 {
-                let shift = 7 - pixel_x;
-                let planes = [
-                    tile[(pixel_y * 4) as usize],
-                    tile[(pixel_y * 4 + 1) as usize],
-                    tile[(pixel_y * 4 + 2) as usize],
-                    tile[(pixel_y * 4 + 3) as usize],
-                ];
-                let value = ((planes[0] >> shift) & 1)
-                    | (((planes[1] >> shift) & 1) << 1)
-                    | (((planes[2] >> shift) & 1) << 2)
-                    | (((planes[3] >> shift) & 1) << 3);
+                // Formato 4bpp do SGDK (rescomp): CHUNKY — cada byte da
+                // linha contém DOIS pixels (nibble alto = pixel esquerdo,
+                // nibble baixo = pixel direito). 4 bytes = 8 pixels.
+                let byte = tile[(pixel_y * 4 + pixel_x / 2) as usize];
+                let value = if pixel_x % 2 == 0 {
+                    byte >> 4
+                } else {
+                    byte & 0xF
+                };
                 let shade = (u16::from(value) * 17) as u8;
                 for scale_y in 0..SCALE as u32 {
                     for scale_x in 0..SCALE as u32 {
@@ -1104,10 +1102,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&work);
     }
 
-    /// Verificação INDEPENDENTE da prévia: cada tile do bloco recebe um
-    /// padrão com UM byte de plano setado (índice de pixel 1/2/4/8) e o
-    /// PNG decodificado deve mostrar exatamente o tom esperado (índice ×
-    /// 17) no centro de cada célula — além das bordas/limites da imagem.
+    /// Verificação INDEPENDENTE da prévia no formato MD/SGDK (CHUNKY —
+    /// 2 pixels por byte, nibble alto = pixel esquerdo): fixture ASSIMÉTRICA
+    /// (pixel (py,px) do tile t = (py*4+px+t) % 16) e comparação de TODOS
+    /// os pixels decodificados, além de bordas e dimensões.
     #[test]
     fn preview_pixels_offsets_and_boundaries_match_reference() {
         let work = std::env::temp_dir().join(format!(
@@ -1115,26 +1113,20 @@ mod tests {
             std::process::id(),
             now_unix()
         ));
-        // 8 tiles com índices distinguíveis: tile t preenche TODOS os
-        // pixels com o valor (t+1) — plano 0..3 codificam (t%8)+1 nos
-        // bytes adequados. Construção manual independente do renderer.
         let mut rom = fixture_rom(0x8000);
         let block_offset = 0x6000usize;
         let tile_count = 8usize;
+        // Fixture assimétrica: valor do pixel (py,px) do tile t.
+        let pixel_value = |tile: usize, py: usize, px: usize| (py * 4 + px + tile) % 16;
+        // Encode CHUNKY (byte = hi nibble do pixel par | lo do ímpar).
         for t in 0..tile_count {
-            let index_value = (t % 8) + 1; // 1..=8
-            let mut tile = [0u8; 32];
-            for row in 0..8 {
-                for plane in 0..4 {
-                    let bit = if (index_value >> plane) & 1 == 1 {
-                        0xFF
-                    } else {
-                        0
-                    };
-                    tile[row * 4 + plane] = bit;
+            for py in 0..8usize {
+                for byte_pair in 0..4usize {
+                    let hi = pixel_value(t, py, byte_pair * 2);
+                    let lo = pixel_value(t, py, byte_pair * 2 + 1);
+                    rom[block_offset + t * 32 + py * 4 + byte_pair] = ((hi << 4) | lo) as u8;
                 }
             }
-            rom[block_offset + t * 32..block_offset + (t + 1) * 32].copy_from_slice(&tile);
         }
 
         let identity = rex_identify_bytes(&rom).expect("identidade");
@@ -1142,8 +1134,27 @@ mod tests {
             crate::tools::reverse::decomp::extract::build_md_extraction_catalog(&identity, &rom)
                 .expect("catálogo");
         let catalog_json = serde_json::to_vec_pretty(&catalog).expect("serialização");
-        let mut discovery = discover_graphic_candidates(&catalog, &rom, &sha256_hex(&catalog_json))
-            .expect("descoberta");
+        // O candidato é construído DIRETAMENTE (sem passar pela descoberta):
+        // este teste verifica o RENDERER da prévia, não o scanner. Fixture
+        // assimétrica não é detectável pela heurística (near-flat ≤2).
+        let proven_candidate = GraphicCandidate {
+            offset: block_offset as u64,
+            size: (tile_count * 32) as u64,
+            kind: KIND_TILE_BLOCK.into(),
+            status: STATUS_CANDIDATE.into(),
+            method: "test_fixture".into(),
+            confidence: 0.5,
+            evidence: serde_json::json!({}),
+            previews: vec![],
+        };
+        let mut discovery = GraphicDiscovery {
+            schema_version: GRAPHIC_DISCOVERY_SCHEMA_V1.into(),
+            original_sha256: catalog.original_sha256.clone(),
+            normalized_sha256: catalog.normalized_sha256.clone(),
+            catalog_sha256: sha256_hex(&catalog_json),
+            unknown_policy: "teste".into(),
+            candidates: vec![proven_candidate],
+        };
 
         export_candidate_previews(&work, &mut discovery, &rom).expect("prévias");
         let block_candidate = discovery
@@ -1155,32 +1166,36 @@ mod tests {
             .expect("candidato do bloco conhecido");
         let artifact = &block_candidate.previews[0];
         let png_bytes = fs::read(&artifact.path).expect("png legível");
-
-        // Decodificação independente: cada célula (tile) tem 8×8 px ×2 de
-        // escala; o pixel central da célula t deve ser o tom uniforme do
-        // tile (índice × 17).
         let decoded = image::load_from_memory(&png_bytes).expect("png decodificável");
-        for t in 0..tile_count {
-            let index_value = (t % 8) + 1;
-            let expected_shade = (index_value * 17) as u8;
-            let center_x = (t % 16) * 16 + 8;
-            let center_y = (t / 16) * 16 + 8;
-            let pixel = decoded.get_pixel(center_x as u32, center_y as u32);
-            assert_eq!(
-                pixel[0], expected_shade,
-                "tile {t}: tom esperado {expected_shade}"
-            );
-        }
 
-        // Borda do PRIMEIRO tile: pixel (1,1) e (14,14) na célula 0 também
-        // têm o tom (toda a célula é uniforme).
-        assert_eq!(decoded.get_pixel(1u32, 1u32)[0], 17);
-        assert_eq!(decoded.get_pixel(14u32, 14u32)[0], 17);
-
-        // Limites: grade fixa de 16 colunas (8 px × escala 2 = 16 px por
-        // célula), 1 linha para 8 tiles.
+        // Grade fixa: 16 colunas, células de 8 px × escala 2 = 16 px.
         assert_eq!(decoded.width(), 16 * 16);
+        // 8 tiles → 1 linha de células → altura 16 px.
         assert_eq!(decoded.height(), 16);
+
+        // COMPARAÇÃO DE TODOS OS PIXELS: para cada tile t, cada pixel
+        // (py, px), todos os 4 subpixels da escala 2 devem ter o tom
+        // esperado (valor do nibble × 17).
+        for t in 0..tile_count {
+            for py in 0..8usize {
+                for px in 0..8usize {
+                    let expected = (pixel_value(t, py, px) * 17) as u8;
+                    let base_x = ((t % 16) * 16 + px * 2) as u32;
+                    let base_y = (py * 2) as u32;
+                    for sx in 0..2u32 {
+                        for sy in 0..2u32 {
+                            let pixel = decoded.get_pixel(base_x + sx, base_y + sy);
+                            assert_eq!(
+                                pixel[0], expected,
+                                "tile {t} pixel ({px},{py}): tom {expected}"
+                            );
+                            assert_eq!(pixel[1], expected);
+                            assert_eq!(pixel[2], expected);
+                        }
+                    }
+                }
+            }
+        }
 
         let _ = std::fs::remove_dir_all(&work);
     }
