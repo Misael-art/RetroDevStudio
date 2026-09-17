@@ -2,6 +2,8 @@
 
 ### REX-04 holdout — revisão do P1 de #66 (2026-09-16)
 
+Commit final publicado: `c8eed22` em `codex/rex04-fatia3` (base revisada `10c89d1`).
+
 No worktree `codex/import-decomp-review`, o HEAD inicial `10c89d1` continha o holdout com seleção vacuamente vazia nas regiões `padrao_codigolike`, `padrao_audiolike` e `padrao_comprimidolike`, além de um gate denso substituído por `false`. A correção em `holdout.rs` tornou os tipos proibidos explícitos, exigiu intervalo válido e interseção real antes de contar candidatos, preservou cobertura por união e protegeu somas de offsets contra overflow. O requisito denso voltou a `coverage >= 0.50`; a falha atual de 0,0% é registrada como `known_limitation`, não como sucesso nem como teste fixado em zero.
 
 Regressões focadas provam falsos positivos dentro/fora/adjacentes/parciais, sobreposição sem dupla contagem, detector “tudo tile” e limites aritméticos. A medição reproduzida encontrou 1 candidato real sobre `padrao_audiolike`; portanto o agregado permanece reprovado, como deve. A rodada passou com holdout 9/9, frontend 614/6, Rust 598/40, clippy, fmt, lint, TypeScript e check:tree; host diagnose `READY`. Não houve reexecução de provas ROM reais, host:certify ou merge; renderer MD e paletas aceitos foram preservados. Status: **Experimental**, qualidade dos densos e do negativo de áudio ainda não aceita.

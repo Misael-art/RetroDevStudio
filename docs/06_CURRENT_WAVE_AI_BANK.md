@@ -1,5 +1,7 @@
 ### Estado corrente — 2026-09-16: REX-04 fatia 3 — holdout P1 corrigido, qualidade ainda reprovada
 
+Commit final publicado: `c8eed22` em `codex/rex04-fatia3` (base revisada `10c89d1`).
+
 No worktree `codex/import-decomp-review`, partindo de `10c89d1`, o holdout de #66 foi corrigido em `src-tauri/src/tools/reverse/decomp/holdout.rs` sem alterar as correções já aceitas de renderer MD ou paletas. `measure_holdout` agora define explicitamente os tipos gráficos proibidos nas três regiões negativas, conta somente candidatos com intervalo válido e interseção real, usa união de intervalos para cobertura e evita overflow aritmético. `CategoryMeasurement.known_limitation` é aditivo e compatível com relatórios antigos via `serde(default)`.
 
 Regressões novas cobrem: candidato dentro de cada negativo, candidato fora, intervalo adjacente, sobreposição parcial, candidatos gráficos sobrepostos sem cobertura duplicada, detector artificial que marca tudo como tile e intervalos que estourariam `u64`. O gate de densos voltou a ser numérico (`cobertura >= 0.50`); o baseline atual mede **0,0%**, permanece reprovado e é marcado como limitação conhecida, sem fixar o teste em zero para não bloquear melhoria parcial futura. A execução do holdout também revelou um falso positivo real na região `padrao_audiolike` (1 candidato sobreposto); o relatório não declara todos os gates atendidos.
