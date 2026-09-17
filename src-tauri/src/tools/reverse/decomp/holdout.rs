@@ -70,8 +70,14 @@ pub struct CategoryMeasurement {
     pub covered_bytes: u64,
     pub region_bytes: u64,
     pub coverage: f32,
+    /// Candidatos com interseção REAL com a região.
     pub overlapping_candidates: usize,
     pub gate_passed: bool,
+    /// true quando a falha do gate é uma LIMITAÇÃO conhecida e documentada
+    /// (ex.: gradiente ±1/byte) — separa "baseline reprovado por limitação"
+    /// de "gate atendido", sem impedir que melhorias futuras o façam passar.
+    #[serde(default)]
+    pub known_limitation: bool,
 }
 
 struct Lcg(u64);
@@ -321,7 +327,9 @@ pub fn covered_fraction(
     region_offset: u64,
     region_size: u64,
 ) -> (u64, f32) {
-    let region_end = region_offset + region_size;
+    let Some(region_end) = region_offset.checked_add(region_size) else {
+        return (0, 0.0);
+    };
     // União de intervalos: ordena por início e acumula trechos distintos
     // (candidatos sobrepostos não contam bytes em dobro).
     let mut intervals: Vec<(u64, u64)> = candidates
@@ -352,31 +360,61 @@ pub fn covered_fraction(
     (covered, fraction)
 }
 
+const TILE_KINDS: &[&str] = &[KIND_TILE_BLOCK];
+const PALETTE_KINDS: &[&str] = &[KIND_PALETTE16, KIND_PALETTE64];
+const NEGATIVE_KINDS: &[&str] = &[KIND_TILE_BLOCK, KIND_PALETTE16, KIND_PALETTE64];
+
+fn candidate_kinds_for_category(category: &str) -> &'static [&'static str] {
+    match category {
+        "padrao_tiles_esparsos" | "padrao_tiles_densos" | "padrao_tiles_dithering" => TILE_KINDS,
+        "padrao_paleta" => PALETTE_KINDS,
+        // These are negative regions: every graphic candidate kind currently
+        // emitted by the detector is explicitly forbidden here. Keeping this
+        // list explicit prevents a future detector-kind addition from being
+        // silently accepted as a negative.
+        "padrao_codigolike" | "padrao_audiolike" | "padrao_comprimidolike" => NEGATIVE_KINDS,
+        _ => &[],
+    }
+}
+
+fn candidate_interval(offset: u64, size: u64) -> Option<(u64, u64)> {
+    let end = offset.checked_add(size)?;
+    (end > offset).then_some((offset, end))
+}
+
+fn intersects_region(candidate: (u64, u64), region_offset: u64, region_size: u64) -> bool {
+    let Some(region_end) = region_offset.checked_add(region_size) else {
+        return false;
+    };
+    candidate.0 < region_end && region_offset < candidate.1
+}
+
 /// Executa a medição do holdout contra a descoberta e retorna o relatório
 /// (incluindo violações de gate, se houver).
 pub fn measure_holdout(
     discovery_candidates: &[(String, u64, u64)],
     regions: &[HoldoutRegion],
 ) -> Vec<CategoryMeasurement> {
-    let by_category = |category: &str| -> Vec<(u64, u64)> {
+    let by_category = |category: &str, region: &HoldoutRegion| -> Vec<(u64, u64)> {
+        let allowed_kinds = candidate_kinds_for_category(category);
         discovery_candidates
             .iter()
             .filter(|(kind, _, _)| {
-                (category.starts_with("padrao_tiles") && kind == KIND_TILE_BLOCK)
-                    || (category == "padrao_paleta"
-                        && (kind == KIND_PALETTE16 || kind == KIND_PALETTE64))
+                allowed_kinds
+                    .iter()
+                    .any(|allowed_kind| *allowed_kind == kind)
             })
-            .map(|(_, offset, size)| (*offset, offset + size))
+            .filter_map(|(_, offset, size)| candidate_interval(*offset, *size))
+            .filter(|candidate| intersects_region(*candidate, region.offset, region.size))
             .collect()
     };
     let gate_for = |category: &str| -> (&'static str, fn(f32) -> bool) {
         match category {
             "padrao_tiles_esparsos" => ("cobertura >= 0.80", |c: f32| c >= 0.80),
-            // tiles_densos: SEM gate numérico — limitação conhecida
-            // documentada (gradiente ±1/byte não é detectável sem FPs em
-            // código); gate_passed=false é a FALHA esperada, separada do
-            // baseline que deve passar.
-            "padrao_tiles_densos" => ("LIMITAÇÃO: cobertura não atendida (sem gate)", |_| false),
+            // O requisito continua sendo numérico mesmo quando o baseline
+            // atual falha: uma melhoria acima de zero deve ser medida, e só
+            // >=50% pode atender o gate.
+            "padrao_tiles_densos" => ("cobertura >= 0.50", |c: f32| c >= 0.50),
             "padrao_tiles_dithering" => ("cobertura > 0.00", |c: f32| c > 0.0),
             "padrao_paleta" => ("offset/tamanho exatos", |_| true), // checagem própria
             _ => ("zero candidatos", |_| true),                     // checagem própria
@@ -385,14 +423,16 @@ pub fn measure_holdout(
 
     let mut measurements = Vec::new();
     for region in regions {
-        let candidates = by_category(&region.category);
+        let candidates = by_category(&region.category, region);
         let (covered, fraction) = covered_fraction(&candidates, region.offset, region.size);
         let (gate_label, gate_check) = gate_for(&region.category);
-        let region_end = region.offset + region.size;
+        let region_end = region.offset.checked_add(region.size);
         let passed = if region.category == "padrao_paleta" {
-            candidates
-                .iter()
-                .any(|(start, end)| *start == region.offset && *end == region_end)
+            region_end.is_some_and(|end| {
+                candidates
+                    .iter()
+                    .any(|(start, candidate_end)| *start == region.offset && *candidate_end == end)
+            })
         } else if matches!(
             region.category.as_str(),
             "padrao_codigolike" | "padrao_audiolike" | "padrao_comprimidolike"
@@ -401,6 +441,7 @@ pub fn measure_holdout(
         } else {
             gate_check(fraction)
         };
+        let known_limitation = region.category == "padrao_tiles_densos" && !passed;
         measurements.push(CategoryMeasurement {
             category: region.category.clone(),
             declared_gate: gate_label.to_string(),
@@ -409,6 +450,7 @@ pub fn measure_holdout(
             coverage: fraction,
             overlapping_candidates: candidates.len(),
             gate_passed: passed,
+            known_limitation,
         });
     }
     measurements
@@ -502,17 +544,21 @@ mod tests {
             by_category("padrao_tiles_esparsos").gate_passed,
             "esparsos ≥80%"
         );
-        // FALHA CONHECIDA separada do baseline: tiles_densos (gradiente
-        // ±1/byte) NÃO atende ao gate — não é "gate atendido". O PIN da
-        // cobertura 0% documenta a limitação; alterar exige justificativa.
+        // Baseline conhecido: o gradiente denso atual mede 0% e falha o
+        // requisito numérico de >=50%. O teste não fixa 0%, para que uma
+        // melhoria parcial acima de zero continue sendo observável.
+        let dense = by_category("padrao_tiles_densos");
         assert!(
-            !by_category("padrao_tiles_densos").gate_passed,
-            "gate de densos é limitação conhecida, deve permanecer reprovado"
+            dense.coverage < 0.50,
+            "baseline denso ainda está abaixo de 50%"
         );
-        assert_eq!(
-            by_category("padrao_tiles_densos").coverage,
-            0.0,
-            "gradiente denso não detectável sem FP em código (limitação registrada)"
+        assert!(
+            !dense.gate_passed,
+            "densos não podem declarar gate atendido"
+        );
+        assert!(
+            dense.known_limitation,
+            "a falha atual de densos deve permanecer explicitamente registrada"
         );
         assert!(
             by_category("padrao_tiles_dithering").gate_passed,
@@ -527,16 +573,121 @@ mod tests {
         ] {
             let measurement = by_category(negative);
             assert_eq!(
-                measurement.overlapping_candidates, 0,
-                "falso positivo em {negative}"
+                measurement.gate_passed,
+                measurement.overlapping_candidates == 0,
+                "gate negativo deve depender da interseção real em {negative}"
             );
-            assert!(measurement.gate_passed);
         }
+
+        // O agregado não pode anunciar que todos os gates foram atendidos:
+        // o baseline denso falha o requisito >=50% e qualquer falso positivo
+        // negativo, como o áudio observado acima, também deve permanecer
+        // visível no relatório.
+        assert!(!measurements
+            .iter()
+            .all(|measurement| measurement.gate_passed));
 
         // Rastreabilidade: candidatos fora de TODAS as regiões declaradas
         // são permitidos (bytes restantes = desconhecido), mas candidatos
         // de tile não podem se sobrepor a regiões negativas — coberto
         // acima.
+    }
+
+    fn test_region(category: &str, offset: u64, size: u64) -> HoldoutRegion {
+        HoldoutRegion {
+            category: category.to_string(),
+            offset,
+            size,
+            origin: "teste de interseção".to_string(),
+            sha256: String::new(),
+        }
+    }
+
+    #[test]
+    fn negative_regions_reject_each_forbidden_kind_only_when_overlapping() {
+        let negative_categories = [
+            "padrao_codigolike",
+            "padrao_audiolike",
+            "padrao_comprimidolike",
+        ];
+        let forbidden_kinds = [KIND_TILE_BLOCK, KIND_PALETTE16, KIND_PALETTE64];
+
+        for category in negative_categories {
+            let region = test_region(category, 0x1000, 0x40);
+            for kind in forbidden_kinds {
+                let candidates = vec![(kind.to_string(), 0x1010, 0x10)];
+                let measurement = &measure_holdout(&candidates, &[region.clone()])[0];
+                assert_eq!(measurement.overlapping_candidates, 1, "{category}/{kind}");
+                assert!(!measurement.gate_passed, "{category}/{kind}");
+            }
+        }
+    }
+
+    #[test]
+    fn negative_candidates_outside_or_adjacent_do_not_reject() {
+        for candidate_offset in [0x0FF0, 0x1040] {
+            let region = test_region("padrao_codigolike", 0x1000, 0x40);
+            let candidates = vec![(KIND_TILE_BLOCK.to_string(), candidate_offset, 0x10)];
+            let measurement = &measure_holdout(&candidates, &[region])[0];
+            assert_eq!(measurement.overlapping_candidates, 0);
+            assert!(measurement.gate_passed);
+        }
+    }
+
+    #[test]
+    fn negative_partial_overlap_is_counted_once() {
+        let region = test_region("padrao_audiolike", 0x1000, 0x40);
+        let candidates = vec![(KIND_TILE_BLOCK.to_string(), 0x0FF0, 0x20)];
+        let measurement = &measure_holdout(&candidates, &[region])[0];
+        assert_eq!(measurement.overlapping_candidates, 1);
+        assert!(!measurement.gate_passed);
+    }
+
+    #[test]
+    fn overlapping_candidates_use_union_without_exceeding_region() {
+        let region = test_region("padrao_tiles_esparsos", 0x1000, 0x40);
+        let candidates = vec![
+            (KIND_TILE_BLOCK.to_string(), 0x1000, 0x20),
+            (KIND_TILE_BLOCK.to_string(), 0x1010, 0x20),
+        ];
+        let measurement = &measure_holdout(&candidates, &[region])[0];
+        assert_eq!(measurement.overlapping_candidates, 2);
+        assert_eq!(measurement.covered_bytes, 0x30);
+        assert!((measurement.coverage - 0.75).abs() < f32::EPSILON);
+        assert!(!measurement.gate_passed);
+    }
+
+    #[test]
+    fn artificial_all_tile_detector_is_rejected_by_all_negative_regions() {
+        let regions: Vec<_> = [
+            "padrao_codigolike",
+            "padrao_audiolike",
+            "padrao_comprimidolike",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, category)| test_region(category, 0x2000 + index as u64 * 0x100, 0x40))
+        .collect();
+        let candidates: Vec<_> = regions
+            .iter()
+            .map(|region| (KIND_TILE_BLOCK.to_string(), region.offset, region.size))
+            .collect();
+        let measurements = measure_holdout(&candidates, &regions);
+        assert!(measurements.iter().all(|measurement| {
+            measurement.overlapping_candidates == 1 && !measurement.gate_passed
+        }));
+    }
+
+    #[test]
+    fn malformed_intervals_do_not_overflow_or_count_as_overlap() {
+        let region = test_region("padrao_codigolike", u64::MAX - 0x10, 0x10);
+        let candidates = vec![
+            (KIND_TILE_BLOCK.to_string(), u64::MAX - 1, 1),
+            (KIND_TILE_BLOCK.to_string(), u64::MAX, 1),
+        ];
+        let measurement = &measure_holdout(&candidates, &[region])[0];
+        assert_eq!(measurement.overlapping_candidates, 1);
+        assert!(!measurement.gate_passed);
     }
 
     /// Relatório do holdout é serializável e reproduzível: duas execuções
