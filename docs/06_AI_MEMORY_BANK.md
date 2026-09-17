@@ -1,5 +1,13 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### REX-04 fatia 4 — oráculo externo de paleta em andamento (2026-09-17)
+
+Fatia autorizada após a PR #67, isolada na branch dependente `codex/rex04-fatia4-palette-oracle`; a PR #67 permanece aberta e sem merge. A mudança não usa `palette_ref*.png` como verdade: classifica somente payloads independentes de símbolos compilados com sufixo exato `_palette_data`, preserva extensões mínimas de 32B e mede a cobertura por união de intervalos para não contar candidatos sobrepostos duas vezes. O restante do inventário continua conservador: entradas menores que 512B e sem prova de paleta permanecem fora dos oráculos.
+
+Provas BYOR reais reexecutadas com os hashes canônicos HAMOOPIG `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9` e Taiketsu `3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c`. Taiketsu gerou `rex04-md-gfx-1789653611-0000`: inventário 205, 4 chunks de paleta independentes a 100%, 5 chunks de tiles a 100/65,6/100/67,2/53,1%, 4 regiões `EXECINSTR`, 0 regiões não-gráficas, 384 candidatos e 32 previews. HAMOOPIG gerou `rex04-md-gfx-1789653659-0000`: inventário 205, 2 chunks de paleta independentes a 100%, os mesmos 5 resultados de tiles, 4 regiões `EXECINSTR`, 0 regiões não-gráficas, 548 candidatos e 32 previews. Os artefatos foram reutilizados por hash e os runs foram anexados ao ledger sem sobrescrita.
+
+Foi acrescentado teste unitário de união de candidatos sobrepostos; fmt, clippy e o conjunto focado de gráficos passaram (16 passados, 2 provas reais ignoradas nesse comando). A bateria completa passou: check:tree, lint, TypeScript, npm 614/6, Rust 603/40, clippy, fmt e `host:certify` com upstream SGDK/PVSnesLib `Success: true` e host `READY`. Limitação explícita: os 172 itens `desconhecido` de cada inventário continuam desconhecidos; 6 paletas localizadas não representam recall global nem extração completa. Status permanece **Experimental**. Próximo passo: registrar o commit e publicar PR dependente, sem merge e sem iniciar nova fatia.
+
 ### REX-04 follow-up — holdout fechado e falso positivo de áudio removido (2026-09-17)
 
 Follow-up dependente de `ba637cf` (PR #66 permanece sem merge): branch `codex/rex04-fatia3-followup`, código `b199f79`. O holdout não exige mais o valor histórico denso de 0,0%; `HISTORICAL_DENSE_BASELINE_COVERAGE` é apenas evidência, enquanto o gate continua `coverage >= 0.50`. A medição agora registra `invalid_candidates` e reprova entradas inválidas, sem descarte silencioso. Testes independentes cobrem abaixo/exato/acima do limiar.

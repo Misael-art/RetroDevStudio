@@ -1745,8 +1745,9 @@ mod tests {
         /// - `Tiles`: tiles 4bpp COMPROVADOS — recurso gráfico declarado +
         ///   símbolo de DADOS de tileset (`<recurso>..._tileset_data`) +
         ///   compressão declarada NONE (bytes brutos verificados);
-        /// - `Other`: outro conteúdo COMPROVADO NÃO-tile (paleta de recurso
-        ///   gráfico);
+        /// - `Palettes`: payloads de paleta de recurso gráfico, preservados
+        ///   como oráculo positivo separado dos tiles;
+        /// - `Other`: outro conteúdo COMPROVADO NÃO-gráfico;
         /// - `Unknown`: compressão não-NONE/desconhecida (bytes comprimidos
         ///   não são tiles brutos), descritores, recurso BIN (pode conter
         ///   dados gráficos brutos — não prova ausência), structs/metadata/
@@ -1761,6 +1762,7 @@ mod tests {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum ProvenClass {
         Tiles,
+        Palettes,
         Other,
         Unknown,
     }
@@ -1769,6 +1771,7 @@ mod tests {
         fn label(&self) -> &'static str {
             match self {
                 ProvenClass::Tiles => "tiles_4bpp_comprovado",
+                ProvenClass::Palettes => "paleta_16bit_comprovada",
                 ProvenClass::Other => "outro_conteudo_comprovado",
                 ProvenClass::Unknown => "desconhecido",
             }
@@ -1779,10 +1782,11 @@ mod tests {
     /// recurso declarado somente se for igual ou o restante do nome começa
     /// com `_` (impede `spr_point2` casar com `spr_point`). Classe de prova
     /// pelo restante do nome + tipo declarado:
+    /// - restante termina em `_palette_data` e o tipo é gráfico → Palettes
+    ///   (payload de paleta independente);
     /// - restante contém `tileset` e o tipo é gráfico → Tiles (dados 4bpp
     ///   comprovados);
-    /// - restante contém `palette` → Other (paleta comprovada — conteúdo
-    ///   NÃO-tile);
+    /// - um descritor de paleta sem payload exato → Unknown;
     /// - tipo declarado não-gráfico (BIN/XGM/WAV/...) → Other (conteúdo
     ///   comprovado não-gráfico);
     /// - todo o resto (structs, metadata, sem declaração) → Unknown.
@@ -1804,7 +1808,10 @@ mod tests {
                 // restante do nome deve terminar exatamente em
                 // `_tileset_data` (descritores terminam em `_tileset`).
                 let is_tileset_payload = remainder.ends_with("_tileset_data");
-                if graphic && is_tileset_payload {
+                let is_palette_payload = remainder.ends_with("_palette_data");
+                if graphic && is_palette_payload {
+                    (decl.declared_type.clone(), ProvenClass::Palettes)
+                } else if graphic && is_tileset_payload {
                     // Tiles comprovados exigem compressão declarada NONE:
                     // bytes comprimidos (BEST/FAST) ou compressão não
                     // declarada NÃO são tiles brutos verificados → Unknown.
@@ -1832,7 +1839,8 @@ mod tests {
     /// COMPILADOS do doador com as declarações do `.res`. Cada entrada
     /// registra objeto, símbolo, tipo declarado, flag gráfico, intervalo no
     /// objeto (extensão = próximo símbolo na mesma seção, senão fim da
-    /// seção) e SHA-256 dos bytes. Extensões < 512B são ignoradas.
+    /// seção) e SHA-256 dos bytes. Extensões < 512B são ignoradas, exceto
+    /// payloads de paleta com mínimo de 32B.
     fn build_graphic_inventory(
         donor_objects: &[(String, Vec<u8>)],
         res_decls: &[ResDecl],
@@ -1863,6 +1871,7 @@ mod tests {
                 if section.section_type != ELF_SECTION_PROGBITS {
                     continue;
                 }
+                let (declared_type, proven) = classify_symbol(&symbol.name, res_decls);
                 let value = symbol.value as usize;
                 let mut extent = section.size.saturating_sub(value);
                 if let Some(values) = by_shndx.get(&symbol.shndx) {
@@ -1873,14 +1882,21 @@ mod tests {
                         }
                     }
                 }
-                if extent < 512 {
+                // Payloads de paleta são pequenos por natureza (16 palavras MD);
+                // tiles e entradas desconhecidas continuam exigindo uma janela
+                // substantiva de 512B.
+                let minimum_extent = if proven == ProvenClass::Palettes {
+                    32
+                } else {
+                    512
+                };
+                if extent < minimum_extent {
                     continue;
                 }
                 let range_start = section.file_offset + value;
                 if range_start + extent > payload.len() {
                     continue;
                 }
-                let (declared_type, proven) = classify_symbol(&symbol.name, res_decls);
                 entries.push(InventoryEntry {
                     object: object_name.clone(),
                     symbol: symbol.name.clone(),
@@ -1893,6 +1909,80 @@ mod tests {
             }
         }
         entries
+    }
+
+    fn candidate_coverage(
+        candidates: &[GraphicCandidate],
+        kinds: &[&str],
+        offset: u64,
+        length: u64,
+    ) -> f32 {
+        if length == 0 {
+            return 0.0;
+        }
+        let end = offset.saturating_add(length);
+        let mut intervals: Vec<(u64, u64)> = candidates
+            .iter()
+            .filter(|candidate| kinds.contains(&candidate.kind.as_str()))
+            .filter_map(|candidate| {
+                let candidate_end = candidate.offset.checked_add(candidate.size)?;
+                let lo = candidate.offset.max(offset);
+                let hi = candidate_end.min(end);
+                (hi > lo).then_some((lo, hi))
+            })
+            .collect();
+        intervals.sort_unstable();
+        let mut covered = 0u64;
+        let mut merged_end = offset;
+        for (lo, hi) in intervals {
+            if lo > merged_end {
+                covered = covered.saturating_add(hi - lo);
+            } else if hi > merged_end {
+                covered = covered.saturating_add(hi - merged_end);
+            }
+            merged_end = merged_end.max(hi);
+        }
+        covered as f32 / length as f32
+    }
+
+    #[test]
+    fn candidate_coverage_merges_overlapping_candidates() {
+        let candidates = vec![
+            GraphicCandidate {
+                offset: 0x1000,
+                size: 16,
+                kind: KIND_PALETTE16.to_string(),
+                status: "candidate".to_string(),
+                method: "test".to_string(),
+                confidence: 0.5,
+                evidence: serde_json::json!({}),
+                previews: Vec::new(),
+            },
+            GraphicCandidate {
+                offset: 0x1008,
+                size: 16,
+                kind: KIND_PALETTE16.to_string(),
+                status: "candidate".to_string(),
+                method: "test".to_string(),
+                confidence: 0.5,
+                evidence: serde_json::json!({}),
+                previews: Vec::new(),
+            },
+            GraphicCandidate {
+                offset: 0x1000,
+                size: 32,
+                kind: KIND_TILE_BLOCK.to_string(),
+                status: "candidate".to_string(),
+                method: "test".to_string(),
+                confidence: 0.5,
+                evidence: serde_json::json!({}),
+                previews: Vec::new(),
+            },
+        ];
+        let palette_coverage = candidate_coverage(&candidates, &[KIND_PALETTE16], 0x1000, 32);
+        assert!((palette_coverage - 0.75).abs() < f32::EPSILON);
+        let tile_coverage = candidate_coverage(&candidates, &[KIND_TILE_BLOCK], 0x1000, 32);
+        assert!((tile_coverage - 1.0).abs() < f32::EPSILON);
     }
 
     /// Confronto com ORÁCULOS INDEPENDENTES do detector (revisões de
@@ -1958,7 +2048,16 @@ mod tests {
         // (a extensão contígua atravessaria conteúdo divergente entre o
         // build do doador e a ROM de referência).
         let mut located: Vec<(u64, usize, usize)> = Vec::new(); // (rom_off, len, idx)
+        let mut palette_located: Vec<(u64, usize, usize)> = Vec::new();
         for (index, entry) in inventory.iter().enumerate() {
+            if entry.proven == ProvenClass::Palettes {
+                for chunk in entry.data.chunks_exact(32) {
+                    if let Some(rom_offset) = find_sub(chunk, bytes) {
+                        palette_located.push((rom_offset as u64, chunk.len(), index));
+                    }
+                }
+                continue;
+            }
             if entry.data.len() < 512 {
                 continue;
             }
@@ -1974,6 +2073,12 @@ mod tests {
         eprintln!(
             "{test_name}: chunks de recurso conhecidos localizados na ROM (512B): {}",
             located.len()
+        );
+        palette_located.sort();
+        palette_located.dedup();
+        eprintln!(
+            "{test_name}: chunks de paleta independentes localizados na ROM (32B): {}",
+            palette_located.len()
         );
 
         // ---- POSITIVO: chunks de TILES 4bpp COMPROVADOS ----
@@ -1992,19 +2097,12 @@ mod tests {
             if entry.proven != ProvenClass::Tiles {
                 continue;
             }
-            let region_end = rom_offset + *matched as u64;
-            let mut covered = 0u64;
-            for candidate in &discovery.candidates {
-                if candidate.kind != KIND_TILE_BLOCK {
-                    continue;
-                }
-                let lo = candidate.offset.max(*rom_offset);
-                let hi = (candidate.offset + candidate.size).min(region_end);
-                if hi > lo {
-                    covered += hi - lo;
-                }
-            }
-            let fraction = covered as f32 / *matched as f32;
+            let fraction = candidate_coverage(
+                &discovery.candidates,
+                &[KIND_TILE_BLOCK],
+                *rom_offset,
+                *matched as u64,
+            );
             tile_chunk_results.push(serde_json::json!({
                 "symbol": entry.symbol,
                 "rom_offset": rom_offset,
@@ -2037,6 +2135,48 @@ mod tests {
                 poor_coverage, 0,
                 "chunks de tiles comprovados devem estar ≥50% cobertos por \
                  candidatos (localização e extração substantivas)"
+            );
+        }
+
+        // ---- POSITIVO: paletas de payload INDEPENDENTE ----
+        // O scanner não é a fonte de verdade: os bytes vêm dos símbolos
+        // `_palette_data` dos objetos compilados e são localizados verbatim
+        // na ROM em chunks canônicos de 32B (16 palavras MD). Isso permite
+        // medir candidatos de paleta sem circularidade e sem confundir uma
+        // paleta com o negativo de conteúdo não-gráfico.
+        let mut palette_chunk_results: Vec<serde_json::Value> = Vec::new();
+        let mut poor_palette_coverage = 0usize;
+        for (rom_offset, matched, index) in &palette_located {
+            let fraction = candidate_coverage(
+                &discovery.candidates,
+                &[KIND_PALETTE16, KIND_PALETTE64],
+                *rom_offset,
+                *matched as u64,
+            );
+            palette_chunk_results.push(serde_json::json!({
+                "symbol": inventory[*index].symbol,
+                "rom_offset": rom_offset,
+                "coverage": fraction,
+            }));
+            eprintln!(
+                "{test_name}: paleta comprovada {} em 0x{rom_offset:X}: cobertura {:.1}%",
+                inventory[*index].symbol,
+                fraction * 100.0
+            );
+            if fraction < 0.5 {
+                poor_palette_coverage += 1;
+            }
+        }
+        if donor_objects.is_empty() {
+            eprintln!("{test_name}: sem objetos do doador — positivo de paleta ignorado");
+        } else {
+            assert!(
+                !palette_located.is_empty(),
+                "com objetos do doador, esperava ≥1 paleta comprovada localizada na ROM"
+            );
+            assert_eq!(
+                poor_palette_coverage, 0,
+                "chunks de paleta comprovados devem estar ≥50% cobertos por candidatos"
             );
         }
 
@@ -2156,6 +2296,7 @@ mod tests {
                 })
             }).collect::<Vec<_>>(),
             "tile_chunks": tile_chunk_results,
+            "palette_chunks": palette_chunk_results,
         });
         let (run_id, artifact) = record_discovery_run(&work, &discovery, confrontation_evidence)
             .expect("run no ledger real");
@@ -2206,10 +2347,10 @@ BIN snd_xgm \"sound/xgm.bin\" 2 2 0 NONE FALSE\n";
         assert_eq!(t2, "SPRITE");
         assert_eq!(p2, ProvenClass::Tiles);
 
-        // paleta de recurso gráfico = OUTRO conteúdo comprovado (não-tile).
+        // paleta de recurso gráfico = oráculo positivo separado dos tiles.
         let (t3, p3) = classify_symbol("spr_point_palette_data", &decls);
         assert_eq!(t3, "SPRITE");
-        assert_eq!(p3, ProvenClass::Other);
+        assert_eq!(p3, ProvenClass::Palettes);
 
         // struct do recurso (sem sufixo de dados) = desconhecido.
         let (t4, p4) = classify_symbol("spr_point", &decls);
