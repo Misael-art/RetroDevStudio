@@ -32,6 +32,9 @@ use crate::tools::reverse::loader::RexRomIdentity;
 
 pub const HOLDOUT_SCHEMA_V1: &str = "rex-holdout-validation/v1";
 pub const HOLDOUT_SCENARIO_ID: &str = "rex04-holdout-validation-v1";
+/// Baseline histórico da família densa antes de qualquer melhoria posterior.
+/// É evidência de comparação, não um valor exigido para sempre pelo teste.
+pub const HISTORICAL_DENSE_BASELINE_COVERAGE: f32 = 0.0;
 
 /// Semente base do holdout — DISTINTA de toda semente usada no ajuste da
 /// heurística (fixtures da fatia 2 usam 0x1234_5678_9abc_def0).
@@ -78,6 +81,13 @@ pub struct CategoryMeasurement {
     /// de "gate atendido", sem impedir que melhorias futuras o façam passar.
     #[serde(default)]
     pub known_limitation: bool,
+    /// Cobertura histórica registrada para comparação, sem congelar a atual.
+    #[serde(default)]
+    pub historical_baseline_coverage: Option<f32>,
+    /// Entradas do tipo pertinente cujo intervalo não pôde ser representado.
+    /// Um relatório com valor diferente de zero nunca pode passar o gate.
+    #[serde(default)]
+    pub invalid_candidates: usize,
 }
 
 struct Lcg(u64);
@@ -395,8 +405,10 @@ pub fn measure_holdout(
     discovery_candidates: &[(String, u64, u64)],
     regions: &[HoldoutRegion],
 ) -> Vec<CategoryMeasurement> {
-    let by_category = |category: &str, region: &HoldoutRegion| -> Vec<(u64, u64)> {
+    let by_category = |category: &str, region: &HoldoutRegion| {
         let allowed_kinds = candidate_kinds_for_category(category);
+        let mut invalid_candidates = 0usize;
+        let mut candidates = Vec::new();
         discovery_candidates
             .iter()
             .filter(|(kind, _, _)| {
@@ -404,9 +416,16 @@ pub fn measure_holdout(
                     .iter()
                     .any(|allowed_kind| *allowed_kind == kind)
             })
-            .filter_map(|(_, offset, size)| candidate_interval(*offset, *size))
-            .filter(|candidate| intersects_region(*candidate, region.offset, region.size))
-            .collect()
+            .for_each(|(_, offset, size)| {
+                let Some(candidate) = candidate_interval(*offset, *size) else {
+                    invalid_candidates += 1;
+                    return;
+                };
+                if intersects_region(candidate, region.offset, region.size) {
+                    candidates.push(candidate);
+                }
+            });
+        (candidates, invalid_candidates)
     };
     let gate_for = |category: &str| -> (&'static str, fn(f32) -> bool) {
         match category {
@@ -423,11 +442,13 @@ pub fn measure_holdout(
 
     let mut measurements = Vec::new();
     for region in regions {
-        let candidates = by_category(&region.category, region);
+        let (candidates, invalid_candidates) = by_category(&region.category, region);
         let (covered, fraction) = covered_fraction(&candidates, region.offset, region.size);
         let (gate_label, gate_check) = gate_for(&region.category);
         let region_end = region.offset.checked_add(region.size);
-        let passed = if region.category == "padrao_paleta" {
+        let passed = if region_end.is_none() || invalid_candidates > 0 {
+            false
+        } else if region.category == "padrao_paleta" {
             region_end.is_some_and(|end| {
                 candidates
                     .iter()
@@ -441,7 +462,10 @@ pub fn measure_holdout(
         } else {
             gate_check(fraction)
         };
-        let known_limitation = region.category == "padrao_tiles_densos" && !passed;
+        let known_limitation = region.category == "padrao_tiles_densos"
+            && !passed
+            && invalid_candidates == 0
+            && region_end.is_some();
         measurements.push(CategoryMeasurement {
             category: region.category.clone(),
             declared_gate: gate_label.to_string(),
@@ -451,6 +475,9 @@ pub fn measure_holdout(
             overlapping_candidates: candidates.len(),
             gate_passed: passed,
             known_limitation,
+            historical_baseline_coverage: (region.category == "padrao_tiles_densos")
+                .then_some(HISTORICAL_DENSE_BASELINE_COVERAGE),
+            invalid_candidates,
         });
     }
     measurements
@@ -544,26 +571,20 @@ mod tests {
             by_category("padrao_tiles_esparsos").gate_passed,
             "esparsos ≥80%"
         );
-        // Baseline conhecido: o gradiente denso atual mede 0% e falha o
-        // requisito numérico de >=50%. O teste não fixa 0%, para que uma
-        // melhoria parcial acima de zero continue sendo observável.
+        // A medição atual é comparada com o baseline histórico sem congelar
+        // a cobertura atual em 0%.
         let dense = by_category("padrao_tiles_densos");
-        assert!(
-            dense.coverage < 0.50,
-            "baseline denso ainda está abaixo de 50%"
+        assert_eq!(
+            dense.historical_baseline_coverage,
+            Some(HISTORICAL_DENSE_BASELINE_COVERAGE)
         );
         assert!(
-            !dense.gate_passed,
-            "densos não podem declarar gate atendido"
+            dense.gate_passed == (dense.coverage >= 0.50),
+            "gate denso deve refletir numericamente a cobertura atual"
         );
-        assert!(
-            dense.known_limitation,
-            "a falha atual de densos deve permanecer explicitamente registrada"
-        );
-        assert!(
-            by_category("padrao_tiles_dithering").gate_passed,
-            "dithering >0 (limitação conhecida, medida)"
-        );
+        assert_eq!(dense.invalid_candidates, 0);
+        assert_eq!(dense.known_limitation, !dense.gate_passed);
+        assert!(by_category("padrao_tiles_dithering").gate_passed);
         assert!(by_category("padrao_paleta").gate_passed, "paleta exata");
 
         for negative in [
@@ -579,18 +600,39 @@ mod tests {
             );
         }
 
-        // O agregado não pode anunciar que todos os gates foram atendidos:
-        // o baseline denso falha o requisito >=50% e qualquer falso positivo
-        // negativo, como o áudio observado acima, também deve permanecer
-        // visível no relatório.
-        assert!(!measurements
-            .iter()
-            .all(|measurement| measurement.gate_passed));
-
         // Rastreabilidade: candidatos fora de TODAS as regiões declaradas
         // são permitidos (bytes restantes = desconhecido), mas candidatos
         // de tile não podem se sobrepor a regiões negativas — coberto
         // acima.
+    }
+
+    #[test]
+    fn audio_region_rejects_graphic_candidates() {
+        let (rom, regions) = build_holdout_rom();
+        let identity = rex_identify_bytes(&rom).expect("ROM sintética identificável");
+        let catalog =
+            crate::tools::reverse::decomp::extract::build_md_extraction_catalog(&identity, &rom)
+                .expect("catálogo");
+        let catalog_json = serde_json::to_vec_pretty(&catalog).expect("serialização");
+        let discovery = discover_graphic_candidates(&catalog, &rom, &sha256_hex(&catalog_json))
+            .expect("descoberta");
+        let audio = regions
+            .iter()
+            .find(|region| region.category == "padrao_audiolike")
+            .expect("região de áudio");
+        let audio_end = audio.offset + audio.size;
+        let candidates: Vec<_> = discovery
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.offset < audio_end && audio.offset < candidate.offset + candidate.size
+            })
+            .collect();
+        eprintln!("candidatos sobre áudio: {candidates:#?}");
+        assert!(
+            candidates.is_empty(),
+            "candidato gráfico sobre região de áudio: {candidates:#?}"
+        );
     }
 
     fn test_region(category: &str, offset: u64, size: u64) -> HoldoutRegion {
@@ -644,6 +686,22 @@ mod tests {
     }
 
     #[test]
+    fn dense_gate_is_numeric_below_at_and_above_threshold() {
+        for (covered_bytes, expected_passed) in [(49, false), (50, true), (51, true)] {
+            let region = test_region("padrao_tiles_densos", 0x1000, 100);
+            let candidates = vec![(KIND_TILE_BLOCK.to_string(), region.offset, covered_bytes)];
+            let measurement = &measure_holdout(&candidates, &[region])[0];
+            assert_eq!(measurement.coverage, covered_bytes as f32 / 100.0);
+            assert_eq!(measurement.gate_passed, expected_passed);
+            assert_eq!(measurement.known_limitation, !expected_passed);
+            assert_eq!(
+                measurement.historical_baseline_coverage,
+                Some(HISTORICAL_DENSE_BASELINE_COVERAGE)
+            );
+        }
+    }
+
+    #[test]
     fn overlapping_candidates_use_union_without_exceeding_region() {
         let region = test_region("padrao_tiles_esparsos", 0x1000, 0x40);
         let candidates = vec![
@@ -687,6 +745,7 @@ mod tests {
         ];
         let measurement = &measure_holdout(&candidates, &[region])[0];
         assert_eq!(measurement.overlapping_candidates, 1);
+        assert_eq!(measurement.invalid_candidates, 1);
         assert!(!measurement.gate_passed);
     }
 
