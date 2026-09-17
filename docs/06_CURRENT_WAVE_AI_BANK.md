@@ -10,6 +10,8 @@ Gates locais: `check:tree`, lint, TypeScript, npm test 614/6, clippy, cargo test
 
 **Próxima fatia proposta — não iniciada:** avaliação independente da cobertura residual e das ambiguidades do scanner Mega Drive, sem novos consoles/formatos, compressão, lógica, nós, edição, rebuild, IPC ou UI. Critérios de aceite: (1) corpus e divisão ajuste/avaliação congelados por SHA-256, sem usar o holdout para calibrar; (2) baseline por categoria com `unknown` preservado e oráculos externos ao detector; (3) cada regra nova acompanhada de regressão pré-correção, negativos de áudio/código/paleta/esparsos e evidência de que não é apenas ajuste de confiança; (4) HAMOOPIG/Taiketsu reexecutados com intervalos exatos, cobertura por recurso, previews independentes, runs append-only e comparação antes/depois; (5) gates completos, host certificado e status ainda **Experimental**. Só iniciar após aceite da PR #67.
 
+Checkpoint de pré-análise, sem alteração do scanner: nos dois artefatos canônicos há 201 entradas independentes no inventário, 29 `tiles_4bpp_comprovado` e 172 `desconhecido`; cinco chunks de 512B foram localizados, com coberturas 100/65,625/100/67,1875/53,125%. HAMOOPIG tem 548 candidatos (310 `palette16`, 27 `palette64`, 211 tiles) e Taiketsu 384 (229 `palette16`, 27 `palette64`, 128 tiles). Como ainda não há oráculo externo de paleta equivalente, esses totais de candidatos não são precisão/recall; a próxima fatia precisa fechar essa lacuna sem usar o próprio detector como verdade.
+
 ### Estado corrente — 2026-09-16: REX-04 fatia 3 — holdout P1 corrigido, qualidade ainda reprovada
 
 Commit final publicado: `c8eed22` em `codex/rex04-fatia3` (base revisada `10c89d1`).

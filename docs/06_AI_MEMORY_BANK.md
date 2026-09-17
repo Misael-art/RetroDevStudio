@@ -12,6 +12,8 @@ Gates: `check:tree`, lint, TypeScript, npm 614/6, clippy, Rust 602/40, fmt e `ho
 
 Próxima fatia proposta, ainda não iniciada: avaliação independente da cobertura residual e das ambiguidades do scanner Mega Drive. Critérios: corpus e divisão ajuste/avaliação congelados por SHA-256; baseline por categoria com `unknown` preservado e oráculos externos; regressão pré-correção para cada regra nova, incluindo negativos de áudio/código/paleta/esparsos; HAMOOPIG/Taiketsu com intervalos exatos, cobertura por recurso, previews independentes, runs append-only e comparação antes/depois; gates completos e host certificado. Sem novos consoles/formatos, compressão, lógica, nós, edição, rebuild, IPC ou UI. Início somente após aceite da PR #67; status permanece **Experimental**.
 
+Checkpoint de pré-análise, sem alteração do scanner: cada ROM possui 201 entradas no inventário independente, sendo 29 `tiles_4bpp_comprovado` e 172 `desconhecido`; cinco chunks de 512B foram localizados, com coberturas 100/65,625/100/67,1875/53,125%. Os artefatos têm 548 candidatos HAMOOPIG (310 `palette16`, 27 `palette64`, 211 tiles) e 384 Taiketsu (229 `palette16`, 27 `palette64`, 128 tiles). Sem oráculo externo de paleta, esses totais não são precisão/recall; a próxima fatia deve fechar essa lacuna sem circularidade.
+
 ### REX-04 holdout — revisão do P1 de #66 (2026-09-16)
 
 Commit final publicado: `c8eed22` em `codex/rex04-fatia3` (base revisada `10c89d1`).
