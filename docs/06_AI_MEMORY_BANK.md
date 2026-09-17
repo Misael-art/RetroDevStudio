@@ -1,5 +1,15 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### REX-04 follow-up — holdout fechado e falso positivo de áudio removido (2026-09-17)
+
+Follow-up dependente de `ba637cf` (PR #66 permanece sem merge): branch `codex/rex04-fatia3-followup`, código `b199f79`. O holdout não exige mais o valor histórico denso de 0,0%; `HISTORICAL_DENSE_BASELINE_COVERAGE` é apenas evidência, enquanto o gate continua `coverage >= 0.50`. A medição agora registra `invalid_candidates` e reprova entradas inválidas, sem descarte silencioso. Testes independentes cobrem abaixo/exato/acima do limiar.
+
+O falso positivo real reproduzido antes da correção era `tile4bpp_block` em `0x9000..0x9400`, confiança `0.77500004`, 32 tiles duplicados, sobre os bytes periódicos `[00,40,80,C0,FF,C0,80,40]`. A regra generalizável adicionada mantém streams de período curto 2/4/8/16 desconhecidos quando não há evidência espacial; não há exceção por offset, hash, nome ou apenas ajuste de confiança. A região de áudio agora tem zero candidatos. Um holdout independente de gradientes densos variados continua detectável.
+
+Medição sintética: esparsos 100,0%, densos 100,0% contra baseline histórico 0,0%, dithering 98,4%, paleta 100,0%; negativos código/áudio/comprimido 0 candidatos. Provas BYOR reais passaram com os hashes canônicos HAMOOPIG `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9` e Taiketsu `3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c`. Os runs persistidos foram `rex04-md-gfx-1789634056-0000` e `rex04-md-gfx-1789634100-0000`, com 5 chunks de tiles a 100/65,6/100/67,2/53,1%, 4 regiões `EXECINSTR` sem candidatos, 0 não-gráficas e 32 previews por ROM. Comparação de artefatos anteriores: HAMOOPIG 548→548 candidatos (12 intervalos trocados); Taiketsu 389→384 (12 removidos, 7 adicionados), sem quebra dos oráculos.
+
+Gates: `check:tree`, lint, TypeScript, npm 614/6, clippy, Rust 602/40, fmt e `host:certify` verdes; upstream SGDK/PVSnesLib `Success: true`, host `READY`. Estado continua **Experimental**; as provas não autorizam declarar extração completa ou reconstrução por nós.
+
 ### REX-04 holdout — revisão do P1 de #66 (2026-09-16)
 
 Commit final publicado: `c8eed22` em `codex/rex04-fatia3` (base revisada `10c89d1`).

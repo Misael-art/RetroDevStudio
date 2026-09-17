@@ -1,3 +1,13 @@
+### Estado corrente — 2026-09-17: REX-04 fatia 3 — holdout e scanner corrigidos, provas reais verdes
+
+Follow-up dependente de `ba637cf` (PR #66 preservada): branch `codex/rex04-fatia3-followup`, código em `b199f79`. O contrato do holdout deixou de congelar o baseline denso histórico em 0,0%: `HISTORICAL_DENSE_BASELINE_COVERAGE` permanece somente como evidência, o gate continua sendo numericamente `cobertura >= 0.50`, e a medição registra `invalid_candidates` e reprova intervalos inválidos em vez de descartá-los. Regressão independente cobre abaixo/exato/acima de 50%.
+
+O falso positivo de áudio foi reproduzido antes da correção na região `padrao_audiolike`: candidato `tile4bpp_block`, offset `0x9000`, tamanho `0x400`, método `tile_plausibility_run_v1`, confiança `0.77500004`, 32 tiles duplicados e bytes do período exato `[00,40,80,C0,FF,C0,80,40]`. A regra generalizável agora mantém streams de período curto (2/4/8/16) sem evidência espacial como desconhecidos; a regressão exige zero candidatos sobre áudio. A prova independente de gradientes densos variados continua detectando tiles, sem exceção por offset/hash/nome e sem reduzir negativos.
+
+Resultado do holdout: esparsos 100,0%, densos 100,0% (baseline histórico 0,0%), dithering 98,4%, paleta 100,0%; código, áudio e comprimido 0 candidatos. As provas reais canônicas mantiveram SHA-256 HAMOOPIG `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9` e Taiketsu `3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c`. HAMOOPIG gerou run `rex04-md-gfx-1789634056-0000` e artefato `discovery-bcf8df3565073ac4ef174f9cebc7674a97e7d33eca278e7c662ffb7b6051bfe0.json`; Taiketsu gerou run `rex04-md-gfx-1789634100-0000` e artefato `discovery-63ad26601d60ebace3e2a0efa4b55c69b6f28fa900651b65d0f1948cd957e93f.json`. Ambos localizaram os mesmos 5 chunks de tiles (100/65,6/100/67,2/53,1%), 4 regiões `EXECINSTR` sem sobreposição e 0 regiões não-gráficas, com 32 previews independentes cada. Comparação anterior→atual: HAMOOPIG 548→548 candidatos (12 intervalos trocados); Taiketsu 389→384 (12 removidos, 7 adicionados), sem regressão nos oráculos.
+
+Gates locais: `check:tree`, lint, TypeScript, npm test 614/6, clippy, cargo test 602/40, fmt e `host:certify` verdes; upstream SGDK/PVSnesLib `Success: true`, host `READY`. A frente permanece **Experimental**: essas provas não promovem descoberta completa, compressão, lógica ou reconstrução por nós.
+
 ### Estado corrente — 2026-09-16: REX-04 fatia 3 — holdout P1 corrigido, qualidade ainda reprovada
 
 Commit final publicado: `c8eed22` em `codex/rex04-fatia3` (base revisada `10c89d1`).
