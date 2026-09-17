@@ -10,6 +10,8 @@ Medição sintética: esparsos 100,0%, densos 100,0% contra baseline histórico 
 
 Gates: `check:tree`, lint, TypeScript, npm 614/6, clippy, Rust 602/40, fmt e `host:certify` verdes; upstream SGDK/PVSnesLib `Success: true`, host `READY`. Estado continua **Experimental**; as provas não autorizam declarar extração completa ou reconstrução por nós.
 
+Próxima fatia proposta, ainda não iniciada: avaliação independente da cobertura residual e das ambiguidades do scanner Mega Drive. Critérios: corpus e divisão ajuste/avaliação congelados por SHA-256; baseline por categoria com `unknown` preservado e oráculos externos; regressão pré-correção para cada regra nova, incluindo negativos de áudio/código/paleta/esparsos; HAMOOPIG/Taiketsu com intervalos exatos, cobertura por recurso, previews independentes, runs append-only e comparação antes/depois; gates completos e host certificado. Sem novos consoles/formatos, compressão, lógica, nós, edição, rebuild, IPC ou UI. Início somente após aceite da PR #67; status permanece **Experimental**.
+
 ### REX-04 holdout — revisão do P1 de #66 (2026-09-16)
 
 Commit final publicado: `c8eed22` em `codex/rex04-fatia3` (base revisada `10c89d1`).

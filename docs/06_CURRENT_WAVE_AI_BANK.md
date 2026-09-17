@@ -8,6 +8,8 @@ Resultado do holdout: esparsos 100,0%, densos 100,0% (baseline histórico 0,0%),
 
 Gates locais: `check:tree`, lint, TypeScript, npm test 614/6, clippy, cargo test 602/40, fmt e `host:certify` verdes; upstream SGDK/PVSnesLib `Success: true`, host `READY`. A frente permanece **Experimental**: essas provas não promovem descoberta completa, compressão, lógica ou reconstrução por nós.
 
+**Próxima fatia proposta — não iniciada:** avaliação independente da cobertura residual e das ambiguidades do scanner Mega Drive, sem novos consoles/formatos, compressão, lógica, nós, edição, rebuild, IPC ou UI. Critérios de aceite: (1) corpus e divisão ajuste/avaliação congelados por SHA-256, sem usar o holdout para calibrar; (2) baseline por categoria com `unknown` preservado e oráculos externos ao detector; (3) cada regra nova acompanhada de regressão pré-correção, negativos de áudio/código/paleta/esparsos e evidência de que não é apenas ajuste de confiança; (4) HAMOOPIG/Taiketsu reexecutados com intervalos exatos, cobertura por recurso, previews independentes, runs append-only e comparação antes/depois; (5) gates completos, host certificado e status ainda **Experimental**. Só iniciar após aceite da PR #67.
+
 ### Estado corrente — 2026-09-16: REX-04 fatia 3 — holdout P1 corrigido, qualidade ainda reprovada
 
 Commit final publicado: `c8eed22` em `codex/rex04-fatia3` (base revisada `10c89d1`).
