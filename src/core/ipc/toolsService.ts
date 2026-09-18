@@ -461,6 +461,7 @@ export interface InspectionPreview {
   data_url?: string | null;
   width?: number | null;
   height?: number | null;
+  png_sha256?: string | null;
   pixels_sha256?: string | null;
 }
 

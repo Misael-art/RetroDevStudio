@@ -201,6 +201,7 @@ pub struct InspectionPreview {
     pub data_url: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub png_sha256: Option<String>,
     pub pixels_sha256: Option<String>,
 }
 
@@ -1159,6 +1160,7 @@ pub fn preview(session_id: &str, candidate_id_value: &str) -> Result<InspectionP
             data_url: None,
             width: None,
             height: None,
+            png_sha256: None,
             pixels_sha256: None,
         });
     };
@@ -1174,6 +1176,7 @@ pub fn preview(session_id: &str, candidate_id_value: &str) -> Result<InspectionP
     let bytes = fs::read(path).map_err(|e| error("preview_io", e.to_string(), true))?;
     let image = image::load_from_memory(&bytes)
         .map_err(|e| error("preview_decode", e.to_string(), false))?;
+    let pixels = image.to_rgba8().into_raw();
     Ok(InspectionPreview {
         session_id: session_id.to_string(),
         candidate_id: candidate_id_value,
@@ -1183,7 +1186,8 @@ pub fn preview(session_id: &str, candidate_id_value: &str) -> Result<InspectionP
         data_url: Some(format!("data:image/png;base64,{}", BASE64.encode(&bytes))),
         width: Some(image.width()),
         height: Some(image.height()),
-        pixels_sha256: Some(sha256_hex(&bytes)),
+        png_sha256: Some(sha256_hex(&bytes)),
+        pixels_sha256: Some(sha256_hex(&pixels)),
     })
 }
 

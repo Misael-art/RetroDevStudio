@@ -185,7 +185,7 @@ describe("InspectionPanel", () => {
   });
 
   it("does not let a slow preview for candidate A replace candidate B", async () => {
-    const pending = new Map<string, (value: { session_id: string; candidate_id: string; available: boolean; data_url: string; artifact: null; pixels_sha256: null }) => void>();
+    const pending = new Map<string, (value: { session_id: string; candidate_id: string; available: boolean; data_url: string; artifact: null; png_sha256: null; pixels_sha256: null }) => void>();
     mocks.inspectionOpen.mockResolvedValue(completedSession);
     mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
     mocks.inspectionCatalogPage.mockImplementation(async (_sessionId: string, _offset: number, _limit: number, _query: string, requestedKind: string) => requestedKind === "palettes"
@@ -204,8 +204,8 @@ describe("InspectionPanel", () => {
     await act(async () => { identifyButton.click(); await flush(); await flush(); });
     const candidateButton = (id: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.includes(id)) as HTMLButtonElement;
     await act(async () => { candidateButton("candidate-a").click(); candidateButton("candidate-b").click(); await flush(); });
-    await act(async () => { pending.get("candidate-b")?.({ session_id: session.session_id, candidate_id: "candidate-b", available: true, data_url: "data:image/png;base64,B", artifact: null, pixels_sha256: null }); await flush(); });
-    await act(async () => { pending.get("candidate-a")?.({ session_id: session.session_id, candidate_id: "candidate-a", available: true, data_url: "data:image/png;base64,A", artifact: null, pixels_sha256: null }); await flush(); });
+    await act(async () => { pending.get("candidate-b")?.({ session_id: session.session_id, candidate_id: "candidate-b", available: true, data_url: "data:image/png;base64,B", artifact: null, png_sha256: null, pixels_sha256: null }); await flush(); });
+    await act(async () => { pending.get("candidate-a")?.({ session_id: session.session_id, candidate_id: "candidate-a", available: true, data_url: "data:image/png;base64,A", artifact: null, png_sha256: null, pixels_sha256: null }); await flush(); });
 
     expect(container.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,B");
     expect(container.querySelector("img")?.getAttribute("alt")).toContain("candidate-b");

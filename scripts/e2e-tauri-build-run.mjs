@@ -1452,12 +1452,109 @@ async function readInspectionUiState(sessionId) {
           naturalHeight: image.naturalHeight,
           declaredWidth: Number(image.getAttribute('data-preview-width') || 0),
           declaredHeight: Number(image.getAttribute('data-preview-height') || 0),
+          pngSha256: image.getAttribute('data-png-sha256'),
           pixelsSha256: image.getAttribute('data-pixels-sha256'),
+          artifactSha256: image.getAttribute('data-artifact-sha256'),
+          src: image.getAttribute('src'),
         } : null,
         unavailable: Boolean(panel?.querySelector('[data-testid="inspection-preview-unavailable"]')),
       };
     `
   );
+}
+
+function renderExpectedTilePreview(romBytes, offset, size) {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset < 0 || size <= 0 || offset + size > romBytes.length) {
+    fail(`Especificação independente de candidato inválida: offset=${offset} size=${size} ROM=${romBytes.length}`);
+  }
+  const tileCount = Math.min(Math.floor(size / 32), 32);
+  if (tileCount < 1) fail(`Candidato conhecido não contém um tile completo: size=${size}`);
+  const width = 16 * 8 * 2;
+  const height = Math.ceil(tileCount / 16) * 8 * 2;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let tileIndex = 0; tileIndex < tileCount; tileIndex += 1) {
+    const base = offset + tileIndex * 32;
+    const column = tileIndex % 16;
+    const row = Math.floor(tileIndex / 16);
+    for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+      for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+        const shift = 7 - pixelX;
+        const value = ((romBytes[base + pixelY * 4] >> shift) & 1)
+          | (((romBytes[base + pixelY * 4 + 1] >> shift) & 1) << 1)
+          | (((romBytes[base + pixelY * 4 + 2] >> shift) & 1) << 2)
+          | (((romBytes[base + pixelY * 4 + 3] >> shift) & 1) << 3);
+        const shade = value * 17;
+        for (let scaleY = 0; scaleY < 2; scaleY += 1) {
+          for (let scaleX = 0; scaleX < 2; scaleX += 1) {
+            const x = column * 16 + pixelX * 2 + scaleX;
+            const y = row * 16 + pixelY * 2 + scaleY;
+            const pixel = (y * width + x) * 4;
+            pixels[pixel] = shade;
+            pixels[pixel + 1] = shade;
+            pixels[pixel + 2] = shade;
+            pixels[pixel + 3] = 255;
+          }
+        }
+      }
+    }
+  }
+  return { width, height, pixels };
+}
+
+function assertExactPreviewPixels(actual, expected, context) {
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    fail(`Dimensões independentes divergentes (${context}): ${JSON.stringify({ actual: [actual.width, actual.height], expected: [expected.width, expected.height] })}`);
+  }
+  const actualPixels = Buffer.from(actual.pixels);
+  if (!actualPixels.equals(expected.pixels)) {
+    let firstDifference = -1;
+    for (let index = 0; index < Math.min(actualPixels.length, expected.pixels.length); index += 1) {
+      if (actualPixels[index] !== expected.pixels[index]) {
+        firstDifference = index;
+        break;
+      }
+    }
+    fail(`Pixels RGBA divergentes (${context}): ${JSON.stringify({ firstDifference, actualSha256: createHash("sha256").update(actualPixels).digest("hex"), expectedSha256: createHash("sha256").update(expected.pixels).digest("hex") })}`);
+  }
+  return {
+    width: actual.width,
+    height: actual.height,
+    pixelsSha256: createHash("sha256").update(actualPixels).digest("hex"),
+  };
+}
+
+async function createUnavailablePreviewFixture() {
+  const size = 0x10000;
+  const bytes = Buffer.alloc(size, 0xa5);
+  bytes.fill(0, 0, 0x200);
+  bytes.write("SEGA", 0x100, "ascii");
+  bytes.write("RDS PREVIEW NEGATIVE", 0x120, "ascii");
+  bytes.write("RDS CONTROLLED FIXTURE", 0x150, "ascii");
+  bytes.writeUInt32BE(0x200, 0x1a0);
+  bytes.writeUInt32BE(size - 1, 0x1a4);
+  bytes.write("JUE", 0x1f0, "ascii");
+  for (let candidateIndex = 0; candidateIndex < 17; candidateIndex += 1) {
+    const offset = 0x2000 + candidateIndex * 0x200;
+    for (let tileIndex = 0; tileIndex < 4; tileIndex += 1) {
+      const base = offset + tileIndex * 32;
+      for (let row = 0; row < 8; row += 1) {
+        bytes[base + row * 4] = row % 2 === 0 ? 0xaa : 0x55;
+        bytes[base + row * 4 + 1] = 0;
+        bytes[base + row * 4 + 2] = 0;
+        bytes[base + row * 4 + 3] = 0;
+      }
+    }
+  }
+  const fixtureDir = await mkdtemp(path.join(os.tmpdir(), "rds-inspection-preview-unavailable-"));
+  const romPath = path.join(fixtureDir, "controlled-preview-unavailable.bin");
+  await writeFile(romPath, bytes);
+  return {
+    fixtureDir,
+    romPath,
+    size: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    expectedCandidateCount: 17,
+  };
 }
 
 async function inspectElementInteraction(sessionId, selector) {
@@ -3665,6 +3762,7 @@ async function main() {
     options.scenario !== "qa-rc" &&
     options.scenario !== "create-game-from-zero";
   let temporaryProjectDir = "";
+  let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
     await assertPathExists(
       options.project,
@@ -3864,12 +3962,24 @@ async function main() {
     }
 
     if (["inspection", "inspection-cancel", "inspection-complete", "inspection-preview-unavailable"].includes(options.scenario)) {
-      const inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
+      let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
+      let inspectionFixture = null;
+      if (options.scenario === "inspection-preview-unavailable" && !process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM) {
+        inspectionFixture = await createUnavailablePreviewFixture();
+        temporaryInspectionFixtureDir = inspectionFixture.fixtureDir;
+        inspectionRom = inspectionFixture.romPath;
+      } else if (options.scenario === "inspection-preview-unavailable") {
+        inspectionRom = process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM;
+      }
       if (!inspectionRom || !(await pathExists(inspectionRom))) {
         fail(
-          "RDS_INSPECTION_ROM deve apontar para uma ROM BYOR real existente; nenhuma ROM e criada pelo E2E."
+          options.scenario === "inspection-preview-unavailable"
+            ? "RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM deve apontar para um fixture BYOR controlado existente."
+            : "RDS_INSPECTION_ROM deve apontar para uma ROM BYOR real existente; nenhuma ROM e criada pelo E2E."
         );
       }
+      const inspectionRomBytes = await readFile(inspectionRom);
+      console.log(`[inspection-rom] ${JSON.stringify({ path: inspectionRom, size: inspectionRomBytes.length, sha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), fixture: inspectionFixture })}`);
       const artifactPrefix = `inspection-${artifactTimestamp()}`;
       const inspectionPanel = "[data-testid='reverse-inspection-panel']";
       const inspectionInput = `${inspectionPanel} input[type='text']`;
@@ -3997,16 +4107,46 @@ async function main() {
       const expectedCandidateId = options.scenario === "inspection-preview-unavailable"
         ? process.env.RDS_INSPECTION_UNAVAILABLE_CANDIDATE_ID ?? ""
         : process.env.RDS_INSPECTION_EXPECTED_CANDIDATE_ID ?? "";
+      const expectedOffset = options.scenario === "inspection-preview-unavailable"
+        ? null
+        : Number(process.env.RDS_INSPECTION_EXPECTED_OFFSET ?? "");
+      const expectedSize = options.scenario === "inspection-preview-unavailable"
+        ? null
+        : Number(process.env.RDS_INSPECTION_EXPECTED_SIZE ?? "");
+      const expectedKind = options.scenario === "inspection-preview-unavailable"
+        ? ""
+        : process.env.RDS_INSPECTION_EXPECTED_KIND ?? "tile4bpp_block";
+      if (options.scenario !== "inspection-preview-unavailable" && (!Number.isSafeInteger(expectedOffset) || !Number.isSafeInteger(expectedSize) || expectedOffset < 0 || expectedSize <= 0)) {
+        fail("A prova positiva exige RDS_INSPECTION_EXPECTED_OFFSET e RDS_INSPECTION_EXPECTED_SIZE independentes da UI.");
+      }
       const candidateTestId = await executeScript(
         sessionId,
         `
           const expected = String(arguments[0] || "");
+          const offset = arguments[2];
+          const size = arguments[3];
+          const kind = String(arguments[4] || "");
           const selector = expected ? "[data-testid='inspection-candidate-" + expected + "']" : (String(arguments[1]) === "unavailable" ? "[data-preview-expected='false']" : "[data-preview-expected='true']");
-          return document.querySelector(selector)?.getAttribute("data-testid") ?? "";
+          const candidates = Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']"));
+          const match = expected ? document.querySelector(selector) : candidates.find((candidate) =>
+            Number(candidate.getAttribute("data-candidate-offset")) === offset &&
+            Number(candidate.getAttribute("data-candidate-size")) === size &&
+            (!kind || candidate.getAttribute("data-candidate-kind") === kind) &&
+            (String(arguments[1]) === "unavailable" ? candidate.getAttribute("data-preview-expected") === "false" : candidate.getAttribute("data-preview-expected") === "true")
+          );
+          return match?.getAttribute("data-testid") ?? "";
         `,
-        [expectedCandidateId, options.scenario === "inspection-preview-unavailable" ? "unavailable" : "available"]
+        [expectedCandidateId, options.scenario === "inspection-preview-unavailable" ? "unavailable" : "available", expectedOffset, expectedSize, expectedKind]
       );
       if (!candidateTestId) fail(expectedCandidateId ? `Candidato esperado não foi localizado: ${expectedCandidateId}` : options.scenario === "inspection-preview-unavailable" ? "Catálogo concluído não expôs candidato explicitamente sem prévia." : "Catálogo concluído não expôs candidato com prévia esperada.");
+      const selectedCandidateEvidence = await executeScript(
+        sessionId,
+        `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${candidateTestId}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
+      );
+      console.log(`[inspection-candidate] ${JSON.stringify(selectedCandidateEvidence)}`);
+      if (options.scenario !== "inspection-preview-unavailable" && (selectedCandidateEvidence?.offset !== expectedOffset || selectedCandidateEvidence?.size !== expectedSize || selectedCandidateEvidence?.kind !== expectedKind || selectedCandidateEvidence?.previewExpected !== "true")) {
+        fail(`Candidato conhecido divergente da especificação independente: ${JSON.stringify({ selected: selectedCandidateEvidence, expected: { offset: expectedOffset, size: expectedSize, kind: expectedKind } })}`);
+      }
       await clickButtonByTestIdWithPointerEvents(sessionId, candidateTestId);
       if (options.scenario === "inspection-preview-unavailable") {
         const unavailable = await waitFor(
@@ -4016,6 +4156,7 @@ async function main() {
           100
         );
         if (!unavailable) fail("Prévia indisponível não foi representada como estado negativo separado.");
+        if (inspectionFixture && selectedCandidateEvidence?.previewExpected !== "false") fail(`Fixture controlado não produziu candidato sem prévia: ${JSON.stringify({ fixture: inspectionFixture, selected: selectedCandidateEvidence })}`);
         console.log("OK: Desktop Tauri inspection/preview-unavailable E2E passou como cenário negativo separado.");
         return;
       }
@@ -4023,8 +4164,6 @@ async function main() {
         async () => executeScript(sessionId, `
           const image = document.querySelector("[data-testid='inspection-preview-image']");
           if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
-          const expectedWidth = Number(image.getAttribute("data-preview-width") || 0);
-          const expectedHeight = Number(image.getAttribute("data-preview-height") || 0);
           const canvas = document.createElement("canvas");
           canvas.width = image.naturalWidth;
           canvas.height = image.naturalHeight;
@@ -4032,26 +4171,56 @@ async function main() {
           if (!context) return false;
           context.drawImage(image, 0, 0);
           const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-          let nonZeroChannels = 0;
-          for (const value of pixels) if (value !== 0) nonZeroChannels += 1;
           return {
             image: true,
             naturalWidth: image.naturalWidth,
             naturalHeight: image.naturalHeight,
-            expectedWidth,
-            expectedHeight,
+            declaredWidth: Number(image.getAttribute("data-preview-width") || 0),
+            declaredHeight: Number(image.getAttribute("data-preview-height") || 0),
+            pngSha256: image.getAttribute("data-png-sha256") || "",
             pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
-            nonZeroChannels,
+            artifactSha256: image.getAttribute("data-artifact-sha256") || "",
+            src: image.currentSrc || image.src,
+            pixels: Array.from(pixels),
           };
         `),
         15000,
         "Prévia real não carregou imagem, dimensões ou pixels",
         100
       );
-      if (!visualEvidence.image || visualEvidence.naturalWidth !== visualEvidence.expectedWidth || visualEvidence.naturalHeight !== visualEvidence.expectedHeight || !visualEvidence.pixelsSha256 || visualEvidence.nonZeroChannels <= 0) {
-        fail(`Prévia real inválida: ${JSON.stringify(visualEvidence)}`);
+      if (!visualEvidence.image || !Array.isArray(visualEvidence.pixels) || !visualEvidence.src) {
+        fail(`Prévia real inválida: ${JSON.stringify({ ...visualEvidence, pixels: undefined })}`);
       }
-      console.log(`[inspection-preview] evidence=${JSON.stringify(visualEvidence)}`);
+      const expectedPreview = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      const independentPixelEvidence = assertExactPreviewPixels(
+        { width: visualEvidence.naturalWidth, height: visualEvidence.naturalHeight, pixels: visualEvidence.pixels },
+        expectedPreview,
+        "ROM/offset/tamanho conhecidos"
+      );
+      const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!pngPayload) fail(`A prévia carregada não expôs uma fonte PNG data: válida: ${String(visualEvidence.src).slice(0, 80)}`);
+      const actualPngSha256 = createHash("sha256").update(Buffer.from(pngPayload, "base64")).digest("hex");
+      if (actualPngSha256 !== visualEvidence.pngSha256 || actualPngSha256 !== visualEvidence.artifactSha256) {
+        fail(`Hash do PNG carregado diverge do contrato de artefato: ${JSON.stringify({ actualPngSha256, pngSha256: visualEvidence.pngSha256, artifactSha256: visualEvidence.artifactSha256 })}`);
+      }
+      if (visualEvidence.pixelsSha256 !== independentPixelEvidence.pixelsSha256 || actualPngSha256 === independentPixelEvidence.pixelsSha256) {
+        fail(`Hashes PNG/RGBA não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidence.pixelsSha256 })}`);
+      }
+      const mutatedPixels = Buffer.from(expectedPreview.pixels);
+      mutatedPixels[0] ^= 1;
+      let mutationRejected = false;
+      try {
+        assertExactPreviewPixels(
+          { width: expectedPreview.width, height: expectedPreview.height, pixels: mutatedPixels },
+          expectedPreview,
+          "mutação de um pixel com atributos HTML inalterados"
+        );
+      } catch (error) {
+        mutationRejected = true;
+        console.log(`[inspection-preview-negative] mutation-rejected=${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (!mutationRejected) fail("O oracle independente aceitou uma imagem com um pixel alterado; a asserção visual está permissiva.");
+      console.log(`[inspection-preview] ${JSON.stringify({ candidate: selectedCandidateEvidence, dimensions: [independentPixelEvidence.width, independentPixelEvidence.height], pngSha256: actualPngSha256, pixelsSha256: independentPixelEvidence.pixelsSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, mutationRejected })}`);
       await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
       const persistedSessionId = completedState.session.id;
       if (!persistedSessionId) fail(`Sessão concluída não tem identidade para validar persistência: ${JSON.stringify(completedState)}`);
@@ -6874,6 +7043,9 @@ async function main() {
           `[cleanup] Nao foi possivel remover o projeto temporario criado pelo onboarding: ${temporaryProjectDir}`
         );
       }
+    }
+    if (temporaryInspectionFixtureDir) {
+      await rm(temporaryInspectionFixtureDir, { recursive: true, force: true });
     }
   }
 }
