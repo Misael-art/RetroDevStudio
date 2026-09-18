@@ -20,7 +20,7 @@
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   access,
@@ -589,6 +589,11 @@ async function runFrontendBuild(mode, effectiveTargetDir) {
 
 export function buildCommandEnvironment(mode, effectiveTargetDir, hostPlatform = process.platform) {
   const env = { ...process.env, CARGO_TARGET_DIR: effectiveTargetDir };
+  try {
+    env.VITE_RDS_BUILD_COMMIT = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
+  } catch {
+    env.VITE_RDS_BUILD_COMMIT = "unknown";
+  }
   if (hostPlatform === "win32") {
     env.TAURI_ENV_PLATFORM = "windows";
     env.TAURI_ENV_ARCH = "x86_64";

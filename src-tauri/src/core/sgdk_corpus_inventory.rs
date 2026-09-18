@@ -2209,7 +2209,13 @@ fn parse_resource_manifest(file: &str, content: &str) -> Vec<SgdkResourceInvento
     let mut resources = Vec::new();
     for (index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+        // Mesmo guarda de `parse_sgdk_manifest` (project_mgr): comentarios `;` (rescomp)
+        // e `//` (projetos reais, ex. HAMOOPIG) nao podem virar recursos falsos.
+        if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with("//")
+        {
             continue;
         }
         let tokens = tokenize_sgdk_resource_line(trimmed);
@@ -3237,6 +3243,29 @@ mod tests {
         fs::write(path, content).expect("write fixture");
     }
 
+    /// Regressao (2026-09-09, linha 8 do corpus — TaiketsuUltraHeroGenesis): comentarios `//`
+    /// em manifests `.res` nao podem virar recursos falsos `UnsupportedKind` no inventario
+    /// semantico (mesmo contrato do guard em `parse_sgdk_manifest`/project_mgr).
+    #[test]
+    fn parse_resource_manifest_ignores_slash_and_semicolon_comment_lines() {
+        let resources = parse_resource_manifest(
+            "res/sprite.res",
+            "//tipo / nome / localizacao_arquivo / quantidade_tiles\n\
+             //305 = 304\n\
+             ; comentario oficial do rescomp\n\
+             SPRITE hero \"images/hero.png\" 4 4\n",
+        );
+
+        assert_eq!(
+            resources.len(),
+            1,
+            "comentarios // e ; nao podem virar recursos falsos: {:?}",
+            resources
+        );
+        assert_eq!(resources[0].kind, "SPRITE");
+        assert_eq!(resources[0].name, "hero");
+    }
+
     #[test]
     fn sgdk_inventory_extracts_structural_code_resources_and_gaps() {
         let root = temp_inventory_dir("structural");
@@ -3924,6 +3953,10 @@ void update_blaze(void) {
             ("Platformer 2", ["platformer 2", "platformer_2"]),
             ("NEXZR MD", ["nexzr md", "nexzr"]),
             ("BLAZE_ENGINE", ["blaze_engine", "blaze"]),
+            (
+                "TaiketsuUltraHeroGenesis",
+                ["taiketsuultraherogenesis", "taiketsu"],
+            ),
         ];
         let mut reports = Vec::new();
         for (label, needles) in verticals {
