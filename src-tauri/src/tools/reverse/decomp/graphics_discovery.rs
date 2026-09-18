@@ -1302,6 +1302,57 @@ mod tests {
         let _ = std::fs::remove_dir_all(&work);
     }
 
+    #[test]
+    fn chunky_tile_golden_12_34_56_78_is_high_nibble_first() {
+        let block_offset = 0x6000usize;
+        let rows: [[u8; 4]; 8] = [
+            [0x12, 0x34, 0x56, 0x78],
+            [0x87, 0x65, 0x43, 0x21],
+            [0x13, 0x57, 0x9B, 0xDF],
+            [0xF0, 0xE1, 0xD2, 0xC3],
+            [0x24, 0x68, 0xAC, 0xEF],
+            [0xFE, 0xDC, 0xBA, 0x98],
+            [0x31, 0x42, 0x53, 0x64],
+            [0x75, 0x86, 0x97, 0xA8],
+        ];
+        let mut rom = fixture_rom(0x8000);
+        for (row, bytes) in rows.iter().enumerate() {
+            rom[block_offset + row * 4..block_offset + row * 4 + 4].copy_from_slice(bytes);
+        }
+        let candidate = GraphicCandidate {
+            offset: block_offset as u64,
+            size: TILE_BYTES as u64,
+            kind: KIND_TILE_BLOCK.into(),
+            status: STATUS_CANDIDATE.into(),
+            method: "golden_fixture".into(),
+            confidence: 0.5,
+            evidence: serde_json::json!({}),
+            previews: vec![],
+        };
+        let png = render_tile_block_png(&rom, &candidate).expect("prévia golden");
+        let decoded = image::load_from_memory(&png).expect("PNG golden decodificável");
+        assert_eq!((decoded.width(), decoded.height()), (256, 16));
+        for (row, bytes) in rows.iter().enumerate() {
+            let expected_indices: Vec<u8> = bytes
+                .iter()
+                .flat_map(|byte| [byte >> 4, byte & 0x0F])
+                .collect();
+            for (pixel_x, index) in expected_indices.iter().enumerate() {
+                let expected = index * 17;
+                for scale_y in 0..2u32 {
+                    for scale_x in 0..2u32 {
+                        let pixel = decoded
+                            .get_pixel(pixel_x as u32 * 2 + scale_x, row as u32 * 2 + scale_y);
+                        assert_eq!(pixel[0], expected, "row {row} x {pixel_x}");
+                        assert_eq!(pixel[1], expected, "row {row} x {pixel_x}");
+                        assert_eq!(pixel[2], expected, "row {row} x {pixel_x}");
+                        assert_eq!(pixel[3], 255, "row {row} x {pixel_x}");
+                    }
+                }
+            }
+        }
+    }
+
     /// Prova real: descoberta no HAMOOPIG. Os recursos COMPARTILHADOS do
     /// motor (sprite.o da família HAMOOPIG/Taiketsu) aparecem verbatim na
     /// ROM de referência — 3 chunks de tiles comprovados (compressão NONE)

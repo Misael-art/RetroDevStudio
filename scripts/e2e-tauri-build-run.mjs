@@ -1478,11 +1478,10 @@ function renderExpectedTilePreview(romBytes, offset, size) {
     const row = Math.floor(tileIndex / 16);
     for (let pixelY = 0; pixelY < 8; pixelY += 1) {
       for (let pixelX = 0; pixelX < 8; pixelX += 1) {
-        const shift = 7 - pixelX;
-        const value = ((romBytes[base + pixelY * 4] >> shift) & 1)
-          | (((romBytes[base + pixelY * 4 + 1] >> shift) & 1) << 1)
-          | (((romBytes[base + pixelY * 4 + 2] >> shift) & 1) << 2)
-          | (((romBytes[base + pixelY * 4 + 3] >> shift) & 1) << 3);
+        // Mega Drive/SGDK chunky 4bpp: each byte stores two pixels;
+        // high nibble is the left pixel, low nibble the right pixel.
+        const packedByte = romBytes[base + pixelY * 4 + Math.floor(pixelX / 2)];
+        const value = pixelX % 2 === 0 ? packedByte >> 4 : packedByte & 0x0f;
         const shade = value * 17;
         for (let scaleY = 0; scaleY < 2; scaleY += 1) {
           for (let scaleX = 0; scaleX < 2; scaleX += 1) {
@@ -1499,6 +1498,29 @@ function renderExpectedTilePreview(romBytes, offset, size) {
     }
   }
   return { width, height, pixels };
+}
+
+function assertChunkyGoldenOracle() {
+  const goldenRows = [
+    [0x12, 0x34, 0x56, 0x78],
+    [0x87, 0x65, 0x43, 0x21],
+    [0x13, 0x57, 0x9b, 0xdf],
+    [0xf0, 0xe1, 0xd2, 0xc3],
+    [0x24, 0x68, 0xac, 0xef],
+    [0xfe, 0xdc, 0xba, 0x98],
+    [0x31, 0x42, 0x53, 0x64],
+    [0x75, 0x86, 0x97, 0xa8],
+  ];
+  const goldenRom = Buffer.alloc(32);
+  goldenRows.forEach((row, index) => row.forEach((value, byteIndex) => { goldenRom[index * 4 + byteIndex] = value; }));
+  const expected = renderExpectedTilePreview(goldenRom, 0, 32);
+  goldenRows.forEach((row, y) => row.flatMap((value) => [value >> 4, value & 0x0f]).forEach((index, x) => {
+    const pixel = (y * 2 * expected.width + x * 2) * 4;
+    const expectedShade = index * 17;
+    if (expected.pixels[pixel] !== expectedShade || expected.pixels[pixel + 1] !== expectedShade || expected.pixels[pixel + 2] !== expectedShade || expected.pixels[pixel + 3] !== 255) {
+      fail(`Golden chunky inválido no oracle: linha=${y} pixel=${x} valor=${index}`);
+    }
+  }));
 }
 
 function assertExactPreviewPixels(actual, expected, context) {
@@ -4191,6 +4213,7 @@ async function main() {
       if (!visualEvidence.image || !Array.isArray(visualEvidence.pixels) || !visualEvidence.src) {
         fail(`Prévia real inválida: ${JSON.stringify({ ...visualEvidence, pixels: undefined })}`);
       }
+      assertChunkyGoldenOracle();
       const expectedPreview = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
       const independentPixelEvidence = assertExactPreviewPixels(
         { width: visualEvidence.naturalWidth, height: visualEvidence.naturalHeight, pixels: visualEvidence.pixels },
