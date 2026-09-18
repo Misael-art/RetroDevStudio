@@ -1477,6 +1477,24 @@ async function inspectElementInteraction(sessionId, selector) {
         text: (node.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120),
       }));
       const active = document.activeElement;
+      const scrollParents = [];
+      let parent = target.parentElement;
+      while (parent) {
+        const parentStyle = getComputedStyle(parent);
+        if (parent.scrollHeight > parent.clientHeight || parent.scrollWidth > parent.clientWidth) {
+          const parentRect = parent.getBoundingClientRect();
+          scrollParents.push({
+            tag: parent.tagName,
+            testId: parent.getAttribute('data-testid'),
+            overflowY: parentStyle.overflowY,
+            scrollTop: parent.scrollTop,
+            scrollHeight: parent.scrollHeight,
+            clientHeight: parent.clientHeight,
+            rect: { top: parentRect.top, height: parentRect.height },
+          });
+        }
+        parent = parent.parentElement;
+      }
       return {
         selector: arguments[0],
         found: true,
@@ -1491,6 +1509,8 @@ async function inspectElementInteraction(sessionId, selector) {
         style: { display: style.display, visibility: style.visibility, pointerEvents: style.pointerEvents, zIndex: style.zIndex, position: style.position },
         elementAtCenter: document.elementFromPoint(point.x, point.y)?.outerHTML?.slice(0, 500) ?? null,
         overlayStack: stack,
+        scrollParents,
+        viewport: { width: window.innerWidth, height: window.innerHeight, scrollX: window.scrollX, scrollY: window.scrollY, devicePixelRatio: window.devicePixelRatio },
         effectiveValue: target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ? target.value : null,
       };
     `,
@@ -1499,6 +1519,32 @@ async function inspectElementInteraction(sessionId, selector) {
 }
 
 async function clickElementWithDiagnostics(sessionId, elementId, selector) {
+  const preparation = await executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return false;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      const scrollParents = [];
+      let parent = target.parentElement;
+      while (parent) {
+        const style = getComputedStyle(parent);
+        if (parent.scrollHeight > parent.clientHeight) {
+          const targetRect = target.getBoundingClientRect();
+          const parentRect = parent.getBoundingClientRect();
+          parent.scrollTop += targetRect.top - parentRect.top - (parentRect.height - targetRect.height) / 2;
+          scrollParents.push({ testId: parent.getAttribute('data-testid'), scrollTop: parent.scrollTop });
+        }
+        parent = parent.parentElement;
+      }
+      target.scrollIntoView({ block: "center", inline: "center" });
+      target.focus();
+      return { rect: target.getBoundingClientRect().toJSON?.() ?? null, scrollParents };
+    `,
+    [selector]
+  );
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  console.log(`[inspection-click] preparation=${JSON.stringify(preparation)}`);
   const before = await inspectElementInteraction(sessionId, selector);
   let response;
   try {
@@ -3834,6 +3880,11 @@ async function main() {
       console.log(`[inspection-build] frontend=${JSON.stringify(frontendEvidence)} git=${JSON.stringify(gitEvidence)}`);
       if (!gitEvidence.commit || frontendEvidence?.buildCommit !== gitEvidence.commit) {
         fail(`Binário/frontend não correspondem ao commit corrente: ${JSON.stringify({ binary: options.app, frontend: frontendEvidence, git: gitEvidence })}`);
+      }
+      try {
+        await setSessionWindowRect(sessionId, 1280, 800);
+      } catch (error) {
+        console.warn(`[inspection] janela não aceitou 1280x800; seguindo somente se o hit-test validar o controle: ${error instanceof Error ? error.message : String(error)}`);
       }
       // O wizard de primeiro uso é uma superfície visual real, mas não faz
       // parte da inspeção. Abre-se o fixture pelo mesmo comando de projeto
