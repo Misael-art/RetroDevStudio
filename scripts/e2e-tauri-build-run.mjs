@@ -3835,6 +3835,17 @@ async function main() {
       if (!gitEvidence.commit || frontendEvidence?.buildCommit !== gitEvidence.commit) {
         fail(`Binário/frontend não correspondem ao commit corrente: ${JSON.stringify({ binary: options.app, frontend: frontendEvidence, git: gitEvidence })}`);
       }
+      // O wizard de primeiro uso é uma superfície visual real, mas não faz
+      // parte da inspeção. Abre-se o fixture pelo mesmo comando de projeto
+      // exposto à UI para remover o overlay; a aprovação abaixo continua
+      // dependendo exclusivamente dos controles visíveis de inspeção.
+      await callAutomationApi(sessionId, "openProject", [options.project]);
+      await waitFor(
+        async () => executeScript(sessionId, `return !document.querySelector("[data-testid='project-wizard-body']");`),
+        20000,
+        "Wizard de primeiro uso não foi fechado ao abrir o projeto fixture",
+        100
+      );
       await clickByTestId(sessionId, "workspace-rail-debug");
       await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace nao abriu");
       await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
