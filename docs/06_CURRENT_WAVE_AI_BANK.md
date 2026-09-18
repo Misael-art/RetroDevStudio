@@ -1,3 +1,23 @@
+### Estado corrente — 2026-09-18: rastreabilidade do PR #69 no código `2dcf32f`
+
+O PR #69 permanece **Experimental**, aberto e sem aceite integral. A integração da inspeção visual é linear a partir de `codex/import-decomp-review` `24978ca`: produto `338eed8`, E2E/diagnóstico `c0c161c`, estabilização do onboarding `5d10d0c`, geometria/click `a4c282c`, prova de pixels/PNG `5e652c6`, correção REX chunky incorporada em `e998bbd` (origem `10c89d1`) e oracle/golden final em `2dcf32f`. `10c89d1` não era ancestral; foi reconciliado explicitamente. A remoção de `decomp/holdout.rs` já pertencia ao HEAD de inspeção e foi preservada.
+
+| Cenário | Commit / binário | ROM ou fixture | Resultado | Evidência |
+|---|---|---|---|---|
+| Identificação + análise + prévia positiva | `2dcf32f` / `4335b331bdf0…4e81a` | HAMOOPIG reference, 917.504 bytes, SHA `558bea6c80c7…f8529be9` | candidato `tile4bpp_block@0000A490-0001`, offset `42128`, tamanho `192`, `256x16`; RGBA chunky validado | PNG SHA `33c3dd82d68b…6dd13f`; pixels RGBA SHA `a5b33b5c97f3…ed480`; [before](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-18T13-31-30-320Z-before-restart.png), [after](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-18T13-31-30-320Z-after-restart.png) |
+| Mutação de um pixel | `2dcf32f` / `4335b331bdf0…4e81a` | mesma ROM | oracle rejeitou o buffer mutado mesmo com atributos HTML inalterados | E2E `inspection-preview-negative`, primeiro byte divergente `0`, SHA mutado `d1eabd7d3751…37954` |
+| Prévia indisponível negativa | `2dcf32f` / `4335b331bdf0…4e81a` | fixture controlado de 65.536 bytes, SHA `623adb46ec46…f630c`, 17 candidatos | candidato `tile4bpp_block@00004000-0010`, offset `16384`, tamanho `128`, sem preview e sem `<img>` | E2E `inspection-preview-unavailable`; fixture removido após o cenário |
+| Cancelamento | `5e652c6` / `d8016828a9f3…aab350` | HAMOOPIG reference, SHA `558bea6c…9be9` | **herdado do executor anterior; não reexecutado nesta rodada**; `run=cancelled`, `session=cancelled` | log do executor: `run-inspection-1789733870-00000000-00000001` |
+| Salvar + reiniciar + reabrir | `2dcf32f` / `4335b331bdf0…4e81a` | HAMOOPIG reference, SHA `558bea6c…9be9` | executado pelo executor como parte do cenário completo; sessão reaberta com identidade preservada | `inspection-1789738303-00000000`, screenshots acima |
+
+O golden Rust `chunky_tile_golden_12_34_56_78_is_high_nibble_first` passou com linhas assimétricas e comparação RGBA ampliada. O oracle E2E mantém o mesmo golden literal, mas sua referência positiva é reconstruída diretamente dos bytes da ROM, offset e tamanho esperados; PNG SHA e pixels RGBA SHA permanecem distintos.
+
+**CI remoto no HEAD de código `2dcf32f` consultado para esta matriz:** `linux-validate` passou em ambos os jobs; `validate` e `desktop-smoke` estavam em execução na consulta. A confirmação da CI do HEAD final deste checkpoint será feita no handoff, após os jobs terminarem.
+
+**Diferença em relação à pilha REX:** a inspeção adiciona o serviço IPC/sessões/eventos, UI experimental, persistência/reabertura e harness desktop; não altera a classificação de extração, não promove candidatos, não implementa codecs, edição, montagem de sprites ou reconstrução do jogo. A correção chunky de `10c89d1` foi a única correção REX relevante ausente incorporada nesta branch; o restante da pilha REX continua ancestral pela base `24978ca`.
+
+Limitações mantidas: cancelamento é evidência herdada nesta rodada; não há certificação de extração completa, reconstrução de gameplay ou produto final. **Experimental; merge/aceite pendentes.**
+
 ### Estado corrente — 2026-09-15 (5): REX-04 fatia 2 ACEITA e INTEGRADA em `codex/import-decomp-review` `3fed085`; scanners de conteúdo são a próxima frente
 
 **REX-04 fatia 2 (descoberta gráfica parcial) aceita pelo revisor em `382f9f4` e integrada:** merge **#65 → `3fed085`** em `codex/import-decomp-review` (NÃO em `main` — consolidação segue via #61, outra linha). Gates no destino: check:tree, tsc, lint, npm test, cargo test --lib **588/40**, clippy, fmt, **host:certify READY** (fingerprint 77bbc2a7…), **provas reais reexecutadas no destino 2/2** (Taiketsu: 5 chunks de `spr_*_tileset_data` NONE com cobertura medida 53,1–100%; HAMOOPIG: 4 regiões de código EXECINSTR com ZERO candidatos — positivo pulado por ausência de build do doador, documentado); CI remota 4/4 no push do merge. Mimosa selado `sha256:95e9142a…` (mesmos 2 FPs conhecidos de NodeGraphEditor).

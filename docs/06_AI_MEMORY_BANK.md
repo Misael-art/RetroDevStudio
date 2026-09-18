@@ -1,5 +1,15 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-18 — rastreabilidade final da inspeção visual no PR #69
+
+HEAD de código testado publicado: `2dcf32f` em `codex/rex04-inspection-ipc`; PR #69 aberto, base `main` `616abdbc`, sem aceite integral. A cadeia funcional é `338eed8` (produto) → `c0c161c` (E2E/diagnóstico) → `5d10d0c` (onboarding) → `a4c282c` (geometria) → `5e652c6` (prova PNG/pixels) → `e998bbd` (cherry-pick de `10c89d1`, formato chunky REX) → `2dcf32f` (oracle + golden final). A divergência de formato não deve ser reaberta: renderer e oracle usam 4bpp chunky Mega Drive, nibble alto primeiro; o golden Rust assimétrico passou. O commit deste checkpoint é documental e não altera esse binário.
+
+Matriz resumida: positivo em `2dcf32f`/binário `4335b331…4e81a`, ROM HAMOOPIG `558bea6c…9be9`, candidato offset `42128`/tamanho `192`, `256x16`, PNG `33c3dd82…dd13f`, RGBA `a5b33b5c…e480`; mutação de pixel rejeitada no mesmo commit; negativo de indisponibilidade em fixture `623adb46…f630c` de 65.536 bytes com 17 candidatos, candidato `@00004000-0010` sem `<img>`; salvar/reiniciar/reabrir executado no cenário positivo. Cancelamento é **herdado**, executado em `5e652c6`/binário `d8016828…aab350` contra a mesma ROM, com `run` e `session` cancelados; não foi reexecutado nesta rodada por não depender do decode.
+
+CI remoto foi consultado no HEAD de código `2dcf32f`: Linux validate passou; validate/desktop-smoke ainda estavam pendentes na consulta. A confirmação da CI do HEAD final deste checkpoint será registrada no handoff após os jobs terminarem.
+
+Integração REX registrada: `10c89d1` não era ancestral do branch de inspeção e foi reconciliado explicitamente em `e998bbd`; a inspeção adiciona IPC, sessão, progresso, UI experimental, previews e persistência sem promover candidatos nem alterar o escopo de extração/reconstrução. Diretórios não rastreados `.mimosa`, `.zcode`, backups e `decomp-recovery` permanecem preservados.
+
 ### Checkpoint 2026-09-18 — REX-04 inspeção visual: hardening e bloqueio E2E do WebKit
 
 Corrigidos os três achados funcionais: listener de progresso instalado antes de `inspectionStart` com reconciliação por `inspectionStatus`; respostas assíncronas de catálogo/prévia/status protegidas por sequência, sessão, filtro e candidato; e sessões persistidas listáveis/selecionáveis após reinício, com aba “Inspeção visual” acessível antes de existir manifesto. Adicionados seletores de QA aos controles e testes atrasados/remount no painel.
