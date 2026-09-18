@@ -66,6 +66,9 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [savedSessionsBusy, setSavedSessionsBusy] = useState(false);
   const [selectedSavedSessionId, setSelectedSavedSessionId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [identifyState, setIdentifyState] = useState<"idle" | "running" | "succeeded" | "failed">("idle");
+  const [identifyInput, setIdentifyInput] = useState("");
+  const [identifyError, setIdentifyError] = useState("");
   const generation = useRef(0);
   const lastSessionId = useRef("");
   const savedSessionId = useRef("");
@@ -184,15 +187,22 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   }
 
   async function identify() {
-    if (!romPath.trim()) {
+    const effectiveRomPath = romPath.trim();
+    if (!effectiveRomPath) {
+      setIdentifyState("failed");
+      setIdentifyInput("");
+      setIdentifyError("rom_path_empty");
       logMessage("warn", "[Inspeção] Selecione uma ROM BYOR.");
       return;
     }
     const requestId = ++sessionRequestSeq.current;
     invalidateAsyncRequests();
     setBusy(true);
+    setIdentifyState("running");
+    setIdentifyInput(effectiveRomPath);
+    setIdentifyError("");
     try {
-      const next = await inspectionOpen(romPath);
+      const next = await inspectionOpen(effectiveRomPath);
       if (requestId !== sessionRequestSeq.current) return;
       generation.current += 1;
       lastSessionId.current = next.session_id;
@@ -205,10 +215,13 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       setSelected(null);
       setPreview(null);
       setSelectedSavedSessionId(next.session_id);
+      setIdentifyState("succeeded");
       if (next.status === "completed") void refreshCatalog(next.session_id, 0, queryRef.current, kindRef.current);
       void refreshSavedSessions();
       logMessage("success", `[Inspeção] ${next.identity.variant} identificado (${next.identity.header_title || "sem título"}).`);
     } catch (error) {
+      setIdentifyState("failed");
+      setIdentifyError(describeError(error));
       logMessage("error", `[Inspeção] Não foi possível identificar a ROM: ${describeError(error)}`);
     } finally {
       if (requestId === sessionRequestSeq.current) setBusy(false);
@@ -337,6 +350,9 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     setPalettePage(null);
     setSelected(null);
     setPreview(null);
+    setIdentifyState("idle");
+    setIdentifyInput("");
+    setIdentifyError("");
   }
 
   function selectSavedSession(saved: InspectionSession) {
@@ -372,17 +388,26 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
           {session && <button type="button" data-testid="inspection-save" onClick={() => void save()} className="rounded border border-[#313244] px-3 py-1 text-[10px] text-[#cdd6f4]">Salvar sessão</button>}
           {session && <button type="button" data-testid="inspection-close" onClick={closeSession} className="rounded border border-[#313244] px-3 py-1 text-[10px] text-[#f9e2af]">Fechar sessão</button>}
         </div>
+        <div
+          data-testid="inspection-identify-state"
+          data-state={identifyState}
+          data-input-value={identifyInput}
+          data-error={identifyError}
+          data-session-id={session?.session_id ?? ""}
+          data-session-status={session?.status ?? ""}
+          className="sr-only"
+        />
         <div className="mt-3 rounded border border-[#313244] bg-[#0f172a] p-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-[10px] uppercase tracking-[0.12em] text-[#7f849c]">Sessões salvas</div>
             <button type="button" onClick={() => void refreshSavedSessions()} disabled={savedSessionsBusy} className="rounded border border-[#313244] px-2 py-1 text-[10px] text-[#cdd6f4]">{savedSessionsBusy ? "Atualizando..." : "Atualizar lista"}</button>
           </div>
-          {savedSessions.length === 0 ? <div className="mt-2 text-[10px] text-[#7f849c]">Nenhuma sessão persistida encontrada neste aplicativo.</div> : <div className="mt-2 space-y-2">{savedSessions.map((saved) => <div key={saved.session_id} className={`flex flex-wrap items-center justify-between gap-2 rounded border p-2 ${selectedSavedSessionId === saved.session_id ? "border-[#cba6f7] bg-[#1b1630]" : "border-[#1e1e2e]"}`}><div className="min-w-0"><div className="truncate text-[10px] text-[#cdd6f4]">{saved.identity.header_title || "ROM sem título"} · {statusLabel(saved.status)}</div><div className="mt-1 truncate font-mono text-[9px] text-[#7f849c]">{saved.session_id} · {saved.identity.normalized_sha256.slice(0, 16)}…</div><div className="mt-1 truncate text-[9px] text-[#7f849c]">{saved.rom_path}</div></div><button type="button" data-testid={`select-saved-session-${saved.session_id}`} onClick={() => selectSavedSession(saved)} className="rounded border border-[#cba6f7]/50 px-2 py-1 text-[10px] text-[#cba6f7]">Selecionar</button></div>)}</div>}
+          {savedSessions.length === 0 ? <div className="mt-2 text-[10px] text-[#7f849c]">Nenhuma sessão persistida encontrada neste aplicativo.</div> : <div className="mt-2 space-y-2">{savedSessions.map((saved) => <div data-testid="inspection-saved-session" data-session-id={saved.session_id} data-session-status={saved.status} key={saved.session_id} className={`flex flex-wrap items-center justify-between gap-2 rounded border p-2 ${selectedSavedSessionId === saved.session_id ? "border-[#cba6f7] bg-[#1b1630]" : "border-[#1e1e2e]"}`}><div className="min-w-0"><div className="truncate text-[10px] text-[#cdd6f4]">{saved.identity.header_title || "ROM sem título"} · {statusLabel(saved.status)}</div><div className="mt-1 truncate font-mono text-[9px] text-[#7f849c]">{saved.session_id} · {saved.identity.normalized_sha256.slice(0, 16)}…</div><div className="mt-1 truncate text-[9px] text-[#7f849c]">{saved.rom_path}</div></div><button type="button" data-testid={`select-saved-session-${saved.session_id}`} onClick={() => selectSavedSession(saved)} className="rounded border border-[#cba6f7]/50 px-2 py-1 text-[10px] text-[#cba6f7]">Selecionar</button></div>)}</div>}
         </div>
       </div>
 
       {session && (
-        <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px]">
+        <div data-testid="inspection-session" data-session-id={session.session_id} data-session-status={session.status} data-identity-sha256={session.identity.normalized_sha256} className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px]">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="text-sm font-semibold text-[#e5e7eb]">{session.identity.header_title || "ROM sem título"}</div>
@@ -401,7 +426,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
 
       {session && !run && session.status !== "completed" && <button type="button" data-testid="inspection-start" onClick={() => void start()} className="rounded bg-[#89b4fa] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">Executar descoberta</button>}
       {run && (
-        <div data-testid="inspection-progress" className="rounded border border-[#313244] bg-[#11111b] p-3">
+        <div data-testid="inspection-run" data-run-id={run.run_id} data-run-status={run.status} data-run-generation={run.generation} className="rounded border border-[#313244] bg-[#11111b] p-3">
           <div className="flex justify-between text-[10px] text-[#cdd6f4]"><span>{currentProgress?.message}</span><span>{percent}%</span></div>
           <div className="mt-2 h-2 rounded bg-[#1e1e2e]"><div className="h-2 rounded bg-[#89b4fa]" style={{ width: `${percent}%` }} /></div>
           <div className="mt-2 text-[10px] text-[#7f849c]">Fase: {currentProgress?.phase} · geração {run.generation} · estado {statusLabel(run.status)}</div>
@@ -419,7 +444,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
             </div>
             <div className="mt-2 text-[10px] text-[#7f849c]">{page.total_candidates} candidato(s) · página {Math.floor(pageOffset / PAGE_SIZE) + 1} · descoberta {page.run_id || "não identificada"}</div>
             <div className="mt-3 grid gap-2 xl:grid-cols-2">
-              {page.candidates.map((candidate) => <button type="button" data-testid={`inspection-candidate-${candidate.id}`} key={candidate.id} onClick={() => void choose(candidate)} className={`rounded border p-3 text-left ${selected?.id === candidate.id ? "border-[#cba6f7] bg-[#1b1630]" : "border-[#1e1e2e] bg-[#0f172a]"}`}><div className="flex justify-between gap-2 text-[10px]"><span className="font-mono text-[#cdd6f4]">{candidate.kind}</span><span className="text-[#7f849c]">{hex(candidate.offset)} +{candidate.size}</span></div><div className="mt-1 font-mono text-[10px] text-[#cdd6f4]">{candidate.id}</div><div className="mt-1 text-[10px] text-[#94a3b8]">{candidate.method} · confiança {(candidate.confidence * 100).toFixed(1)}% · {candidate.status}</div><div className="mt-1 text-[10px] text-[#7f849c]">{candidate.previews.length ? "prévia disponível" : "prévia indisponível"}</div></button>)}
+              {page.candidates.map((candidate) => <button type="button" data-testid={`inspection-candidate-${candidate.id}`} data-preview-expected={candidate.previews.length > 0} key={candidate.id} onClick={() => void choose(candidate)} className={`rounded border p-3 text-left ${selected?.id === candidate.id ? "border-[#cba6f7] bg-[#1b1630]" : "border-[#1e1e2e] bg-[#0f172a]"}`}><div className="flex justify-between gap-2 text-[10px]"><span className="font-mono text-[#cdd6f4]">{candidate.kind}</span><span className="text-[#7f849c]">{hex(candidate.offset)} +{candidate.size}</span></div><div className="mt-1 font-mono text-[10px] text-[#cdd6f4]">{candidate.id}</div><div className="mt-1 text-[10px] text-[#94a3b8]">{candidate.method} · confiança {(candidate.confidence * 100).toFixed(1)}% · {candidate.status}</div><div className="mt-1 text-[10px] text-[#7f849c]">{candidate.previews.length ? "prévia disponível" : "prévia indisponível"}</div></button>)}
             </div>
             {page.unknown_regions.map((region) => <div key={`${region.offset}-${region.size}`} className="mt-2 rounded border border-[#f9e2af]/30 bg-[#2a2414] p-2 text-[10px] text-[#f9e2af]">UNKNOWN · {hex(region.offset)} +{region.size} · {region.method}</div>)}
             <div className="mt-3 flex gap-2"><button type="button" disabled={pageOffset === 0} onClick={() => { const next = Math.max(0, pageOffset - PAGE_SIZE); setPageOffset(next); void refreshCatalog(session.session_id, next); }} className="rounded border border-[#313244] px-3 py-1 text-[10px] text-[#cdd6f4]">Anterior</button><button type="button" disabled={pageOffset + PAGE_SIZE >= page.total_candidates} onClick={() => { const next = pageOffset + PAGE_SIZE; setPageOffset(next); void refreshCatalog(session.session_id, next); }} className="rounded border border-[#313244] px-3 py-1 text-[10px] text-[#cdd6f4]">Próxima</button></div>
@@ -429,7 +454,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
             <div className="rounded border border-[#313244] bg-[#11111b] p-3">
               <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">Pixels e proveniência</div>
               <div className="mt-2 text-[10px] text-[#cdd6f4]">{selected.id} · offset 0x{hex(selected.offset)} · tamanho {selected.size} · método {selected.method}</div>
-              {preview?.available && preview.data_url ? <img src={preview.data_url} alt={`Prévia real de ${selected.id}`} className="mt-3 max-w-full border border-[#313244] bg-black [image-rendering:pixelated]" /> : <div className="mt-3 rounded border border-[#f9e2af]/30 bg-[#2a2414] p-3 text-[10px] text-[#f9e2af]">{preview?.reason || "Prévia indisponível; nenhum placeholder representa bytes recuperados."}</div>}
+              {preview?.available && preview.data_url ? <img data-testid="inspection-preview-image" data-preview-width={preview.width ?? ""} data-preview-height={preview.height ?? ""} data-pixels-sha256={preview.pixels_sha256 ?? ""} src={preview.data_url} alt={`Prévia real de ${selected.id}`} className="mt-3 max-w-full border border-[#313244] bg-black [image-rendering:pixelated]" /> : <div data-testid="inspection-preview-unavailable" className="mt-3 rounded border border-[#f9e2af]/30 bg-[#2a2414] p-3 text-[10px] text-[#f9e2af]">{preview?.reason || "Prévia indisponível; nenhum placeholder representa bytes recuperados."}</div>}
               {preview?.artifact && <div className="mt-2 break-all font-mono text-[9px] text-[#7f849c]">artefato {preview.artifact.sha256} · pixels {preview.pixels_sha256}</div>}
             </div>
             <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px]">

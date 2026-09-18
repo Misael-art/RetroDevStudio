@@ -15,6 +15,7 @@ import { constants as fsConstants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -423,6 +424,9 @@ function parseArgs(argv) {
           "qa-rc",
           "create-game-from-zero",
           "inspection",
+          "inspection-cancel",
+          "inspection-complete",
+          "inspection-preview-unavailable",
         ].includes(
           value
         )
@@ -1063,7 +1067,7 @@ async function detectBuildFailure(sessionId, sinceIndex = 0) {
   return `build falhou (${failure.diagnostic.area}): ${detail}`;
 }
 
-async function webdriverRequest(method, route, body) {
+async function webdriverRequestDetailed(method, route, body) {
   const response = await fetch(`${driverServerUrl}${route}`, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -1071,18 +1075,36 @@ async function webdriverRequest(method, route, body) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { raw_body: text };
+  }
 
-  if (!response.ok) {
-    const details = payload?.value?.message ?? response.statusText;
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    headers: Object.fromEntries(response.headers.entries()),
+    body: text,
+    payload,
+  };
+}
+
+async function webdriverRequest(method, route, body) {
+  const result = await webdriverRequestDetailed(method, route, body);
+
+  if (!result.ok) {
+    const details = result.payload?.value?.message ?? result.statusText;
     throw new Error(`${method} ${route} falhou: ${details}`);
   }
 
-  if (payload?.value?.error) {
-    throw new Error(payload.value.message ?? `${method} ${route} retornou erro WebDriver.`);
+  if (result.payload?.value?.error) {
+    throw new Error(result.payload.value.message ?? `${method} ${route} retornou erro WebDriver.`);
   }
 
-  return payload;
+  return result.payload;
 }
 
 async function isDriverOnline() {
@@ -1393,6 +1415,107 @@ async function fillInputBySelector(sessionId, selector, value) {
   if (!result) {
     fail(`Falha ao preencher input via seletor: ${selector}`);
   }
+}
+
+async function readInspectionUiState(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const panel = document.querySelector('[data-testid="reverse-inspection-panel"]');
+      const identify = panel?.querySelector('[data-testid="inspection-identify-state"]');
+      const session = panel?.querySelector('[data-testid="inspection-session"]');
+      const run = panel?.querySelector('[data-testid="inspection-run"]');
+      const input = panel?.querySelector('input[type="text"]');
+      const image = panel?.querySelector('[data-testid="inspection-preview-image"]');
+      return {
+        inputValue: input instanceof HTMLInputElement ? input.value : null,
+        identify: identify ? {
+          state: identify.getAttribute('data-state'),
+          inputValue: identify.getAttribute('data-input-value'),
+          error: identify.getAttribute('data-error'),
+          sessionId: identify.getAttribute('data-session-id'),
+          sessionStatus: identify.getAttribute('data-session-status'),
+        } : null,
+        session: session ? {
+          id: session.getAttribute('data-session-id'),
+          status: session.getAttribute('data-session-status'),
+          identitySha256: session.getAttribute('data-identity-sha256'),
+        } : null,
+        run: run ? {
+          id: run.getAttribute('data-run-id'),
+          status: run.getAttribute('data-run-status'),
+          generation: run.getAttribute('data-run-generation'),
+        } : null,
+        preview: image ? {
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          declaredWidth: Number(image.getAttribute('data-preview-width') || 0),
+          declaredHeight: Number(image.getAttribute('data-preview-height') || 0),
+          pixelsSha256: image.getAttribute('data-pixels-sha256'),
+        } : null,
+        unavailable: Boolean(panel?.querySelector('[data-testid="inspection-preview-unavailable"]')),
+      };
+    `
+  );
+}
+
+async function inspectElementInteraction(sessionId, selector) {
+  return executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return { selector: arguments[0], found: false };
+      const rect = target.getBoundingClientRect();
+      const style = getComputedStyle(target);
+      const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const stack = document.elementsFromPoint(point.x, point.y).slice(0, 8).map((node) => ({
+        tag: node.tagName,
+        testId: node.getAttribute?.('data-testid') ?? null,
+        id: node.id || null,
+        className: typeof node.className === 'string' ? node.className.slice(0, 160) : null,
+        text: (node.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120),
+      }));
+      const active = document.activeElement;
+      return {
+        selector: arguments[0],
+        found: true,
+        tag: target.tagName,
+        outerHTML: target.outerHTML.slice(0, 1200),
+        visible: Boolean(rect.width && rect.height && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0),
+        disabled: target instanceof HTMLButtonElement || target instanceof HTMLInputElement ? target.disabled : false,
+        ariaDisabled: target.getAttribute('aria-disabled'),
+        focused: active === target,
+        activeElement: active instanceof HTMLElement ? { tag: active.tagName, testId: active.getAttribute('data-testid'), id: active.id || null } : null,
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        style: { display: style.display, visibility: style.visibility, pointerEvents: style.pointerEvents, zIndex: style.zIndex, position: style.position },
+        elementAtCenter: document.elementFromPoint(point.x, point.y)?.outerHTML?.slice(0, 500) ?? null,
+        overlayStack: stack,
+        effectiveValue: target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ? target.value : null,
+      };
+    `,
+    [selector]
+  );
+}
+
+async function clickElementWithDiagnostics(sessionId, elementId, selector) {
+  const before = await inspectElementInteraction(sessionId, selector);
+  let response;
+  try {
+    response = await webdriverRequestDetailed("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+  } catch (error) {
+    response = { exception: error instanceof Error ? error.message : String(error) };
+  }
+  const after = await inspectElementInteraction(sessionId, selector);
+  const uiState = await readInspectionUiState(sessionId);
+  console.log(`[inspection-click] selected=${JSON.stringify(before)}`);
+  console.log(`[inspection-click] http=${JSON.stringify(response)}`);
+  console.log(`[inspection-click] after=${JSON.stringify(after)}`);
+  console.log(`[inspection-click] ui=${JSON.stringify(uiState)}`);
+  if (response.exception || !response.ok || response.payload?.value?.error) {
+    throw new Error(`Clique WebDriver falhou com diagnóstico completo: ${JSON.stringify(response)}`);
+  }
+  return { before, response, after, uiState };
 }
 
 async function waitForBodyText(sessionId, fragment, timeoutMs, label) {
@@ -3694,7 +3817,7 @@ async function main() {
       currentE2eRunContext.project = options.project;
     }
 
-    if (options.scenario === "inspection") {
+    if (["inspection", "inspection-cancel", "inspection-complete", "inspection-preview-unavailable"].includes(options.scenario)) {
       const inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
       if (!inspectionRom || !(await pathExists(inspectionRom))) {
         fail(
@@ -3704,6 +3827,14 @@ async function main() {
       const artifactPrefix = `inspection-${artifactTimestamp()}`;
       const inspectionPanel = "[data-testid='reverse-inspection-panel']";
       const inspectionInput = `${inspectionPanel} input[type='text']`;
+      const gitEvidence = await readGitEvidence();
+      const binarySha256 = createHash("sha256").update(await readFile(options.app)).digest("hex");
+      const frontendEvidence = await executeScript(sessionId, `return { buildCommit: window.__RDS_BUILD_COMMIT__ ?? null, scripts: Array.from(document.scripts).map((script) => script.src || script.textContent?.slice(0, 80) || "") };`);
+      console.log(`[inspection-build] binary=${JSON.stringify({ path: options.app, sha256: binarySha256 })}`);
+      console.log(`[inspection-build] frontend=${JSON.stringify(frontendEvidence)} git=${JSON.stringify(gitEvidence)}`);
+      if (!gitEvidence.commit || frontendEvidence?.buildCommit !== gitEvidence.commit) {
+        fail(`Binário/frontend não correspondem ao commit corrente: ${JSON.stringify({ binary: options.app, frontend: frontendEvidence, git: gitEvidence })}`);
+      }
       await clickByTestId(sessionId, "workspace-rail-debug");
       await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace nao abriu");
       await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
@@ -3722,48 +3853,77 @@ async function main() {
         250
       );
       await fillInputBySelector(sessionId, inspectionInput, inspectionRom);
-      await activateByTestIdWithEnter(sessionId, "inspection-identify");
-      await waitForBodyText(sessionId, "Base identificada", 30000, "ROM BYOR nao foi identificada");
-      const initialDiscoveryAvailable = await executeScript(
-        sessionId,
-        `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Executar descoberta");`
-      );
-      if (initialDiscoveryAvailable) {
-        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-start");
-      }
-
-      let cancelObserved = false;
+      const inputState = await readInspectionUiState(sessionId);
+      console.log(`[inspection-identify] input=${JSON.stringify(inputState)}`);
+      const identifySelector = "[data-testid='inspection-identify']";
+      const identifyElement = await findElement(sessionId, identifySelector);
+      await clickElementWithDiagnostics(sessionId, identifyElement, identifySelector);
+      let identifiedState;
       try {
+        identifiedState = await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.identify?.state === "succeeded" && state.session?.id ? state : false;
+          },
+          30000,
+          "handler React/IPC de identificação não produziu estado de sessão",
+          100
+        );
+      } catch (error) {
+        const state = await readInspectionUiState(sessionId);
+        const automation = await readAutomationState(sessionId);
+        console.log(`[inspection-identify] final-ui=${JSON.stringify(state)}`);
+        console.log(`[inspection-identify] console=${JSON.stringify(automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [])}`);
+        throw error;
+      }
+      const identifyAutomation = await readAutomationState(sessionId);
+      console.log(`[inspection-identify] success=${JSON.stringify(identifiedState)}`);
+      console.log(`[inspection-identify] ipc-log=${JSON.stringify(identifyAutomation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [])}`);
+
+      const startAvailable = await executeScript(
+        sessionId,
+        `return Boolean(document.querySelector("[data-testid='inspection-start']"));`
+      );
+      if (!startAvailable) {
+        fail(`Identificação terminou sem o controle de análise: ${JSON.stringify(await readInspectionUiState(sessionId))}`);
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-start");
+
+      if (options.scenario === "inspection-cancel") {
         await waitFor(
-          async () => executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Cancelar análise");`),
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.run?.status === "running" ? state : false;
+          },
           10000,
-          "Descoberta nao exibiu o controle visível de cancelamento",
+          "Cancelamento não foi testado: a UI não exibiu um run em andamento",
           100
         );
         await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-cancel");
-        await waitForBodyText(sessionId, "Análise cancelada", 30000, "Cancelamento nao chegou ao estado final");
-        cancelObserved = true;
-      } catch (error) {
-        console.log(`[inspection] cancelamento nao observado nesta corrida: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      if (!cancelObserved) {
-        await waitForBodyText(sessionId, "Análise concluída", 30000, "Descoberta nao chegou a um estado terminal");
+        const cancelledState = await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.run?.status === "cancelled" && state.session?.status === "cancelled" ? state : false;
+          },
+          30000,
+          "Cancelamento não chegou ao estado terminal cancelled",
+          100
+        );
+        console.log(`[inspection-cancel] OK: estado terminal ${JSON.stringify(cancelledState)}`);
+        console.log("OK: Desktop Tauri inspection/cancel E2E passou com cancelamento comprovado.");
+        return;
       }
 
-      // A sessão cancelada não promove catálogo parcial. Reidentificar cria uma
-      // nova sessão legítima para provar o caminho completo até salvar/reabrir.
-      if (cancelObserved) {
-        await activateByTestIdWithEnter(sessionId, "inspection-identify");
-        await waitForBodyText(sessionId, "Base identificada", 30000, "Reidentificação BYOR nao concluiu");
-        const retryDiscoveryAvailable = await executeScript(
-          sessionId,
-          `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Executar descoberta");`
-        );
-        if (retryDiscoveryAvailable) {
-          await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-start");
-        }
-      }
-      await waitForBodyText(sessionId, "Análise concluída", 120000, "Descoberta visual nao concluiu");
+      const completedState = await waitFor(
+        async () => {
+          const state = await readInspectionUiState(sessionId);
+          return state?.run?.status === "completed" && state.session?.status === "completed" ? state : false;
+        },
+        120000,
+        "Descoberta visual não chegou ao estado terminal completed",
+        250
+      );
+      console.log(`[inspection-complete] terminal=${JSON.stringify(completedState)}`);
       const beforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-before-restart.png`);
       const candidateAvailable = await waitFor(
         async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid^='inspection-candidate-']"));`),
@@ -3772,28 +3932,74 @@ async function main() {
         250
       );
       if (!candidateAvailable) fail("Catálogo concluído não exibiu candidato visual.");
+      const expectedCandidateId = options.scenario === "inspection-preview-unavailable"
+        ? process.env.RDS_INSPECTION_UNAVAILABLE_CANDIDATE_ID ?? ""
+        : process.env.RDS_INSPECTION_EXPECTED_CANDIDATE_ID ?? "";
       const candidateTestId = await executeScript(
         sessionId,
-        `return document.querySelector("[data-testid^='inspection-candidate-']")?.getAttribute("data-testid") ?? "";`
+        `
+          const expected = String(arguments[0] || "");
+          const selector = expected ? "[data-testid='inspection-candidate-" + expected + "']" : (String(arguments[1]) === "unavailable" ? "[data-preview-expected='false']" : "[data-preview-expected='true']");
+          return document.querySelector(selector)?.getAttribute("data-testid") ?? "";
+        `,
+        [expectedCandidateId, options.scenario === "inspection-preview-unavailable" ? "unavailable" : "available"]
       );
-      if (!candidateTestId) fail("Não foi possível localizar o controle visível do primeiro candidato.");
-      await clickByTestId(sessionId, candidateTestId);
-      await waitForBodyText(sessionId, "Pixels e proveniência", 15000, "Seleção do candidato não abriu a inspeção visual");
-      const visualEvidence = await executeScript(
-        sessionId,
-        `return { image: Boolean(document.querySelector("${inspectionPanel} img")), unavailable: document.querySelector("${inspectionPanel}")?.textContent?.includes("Prévia indisponível") ?? false };`
-      );
-      if (!visualEvidence?.image && !visualEvidence?.unavailable) {
-        fail("A seleção do candidato não expôs nem pixels nem indisponibilidade de prévia.");
+      if (!candidateTestId) fail(expectedCandidateId ? `Candidato esperado não foi localizado: ${expectedCandidateId}` : options.scenario === "inspection-preview-unavailable" ? "Catálogo concluído não expôs candidato explicitamente sem prévia." : "Catálogo concluído não expôs candidato com prévia esperada.");
+      await clickButtonByTestIdWithPointerEvents(sessionId, candidateTestId);
+      if (options.scenario === "inspection-preview-unavailable") {
+        const unavailable = await waitFor(
+          async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-preview-unavailable']")) && !document.querySelector("[data-testid='inspection-preview-image']");`),
+          15000,
+          "O cenário de prévia indisponível não expôs o estado negativo explícito",
+          100
+        );
+        if (!unavailable) fail("Prévia indisponível não foi representada como estado negativo separado.");
+        console.log("OK: Desktop Tauri inspection/preview-unavailable E2E passou como cenário negativo separado.");
+        return;
       }
-      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
-      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
-
-      const persistedSessionId = await executeScript(
-        sessionId,
-        `return Array.from(document.querySelectorAll("[data-testid^='select-saved-session-']"))[0]?.getAttribute("data-testid")?.replace("select-saved-session-", "") ?? "";`
+      const visualEvidence = await waitFor(
+        async () => executeScript(sessionId, `
+          const image = document.querySelector("[data-testid='inspection-preview-image']");
+          if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
+          const expectedWidth = Number(image.getAttribute("data-preview-width") || 0);
+          const expectedHeight = Number(image.getAttribute("data-preview-height") || 0);
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          if (!context) return false;
+          context.drawImage(image, 0, 0);
+          const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          let nonZeroChannels = 0;
+          for (const value of pixels) if (value !== 0) nonZeroChannels += 1;
+          return {
+            image: true,
+            naturalWidth: image.naturalWidth,
+            naturalHeight: image.naturalHeight,
+            expectedWidth,
+            expectedHeight,
+            pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+            nonZeroChannels,
+          };
+        `),
+        15000,
+        "Prévia real não carregou imagem, dimensões ou pixels",
+        100
       );
-      if (!persistedSessionId) fail("Salvar sessão não deixou uma sessão persistida selecionável.");
+      if (!visualEvidence.image || visualEvidence.naturalWidth !== visualEvidence.expectedWidth || visualEvidence.naturalHeight !== visualEvidence.expectedHeight || !visualEvidence.pixelsSha256 || visualEvidence.nonZeroChannels <= 0) {
+        fail(`Prévia real inválida: ${JSON.stringify(visualEvidence)}`);
+      }
+      console.log(`[inspection-preview] evidence=${JSON.stringify(visualEvidence)}`);
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+      const persistedSessionId = completedState.session.id;
+      if (!persistedSessionId) fail(`Sessão concluída não tem identidade para validar persistência: ${JSON.stringify(completedState)}`);
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`),
+        15000,
+        "Salvar sessão não publicou a sessão corrente na lista persistida",
+        100
+      );
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
       await deleteSession(sessionId);
       sessionId = await createSession(options.app);
       currentE2eRunContext.sessionId = sessionId;
@@ -3819,15 +4025,42 @@ async function main() {
         "Painel de inspeção não voltou após reinício",
         250
       );
-      await waitForBodyText(sessionId, persistedSessionId, 30000, "Sessão persistida não foi descoberta após reinício");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`),
+        30000,
+        "Sessão persistida não foi descoberta após reinício",
+        100
+      );
       await clickByTestId(sessionId, `select-saved-session-${persistedSessionId}`, false);
       await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-reopen");
-      await waitForBodyText(sessionId, persistedSessionId, 30000, "Sessão persistida não foi reaberta após reinício");
+      const reopenedState = await waitFor(
+        async () => {
+          const state = await readInspectionUiState(sessionId);
+          return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false;
+        },
+        30000,
+        "Sessão persistida não foi reaberta após reinício",
+        100
+      );
+      console.log(`[inspection-reopen] state=${JSON.stringify(reopenedState)}`);
+      const reopenedCandidate = await waitFor(
+        async () => executeScript(sessionId, `return document.querySelector("[data-testid='${candidateTestId}']")?.getAttribute("data-testid") ?? "";`),
+        30000,
+        "Catálogo da sessão reaberta não expôs o candidato esperado",
+        100
+      );
+      await clickButtonByTestIdWithPointerEvents(sessionId, reopenedCandidate);
+      await waitFor(
+        async () => executeScript(sessionId, `const image = document.querySelector("[data-testid='inspection-preview-image']"); return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;`),
+        15000,
+        "Prévia real não voltou após reabrir a sessão",
+        100
+      );
       const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
-      console.log("OK: Desktop Tauri inspection/cancel/save/restart/reopen E2E passou.");
+      console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
       console.log(`ROM BYOR: ${inspectionRom}`);
       console.log(`Sessão reaberta: ${persistedSessionId}`);
-      console.log(`Prévia: ${visualEvidence.image ? "pixels PNG" : "indisponível explicitamente"}`);
+      console.log(`Prévia: pixels PNG carregados (${visualEvidence.naturalWidth}x${visualEvidence.naturalHeight})`);
       console.log(`Evidências: ${beforeRestartScreenshot}`);
       console.log(`Evidências: ${afterRestartScreenshot}`);
       return;
