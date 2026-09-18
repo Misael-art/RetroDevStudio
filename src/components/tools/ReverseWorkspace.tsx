@@ -11,6 +11,7 @@ import {
   romSaveAnnotations,
 } from "../../core/ipc/toolsService";
 import { ExperimentalNotice } from "./ToolNotices";
+import InspectionPanel from "./InspectionPanel";
 import ToolPathField from "./ToolPathField";
 
 type ReverseView =
@@ -20,7 +21,8 @@ type ReverseView =
   | "text"
   | "audio"
   | "code"
-  | "projection";
+  | "projection"
+  | "inspection";
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -278,6 +280,7 @@ export default function ReverseWorkspace() {
           ? "Projection continua informativa nesta wave; use anotacoes como saida persistida."
           : "Projection suportada para esta ROM; revise hints antes de gerar qualquer saida.";
   const viewTabs: { id: ReverseView; label: string }[] = [
+    { id: "inspection", label: "Inspeção visual" },
     { id: "map", label: "ROM Map" },
     { id: "hex", label: "Hex" },
     { id: "graphics", label: "Graphics" },
@@ -286,6 +289,20 @@ export default function ReverseWorkspace() {
     { id: "code", label: "Code" },
     { id: "projection", label: "Projection" },
   ];
+
+  if (activeView === "inspection") {
+    return (
+      <div className="flex flex-col gap-3 p-3">
+        <ExperimentalNotice summary="Inspeção visual Experimental: BYOR, catálogo unknown, candidatos heurísticos, prévias e proveniência. Nenhum byte da ROM é editado." />
+        <InspectionPanel logMessage={logMessage} />
+        <div className="flex flex-wrap gap-2">
+          {viewTabs.filter((tab) => tab.id !== "inspection").map((tab) => (
+            <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Voltar para {tab.label}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -299,6 +316,34 @@ export default function ReverseWorkspace() {
         extensions={["md", "bin", "gen", "smc", "sfc", "fig"]}
         accentColor="f9e2af"
       />
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          data-testid="reverse-tab-inspection"
+          onClick={() => setActiveView("inspection")}
+          className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8] hover:text-[#e5e7eb]"
+        >
+          Inspeção visual
+        </button>
+        {manifest &&
+          viewTabs
+            .filter((tab) => tab.id !== "inspection")
+            .map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveView(tab.id)}
+                className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+                  activeView === tab.id
+                    ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
+                    : "border-[#313244] bg-[#11111b] text-[#94a3b8] hover:text-[#e5e7eb]"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+      </div>
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
@@ -456,23 +501,6 @@ export default function ReverseWorkspace() {
               <dt className="text-[#64748b]">Proximo passo</dt>
               <dd className="text-[#cdd6f4]">{reverseReadinessLabel}</dd>
             </dl>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {viewTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveView(tab.id)}
-                className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
-                  activeView === tab.id
-                    ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
-                    : "border-[#313244] bg-[#11111b] text-[#94a3b8] hover:text-[#e5e7eb]"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
           </div>
 
           {activeView === "map" && (

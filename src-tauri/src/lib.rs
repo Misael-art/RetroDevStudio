@@ -424,6 +424,19 @@ where
         .await
 }
 
+async fn run_heavy_inspection_command<T, F>(
+    command_name: &'static str,
+    task: F,
+) -> Result<T, tools::reverse::decomp::inspection::InspectionError>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    run_heavy_result_command(command_name, task)
+        .await
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
 fn interrupted_build_result() -> BuildResult {
     BuildResult {
         ok: false,
@@ -1998,6 +2011,137 @@ async fn rom_extract_audio(rom_path: String) -> Result<Vec<AudioCandidate>, Stri
         tools::reverse::extract_audio(&rom_path)
     })
     .await
+}
+
+#[tauri::command]
+async fn rex_inspection_open(
+    rom_path: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_open", move || {
+        tools::reverse::decomp::inspection::open(&rom_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_reopen(
+    rom_path: String,
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_reopen", move || {
+        tools::reverse::decomp::inspection::reopen(&rom_path, &session_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_start(
+    app: AppHandle,
+    session_id: String,
+    generation: u64,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionRun,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::start(app, &session_id, generation)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_cancel(
+    session_id: String,
+    run_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionRun,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::cancel(&session_id, &run_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_status(
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionStatus,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::status(&session_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_list_sessions() -> Result<
+    Vec<tools::reverse::decomp::inspection::InspectionSession>,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::list_sessions()
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+async fn rex_inspection_catalog_page(
+    session_id: String,
+    offset: usize,
+    limit: usize,
+    query: String,
+    kind: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionCatalogPage,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_catalog_page", move || {
+        tools::reverse::decomp::inspection::catalog_page(&session_id, offset, limit, &query, &kind)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_preview(
+    session_id: String,
+    candidate_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionPreview,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_preview", move || {
+        tools::reverse::decomp::inspection::preview(&session_id, &candidate_id)
+    })
+    .await
+}
+
+#[tauri::command]
+fn rex_inspection_save_palette_choice(
+    session_id: String,
+    tile_candidate_id: String,
+    palette_candidate_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionUserChoice,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::save_palette_choice(
+        &session_id,
+        &tile_candidate_id,
+        &palette_candidate_id,
+    )
+    .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_save(
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::save(&session_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
 }
 
 #[tauri::command]
@@ -4574,6 +4718,16 @@ pub fn run() {
             rom_extract_text,
             rom_extract_audio,
             rom_save_annotations,
+            rex_inspection_open,
+            rex_inspection_reopen,
+            rex_inspection_start,
+            rex_inspection_cancel,
+            rex_inspection_status,
+            rex_inspection_list_sessions,
+            rex_inspection_catalog_page,
+            rex_inspection_preview,
+            rex_inspection_save_palette_choice,
+            rex_inspection_save,
             list_project_assets,
             open_project_source_path,
             read_legacy_project_file,

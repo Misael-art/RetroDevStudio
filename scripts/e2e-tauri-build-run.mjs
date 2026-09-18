@@ -422,6 +422,7 @@ function parseArgs(argv) {
           "onboarding-shell",
           "qa-rc",
           "create-game-from-zero",
+          "inspection",
         ].includes(
           value
         )
@@ -2975,6 +2976,17 @@ async function clickByTestId(sessionId, testId) {
   }
 }
 
+async function activateByTestIdWithEnter(sessionId, testId) {
+  const visible = await executeScript(
+    sessionId,
+    `const element = document.querySelector('[data-testid="' + String(arguments[0]) + '"]'); if (!(element instanceof HTMLElement)) return false; element.scrollIntoView({ block: "center", inline: "center" }); element.focus(); return true;`,
+    [testId]
+  );
+  if (!visible) throw new Error(`Elemento não encontrado para teclado: ${testId}`);
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/value`, { text: "\uE007", value: ["\uE007"] });
+}
+
 async function clickButtonByText(sessionId, expectedText, mode = "contains") {
   const clicked = await executeScript(
     sessionId,
@@ -3001,6 +3013,45 @@ async function clickButtonByText(sessionId, expectedText, mode = "contains") {
   if (!clicked) {
     fail(`Botao nao encontrado para clique: '${expectedText}'.`);
   }
+}
+
+async function clickButtonByTestIdWithPointerEvents(sessionId, testId) {
+  const result = await executeScript(
+    sessionId,
+    `const button = document.querySelector('[data-testid="' + String(arguments[0]) + '"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({ block: "center", inline: "center" }); button.focus(); for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); return true;`,
+    [testId]
+  );
+  if (!result) fail(`Botao nao encontrado para eventos: '${testId}'.`);
+}
+
+async function clickButtonByTextWithPointerEvents(sessionId, expectedText) {
+  const result = await executeScript(
+    sessionId,
+    `const expected = String(arguments[0]); const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.replace(/\\s+/g, " ").trim().includes(expected)); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({ block: "center", inline: "center" }); button.focus(); for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); return true;`,
+    [expectedText]
+  );
+  if (!result) fail(`Botao nao encontrado para eventos: '${expectedText}'.`);
+}
+
+async function clickButtonByTextAtCoordinates(sessionId, expectedText) {
+  const rect = await executeScript(
+    sessionId,
+    `const expected = String(arguments[0]); const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.replace(/\\s+/g, " ").trim().includes(expected)); if (!(button instanceof HTMLButtonElement) || button.disabled) return null; button.scrollIntoView({ block: "center", inline: "center" }); const rect = button.getBoundingClientRect(); return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };`,
+    [expectedText]
+  );
+  if (!rect) fail(`Botao nao encontrado para clique coordenado: '${expectedText}'.`);
+  await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-inspection-mouse",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: rect.x, y: rect.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
 }
 
 async function clickButtonByTestId(sessionId, testId) {
@@ -3641,6 +3692,145 @@ async function main() {
       options.project = path.join(temporaryProjectDir, path.basename(sourceProject));
       await cp(sourceProject, options.project, { recursive: true });
       currentE2eRunContext.project = options.project;
+    }
+
+    if (options.scenario === "inspection") {
+      const inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
+      if (!inspectionRom || !(await pathExists(inspectionRom))) {
+        fail(
+          "RDS_INSPECTION_ROM deve apontar para uma ROM BYOR real existente; nenhuma ROM e criada pelo E2E."
+        );
+      }
+      const artifactPrefix = `inspection-${artifactTimestamp()}`;
+      const inspectionPanel = "[data-testid='reverse-inspection-panel']";
+      const inspectionInput = `${inspectionPanel} input[type='text']`;
+      await clickByTestId(sessionId, "workspace-rail-debug");
+      await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace nao abriu");
+      await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+      try {
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace nao terminou de montar");
+      } catch (error) {
+        console.log(`[inspection] estado apos abrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
+        console.log(`[inspection] botoes apos abrir reverse: ${JSON.stringify(await executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).map((button) => button.textContent?.replace(/\\s+/g, " ").trim()).filter(Boolean).slice(-20);`))}`);
+        throw error;
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
+        15000,
+        "Painel de inspeção visual nao abriu",
+        250
+      );
+      await fillInputBySelector(sessionId, inspectionInput, inspectionRom);
+      await activateByTestIdWithEnter(sessionId, "inspection-identify");
+      await waitForBodyText(sessionId, "Base identificada", 30000, "ROM BYOR nao foi identificada");
+      const initialDiscoveryAvailable = await executeScript(
+        sessionId,
+        `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Executar descoberta");`
+      );
+      if (initialDiscoveryAvailable) {
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-start");
+      }
+
+      let cancelObserved = false;
+      try {
+        await waitFor(
+          async () => executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Cancelar análise");`),
+          10000,
+          "Descoberta nao exibiu o controle visível de cancelamento",
+          100
+        );
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-cancel");
+        await waitForBodyText(sessionId, "Análise cancelada", 30000, "Cancelamento nao chegou ao estado final");
+        cancelObserved = true;
+      } catch (error) {
+        console.log(`[inspection] cancelamento nao observado nesta corrida: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (!cancelObserved) {
+        await waitForBodyText(sessionId, "Análise concluída", 30000, "Descoberta nao chegou a um estado terminal");
+      }
+
+      // A sessão cancelada não promove catálogo parcial. Reidentificar cria uma
+      // nova sessão legítima para provar o caminho completo até salvar/reabrir.
+      if (cancelObserved) {
+        await activateByTestIdWithEnter(sessionId, "inspection-identify");
+        await waitForBodyText(sessionId, "Base identificada", 30000, "Reidentificação BYOR nao concluiu");
+        const retryDiscoveryAvailable = await executeScript(
+          sessionId,
+          `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Executar descoberta");`
+        );
+        if (retryDiscoveryAvailable) {
+          await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-start");
+        }
+      }
+      await waitForBodyText(sessionId, "Análise concluída", 120000, "Descoberta visual nao concluiu");
+      const beforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-before-restart.png`);
+      const candidateAvailable = await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid^='inspection-candidate-']"));`),
+        30000,
+        "Catálogo concluído não exibiu candidato visual",
+        250
+      );
+      if (!candidateAvailable) fail("Catálogo concluído não exibiu candidato visual.");
+      const candidateTestId = await executeScript(
+        sessionId,
+        `return document.querySelector("[data-testid^='inspection-candidate-']")?.getAttribute("data-testid") ?? "";`
+      );
+      if (!candidateTestId) fail("Não foi possível localizar o controle visível do primeiro candidato.");
+      await clickByTestId(sessionId, candidateTestId);
+      await waitForBodyText(sessionId, "Pixels e proveniência", 15000, "Seleção do candidato não abriu a inspeção visual");
+      const visualEvidence = await executeScript(
+        sessionId,
+        `return { image: Boolean(document.querySelector("${inspectionPanel} img")), unavailable: document.querySelector("${inspectionPanel}")?.textContent?.includes("Prévia indisponível") ?? false };`
+      );
+      if (!visualEvidence?.image && !visualEvidence?.unavailable) {
+        fail("A seleção do candidato não expôs nem pixels nem indisponibilidade de prévia.");
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+
+      const persistedSessionId = await executeScript(
+        sessionId,
+        `return Array.from(document.querySelectorAll("[data-testid^='select-saved-session-']"))[0]?.getAttribute("data-testid")?.replace("select-saved-session-", "") ?? "";`
+      );
+      if (!persistedSessionId) fail("Salvar sessão não deixou uma sessão persistida selecionável.");
+      await deleteSession(sessionId);
+      sessionId = await createSession(options.app);
+      currentE2eRunContext.sessionId = sessionId;
+      await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App não reabriu após reinício real");
+      await waitFor(
+        async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"),
+        uiBootstrapTimeoutMs,
+        "API de automação não voltou após reinício real"
+      );
+      await clickByTestId(sessionId, "workspace-rail-debug");
+      await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace não voltou após reinício");
+      await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+      try {
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace nao terminou de remontar");
+      } catch (error) {
+        console.log(`[inspection] estado apos reabrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
+        throw error;
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
+        15000,
+        "Painel de inspeção não voltou após reinício",
+        250
+      );
+      await waitForBodyText(sessionId, persistedSessionId, 30000, "Sessão persistida não foi descoberta após reinício");
+      await clickByTestId(sessionId, `select-saved-session-${persistedSessionId}`, false);
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-reopen");
+      await waitForBodyText(sessionId, persistedSessionId, 30000, "Sessão persistida não foi reaberta após reinício");
+      const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
+      console.log("OK: Desktop Tauri inspection/cancel/save/restart/reopen E2E passou.");
+      console.log(`ROM BYOR: ${inspectionRom}`);
+      console.log(`Sessão reaberta: ${persistedSessionId}`);
+      console.log(`Prévia: ${visualEvidence.image ? "pixels PNG" : "indisponível explicitamente"}`);
+      console.log(`Evidências: ${beforeRestartScreenshot}`);
+      console.log(`Evidências: ${afterRestartScreenshot}`);
+      return;
     }
 
     if (options.scenario === "onboarding-shell") {

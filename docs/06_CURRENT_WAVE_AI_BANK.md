@@ -6,6 +6,16 @@
 
 **Próxima frente:** scanners de conteúdo adicionais (reduzir os ~99,9% de unknown) — NÃO iniciada; depende de GO.
 
+### Estado corrente — 2026-09-17: fatia de inspeção visual desktop REX-04 implementada para revisão
+
+**Entrega em `codex/rex04-inspection-ipc` (Experimental):** fluxo somente leitura `ROM BYOR → identidade base → catálogo → descoberta assíncrona → progresso/cancelamento → candidatos e regiões UNKNOWN → prévias reais PNG/proveniência → escolha manual de paleta → snapshot/reabertura com identidade verificada`. A UI foi adicionada como aba isolada do Reverse Workspace; candidatos continuam heurísticos e não promovem bytes, sprites ou gameplay.
+
+**Endurecimentos incluídos:** hash de catálogo ligado à serialização canônica e aos bytes exatos; validação de schema/tamanho/intervalos/overflow/contiguidade/status/limites; artefatos create-new imutáveis sem panic e com limpeza de escrita parcial; resolução de artefatos com contenção, tipo regular e hash; deduplicação de referências; erros IPC estruturados (`code`, `message`, `retryable`); IDs de candidato gerados pelo backend; sessão correlacionada por identidade, geração e ROM. Nenhuma dependência nova ou ROM foi adicionada.
+
+**Evidência local:** `check:tree`, lint, TypeScript, build frontend, Vitest (64 arquivos; 618 passados, 3 ignorados no último run da certificação antes de ENOSPC; run completo anterior 615/6), `cargo fmt --check`, `cargo clippy --lib -- -D warnings` e `cargo test --lib -- --nocapture --test-threads=1` (592 passados, 40 ignorados) executados. O `host:diagnose` final está READY; duas tentativas de `host:certify` terminaram em `ENOSPC` nos workers da suíte frontend mesmo após liberar o cache `src-tauri/target-test/dev`, portanto a certificação completa permanece bloqueada por capacidade do host. A execução canônica ainda deve preservar os hashes HAMOOPIG `558bea6c…f8529be9` e Taiketsu `3967996a…42bc7c`; nenhuma aprovação do PR #68 é inferida desta entrega.
+
+**Limitações explícitas:** sem byte editing, codecs, descompressão, montagem de sprites, lógica, rebuild, emulação ou decompilação completa; cancelamento é cooperativo em pontos de fase; concorrência de substituição de caminho permanece fora do escopo. A disponibilidade de prévia é verificada pelo backend; ausência não gera placeholder. Próximo passo: revisão independente e prova desktop canônica com BYOR disponível.
+
 ---
 
 ### Estado corrente — 2026-09-15 (4): REX-04 fatia 2 — classificação endurecida (payload `tileset_data` + compressão NONE + tokenizer com aspas), PR #65 aguardando re-revisão
@@ -2278,3 +2288,10 @@ Preservar o pacote interno auditavel sem inflar status de release publica. A rod
 - Gates locais de `c042ecf`: host:certify READY, 604 frontend, 524 Rust, clippy completo, fmt, build desktop e Build & Run MD/SNES; input Right chegou à RAM da ROM MD. Integração somente após checks remotos verdes. Estado remoto final e hashes em `/home/misael/RetroDevStudio/verified-2026-09-10-c042ecf/evidence/provenance.json`; limitações e reprodução em LEIA-ME e Memory Bank. Nenhuma declaração de produto inteiro finalizado.
 
 - GUARD-SPRITE-PRIORITY-01: corrigir prioridade no argumento correto de TILE_ATTR (prioridade estava espelhando o sprite). Regressão negativa reproduzida em `c042ecf`; revalidação do candidato final rastreada no PR #61 e em `evidence/provenance.json`, mantendo o baseline anterior para comparação.
+### Estado corrente — 2026-09-18: hardening da inspeção visual e E2E desktop bloqueada pelo WebKit
+
+Fechados os três gaps do painel: listener antes do start + reconciliação por status; invalidação/guards de respostas antigas por sessão, sequência, filtro e candidato; listagem persistente de sessões com seleção após reinício. A aba de inspeção agora é acessível antes da identificação, e os controles possuem seletores de QA.
+
+O scanner gráfico recebeu cache de avaliações e avanço monotônico após timeout em ROM real causado por recomputação/retrocesso. `graphics_discovery`: 14 testes passaram, 2 ignorados; clippy passou. Rebuild canônico atualizado: binário `src-tauri/target-test/debug/retro-dev-studio`, SHA-256 `03674e8b2f1f88bbecf66f724f1b3f8a3a3e11442a8fcb879f9ad50ddca19180`.
+
+Bloqueio restante: o WebKitWebDriver não ativa os botões da inspeção (`POST /element/.../click` vazio; clique DOM e Enter também não produziram identificação). A E2E real chega ao painel, mas não observa nova sessão/start; portanto cancelamento e reinício/reabertura não estão certificados. O `Input/output error` em `src-tauri/src/tools/reverse/decomp-recovery/object_diff.rs` foi isolado e preservado, sem limpeza destrutiva. **Experimental; aceite pendente.**

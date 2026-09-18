@@ -22,8 +22,8 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::extract::{
-    canonical_dir_under, reject_if_symlink, sha256_path_component, write_file_immutable,
-    ExtractionCatalog,
+    canonical_dir_under, reject_if_symlink, sha256_path_component, validate_extraction_catalog,
+    write_file_immutable, ExtractionCatalog,
 };
 use super::rom_library::{
     now_unix, record_scenario_run, sha256_hex, ArtifactRef, ScenarioRunRecord,
@@ -234,6 +234,7 @@ fn extend_block(data: &[u8], block_start: u64, end: u64) -> u64 {
 /// desalinhada pode estar até 31 bytes antes do grid real.
 fn scan_tile_blocks(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> {
     let mut candidates = Vec::new();
+    let mut evaluated = std::collections::HashMap::<u64, (u64, f32)>::new();
     let mut offset = start;
     while offset + TILE_BYTES as u64 <= end {
         if !plausible_tile(data, offset) {
@@ -245,13 +246,26 @@ fn scan_tile_blocks(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> 
         let snap_hi = (offset + 30).min(end.saturating_sub(TILE_BYTES as u64));
         let mut block_start = snap_lo + (offset - snap_lo) % SCAN_STEP;
         while block_start <= snap_hi {
-            let block_end = extend_block(data, block_start, end);
+            let (block_end, avg) = if let Some(&(cached_end, cached_avg)) =
+                evaluated.get(&block_start)
+            {
+                (cached_end, cached_avg)
+            } else {
+                let cached_end = extend_block(data, block_start, end);
+                let tiles = (cached_end - block_start) / TILE_BYTES as u64;
+                let cached_avg = if tiles == 0 {
+                    0.0
+                } else {
+                    (0..tiles)
+                        .map(|t| tile_plausibility_score(data, block_start + t * TILE_BYTES as u64))
+                        .sum::<f32>()
+                        / tiles as f32
+                };
+                evaluated.insert(block_start, (cached_end, cached_avg));
+                (cached_end, cached_avg)
+            };
             let tiles = (block_end - block_start) / TILE_BYTES as u64;
             if tiles >= 1 {
-                let avg = (0..tiles)
-                    .map(|t| tile_plausibility_score(data, block_start + t * TILE_BYTES as u64))
-                    .sum::<f32>()
-                    / tiles as f32;
                 let better = match best {
                     None => true,
                     Some((best_avg, _, best_size)) => {
@@ -272,7 +286,7 @@ fn scan_tile_blocks(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> 
         if tiles >= MIN_TILES_PER_BLOCK {
             candidates.push(build_tile_candidate(data, block_start, block_end, tiles));
         }
-        offset = block_end;
+        offset = block_end.max(offset + SCAN_STEP);
     }
     candidates
 }
@@ -426,11 +440,14 @@ pub fn discover_graphic_candidates(
     normalized: &[u8],
     catalog_sha256: &str,
 ) -> Result<GraphicDiscovery, String> {
-    let rom_sha = sha256_hex(normalized);
-    if rom_sha != catalog.normalized_sha256 {
+    validate_extraction_catalog(catalog, normalized)?;
+    let canonical_catalog = serde_json::to_vec_pretty(catalog)
+        .map_err(|error| format!("falha ao serializar catálogo canônico: {error}"))?;
+    let expected_catalog_sha = sha256_hex(&canonical_catalog);
+    if catalog_sha256 != expected_catalog_sha {
         return Err(format!(
-            "bytes normalizados não correspondem ao catálogo: esperado {}, obtido {}",
-            catalog.normalized_sha256, rom_sha
+            "hash do artefato de catálogo não corresponde à serialização canônica: esperado {}, obtido {}",
+            expected_catalog_sha, catalog_sha256
         ));
     }
     sha256_path_component(catalog_sha256)?;
@@ -462,17 +479,75 @@ pub fn discover_graphic_candidates(
 /// Escreve bytes imutáveis endereçados por hash como `{prefixo}-{sha}.png`
 /// sob `dir`; reutiliza (idempotente) arquivo regular idêntico; symlinks são
 /// rejeitados.
-fn write_immutable_artifact(dir: &Path, prefix: &str, bytes: &[u8]) -> ArtifactRef {
+fn write_immutable_artifact(dir: &Path, prefix: &str, bytes: &[u8]) -> Result<ArtifactRef, String> {
     let sha = sha256_hex(bytes);
     let path = dir.join(format!("{prefix}-{sha}.png"));
     let write_result =
         reject_if_symlink(&path).and_then(|()| write_file_immutable(&path, bytes, &sha));
-    write_result.unwrap_or_else(|error| panic!("falha ao escrever artefato imutável: {error}"));
-    ArtifactRef {
+    write_result?;
+    Ok(ArtifactRef {
         label: prefix.to_string(),
         path: path.display().to_string(),
         sha256: sha,
+    })
+}
+
+fn push_unique_artifact(artifacts: &mut Vec<ArtifactRef>, artifact: ArtifactRef) {
+    if !artifacts.iter().any(|existing| existing == &artifact) {
+        artifacts.push(artifact);
     }
+}
+
+pub(crate) fn validate_graphic_discovery(
+    discovery: &GraphicDiscovery,
+    normalized: &[u8],
+) -> Result<(), String> {
+    if discovery.schema_version != GRAPHIC_DISCOVERY_SCHEMA_V1
+        || discovery.normalized_sha256 != sha256_hex(normalized)
+        || discovery.original_sha256.len() != 64
+        || !discovery
+            .original_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("descoberta não corresponde à identidade dos bytes".to_string());
+    }
+    if discovery.catalog_sha256.len() != 64
+        || !discovery
+            .catalog_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("descoberta referencia um SHA de catálogo inválido".to_string());
+    }
+    for candidate in &discovery.candidates {
+        let end = candidate
+            .offset
+            .checked_add(candidate.size)
+            .ok_or_else(|| "overflow no intervalo do candidato".to_string())?;
+        if candidate.size == 0
+            || end > normalized.len() as u64
+            || candidate.status != STATUS_CANDIDATE
+        {
+            return Err(format!(
+                "intervalo/status inválido no candidato {}@{}",
+                candidate.kind, candidate.offset
+            ));
+        }
+        match candidate.kind.as_str() {
+            KIND_TILE_BLOCK if candidate.size % TILE_BYTES as u64 == 0 => {}
+            KIND_PALETTE16 | KIND_PALETTE64 if candidate.size % 2 == 0 => {}
+            _ => {
+                return Err(format!(
+                    "tipo/tamanho inválido no candidato '{}'",
+                    candidate.kind
+                ))
+            }
+        }
+        let _ = usize::try_from(candidate.offset)
+            .map_err(|_| "offset do candidato não cabe no host".to_string())?;
+    }
+    Ok(())
 }
 
 /// Exporta prévias PNG para os candidatos (limite: 16 de cada tipo), com o
@@ -483,6 +558,7 @@ pub fn export_candidate_previews(
     discovery: &mut GraphicDiscovery,
     normalized: &[u8],
 ) -> Result<usize, String> {
+    validate_graphic_discovery(discovery, normalized)?;
     let previews_dir = canonical_dir_under(
         work_dir,
         &["extract", &discovery.normalized_sha256, "previews"],
@@ -498,8 +574,8 @@ pub fn export_candidate_previews(
                     continue;
                 }
                 let png = render_tile_block_png(normalized, candidate)?;
-                let artifact = write_immutable_artifact(&previews_dir, "tiles", &png);
-                candidate.previews.push(artifact);
+                let artifact = write_immutable_artifact(&previews_dir, "tiles", &png)?;
+                push_unique_artifact(&mut candidate.previews, artifact);
                 written += 1;
             }
             KIND_PALETTE16 | KIND_PALETTE64 => {
@@ -508,8 +584,8 @@ pub fn export_candidate_previews(
                     continue;
                 }
                 let png = render_palette_png(normalized, candidate)?;
-                let artifact = write_immutable_artifact(&previews_dir, "palette", &png);
-                candidate.previews.push(artifact);
+                let artifact = write_immutable_artifact(&previews_dir, "palette", &png)?;
+                push_unique_artifact(&mut candidate.previews, artifact);
                 written += 1;
             }
             _ => {}
@@ -626,7 +702,9 @@ pub fn record_discovery_run(
     };
     let mut artifacts = vec![artifact.clone()];
     for candidate in &discovery.candidates {
-        artifacts.extend(candidate.previews.iter().cloned());
+        for artifact_ref in &candidate.previews {
+            push_unique_artifact(&mut artifacts, artifact_ref.clone());
+        }
     }
     let mut by_kind = std::collections::BTreeMap::new();
     for candidate in &discovery.candidates {
@@ -1012,6 +1090,30 @@ mod tests {
         let error = discover_graphic_candidates(&catalog, &other, &catalog_sha)
             .expect_err("bytes divergentes");
         assert!(error.contains("não correspondem"), "{error}");
+    }
+
+    #[test]
+    fn discovery_rejects_a_valid_but_wrong_catalog_hash() {
+        let rom = fixture_rom(0x8000);
+        let (catalog, _) = catalog_and_sha(&rom);
+        let wrong_hash = "0".repeat(64);
+        let error = discover_graphic_candidates(&catalog, &rom, &wrong_hash)
+            .expect_err("SHA hex válido mas não vinculado ao artefato deve falhar");
+        assert!(error.contains("serialização canônica"), "{error}");
+    }
+
+    #[test]
+    fn discovery_rejects_overflow_and_inconsistent_catalog_ranges() {
+        let rom = fixture_rom(0x8000);
+        let (mut catalog, catalog_sha) = catalog_and_sha(&rom);
+        catalog.regions[2].offset = u64::MAX - 1;
+        catalog.regions[2].size = 8;
+        let error = discover_graphic_candidates(&catalog, &rom, &catalog_sha)
+            .expect_err("intervalo fora da ROM deve falhar antes do scanner");
+        assert!(
+            error.contains("intervalo") || error.contains("overflow"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -2019,12 +2121,12 @@ BIN snd_xgm \"sound/xgm.bin\" 2 2 0 NONE FALSE\n";
 
         // Section headers (40B cada): name, type, flags, addr, offset, size,
         // link, info, addralign, entsize.
-        let mut section_header = |section_type: u32,
-                                  flags: u32,
-                                  offset: u32,
-                                  size: u32,
-                                  link: u32,
-                                  entsize: u32|
+        let section_header = |section_type: u32,
+                              flags: u32,
+                              offset: u32,
+                              size: u32,
+                              link: u32,
+                              entsize: u32|
          -> Vec<u8> {
             let mut header = vec![0u8; 40];
             header[4..8].copy_from_slice(&section_type.to_be_bytes());

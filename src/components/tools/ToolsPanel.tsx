@@ -3089,6 +3089,7 @@ export default function ToolsPanel({
                   >
                     <button
                       type="button"
+                      data-testid={`tools-category-${category.id}`}
                       onClick={() => setActiveCategory(category.id)}
                       className={`flex w-full items-start justify-between rounded-xl px-2 py-2 text-left transition-colors ${
                         isActiveCategory
@@ -3115,6 +3116,7 @@ export default function ToolsPanel({
                           <button
                             key={tool.id}
                             type="button"
+                            data-testid={`tools-tool-${tool.id}`}
                             onClick={() => setActive(tool.id)}
                             className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
                               safeActive === tool.id

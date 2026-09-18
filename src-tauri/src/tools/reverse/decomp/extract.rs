@@ -160,7 +160,7 @@ pub(crate) fn reject_if_symlink(path: &Path) -> Result<(), String> {
 
 /// Componentes de caminho FIXOS aceitos sem validação hex — qualquer outro
 /// componente é obrigatoriamente hex64 (sha256). Nada de passagem livre.
-const LITERAL_COMPONENTS: [&str; 2] = ["extract", "previews"];
+const LITERAL_COMPONENTS: [&str; 4] = ["extract", "previews", "sessions", "choices"];
 
 /// Diretório canônico sob `work_dir` para um caminho relativo de componentes
 /// fixos mais componentes hex validáveis: cada componente existente é checado
@@ -284,7 +284,7 @@ pub fn build_md_extraction_catalog(
         identified = 0x200;
     }
 
-    Ok(ExtractionCatalog {
+    let catalog = ExtractionCatalog {
         schema_version: EXTRACTION_CATALOG_SCHEMA_V1.into(),
         original_sha256: identity.original_sha256.clone(),
         normalized_sha256: identity.normalized_sha256.clone(),
@@ -295,7 +295,98 @@ pub fn build_md_extraction_catalog(
         unknown_bytes: total - identified,
         total_bytes: total,
         regions,
-    })
+    };
+    validate_extraction_catalog(&catalog, normalized)?;
+    Ok(catalog)
+}
+
+/// Valida um catálogo antes de qualquer consumidor interpretar seus offsets.
+/// Catálogos chegam de artefatos persistidos e, portanto, não podem ser tratados
+/// como dados confiáveis apenas porque desserializaram.
+pub(crate) fn validate_extraction_catalog(
+    catalog: &ExtractionCatalog,
+    normalized: &[u8],
+) -> Result<(), String> {
+    if catalog.schema_version != EXTRACTION_CATALOG_SCHEMA_V1 {
+        return Err(format!(
+            "schema de catálogo não suportado: {}",
+            catalog.schema_version
+        ));
+    }
+    if catalog.normalized_size != normalized.len() as u64 {
+        return Err(format!(
+            "tamanho do catálogo diverge dos bytes: esperado {}, observado {}",
+            catalog.normalized_size,
+            normalized.len()
+        ));
+    }
+    if catalog.total_bytes != catalog.normalized_size {
+        return Err("total_bytes do catálogo diverge de normalized_size".to_string());
+    }
+    if catalog.original_sha256.len() != 64
+        || !catalog
+            .original_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+        || catalog.normalized_sha256.len() != 64
+        || !catalog
+            .normalized_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("hash de identidade do catálogo deve ser hex de 64 caracteres".to_string());
+    }
+    let normalized_sha = sha256_hex(normalized);
+    if normalized_sha != catalog.normalized_sha256 {
+        return Err(format!(
+            "bytes normalizados não correspondem ao catálogo: esperado {}, obtido {}",
+            catalog.normalized_sha256, normalized_sha
+        ));
+    }
+    if catalog.regions.is_empty() {
+        return Err("catálogo sem regiões".to_string());
+    }
+
+    let mut expected_offset = 0u64;
+    let mut identified = 0u64;
+    let mut unknown = 0u64;
+    for region in &catalog.regions {
+        if region.size == 0 {
+            return Err(format!("região '{}' tem tamanho zero", region.kind));
+        }
+        let end = region.offset.checked_add(region.size).ok_or_else(|| {
+            format!(
+                "overflow no intervalo da região '{}': {}+{}",
+                region.kind, region.offset, region.size
+            )
+        })?;
+        if region.offset != expected_offset || end > normalized.len() as u64 {
+            return Err(format!(
+                "intervalo inválido ou fora da ROM na região '{}': [{}, {})",
+                region.kind, region.offset, end
+            ));
+        }
+        if region.kind.trim().is_empty()
+            || region.status.trim().is_empty()
+            || region.method.trim().is_empty()
+        {
+            return Err("região sem kind, status ou método obrigatório".to_string());
+        }
+        match region.status.as_str() {
+            STATUS_IDENTIFIED => identified = identified.saturating_add(region.size),
+            STATUS_UNKNOWN => unknown = unknown.saturating_add(region.size),
+            other => return Err(format!("status de região não suportado: {other}")),
+        }
+        expected_offset = end;
+    }
+    if expected_offset != catalog.total_bytes
+        || identified != catalog.identified_bytes
+        || unknown != catalog.unknown_bytes
+        || identified.checked_add(unknown) != Some(catalog.total_bytes)
+    {
+        return Err("cobertura do catálogo é inconsistente".to_string());
+    }
+    Ok(())
 }
 
 /// Sequenciador de run_id: `now_unix()` tem resolução de segundos e duas
@@ -319,9 +410,22 @@ pub(crate) fn write_file_immutable(
         .create_new(true)
         .open(path)
     {
-        Ok(mut file) => file
-            .write_all(bytes)
-            .map_err(|error| format!("falha ao escrever catálogo '{}': {error}", path.display())),
+        Ok(mut file) => {
+            let result = file
+                .write_all(bytes)
+                .and_then(|()| file.sync_all())
+                .map_err(|error| {
+                    format!("falha ao escrever catálogo '{}': {error}", path.display())
+                });
+            drop(file);
+            if result.is_err() {
+                // O arquivo acabou de ser criado por esta chamada. Removê-lo
+                // evita que uma escrita parcial seja confundida com artefato
+                // reutilizável em uma execução posterior.
+                let _ = fs::remove_file(path);
+            }
+            result
+        }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             // Rejeita link e entry não regular ANTES de ler — a leitura a
             // seguir só acontece em arquivo regular verificado.

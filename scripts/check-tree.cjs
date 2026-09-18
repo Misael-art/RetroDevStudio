@@ -10,7 +10,19 @@ const path = require("path");
 
 const root = path.resolve(__dirname, "..");
 const allowedDirs = [".github", "data", "docs", "src", "src-tauri", "toolchains", "scripts"];
-const ignoreDirs = [".git", "node_modules", "target", "dist", ".cursor", ".vscode", ".claude"];
+// Agent/session metadata is intentionally outside the product tree and must
+// not make the repository gate fail while other sessions are active.
+const ignoreDirs = [
+  ".git",
+  "node_modules",
+  "target",
+  "dist",
+  ".cursor",
+  ".vscode",
+  ".claude",
+  ".mimosa",
+  ".zcode",
+];
 
 if (!fs.existsSync(path.join(root, "docs", "08_TREE_ARCHITECTURE.md"))) {
   console.error("ERRO: Execute este script na raiz do repositorio RetroDev Studio (onde esta a pasta docs).");

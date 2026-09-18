@@ -343,6 +343,195 @@ export interface RomTextExtractionResult {
   pointer_tables: PointerTableCandidate[];
 }
 
+export interface InspectionError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface InspectionRomIdentity {
+  original_sha256: string;
+  normalized_sha256: string;
+  original_size: number;
+  normalized_size: number;
+  variant: string;
+  header_console: string;
+  header_title: string;
+  region?: string | null;
+  version?: string | null;
+  size_note?: string | null;
+}
+
+export interface InspectionArtifactRef {
+  label: string;
+  path: string;
+  sha256: string;
+}
+
+export interface InspectionSession {
+  schema_version: string;
+  session_id: string;
+  rom_path: string;
+  identity: InspectionRomIdentity;
+  catalog_artifact: InspectionArtifactRef;
+  artifact_refs: InspectionArtifactRef[];
+  user_choice_artifacts: InspectionArtifactRef[];
+  discovery_run_id?: string | null;
+  status: string;
+  candidates_total: number;
+  unknown_bytes: number;
+  created_at_unix: number;
+  completed_at_unix?: number | null;
+  error?: InspectionError | null;
+}
+
+export interface InspectionProgress {
+  session_id: string;
+  run_id: string;
+  generation: number;
+  phase: string;
+  status: string;
+  completed_work: number;
+  total_work: number;
+  candidates_found: number;
+  message: string;
+}
+
+export interface InspectionRun {
+  run_id: string;
+  session_id: string;
+  generation: number;
+  status: string;
+  progress: InspectionProgress;
+  started_at_unix: number;
+  finished_at_unix?: number | null;
+  error?: InspectionError | null;
+}
+
+export interface InspectionStatus {
+  session: InspectionSession;
+  run?: InspectionRun | null;
+}
+
+export interface InspectionCandidate {
+  id: string;
+  offset: number;
+  size: number;
+  kind: string;
+  status: string;
+  method: string;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  previews: InspectionArtifactRef[];
+}
+
+export interface InspectionUnknownRegion {
+  offset: number;
+  size: number;
+  kind: string;
+  method: string;
+}
+
+export interface InspectionUserChoice {
+  choice_id: string;
+  session_id: string;
+  tile_candidate_id: string;
+  palette_candidate_id: string;
+  source: string;
+  artifact: InspectionArtifactRef;
+}
+
+export interface InspectionCatalogPage {
+  session_id: string;
+  run_id: string;
+  offset: number;
+  limit: number;
+  total_candidates: number;
+  candidates: InspectionCandidate[];
+  unknown_regions: InspectionUnknownRegion[];
+  user_choices: InspectionUserChoice[];
+}
+
+export interface InspectionPreview {
+  session_id: string;
+  candidate_id: string;
+  available: boolean;
+  reason?: string | null;
+  artifact?: InspectionArtifactRef | null;
+  data_url?: string | null;
+  width?: number | null;
+  height?: number | null;
+  pixels_sha256?: string | null;
+}
+
+export const INSPECTION_PROGRESS_EVENT = "rex://inspection-progress";
+
+export function inspectionOpen(romPath: string): Promise<InspectionSession> {
+  return invoke<InspectionSession>("rex_inspection_open", { romPath });
+}
+
+export function inspectionReopen(romPath: string, sessionId: string): Promise<InspectionSession> {
+  return invoke<InspectionSession>("rex_inspection_reopen", { romPath, sessionId });
+}
+
+export function inspectionStart(sessionId: string, generation: number): Promise<InspectionRun> {
+  return invoke<InspectionRun>("rex_inspection_start", { sessionId, generation });
+}
+
+export function inspectionCancel(sessionId: string, runId: string): Promise<InspectionRun> {
+  return invoke<InspectionRun>("rex_inspection_cancel", { sessionId, runId });
+}
+
+export function inspectionStatus(sessionId: string): Promise<InspectionStatus> {
+  return invoke<InspectionStatus>("rex_inspection_status", { sessionId });
+}
+
+export function inspectionListSessions(): Promise<InspectionSession[]> {
+  return invoke<InspectionSession[]>("rex_inspection_list_sessions");
+}
+
+export function inspectionCatalogPage(
+  sessionId: string,
+  offset: number,
+  limit: number,
+  query: string,
+  kind: string
+): Promise<InspectionCatalogPage> {
+  return invoke<InspectionCatalogPage>("rex_inspection_catalog_page", {
+    sessionId,
+    offset,
+    limit,
+    query,
+    kind,
+  });
+}
+
+export function inspectionPreview(sessionId: string, candidateId: string): Promise<InspectionPreview> {
+  return invoke<InspectionPreview>("rex_inspection_preview", { sessionId, candidateId });
+}
+
+export function inspectionSavePaletteChoice(
+  sessionId: string,
+  tileCandidateId: string,
+  paletteCandidateId: string
+): Promise<InspectionUserChoice> {
+  return invoke<InspectionUserChoice>("rex_inspection_save_palette_choice", {
+    sessionId,
+    tileCandidateId,
+    paletteCandidateId,
+  });
+}
+
+export function inspectionSave(sessionId: string): Promise<InspectionSession> {
+  return invoke<InspectionSession>("rex_inspection_save", { sessionId });
+}
+
+export function listenInspectionProgress(
+  callback: (progress: InspectionProgress) => void
+): Promise<UnlistenFn> {
+  return listen<InspectionProgress>(INSPECTION_PROGRESS_EVENT, (event) => callback(event.payload));
+}
+
 // ── Patch Studio ──────────────────────────────────────────────────────────────
 
 export function patchCreateIps(
