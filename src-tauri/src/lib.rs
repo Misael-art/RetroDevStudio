@@ -126,6 +126,82 @@ pub struct GenerateResult {
     pub build_source_map: Option<BuildSourceMap>,
 }
 
+/// Época do core: incrementa a cada `emulator_load_rom`. Um `send_input`
+/// emitido numa época anterior é RECUSADO pelo backend (não é aplicado ao
+/// core novo) — fecha a corrida de um input em voo atravessar uma recarga.
+static CORE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Test-only: canais de sincronização para o gate de época em
+/// `send_input_if_current`. O sender sinaliza "atingiu o gate" via TX e
+/// aguarda a liberação via RX — sem sleep nem timing.
+#[cfg(test)]
+static EPOCH_TEST_GATE_TX: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>> =
+    std::sync::Mutex::new(None);
+#[cfg(test)]
+static EPOCH_TEST_GATE_RX: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>> =
+    std::sync::Mutex::new(None);
+
+impl EmulatorCoreState {
+    /// Aplica o joypad somente se a época do core ainda for `session_epoch`.
+    /// A conferência e a aplicação ocorrem na MESMA seção crítica do mutex do
+    /// core — o mesmo lock usado pela recarga, que incrementa a época. Assim,
+    /// um input antigo que chegue depois de uma recarga é recusado sob o
+    /// lock; a ordem "valida fora do lock" não é expressável neste caminho.
+    fn send_input_if_current(
+        &self,
+        session_epoch: Option<u64>,
+        joypad: JoypadState,
+    ) -> EmulatorCommandResult {
+        // Test-only gate: quando ativado, sinaliza "atingiu o ponto pré-lock"
+        // via canal e aguarda a liberação pelo teste em outro canal — sem
+        // depender de sleep nem de timing. Os canais são instalados pelo
+        // teste antes de spawnar o sender.
+        #[cfg(test)]
+        {
+            let arrived = EPOCH_TEST_GATE_TX.lock().unwrap().take();
+            if let Some(tx) = arrived {
+                let _ = tx.send(());
+                if let Some(rx) = EPOCH_TEST_GATE_RX.lock().unwrap().take() {
+                    let _ = rx.recv().unwrap(); // bloqueia até o teste liberar
+                }
+            }
+        }
+
+        let core = match self.0.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                return EmulatorCommandResult {
+                    ok: false,
+                    message: e.to_string(),
+                }
+            }
+        };
+
+        if let Some(epoch) = session_epoch {
+            let current = CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
+            if epoch != current {
+                return EmulatorCommandResult {
+                    ok: false,
+                    message: format!(
+                        "sessão de input obsoleta: emitida na época {epoch}, corrente é {current}"
+                    ),
+                };
+            }
+        }
+
+        match core.set_joypad(joypad) {
+            Ok(()) => EmulatorCommandResult {
+                ok: true,
+                message: String::new(),
+            },
+            Err(e) => EmulatorCommandResult {
+                ok: false,
+                message: e,
+            },
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct EmulatorCommandResult {
     pub ok: bool,
@@ -348,6 +424,19 @@ where
         .await
 }
 
+async fn run_heavy_inspection_command<T, F>(
+    command_name: &'static str,
+    task: F,
+) -> Result<T, tools::reverse::decomp::inspection::InspectionError>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    run_heavy_result_command(command_name, task)
+        .await
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
 fn interrupted_build_result() -> BuildResult {
     BuildResult {
         ok: false,
@@ -428,15 +517,25 @@ fn emulator_load_rom(rom_path: String, emu: State<EmulatorCoreState>) -> Emulato
     };
 
     match core.load_rom(Path::new(&rom_path)) {
-        Ok(()) => EmulatorCommandResult {
-            ok: true,
-            message: match core.loaded_core_label() {
-                Some(label) if !label.is_empty() => {
-                    format!("ROM carregada: {} ({})", rom_path, label)
-                }
-                _ => format!("ROM carregada: {}", rom_path),
-            },
-        },
+        Ok(()) => {
+            // Nova época: inputs emitidos antes da recarga passam a ser
+            // recusados pelo send_input (ver CORE_EPOCH).
+            CORE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // Política de carga: controles voltam ao neutro. Um `send_input`
+            // que tenha atravessado a recarga (mutex serializa com o load)
+            // é neutralizado aqui — o core novo nunca herda joypad da
+            // sessão anterior.
+            let _ = core.set_joypad(crate::emulator::libretro_ffi::JoypadState::default());
+            EmulatorCommandResult {
+                ok: true,
+                message: match core.loaded_core_label() {
+                    Some(label) if !label.is_empty() => {
+                        format!("ROM carregada: {} ({})", rom_path, label)
+                    }
+                    _ => format!("ROM carregada: {}", rom_path),
+                },
+            }
+        }
         Err(e) => EmulatorCommandResult {
             ok: false,
             message: e,
@@ -1560,28 +1659,31 @@ fn emulator_get_execution_trace(
 #[tauri::command]
 fn emulator_send_input(
     joypad: JoypadState,
+    session_epoch: Option<u64>,
     emu: State<EmulatorCoreState>,
 ) -> EmulatorCommandResult {
-    let core = match emu.0.lock() {
-        Ok(c) => c,
-        Err(e) => {
-            return EmulatorCommandResult {
-                ok: false,
-                message: e.to_string(),
-            }
-        }
-    };
+    emulator_send_input_command(&emu, joypad, session_epoch)
+}
 
-    match core.set_joypad(joypad) {
-        Ok(()) => EmulatorCommandResult {
-            ok: true,
-            message: String::new(),
-        },
-        Err(e) => EmulatorCommandResult {
-            ok: false,
-            message: e,
-        },
-    }
+fn emulator_send_input_command(
+    emu: &EmulatorCoreState,
+    joypad: JoypadState,
+    session_epoch: Option<u64>,
+) -> EmulatorCommandResult {
+    // A conferência de época e a aplicação acontecem DENTRO da mesma seção
+    // crítica do mutex do core (a mesma usada pela recarga, que incrementa a
+    // época). Validar antes do lock permitia: input antigo valida → recarga
+    // troca o core e incrementa a época → input aplica controles antigos ao
+    // core novo (corrida P1 da revisão 1a1fc65). A ordem "valida fora do
+    // lock" deixa de ser expressável: o único caminho de aplicação é este
+    // método, que recebe o guard por dentro.
+    emu.send_input_if_current(session_epoch, joypad)
+}
+
+/// Época corrente do core (incrementa a cada carga de ROM).
+#[tauri::command]
+fn emulator_get_core_epoch() -> u64 {
+    CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Para o emulador e limpa o framebuffer.
@@ -1909,6 +2011,153 @@ async fn rom_extract_audio(rom_path: String) -> Result<Vec<AudioCandidate>, Stri
         tools::reverse::extract_audio(&rom_path)
     })
     .await
+}
+
+#[tauri::command]
+async fn rex_inspection_open(
+    rom_path: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_open", move || {
+        tools::reverse::decomp::inspection::open(&rom_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_reopen(
+    rom_path: String,
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_reopen", move || {
+        tools::reverse::decomp::inspection::reopen(&rom_path, &session_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_start(
+    app: AppHandle,
+    session_id: String,
+    generation: u64,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionRun,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::start(app, &session_id, generation)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_cancel(
+    session_id: String,
+    run_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionRun,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::cancel(&session_id, &run_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_status(
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionStatus,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::status(&session_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_list_sessions() -> Result<
+    Vec<tools::reverse::decomp::inspection::InspectionSession>,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::list_sessions()
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+async fn rex_inspection_catalog_page(
+    session_id: String,
+    offset: usize,
+    limit: usize,
+    query: String,
+    kind: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionCatalogPage,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_catalog_page", move || {
+        tools::reverse::decomp::inspection::catalog_page(&session_id, offset, limit, &query, &kind)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_preview(
+    session_id: String,
+    candidate_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionPreview,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_preview", move || {
+        tools::reverse::decomp::inspection::preview(&session_id, &candidate_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_sprite_frame(
+    session_id: String,
+    resource_id: String,
+    flip_x: bool,
+    flip_y: bool,
+) -> Result<
+    tools::reverse::decomp::sprite_composition::InspectionSpriteFrame,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_sprite_frame", move || {
+        tools::reverse::decomp::inspection::sprite_frame(&session_id, &resource_id, flip_x, flip_y)
+    })
+    .await
+}
+
+#[tauri::command]
+fn rex_inspection_save_palette_choice(
+    session_id: String,
+    tile_candidate_id: String,
+    palette_candidate_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionUserChoice,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::save_palette_choice(
+        &session_id,
+        &tile_candidate_id,
+        &palette_candidate_id,
+    )
+    .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_save(
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::save(&session_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
 }
 
 #[tauri::command]
@@ -4423,6 +4672,7 @@ pub fn run() {
             parity_run_reference_candidate,
             parity_run_cycle_report,
             emulator_read_memory,
+            emulator_get_core_epoch,
             emulator_get_execution_trace,
             emulator_send_input,
             emulator_stop,
@@ -4484,6 +4734,17 @@ pub fn run() {
             rom_extract_text,
             rom_extract_audio,
             rom_save_annotations,
+            rex_inspection_open,
+            rex_inspection_reopen,
+            rex_inspection_start,
+            rex_inspection_cancel,
+            rex_inspection_status,
+            rex_inspection_list_sessions,
+            rex_inspection_catalog_page,
+            rex_inspection_preview,
+            rex_inspection_sprite_frame,
+            rex_inspection_save_palette_choice,
+            rex_inspection_save,
             list_project_assets,
             open_project_source_path,
             read_legacy_project_file,
@@ -8223,5 +8484,172 @@ pub extern "C" fn retro_run() {
 
         assert!(snapshot.is_empty());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    // ── Corrida de época no send_input (re-revisão 1a1fc65, P1) ──────────────
+
+    use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+    use std::sync::atomic::Ordering;
+
+    /// Serializa os testes que tocam CORE_EPOCH (estático de processo): sem
+    /// este guard, o harness paralelo deixa os testes invalidarem a época uns
+    /// dos outros (revisão de e39f2b5: "um teste pode invalidar a época do
+    /// outro").
+    static CORE_EPOCH_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Força as interleavings da corrida de época (revisor 1a1fc65): a época
+    /// muda ENTRE a captura do frontend e a execução sob o lock. Teste único
+    /// porque CORE_EPOCH é estático de processo — os cenários executam em
+    /// sequência fixa.
+    #[test]
+    fn send_input_epoch_race_is_refused_under_lock_without_applying() {
+        let _guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
+        let state = EmulatorCoreState(std::sync::Mutex::new(EmulatorCore::new(None)));
+
+        // Cenário 1: frontend capturou a época 4; a recarga levou o core para
+        // 5 entre a captura e a execução. Conferência sob o lock deve recusar
+        // sem aplicar o input ao core novo.
+        CORE_EPOCH.store(5, Ordering::SeqCst);
+        let stale = state.send_input_if_current(
+            Some(4),
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+        );
+        assert!(!stale.ok, "época obsoleta deve ser recusada");
+        assert!(stale.message.contains("obsoleta"), "{}", stale.message);
+        assert!(
+            !state.0.lock().unwrap().current_joypad().right,
+            "input obsoleto não pode ser aplicado ao core novo"
+        );
+
+        // Cenário 2 (controle): época corrente é aplicada normalmente.
+        let applied = state.send_input_if_current(
+            Some(5),
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+        );
+        assert!(applied.ok);
+        assert!(state.0.lock().unwrap().current_joypad().right);
+
+        // Cenário 3: a conferência acontece DENTRO da seção crítica — um load
+        // que incrementa a época depois do lock do send invalida o send que
+        // ainda vai aplicar.
+        CORE_EPOCH.store(9, Ordering::SeqCst);
+        let captured_current = Some(9u64);
+        CORE_EPOCH.store(10, Ordering::SeqCst);
+        let invalidated = state.send_input_if_current(captured_current, JoypadState::default());
+        assert!(
+            !invalidated.ok,
+            "época capturada antes da recarga deve ser recusada"
+        );
+        assert!(
+            invalidated.message.contains('9') && invalidated.message.contains("10"),
+            "recusa cita as duas épocas: {}",
+            invalidated.message
+        );
+    }
+
+    /// Regressão da ORDEM DEFETUOSA com o comando REAL e sincronização
+    /// determinística via gate de canais instalado antes do spawn: o sender
+    /// pausa no hook pré-lock dentro de `send_input_if_current` (imediatamente
+    /// antes de adquirir o mutex do core), o teste confirma a chegada,
+    /// incrementa a época — SEM segurar o mutex do core: a ordem é controlada
+    /// pelo hook, não pelo lock — e libera o gate. O sender então adquire o
+    /// mutex, valida sob o lock vendo a época já incrementada e recusa. No
+    /// código com validação antes do lock (regressão), a validação roda ANTES
+    /// do hook, com a época ainda 1, e o input é aplicado quando o lock é
+    /// adquirido — o teste FALHA.
+    #[test]
+    fn send_input_command_refuses_epoch_bumped_after_prelock_hook() {
+        use std::sync::mpsc;
+
+        let _epoch_guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
+        let state = std::sync::Arc::new(EmulatorCoreState(std::sync::Mutex::new(
+            EmulatorCore::new(None),
+        )));
+        CORE_EPOCH.store(1, Ordering::SeqCst);
+        let captured_before_reload = Some(1u64);
+
+        // Instala AMBAS as metades do gate ANTES de spawnar o sender:
+        // - chegada: TX vai no gate (o sender sinaliza), RX fica com o teste;
+        // - liberação: RX vai no gate (o sender aguarda), TX fica com o teste.
+        // Se a metade de liberação fosse instalada depois, o sender passaria
+        // direto pelo gate (RX ausente) e o teste não pausaria nada.
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        *EPOCH_TEST_GATE_TX.lock().unwrap() = Some(gate_tx);
+        *EPOCH_TEST_GATE_RX.lock().unwrap() = Some(release_rx);
+
+        // Sender: chama o comando REAL. No código corrigido, pausa no gate,
+        // adquire o mutex após a liberação, valida 1 vs 2 → recusa.
+        let state_sender = std::sync::Arc::clone(&state);
+        let sender = std::thread::spawn(move || {
+            emulator_send_input_command(
+                &state_sender,
+                JoypadState {
+                    right: true,
+                    ..JoypadState::default()
+                },
+                captured_before_reload,
+            )
+        });
+
+        // Aguarda confirmação EXPLÍCITA de que o sender atingiu o gate.
+        gate_rx
+            .recv()
+            .expect("sender não sinalizou chegada ao gate");
+
+        // Incrementa a época com o sender pausado no gate (antes do mutex).
+        CORE_EPOCH.store(2, Ordering::SeqCst);
+
+        // Libera o gate: o sender adquire o mutex e valida contra a época 2.
+        release_tx.send(()).expect("gate já encerrado");
+
+        let result = sender.join().unwrap();
+
+        assert!(
+            !result.ok,
+            "VAZAMENTO: send validou com a época antiga (1) e aplicou input depois de o core ter sido incrementado para 2: {}",
+            result.message
+        );
+        assert!(result.message.contains("obsoleta"), "{}", result.message);
+        let joypad = state.0.lock().unwrap().current_joypad();
+        assert!(
+            !joypad.right,
+            "input obsoleto não pode ser aplicado ao core novo"
+        );
+    }
+    /// Sequencial: época capturada antes do incremento → recusa sem aplicar.
+    /// Cobertura do contrato de época.
+    #[test]
+    fn send_input_refuses_epoch_captured_before_increment() {
+        let _guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
+        let state = EmulatorCoreState(std::sync::Mutex::new(EmulatorCore::new(None)));
+
+        CORE_EPOCH.store(1, Ordering::SeqCst);
+        let captured = CORE_EPOCH.load(Ordering::SeqCst);
+        CORE_EPOCH.store(2, Ordering::SeqCst);
+
+        let result = state.send_input_if_current(
+            Some(captured),
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+        );
+        assert!(
+            !result.ok,
+            "época capturada antes do incremento deve ser recusada: {}",
+            result.message
+        );
+        assert!(result.message.contains("obsoleta"), "{}", result.message);
+        assert!(
+            !state.0.lock().unwrap().current_joypad().right,
+            "input obsoleto não pode ser aplicado ao core novo"
+        );
     }
 }
