@@ -19,17 +19,56 @@ use crate::tools::reverse::loader::rex_read_rom;
 pub const HAMOOPIG_REFERENCE_SHA256: &str =
     "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
 const RESOURCE_ID: &str = "spr_ryo_100";
-const FRAME_ID: &str = "spr_ryo_100/frame-0";
-const FRAME_WIDTH: u32 = 64;
-const FRAME_HEIGHT: u32 = 104;
 const TILE_BYTES: usize = 32;
-const TILE_DATA_OFFSET: usize = 0x863a0;
 const TILE_DATA_SIZE: usize = 0x800;
 const PALETTE_OFFSET: usize = 0x2cc68;
 const PALETTE_SIZE: usize = 0x20;
-const DESCRIPTORS_OFFSET: usize = 0x22260;
-const DESCRIPTORS_SIZE: usize = 8 * 6;
 const SOURCE_PNG_SHA256: &str = "1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b";
+
+const FRAME0_DESCRIPTORS: [u8; 8 * 6] = [
+    0x2c, 0x1c, 0x0f, 0x05, 0x1b, 0x10, 0x0c, 0x3c, 0x0f, 0x04, 0x1c, 0x10, 0x37, 0x11, 0x07, 0x25,
+    0x0b, 0x08, 0x14, 0x3c, 0x06, 0x24, 0x0c, 0x06, 0x4c, 0x0c, 0x09, 0x05, 0x23, 0x06, 0x57, 0x01,
+    0x09, 0x25, 0x03, 0x06, 0x58, 0x00, 0x05, 0x00, 0x30, 0x04, 0x04, 0x5c, 0x04, 0x15, 0x1b, 0x02,
+];
+const FRAME1_DESCRIPTORS: [u8; 8 * 6] = [
+    0x11, 0x37, 0x0f, 0x07, 0x19, 0x10, 0x31, 0x1f, 0x0e, 0x08, 0x18, 0x0c, 0x37, 0x11, 0x07, 0x24,
+    0x0c, 0x08, 0x11, 0x3f, 0x06, 0x27, 0x09, 0x06, 0x49, 0x0f, 0x09, 0x05, 0x23, 0x06, 0x57, 0x01,
+    0x09, 0x24, 0x04, 0x06, 0x58, 0x00, 0x09, 0x00, 0x28, 0x06, 0x04, 0x54, 0x09, 0x0c, 0x1c, 0x06,
+];
+
+struct SpriteManifest {
+    frame_id: &'static str,
+    frame_label: &'static str,
+    width: u32,
+    height: u32,
+    tile_data_offset: usize,
+    tile_data_size: usize,
+    descriptor_offset: usize,
+    descriptors: &'static [u8; 8 * 6],
+}
+
+const FRAME_MANIFESTS: [SpriteManifest; 2] = [
+    SpriteManifest {
+        frame_id: "spr_ryo_100/frame-0",
+        frame_label: "frame 0",
+        width: 64,
+        height: 104,
+        tile_data_offset: 0x863a0,
+        tile_data_size: 0x800,
+        descriptor_offset: 0x22260,
+        descriptors: &FRAME0_DESCRIPTORS,
+    },
+    SpriteManifest {
+        frame_id: "spr_ryo_100/frame-1",
+        frame_label: "frame 1",
+        width: 64,
+        height: 104,
+        tile_data_offset: 0x86ba0,
+        tile_data_size: 0x840,
+        descriptor_offset: 0x222a2,
+        descriptors: &FRAME1_DESCRIPTORS,
+    },
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SpriteFramePart {
@@ -84,14 +123,8 @@ struct Part {
     y_flip: usize,
 }
 
-const EXPECTED_DESCRIPTOR_BYTES: [u8; DESCRIPTORS_SIZE] = [
-    0x2c, 0x1c, 0x0f, 0x05, 0x1b, 0x10, 0x0c, 0x3c, 0x0f, 0x04, 0x1c, 0x10, 0x37, 0x11, 0x07, 0x25,
-    0x0b, 0x08, 0x14, 0x3c, 0x06, 0x24, 0x0c, 0x06, 0x4c, 0x0c, 0x09, 0x05, 0x23, 0x06, 0x57, 0x01,
-    0x09, 0x25, 0x03, 0x06, 0x58, 0x00, 0x05, 0x00, 0x30, 0x04, 0x04, 0x5c, 0x04, 0x15, 0x1b, 0x02,
-];
-
-fn decode_parts(descriptors: &[u8]) -> Result<Vec<Part>, String> {
-    if descriptors != EXPECTED_DESCRIPTOR_BYTES {
+fn decode_parts(descriptors: &[u8], expected: &[u8]) -> Result<Vec<Part>, String> {
+    if descriptors != expected {
         return Err("descritores do frame não correspondem ao manifesto ResComp".to_string());
     }
     let mut tile_start = 0usize;
@@ -115,7 +148,7 @@ fn decode_parts(descriptors: &[u8]) -> Result<Vec<Part>, String> {
         });
         tile_start += tile_count;
     }
-    if tile_start * TILE_BYTES != TILE_DATA_SIZE {
+    if tile_start == 0 {
         return Err("descritores não cobrem exatamente os bytes compilados".to_string());
     }
     Ok(parts)
@@ -140,13 +173,20 @@ fn compose_rgba(
     tile_data: &[u8],
     palette: &[u8],
     parts: &[Part],
+    width: u32,
+    height: u32,
     flip_x: bool,
     flip_y: bool,
 ) -> Result<RgbaImage, String> {
-    if tile_data.len() != TILE_DATA_SIZE || palette.len() != PALETTE_SIZE {
+    let required_tiles = parts
+        .iter()
+        .map(|part| part.tile_start + part.tile_count)
+        .max()
+        .unwrap_or_default();
+    if tile_data.len() < required_tiles * TILE_BYTES || palette.len() != PALETTE_SIZE {
         return Err("tamanho de bytes compilados incompatível com o manifesto".to_string());
     }
-    let mut canvas = RgbaImage::from_pixel(FRAME_WIDTH, FRAME_HEIGHT, palette_rgba(palette, 0));
+    let mut canvas = RgbaImage::from_pixel(width, height, palette_rgba(palette, 0));
     for part in parts {
         for local_y in 0..part.tile_height {
             for local_x in 0..part.tile_width {
@@ -226,14 +266,18 @@ fn parts_wire(parts: &[Part]) -> Vec<SpriteFramePart> {
 pub fn compose_for_session(
     session: &InspectionSession,
     resource_id: &str,
+    frame_id: &str,
     flip_x: bool,
     flip_y: bool,
 ) -> Result<InspectionSpriteFrame, String> {
-    if resource_id != RESOURCE_ID {
-        return Err(format!(
-            "sprite_manifest_missing: nenhum frame HAMOOPIG rastreável para '{resource_id}'"
-        ));
-    }
+    let manifest = FRAME_MANIFESTS
+        .iter()
+        .find(|manifest| manifest.frame_id == frame_id && resource_id == RESOURCE_ID)
+        .ok_or_else(|| {
+            format!(
+                "sprite_manifest_missing: nenhum frame HAMOOPIG rastreável para '{resource_id}/{frame_id}'"
+            )
+        })?;
     let rom_path = Path::new(&session.rom_path);
     let (identity, rom) = rex_read_rom(rom_path)?;
     if identity.normalized_sha256 != HAMOOPIG_REFERENCE_SHA256 {
@@ -243,9 +287,9 @@ pub fn compose_for_session(
         ));
     }
     let required_end = [
-        TILE_DATA_OFFSET + TILE_DATA_SIZE,
+        manifest.tile_data_offset + manifest.tile_data_size,
         PALETTE_OFFSET + PALETTE_SIZE,
-        DESCRIPTORS_OFFSET + DESCRIPTORS_SIZE,
+        manifest.descriptor_offset + manifest.descriptors.len(),
     ]
     .into_iter()
     .max()
@@ -253,11 +297,16 @@ pub fn compose_for_session(
     if rom.len() < required_end {
         return Err("sprite_manifest_rom_short: ROM não contém o frame compilado".to_string());
     }
-    let parts = decode_parts(&rom[DESCRIPTORS_OFFSET..DESCRIPTORS_OFFSET + DESCRIPTORS_SIZE])?;
+    let parts = decode_parts(
+        &rom[manifest.descriptor_offset..manifest.descriptor_offset + manifest.descriptors.len()],
+        manifest.descriptors,
+    )?;
     let image = compose_rgba(
-        &rom[TILE_DATA_OFFSET..TILE_DATA_OFFSET + TILE_DATA_SIZE],
+        &rom[manifest.tile_data_offset..manifest.tile_data_offset + manifest.tile_data_size],
         &rom[PALETTE_OFFSET..PALETTE_OFFSET + PALETTE_SIZE],
         &parts,
+        manifest.width,
+        manifest.height,
         flip_x,
         flip_y,
     )?;
@@ -269,7 +318,9 @@ pub fn compose_for_session(
         &decomp_work_dir(),
         &["extract", &identity.normalized_sha256, "previews"],
     )?;
-    let path = previews_dir.join(format!("sprite-frame-{RESOURCE_ID}-{png_sha256}.png"));
+    let path = previews_dir.join(format!(
+        "sprite-frame-{resource_id}-{frame_id}-{png_sha256}.png"
+    ));
     write_file_immutable(&path, &png, &png_sha256)?;
     let artifact = ArtifactRef {
         label: "sprite-frame-composition".to_string(),
@@ -279,11 +330,11 @@ pub fn compose_for_session(
     Ok(InspectionSpriteFrame {
         session_id: session.session_id.clone(),
         resource_id: RESOURCE_ID.to_string(),
-        frame_id: FRAME_ID.to_string(),
+        frame_id: manifest.frame_id.to_string(),
         available: true,
         reason: None,
-        width: FRAME_WIDTH,
-        height: FRAME_HEIGHT,
+        width: manifest.width,
+        height: manifest.height,
         data_url: Some(format!(
             "data:image/png;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(&png)
@@ -292,11 +343,11 @@ pub fn compose_for_session(
         png_sha256: Some(png_sha256),
         pixels_sha256: Some(pixels_sha256),
         rom_sha256: identity.normalized_sha256,
-        tile_data_offset: TILE_DATA_OFFSET as u64,
-        tile_data_size: TILE_DATA_SIZE as u64,
+        tile_data_offset: manifest.tile_data_offset as u64,
+        tile_data_size: manifest.tile_data_size as u64,
         palette_offset: PALETTE_OFFSET as u64,
         palette_size: PALETTE_SIZE as u64,
-        descriptor_offset: DESCRIPTORS_OFFSET as u64,
+        descriptor_offset: manifest.descriptor_offset as u64,
         flip_x,
         flip_y,
         transparency_index: 0,
@@ -304,18 +355,18 @@ pub fn compose_for_session(
         metadata_source: "Metadado doador + bytes compilados verificáveis; não é descoberta automática".to_string(),
         rom_evidence: vec![
             format!("normalized_sha256={HAMOOPIG_REFERENCE_SHA256}"),
-            format!("tile_data=0x{TILE_DATA_OFFSET:06X}+0x{TILE_DATA_SIZE:X}"),
+            format!("tile_data=0x{:06X}+0x{:X}", manifest.tile_data_offset, manifest.tile_data_size),
             format!("palette=0x{PALETTE_OFFSET:06X}+0x{PALETTE_SIZE:X}"),
-            format!("descriptors=0x{DESCRIPTORS_OFFSET:06X}+0x{DESCRIPTORS_SIZE:X}"),
+            format!("descriptors=0x{:06X}+0x{:X}", manifest.descriptor_offset, manifest.descriptors.len()),
         ],
         donor_evidence: vec![
-            "res/sprite.res: SPRITE spr_ryo_100 sprite/ryo/100.png 8 13 NONE 0".to_string(),
+            format!("res/sprite.res: SPRITE spr_ryo_100 sprite/ryo/100.png 8 13 NONE 0 · {}", manifest.frame_label),
             format!("source_png_sha256={SOURCE_PNG_SHA256}"),
             "SGDK ResComp: FrameVDPSprite (offsetY, offsetYFlip, size, offsetX, offsetXFlip, numTile)".to_string(),
             "transformação: tiles 4bpp nibble alto primeiro, ordem vertical por VDP sprite (x→y); paleta MD RGB333; índice 0 transparente".to_string(),
         ],
         limitations: vec![
-            "Somente spr_ryo_100/frame-0 da ROM HAMOOPIG de referência está automatizado".to_string(),
+            "Somente os frames 0 e 1 de spr_ryo_100 da ROM HAMOOPIG de referência estão automatizados".to_string(),
             "A identidade semântica, frame e ordem dos VDP sprites vêm do projeto doador".to_string(),
             "Não cobre animação, runtime de hitbox, streaming ou reconstrução do jogo".to_string(),
         ],
@@ -360,6 +411,8 @@ mod tests {
             &fixture_tiles(),
             &fixture_palette(),
             &fixture_parts(),
+            64,
+            104,
             false,
             false,
         )
@@ -378,12 +431,22 @@ mod tests {
             &fixture_tiles(),
             &fixture_palette(),
             &fixture_parts(),
+            64,
+            104,
             false,
             false,
         )
         .unwrap();
-        let wrong =
-            compose_rgba(&fixture_tiles(), &fixture_palette(), &parts, false, false).unwrap();
+        let wrong = compose_rgba(
+            &fixture_tiles(),
+            &fixture_palette(),
+            &parts,
+            64,
+            104,
+            false,
+            false,
+        )
+        .unwrap();
         assert_ne!(expected.as_raw(), wrong.as_raw());
     }
 
@@ -393,14 +456,24 @@ mod tests {
             &fixture_tiles(),
             &fixture_palette(),
             &fixture_parts(),
+            64,
+            104,
             false,
             false,
         )
         .unwrap();
         let mut palette = fixture_palette();
         palette[2..4].copy_from_slice(&0x0e00_u16.to_be_bytes());
-        let wrong =
-            compose_rgba(&fixture_tiles(), &palette, &fixture_parts(), false, false).unwrap();
+        let wrong = compose_rgba(
+            &fixture_tiles(),
+            &palette,
+            &fixture_parts(),
+            64,
+            104,
+            false,
+            false,
+        )
+        .unwrap();
         assert_ne!(expected.as_raw(), wrong.as_raw());
     }
 
@@ -410,6 +483,8 @@ mod tests {
             &fixture_tiles(),
             &fixture_palette(),
             &fixture_parts(),
+            64,
+            104,
             false,
             false,
         )
@@ -418,10 +493,23 @@ mod tests {
             &fixture_tiles(),
             &fixture_palette(),
             &fixture_parts(),
+            64,
+            104,
             true,
             false,
         )
         .unwrap();
         assert_ne!(expected.as_raw(), wrong.as_raw());
+    }
+
+    #[test]
+    fn manifest_exposes_two_independent_frames_without_promoting_other_resources() {
+        assert_eq!(FRAME_MANIFESTS.len(), 2);
+        assert_eq!(FRAME_MANIFESTS[0].frame_id, "spr_ryo_100/frame-0");
+        assert_eq!(FRAME_MANIFESTS[1].frame_id, "spr_ryo_100/frame-1");
+        let parts = decode_parts(FRAME1_DESCRIPTORS.as_slice(), &FRAME1_DESCRIPTORS).unwrap();
+        assert_eq!(parts.iter().map(|part| part.tile_count).sum::<usize>(), 66);
+        assert_eq!(FRAME_MANIFESTS[1].tile_data_offset, 0x86ba0);
+        assert_eq!(FRAME_MANIFESTS[1].descriptor_offset, 0x222a2);
     }
 }

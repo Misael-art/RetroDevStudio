@@ -61,6 +61,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [selected, setSelected] = useState<InspectionCandidate | null>(null);
   const [preview, setPreview] = useState<InspectionPreview | null>(null);
   const [spriteFrame, setSpriteFrame] = useState<InspectionSpriteFrame | null>(null);
+  const [spriteFrameId, setSpriteFrameId] = useState("spr_ryo_100/frame-0");
   const [spriteFrameBusy, setSpriteFrameBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("");
@@ -315,7 +316,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     const requestId = ++previewRequestSeq.current;
     setSpriteFrameBusy(true);
     try {
-      const next = await inspectionSpriteFrame(sessionId, "spr_ryo_100", false, false);
+      const next = await inspectionSpriteFrame(sessionId, "spr_ryo_100", spriteFrameId, false, false);
       if (requestId !== previewRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
       setSpriteFrame(next);
       logMessage("success", "[Inspeção] Frame composto HAMOOPIG verificado contra bytes e metadado doador.");
@@ -466,7 +467,15 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                 <div className="text-[10px] uppercase tracking-[0.16em] text-[#cba6f7]">Frame composto · HAMOOPIG · Experimental</div>
                 <div className="mt-1 text-[#f9e2af]">Não é prévia de tile: composição assistida por metadado doador, com bytes compilados verificados.</div>
               </div>
-              <button type="button" data-testid="inspection-compose-sprite" onClick={() => void composeSpriteFrame()} disabled={spriteFrameBusy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">{spriteFrameBusy ? "Compondo..." : "Compor spr_ryo_100 / frame 0"}</button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1 text-[10px] text-[#cdd6f4]">Frame
+                  <select data-testid="inspection-sprite-frame-select" value={spriteFrameId} onChange={(event) => { setSpriteFrameId(event.target.value); setSpriteFrame(null); }} className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] text-[#cdd6f4]">
+                    <option value="spr_ryo_100/frame-0">spr_ryo_100 / frame 0</option>
+                    <option value="spr_ryo_100/frame-1">spr_ryo_100 / frame 1</option>
+                  </select>
+                </label>
+                <button type="button" data-testid="inspection-compose-sprite" onClick={() => void composeSpriteFrame()} disabled={spriteFrameBusy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">{spriteFrameBusy ? "Compondo..." : "Compor frame"}</button>
+              </div>
             </div>
             {spriteFrame?.available && spriteFrame.data_url && <div className="mt-3 flex min-w-0 flex-col gap-3">
               <div data-testid="inspection-sprite-frame-stage" className="min-w-0 overflow-auto rounded border border-[#313244] bg-[#0b0f19] p-2" aria-label="Área reservada do frame composto">

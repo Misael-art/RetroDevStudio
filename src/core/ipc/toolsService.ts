@@ -553,12 +553,14 @@ export function inspectionPreview(sessionId: string, candidateId: string): Promi
 export function inspectionSpriteFrame(
   sessionId: string,
   resourceId: string,
+  frameId = `${resourceId}/frame-0`,
   flipX = false,
   flipY = false
 ): Promise<InspectionSpriteFrame> {
   return invoke<InspectionSpriteFrame>("rex_inspection_sprite_frame", {
     sessionId,
     resourceId,
+    frameId,
     flipX,
     flipY,
   });

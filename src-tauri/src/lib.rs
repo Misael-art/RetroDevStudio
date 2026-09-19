@@ -2120,6 +2120,7 @@ async fn rex_inspection_preview(
 async fn rex_inspection_sprite_frame(
     session_id: String,
     resource_id: String,
+    frame_id: String,
     flip_x: bool,
     flip_y: bool,
 ) -> Result<
@@ -2127,7 +2128,13 @@ async fn rex_inspection_sprite_frame(
     tools::reverse::decomp::inspection::InspectionError,
 > {
     run_heavy_inspection_command("rex_inspection_sprite_frame", move || {
-        tools::reverse::decomp::inspection::sprite_frame(&session_id, &resource_id, flip_x, flip_y)
+        tools::reverse::decomp::inspection::sprite_frame(
+            &session_id,
+            &resource_id,
+            &frame_id,
+            flip_x,
+            flip_y,
+        )
     })
     .await
 }

@@ -1573,24 +1573,41 @@ async function ensureSpriteFrameVisibleAndUnobstructed(sessionId) {
 }
 
 function renderExpectedSpriteFrame(romBytes, options = {}) {
-  const tileDataOffset = 0x863a0;
+  const frameId = options.frameId ?? "spr_ryo_100/frame-0";
+  const manifests = {
+    "spr_ryo_100/frame-0": {
+      tileDataOffset: 0x863a0,
+      descriptorOffset: 0x22260,
+      tileCount: 64,
+      descriptors: [
+        [0x2c, 0x1c, 0x0f, 0x05, 0x1b, 0x10], [0x0c, 0x3c, 0x0f, 0x04, 0x1c, 0x10],
+        [0x37, 0x11, 0x07, 0x25, 0x0b, 0x08], [0x14, 0x3c, 0x06, 0x24, 0x0c, 0x06],
+        [0x4c, 0x0c, 0x09, 0x05, 0x23, 0x06], [0x57, 0x01, 0x09, 0x25, 0x03, 0x06],
+        [0x58, 0x00, 0x05, 0x00, 0x30, 0x04], [0x04, 0x5c, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-1": {
+      tileDataOffset: 0x86ba0,
+      descriptorOffset: 0x222a2,
+      tileCount: 66,
+      descriptors: [
+        [0x11, 0x37, 0x0f, 0x07, 0x19, 0x10], [0x31, 0x1f, 0x0e, 0x08, 0x18, 0x0c],
+        [0x37, 0x11, 0x07, 0x24, 0x0c, 0x08], [0x11, 0x3f, 0x06, 0x27, 0x09, 0x06],
+        [0x49, 0x0f, 0x09, 0x05, 0x23, 0x06], [0x57, 0x01, 0x09, 0x24, 0x04, 0x06],
+        [0x58, 0x00, 0x09, 0x00, 0x28, 0x06], [0x04, 0x54, 0x09, 0x0c, 0x1c, 0x06],
+      ],
+    },
+  };
+  const manifest = manifests[frameId];
+  if (!manifest) fail(`Manifesto independente ausente para ${frameId}`);
+  const tileDataOffset = manifest.tileDataOffset;
   const paletteOffset = 0x2cc68;
-  const descriptorOffset = 0x22260;
   const width = 64;
   const height = 104;
-  const descriptors = [
-    [0x2c, 0x1c, 0x0f, 0x05, 0x1b, 0x10],
-    [0x0c, 0x3c, 0x0f, 0x04, 0x1c, 0x10],
-    [0x37, 0x11, 0x07, 0x25, 0x0b, 0x08],
-    [0x14, 0x3c, 0x06, 0x24, 0x0c, 0x06],
-    [0x4c, 0x0c, 0x09, 0x05, 0x23, 0x06],
-    [0x57, 0x01, 0x09, 0x25, 0x03, 0x06],
-    [0x58, 0x00, 0x05, 0x00, 0x30, 0x04],
-    [0x04, 0x5c, 0x04, 0x15, 0x1b, 0x02],
-  ];
+  const descriptors = manifest.descriptors;
   const descriptorBytes = Buffer.from(descriptors.flat());
-  if (!descriptorBytes.equals(romBytes.subarray(descriptorOffset, descriptorOffset + descriptorBytes.length))) {
-    fail("Descritores independentes de spr_ryo_100 divergiram da ROM de referência.");
+  if (!descriptorBytes.equals(romBytes.subarray(manifest.descriptorOffset, manifest.descriptorOffset + descriptorBytes.length))) {
+    fail(`Descritores independentes de ${frameId} divergiram da ROM de referência.`);
   }
   const pixels = Buffer.alloc(width * height * 4);
   const tileOrdering = options.tileOrdering ?? "vertical";
@@ -1647,22 +1664,22 @@ function renderExpectedSpriteFrame(romBytes, options = {}) {
     }
     tileStart += tileCount;
   }
-  if (tileStart !== 64) fail(`Oráculo independente esperava 64 tiles e obteve ${tileStart}`);
-  return { width, height, pixels };
+  if (tileStart !== manifest.tileCount) fail(`Oráculo independente esperava ${manifest.tileCount} tiles e obteve ${tileStart}`);
+  return { width, height, pixels, frameId };
 }
 
 function assertSpriteFrameOracles(romBytes, actual, context) {
-  const expected = renderExpectedSpriteFrame(romBytes, { transparentRgb: "canvas" });
-  const independentPng = renderExpectedSpriteFrame(romBytes);
+  const expected = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId, transparentRgb: "canvas" });
+  const independentPng = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId });
   const independent = assertExactPreviewPixels(
     { width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels },
     expected,
     context
   );
-  const expectedIndexSha256 = "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c";
-  const expectedRgbaSha256 = "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58";
   const independentPngSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
-  const expectedCanvasSha256 = "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc";
+  const expectedIndexSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c" : createHash("sha256").update(Buffer.from(expected.pixels)).digest("hex");
+  const expectedRgbaSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58" : independentPngSha256;
+  const expectedCanvasSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc" : "c63a0fd26c561806f5319fb24380983db10b99998048c678f81d2bf45c7fbde0";
   if (expectedRgbaSha256 !== independentPngSha256 || expectedCanvasSha256 !== independent.pixelsSha256) {
     fail(`Oráculos RGBA independente/canvas não batem com as referências: ${JSON.stringify({ expectedRgbaSha256, independentPngSha256, expectedCanvasSha256, actualCanvas: independent.pixelsSha256, expectedIndexSha256 })}`);
   }
