@@ -2,6 +2,8 @@
 
 Status da fatia: **Experimental / prova desktop concluída no branch isolado**. Esta entrega não promove a descoberta heurística de tiles a recuperação automática de sprites. O painel mostra explicitamente `Frame composto`, `Metadado doador + bytes compilados verificáveis` e `Não é prévia de tile`.
 
+Correção visual no produto `30cd753fa0f67d873ff02b30244359657d8f70f1`: o frame tem área própria não encolhível, rolagem inteira quando necessário e metadados em bloco separado. A imagem usa `content-box` explícito de 192×312 CSS (64×104 nativos em escala 3×), bordas descontadas pelo E2E, proporção nativa, transparência e `image-rendering: pixelated`. Redução fracionária silenciosa é rejeitada pelo harness.
+
 ## Recurso rastreado
 
 | Item | Proveniência | Identificador / hash |
@@ -35,11 +37,11 @@ Os testes Rust e o harness E2E rejeitam, por comparação integral, ordem row-ma
 
 | Cenário | Commit / binário | ROM ou fixture | Resultado | Evidência |
 | --- | --- | --- | --- | --- |
-| Golden/ordem/paleta/flip | `2425bd0`; binário canônico `4d9f95790b6758271240d21ae186d5e1079cb8590cfd15c0037231fd8fb47b8d` | fixtures unitários | 4 testes Rust passam; negativos de ordem, paleta e flip rejeitados | `cargo test --lib sprite_composition -- --nocapture` |
-| Fonte independente | `2425bd0` + binário acima | PNG doador acima; offsets `0x863A0`, `0x2CC68`, `0x22260` | todos os 6.656 pixels; PNG/RGBA separados; mutação rejeitada | [log E2E final no HEAD](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/sprite-frame-01-e2e-final-head.log) |
-| Desktop composição | `2425bd0` + binário `4d9f95790b6758271240d21ae186d5e1079cb8590cfd15c0037231fd8fb47b8d` | ROM BYOR `558bea…`; sessão `inspection-1789834584-00000000`; `spr_ryo_100/frame-0` | passou no desktop, 64×104 nativo, escala inteira 3× | [sprite antes do reinício](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-19T16-16-06-738Z-sprite-before-restart.png) |
-| Salvar/reiniciar/reabrir composição | `2425bd0` + mesmo binário | mesma ROM/sessão; candidato independente `0xA490 + 192` permanece separado | passou; pixels foram lidos novamente após reinício, com identidade ROM/sessão/frame confirmada; prévia pós-reinício `fullyVisible=true`, `unobstructed=true`, hit-test em `IMG` | [sprite após reinício](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-19T16-16-06-738Z-sprite-after-restart.png) |
-| Negativo de wizard/obstrução | `2425bd0` + mesmo binário | mesma sessão persistida | clique nativo rejeitado com wizard visível; `unobstructed=false`, `selectionUnchanged=true`, `syntheticEvents=false` | [log E2E final no HEAD](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/sprite-frame-01-e2e-final-head.log) |
+| Golden/ordem/paleta/flip | `30cd753`; binário canônico `c73bd83e8df66ccb1bd08aff55b5ab40ef85ffa8334d84be1e53fa27518b6dc6` | fixtures unitários | 4 testes Rust passam; negativos de ordem, paleta e flip rejeitados | `cargo test --lib sprite_composition -- --nocapture` |
+| Fonte independente | `30cd753` + binário acima | PNG doador acima; offsets `0x863A0`, `0x2CC68`, `0x22260` | todos os 6.656 pixels; PNG/RGBA separados; mutação rejeitada | [log E2E de layout](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/sprite-frame-01-layout-e2e.log) |
+| Desktop composição + layout | `30cd753` + binário `c73bd83e8df66ccb1bd08aff55b5ab40ef85ffa8334d84be1e53fa27518b6dc6` | ROM BYOR `558bea…`; sessão `inspection-1789849980-00000000`; `spr_ryo_100/frame-0` | passou; conteúdo CSS `192×312`, `content-box`, escala inteira 3×, `pixelated`, metadados abaixo e área com rolagem | [sprite antes do reinício](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-19T20-32-49-451Z-sprite-before-restart.png) |
+| Salvar/reiniciar/reabrir composição | `30cd753` + mesmo binário | mesma ROM/sessão; candidato independente `0xA490 + 192` permanece separado | passou; pixels foram lidos novamente após reinício; conteúdo `192×312`, `fullyVisible=true`, `unobstructed=true`, hit-test em `IMG`, `metadataBelow=true` | [sprite após reinício](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-19T20-32-49-451Z-sprite-after-restart.png) |
+| Negativo de wizard/obstrução | `30cd753` + mesmo binário | mesma sessão persistida | clique nativo rejeitado com wizard visível; `unobstructed=false`, `selectionUnchanged=true`, `syntheticEvents=false` | [log E2E de layout](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/sprite-frame-01-layout-e2e.log) |
 | Cancelamento | herdado do executor no PR #70 | ROM `558bea…` | não repetido por esta alteração de composição | evidência histórica do PR #70; não atribuir à nova prova |
 
 O PR #70 permanece preservado e sem merge. A integração desta fatia será proposta em branch/PR separado, sem restaurar arquivos antigos por cópia indiscriminada.
