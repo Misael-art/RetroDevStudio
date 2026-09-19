@@ -1560,8 +1560,14 @@ async function createUnavailablePreviewFixture() {
     for (let tileIndex = 0; tileIndex < 4; tileIndex += 1) {
       const base = offset + tileIndex * 32;
       for (let row = 0; row < 8; row += 1) {
-        bytes[base + row * 4] = row % 2 === 0 ? 0xaa : 0x55;
-        bytes[base + row * 4 + 1] = 0;
+        // Keep the fixture graphic-like without making it an exact short
+        // period. The scanner must accept these 1bpp-like rows while the
+        // two constant-tile gaps keep the 17 blocks separate. The 17th
+        // candidate is intentionally beyond the preview export cap (16),
+        // which exercises a real candidate with no preview artifact.
+        const seed = candidateIndex * 29 + tileIndex * 11 + row * 7;
+        bytes[base + row * 4] = (0x31 + seed) & 0xff;
+        bytes[base + row * 4 + 1] = (0x8d ^ seed) & 0xff;
         bytes[base + row * 4 + 2] = 0;
         bytes[base + row * 4 + 3] = 0;
       }
@@ -4141,26 +4147,59 @@ async function main() {
       if (options.scenario !== "inspection-preview-unavailable" && (!Number.isSafeInteger(expectedOffset) || !Number.isSafeInteger(expectedSize) || expectedOffset < 0 || expectedSize <= 0)) {
         fail("A prova positiva exige RDS_INSPECTION_EXPECTED_OFFSET e RDS_INSPECTION_EXPECTED_SIZE independentes da UI.");
       }
-      const candidateTestId = await executeScript(
+      const candidateLookup = async () => executeScript(
         sessionId,
         `
           const expected = String(arguments[0] || "");
           const offset = arguments[2];
           const size = arguments[3];
           const kind = String(arguments[4] || "");
-          const selector = expected ? "[data-testid='inspection-candidate-" + expected + "']" : (String(arguments[1]) === "unavailable" ? "[data-preview-expected='false']" : "[data-preview-expected='true']");
+          const unavailable = String(arguments[1]) === "unavailable";
+          const selector = expected ? "[data-testid='inspection-candidate-" + expected + "']" : (unavailable ? "[data-preview-expected='false']" : "[data-preview-expected='true']");
           const candidates = Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']"));
           const match = expected ? document.querySelector(selector) : candidates.find((candidate) =>
-            Number(candidate.getAttribute("data-candidate-offset")) === offset &&
-            Number(candidate.getAttribute("data-candidate-size")) === size &&
-            (!kind || candidate.getAttribute("data-candidate-kind") === kind) &&
-            (String(arguments[1]) === "unavailable" ? candidate.getAttribute("data-preview-expected") === "false" : candidate.getAttribute("data-preview-expected") === "true")
+            (unavailable || (
+              Number(candidate.getAttribute("data-candidate-offset")) === offset &&
+              Number(candidate.getAttribute("data-candidate-size")) === size &&
+              (!kind || candidate.getAttribute("data-candidate-kind") === kind)
+            )) &&
+            (unavailable ? candidate.getAttribute("data-preview-expected") === "false" : candidate.getAttribute("data-preview-expected") === "true")
           );
           return match?.getAttribute("data-testid") ?? "";
         `,
         [expectedCandidateId, options.scenario === "inspection-preview-unavailable" ? "unavailable" : "available", expectedOffset, expectedSize, expectedKind]
       );
-      if (!candidateTestId) fail(expectedCandidateId ? `Candidato esperado não foi localizado: ${expectedCandidateId}` : options.scenario === "inspection-preview-unavailable" ? "Catálogo concluído não expôs candidato explicitamente sem prévia." : "Catálogo concluído não expôs candidato com prévia esperada.");
+      let candidateTestId = await candidateLookup();
+      // The controlled negative deliberately places the first unavailable
+      // candidate after the 16-preview export cap. If pagination hides it,
+      // reach it through the visible paginator so the scenario still
+      // exercises the UI path instead of selecting it through IPC.
+      if (!candidateTestId && options.scenario === "inspection-preview-unavailable") {
+        for (let pageTurn = 0; pageTurn < 32 && !candidateTestId; pageTurn += 1) {
+          const nextPage = await executeScript(
+            sessionId,
+            `return Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.replace(/\\s+/g, " ").trim() === "Próxima" && !button.disabled) ? true : false;`
+          );
+          if (!nextPage) break;
+          const beforeCount = await executeScript(sessionId, `return document.querySelectorAll("[data-testid^='inspection-candidate-']").length;`);
+          await clickButtonByTextWithPointerEvents(sessionId, "Próxima");
+          await waitFor(
+            async () => executeScript(sessionId, `return document.querySelectorAll("[data-testid^='inspection-candidate-']").length !== ${Number(beforeCount)};`),
+            5000,
+            "Paginação do catálogo não atualizou a página",
+            100
+          );
+          candidateTestId = await candidateLookup();
+        }
+      }
+      if (!candidateTestId) {
+        const catalogSummary = await executeScript(
+          sessionId,
+          `return Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']")).map((candidate) => ({ id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") }));`
+        );
+        console.log(`[inspection-candidate-negative] catalog=${JSON.stringify(catalogSummary)}`);
+        fail(expectedCandidateId ? `Candidato esperado não foi localizado: ${expectedCandidateId}` : options.scenario === "inspection-preview-unavailable" ? "Catálogo concluído não expôs candidato explicitamente sem prévia." : "Catálogo concluído não expôs candidato com prévia esperada.");
+      }
       const selectedCandidateEvidence = await executeScript(
         sessionId,
         `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${candidateTestId}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
