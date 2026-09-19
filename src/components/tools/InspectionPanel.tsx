@@ -468,18 +468,21 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
               </div>
               <button type="button" data-testid="inspection-compose-sprite" onClick={() => void composeSpriteFrame()} disabled={spriteFrameBusy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">{spriteFrameBusy ? "Compondo..." : "Compor spr_ryo_100 / frame 0"}</button>
             </div>
-            {spriteFrame?.available && spriteFrame.data_url && <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,280px)_1fr]">
-              <div>
-                <img data-testid="inspection-sprite-frame-image" data-sprite-resource={spriteFrame.resource_id} data-sprite-frame={spriteFrame.frame_id} data-sprite-rom-sha256={spriteFrame.rom_sha256} data-sprite-width={spriteFrame.width} data-sprite-height={spriteFrame.height} data-png-sha256={spriteFrame.png_sha256 ?? ""} data-pixels-sha256={spriteFrame.pixels_sha256 ?? ""} src={spriteFrame.data_url} alt="Frame composto HAMOOPIG spr_ryo_100" width={spriteFrame.width * 3} height={spriteFrame.height * 3} className="border border-[#313244] bg-[#ff00ff] [image-rendering:pixelated]" style={{ imageRendering: "pixelated" }} />
-                <div className="mt-2 font-mono text-[9px] text-[#7f849c]">Dimensão nativa {spriteFrame.width}×{spriteFrame.height} · escala inteira 3× · RGBA pixels {spriteFrame.pixels_sha256}</div>
+            {spriteFrame?.available && spriteFrame.data_url && <div className="mt-3 flex min-w-0 flex-col gap-3">
+              <div data-testid="inspection-sprite-frame-stage" className="min-w-0 overflow-auto rounded border border-[#313244] bg-[#0b0f19] p-2" aria-label="Área reservada do frame composto">
+                <div className="w-[196px] min-w-[196px] shrink-0">
+                  <img data-testid="inspection-sprite-frame-image" data-sprite-resource={spriteFrame.resource_id} data-sprite-frame={spriteFrame.frame_id} data-sprite-rom-sha256={spriteFrame.rom_sha256} data-sprite-width={spriteFrame.width} data-sprite-height={spriteFrame.height} data-sprite-scale="3" data-png-sha256={spriteFrame.png_sha256 ?? ""} data-pixels-sha256={spriteFrame.pixels_sha256 ?? ""} src={spriteFrame.data_url} alt="Frame composto HAMOOPIG spr_ryo_100" width={spriteFrame.width * 3} height={spriteFrame.height * 3} className="block shrink-0 border border-[#313244] bg-[#ff00ff] [image-rendering:pixelated]" style={{ boxSizing: "content-box", imageRendering: "pixelated", width: `${spriteFrame.width * 3}px`, height: `${spriteFrame.height * 3}px`, maxWidth: "none", maxHeight: "none" }} />
+                </div>
               </div>
-              <div className="space-y-1 text-[#cdd6f4]">
-                <div>ROM recuperada: {spriteFrame.rom_sha256}</div>
-                <div>Bytes de tiles: 0x{hex(spriteFrame.tile_data_offset)} + {spriteFrame.tile_data_size} · paleta: 0x{hex(spriteFrame.palette_offset)} + {spriteFrame.palette_size}</div>
-                <div>Descritores VDP: 0x{hex(spriteFrame.descriptor_offset)} · flip X/Y: {String(spriteFrame.flip_x)}/{String(spriteFrame.flip_y)} · transparência: índice {spriteFrame.transparency_index}</div>
-                <div className="text-[#f9e2af]">{spriteFrame.metadata_source}</div>
-                <div className="mt-2 text-[#7f849c]">Doador: {spriteFrame.donor_evidence.join(" · ")}</div>
-                <div className="mt-2 text-[#7f849c]">Limitações: {spriteFrame.limitations.join(" · ")}</div>
+              <div data-testid="inspection-sprite-frame-metadata" className="min-w-0 space-y-1 break-words text-[#cdd6f4]">
+                <div className="font-mono text-[9px] text-[#7f849c]">Conteúdo CSS {spriteFrame.width * 3}×{spriteFrame.height * 3}px · escala inteira 3× · nativo {spriteFrame.width}×{spriteFrame.height}px</div>
+                <div className="font-mono text-[9px] break-all text-[#7f849c]">RGBA pixels: {spriteFrame.pixels_sha256}</div>
+                <div className="break-all">ROM recuperada: {spriteFrame.rom_sha256}</div>
+                <div className="break-all">Bytes de tiles: 0x{hex(spriteFrame.tile_data_offset)} + {spriteFrame.tile_data_size} · paleta: 0x{hex(spriteFrame.palette_offset)} + {spriteFrame.palette_size}</div>
+                <div className="break-all">Descritores VDP: 0x{hex(spriteFrame.descriptor_offset)} · flip X/Y: {String(spriteFrame.flip_x)}/{String(spriteFrame.flip_y)} · transparência: índice {spriteFrame.transparency_index}</div>
+                <div className="text-[#f9e2af] break-words">{spriteFrame.metadata_source}</div>
+                <div className="mt-2 text-[#7f849c] break-words">Doador: {spriteFrame.donor_evidence.join(" · ")}</div>
+                <div className="mt-2 text-[#7f849c] break-words">Limitações: {spriteFrame.limitations.join(" · ")}</div>
               </div>
             </div>}
           </div>

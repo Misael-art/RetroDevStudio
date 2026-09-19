@@ -282,7 +282,16 @@ describe("InspectionPanel", () => {
     await act(async () => { composeButton.click(); await flush(); });
 
     expect(mocks.inspectionSpriteFrame).toHaveBeenCalledWith(completedSession.session_id, "spr_ryo_100", false, false);
-    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")?.getAttribute("data-sprite-frame")).toBe("spr_ryo_100/frame-0");
+    const spriteImage = container.querySelector("[data-testid='inspection-sprite-frame-image']") as HTMLImageElement;
+    expect(spriteImage.getAttribute("data-sprite-frame")).toBe("spr_ryo_100/frame-0");
+    expect(spriteImage.getAttribute("width")).toBe("192");
+    expect(spriteImage.getAttribute("height")).toBe("312");
+    expect(spriteImage.dataset.spriteScale).toBe("3");
+    expect(spriteImage.style.width).toBe("192px");
+    expect(spriteImage.style.height).toBe("312px");
+    expect(spriteImage.style.maxWidth).toBe("none");
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-stage']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-metadata']")).toBeTruthy();
     expect(container.textContent).toContain("Não é prévia de tile");
   });
 });

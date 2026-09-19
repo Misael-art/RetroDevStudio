@@ -1517,6 +1517,61 @@ async function readRenderedSpriteFramePixels(sessionId) {
   );
 }
 
+async function ensureSpriteFrameVisibleAndUnobstructed(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-sprite-frame-image"]');
+      const stage = document.querySelector('[data-testid="inspection-sprite-frame-stage"]');
+      const metadata = document.querySelector('[data-testid="inspection-sprite-frame-metadata"]');
+      if (!(image instanceof HTMLImageElement) || !(stage instanceof HTMLElement) || !(metadata instanceof HTMLElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      image.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = image.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const metadataRect = metadata.getBoundingClientRect();
+      const style = window.getComputedStyle(image);
+      const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0;
+      const borderRight = Number.parseFloat(style.borderRightWidth) || 0;
+      const borderTop = Number.parseFloat(style.borderTopWidth) || 0;
+      const borderBottom = Number.parseFloat(style.borderBottomWidth) || 0;
+      const contentWidth = rect.width - borderLeft - borderRight;
+      const contentHeight = rect.height - borderTop - borderBottom;
+      const cssWidth = Number.parseFloat(style.width) || 0;
+      const cssHeight = Number.parseFloat(style.height) || 0;
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
+      const unobstructed = Boolean(top && (top === image || image.contains(top)));
+      const expectedWidth = 192;
+      const expectedHeight = 312;
+      const exactContentDimensions = Math.abs(contentWidth - expectedWidth) < 0.01 && Math.abs(contentHeight - expectedHeight) < 0.01;
+      const integerScale = Math.abs(contentWidth / image.naturalWidth - 3) < 0.01 && Math.abs(contentHeight / image.naturalHeight - 3) < 0.01;
+      const metadataBelow = metadataRect.top >= rect.bottom - 0.01;
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        content: { width: contentWidth, height: contentHeight },
+        css: { width: cssWidth, height: cssHeight, boxSizing: style.boxSizing, imageRendering: style.imageRendering },
+        borders: { left: borderLeft, right: borderRight, top: borderTop, bottom: borderBottom },
+        stageRect: { x: stageRect.x, y: stageRect.y, width: stageRect.width, height: stageRect.height },
+        metadataRect: { x: metadataRect.x, y: metadataRect.y, width: metadataRect.width, height: metadataRect.height },
+        naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
+        fullyVisible,
+        unobstructed,
+        exactContentDimensions,
+        integerScale,
+        pixelated: style.imageRendering === 'pixelated',
+        metadataBelow,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: topWithTestId?.getAttribute('data-testid') ?? '',
+        stageOverflowX: window.getComputedStyle(stage).overflowX,
+      };
+    `
+  );
+}
+
 function renderExpectedSpriteFrame(romBytes, options = {}) {
   const tileDataOffset = 0x863a0;
   const paletteOffset = 0x2cc68;
@@ -4666,7 +4721,16 @@ async function main() {
       if (spriteActualPngSha256 !== spriteVisualEvidence.pngSha256 || spriteVisualEvidence.pixelsSha256 !== spriteIndependentEvidence.independentPngPixelsSha256 || spriteActualPngSha256 === spriteVisualEvidence.pixelsSha256) {
         fail(`Hashes PNG/RGBA do frame composto não estão separados ou não batem com o oráculo: ${JSON.stringify({ pngSha256: spriteActualPngSha256, pixelsSha256: spriteVisualEvidence.pixelsSha256, expectedPngPixelsSha256: spriteIndependentEvidence.independentPngPixelsSha256 })}`);
       }
-      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: spriteVisualEvidence.romSha256, resource: spriteVisualEvidence.resourceId, frame: spriteVisualEvidence.frameId, nativeSize: [spriteVisualEvidence.naturalWidth, spriteVisualEvidence.naturalHeight], pngSha256: spriteActualPngSha256, pixelsSha256: spriteIndependentEvidence.pixelsSha256, expectedIndexSha256: spriteIndependentEvidence.expectedIndexSha256, expectedRgbaSha256: spriteIndependentEvidence.expectedRgbaSha256 })}`);
+      const spriteLayout = await waitFor(
+        async () => {
+          const layout = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+          return layout?.fullyVisible && layout.unobstructed && layout.exactContentDimensions && layout.integerScale && layout.pixelated && layout.metadataBelow ? layout : false;
+        },
+        15000,
+        "Frame composto encolheu, perdeu a escala inteira 3×, ficou obstruído ou sobrepôs os metadados",
+        100
+      );
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: spriteVisualEvidence.romSha256, resource: spriteVisualEvidence.resourceId, frame: spriteVisualEvidence.frameId, nativeSize: [spriteVisualEvidence.naturalWidth, spriteVisualEvidence.naturalHeight], pngSha256: spriteActualPngSha256, pixelsSha256: spriteIndependentEvidence.pixelsSha256, expectedIndexSha256: spriteIndependentEvidence.expectedIndexSha256, expectedRgbaSha256: spriteIndependentEvidence.expectedRgbaSha256, layout: spriteLayout })}`);
       const spriteBeforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-before-restart.png`);
       await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
       const persistedSessionId = completedState.session.id;
@@ -4859,7 +4923,16 @@ async function main() {
       if (reopenedSpriteVisualEvidence?.romSha256 !== reopenedState.session.identitySha256 || reopenedSpriteVisualEvidence?.resourceId !== "spr_ryo_100" || reopenedSpriteVisualEvidence?.frameId !== "spr_ryo_100/frame-0") {
         fail(`Frame composto reaberto diverge da identidade persistida: ${JSON.stringify({ sprite: reopenedSpriteVisualEvidence, session: reopenedState })}`);
       }
-      console.log(`[inspection-reopen-sprite-frame] ${JSON.stringify({ romSha256: reopenedSpriteVisualEvidence.romSha256, resource: reopenedSpriteVisualEvidence.resourceId, frame: reopenedSpriteVisualEvidence.frameId, dimensions: [reopenedSpriteVisualEvidence.naturalWidth, reopenedSpriteVisualEvidence.naturalHeight], pngSha256: reopenedSpriteVisualEvidence.pngSha256, pixelsSha256: reopenedSpriteIndependentEvidence.pixelsSha256, expectedRgbaSha256: reopenedSpriteIndependentEvidence.expectedRgbaSha256 })}`);
+      const reopenedSpriteLayout = await waitFor(
+        async () => {
+          const layout = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+          return layout?.fullyVisible && layout.unobstructed && layout.exactContentDimensions && layout.integerScale && layout.pixelated && layout.metadataBelow ? layout : false;
+        },
+        15000,
+        "Frame composto reaberto encolheu, perdeu a escala inteira 3×, ficou obstruído ou sobrepôs os metadados",
+        100
+      );
+      console.log(`[inspection-reopen-sprite-frame] ${JSON.stringify({ romSha256: reopenedSpriteVisualEvidence.romSha256, resource: reopenedSpriteVisualEvidence.resourceId, frame: reopenedSpriteVisualEvidence.frameId, dimensions: [reopenedSpriteVisualEvidence.naturalWidth, reopenedSpriteVisualEvidence.naturalHeight], pngSha256: reopenedSpriteVisualEvidence.pngSha256, pixelsSha256: reopenedSpriteIndependentEvidence.pixelsSha256, expectedRgbaSha256: reopenedSpriteIndependentEvidence.expectedRgbaSha256, layout: reopenedSpriteLayout })}`);
       const spriteAfterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-after-restart.png`);
       const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
       console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
