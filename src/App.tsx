@@ -4581,6 +4581,7 @@ export default function App() {
                 <button
                   key={target}
                   type="button"
+                  data-testid={`wizard-target-${target}`}
                   disabled={selectedTemplateMegadriveOnly && target === "snes"}
                   onClick={() => setNewProjTarget(target)}
                   className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
@@ -4708,13 +4709,22 @@ export default function App() {
               className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#313244] bg-[#181825] pt-3"
             >
               {activeProjectDir ? (
-                <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
+                <ToolbarButton
+                  label="Cancelar"
+                  onClick={() => setShowProjectWizard(false)}
+                  testId="wizard-cancel"
+                />
               ) : null}
-              <ToolbarButton label="Abrir Projeto" onClick={() => void handleOpenProject()} />
+              <ToolbarButton
+                label="Abrir Projeto"
+                onClick={() => void handleOpenProject()}
+                testId="wizard-open-project"
+              />
               <ToolbarButton
                 label={creatingProject ? "Criando..." : "Criar Projeto"}
                 onClick={() => void confirmNewProject()}
                 accent="primary"
+                testId="wizard-create-project"
                 disabled={
                   creatingProject ||
                   templatesLoading ||

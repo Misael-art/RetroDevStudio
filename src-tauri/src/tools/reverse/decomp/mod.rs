@@ -17,6 +17,7 @@ pub mod extract;
 pub mod fingerprint;
 pub mod ghidra_bridge;
 pub mod graphics_discovery;
+pub mod holdout;
 pub mod inspection;
 pub mod object_diff;
 pub mod rom_library;
