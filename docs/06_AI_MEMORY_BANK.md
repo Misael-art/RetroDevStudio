@@ -1,5 +1,15 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-19 — REX-04/Sprite-Frame-01 HAMOOPIG fechado no desktop
+
+Commit `57460b8` publicado na branch isolada `codex/rex-sprite-frame-01`; PR #70 foi preservado sem merge. A fatia não trata prévia de tiles como sprite: compõe somente `spr_ryo_100/frame-0` (64×104) com tiles, posições, ordem vertical ResComp, flips, paleta MD RGB333 e transparência, explicitamente marcada como Experimental e assistida por metadado doador.
+
+Referências: ROM BYOR histórica de 917.504 bytes, SHA `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`; fonte `res/sprite/ryo/100.png`, SHA `1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b`; offsets compilados `0x863A0/0x800`, `0x2CC68/0x20`, `0x22260/0x30`. RGBA independente do PNG: `50cba0…`; canvas WebKit: `c70a3d…`; índices do frame: `938611…`.
+
+Binário canônico final: `/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/debug/retro-dev-studio`, SHA `529372408000893eea87f23bf47fedf5552af69301a75294b17b878888606fba`, frontend `57460b8`. E2E final passou com identificação, catálogo/candidato independente `0xA490+192`, composição, mutação rejeitada, salvar, reiniciar, reabrir e releitura de pixels; sessão `inspection-1789833207-00000000`. O negativo do wizard registrou obstrução e seleção inalterada. Evidências: `src-tauri/target-test/validation/sprite-frame-01-e2e-final-2.log` e screenshots `inspection-2026-09-19T15-53-12-704Z-sprite-{before,after}-restart.png`.
+
+Diagnóstico corrigido durante a execução final: um run foi rejeitado honestamente por HTTP 400 `element click intercepted` porque o drawer Console cobria o controle; o harness passou a fechá-lo por botão visível e clique WebDriver nativo, sem remover overlay por JavaScript. O cancelamento continua explicitamente herdado da evidência do PR #70 e não foi repetido nesta alteração de composição. Holdout, scanner, oráculo de paletas, IPC/UI e arquivos untracked de outras sessões permanecem preservados.
+
 ### Checkpoint 2026-09-19 — prova visual de reabertura endurecida no harness `0e34773`
 
 O cenário `inspection-complete` foi reexecutado sem repetir os testes do scanner. O binário/frontend permaneceram no produto `441533f8c231e38be185f0526fd609559e8ffec5`, SHA `97569a6f9b9c70402e8d6ebdec877a0450e338b45e39cb363f3b082398bb662`; o harness alterado está em `0e34773`. A ROM HAMOOPIG preservada tem 917.504 bytes e SHA `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`.

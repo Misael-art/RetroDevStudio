@@ -3556,6 +3556,32 @@ async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = tes
   return clickButtonByTestIdNative(sessionId, testId, label);
 }
 
+async function closeVisibleConsoleDrawer(sessionId, label = "console inicial") {
+  const visible = await executeScript(
+    sessionId,
+    `return document.querySelector('[data-testid="console-drawer"][data-visible="true"]') ? true : false;`
+  );
+  if (!visible) {
+    return { closed: false, reason: "not-visible" };
+  }
+  const selector = '[data-testid="console-drawer"] > div:first-child > button';
+  const before = await inspectElementInteraction(sessionId, selector);
+  if (!before?.found || !before.visible || before.disabled || before.elementAtCenter?.includes('console-details')) {
+    fail(`Console visível não ficou fechável por controle nativo (${label}): ${JSON.stringify(before)}`);
+  }
+  const elementId = await findElement(sessionId, selector);
+  await clickElement(sessionId, elementId);
+  await waitFor(
+    async () => !(await executeScript(sessionId, `return document.querySelector('[data-testid="console-drawer"][data-visible="true"]') ? true : false;`)),
+    5000,
+    `Console não fechou pelo controle visível (${label})`,
+    100
+  );
+  const after = await inspectElementInteraction(sessionId, selector);
+  console.log(`[inspection-console] ${JSON.stringify({ label, before, after, closed: true })}`);
+  return { closed: true, before, after };
+}
+
 async function readSavedSessionSelection(sessionId, persistedSessionId) {
   return executeScript(
     sessionId,
@@ -4373,6 +4399,7 @@ async function main() {
         console.warn(`[inspection] janela não aceitou 1280x800; seguindo somente se o hit-test validar o controle: ${error instanceof Error ? error.message : String(error)}`);
       }
       await handleProjectWizardVisibly(sessionId, "initial");
+      await closeVisibleConsoleDrawer(sessionId);
       await clickByTestId(sessionId, "workspace-rail-debug");
       await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace nao abriu");
       await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
