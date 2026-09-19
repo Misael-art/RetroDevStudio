@@ -1463,6 +1463,32 @@ async function readInspectionUiState(sessionId) {
   );
 }
 
+async function readRenderedPreviewPixels(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-preview-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return {
+        image: true,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        pngSha256: image.getAttribute("data-png-sha256") || "",
+        pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+        artifactSha256: image.getAttribute("data-artifact-sha256") || "",
+        src: image.currentSrc || image.src,
+        pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+      };
+    `
+  );
+}
+
 function renderExpectedTilePreview(romBytes, offset, size) {
   if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset < 0 || size <= 0 || offset + size > romBytes.length) {
     fail(`Especificação independente de candidato inválida: offset=${offset} size=${size} ROM=${romBytes.length}`);
@@ -3318,6 +3344,117 @@ async function clickButtonByTestIdWithPointerEvents(sessionId, testId) {
   if (!result) fail(`Botao nao encontrado para eventos: '${testId}'.`);
 }
 
+async function inspectNativeButtonTarget(sessionId, testId) {
+  return executeScript(
+    sessionId,
+    `
+      const testId = String(arguments[0] ?? "");
+      const button = document.querySelector('[data-testid="' + testId + '"]');
+      if (!(button instanceof HTMLButtonElement)) {
+        return { exists: false, testId };
+      }
+      button.scrollIntoView({ block: "center", inline: "center" });
+      const rect = button.getBoundingClientRect();
+      const style = window.getComputedStyle(button);
+      const visible = rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = visible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest("[data-testid]") : null;
+      const unobstructed = Boolean(top && (top === button || button.contains(top)));
+      const wizard = document.querySelector('[data-testid="project-wizard-body"]');
+      return {
+        exists: true,
+        testId,
+        visible,
+        disabled: Boolean(button.disabled),
+        focused: document.activeElement === button,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point: { x, y },
+        topTag: top?.tagName ?? "",
+        topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
+        topClass: top instanceof Element ? String(top.className ?? "") : "",
+        unobstructed,
+        wizardVisible: Boolean(wizard),
+      };
+    `,
+    [testId]
+  );
+}
+
+async function clickButtonByTestIdNative(sessionId, testId, label = testId) {
+  const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled || !diagnostic.unobstructed) {
+    fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  await clickElement(sessionId, elementId);
+  return diagnostic;
+}
+
+async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = testId, timeoutMs = 30000) {
+  await waitFor(
+    async () => {
+      const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+      return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+    },
+    timeoutMs,
+    `Controle nativo não ficou disponível: ${label}`,
+    100
+  );
+  return clickButtonByTestIdNative(sessionId, testId, label);
+}
+
+async function assertNativeButtonBlockedByOverlay(sessionId, testId, label = testId) {
+  const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled) {
+    fail(`Negativo de obstrução não pôde testar '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  if (diagnostic.unobstructed) {
+    fail(`Negativo de obstrução não encontrou bloqueador para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  console.log(`[inspection-reopen-negative] blocked=${JSON.stringify({ label, ...diagnostic })}`);
+  return diagnostic;
+}
+
+async function handleProjectWizardVisibly(sessionId, label) {
+  const wizardVisible = await executeScript(
+    sessionId,
+    `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`
+  );
+  if (!wizardVisible) {
+    return { label, action: "not-visible" };
+  }
+
+  const existingProject = await executeScript(
+    sessionId,
+    `return Boolean(document.querySelector('[data-testid="wizard-open-existing-project"]'));`
+  );
+  if (existingProject) {
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-open-existing-project", `${label}: abrir projeto existente`);
+  } else {
+    await clickButtonByTestIdNativeWhenReady(sessionId, "template-card-empty", `${label}: selecionar Projeto Vazio`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-target-megadrive", `${label}: selecionar Mega Drive`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-create-project", `${label}: concluir wizard`);
+  }
+
+  const state = await waitFor(
+    async () => {
+      const wizard = await executeScript(
+        sessionId,
+        `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`
+      );
+      const automation = await readAutomationState(sessionId);
+      return !wizard && automation?.activeProjectDir ? automation : false;
+    },
+    30000,
+    `Wizard não foi concluído por controles visíveis (${label})`,
+    100
+  );
+  console.log(`[inspection-wizard] ${JSON.stringify({ label, action: existingProject ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir })}`);
+  return { label, action: existingProject ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir };
+}
+
 async function clickButtonByTextWithPointerEvents(sessionId, expectedText) {
   const result = await executeScript(
     sessionId,
@@ -4024,17 +4161,7 @@ async function main() {
       } catch (error) {
         console.warn(`[inspection] janela não aceitou 1280x800; seguindo somente se o hit-test validar o controle: ${error instanceof Error ? error.message : String(error)}`);
       }
-      // O wizard de primeiro uso é uma superfície visual real, mas não faz
-      // parte da inspeção. Abre-se o fixture pelo mesmo comando de projeto
-      // exposto à UI para remover o overlay; a aprovação abaixo continua
-      // dependendo exclusivamente dos controles visíveis de inspeção.
-      await callAutomationApi(sessionId, "openProject", [options.project]);
-      await waitFor(
-        async () => executeScript(sessionId, `return !document.querySelector("[data-testid='project-wizard-body']");`),
-        20000,
-        "Wizard de primeiro uso não foi fechado ao abrir o projeto fixture",
-        100
-      );
+      await handleProjectWizardVisibly(sessionId, "initial");
       await clickByTestId(sessionId, "workspace-rail-debug");
       await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace nao abriu");
       await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
@@ -4302,7 +4429,8 @@ async function main() {
         uiBootstrapTimeoutMs,
         "API de automação não voltou após reinício real"
       );
-      await clickByTestId(sessionId, "workspace-rail-debug");
+      await handleProjectWizardVisibly(sessionId, "after-restart");
+      await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace após reinício");
       await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace não voltou após reinício");
       await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
       try {
@@ -4311,7 +4439,7 @@ async function main() {
         console.log(`[inspection] estado apos reabrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
         throw error;
       }
-      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+      await clickButtonByTestIdNative(sessionId, "reverse-tab-inspection", "abrir aba Inspeção após reinício");
       await waitFor(
         async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
         15000,
@@ -4324,15 +4452,70 @@ async function main() {
         "Sessão persistida não foi descoberta após reinício",
         100
       );
-      await clickByTestId(sessionId, `select-saved-session-${persistedSessionId}`, false);
-      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-reopen");
+
+      // Negative control: deliberately reopen the real wizard through its
+      // visible menu control. A native WebDriver click must be rejected by
+      // hit-test and must not activate the saved-session control underneath it.
+      await clickButtonByTestIdNative(sessionId, "unified-topbar-menu-trigger", "abrir menu superior para o negativo");
+      await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, "menu-action-project-new");
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        10000,
+        "Menu superior não expôs o controle Novo Projeto",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, "menu-action-project-new", "abrir wizard deliberadamente para o negativo");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`),
+        15000,
+        "Wizard não ficou visível para o negativo deliberado de obstrução",
+        100
+      );
+      await assertNativeButtonBlockedByOverlay(
+        sessionId,
+        `select-saved-session-${persistedSessionId}`,
+        "seleção da sessão salva atrás do wizard"
+      );
+      await clickButtonByTestIdNative(sessionId, "wizard-cancel", "fechar wizard pelo controle visível");
+      await waitFor(
+        async () => executeScript(sessionId, `return !document.querySelector('[data-testid="project-wizard-body"]');`),
+        15000,
+        "Wizard permaneceu como bloqueador após tratamento visual",
+        100
+      );
+      await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, `select-saved-session-${persistedSessionId}`);
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        30000,
+        "Controle nativo de seleção da sessão permaneceu obstruído após fechar o wizard",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, `select-saved-session-${persistedSessionId}`, "seleção da sessão salva após reinício");
+      const reopenDiagnostic = await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, "inspection-reopen");
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        15000,
+        "Controle nativo de reabertura não ficou disponível após selecionar a sessão",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, "inspection-reopen", "reabertura da sessão após reinício");
       const reopenedState = await waitFor(
         async () => {
           const state = await readInspectionUiState(sessionId);
-          return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false;
+          return state?.session?.id === persistedSessionId &&
+            state.session.status === "completed" &&
+            state.session.identitySha256 === completedState.session.identitySha256
+            ? state
+            : false;
         },
         30000,
-        "Sessão persistida não foi reaberta após reinício",
+        "Sessão persistida não foi reaberta com a mesma identidade após reinício",
         100
       );
       console.log(`[inspection-reopen] state=${JSON.stringify(reopenedState)}`);
@@ -4342,18 +4525,49 @@ async function main() {
         "Catálogo da sessão reaberta não expôs o candidato esperado",
         100
       );
-      await clickButtonByTestIdWithPointerEvents(sessionId, reopenedCandidate);
-      await waitFor(
-        async () => executeScript(sessionId, `const image = document.querySelector("[data-testid='inspection-preview-image']"); return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;`),
+      const reopenedCandidateEvidence = await executeScript(
+        sessionId,
+        `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${reopenedCandidate}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
+      );
+      if (!reopenedCandidateEvidence ||
+        reopenedCandidateEvidence.offset !== expectedOffset ||
+        reopenedCandidateEvidence.size !== expectedSize ||
+        reopenedCandidateEvidence.kind !== expectedKind ||
+        reopenedCandidateEvidence.previewExpected !== "true") {
+        fail(`Candidato reaberto diverge da especificação independente: ${JSON.stringify({ selected: reopenedCandidateEvidence, expected: { offset: expectedOffset, size: expectedSize, kind: expectedKind } })}`);
+      }
+      await clickButtonByTestIdNative(sessionId, reopenedCandidate, "seleção do candidato após reinício");
+      const reopenedVisualEvidence = await waitFor(
+        async () => {
+          const evidence = await readRenderedPreviewPixels(sessionId);
+          return evidence?.image && evidence.pixels?.length > 0 ? evidence : false;
+        },
         15000,
         "Prévia real não voltou após reabrir a sessão",
         100
       );
+      assertChunkyGoldenOracle();
+      const expectedPreviewAfterRestart = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      const independentPixelEvidenceAfterRestart = assertExactPreviewPixels(
+        { width: reopenedVisualEvidence.naturalWidth, height: reopenedVisualEvidence.naturalHeight, pixels: reopenedVisualEvidence.pixels },
+        expectedPreviewAfterRestart,
+        "ROM/offset/tamanho conhecidos após reinício"
+      );
+      const pngPayloadAfterRestart = String(reopenedVisualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!pngPayloadAfterRestart) fail(`A prévia reaberta não expôs uma fonte PNG data: válida: ${String(reopenedVisualEvidence.src).slice(0, 80)}`);
+      const actualPngSha256AfterRestart = createHash("sha256").update(Buffer.from(pngPayloadAfterRestart, "base64")).digest("hex");
+      if (actualPngSha256AfterRestart !== reopenedVisualEvidence.pngSha256 || actualPngSha256AfterRestart !== reopenedVisualEvidence.artifactSha256) {
+        fail(`Hash do PNG reaberto diverge do contrato de artefato: ${JSON.stringify({ actualPngSha256: actualPngSha256AfterRestart, pngSha256: reopenedVisualEvidence.pngSha256, artifactSha256: reopenedVisualEvidence.artifactSha256 })}`);
+      }
+      if (reopenedVisualEvidence.pixelsSha256 !== independentPixelEvidenceAfterRestart.pixelsSha256 || actualPngSha256AfterRestart === independentPixelEvidenceAfterRestart.pixelsSha256) {
+        fail(`Hashes PNG/RGBA reabertos não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256AfterRestart, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256 })}`);
+      }
+      console.log(`[inspection-reopen-visual] ${JSON.stringify({ romSha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), sessionId: reopenedState.session.id, identitySha256: reopenedState.session.identitySha256, candidate: reopenedCandidateEvidence, dimensions: [independentPixelEvidenceAfterRestart.width, independentPixelEvidenceAfterRestart.height], pngSha256: actualPngSha256AfterRestart, pixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, reopenDiagnostic })}`);
       const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
       console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
       console.log(`ROM BYOR: ${inspectionRom}`);
       console.log(`Sessão reaberta: ${persistedSessionId}`);
-      console.log(`Prévia: pixels PNG carregados (${visualEvidence.naturalWidth}x${visualEvidence.naturalHeight})`);
+      console.log(`Prévia após reinício: pixels PNG recalculados (${reopenedVisualEvidence.naturalWidth}x${reopenedVisualEvidence.naturalHeight})`);
       console.log(`Evidências: ${beforeRestartScreenshot}`);
       console.log(`Evidências: ${afterRestartScreenshot}`);
       return;
