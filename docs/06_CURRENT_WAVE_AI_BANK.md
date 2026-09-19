@@ -17,8 +17,7 @@ O golden Rust `chunky_tile_golden_12_34_56_78_is_high_nibble_first` passou com l
 **Diferença em relação à pilha REX:** a inspeção adiciona o serviço IPC/sessões/eventos, UI experimental, persistência/reabertura e harness desktop; não altera a classificação de extração, não promove candidatos, não implementa codecs, edição, montagem de sprites ou reconstrução do jogo. A correção chunky de `10c89d1` foi a única correção REX relevante ausente incorporada nesta branch; o restante da pilha REX continua ancestral pela base `24978ca`.
 
 Limitações mantidas: cancelamento é evidência herdada nesta rodada; não há certificação de extração completa, reconstrução de gameplay ou produto final. **Experimental; merge/aceite pendentes.**
-
-### Estado corrente — 2026-09-15 (5): REX-04 fatia 2 ACEITA e INTEGRADA em `codex/import-decomp-review` `3fed085`; scanners de conteúdo são a próxima frente
+    ### Estado corrente — 2026-09-15 (5): REX-04 fatia 2 ACEITA e INTEGRADA em `codex/import-decomp-review` `3fed085`; scanners de conteúdo são a próxima frente
 
 **REX-04 fatia 2 (descoberta gráfica parcial) aceita pelo revisor em `382f9f4` e integrada:** merge **#65 → `3fed085`** em `codex/import-decomp-review` (NÃO em `main` — consolidação segue via #61, outra linha). Gates no destino: check:tree, tsc, lint, npm test, cargo test --lib **588/40**, clippy, fmt, **host:certify READY** (fingerprint 77bbc2a7…), **provas reais reexecutadas no destino 2/2** (Taiketsu: 5 chunks de `spr_*_tileset_data` NONE com cobertura medida 53,1–100%; HAMOOPIG: 4 regiões de código EXECINSTR com ZERO candidatos — positivo pulado por ausência de build do doador, documentado); CI remota 4/4 no push do merge. Mimosa selado `sha256:95e9142a…` (mesmos 2 FPs conhecidos de NodeGraphEditor).
 

@@ -18,6 +18,7 @@ pub mod fingerprint;
 pub mod ghidra_bridge;
 pub mod graphics_discovery;
 pub mod inspection;
+pub mod holdout;
 pub mod object_diff;
 pub mod rom_library;
 pub mod symbols;

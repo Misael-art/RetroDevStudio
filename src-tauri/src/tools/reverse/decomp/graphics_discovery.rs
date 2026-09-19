@@ -1370,7 +1370,9 @@ mod tests {
         let Some(lib) = optional_donor_lib(test_name) else {
             return;
         };
-        run_confrontation(test_name, &bytes, &lib, &[], &[]);
+        let donor_objects = load_donor_objects(test_name);
+        let res_decls = load_donor_res_decls(test_name);
+        run_confrontation(test_name, &bytes, &lib, &donor_objects, &res_decls);
     }
 
     /// Prova real: confrontação para a ROM de referência do Taiketsu com os
