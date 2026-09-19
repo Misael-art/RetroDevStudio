@@ -147,6 +147,58 @@ pub fn graphic_score_tile(tile: &[u8]) -> f32 {
 /// único plano; strings/padding variam mais e não se qualificam.
 const NEAR_FLAT_MAX_BITS: u32 = 2;
 
+fn has_exact_byte_period(bytes: &[u8], period: usize) -> bool {
+    period > 0
+        && bytes.len() >= period * 2
+        && bytes
+            .iter()
+            .enumerate()
+            .skip(period)
+            .all(|(index, byte)| *byte == bytes[index % period])
+}
+
+/// Fração de linhas que se mantêm próximas de uma das três linhas anteriores
+/// em magnitude e bits. É deliberadamente separada da regra de QUASE-FLAT:
+/// gradientes 4bpp legítimos podem mudar vários bits ao incrementar um byte,
+/// mas ainda preservam uma variação espacial pequena e consistente.
+fn dense_row_repeat_score(tile: &[u8]) -> f32 {
+    if tile.len() < TILE_BYTES {
+        return 0.0;
+    }
+    let rows: [[u8; 4]; 8] = core::array::from_fn(|row| {
+        [
+            tile[row * 4],
+            tile[row * 4 + 1],
+            tile[row * 4 + 2],
+            tile[row * 4 + 3],
+        ]
+    });
+    let mut good = 0u32;
+    for (index, row) in rows.iter().enumerate().skip(1) {
+        let matches = (1..=3).any(|back| {
+            if index < back {
+                return false;
+            }
+            let previous = rows[index - back];
+            let abs_delta: u16 = previous
+                .iter()
+                .zip(row.iter())
+                .map(|(left, right)| u16::from(left.abs_diff(*right)))
+                .sum();
+            let xor_bits: u32 = previous
+                .iter()
+                .zip(row.iter())
+                .map(|(left, right)| u32::from(left ^ right).count_ones())
+                .sum();
+            abs_delta <= 8 && xor_bits <= 16
+        });
+        if matches {
+            good += 1;
+        }
+    }
+    good as f32 / 8.0
+}
+
 /// Fração de pares de nibbles adjacentes iguais (suavidade horizontal):
 /// arte real tem corridas de pixels da mesma cor; código tem nibbles
 /// variados. Métrica auxiliar da regra de tile "denso".
@@ -179,9 +231,23 @@ fn tile_plausibility_score(data: &[u8], offset: u64) -> f32 {
     if tile.iter().all(|byte| *byte == tile[0]) {
         return 0.0;
     }
+    // A short exact period is equally plausible as a 1D stream and as a
+    // repeated texture. Without spatial evidence, keep it unknown instead of
+    // asserting a graphic interpretation.
+    if [2usize, 4, 8, 16]
+        .iter()
+        .copied()
+        .any(|period| has_exact_byte_period(tile, period))
+    {
+        return 0.0;
+    }
     let base = graphic_score_tile(tile);
     if base >= MIN_TILE_SCORE {
         return base;
+    }
+    let dense = dense_row_repeat_score(tile);
+    if dense >= 0.75 {
+        return dense;
     }
     let distinct = tile
         .iter()
@@ -202,6 +268,31 @@ fn plausible_tile(data: &[u8], offset: u64) -> bool {
 /// bloco (tiles densos reais alternam com tiles que a heurística não alcança;
 /// gap_tiles registrado na evidência).
 const MAX_GAP_TILES: u64 = 1;
+
+/// Detecta um bloco grande cuja repetição é explicada integralmente por um
+/// período curto de bytes. Sem evidência espacial adicional, esse padrão é
+/// ambíguo entre uma textura repetida e um stream (por exemplo, áudio PCM)
+/// interpretado como tiles; manter o bloco desconhecido evita promovê-lo a
+/// candidato gráfico por acidente.
+fn is_ambiguous_periodic_stream(data: &[u8], start: u64, end: u64) -> bool {
+    let Ok(start) = usize::try_from(start) else {
+        return false;
+    };
+    let Ok(end) = usize::try_from(end) else {
+        return false;
+    };
+    if start >= end || end > data.len() {
+        return false;
+    }
+    let bytes = &data[start..end];
+    if bytes.len() < TILE_BYTES * 8 {
+        return false;
+    }
+    [2usize, 4, 8, 16]
+        .iter()
+        .copied()
+        .any(|period| bytes.len().is_multiple_of(period) && has_exact_byte_period(bytes, period))
+}
 
 /// Estende um bloco a partir de `block_start` em stride de TILE_BYTES,
 /// tolerando até MAX_GAP_TILES tiles implausíveis consecutivos. Retorna o
@@ -283,7 +374,9 @@ fn scan_tile_blocks(data: &[u8], start: u64, end: u64) -> Vec<GraphicCandidate> 
             continue;
         };
         let tiles = (block_end - block_start) / TILE_BYTES as u64;
-        if tiles >= MIN_TILES_PER_BLOCK {
+        if tiles >= MIN_TILES_PER_BLOCK
+            && !is_ambiguous_periodic_stream(data, block_start, block_end)
+        {
             candidates.push(build_tile_candidate(data, block_start, block_end, tiles));
         }
         offset = block_end.max(offset + SCAN_STEP);
@@ -303,8 +396,9 @@ fn build_tile_candidate(data: &[u8], offset: u64, block_end: u64, tiles: u64) ->
     for t in 0..tiles {
         let base = start + (t as usize) * TILE_BYTES;
         let tile = &data[base..base + TILE_BYTES];
-        score_sum += graphic_score_tile(tile);
-        if graphic_score_tile(tile) < MIN_TILE_SCORE {
+        let tile_score = tile_plausibility_score(data, offset + t * TILE_BYTES as u64);
+        score_sum += tile_score;
+        if tile_score < MIN_TILE_SCORE {
             gap_tiles += 1;
         }
         for row in 0..8 {
@@ -1006,6 +1100,59 @@ mod tests {
             discovery.candidates.is_empty(),
             "junk pseudoaleatório não pode virar candidato: {:#?}",
             discovery.candidates
+        );
+    }
+
+    #[test]
+    fn periodic_stream_guard_keeps_ambiguous_bytes_unknown() {
+        let period = [0u8, 64, 128, 192, 255, 192, 128, 64];
+        let mut periodic = Vec::with_capacity(1024);
+        for index in 0..1024 {
+            periodic.push(period[index % period.len()]);
+        }
+        assert!(is_ambiguous_periodic_stream(
+            &periodic,
+            0,
+            periodic.len() as u64
+        ));
+
+        periodic[511] ^= 1;
+        assert!(!is_ambiguous_periodic_stream(
+            &periodic,
+            0,
+            periodic.len() as u64
+        ));
+        assert_eq!(tile_plausibility_score(&periodic, 0), 0.0);
+    }
+
+    #[test]
+    fn independent_dense_gradient_tiles_remain_detectable() {
+        let mut data = vec![0u8; TILE_BYTES * 4];
+        for tile in 0..4usize {
+            let bases = [
+                24u8.wrapping_add(tile as u8 * 7),
+                72u8.wrapping_add(tile as u8 * 5),
+                128u8.wrapping_add(tile as u8 * 3),
+                180u8.wrapping_add(tile as u8 * 2),
+            ];
+            for row in 0..8usize {
+                let delta = row as u8;
+                let at = tile * TILE_BYTES + row * 4;
+                data[at] = bases[0].wrapping_add(delta);
+                data[at + 1] = bases[1].wrapping_sub(delta);
+                data[at + 2] = bases[2].wrapping_add(delta);
+                data[at + 3] = bases[3].wrapping_sub(delta);
+            }
+        }
+        assert!(tile_plausibility_score(&data, 0) >= MIN_TILE_SCORE);
+        let candidates = scan_tile_blocks(&data, 0, data.len() as u64);
+        assert!(
+            candidates.iter().any(|candidate| {
+                candidate.kind == KIND_TILE_BLOCK
+                    && candidate.offset == 0
+                    && candidate.size >= (TILE_BYTES * 4) as u64
+            }),
+            "gradiente independente não detectado: {candidates:#?}"
         );
     }
 
