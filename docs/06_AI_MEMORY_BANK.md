@@ -1,5 +1,15 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-19 — prova visual de reabertura endurecida no harness `0e34773`
+
+O cenário `inspection-complete` foi reexecutado sem repetir os testes do scanner. O binário/frontend permaneceram no produto `441533f8c231e38be185f0526fd609559e8ffec5`, SHA `97569a6f9b9c70402e8d6ebdec877a0450e338b45e39cb363f3b082398bb662`; o harness alterado está em `0e34773`. A ROM HAMOOPIG preservada tem 917.504 bytes e SHA `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`.
+
+Sessão `inspection-1789823471-00000000`, run `run-inspection-1789823471-00000000-00000001`: identificação/análise concluídas; candidato `inspection-candidate-tile4bpp_block@0000A490-0000`, offset `42128`, tamanho `192`, `tile4bpp_block`, preview `256x16`; PNG SHA `33c3dd82d68b123f0e37b3baa1163cad69ef33c522dad80139ae9b611a6dd13f`; pixels RGBA SHA independente `a5b33b5c97f32106fda7e610da91ff3bcce67c92375d673ee25f7389af1ed480`. A mutação de um pixel continuou rejeitada (`d1eabd7d37515d98eb8313c34ce4bf9e0eb5fbd65ba572fc8127183ef8a37954`).
+
+Após reinício, o wizard foi tratado por controles visíveis; o mesmo helper de clique WebDriver, em modo esperado-bloqueado, registrou `unobstructed=false`, overlay do wizard, `selectionUnchanged=true` e `syntheticEvents=false`, sem clicar no elemento coberto. Depois, a sessão/candidato foram reabertos e o painel foi rolado até a prévia: viewport `1920x1080`, retângulo `201.156x14.4375`, `fullyVisible=true`, `unobstructed=true`, hit-test em `IMG`, tamanho renderizado suficiente. A captura efetivamente apresentada está em [after-restart](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-19T13-10-56-962Z-after-restart.png), SHA `2da6ed188265be20d196b0e964c38baa6ddbe47c266a76f7f4ac6faf99ddd49e`; [before-restart](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-19T13-10-56-962Z-before-restart.png), SHA `6ef0053a33c8647cfbb12becf0fdbcde051ab972f040a5cd03e49a031011c238`.
+
+O cancelamento permanece explicitamente **evidência herdada do executor**, não reexecutada nesta rodada: `run-inspection-1789820344-00000000-00000001`, sessão `inspection-1789820344-00000000`. O estado segue Experimental e sem merge.
+
 ### Checkpoint 2026-09-19 — integração isolada auditada para #69
 
 O PR #69 e os PRs REX #66–#68 eram linhas paralelas; nenhum head REX é ancestral do #69. `10c89d1` também não é ancestral do #69: `e998bbd` é o patch equivalente já presente na inspeção. Nesta branch isolada, #66/#67/#68 foram integrados por `177c831`, `63e730d` e `af6c0f3`, respectivamente. O holdout foi restaurado pelo merge de #66 — não “preservado” de um HEAD que já o continha — e os conflitos foram resolvidos por código, sem cópia indiscriminada. Untracked de outras sessões permanecem preservados.
