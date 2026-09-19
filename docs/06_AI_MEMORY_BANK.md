@@ -1,5 +1,13 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-19 — REX-04/Sprite-Frame-01 HAMOOPIG reexecutado no HEAD final
+
+No branch isolado `codex/rex-sprite-frame-01`, o build canônico do produto em `2425bd0383d800fe66ab956f5f9be135c0e1494b` gerou `/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/debug/retro-dev-studio` com SHA `4d9f95790b6758271240d21ae186d5e1079cb8590cfd15c0037231fd8fb47b8d`. O frontend carregado declarou o mesmo commit. A execução `sprite-frame-01-e2e-final-head.log` passou com ROM BYOR `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`, fonte doadora `1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b`, sessão `inspection-1789834584-00000000`, recurso `spr_ryo_100/frame-0` e frame nativo 64×104.
+
+A composição independente continuou com PNG `8bb4dc723fa4d9435f6eaa3ce1c2248df7a20e30b800a6c56bfdd0a54fa96168`, RGBA do PNG `50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58`, canvas WebKit `c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc` e índices `938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c`. O candidato de tiles permaneceu separado (`0xA490`, 192 bytes, PNG `33c3dd82d68b123f0e37b3baa1163cad69ef33c522dad80139ae9b611a6dd13f`, pixels `a5b33b5c97f32106fda7e610da91ff3bcce67c92375d673ee25f7389af1ed480`). A mutação visual foi rejeitada; após reinício a prévia foi capturada novamente com `fullyVisible=true`, `unobstructed=true`, hit-test em `IMG`, e identidade ROM/sessão/candidato confirmada. O negativo do wizard rejeitou o clique nativo obstruído (`selectionUnchanged=true`, `syntheticEvents=false`). Capturas: `inspection-2026-09-19T16-16-06-738Z-sprite-before-restart.png` e `inspection-2026-09-19T16-16-06-738Z-sprite-after-restart.png`.
+
+O cancelamento é explicitamente **herdado do executor do PR #70**, não reexecutado nesta alteração de composição; não deve ser contado como nova prova deste binário. A árvore continua com os untracked de outras sessões preservados e não staged. A documentação abaixo mantém os checkpoints históricos; este checkpoint é o destino atual da matriz.
+
 ### Checkpoint 2026-09-19 — REX-04/Sprite-Frame-01 HAMOOPIG fechado no desktop
 
 Commit `57460b8` publicado na branch isolada `codex/rex-sprite-frame-01`; PR #70 foi preservado sem merge. A fatia não trata prévia de tiles como sprite: compõe somente `spr_ryo_100/frame-0` (64×104) com tiles, posições, ordem vertical ResComp, flips, paleta MD RGB333 e transparência, explicitamente marcada como Experimental e assistida por metadado doador.
