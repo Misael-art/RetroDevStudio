@@ -7,6 +7,7 @@ import {
   type InspectionProgress,
   type InspectionRun,
   type InspectionSession,
+  type InspectionSpriteFrame,
   inspectionCancel,
   inspectionCatalogPage,
   inspectionListSessions,
@@ -15,6 +16,7 @@ import {
   inspectionReopen,
   inspectionSave,
   inspectionSavePaletteChoice,
+  inspectionSpriteFrame,
   inspectionStatus,
   inspectionStart,
   listenInspectionProgress,
@@ -58,6 +60,8 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [palettePage, setPalettePage] = useState<InspectionCatalogPage | null>(null);
   const [selected, setSelected] = useState<InspectionCandidate | null>(null);
   const [preview, setPreview] = useState<InspectionPreview | null>(null);
+  const [spriteFrame, setSpriteFrame] = useState<InspectionSpriteFrame | null>(null);
+  const [spriteFrameBusy, setSpriteFrameBusy] = useState(false);
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState("");
   const [pageOffset, setPageOffset] = useState(0);
@@ -97,6 +101,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     bufferedProgress.current.clear();
     progressListener.current?.unlisten?.();
     progressListener.current = null;
+    setSpriteFrame(null);
   }
 
   function applyProgress(progress: InspectionProgress) {
@@ -304,6 +309,24 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     }
   }
 
+  async function composeSpriteFrame() {
+    const sessionId = sessionRef.current?.session_id;
+    if (!sessionId) return;
+    const requestId = ++previewRequestSeq.current;
+    setSpriteFrameBusy(true);
+    try {
+      const next = await inspectionSpriteFrame(sessionId, "spr_ryo_100", false, false);
+      if (requestId !== previewRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
+      setSpriteFrame(next);
+      logMessage("success", "[Inspeção] Frame composto HAMOOPIG verificado contra bytes e metadado doador.");
+    } catch (error) {
+      if (requestId !== previewRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
+      logMessage("error", `[Inspeção] Composição de sprite recusada: ${describeError(error)}`);
+    } finally {
+      if (requestId === previewRequestSeq.current) setSpriteFrameBusy(false);
+    }
+  }
+
   async function saveChoice() {
     if (!session || !selected || selected.kind !== "tile4bpp_block" || !selectedPalette) return;
     try {
@@ -437,6 +460,29 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
 
       {session?.status === "completed" && page && (
         <>
+          <div data-testid="inspection-sprite-frame-panel" className="rounded border border-[#cba6f7]/40 bg-[#11111b] p-3 text-[10px]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.16em] text-[#cba6f7]">Frame composto · HAMOOPIG · Experimental</div>
+                <div className="mt-1 text-[#f9e2af]">Não é prévia de tile: composição assistida por metadado doador, com bytes compilados verificados.</div>
+              </div>
+              <button type="button" data-testid="inspection-compose-sprite" onClick={() => void composeSpriteFrame()} disabled={spriteFrameBusy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">{spriteFrameBusy ? "Compondo..." : "Compor spr_ryo_100 / frame 0"}</button>
+            </div>
+            {spriteFrame?.available && spriteFrame.data_url && <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,280px)_1fr]">
+              <div>
+                <img data-testid="inspection-sprite-frame-image" data-sprite-resource={spriteFrame.resource_id} data-sprite-frame={spriteFrame.frame_id} data-sprite-rom-sha256={spriteFrame.rom_sha256} data-sprite-width={spriteFrame.width} data-sprite-height={spriteFrame.height} data-png-sha256={spriteFrame.png_sha256 ?? ""} data-pixels-sha256={spriteFrame.pixels_sha256 ?? ""} src={spriteFrame.data_url} alt="Frame composto HAMOOPIG spr_ryo_100" width={spriteFrame.width * 3} height={spriteFrame.height * 3} className="border border-[#313244] bg-[#ff00ff] [image-rendering:pixelated]" style={{ imageRendering: "pixelated" }} />
+                <div className="mt-2 font-mono text-[9px] text-[#7f849c]">Dimensão nativa {spriteFrame.width}×{spriteFrame.height} · escala inteira 3× · RGBA pixels {spriteFrame.pixels_sha256}</div>
+              </div>
+              <div className="space-y-1 text-[#cdd6f4]">
+                <div>ROM recuperada: {spriteFrame.rom_sha256}</div>
+                <div>Bytes de tiles: 0x{hex(spriteFrame.tile_data_offset)} + {spriteFrame.tile_data_size} · paleta: 0x{hex(spriteFrame.palette_offset)} + {spriteFrame.palette_size}</div>
+                <div>Descritores VDP: 0x{hex(spriteFrame.descriptor_offset)} · flip X/Y: {String(spriteFrame.flip_x)}/{String(spriteFrame.flip_y)} · transparência: índice {spriteFrame.transparency_index}</div>
+                <div className="text-[#f9e2af]">{spriteFrame.metadata_source}</div>
+                <div className="mt-2 text-[#7f849c]">Doador: {spriteFrame.donor_evidence.join(" · ")}</div>
+                <div className="mt-2 text-[#7f849c]">Limitações: {spriteFrame.limitations.join(" · ")}</div>
+              </div>
+            </div>}
+          </div>
           <div className="rounded border border-[#313244] bg-[#11111b] p-3">
             <div className="flex flex-wrap gap-2">
               <input aria-label="Buscar candidatos" value={query} onChange={(event) => { const nextQuery = event.target.value; queryRef.current = nextQuery; kindRef.current = kind; setQuery(nextQuery); setPageOffset(0); selectedRef.current = null; previewRequestSeq.current += 1; setSelected(null); setPreview(null); void refreshCatalog(session.session_id, 0, nextQuery, kind); }} placeholder="Buscar método ou tipo" className="min-w-[180px] flex-1 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] text-[#cdd6f4]" />

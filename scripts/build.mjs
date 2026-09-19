@@ -594,13 +594,13 @@ export function buildCommandEnvironment(mode, effectiveTargetDir, hostPlatform =
   } catch {
     env.VITE_RDS_BUILD_COMMIT = "unknown";
   }
+  prependUserCargoBin(env, hostPlatform);
   if (hostPlatform === "win32") {
     env.TAURI_ENV_PLATFORM = "windows";
     env.TAURI_ENV_ARCH = "x86_64";
     env.TAURI_ENV_FAMILY = "windows";
     env.TAURI_ENV_TARGET_TRIPLE = "x86_64-pc-windows-msvc";
     env.TAURI_ENV_DEBUG = mode === "debug" ? "true" : "false";
-    prependUserCargoBin(env, hostPlatform);
   }
   if (process.env.RDS_E2E_QA_RC_MEMORY_SAFE === "1") {
     env.CARGO_BUILD_JOBS ??= "1";

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   inspectionReopen: vi.fn(),
   inspectionSave: vi.fn(),
   inspectionSavePaletteChoice: vi.fn(),
+  inspectionSpriteFrame: vi.fn(),
 }));
 
 vi.mock("../../core/ipc/toolsService", () => mocks);
@@ -102,6 +103,32 @@ describe("InspectionPanel", () => {
     mocks.inspectionListSessions.mockResolvedValue([]);
     mocks.listenInspectionProgress.mockResolvedValue(() => undefined);
     mocks.inspectionCatalogPage.mockResolvedValue({ session_id: session.session_id, run_id: "", offset: 0, limit: 24, total_candidates: 0, candidates: [], unknown_regions: [], user_choices: [] });
+    mocks.inspectionSpriteFrame.mockResolvedValue({
+      session_id: completedSession.session_id,
+      resource_id: "spr_ryo_100",
+      frame_id: "spr_ryo_100/frame-0",
+      available: true,
+      width: 64,
+      height: 104,
+      data_url: "data:image/png;base64,sprite",
+      artifact: { label: "sprite-frame", path: "/artifacts/sprite.png", sha256: "d".repeat(64) },
+      png_sha256: "e".repeat(64),
+      pixels_sha256: "f".repeat(64),
+      rom_sha256: "b".repeat(64),
+      tile_data_offset: 0x863a0,
+      tile_data_size: 0x800,
+      palette_offset: 0x2cc68,
+      palette_size: 0x20,
+      descriptor_offset: 0x22260,
+      flip_x: false,
+      flip_y: false,
+      transparency_index: 0,
+      parts: [],
+      metadata_source: "Metadado doador + bytes compilados verificáveis",
+      rom_evidence: [],
+      donor_evidence: [],
+      limitations: [],
+    });
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -234,5 +261,28 @@ describe("InspectionPanel", () => {
 
     expect(mocks.inspectionReopen).toHaveBeenCalledWith("/roms/persisted.md", "session-persisted-002");
     expect(container.textContent).toContain("session-persisted-002");
+  });
+
+  it("renders the donor-assisted composed sprite frame through IPC", async () => {
+    mocks.inspectionOpen.mockResolvedValue(completedSession);
+    mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
+    mocks.inspectionCatalogPage.mockResolvedValue({ session_id: completedSession.session_id, run_id: completed.run_id, offset: 0, limit: 24, total_candidates: 0, candidates: [], unknown_regions: [], user_choices: [] });
+
+    await act(async () => {
+      root.render(<InspectionPanel logMessage={vi.fn()} />);
+      await flush();
+    });
+    const input = container.querySelector("input[type='text']");
+    setTextInput(input as Element, "/roms/test.md");
+    await act(async () => { await flush(); });
+    const identifyButton = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Identificar base") as HTMLButtonElement;
+    await act(async () => { identifyButton.click(); await flush(); await flush(); });
+    const composeButton = container.querySelector("[data-testid='inspection-compose-sprite']") as HTMLButtonElement;
+    expect(composeButton).toBeTruthy();
+    await act(async () => { composeButton.click(); await flush(); });
+
+    expect(mocks.inspectionSpriteFrame).toHaveBeenCalledWith(completedSession.session_id, "spr_ryo_100", false, false);
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")?.getAttribute("data-sprite-frame")).toBe("spr_ryo_100/frame-0");
+    expect(container.textContent).toContain("Não é prévia de tile");
   });
 });

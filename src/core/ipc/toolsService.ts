@@ -465,6 +465,45 @@ export interface InspectionPreview {
   pixels_sha256?: string | null;
 }
 
+export interface InspectionSpriteFramePart {
+  tile_start: number;
+  tile_count: number;
+  tile_width: number;
+  tile_height: number;
+  x: number;
+  y: number;
+  x_flip: number;
+  y_flip: number;
+}
+
+export interface InspectionSpriteFrame {
+  session_id: string;
+  resource_id: string;
+  frame_id: string;
+  available: boolean;
+  reason?: string | null;
+  width: number;
+  height: number;
+  data_url?: string | null;
+  artifact?: InspectionArtifactRef | null;
+  png_sha256?: string | null;
+  pixels_sha256?: string | null;
+  rom_sha256: string;
+  tile_data_offset: number;
+  tile_data_size: number;
+  palette_offset: number;
+  palette_size: number;
+  descriptor_offset: number;
+  flip_x: boolean;
+  flip_y: boolean;
+  transparency_index: number;
+  parts: InspectionSpriteFramePart[];
+  metadata_source: string;
+  rom_evidence: string[];
+  donor_evidence: string[];
+  limitations: string[];
+}
+
 export const INSPECTION_PROGRESS_EVENT = "rex://inspection-progress";
 
 export function inspectionOpen(romPath: string): Promise<InspectionSession> {
@@ -509,6 +548,20 @@ export function inspectionCatalogPage(
 
 export function inspectionPreview(sessionId: string, candidateId: string): Promise<InspectionPreview> {
   return invoke<InspectionPreview>("rex_inspection_preview", { sessionId, candidateId });
+}
+
+export function inspectionSpriteFrame(
+  sessionId: string,
+  resourceId: string,
+  flipX = false,
+  flipY = false
+): Promise<InspectionSpriteFrame> {
+  return invoke<InspectionSpriteFrame>("rex_inspection_sprite_frame", {
+    sessionId,
+    resourceId,
+    flipX,
+    flipY,
+  });
 }
 
 export function inspectionSavePaletteChoice(

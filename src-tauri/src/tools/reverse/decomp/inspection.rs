@@ -1191,6 +1191,16 @@ pub fn preview(session_id: &str, candidate_id_value: &str) -> Result<InspectionP
     })
 }
 
+pub fn sprite_frame(
+    session_id: &str,
+    resource_id: &str,
+    flip_x: bool,
+    flip_y: bool,
+) -> Result<super::sprite_composition::InspectionSpriteFrame, String> {
+    let stored = get_stored_session(session_id)?;
+    super::sprite_composition::compose_for_session(&stored.session, resource_id, flip_x, flip_y)
+}
+
 pub fn save_palette_choice(
     session_id: &str,
     tile_candidate_id: &str,

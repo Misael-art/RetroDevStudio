@@ -2117,6 +2117,22 @@ async fn rex_inspection_preview(
 }
 
 #[tauri::command]
+async fn rex_inspection_sprite_frame(
+    session_id: String,
+    resource_id: String,
+    flip_x: bool,
+    flip_y: bool,
+) -> Result<
+    tools::reverse::decomp::sprite_composition::InspectionSpriteFrame,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_sprite_frame", move || {
+        tools::reverse::decomp::inspection::sprite_frame(&session_id, &resource_id, flip_x, flip_y)
+    })
+    .await
+}
+
+#[tauri::command]
 fn rex_inspection_save_palette_choice(
     session_id: String,
     tile_candidate_id: String,
@@ -4726,6 +4742,7 @@ pub fn run() {
             rex_inspection_list_sessions,
             rex_inspection_catalog_page,
             rex_inspection_preview,
+            rex_inspection_sprite_frame,
             rex_inspection_save_palette_choice,
             rex_inspection_save,
             list_project_assets,

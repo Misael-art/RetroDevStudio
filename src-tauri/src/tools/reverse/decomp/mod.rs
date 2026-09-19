@@ -21,5 +21,6 @@ pub mod holdout;
 pub mod inspection;
 pub mod object_diff;
 pub mod rom_library;
+pub mod sprite_composition;
 pub mod symbols;
 pub mod triage;

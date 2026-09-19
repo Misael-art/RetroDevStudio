@@ -1489,6 +1489,148 @@ async function readRenderedPreviewPixels(sessionId) {
   );
 }
 
+async function readRenderedSpriteFramePixels(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-sprite-frame-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return {
+        image: true,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        romSha256: image.getAttribute("data-sprite-rom-sha256") || "",
+        resourceId: image.getAttribute("data-sprite-resource") || "",
+        frameId: image.getAttribute("data-sprite-frame") || "",
+        pngSha256: image.getAttribute("data-png-sha256") || "",
+        pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+        src: image.currentSrc || image.src,
+        pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+      };
+    `
+  );
+}
+
+function renderExpectedSpriteFrame(romBytes, options = {}) {
+  const tileDataOffset = 0x863a0;
+  const paletteOffset = 0x2cc68;
+  const descriptorOffset = 0x22260;
+  const width = 64;
+  const height = 104;
+  const descriptors = [
+    [0x2c, 0x1c, 0x0f, 0x05, 0x1b, 0x10],
+    [0x0c, 0x3c, 0x0f, 0x04, 0x1c, 0x10],
+    [0x37, 0x11, 0x07, 0x25, 0x0b, 0x08],
+    [0x14, 0x3c, 0x06, 0x24, 0x0c, 0x06],
+    [0x4c, 0x0c, 0x09, 0x05, 0x23, 0x06],
+    [0x57, 0x01, 0x09, 0x25, 0x03, 0x06],
+    [0x58, 0x00, 0x05, 0x00, 0x30, 0x04],
+    [0x04, 0x5c, 0x04, 0x15, 0x1b, 0x02],
+  ];
+  const descriptorBytes = Buffer.from(descriptors.flat());
+  if (!descriptorBytes.equals(romBytes.subarray(descriptorOffset, descriptorOffset + descriptorBytes.length))) {
+    fail("Descritores independentes de spr_ryo_100 divergiram da ROM de referência.");
+  }
+  const pixels = Buffer.alloc(width * height * 4);
+  const tileOrdering = options.tileOrdering ?? "vertical";
+  const paletteDelta = options.paletteDelta ?? 0;
+  const flipX = Boolean(options.flipX);
+  const flipY = Boolean(options.flipY);
+  let tileStart = 0;
+  const color = (index) => {
+    const wordOffset = paletteOffset + index * 2;
+    let word = romBytes.readUInt16BE(wordOffset);
+    if (index === 1) word ^= paletteDelta;
+    return [((word >> 1) & 7) * 36, ((word >> 5) & 7) * 36, ((word >> 9) & 7) * 36, index === 0 ? 0 : 255];
+  };
+  const put = (x, y, index) => {
+    const pixel = (y * width + x) * 4;
+    const rgba = index === 0 && options.transparentRgb === "canvas" ? [0, 0, 0, 0] : color(index);
+    pixels[pixel] = rgba[0];
+    pixels[pixel + 1] = rgba[1];
+    pixels[pixel + 2] = rgba[2];
+    pixels[pixel + 3] = rgba[3];
+  };
+  const transparent = options.transparentRgb === "canvas" ? [0, 0, 0, 0] : color(0);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const offset = pixel * 4;
+    pixels[offset] = transparent[0];
+    pixels[offset + 1] = transparent[1];
+    pixels[offset + 2] = transparent[2];
+    pixels[offset + 3] = transparent[3];
+  }
+  for (const [offsetY, offsetYFlip, size, offsetX, offsetXFlip, tileCount] of descriptors) {
+    const tileWidth = (size >> 2) + 1;
+    const tileHeight = (size & 3) + 1;
+    if (tileCount !== tileWidth * tileHeight) fail(`Descritor com tileCount inconsistente: ${JSON.stringify({ size, tileCount })}`);
+    for (let localX = 0; localX < tileWidth; localX += 1) {
+      for (let localY = 0; localY < tileHeight; localY += 1) {
+        const sourceX = flipX ? tileWidth - 1 - localX : localX;
+        const sourceY = flipY ? tileHeight - 1 - localY : localY;
+        const tileInPart = tileOrdering === "vertical"
+          ? sourceX * tileHeight + sourceY
+          : sourceY * tileWidth + sourceX;
+        const tileIndex = tileStart + tileInPart;
+        const destX = (flipX ? offsetXFlip : offsetX) + localX * 8;
+        const destY = (flipY ? offsetYFlip : offsetY) + localY * 8;
+        for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+          for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+            const sourcePixelX = flipX ? 7 - pixelX : pixelX;
+            const sourcePixelY = flipY ? 7 - pixelY : pixelY;
+            const packedByte = romBytes[tileDataOffset + tileIndex * 32 + sourcePixelY * 4 + Math.floor(sourcePixelX / 2)];
+            const index = sourcePixelX % 2 === 0 ? packedByte >> 4 : packedByte & 0x0f;
+            put(destX + pixelX, destY + pixelY, index);
+          }
+        }
+      }
+    }
+    tileStart += tileCount;
+  }
+  if (tileStart !== 64) fail(`Oráculo independente esperava 64 tiles e obteve ${tileStart}`);
+  return { width, height, pixels };
+}
+
+function assertSpriteFrameOracles(romBytes, actual, context) {
+  const expected = renderExpectedSpriteFrame(romBytes, { transparentRgb: "canvas" });
+  const independentPng = renderExpectedSpriteFrame(romBytes);
+  const independent = assertExactPreviewPixels(
+    { width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels },
+    expected,
+    context
+  );
+  const expectedIndexSha256 = "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c";
+  const expectedRgbaSha256 = "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58";
+  const independentPngSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
+  const expectedCanvasSha256 = "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc";
+  if (expectedRgbaSha256 !== independentPngSha256 || expectedCanvasSha256 !== independent.pixelsSha256) {
+    fail(`Oráculos RGBA independente/canvas não batem com as referências: ${JSON.stringify({ expectedRgbaSha256, independentPngSha256, expectedCanvasSha256, actualCanvas: independent.pixelsSha256, expectedIndexSha256 })}`);
+  }
+  for (const [label, variant] of [
+    ["ordem vertical -> row-major", { tileOrdering: "row-major" }],
+    ["paleta alterada", { paletteDelta: 0x0200 }],
+    ["flip horizontal", { flipX: true }],
+  ]) {
+    let rejected = false;
+    try {
+      assertExactPreviewPixels(
+        { width: actual.naturalWidth, height: actual.naturalHeight, pixels: renderExpectedSpriteFrame(romBytes, { ...variant, transparentRgb: "canvas" }).pixels },
+        expected,
+        `${context}: negativo ${label}`
+      );
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) fail(`Negativo do frame composto não foi detectado: ${label}`);
+  }
+  return { ...independent, expectedIndexSha256, expectedRgbaSha256, independentPngPixelsSha256: independentPngSha256, expectedCanvasSha256 };
+}
+
 function renderExpectedTilePreview(romBytes, offset, size) {
   if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset < 0 || size <= 0 || offset + size > romBytes.length) {
     fail(`Especificação independente de candidato inválida: offset=${offset} size=${size} ROM=${romBytes.length}`);
@@ -4202,6 +4344,18 @@ async function main() {
       }
       const inspectionRomBytes = await readFile(inspectionRom);
       console.log(`[inspection-rom] ${JSON.stringify({ path: inspectionRom, size: inspectionRomBytes.length, sha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), fixture: inspectionFixture })}`);
+      const spriteSourcePng = process.env.RDS_INSPECTION_SPRITE_SOURCE_PNG ?? "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/ryo/100.png";
+      const requiresSpriteOracle = options.scenario === "inspection" || options.scenario === "inspection-complete";
+      if (requiresSpriteOracle && !(await pathExists(spriteSourcePng))) {
+        fail(`RDS_INSPECTION_SPRITE_SOURCE_PNG deve apontar para o PNG doador independente: ${spriteSourcePng}`);
+      }
+      const spriteSourcePngSha256 = !requiresSpriteOracle
+        ? null
+        : createHash("sha256").update(await readFile(spriteSourcePng)).digest("hex");
+      if (requiresSpriteOracle && spriteSourcePngSha256 !== "1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b") {
+        fail(`PNG doador independente divergente: ${JSON.stringify({ path: spriteSourcePng, sha256: spriteSourcePngSha256 })}`);
+      }
+      console.log(`[inspection-sprite-source] ${JSON.stringify({ path: spriteSourcePng, sha256: spriteSourcePngSha256, frame: "spr_ryo_100/frame-0", nativeSize: [64, 104] })}`);
       const artifactPrefix = `inspection-${artifactTimestamp()}`;
       const inspectionPanel = "[data-testid='reverse-inspection-panel']";
       const inspectionInput = `${inspectionPanel} input[type='text']`;
@@ -4438,6 +4592,7 @@ async function main() {
       }
       assertChunkyGoldenOracle();
       const expectedPreview = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      console.log(`[inspection-preview-oracle] ${JSON.stringify({ offset: expectedOffset, size: expectedSize, dimensions: [expectedPreview.width, expectedPreview.height], pixelsSha256: createHash("sha256").update(expectedPreview.pixels).digest("hex"), firstBytes: Array.from(inspectionRomBytes.subarray(expectedOffset, expectedOffset + 16)) })}`);
       const independentPixelEvidence = assertExactPreviewPixels(
         { width: visualEvidence.naturalWidth, height: visualEvidence.naturalHeight, pixels: visualEvidence.pixels },
         expectedPreview,
@@ -4467,6 +4622,25 @@ async function main() {
       }
       if (!mutationRejected) fail("O oracle independente aceitou uma imagem com um pixel alterado; a asserção visual está permissiva.");
       console.log(`[inspection-preview] ${JSON.stringify({ candidate: selectedCandidateEvidence, dimensions: [independentPixelEvidence.width, independentPixelEvidence.height], pngSha256: actualPngSha256, pixelsSha256: independentPixelEvidence.pixelsSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, mutationRejected })}`);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame HAMOOPIG");
+      const spriteVisualEvidence = await waitFor(
+        async () => readRenderedSpriteFramePixels(sessionId),
+        15000,
+        "Frame composto HAMOOPIG não carregou imagem, dimensões ou pixels",
+        100
+      );
+      if (!spriteVisualEvidence?.image || spriteVisualEvidence.resourceId !== "spr_ryo_100" || spriteVisualEvidence.frameId !== "spr_ryo_100/frame-0" || spriteVisualEvidence.romSha256 !== createHash("sha256").update(inspectionRomBytes).digest("hex")) {
+        fail(`Identidade do frame composto divergente: ${JSON.stringify(spriteVisualEvidence)}`);
+      }
+      const spriteIndependentEvidence = assertSpriteFrameOracles(inspectionRomBytes, spriteVisualEvidence, "ROM/manifesto HAMOOPIG conhecidos");
+      const spritePngPayload = String(spriteVisualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!spritePngPayload) fail("Frame composto não expôs uma fonte PNG data: válida.");
+      const spriteActualPngSha256 = createHash("sha256").update(Buffer.from(spritePngPayload, "base64")).digest("hex");
+      if (spriteActualPngSha256 !== spriteVisualEvidence.pngSha256 || spriteVisualEvidence.pixelsSha256 !== spriteIndependentEvidence.independentPngPixelsSha256 || spriteActualPngSha256 === spriteVisualEvidence.pixelsSha256) {
+        fail(`Hashes PNG/RGBA do frame composto não estão separados ou não batem com o oráculo: ${JSON.stringify({ pngSha256: spriteActualPngSha256, pixelsSha256: spriteVisualEvidence.pixelsSha256, expectedPngPixelsSha256: spriteIndependentEvidence.independentPngPixelsSha256 })}`);
+      }
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: spriteVisualEvidence.romSha256, resource: spriteVisualEvidence.resourceId, frame: spriteVisualEvidence.frameId, nativeSize: [spriteVisualEvidence.naturalWidth, spriteVisualEvidence.naturalHeight], pngSha256: spriteActualPngSha256, pixelsSha256: spriteIndependentEvidence.pixelsSha256, expectedIndexSha256: spriteIndependentEvidence.expectedIndexSha256, expectedRgbaSha256: spriteIndependentEvidence.expectedRgbaSha256 })}`);
+      const spriteBeforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-before-restart.png`);
       await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
       const persistedSessionId = completedState.session.id;
       if (!persistedSessionId) fail(`Sessão concluída não tem identidade para validar persistência: ${JSON.stringify(completedState)}`);
@@ -4647,6 +4821,19 @@ async function main() {
         fail(`Hashes PNG/RGBA reabertos não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256AfterRestart, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256 })}`);
       }
       console.log(`[inspection-reopen-visual] ${JSON.stringify({ romSha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), sessionId: reopenedState.session.id, identitySha256: reopenedState.session.identitySha256, candidate: reopenedCandidateEvidence, dimensions: [independentPixelEvidenceAfterRestart.width, independentPixelEvidenceAfterRestart.height], pngSha256: actualPngSha256AfterRestart, pixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, previewLayout: reopenedPreviewLayout, reopenDiagnostic })}`);
+      await clickButtonByTestIdNative(sessionId, "inspection-compose-sprite", "composição do frame após reinício");
+      const reopenedSpriteVisualEvidence = await waitFor(
+        async () => readRenderedSpriteFramePixels(sessionId),
+        15000,
+        "Frame composto HAMOOPIG não voltou após reabrir a sessão",
+        100
+      );
+      const reopenedSpriteIndependentEvidence = assertSpriteFrameOracles(inspectionRomBytes, reopenedSpriteVisualEvidence, "ROM/manifesto HAMOOPIG após reinício");
+      if (reopenedSpriteVisualEvidence?.romSha256 !== reopenedState.session.identitySha256 || reopenedSpriteVisualEvidence?.resourceId !== "spr_ryo_100" || reopenedSpriteVisualEvidence?.frameId !== "spr_ryo_100/frame-0") {
+        fail(`Frame composto reaberto diverge da identidade persistida: ${JSON.stringify({ sprite: reopenedSpriteVisualEvidence, session: reopenedState })}`);
+      }
+      console.log(`[inspection-reopen-sprite-frame] ${JSON.stringify({ romSha256: reopenedSpriteVisualEvidence.romSha256, resource: reopenedSpriteVisualEvidence.resourceId, frame: reopenedSpriteVisualEvidence.frameId, dimensions: [reopenedSpriteVisualEvidence.naturalWidth, reopenedSpriteVisualEvidence.naturalHeight], pngSha256: reopenedSpriteVisualEvidence.pngSha256, pixelsSha256: reopenedSpriteIndependentEvidence.pixelsSha256, expectedRgbaSha256: reopenedSpriteIndependentEvidence.expectedRgbaSha256 })}`);
+      const spriteAfterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-after-restart.png`);
       const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
       console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
       console.log(`ROM BYOR: ${inspectionRom}`);
@@ -4654,6 +4841,8 @@ async function main() {
       console.log(`Prévia após reinício: pixels PNG recalculados (${reopenedVisualEvidence.naturalWidth}x${reopenedVisualEvidence.naturalHeight})`);
       console.log(`Evidências: ${beforeRestartScreenshot}`);
       console.log(`Evidências: ${afterRestartScreenshot}`);
+      console.log(`Evidências do frame composto: ${spriteBeforeRestartScreenshot}`);
+      console.log(`Evidências do frame composto após reinício: ${spriteAfterRestartScreenshot}`);
       return;
     }
 
