@@ -160,7 +160,7 @@ pub(crate) fn reject_if_symlink(path: &Path) -> Result<(), String> {
 
 /// Componentes de caminho FIXOS aceitos sem validação hex — qualquer outro
 /// componente é obrigatoriamente hex64 (sha256). Nada de passagem livre.
-const LITERAL_COMPONENTS: [&str; 4] = ["extract", "previews", "sessions", "choices"];
+const LITERAL_COMPONENTS: [&str; 5] = ["extract", "previews", "sessions", "choices", "edits"];
 
 /// Diretório canônico sob `work_dir` para um caminho relativo de componentes
 /// fixos mais componentes hex validáveis: cada componente existente é checado
@@ -720,6 +720,21 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&work);
+    }
+
+    #[test]
+    fn edits_is_a_literal_component_under_a_valid_rom_hash() {
+        let work = std::env::temp_dir().join(format!(
+            "rex04-edits-path-test-{}-{}",
+            std::process::id(),
+            now_unix()
+        ));
+        let sha = "b".repeat(64);
+        let dir = canonical_dir_under(&work, &["extract", &sha, "edits"])
+            .expect("diretório de edição válido e contido");
+        let work_canonical = fs::canonicalize(&work).expect("work_dir existe");
+        assert!(dir.starts_with(&work_canonical));
+        assert!(dir.ends_with("edits"));
     }
 
     #[test]
