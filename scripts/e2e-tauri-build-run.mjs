@@ -1425,7 +1425,7 @@ async function fillInputByLabel(sessionId, labelText, value) {
     `
       const expected = String(arguments[0] ?? '').trim();
       const label = Array.from(document.querySelectorAll('label')).find((candidate) => candidate.textContent?.trim() === expected);
-      const input = label?.querySelector('input');
+      const input = label?.querySelector('input') ?? label?.parentElement?.querySelector('input');
       if (!(input instanceof HTMLInputElement)) return false;
       const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
       if (typeof descriptor?.set !== 'function') return false;
@@ -1810,9 +1810,19 @@ function assertSonicStandOracles(romBytes, actual, context) {
     context
   );
   const independentPngPixelsSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
-  const expectedPixelsSha256 = "ce95ea66f2cfcec40a0fb12cb35fe5e88530de036de9f897333ce762f06b40d4";
-  if (independentPngPixelsSha256 !== expectedPixelsSha256) {
-    fail(`Oráculo Sonic stand não corresponde ao golden literal: ${JSON.stringify({ independentPngPixelsSha256, expectedPixelsSha256 })}`);
+  const romSha256 = createHash("sha256").update(romBytes).digest("hex");
+  const expectedPixelsByRomSha256 = {
+    // Golden literal independente da ROM BYOR sem edição.
+    c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb:
+      "ce95ea66f2cfcec40a0fb12cb35fe5e88530de036de9f897333ce762f06b40d4",
+    // Mutação determinística exercitada pela UI: palette[1] = RGB333(7,0,7).
+    d381b1eed8f47dcd08890007b58b90cd5e3cabdaed96deac9b1e7336b1558e4d:
+      "91ee4ab0c08987597918a4951020cac81c6d3903b415c32d0c1dd8d783850588",
+  };
+  const expectedPixelsSha256 = expectedPixelsByRomSha256[romSha256];
+  console.log(`[inspection-sonic-oracle] ${JSON.stringify({ context, romSha256, romLength: romBytes.length, mappingSha256: createHash("sha256").update(romBytes.subarray(0x21293, 0x21293 + 21)).digest("hex"), independentPngPixelsSha256 })}`);
+  if (!expectedPixelsSha256 || independentPngPixelsSha256 !== expectedPixelsSha256) {
+    fail(`Oráculo Sonic stand não corresponde ao golden literal da ROM exercitada: ${JSON.stringify({ romSha256, independentPngPixelsSha256, expectedPixelsSha256 })}`);
   }
   for (const [label, variant] of [
     ["ordem de tiles row-major -> vertical", { tileOrder: "vertical" }],
@@ -2154,7 +2164,14 @@ async function clickElementWithDiagnostics(sessionId, elementId, selector) {
   const before = await inspectElementInteraction(sessionId, selector);
   let response;
   try {
-    response = await webdriverRequestDetailed("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+    // O WebKitWebDriver pode conservar a referência geométrica do elemento
+    // antes do scroll. Reencontrar o mesmo nó depois da verificação mantém o
+    // clique nativo, mas evita enviar a operação para a posição anterior.
+    const currentElementId = await findElement(sessionId, selector);
+    if (currentElementId !== elementId) {
+      console.log(`[inspection-click] elemento re-resolvido após scroll: ${elementId} -> ${currentElementId}`);
+    }
+    response = await webdriverRequestDetailed("POST", `/session/${sessionId}/element/${currentElementId}/click`, {});
   } catch (error) {
     response = { exception: error instanceof Error ? error.message : String(error) };
   }
@@ -2166,6 +2183,46 @@ async function clickElementWithDiagnostics(sessionId, elementId, selector) {
   console.log(`[inspection-click] ui=${JSON.stringify(uiState)}`);
   if (response.exception || !response.ok || response.payload?.value?.error) {
     throw new Error(`Clique WebDriver falhou com diagnóstico completo: ${JSON.stringify(response)}`);
+  }
+  return { before, response, after, uiState };
+}
+
+async function clickElementWithNativePointer(sessionId, selector, label) {
+  const preparation = await executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return null;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      target.focus();
+      const rect = target.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+    `,
+    [selector]
+  );
+  if (!preparation) fail(`Controle ausente para clique nativo por ponteiro: ${label}`);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const before = await inspectElementInteraction(sessionId, selector);
+  if (!before?.found || !before.visible || before.disabled || !before.elementAtCenter?.includes("inspection-sonic-edit")) {
+    fail(`Clique nativo por ponteiro bloqueado: ${JSON.stringify({ label, before })}`);
+  }
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-native-pointer",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: preparation.x, y: preparation.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
+  const after = await inspectElementInteraction(sessionId, selector);
+  const uiState = await readInspectionUiState(sessionId);
+  console.log(`[inspection-click-pointer] ${JSON.stringify({ label, preparation, before, response, after, uiState })}`);
+  if (!response.ok || response.payload?.value?.error) {
+    throw new Error(`Clique nativo por ponteiro falhou: ${JSON.stringify(response)}`);
   }
   return { before, response, after, uiState };
 }
@@ -4911,7 +4968,7 @@ async function main() {
         await fillInputByLabel(sessionId, "R", "7");
         await fillInputByLabel(sessionId, "G", "0");
         await fillInputByLabel(sessionId, "B", "7");
-        await clickButtonByTestIdNative(sessionId, "inspection-sonic-edit", "editar a paleta Sonic pela interface");
+        await clickElementWithNativePointer(sessionId, "[data-testid='inspection-sonic-edit']", "editar a paleta Sonic pela interface");
         let editEvidence;
         try {
           editEvidence = await waitFor(
@@ -4980,7 +5037,8 @@ async function main() {
         await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`), 15000, "Painel Sonic não voltou", 100);
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-refresh-sessions", "atualizar sessões Sonic após reinício");
         await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 30000, "Sessão Sonic não foi descoberta após reinício", 100);
-        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, `[data-testid='select-saved-session-${persistedSessionId}']`), "selecionar sessão Sonic após reinício");
+        const reopenedSessionSelector = `[data-testid='select-saved-session-${persistedSessionId}']`;
+        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, reopenedSessionSelector), reopenedSessionSelector);
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-reopen", "reabrir sessão Sonic após reinício");
         const reopenedState = await waitFor(async () => { const state = await readInspectionUiState(sessionId); return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false; }, 30000, "Sessão Sonic não foi reaberta", 100);
         const reopenedFrame = await waitFor(async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sprite-frame-select"]')?.value ?? '';`), 15000, "Frame Sonic salvo não foi restaurado", 100);
@@ -5023,7 +5081,8 @@ async function main() {
         await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`), 15000, "Painel secundário não voltou", 100);
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-refresh-sessions", "atualizar sessões secundárias após reinício");
         await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Sessão secundária persistida não apareceu após reinício", 100);
-        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, `[data-testid='select-saved-session-${persistedSessionId}']`), "selecionar sessão secundária persistida");
+        const secondarySessionSelector = `[data-testid='select-saved-session-${persistedSessionId}']`;
+        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, secondarySessionSelector), secondarySessionSelector);
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-reopen", "reabrir sessão secundária");
         await waitFor(async () => { const state = await readInspectionUiState(sessionId); return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false; }, 30000, "Sessão secundária não foi restaurada após reinício", 100);
         await selectInspectionFrameNative(sessionId, secondaryFrameId);

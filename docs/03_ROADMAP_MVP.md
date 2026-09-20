@@ -478,3 +478,6 @@ Adicionais aos gates gerais deste roadmap, aplicados sempre que o programa avanc
 - Um item nao pode continuar descrito como `planejamento` se o codigo o marcar como `importable: true`.
 - Um item nao pode sair de `Experimental` sem evidencia institucional e sem alinhamento de UI, docs e backend.
 - `README.md` nao deve manter claims de readiness mais especificas ou mais otimistas do que este arquivo.
+### REX-14 — piloto visual Sonic 1 (Experimental, branch isolada)
+
+Em 2026-09-20, `codex/rex-sonic1-pilot` (`44d679d`) passou a conter a fatia assistida `sonic1_sonic/stand`: ROM BYOR fixada por SHA, composição de frame por tiles/mapping/paleta MD, edição de uma palavra RGB333, persistência, BPS e chamada do emulador pela UI. A referência `s1disasm` e os metadados do frame são proveniência assistida; os pixels são recalculados dos bytes da ROM por oráculo independente. O desktop E2E completo e a certificação final continuam pendentes; não promover para extração universal, reconstrução do jogo ou lógica/nós antes desses gates.
