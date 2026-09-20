@@ -1119,6 +1119,10 @@ impl EmulatorCore {
             .map(|state| PathBuf::from(&state.rom_path))
     }
 
+    pub fn frame_index(&self) -> u64 {
+        self.rewind.frame_index
+    }
+
     pub fn execution_trace_capture(&self) -> RuntimeExecutionTraceCapture {
         let mut capture = self.trace_capture.clone();
         capture.save = self.runtime_save_status();

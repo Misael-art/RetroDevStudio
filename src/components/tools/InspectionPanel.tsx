@@ -24,7 +24,7 @@ import {
   patchApplyBps,
   patchCreateBps,
 } from "../../core/ipc/toolsService";
-import { emulatorLoadRom, emulatorRunFrame } from "../../core/ipc/emulatorService";
+import { emulatorLoadRom, emulatorObserve, emulatorRunFrame, type EmulatorObservationResult } from "../../core/ipc/emulatorService";
 import { useEditorStore } from "../../core/store/editorStore";
 import ToolPathField from "./ToolPathField";
 
@@ -85,6 +85,10 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [editGreen, setEditGreen] = useState(7);
   const [editBlue, setEditBlue] = useState(7);
   const [editBusy, setEditBusy] = useState(false);
+  const [emulatorObservation, setEmulatorObservation] = useState<EmulatorObservationResult | null>(null);
+  const [emulatorObservationLabel, setEmulatorObservationLabel] = useState("");
+  const [emulatorObservationHistory, setEmulatorObservationHistory] = useState<Array<{ label: string; observation: EmulatorObservationResult }>>([]);
+  const emulatorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [patchPath, setPatchPath] = useState("");
   const [patchedRomPath, setPatchedRomPath] = useState("");
   const [patchBusy, setPatchBusy] = useState(false);
@@ -190,6 +194,26 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       progressListener.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const canvas = emulatorCanvasRef.current;
+    const observation = emulatorObservation;
+    if (!canvas || !observation?.ok || observation.framebuffer_width <= 0 || observation.framebuffer_height <= 0) return;
+    canvas.width = observation.framebuffer_width;
+    canvas.height = observation.framebuffer_height;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.imageSmoothingEnabled = false;
+    context.putImageData(
+      new ImageData(
+        new Uint8ClampedArray(observation.framebuffer_rgba),
+        observation.framebuffer_width,
+        observation.framebuffer_height,
+      ),
+      0,
+      0,
+    );
+  }, [emulatorObservation]);
 
   async function refreshCatalog(sessionId: string, offset: number, nextQuery = queryRef.current, nextKind = kindRef.current) {
     const requestId = ++catalogRequestSeq.current;
@@ -436,22 +460,38 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     }
   }
 
-  async function runPatchedRom() {
-    if (!patchedRomPath.trim()) return;
+  async function runRomAndObserve(romPathToRun: string, label: string) {
+    if (!romPathToRun.trim()) return;
     setPatchBusy(true);
+    setEmulatorObservation(null);
+    setEmulatorObservationLabel(label);
     try {
-      const loaded = await emulatorLoadRom(patchedRomPath.trim());
+      const loaded = await emulatorLoadRom(romPathToRun.trim());
       if (!loaded.ok) throw new Error(loaded.message);
       for (let frame = 0; frame < 60; frame += 1) {
         const result = await emulatorRunFrame();
         if (!result.ok) throw new Error(result.message);
       }
-      logMessage("success", "[Emulador] ROM modificada carregada e executada por 60 frames no core canônico.");
+      const observation = await emulatorObserve();
+      if (!observation.ok) throw new Error(observation.message || "Observação do core recusada.");
+      setEmulatorObservation(observation);
+      setEmulatorObservationHistory((current) => [...current.filter((entry) => entry.label !== label), { label, observation }].slice(-4));
+      logMessage("success", `[Emulador] ${observation.message}`);
     } catch (error) {
       logMessage("error", `[Emulador] Execução recusada: ${describeError(error)}`);
     } finally {
       setPatchBusy(false);
     }
+  }
+
+  async function runBaseRom() {
+    if (!session?.rom_path) return;
+    await runRomAndObserve(session.rom_path, "ROM base");
+  }
+
+  async function runPatchedRom() {
+    if (!patchedRomPath.trim()) return;
+    await runRomAndObserve(patchedRomPath.trim(), "ROM aplicada");
   }
 
   function closeSession() {
@@ -468,6 +508,9 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     setBusy(false);
     setSession(null);
     setRun(null);
+    setEmulatorObservation(null);
+    setEmulatorObservationLabel("");
+    setEmulatorObservationHistory([]);
     setPage(null);
     setPalettePage(null);
     setSelected(null);
@@ -612,7 +655,22 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                 <ToolPathField label="Exportar patch BPS" value={patchPath} set={setPatchPath} extensions={["bps"]} accentColor="f9e2af" />
                 <button type="button" data-testid="inspection-sonic-export-patch" disabled={patchBusy || !patchPath.trim()} onClick={() => void exportPilotPatch()} className="rounded border border-[#f9e2af]/50 px-3 py-1 text-[#f9e2af]">Exportar patch BPS</button>
                 <ToolPathField label="Salvar ROM modificada aplicada" value={patchedRomPath} set={setPatchedRomPath} extensions={["bin", "md", "gen"]} accentColor="f9e2af" />
-                <div className="flex flex-wrap gap-2"><button type="button" data-testid="inspection-sonic-apply-patch" disabled={patchBusy || !patchPath.trim() || !patchedRomPath.trim()} onClick={() => void applyPilotPatch()} className="rounded border border-[#a6e3a1]/50 px-3 py-1 text-[#a6e3a1]">Aplicar à base</button><button type="button" data-testid="inspection-sonic-run-patched" disabled={patchBusy || !patchedRomPath.trim()} onClick={() => void runPatchedRom()} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]">Carregar e executar 60 frames</button></div>
+                <div className="flex flex-wrap gap-2"><button type="button" data-testid="inspection-sonic-apply-patch" disabled={patchBusy || !patchPath.trim() || !patchedRomPath.trim()} onClick={() => void applyPilotPatch()} className="rounded border border-[#a6e3a1]/50 px-3 py-1 text-[#a6e3a1]">Aplicar à base</button><button type="button" data-testid="inspection-sonic-run-base" disabled={patchBusy || !session.rom_path} onClick={() => void runBaseRom()} className="rounded border border-[#cdd6f4]/50 px-3 py-1 text-[#cdd6f4]">Observar ROM base</button><button type="button" data-testid="inspection-sonic-run-patched" disabled={patchBusy || !patchedRomPath.trim()} onClick={() => void runPatchedRom()} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]">Observar ROM aplicada</button></div>
+              </div>}
+              {emulatorObservation && <div data-testid="inspection-emulator-observation" data-observation-label={emulatorObservationLabel} data-rom-path={emulatorObservation.rom_path} data-rom-sha256={emulatorObservation.rom_sha256} data-rom-size={emulatorObservation.rom_size} data-core-label={emulatorObservation.core_label} data-core-path={emulatorObservation.core_path} data-frames-run={emulatorObservation.frames_run} data-framebuffer-width={emulatorObservation.framebuffer_width} data-framebuffer-height={emulatorObservation.framebuffer_height} data-framebuffer-sha256={emulatorObservation.framebuffer_sha256} data-non-black-pixels={emulatorObservation.non_black_pixels} className="mt-3 rounded border border-[#89b4fa]/40 bg-[#101b2e] p-3 text-[10px]">
+                <div className="font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">Observação real do core · {emulatorObservationLabel}</div>
+                <div className="mt-1 break-all text-[#cdd6f4]">{emulatorObservation.message}</div>
+                <div className="mt-2 grid gap-1 font-mono text-[9px] text-[#bac2de] md:grid-cols-2">
+                  <div>ROM: {emulatorObservation.rom_sha256} · {emulatorObservation.rom_size} bytes</div>
+                  <div>Core: {emulatorObservation.core_label} · {emulatorObservation.core_path}</div>
+                  <div>Frames observados: {emulatorObservation.frames_run}</div>
+                  <div>Framebuffer: {emulatorObservation.framebuffer_width}×{emulatorObservation.framebuffer_height} · {emulatorObservation.non_black_pixels} pixels não pretos</div>
+                  <div className="break-all md:col-span-2">RGBA SHA-256: {emulatorObservation.framebuffer_sha256}</div>
+                </div>
+                <canvas ref={emulatorCanvasRef} data-testid="inspection-emulator-framebuffer" width={emulatorObservation.framebuffer_width} height={emulatorObservation.framebuffer_height} aria-label={"Framebuffer observado da " + emulatorObservationLabel} className="mt-3 block h-auto w-full max-w-[640px] border border-[#313244] bg-black [image-rendering:pixelated]" style={{ imageRendering: "pixelated" }} />
+                <div className="mt-2 text-[#a6e3a1]">Critério 1 — ROM carregada e frames/framebuffer produzidos: PASS quando esta observação tem identidade, frames e pixels reais.</div>
+                <div data-testid="inspection-palette-effect-status" className="mt-1 text-[#f9e2af]">Critério 2 — alteração de paleta apareceu no jogo: PENDENTE até comparar base e cópia com Sonic visível sob condições equivalentes.</div>
+                {emulatorObservationHistory.length > 1 && <div data-testid="inspection-emulator-observation-history" className="mt-2 space-y-1 border-t border-[#313244] pt-2">{emulatorObservationHistory.map((entry) => <div key={entry.label + "-" + entry.observation.rom_sha256} data-testid={"inspection-emulator-observation-" + (entry.label === "ROM base" ? "base" : "applied")} className="break-all text-[#bac2de]">{entry.label}: ROM {entry.observation.rom_sha256} · frames {entry.observation.frames_run} · framebuffer {entry.observation.framebuffer_sha256}</div>)}</div>}
               </div>}
             </div>}
           </div>

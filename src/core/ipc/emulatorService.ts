@@ -10,6 +10,22 @@ export interface EmulatorCommandResult {
   diagnostics?: ActionableDiagnostic[];
 }
 
+export interface EmulatorObservationResult {
+  ok: boolean;
+  message: string;
+  rom_path: string;
+  rom_size: number;
+  rom_sha256: string;
+  core_label: string;
+  core_path: string;
+  frames_run: number;
+  framebuffer_width: number;
+  framebuffer_height: number;
+  framebuffer_sha256: string;
+  non_black_pixels: number;
+  framebuffer_rgba: number[];
+}
+
 export interface EmulatorMemoryResult {
   ok: boolean;
   data: number[];
@@ -66,6 +82,10 @@ export function emulatorLoadRom(romPath: string): Promise<EmulatorCommandResult>
 
 export function emulatorRunFrame(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_run_frame");
+}
+
+export function emulatorObserve(): Promise<EmulatorObservationResult> {
+  return invoke<EmulatorObservationResult>("emulator_observe");
 }
 
 export function emulatorSaveState(): Promise<EmulatorCommandResult> {

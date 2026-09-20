@@ -58,7 +58,7 @@ use core::project_mgr::{
     ProjectTemplateSummary, SceneInfo, DEFAULT_ENTRY_SCENE,
 };
 use core::rom_mastering::{
-    inspect_rom_mastering as inspect_rom_mastering_impl, RomMasteringReport,
+    inspect_rom_mastering as inspect_rom_mastering_impl, sha256_hex, RomMasteringReport,
 };
 use core::runtime_contracts::{
     inspect_runtime_contracts as inspect_runtime_contracts_impl, RuntimeContractsReport,
@@ -206,6 +206,23 @@ impl EmulatorCoreState {
 pub struct EmulatorCommandResult {
     pub ok: bool,
     pub message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmulatorObservationResult {
+    pub ok: bool,
+    pub message: String,
+    pub rom_path: String,
+    pub rom_size: usize,
+    pub rom_sha256: String,
+    pub core_label: String,
+    pub core_path: String,
+    pub frames_run: u64,
+    pub framebuffer_width: u32,
+    pub framebuffer_height: u32,
+    pub framebuffer_sha256: String,
+    pub non_black_pixels: usize,
+    pub framebuffer_rgba: Vec<u8>,
 }
 
 #[derive(serde::Serialize)]
@@ -574,6 +591,141 @@ fn emulator_run_frame(app: AppHandle, emu: State<EmulatorCoreState>) -> Emulator
     EmulatorCommandResult {
         ok: true,
         message: String::new(),
+    }
+}
+
+/// Observa o estado real após a execução: identidade da ROM e do core,
+/// avanço de frames e o framebuffer RGBA produzido pelo core. Esta chamada
+/// não infere sucesso a partir da mensagem de `emulator_run_frame`.
+#[tauri::command]
+fn emulator_observe(emu: State<EmulatorCoreState>) -> EmulatorObservationResult {
+    let core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(error) => {
+            return EmulatorObservationResult {
+                ok: false,
+                message: error.to_string(),
+                rom_path: String::new(),
+                rom_size: 0,
+                rom_sha256: String::new(),
+                core_label: String::new(),
+                core_path: String::new(),
+                frames_run: 0,
+                framebuffer_width: 0,
+                framebuffer_height: 0,
+                framebuffer_sha256: String::new(),
+                non_black_pixels: 0,
+                framebuffer_rgba: Vec::new(),
+            };
+        }
+    };
+
+    let Some(rom_path) = core.loaded_rom_path() else {
+        return EmulatorObservationResult {
+            ok: false,
+            message: "Nenhuma ROM carregada para observação.".to_string(),
+            rom_path: String::new(),
+            rom_size: 0,
+            rom_sha256: String::new(),
+            core_label: String::new(),
+            core_path: String::new(),
+            frames_run: core.frame_index(),
+            framebuffer_width: 0,
+            framebuffer_height: 0,
+            framebuffer_sha256: String::new(),
+            non_black_pixels: 0,
+            framebuffer_rgba: Vec::new(),
+        };
+    };
+
+    let rom_bytes = match fs::read(&rom_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return EmulatorObservationResult {
+                ok: false,
+                message: format!(
+                    "Falha ao reler ROM carregada '{}': {error}",
+                    rom_path.display()
+                ),
+                rom_path: rom_path.display().to_string(),
+                rom_size: 0,
+                rom_sha256: String::new(),
+                core_label: core.loaded_core_label().unwrap_or_default().to_string(),
+                core_path: core
+                    .loaded_core_file()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+                frames_run: core.frame_index(),
+                framebuffer_width: 0,
+                framebuffer_height: 0,
+                framebuffer_sha256: String::new(),
+                non_black_pixels: 0,
+                framebuffer_rgba: Vec::new(),
+            };
+        }
+    };
+
+    let (framebuffer, size, pixel_format) = match core.get_framebuffer() {
+        Ok(value) => value,
+        Err(error) => {
+            return EmulatorObservationResult {
+                ok: false,
+                message: format!("Falha ao observar framebuffer: {error}"),
+                rom_path: rom_path.display().to_string(),
+                rom_size: rom_bytes.len(),
+                rom_sha256: sha256_hex(&rom_bytes),
+                core_label: core.loaded_core_label().unwrap_or_default().to_string(),
+                core_path: core
+                    .loaded_core_file()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+                frames_run: core.frame_index(),
+                framebuffer_width: 0,
+                framebuffer_height: 0,
+                framebuffer_sha256: String::new(),
+                non_black_pixels: 0,
+                framebuffer_rgba: Vec::new(),
+            };
+        }
+    };
+    let frame = framebuffer_to_rgba(&framebuffer, size, pixel_format);
+    let non_black_pixels = frame
+        .rgba
+        .chunks_exact(4)
+        .filter(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
+        .count();
+    let rom_sha256 = sha256_hex(&rom_bytes);
+    let framebuffer_sha256 = sha256_hex(&frame.rgba);
+    let core_label = core.loaded_core_label().unwrap_or_default().to_string();
+    let core_path = core
+        .loaded_core_file()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    let frames_run = core.frame_index();
+
+    EmulatorObservationResult {
+        ok: true,
+        message: format!(
+            "ROM {} carregada no core {}; {} frame(s), framebuffer {}x{}, {} pixel(s) não pretos, RGBA SHA-256 {}.",
+            rom_path.display(),
+            core_label,
+            frames_run,
+            frame.width,
+            frame.height,
+            non_black_pixels,
+            framebuffer_sha256
+        ),
+        rom_path: rom_path.display().to_string(),
+        rom_size: rom_bytes.len(),
+        rom_sha256,
+        core_label,
+        core_path,
+        frames_run,
+        framebuffer_width: frame.width,
+        framebuffer_height: frame.height,
+        framebuffer_sha256,
+        non_black_pixels,
+        framebuffer_rgba: frame.rgba,
     }
 }
 
@@ -4694,6 +4846,7 @@ pub fn run() {
             // Emulator
             emulator_load_rom,
             emulator_run_frame,
+            emulator_observe,
             emulator_save_state,
             emulator_load_state,
             emulator_rewind_step,

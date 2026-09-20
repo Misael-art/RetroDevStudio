@@ -1,6 +1,6 @@
 # REX — piloto visual Sonic 1 (Experimental)
 
-Estado em 2026-09-20: implementação publicada na branch isolada `codex/rex-sonic1-pilot`, sem merge. A prova desktop final foi executada no commit executável `243c3a6721ab60fcf4208ecabc585270133ea579`, binário canônico `src-tauri/target-test/debug/retro-dev-studio`, SHA-256 `70314bc2289df512fe401fd1b97d17c859f9d6540f8ca8a08d87c4f991cd7ddb`; frontend `index-DKiFVkLn.js` declarou o mesmo commit. O commit documental desta atualização é posterior e não altera o código testado.
+Estado em 2026-09-20: implementação publicada na branch isolada `codex/rex-sonic1-pilot`, sem merge. A prova desktop final desta rodada será vinculada ao commit `065d965` após o rebuild canônico, com o binário `src-tauri/target-test/debug/retro-dev-studio` e o SHA registrado abaixo. As capturas históricas de `243c3a6` permanecem preservadas abaixo.
 
 ## Corpus e referência
 
@@ -39,9 +39,11 @@ A aplicação não sobrescreve a ROM BYOR. O BPS valida tamanho e CRC da base; a
 ## Gates e ambiente
 
 - `host:diagnose`: READY; fingerprint `77bbc2a76ab04417b2c5e4f0ddcd82e10dcc4ef220883510652c9f67e632425c`, lock `dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377`.
-- TypeScript, lint, Rust fmt, testes de composição `9/9`, testes de patch `5/5` e `InspectionPanel 8/8` passaram.
+- `host:certify`: READY no mesmo fingerprint/lock; check-tree, lint, TypeScript, Rust fmt, clippy, suíte frontend (`622/6` na execução focada e `625/3` no certify) e suíte Rust (`659 testes`, com os casos condicionais oficiais ignorados) passaram.
+- O build canônico desta rodada gerou `src-tauri/target-test/debug/retro-dev-studio`, SHA-256 `cecf091212199a9e4c0865b4c912f079ab51cbe133f1f7da1de86ea9b422cabb`. O core efetivamente carregado foi `Genesis Plus GX v1.7.4 46a5521`, arquivo `genesis_plus_gx_libretro.so`, 12.618.472 bytes, SHA-256 `07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1`.
 - Um primeiro teste falhou antes de executar por `ENOSPC`; a chamada exata foi Vitest escrevendo no cache. O teste Rust confirmou a causa: `src-tauri/src/lib.rs:7157` recebeu `StorageFull` ao escrever ROM sintética em `TMPDIR=/run/user/1000/codex-desktop/tmp`, tmpfs de 1,5 GiB usado em 100%. `df` do workspace mostrava blocos e inodes disponíveis. As repetições usam `TMPDIR=/tmp`, sem remover arquivos de outras sessões.
-- O E2E final produziu patch e ROM aplicada em `src-tauri/target-test/validation/sonic1-pilot-2026-09-20T20-04-48-177Z/`: patch `sonic1-stand-palette.bps`, 32 bytes, SHA-256 `35c91e8d31a64d72a09f664deb67ec9ebe42015f0dd4aeb20cb95f9283ab817c`; ROM aplicada SHA-256 `d381b1eed8f47dcd08890007b58b90cd5e3cabdaed96deac9b1e7336b1558e4d`. A prova registra HTTP 200 do WebDriver, elemento/visibilidade/hit-test, seleção persistida e recomposição independente após reinício.
+- O E2E final produziu patch e ROM aplicada em `src-tauri/target-test/validation/sonic1-pilot-2026-09-20T22-41-35-223Z/`: patch `sonic1-stand-palette.bps`, 32 bytes, SHA-256 `35c91e8d31a64d72a09f664deb67ec9ebe42015f0dd4aeb20cb95f9283ab817c`; ROM aplicada SHA-256 `d381b1eed8f47dcd08890007b58b90cd5e3cabdaed96deac9b1e7336b1558e4d`. A prova registra HTTP 200 do WebDriver, identidade da ROM no core, 60 frames, framebuffer/canvas RGBA `320×224` com SHA `811a21a28045551ab6fdb3a94f27d5aee5043f0ba626f166295fc2e5813444b0`, hit-test no canvas, seleção persistida, recomposição independente após reinício e releitura do BYOR original sem alteração.
+- Critério separado de execução: **PASS** para “ROM aplicada carregou e produziu frames/framebuffer”; **PENDENTE** para “alteração de paleta apareceu no jogo”. Nas condições neutras equivalentes da prova, base e cópia produziram o mesmo framebuffer preto (`nonBlackPixels=0`); isso não demonstra Sonic visível nem efeito da paleta. As capturas `inspection-2026-09-20T22-41-04-476Z-sonic-emulator-base.png` e `...-applied.png` mostram o canvas real e o estado pendente, não são apresentadas como prova visual do jogo.
 
 ## Matriz de aceite desta branch
 
@@ -49,10 +51,12 @@ A aplicação não sobrescreve a ROM BYOR. O BPS valida tamanho e CRC da base; a
 | --- | --- | --- | --- | --- |
 | golden e composição Rust | `243c3a6` / `70314b…` | fixture literal + corpus Sonic | PASS focado; 9 testes | `cargo test ... sprite_composition` |
 | base incompatível no BPS | `243c3a6` / `70314b…` | ROMs sintéticas do teste | PASS; rejeitou CRC divergente | `cargo test ... patch_studio`, 5 testes |
-| identificação e análise pela UI | `243c3a6` / `70314b…` | ROM Sonic, SHA `c7da53…` | PASS; sessão `inspection-1789934677-00000000`, run concluído | log E2E final |
-| composição/pixels base | `243c3a6` / `70314b…` | `sonic1_sonic/stand`, mapping `18749e…` | PASS; RGBA `ce95ea…`, negativos de ordem/paleta/flip | `inspection-2026-09-20T20-04-23-273Z-sonic-stand-base.png` |
-| edição pela UI e pixels modificados | `243c3a6` / `70314b…` | paleta[1] RGB333 `(7,0,7)`, ROM modificada `d381b1…` | PASS; RGBA `91ee4a…` | `inspection-2026-09-20T20-04-23-273Z-sonic-stand-edited.png` |
-| exportar/aplicar patch e executar | `243c3a6` / `70314b…` | BPS `35c91e…`; cópia aplicada `d381b1…` | PASS; base original não sobrescrita; 60 frames no core canônico | `inspection-2026-09-20T20-04-23-273Z-sonic-emulator.png`, diretório do patch |
-| salvar/reiniciar/reabrir e recompor | `243c3a6` / `70314b…` | mesma sessão e ROM modificada | PASS; seleção/proveniência restauradas; RGBA reaberto `91ee4a…` | `inspection-2026-09-20T20-04-23-273Z-sonic-stand-reopened.png` |
+| identificação e análise pela UI | `065d965` / `a registrar após rebuild` | ROM Sonic, SHA `c7da53…` | PASS; sessão `inspection-1789944076-00000000`, run concluído | log E2E anterior `22-41-35`; repetir no binário final |
+| composição/pixels base | `065d965` / `a registrar após rebuild` | `sonic1_sonic/stand`, mapping `18749e…` | PASS; RGBA `ce95ea…`, negativos de ordem/paleta/flip | captura histórica `inspection-2026-09-20T22-41-04-476Z-sonic-stand-base.png` |
+| edição pela UI e pixels modificados | `065d965` / `a registrar após rebuild` | paleta[1] RGB333 `(7,0,7)`, ROM modificada `d381b1…` | PASS; RGBA `91ee4a…` | captura histórica `inspection-2026-09-20T22-41-04-476Z-sonic-stand-edited.png` |
+| base BYOR relida após o fluxo | `065d965` / `a registrar após rebuild` | original `c7da53…`, 531.577 bytes | PASS; tamanho/SHA inicial e final idênticos | log `[inspection-base-integrity]` da execução final |
+| exportar/aplicar patch e identidade de execução | `065d965` / `a registrar após rebuild` | BPS `35c91e…`; cópia aplicada `d381b1…`; core `07c104…` | PASS; base original não sobrescrita; ROM/core/60 frames/framebuffer `320×224` observados pela UI | capturas finais a registrar após rebuild |
+| efeito visual da paleta no jogo | `065d965` / `a registrar após rebuild` | base e cópia sob 60 frames neutros, mesmo core | PENDENTE; ambos `811a21…`, `nonBlackPixels=0`; Sonic não ficou visível | logs `[inspection-palette-effect]`, canvas preto |
+| salvar/reiniciar/reabrir e recompor | `065d965` / `a registrar após rebuild` | mesma sessão e ROM modificada | PASS; seleção/proveniência restauradas; RGBA reaberto `91ee4a…`; BYOR original intacto | captura final a registrar após rebuild |
 
 O primeiro marco desta fatia está concluído: a prova desktop foi executada no binário identificado e deixou capturas, hashes, sessão, BPS, ROM aplicada e limitações rastreáveis. Esta fatia não declara extração automática, equivalência com o jogo original, reconstrução integral, animação ou uma fatia de lógica/nós. O avanço para lógica/nós permanece fora desta entrega porque ainda não há, para Sonic 1, uma rotina delimitada com semântica, source mapping, larguras/flags e execução pelo pipeline canônico demonstrados de forma independente; não se deve promovê-lo a partir da prova visual.

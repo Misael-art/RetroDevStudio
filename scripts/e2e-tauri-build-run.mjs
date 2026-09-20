@@ -3325,6 +3325,69 @@ async function readFramebufferStats(sessionId) {
   );
 }
 
+async function readInspectionEmulatorObservation(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const observation = document.querySelector('[data-testid="inspection-emulator-observation"]');
+      const canvas = document.querySelector('[data-testid="inspection-emulator-framebuffer"]');
+      if (!observation || !(canvas instanceof HTMLCanvasElement)) return null;
+      const context = canvas.getContext("2d");
+      const pixels = context ? context.getImageData(0, 0, canvas.width, canvas.height).data : null;
+      let nonBlackPixels = 0;
+      if (pixels) {
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (pixels[index] !== 0 || pixels[index + 1] !== 0 || pixels[index + 2] !== 0) nonBlackPixels += 1;
+        }
+      }
+      return {
+        label: observation.getAttribute("data-observation-label") || "",
+        romPath: observation.getAttribute("data-rom-path") || "",
+        romSha256: observation.getAttribute("data-rom-sha256") || "",
+        romSize: Number(observation.getAttribute("data-rom-size") || "0"),
+        coreLabel: observation.getAttribute("data-core-label") || "",
+        corePath: observation.getAttribute("data-core-path") || "",
+        framesRun: Number(observation.getAttribute("data-frames-run") || "0"),
+        framebufferWidth: Number(observation.getAttribute("data-framebuffer-width") || "0"),
+        framebufferHeight: Number(observation.getAttribute("data-framebuffer-height") || "0"),
+        framebufferSha256: observation.getAttribute("data-framebuffer-sha256") || "",
+        declaredNonBlackPixels: Number(observation.getAttribute("data-non-black-pixels") || "0"),
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        canvasRgbaBytes: pixels?.length ?? 0,
+        canvasNonBlackPixels: nonBlackPixels,
+        text: observation.textContent?.replace(/\\s+/g, " ").trim() || "",
+      };
+    `
+  );
+}
+
+async function ensureEmulatorObservationVisible(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="inspection-emulator-framebuffer"]');
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      canvas.scrollIntoView({ block: "center", inline: "nearest" });
+      const rect = canvas.getBoundingClientRect();
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const unobstructed = Boolean(top && (top === canvas || canvas.contains(top)));
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        fullyVisible,
+        unobstructed,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: top instanceof Element ? top.getAttribute('data-testid') ?? '' : '',
+      };
+    `
+  );
+}
+
 async function assertNodeGraphUiDiagnostics(sessionId, options = {}) {
   const diagnostics = await readNodeGraphUiDiagnostics(sessionId);
   if (!diagnostics?.hasCanvas || !diagnostics?.hasOverview || diagnostics.cardCount < 1) {
@@ -5008,14 +5071,62 @@ async function main() {
         if (patchedSha256 !== modifiedSha256 || baseSha256 !== createHash("sha256").update(inspectionRomBytes).digest("hex") || !patchedRomBytes.equals(modifiedRomBytes)) {
           fail(`Aplicação BPS não reproduziu exatamente a ROM editada: ${JSON.stringify({ baseSha256, modifiedSha256, patchedSha256 })}`);
         }
-        await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-patched", "executar ROM Sonic aplicada pela interface");
-        await waitFor(
-          async () => executeScript(sessionId, `return Boolean(window.__RDS_E2E__?.getState?.()?.consoleEntries?.some((entry) => String(entry?.message ?? '').includes('ROM modificada carregada e executada')));`),
-          30000,
-          "A execução da ROM aplicada não confirmou o caminho canônico do emulador",
-          100
-        );
-        const emulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator.png`);
+        const assertEmulatorObservation = async (label, expectedRomSha256) => {
+          let lastObservation = null;
+          let observation;
+          try {
+            observation = await waitFor(
+              async () => {
+                const current = await readInspectionEmulatorObservation(sessionId);
+                lastObservation = current;
+                return current &&
+                  current.label === label &&
+                  current.romSha256 === expectedRomSha256 &&
+                  current.framesRun >= 60 &&
+                  current.coreLabel &&
+                  current.corePath &&
+                  current.framebufferWidth > 0 &&
+                  current.framebufferHeight > 0 &&
+                  current.framebufferSha256.length === 64 &&
+                  current.canvasWidth === current.framebufferWidth &&
+                  current.canvasHeight === current.framebufferHeight &&
+                  current.canvasRgbaBytes === current.framebufferWidth * current.framebufferHeight * 4
+                  ? current
+                  : false;
+              },
+              30000,
+              "A observação real da " + label + " não comprovou ROM, core, frames e framebuffer",
+              100
+            );
+          } catch (error) {
+            console.error(`[inspection-emulator-observation] timeout ${label} ` + JSON.stringify({ expectedRomSha256, lastObservation, error: String(error) }));
+            throw error;
+          }
+          console.log(`[inspection-emulator-observation] ` + JSON.stringify(observation));
+          return observation;
+        };
+
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-base", "observar ROM Sonic base pela interface");
+        const baseEmulatorObservation = await assertEmulatorObservation("ROM base", baseSha256);
+        const baseEmulatorCanvas = await ensureEmulatorObservationVisible(sessionId);
+        if (!baseEmulatorCanvas?.fullyVisible || !baseEmulatorCanvas.unobstructed) {
+          fail(`Framebuffer da ROM base não ficou visível/desobstruído para captura: ${JSON.stringify(baseEmulatorCanvas)}`);
+        }
+        const baseEmulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator-base.png`);
+
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-patched", "observar ROM Sonic aplicada pela interface");
+        const appliedEmulatorObservation = await assertEmulatorObservation("ROM aplicada", patchedSha256);
+        const appliedEmulatorCanvas = await ensureEmulatorObservationVisible(sessionId);
+        if (!appliedEmulatorCanvas?.fullyVisible || !appliedEmulatorCanvas.unobstructed) {
+          fail(`Framebuffer da ROM aplicada não ficou visível/desobstruído para captura: ${JSON.stringify(appliedEmulatorCanvas)}`);
+        }
+        const emulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator-applied.png`);
+        const framebufferDiverged = baseEmulatorObservation.framebufferSha256 !== appliedEmulatorObservation.framebufferSha256;
+        const sameConditions = baseEmulatorObservation.framesRun === appliedEmulatorObservation.framesRun &&
+          baseEmulatorObservation.framebufferWidth === appliedEmulatorObservation.framebufferWidth &&
+          baseEmulatorObservation.framebufferHeight === appliedEmulatorObservation.framebufferHeight &&
+          baseEmulatorObservation.coreLabel === appliedEmulatorObservation.coreLabel;
+        console.log(`[inspection-palette-effect] ` + JSON.stringify({ status: "pending", reason: "Sonic visível não foi identificado por um marcador independente nesta sequência; divergência do framebuffer é apenas observação", framebufferDiverged, sameConditions, base: { romSha256: baseEmulatorObservation.romSha256, framebufferSha256: baseEmulatorObservation.framebufferSha256 }, applied: { romSha256: appliedEmulatorObservation.romSha256, framebufferSha256: appliedEmulatorObservation.framebufferSha256 }, baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }));
 
         await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
         const persistedSessionId = completedState.session.id;
@@ -5048,7 +5159,13 @@ async function main() {
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recompor Sonic após reinício");
         const reopenedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após salvar/reiniciar/reabrir");
         const reopenedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-reopened.png`);
-        console.log(`[inspection-sonic] ${JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulator: emulatorScreenshot, reopened: reopenedScreenshot }, sessionId: reopenedState.session.id })}`);
+        const baseAfterFlowBytes = await readFile(inspectionRom);
+        const baseAfterFlowSha256 = createHash("sha256").update(baseAfterFlowBytes).digest("hex");
+        if (baseAfterFlowBytes.length !== inspectionRomBytes.length || baseAfterFlowSha256 !== baseSha256) {
+          fail("ROM BYOR original foi alterada durante o fluxo: " + JSON.stringify({ initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 } }));
+        }
+        console.log(`[inspection-base-integrity] ` + JSON.stringify({ path: inspectionRom, initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 }, unchanged: true }));
+        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "pending", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot }, sessionId: reopenedState.session.id }));
         console.log("OK: Desktop Tauri Sonic identify/compose/edit/save/patch/apply/run/restart/reopen E2E passou.");
         return;
       }
