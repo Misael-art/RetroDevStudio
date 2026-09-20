@@ -510,6 +510,8 @@ mod tests {
             special_chips: Vec::new(),
             segments: Vec::new(),
             entry_points,
+            container: None,
+            normalization: Vec::new(),
             trace_note: String::new(),
         }
     }

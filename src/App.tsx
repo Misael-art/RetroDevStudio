@@ -15,7 +15,11 @@ import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
 import LayerPanel from "./components/hierarchy/LayerPanel";
 import type { ToolTab, ToolWorkspace } from "./components/tools/ToolsPanel";
 import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
-import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
+import {
+  emulatorGetCoreEpoch,
+  emulatorLoadRom,
+  emulatorStop,
+} from "./core/ipc/emulatorService";
 import { inspectRomMastering } from "./core/ipc/projectCapabilityService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
@@ -48,6 +52,7 @@ import {
 import {
   useEditorStore,
   type EditorWorkspace,
+  type JoypadObservation,
 } from "./core/store/editorStore";
 import {
   clearSceneDraft,
@@ -1433,6 +1438,33 @@ type AutomationState = {
 
 type AutomationApi = {
   openProject: (projectDir: string) => Promise<boolean>;
+  /** Carrega uma ROM no emulador pelo mesmo caminho do controle visível
+   * "Carregar ROM" (sem o diálogo nativo, que a automação não dirige).
+   * `options.startPaused` deixa a sessão pausada (frame 0 definido, sem o
+   * loop livre rodar) — usado para alinhar o protocolo de automação.
+   * E2E / QA. */
+  loadRomForEmulation: (
+    romPath: string,
+    options?: { startPaused?: boolean }
+  ) => Promise<boolean>;
+  pauseEmulator: () => boolean;
+  /** Observação do caminho de input do produto. `lastJoypadRequest` é apenas
+   * intenção registrada antes do IPC; a prova de entrega é `lastJoypadAck`,
+   * gravado somente quando o backend responde `ok: true` para aquela mesma
+   * sequência. Asserções de E2E devem usar o ack, nunca a request.
+   * E2E / QA. */
+  getLastInputObservation: () => {
+    lastJoypadRequest: JoypadObservation | null;
+    lastJoypadAck: JoypadObservation | null;
+    lastJoypadSendError: { sessionId: string; seq: number; message: string } | null;
+    joypadSessionId: string | null;
+    joypadSessionHold: boolean;
+    joypadBlockedCount: number;
+  };
+  /** Para o emulador pelo mesmo caminho do controle visível "Parar",
+   * desligando o runtime do core — a carga seguinte parte de power-on real.
+   * E2E / QA. */
+  stopEmulator: () => Promise<boolean>;
   /** Importa doador SGDK para `baseDir` e abre o projeto nativo gerado; devolve o caminho absoluto. */
   importSgdkProject: (
     projectName: string,
@@ -2441,13 +2473,18 @@ export default function App() {
   ];
 
   async function resetEmulatorSession(switchToScene = false) {
+    // Invalidação antes do await do stop: a época morre aqui, não na resposta.
+    useEditorStore.getState().beginJoypadSessionHold();
     try {
+      useEditorStore.getState().releaseJoypadSessionHold();
       await emulatorStop();
     } catch {
+      useEditorStore.getState().releaseJoypadSessionHold();
       // Project and target transitions should still reset local editor state even if the core is already stopped.
     }
 
     setEmulatorLoaded(false);
+    useEditorStore.getState().setCoreEpoch(null);
     setEmulPaused(false);
 
     if (switchToScene) {
@@ -3024,6 +3061,8 @@ export default function App() {
     }
   }
 
+  /** Carrega uma ROM no emulador pelo mesmo caminho do controle visível
+   * "Carregar ROM" (diálogo nativo incluído). */
   async function handleEmulatorLoadRom() {
     try {
       const selected = await open({
@@ -3033,39 +3072,7 @@ export default function App() {
       if (!selected) return;
 
       const romPath = typeof selected === "string" ? selected : selected[0];
-      const romDependency = await detectRomDependency(romPath);
-      if (romDependency.dependency_id) {
-        const ready = await ensureDependencies(
-          [romDependency.dependency_id],
-          "Carregar esta ROM requer o core Libretro correspondente."
-        );
-        if (!ready) return;
-      }
-
-      const result = await emulatorLoadRom(romPath);
-      if (!result.ok) {
-        setEmulatorLoaded(false);
-        const failureMessage = formatEmulatorFailureMessage(result.message);
-        logMessage("error", failureMessage);
-        if (result.message.includes("Nenhum core Libretro")) {
-          openRuntimeSetupForIssue();
-        }
-        reportDiagnostic(
-          result.diagnostics?.[0] ??
-            createFallbackDiagnostic({
-              area: "libretro_emulation",
-              sourcePath: romPath,
-              technicalDetail: failureMessage,
-            })
-        );
-        return;
-      }
-
-      setEmulatorLoaded(true);
-      trackProductMetric({ kind: "rom_loaded" });
-      logMessage("success", `ROM carregada: ${romPath}`);
-      setActiveViewportTab("game");
-      setEmulPaused(false);
+      await loadRomIntoEmulator(romPath);
     } catch (error) {
       reportDiagnostic(
         createFallbackDiagnostic({
@@ -3074,6 +3081,67 @@ export default function App() {
         })
       );
     }
+  }
+
+  /** Mesma sequência do controle visível "Carregar ROM" após a escolha do
+   * arquivo; usada também pela automação E2E, que não consegue dirigir o
+   * diálogo nativo de arquivos do sistema operacional. */
+  async function loadRomIntoEmulator(
+    romPath: string,
+    options?: { startPaused?: boolean }
+  ) {
+    // Invalidação ANTES de qualquer await: durante a carga em voo a época
+    // antiga já não existe — inputs da sessão velha são bloqueados (e
+    // contados), nunca aceitos na janela de transição.
+    useEditorStore.getState().beginJoypadSessionHold();
+    try {
+      await loadRomIntoEmulatorInner(romPath, options);
+    } finally {
+      useEditorStore.getState().releaseJoypadSessionHold();
+    }
+  }
+
+  async function loadRomIntoEmulatorInner(
+    romPath: string,
+    options?: { startPaused?: boolean }
+  ) {
+    const romDependency = await detectRomDependency(romPath);
+    if (romDependency.dependency_id) {
+      const ready = await ensureDependencies(
+        [romDependency.dependency_id],
+        "Carregar esta ROM requer o core Libretro correspondente."
+      );
+      if (!ready) return;
+    }
+
+    const result = await emulatorLoadRom(romPath);
+    if (!result.ok) {
+      setEmulatorLoaded(false);
+      const failureMessage = formatEmulatorFailureMessage(result.message);
+      logMessage("error", failureMessage);
+      if (result.message.includes("Nenhum core Libretro")) {
+        openRuntimeSetupForIssue();
+      }
+      reportDiagnostic(
+        result.diagnostics?.[0] ??
+          createFallbackDiagnostic({
+            area: "libretro_emulation",
+            sourcePath: romPath,
+            technicalDetail: failureMessage,
+          })
+      );
+      return;
+    }
+
+    setEmulatorLoaded(true);
+    // Ancora a época do core para os envios de input (o backend recusa época
+    // obsoleta — ver CORE_EPOCH em lib.rs).
+    const coreEpoch = await emulatorGetCoreEpoch().catch(() => null);
+    useEditorStore.getState().setCoreEpoch(coreEpoch);
+    trackProductMetric({ kind: "rom_loaded" });
+    logMessage("success", `ROM carregada: ${romPath}`);
+    setActiveViewportTab("game");
+    setEmulPaused(Boolean(options?.startPaused));
   }
 
   function handleEmulatorPause() {
@@ -3777,6 +3845,33 @@ export default function App() {
 
     window.__RDS_E2E__ = {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
+      loadRomForEmulation: async (
+        romPath: string,
+        options?: { startPaused?: boolean }
+      ) => {
+        await loadRomIntoEmulator(romPath, options);
+        return useEditorStore.getState().emulatorLoaded;
+      },
+      pauseEmulator: () => {
+        useEditorStore.getState().setEmulPaused(true);
+        return useEditorStore.getState().emulPaused;
+      },
+      getLastInputObservation: () => {
+        const state = useEditorStore.getState();
+        return {
+          lastJoypadRequest: state.lastJoypadRequest,
+          lastJoypadAck: state.lastJoypadAck,
+          lastJoypadSendError: state.lastJoypadSendError,
+          joypadSessionId: state.joypadSessionId,
+          joypadSessionHold: state.joypadSessionHold,
+          joypadBlockedCount: state.joypadBlockedCount,
+          coreEpoch: state.coreEpoch,
+        };
+      },
+      stopEmulator: async () => {
+        await handleEmulatorStop();
+        return !useEditorStore.getState().emulatorLoaded;
+      },
       importSgdkProject: async (projectName: string, baseDir: string, sgdkDonorPath: string) => {
         const result = await importSgdkProject(projectName, baseDir, sgdkDonorPath);
         const hydrated = await hydrateProjectState(
@@ -4486,6 +4581,7 @@ export default function App() {
                 <button
                   key={target}
                   type="button"
+                  data-testid={`wizard-target-${target}`}
                   disabled={selectedTemplateMegadriveOnly && target === "snes"}
                   onClick={() => setNewProjTarget(target)}
                   className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
@@ -4613,13 +4709,22 @@ export default function App() {
               className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#313244] bg-[#181825] pt-3"
             >
               {activeProjectDir ? (
-                <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
+                <ToolbarButton
+                  label="Cancelar"
+                  onClick={() => setShowProjectWizard(false)}
+                  testId="wizard-cancel"
+                />
               ) : null}
-              <ToolbarButton label="Abrir Projeto" onClick={() => void handleOpenProject()} />
+              <ToolbarButton
+                label="Abrir Projeto"
+                onClick={() => void handleOpenProject()}
+                testId="wizard-open-project"
+              />
               <ToolbarButton
                 label={creatingProject ? "Criando..." : "Criar Projeto"}
                 onClick={() => void confirmNewProject()}
                 accent="primary"
+                testId="wizard-create-project"
                 disabled={
                   creatingProject ||
                   templatesLoading ||
