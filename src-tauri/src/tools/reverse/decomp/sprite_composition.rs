@@ -274,6 +274,19 @@ fn parts_wire(parts: &[Part]) -> Vec<SpriteFramePart> {
         .collect()
 }
 
+fn artifact_name_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 pub fn compose_for_session(
     session: &InspectionSession,
     resource_id: &str,
@@ -323,7 +336,9 @@ pub fn compose_for_session(
         &["extract", &identity.normalized_sha256, "previews"],
     )?;
     let path = previews_dir.join(format!(
-        "sprite-frame-{resource_id}-{frame_id}-{png_sha256}.png"
+        "sprite-frame-{}-{}-{png_sha256}.png",
+        artifact_name_component(resource_id),
+        artifact_name_component(frame_id),
     ));
     write_file_immutable(&path, &png, &png_sha256)?;
     let artifact = ArtifactRef {
@@ -521,5 +536,11 @@ mod tests {
     fn unknown_or_mismatched_manifest_is_rejected_without_fallback() {
         assert!(manifest_for("spr_ryo_100", "spr_ryo_100/frame-9").is_err());
         assert!(manifest_for("spr_ryo_101", "spr_ryo_100/frame-1").is_err());
+    }
+
+    #[test]
+    fn artifact_name_components_cannot_turn_resource_ids_into_paths() {
+        assert_eq!(artifact_name_component("spr_ryo_100/frame-1"), "spr_ryo_100_frame-1");
+        assert!(!artifact_name_component("spr_ryo_100/frame-1").contains('/'));
     }
 }
