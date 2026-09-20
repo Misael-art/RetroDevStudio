@@ -426,6 +426,7 @@ function parseArgs(argv) {
           "inspection",
           "inspection-cancel",
           "inspection-complete",
+          "inspection-sprite-secondary",
           "inspection-preview-unavailable",
         ].includes(
           value
@@ -1544,8 +1545,8 @@ async function ensureSpriteFrameVisibleAndUnobstructed(sessionId) {
       const top = fullyVisible ? document.elementFromPoint(x, y) : null;
       const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
       const unobstructed = Boolean(top && (top === image || image.contains(top)));
-      const expectedWidth = 192;
-      const expectedHeight = 312;
+      const expectedWidth = image.naturalWidth * 3;
+      const expectedHeight = image.naturalHeight * 3;
       const exactContentDimensions = Math.abs(contentWidth - expectedWidth) < 0.01 && Math.abs(contentHeight - expectedHeight) < 0.01;
       const integerScale = Math.abs(contentWidth / image.naturalWidth - 3) < 0.01 && Math.abs(contentHeight / image.naturalHeight - 3) < 0.01;
       const metadataBelow = metadataRect.top >= rect.bottom - 0.01;
@@ -1597,13 +1598,55 @@ function renderExpectedSpriteFrame(romBytes, options = {}) {
         [0x58, 0x00, 0x09, 0x00, 0x28, 0x06], [0x04, 0x54, 0x09, 0x0c, 0x1c, 0x06],
       ],
     },
+    "spr_ryo_100/frame-2": {
+      tileDataOffset: 0x873e0,
+      descriptorOffset: 0x222e4,
+      tileCount: 74,
+      descriptors: [
+        [0x0b, 0x3d, 0x0f, 0x01, 0x1f, 0x10], [0x2b, 0x1d, 0x0f, 0x08, 0x18, 0x10],
+        [0x0b, 0x3d, 0x0b, 0x21, 0x07, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x03, 0x5d, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-3": {
+      tileDataOffset: 0x87d20,
+      descriptorOffset: 0x22320,
+      tileCount: 74,
+      descriptors: [
+        [0x0a, 0x3e, 0x0f, 0x04, 0x1c, 0x10], [0x2a, 0x1e, 0x0f, 0x08, 0x18, 0x10],
+        [0x0a, 0x3e, 0x0b, 0x24, 0x04, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x02, 0x5e, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-4": {
+      tileDataOffset: 0x873e0,
+      descriptorOffset: 0x222e4,
+      tileCount: 74,
+      descriptors: [
+        [0x0b, 0x3d, 0x0f, 0x01, 0x1f, 0x10], [0x2b, 0x1d, 0x0f, 0x08, 0x18, 0x10],
+        [0x0b, 0x3d, 0x0b, 0x21, 0x07, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x03, 0x5d, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_spark0/frame-0": {
+      tileDataOffset: 0x80060,
+      descriptorOffset: 0x22f94,
+      tileCount: 9,
+      paletteOffset: 0x2e134,
+      width: 24,
+      height: 24,
+      descriptors: [[0x00, 0x00, 0x0a, 0x00, 0x00, 0x09]],
+    },
   };
   const manifest = manifests[frameId];
   if (!manifest) fail(`Manifesto independente ausente para ${frameId}`);
   const tileDataOffset = manifest.tileDataOffset;
-  const paletteOffset = 0x2cc68;
-  const width = 64;
-  const height = 104;
+  const paletteOffset = manifest.paletteOffset ?? 0x2cc68;
+  const width = manifest.width ?? 64;
+  const height = manifest.height ?? 104;
   const descriptors = manifest.descriptors;
   const descriptorBytes = Buffer.from(descriptors.flat());
   if (!descriptorBytes.equals(romBytes.subarray(manifest.descriptorOffset, manifest.descriptorOffset + descriptorBytes.length))) {
@@ -1677,13 +1720,30 @@ function assertSpriteFrameOracles(romBytes, actual, context) {
     context
   );
   const independentPngSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
-  const expectedIndexSha256 = actual.frameId === "spr_ryo_100/frame-0"
-    ? "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c"
-    : "77b3b0dba715b352c3ace058abefa5d5d1918d2393dc2064b60a9ed01e0e1903";
-  const expectedRgbaSha256 = actual.frameId === "spr_ryo_100/frame-0"
-    ? "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58"
-    : "15dab9d16df147cc1bb81348fbc0d0a7e65458b34d3d77541df536024af768d0";
-  const expectedCanvasSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc" : "c63a0fd26c561806f5319fb24380983db10b99998048c678f81d2bf45c7fbde0";
+  const expectedIndexSha256 = {
+    "spr_ryo_100/frame-0": "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c",
+    "spr_ryo_100/frame-1": "77b3b0dba715b352c3ace058abefa5d5d1918d2393dc2064b60a9ed01e0e1903",
+    "spr_ryo_100/frame-2": "ef5072905140185e6353b372bc523ec28f71576204424892c30dd20ea3ee3be7",
+    "spr_ryo_100/frame-3": "c8917da4d036451d5090a905e2ddc34f68170cf958e1c2c8a8c16f5c987a4379",
+    "spr_ryo_100/frame-4": "ef5072905140185e6353b372bc523ec28f71576204424892c30dd20ea3ee3be7",
+    "spr_spark0/frame-0": "b474d8c417767ce822d0babf51bea71d342caf51d78d321867596a992784012b",
+  }[actual.frameId];
+  const expectedRgbaSha256 = {
+    "spr_ryo_100/frame-0": "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58",
+    "spr_ryo_100/frame-1": "15dab9d16df147cc1bb81348fbc0d0a7e65458b34d3d77541df536024af768d0",
+    "spr_ryo_100/frame-2": "63d238fcb0f2b7f6f3283d64ab6987be4f78b209f3d5aca11e2e2f2ea6003871",
+    "spr_ryo_100/frame-3": "af33e3e00eff92da8c2582f42b1ef5719b97506384ef1c0874e6fe6525ac53ee",
+    "spr_ryo_100/frame-4": "63d238fcb0f2b7f6f3283d64ab6987be4f78b209f3d5aca11e2e2f2ea6003871",
+    "spr_spark0/frame-0": "55045927d4b5bd9238a69a49264f625456abe51144ba9b14ee949ed8716223b3",
+  }[actual.frameId];
+  const expectedCanvasSha256 = {
+    "spr_ryo_100/frame-0": "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc",
+    "spr_ryo_100/frame-1": "c63a0fd26c561806f5319fb24380983db10b99998048c678f81d2bf45c7fbde0",
+    "spr_ryo_100/frame-2": "b09f31cd84b5b4b684ab0ef0b5e0fa185e33c0de6ac4ad4d468b9423d77a2a08",
+    "spr_ryo_100/frame-3": "dedd3c0838040bdf12868c7d6a6b93130247efd8b849244348149af95a8c1137",
+    "spr_ryo_100/frame-4": "b09f31cd84b5b4b684ab0ef0b5e0fa185e33c0de6ac4ad4d468b9423d77a2a08",
+    "spr_spark0/frame-0": "601829b5a8ab8853fdc1d9047f95ecdfcc6e0f91f73a88ae226ad55c3e70679f",
+  }[actual.frameId];
   if (expectedRgbaSha256 !== independentPngSha256 || expectedCanvasSha256 !== independent.pixelsSha256) {
     fail(`Oráculos RGBA independente/canvas não batem com as referências: ${JSON.stringify({ expectedRgbaSha256, independentPngSha256, expectedCanvasSha256, actualCanvas: independent.pixelsSha256, expectedIndexSha256 })}`);
   }
@@ -1724,8 +1784,9 @@ async function verifyRenderedSpriteFrame(sessionId, romBytes, frameId, context) 
     console.log(`[inspection-sprite-frame-failure] ${JSON.stringify({ context, frameId, uiState, composeButton, inspectionLogs: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
     throw error;
   }
-  if (!visualEvidence?.image || visualEvidence.resourceId !== "spr_ryo_100" || visualEvidence.frameId !== frameId || visualEvidence.romSha256 !== romSha256) {
-    fail(`Identidade do frame composto divergente (${context}): ${JSON.stringify({ expected: { resourceId: "spr_ryo_100", frameId, romSha256 }, actual: visualEvidence })}`);
+  const expectedResourceId = frameId.split("/", 1)[0];
+  if (!visualEvidence?.image || visualEvidence.resourceId !== expectedResourceId || visualEvidence.frameId !== frameId || visualEvidence.romSha256 !== romSha256) {
+    fail(`Identidade do frame composto divergente (${context}): ${JSON.stringify({ expected: { resourceId: expectedResourceId, frameId, romSha256 }, actual: visualEvidence })}`);
   }
   const independentEvidence = assertSpriteFrameOracles(romBytes, visualEvidence, `${context}: ${frameId}`);
   const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
@@ -3673,9 +3734,11 @@ async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = tes
 
 async function selectInspectionFrameNative(sessionId, frameId) {
   const selector = "[data-testid='inspection-sprite-frame-select']";
-  const diagnostic = await executeScript(
-    sessionId,
-    `
+  const diagnostic = await waitFor(
+    async () => {
+      const next = await executeScript(
+        sessionId,
+        `
       const select = document.querySelector(${JSON.stringify(selector)});
       if (!(select instanceof HTMLSelectElement)) return { exists: false };
       select.scrollIntoView({ block: "center", inline: "center" });
@@ -3688,6 +3751,7 @@ async function selectInspectionFrameNative(sessionId, frameId) {
       return {
         exists: true,
         value: select.value,
+        options: Array.from(select.options, (option) => option.value),
         visible: rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden",
         disabled: Boolean(select.disabled),
         focused: document.activeElement === select,
@@ -3697,7 +3761,13 @@ async function selectInspectionFrameNative(sessionId, frameId) {
         topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
         unobstructed: Boolean(top && (top === select || select.contains(top))),
       };
-    `
+        `
+      );
+      return next?.exists && next.visible ? next : false;
+    },
+    60000,
+    `Controle de seleção de frame não apareceu: ${frameId}`,
+    100
   );
   if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled || !diagnostic.unobstructed) {
     fail(`Seleção nativa de frame bloqueada: ${JSON.stringify({ frameId, diagnostic })}`);
@@ -3705,13 +3775,22 @@ async function selectInspectionFrameNative(sessionId, frameId) {
   if (diagnostic.value !== frameId) {
     const elementId = await findElement(sessionId, selector);
     await clickElement(sessionId, elementId);
-    const key = frameId.endsWith("/frame-1") ? "\uE015" : "\uE013";
+    const frameIndex = Array.isArray(diagnostic.options) ? diagnostic.options.indexOf(frameId) : -1;
+    if (frameIndex < 0) fail(`Frame não está exposto no controle nativo: ${JSON.stringify({ frameId, options: diagnostic.options })}`);
     await webdriverRequest("POST", `/session/${sessionId}/actions`, {
-      actions: [{ type: "key", id: "inspection-frame-selector", actions: [
-        { type: "keyDown", value: key },
-        { type: "keyUp", value: key },
+      actions: [{ type: "key", id: "inspection-frame-selector-home", actions: [
+        { type: "keyDown", value: "\uE011" },
+        { type: "keyUp", value: "\uE011" },
       ] }],
     });
+    if (frameIndex > 0) {
+      await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+        actions: [{ type: "key", id: "inspection-frame-selector-down", actions: Array.from({ length: frameIndex }, () => [
+          { type: "keyDown", value: "\uE015" },
+          { type: "keyUp", value: "\uE015" },
+        ]).flat() }],
+      });
+    }
     await webdriverRequest("POST", `/session/${sessionId}/actions`, {
       actions: [{ type: "key", id: "inspection-frame-selector-enter", actions: [
         { type: "keyDown", value: "\uE007" },
@@ -3824,11 +3903,16 @@ async function handleProjectWizardVisibly(sessionId, label) {
     return { label, action: "not-visible" };
   }
 
-  const existingProject = await executeScript(
-    sessionId,
-    `return Boolean(document.querySelector('[data-testid="wizard-open-existing-project"]'));`
+  const wizardAction = await waitFor(
+    async () => executeScript(
+      sessionId,
+      `return document.querySelector('[data-testid="wizard-open-existing-project"]') ? "existing" : document.querySelector('[data-testid="template-card-empty"]') ? "empty" : false;`
+    ),
+    15000,
+    `Controles do wizard não apareceram (${label})`,
+    100
   );
-  if (existingProject) {
+  if (wizardAction === "existing") {
     await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-open-existing-project", `${label}: abrir projeto existente`);
   } else {
     await clickButtonByTestIdNativeWhenReady(sessionId, "template-card-empty", `${label}: selecionar Projeto Vazio`);
@@ -3849,8 +3933,8 @@ async function handleProjectWizardVisibly(sessionId, label) {
     `Wizard não foi concluído por controles visíveis (${label})`,
     100
   );
-  console.log(`[inspection-wizard] ${JSON.stringify({ label, action: existingProject ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir })}`);
-  return { label, action: existingProject ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir };
+  console.log(`[inspection-wizard] ${JSON.stringify({ label, action: wizardAction === "existing" ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir })}`);
+  return { label, action: wizardAction === "existing" ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir };
 }
 
 async function clickButtonByTextWithPointerEvents(sessionId, expectedText) {
@@ -4524,7 +4608,7 @@ async function main() {
       currentE2eRunContext.project = options.project;
     }
 
-    if (["inspection", "inspection-cancel", "inspection-complete", "inspection-preview-unavailable"].includes(options.scenario)) {
+    if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-preview-unavailable"].includes(options.scenario)) {
       let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
       let inspectionFixture = null;
       if (options.scenario === "inspection-preview-unavailable" && !process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM) {
@@ -4543,18 +4627,24 @@ async function main() {
       }
       const inspectionRomBytes = await readFile(inspectionRom);
       console.log(`[inspection-rom] ${JSON.stringify({ path: inspectionRom, size: inspectionRomBytes.length, sha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), fixture: inspectionFixture })}`);
-      const spriteSourcePng = process.env.RDS_INSPECTION_SPRITE_SOURCE_PNG ?? "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/ryo/100.png";
-      const requiresSpriteOracle = options.scenario === "inspection" || options.scenario === "inspection-complete";
+      const spriteResourceId = process.env.RDS_INSPECTION_SPRITE_RESOURCE_ID ?? "spr_ryo_100";
+      const spriteSourcePng = process.env.RDS_INSPECTION_SPRITE_SOURCE_PNG ?? (spriteResourceId === "spr_spark0"
+        ? "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/TAIKETSU ULTRA HERO GENESIS [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/spr_spark0.png"
+        : "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/ryo/100.png");
+      const requiresSpriteOracle = options.scenario === "inspection" || options.scenario === "inspection-complete" || options.scenario === "inspection-sprite-secondary";
       if (requiresSpriteOracle && !(await pathExists(spriteSourcePng))) {
         fail(`RDS_INSPECTION_SPRITE_SOURCE_PNG deve apontar para o PNG doador independente: ${spriteSourcePng}`);
       }
       const spriteSourcePngSha256 = !requiresSpriteOracle
         ? null
         : createHash("sha256").update(await readFile(spriteSourcePng)).digest("hex");
-      if (requiresSpriteOracle && spriteSourcePngSha256 !== "1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b") {
+      const expectedSourceSha256 = process.env.RDS_INSPECTION_SPRITE_RESOURCE_ID === "spr_spark0"
+        ? "cafaf180ba006903242aa822fb3c0dceb42424a9e0bd07a5a19b75f33a4bf196"
+        : "1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b";
+      if (requiresSpriteOracle && spriteSourcePngSha256 !== expectedSourceSha256) {
         fail(`PNG doador independente divergente: ${JSON.stringify({ path: spriteSourcePng, sha256: spriteSourcePngSha256 })}`);
       }
-      console.log(`[inspection-sprite-source] ${JSON.stringify({ path: spriteSourcePng, sha256: spriteSourcePngSha256, frame: "spr_ryo_100/frame-0", nativeSize: [64, 104] })}`);
+      console.log(`[inspection-sprite-source] ${JSON.stringify({ path: spriteSourcePng, resource: spriteResourceId, sha256: spriteSourcePngSha256, frame: `${spriteResourceId}/frame-0` })}`);
       const artifactPrefix = `inspection-${artifactTimestamp()}`;
       const inspectionPanel = "[data-testid='reverse-inspection-panel']";
       const inspectionInput = `${inspectionPanel} input[type='text']`;
@@ -4663,6 +4753,46 @@ async function main() {
       );
       console.log(`[inspection-complete] terminal=${JSON.stringify(completedState)}`);
       const beforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-before-restart.png`);
+      if (options.scenario === "inspection-sprite-secondary") {
+        if (spriteResourceId !== "spr_spark0" || createHash("sha256").update(inspectionRomBytes).digest("hex") !== "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c") {
+          fail(`Cenário secundário exige spr_spark0 e ROM Taiketsu verificada: ${JSON.stringify({ resource: spriteResourceId, rom: createHash("sha256").update(inspectionRomBytes).digest("hex") })}`);
+        }
+        const secondaryFrameId = "spr_spark0/frame-0";
+        await selectInspectionFrameNative(sessionId, secondaryFrameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do spr_spark0/frame-0");
+        const secondaryBefore = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, secondaryFrameId, "recurso secundário antes de salvar");
+        const secondaryBeforeScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-spark0-before-restart.png`);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+        const persistedSessionId = completedState.session.id;
+        if (!persistedSessionId) fail(`Sessão secundária concluída não tem identidade: ${JSON.stringify(completedState)}`);
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Salvar sessão secundária não publicou a sessão", 100);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+        await deleteSession(sessionId);
+        sessionId = await createSession(options.app);
+        currentE2eRunContext.sessionId = sessionId;
+        await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App secundário não reabriu após reinício");
+        await waitFor(async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API de automação secundária não voltou", 100);
+        await handleProjectWizardVisibly(sessionId, "secondary-after-restart");
+        await setSessionWindowRect(sessionId, 1280, 800);
+        await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace secundário após reinício");
+        await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace secundário não voltou");
+        await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace secundário não voltou");
+        await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`), 15000, "Painel secundário não voltou", 100);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-refresh-sessions", "atualizar sessões secundárias após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Sessão secundária persistida não apareceu após reinício", 100);
+        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, `[data-testid='select-saved-session-${persistedSessionId}']`), "selecionar sessão secundária persistida");
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-reopen", "reabrir sessão secundária");
+        await waitFor(async () => { const state = await readInspectionUiState(sessionId); return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false; }, 30000, "Sessão secundária não foi restaurada após reinício", 100);
+        await selectInspectionFrameNative(sessionId, secondaryFrameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do spr_spark0/frame-0 após reinício");
+        const secondaryAfter = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, secondaryFrameId, "recurso secundário após reabrir");
+        const secondaryAfterScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-spark0-after-restart.png`);
+        console.log(`[inspection-sprite-secondary] ${JSON.stringify({ resource: spriteResourceId, frame: secondaryFrameId, romSha256: secondaryAfter.visualEvidence.romSha256, sourcePngSha256: spriteSourcePngSha256, beforePixelsSha256: secondaryBefore.independentEvidence.pixelsSha256, afterPixelsSha256: secondaryAfter.independentEvidence.pixelsSha256, beforeScreenshot: secondaryBeforeScreenshot, afterScreenshot: secondaryAfterScreenshot, restoredSessionId: persistedSessionId, nativeSize: [secondaryAfter.visualEvidence.naturalWidth, secondaryAfter.visualEvidence.naturalHeight], offsets: { tileData: [0x80060, 0x120], palette: [0x2e134, 0x20], descriptor: 0x22f94 } })}`);
+        console.log("OK: Desktop Tauri inspection secondary sprite save/restart/reopen E2E passou.");
+        return;
+      }
       const candidateAvailable = await waitFor(
         async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid^='inspection-candidate-']"));`),
         30000,
@@ -4840,6 +4970,20 @@ async function main() {
       const frame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "troca frame-0 para frame-1");
       const spriteFrame1Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-1.png`);
       console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame1Proof.visualEvidence.romSha256, resource: frame1Proof.visualEvidence.resourceId, frame: frame1Proof.visualEvidence.frameId, nativeSize: [frame1Proof.visualEvidence.naturalWidth, frame1Proof.visualEvidence.naturalHeight], pngSha256: frame1Proof.actualPngSha256, pixelsSha256: frame1Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame1Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame1Proof.independentEvidence.expectedRgbaSha256, layout: frame1Proof.layout, screenshot: spriteFrame1Screenshot })}`);
+
+      for (const frameNumber of [2, 3, 4]) {
+        const frameId = `spr_ryo_100/frame-${frameNumber}`;
+        await selectInspectionFrameNative(sessionId, frameId);
+        const staleFrame = await readRenderedSpriteFramePixels(sessionId);
+        if (staleFrame?.frameId === frame1Id || staleFrame?.frameId === `spr_ryo_100/frame-${frameNumber - 1}`) {
+          fail(`A troca para ${frameId} reutilizou a prévia anterior: ${JSON.stringify(staleFrame)}`);
+        }
+        console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frameNumber === 2 ? frame1Id : `spr_ryo_100/frame-${frameNumber - 1}`, to: frameId, pending: staleFrame ? { frame: staleFrame.frameId, resource: staleFrame.resourceId } : null, previousPreviewRemovedOnChange: !staleFrame || staleFrame.frameId !== frameId })}`);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", `composição do ${frameId}`);
+        const proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frameId, `troca para ${frameId}`);
+        const screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-${frameNumber}.png`);
+        console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: proof.visualEvidence.romSha256, resource: proof.visualEvidence.resourceId, frame: proof.visualEvidence.frameId, nativeSize: [proof.visualEvidence.naturalWidth, proof.visualEvidence.naturalHeight], pngSha256: proof.actualPngSha256, pixelsSha256: proof.independentEvidence.pixelsSha256, expectedIndexSha256: proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: proof.independentEvidence.expectedRgbaSha256, layout: proof.layout, screenshot })}`);
+      }
 
       await selectInspectionFrameNative(sessionId, frame0Id);
       const afterFrame0Return = await readRenderedSpriteFramePixels(sessionId);
