@@ -1709,12 +1709,21 @@ function assertSpriteFrameOracles(romBytes, actual, context) {
 
 async function verifyRenderedSpriteFrame(sessionId, romBytes, frameId, context) {
   const romSha256 = createHash("sha256").update(romBytes).digest("hex");
-  const visualEvidence = await waitFor(
-    async () => readRenderedSpriteFramePixels(sessionId),
-    15000,
-    `Frame composto ${frameId} não carregou imagem, dimensões ou pixels`,
-    100
-  );
+  let visualEvidence;
+  try {
+    visualEvidence = await waitFor(
+      async () => readRenderedSpriteFramePixels(sessionId),
+      15000,
+      `Frame composto ${frameId} não carregou imagem, dimensões ou pixels`,
+      100
+    );
+  } catch (error) {
+    const uiState = await readInspectionUiState(sessionId);
+    const automation = await readAutomationState(sessionId);
+    const composeButton = await inspectNativeButtonTarget(sessionId, "inspection-compose-sprite");
+    console.log(`[inspection-sprite-frame-failure] ${JSON.stringify({ context, frameId, uiState, composeButton, inspectionLogs: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
+    throw error;
+  }
   if (!visualEvidence?.image || visualEvidence.resourceId !== "spr_ryo_100" || visualEvidence.frameId !== frameId || visualEvidence.romSha256 !== romSha256) {
     fail(`Identidade do frame composto divergente (${context}): ${JSON.stringify({ expected: { resourceId: "spr_ryo_100", frameId, romSha256 }, actual: visualEvidence })}`);
   }
