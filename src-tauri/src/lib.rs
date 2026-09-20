@@ -2169,6 +2169,31 @@ fn rex_inspection_save(
 }
 
 #[tauri::command]
+fn rex_inspection_edit_sonic_palette(
+    session_id: String,
+    resource_id: String,
+    frame_id: String,
+    palette_index: u8,
+    red: u8,
+    green: u8,
+    blue: u8,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionEdit,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::edit_sonic_palette(
+        &session_id,
+        &resource_id,
+        &frame_id,
+        palette_index,
+        red,
+        green,
+        blue,
+    )
+    .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
 fn rom_save_annotations(
     rom_path: String,
     annotations: Vec<ReverseAnnotation>,
@@ -4753,6 +4778,7 @@ pub fn run() {
             rex_inspection_sprite_frame,
             rex_inspection_save_palette_choice,
             rex_inspection_save,
+            rex_inspection_edit_sonic_palette,
             list_project_assets,
             open_project_source_path,
             read_legacy_project_file,

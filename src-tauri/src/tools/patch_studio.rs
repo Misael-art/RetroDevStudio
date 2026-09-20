@@ -360,9 +360,29 @@ pub fn apply_bps(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     let mut pos = BPS_HEADER.len();
-    let _source_size = decode_varint(patch, &mut pos)?;
+    let source_size = decode_varint(patch, &mut pos)? as usize;
     let target_size = decode_varint(patch, &mut pos)? as usize;
     let metadata_size = decode_varint(patch, &mut pos)? as usize;
+    if source_size != original.len() {
+        return Err(format!(
+            "Patch BPS rejeitado: tamanho da base divergente (esperado {source_size}, observado {}).",
+            original.len()
+        ));
+    }
+    let source_checksum = u32::from_le_bytes(
+        patch[patch.len() - 12..patch.len() - 8]
+            .try_into()
+            .map_err(|_| "Patch BPS corrompido: checksum da base ausente.".to_string())?,
+    );
+    let observed_source_checksum = crc32_simple(original);
+    if source_checksum != observed_source_checksum {
+        return Err(format!(
+            "Patch BPS rejeitado: checksum da base divergente (esperado {source_checksum:08X}, observado {observed_source_checksum:08X})."
+        ));
+    }
+    if pos + metadata_size > patch.len() - 12 {
+        return Err("Patch BPS corrompido: metadados ultrapassam o corpo.".to_string());
+    }
     pos += metadata_size; // skip metadata
 
     let actions_end = patch.len() - 12; // 3× CRC32
@@ -432,6 +452,23 @@ pub fn apply_bps(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
     Ok(output)
 }
 
+fn reject_overwrite(input_path: &Path, output_path: &Path) -> Result<(), String> {
+    let input = fs::canonicalize(input_path)
+        .map_err(|error| format!("Erro ao resolver ROM base: {error}"))?;
+    let output = if output_path.exists() {
+        fs::canonicalize(output_path)
+            .map_err(|error| format!("Erro ao resolver saída da ROM: {error}"))?
+    } else {
+        output_path.to_path_buf()
+    };
+    if input == output {
+        return Err(
+            "A ROM original não pode ser sobrescrita; escolha outro arquivo de saída.".to_string(),
+        );
+    }
+    Ok(())
+}
+
 // ── IPC-level helpers (chamados de lib.rs) ───────────────────────────────────
 
 /// Cria um patch IPS a partir de dois arquivos e salva em `patch_path`.
@@ -467,6 +504,9 @@ pub fn create_ips_file(
 
 /// Aplica um patch IPS a uma ROM e salva a ROM patcheada em `output_path`.
 pub fn apply_ips_file(rom_path: &Path, patch_path: &Path, output_path: &Path) -> PatchResult {
+    if let Err(error) = reject_overwrite(rom_path, output_path) {
+        return PatchResult::err(error);
+    }
     let rom = match fs::read(rom_path) {
         Ok(b) => b,
         Err(e) => return PatchResult::err(format!("Erro ao ler ROM: {e}")),
@@ -577,6 +617,9 @@ pub fn create_bps_file_compliance(
 
 /// Aplica um patch BPS a uma ROM e salva a ROM patcheada em `output_path`.
 pub fn apply_bps_file(rom_path: &Path, patch_path: &Path, output_path: &Path) -> PatchResult {
+    if let Err(error) = reject_overwrite(rom_path, output_path) {
+        return PatchResult::err(error);
+    }
     let rom = match fs::read(rom_path) {
         Ok(b) => b,
         Err(e) => return PatchResult::err(format!("Erro ao ler ROM: {e}")),
@@ -688,5 +731,18 @@ mod tests {
         let restored = super::apply_bps(&original, &patch).expect("Failed to apply BPS patch");
 
         assert_eq!(restored, modified);
+    }
+
+    #[test]
+    fn apply_bps_rejects_a_different_base_with_the_same_size() {
+        let original = b"sonic-base-rom".to_vec();
+        let mut modified = original.clone();
+        modified[5] ^= 0x20;
+        let patch = create_bps(&original, &modified).expect("create bps");
+
+        let mut wrong_base = original.clone();
+        wrong_base[0] ^= 0x01;
+        let error = apply_bps(&wrong_base, &patch).expect_err("wrong base must be rejected");
+        assert!(error.contains("checksum da base divergente"), "{error}");
     }
 }

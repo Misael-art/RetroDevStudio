@@ -117,6 +117,24 @@ pub struct InspectionSession {
     pub error: Option<InspectionError>,
     #[serde(default)]
     pub sprite_frame_id: Option<String>,
+    #[serde(default)]
+    pub edit: Option<InspectionEdit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InspectionEdit {
+    pub format: String,
+    pub resource_id: String,
+    pub frame_id: String,
+    pub palette_index: u8,
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub original_rom_sha256: String,
+    pub modified_rom_sha256: String,
+    pub modified_rom_path: String,
+    pub changed_offsets: Vec<u64>,
+    pub bytes_changed: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -887,6 +905,7 @@ pub fn open(rom_path: &str) -> Result<InspectionSession, String> {
         completed_at_unix: None,
         error: None,
         sprite_frame_id: None,
+        edit: None,
     };
     persist_session(&decomp_work_dir(), &session)?;
     sessions().lock().map_err(|e| e.to_string())?.insert(
@@ -1304,6 +1323,79 @@ pub fn save(session_id: &str, sprite_frame_id: Option<&str>) -> Result<Inspectio
         .map_err(|e| e.to_string())?
         .insert(session_id.to_string(), stored.clone());
     Ok(stored.session)
+}
+
+pub fn edit_sonic_palette(
+    session_id: &str,
+    resource_id: &str,
+    frame_id: &str,
+    palette_index: u8,
+    red: u8,
+    green: u8,
+    blue: u8,
+) -> Result<InspectionEdit, String> {
+    if resource_id != "sonic1_sonic" || frame_id != "sonic1_sonic/stand" {
+        return Err(error(
+            "edit_resource_unsupported",
+            "A edição piloto só aceita sonic1_sonic/stand",
+            false,
+        ));
+    }
+    if palette_index == 0 || palette_index >= 16 || red >= 8 || green >= 8 || blue >= 8 {
+        return Err(error(
+            "edit_palette_invalid",
+            "Use índice de paleta 1..15 e canais MD RGB333 entre 0 e 7",
+            false,
+        ));
+    }
+    let mut stored = get_stored_session(session_id)?;
+    let (identity, mut rom) = rex_read_rom(Path::new(&stored.session.rom_path))?;
+    if identity.normalized_sha256 != super::sprite_composition::SONIC1_REFERENCE_SHA256 {
+        return Err(error(
+            "edit_rom_profile_mismatch",
+            "A edição Sonic exige a ROM BYOR local do perfil comprovado",
+            false,
+        ));
+    }
+    let palette_offset = 0x2388usize + usize::from(palette_index) * 2;
+    let before = rom[palette_offset..palette_offset + 2].to_vec();
+    let word = (u16::from(red) << 1) | (u16::from(green) << 5) | (u16::from(blue) << 9);
+    rom[palette_offset..palette_offset + 2].copy_from_slice(&word.to_be_bytes());
+    let modified_sha = sha256_hex(&rom);
+    let changed_offsets = (0..2)
+        .filter(|index| before[*index] != rom[palette_offset + *index])
+        .map(|index| (palette_offset + index) as u64)
+        .collect::<Vec<_>>();
+    let edit_dir = canonical_dir_under(
+        &decomp_work_dir(),
+        &["extract", &identity.normalized_sha256, "edits"],
+    )?;
+    let modified_path = edit_dir.join(format!(
+        "sonic1-sprite-stand-palette-{palette_index}-{modified_sha}.bin"
+    ));
+    write_file_immutable(&modified_path, &rom, &modified_sha)?;
+    let bytes_changed = changed_offsets.len() as u32;
+    let edit = InspectionEdit {
+        format: "md_rgb333_palette_word".to_string(),
+        resource_id: resource_id.to_string(),
+        frame_id: frame_id.to_string(),
+        palette_index,
+        red,
+        green,
+        blue,
+        original_rom_sha256: identity.normalized_sha256,
+        modified_rom_sha256: modified_sha,
+        modified_rom_path: modified_path.display().to_string(),
+        changed_offsets,
+        bytes_changed,
+    };
+    stored.session.edit = Some(edit.clone());
+    persist_session(&decomp_work_dir(), &stored.session)?;
+    sessions()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(session_id.to_string(), stored);
+    Ok(edit)
 }
 
 #[cfg(test)]

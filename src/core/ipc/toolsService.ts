@@ -384,6 +384,22 @@ export interface InspectionSession {
   completed_at_unix?: number | null;
   error?: InspectionError | null;
   sprite_frame_id?: string | null;
+  edit?: InspectionEdit | null;
+}
+
+export interface InspectionEdit {
+  format: string;
+  resource_id: string;
+  frame_id: string;
+  palette_index: number;
+  red: number;
+  green: number;
+  blue: number;
+  original_rom_sha256: string;
+  modified_rom_sha256: string;
+  modified_rom_path: string;
+  changed_offsets: number[];
+  bytes_changed: number;
 }
 
 export interface InspectionProgress {
@@ -581,6 +597,26 @@ export function inspectionSavePaletteChoice(
 
 export function inspectionSave(sessionId: string, spriteFrameId?: string): Promise<InspectionSession> {
   return invoke<InspectionSession>("rex_inspection_save", { sessionId, spriteFrameId });
+}
+
+export function inspectionEditSonicPalette(
+  sessionId: string,
+  resourceId: string,
+  frameId: string,
+  paletteIndex: number,
+  red: number,
+  green: number,
+  blue: number
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_edit_sonic_palette", {
+    sessionId,
+    resourceId,
+    frameId,
+    paletteIndex,
+    red,
+    green,
+    blue,
+  });
 }
 
 export function listenInspectionProgress(

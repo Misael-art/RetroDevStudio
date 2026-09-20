@@ -10,6 +10,7 @@ import {
   type InspectionSpriteFrame,
   inspectionCancel,
   inspectionCatalogPage,
+  inspectionEditSonicPalette,
   inspectionListSessions,
   inspectionOpen,
   inspectionPreview,
@@ -20,7 +21,11 @@ import {
   inspectionStatus,
   inspectionStart,
   listenInspectionProgress,
+  patchApplyBps,
+  patchCreateBps,
 } from "../../core/ipc/toolsService";
+import { emulatorLoadRom, emulatorRunFrame } from "../../core/ipc/emulatorService";
+import { useEditorStore } from "../../core/store/editorStore";
 import ToolPathField from "./ToolPathField";
 
 interface InspectionPanelProps {
@@ -53,6 +58,7 @@ function statusLabel(status: string): string {
 }
 
 export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
+  const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
   const [romPath, setRomPath] = useState("");
   const [session, setSession] = useState<InspectionSession | null>(null);
   const [run, setRun] = useState<InspectionRun | null>(null);
@@ -74,6 +80,14 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [identifyState, setIdentifyState] = useState<"idle" | "running" | "succeeded" | "failed">("idle");
   const [identifyInput, setIdentifyInput] = useState("");
   const [identifyError, setIdentifyError] = useState("");
+  const [editPaletteIndex, setEditPaletteIndex] = useState(1);
+  const [editRed, setEditRed] = useState(7);
+  const [editGreen, setEditGreen] = useState(7);
+  const [editBlue, setEditBlue] = useState(7);
+  const [editBusy, setEditBusy] = useState(false);
+  const [patchPath, setPatchPath] = useState("");
+  const [patchedRomPath, setPatchedRomPath] = useState("");
+  const [patchBusy, setPatchBusy] = useState(false);
   const generation = useRef(0);
   const lastSessionId = useRef("");
   const savedSessionId = useRef("");
@@ -366,6 +380,80 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     }
   }
 
+  async function editSonicPalette() {
+    if (!session || spriteFrameId !== "sonic1_sonic/stand") return;
+    setEditBusy(true);
+    try {
+      const edit = await inspectionEditSonicPalette(
+        session.session_id,
+        "sonic1_sonic",
+        "sonic1_sonic/stand",
+        editPaletteIndex,
+        editRed,
+        editGreen,
+        editBlue,
+      );
+      const next = { ...session, edit };
+      sessionRef.current = next;
+      setSession(next);
+      setSpriteFrame(null);
+      logMessage("success", `[Inspeção] Edição persistida em cópia BYOR: ${edit.modified_rom_sha256}.`);
+    } catch (error) {
+      logMessage("error", `[Inspeção] Edição recusada: ${describeError(error)}`);
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function exportPilotPatch() {
+    if (!session?.edit || !patchPath.trim()) return;
+    setPatchBusy(true);
+    try {
+      const result = await patchCreateBps(
+        session.rom_path,
+        session.edit.modified_rom_path,
+        patchPath.trim(),
+        activeProjectDir || null,
+      );
+      logMessage(result.ok ? "success" : "error", `[Patch] ${result.message}${result.patch_hash ? ` CRC32 ${result.patch_hash}` : ""}`);
+    } catch (error) {
+      logMessage("error", `[Patch] Exportação recusada: ${describeError(error)}`);
+    } finally {
+      setPatchBusy(false);
+    }
+  }
+
+  async function applyPilotPatch() {
+    if (!session || !patchPath.trim() || !patchedRomPath.trim()) return;
+    setPatchBusy(true);
+    try {
+      const result = await patchApplyBps(session.rom_path, patchPath.trim(), patchedRomPath.trim());
+      logMessage(result.ok ? "success" : "error", `[Patch] ${result.message}`);
+    } catch (error) {
+      logMessage("error", `[Patch] Aplicação recusada: ${describeError(error)}`);
+    } finally {
+      setPatchBusy(false);
+    }
+  }
+
+  async function runPatchedRom() {
+    if (!patchedRomPath.trim()) return;
+    setPatchBusy(true);
+    try {
+      const loaded = await emulatorLoadRom(patchedRomPath.trim());
+      if (!loaded.ok) throw new Error(loaded.message);
+      for (let frame = 0; frame < 60; frame += 1) {
+        const result = await emulatorRunFrame();
+        if (!result.ok) throw new Error(result.message);
+      }
+      logMessage("success", "[Emulador] ROM modificada carregada e executada por 60 frames no core canônico.");
+    } catch (error) {
+      logMessage("error", `[Emulador] Execução recusada: ${describeError(error)}`);
+    } finally {
+      setPatchBusy(false);
+    }
+  }
+
   function closeSession() {
     const currentSessionId = sessionRef.current?.session_id;
     if (currentSessionId) {
@@ -486,6 +574,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                     <option value="spr_ryo_100/frame-3">spr_ryo_100 / frame 3</option>
                     <option value="spr_ryo_100/frame-4">spr_ryo_100 / frame 4 (deduplicado)</option>
                     <option value="spr_spark0/frame-0">spr_spark0 / frame 0 · Taiketsu</option>
+                    <option value="sonic1_sonic/stand">sonic1_sonic / stand · Sonic 1 (assistido)</option>
                   </select>
                 </label>
                 <button type="button" data-testid="inspection-compose-sprite" onClick={() => void composeSpriteFrame()} aria-busy={spriteFrameBusy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">{spriteFrameBusy ? "Compondo..." : "Compor frame"}</button>
@@ -507,6 +596,24 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                 <div className="mt-2 text-[#7f849c] break-words">Doador: {spriteFrame.donor_evidence.join(" · ")}</div>
                 <div className="mt-2 text-[#7f849c] break-words">Limitações: {spriteFrame.limitations.join(" · ")}</div>
               </div>
+            </div>}
+            {spriteFrameId === "sonic1_sonic/stand" && <div data-testid="inspection-sonic-edit-panel" className="mt-3 rounded border border-[#f9e2af]/30 bg-[#2a2414] p-3 text-[10px]">
+              <div className="font-semibold uppercase tracking-[0.16em] text-[#f9e2af]">Edição piloto · paleta MD RGB333</div>
+              <div className="mt-1 text-[#cdd6f4]">Opera somente sobre uma cópia persistida da ROM; o arquivo BYOR original nunca é sobrescrito.</div>
+              <div className="mt-2 flex flex-wrap items-end gap-2">
+                <label className="flex flex-col gap-1 text-[#7f849c]">Índice<input data-testid="inspection-sonic-palette-index" type="number" min={1} max={15} value={editPaletteIndex} onChange={(event) => setEditPaletteIndex(Number(event.target.value))} className="w-16 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                <label className="flex flex-col gap-1 text-[#7f849c]">R<input data-testid="inspection-sonic-palette-red" type="number" min={0} max={7} value={editRed} onChange={(event) => setEditRed(Number(event.target.value))} className="w-16 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                <label className="flex flex-col gap-1 text-[#7f849c]">G<input data-testid="inspection-sonic-palette-green" type="number" min={0} max={7} value={editGreen} onChange={(event) => setEditGreen(Number(event.target.value))} className="w-16 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                <label className="flex flex-col gap-1 text-[#7f849c]">B<input data-testid="inspection-sonic-palette-blue" type="number" min={0} max={7} value={editBlue} onChange={(event) => setEditBlue(Number(event.target.value))} className="w-16 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                <button type="button" data-testid="inspection-sonic-edit" disabled={editBusy || !session} onClick={() => void editSonicPalette()} className="rounded bg-[#f9e2af] px-3 py-1 font-semibold text-[#1e1e2e]">{editBusy ? "Editando..." : "Editar pela interface"}</button>
+              </div>
+              {session.edit && <div data-testid="inspection-sonic-edit-result" className="mt-2 break-all text-[#a6e3a1]">ROM modificada {session.edit.modified_rom_sha256} · offsets {session.edit.changed_offsets.map((offset) => `0x${hex(offset)}`).join(", ")} · {session.edit.bytes_changed} byte(s)</div>}
+              {session.edit && <div className="mt-3 grid gap-2">
+                <ToolPathField label="Exportar patch BPS" value={patchPath} set={setPatchPath} extensions={["bps"]} accentColor="f9e2af" />
+                <button type="button" data-testid="inspection-sonic-export-patch" disabled={patchBusy || !patchPath.trim()} onClick={() => void exportPilotPatch()} className="rounded border border-[#f9e2af]/50 px-3 py-1 text-[#f9e2af]">Exportar patch BPS</button>
+                <ToolPathField label="Salvar ROM modificada aplicada" value={patchedRomPath} set={setPatchedRomPath} extensions={["bin", "md", "gen"]} accentColor="f9e2af" />
+                <div className="flex flex-wrap gap-2"><button type="button" data-testid="inspection-sonic-apply-patch" disabled={patchBusy || !patchPath.trim() || !patchedRomPath.trim()} onClick={() => void applyPilotPatch()} className="rounded border border-[#a6e3a1]/50 px-3 py-1 text-[#a6e3a1]">Aplicar à base</button><button type="button" data-testid="inspection-sonic-run-patched" disabled={patchBusy || !patchedRomPath.trim()} onClick={() => void runPatchedRom()} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]">Carregar e executar 60 frames</button></div>
+              </div>}
             </div>}
           </div>
           <div className="rounded border border-[#313244] bg-[#11111b] p-3">

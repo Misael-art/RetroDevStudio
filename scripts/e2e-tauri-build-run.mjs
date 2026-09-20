@@ -427,6 +427,7 @@ function parseArgs(argv) {
           "inspection-cancel",
           "inspection-complete",
           "inspection-sprite-secondary",
+          "inspection-sonic",
           "inspection-preview-unavailable",
         ].includes(
           value
@@ -1418,6 +1419,27 @@ async function fillInputBySelector(sessionId, selector, value) {
   }
 }
 
+async function fillInputByLabel(sessionId, labelText, value) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const expected = String(arguments[0] ?? '').trim();
+      const label = Array.from(document.querySelectorAll('label')).find((candidate) => candidate.textContent?.trim() === expected);
+      const input = label?.querySelector('input');
+      if (!(input instanceof HTMLInputElement)) return false;
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+      if (typeof descriptor?.set !== 'function') return false;
+      input.focus();
+      descriptor.set.call(input, String(arguments[1] ?? ''));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `,
+    [labelText, value]
+  );
+  if (!result) fail(`Falha ao preencher o campo rotulado: ${labelText}`);
+}
+
 async function readInspectionUiState(sessionId) {
   return executeScript(
     sessionId,
@@ -1711,7 +1733,120 @@ function renderExpectedSpriteFrame(romBytes, options = {}) {
   return { width, height, pixels, frameId };
 }
 
+function renderExpectedSonicStand(romBytes, options = {}) {
+  const mapping = Buffer.from([
+    0x04, 0xec, 0x08, 0x00, 0x00,
+    0xf0, 0xf4, 0x0d, 0x00, 0x03,
+    0xf0, 0x04, 0x08, 0x00, 0x0b,
+    0xf0, 0x0c, 0x08, 0x00, 0x0e,
+  ]);
+  const tileDataOffset = 0x21afe;
+  const tileDataSize = 0xa120;
+  const paletteOffset = 0x2388;
+  const descriptorOffset = 0x21293;
+  const width = 32;
+  const height = 40;
+  if (!mapping.equals(romBytes.subarray(descriptorOffset, descriptorOffset + mapping.length))) {
+    fail("Mapping Sonic stand independente divergiu da ROM.");
+  }
+  if (romBytes.length < tileDataOffset + tileDataSize || romBytes.length < paletteOffset + 0x20) {
+    fail("ROM Sonic independente não contém os intervalos do frame stand.");
+  }
+  const pixels = Buffer.alloc(width * height * 4);
+  const palette = (index) => {
+    let word = romBytes.readUInt16BE(paletteOffset + index * 2);
+    if (index === 1 && Number.isInteger(options.paletteDelta)) word ^= options.paletteDelta;
+    return [((word >> 1) & 7) * 36, ((word >> 5) & 7) * 36, ((word >> 9) & 7) * 36, index === 0 ? 0 : 255];
+  };
+  for (let offset = 0; offset < pixels.length; offset += 4) pixels[offset + 3] = 0;
+  let mappingOffset = 1;
+  const originX = 16;
+  const originY = 20;
+  const tileStartByPart = [];
+  for (let partIndex = 0; partIndex < mapping[0]; partIndex += 1) {
+    const y = mapping[mappingOffset];
+    const size = mapping[mappingOffset + 1];
+    const tileStart = mapping.readUInt16BE(mappingOffset + 2);
+    const x = mapping[mappingOffset + 4] << 24 >> 24;
+    const tileWidth = ((size >> 2) & 3) + 1;
+    const tileHeight = (size & 3) + 1;
+    tileStartByPart.push({ tileStart, tileWidth, tileHeight, x, y: y << 24 >> 24 });
+    mappingOffset += 5;
+  }
+  for (const part of tileStartByPart) {
+    for (let localY = 0; localY < part.tileHeight; localY += 1) {
+      for (let localX = 0; localX < part.tileWidth; localX += 1) {
+        const tileIndex = part.tileStart + (options.tileOrder === "vertical"
+          ? localX * part.tileHeight + localY
+          : localY * part.tileWidth + localX);
+        for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+          for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+            const packed = romBytes[tileDataOffset + tileIndex * 32 + pixelY * 4 + Math.floor(pixelX / 2)];
+            const paletteIndex = pixelX % 2 === 0 ? packed >> 4 : packed & 0x0f;
+            const sourceX = originX + part.x + localX * 8 + pixelX;
+            const sourceY = originY + part.y + localY * 8 + pixelY;
+            const destX = options.flipX ? width - 1 - sourceX : sourceX;
+            const destY = options.flipY ? height - 1 - sourceY : sourceY;
+            if (destX < 0 || destY < 0 || destX >= width || destY >= height) fail(`Mapping Sonic fora do canvas: ${destX},${destY}`);
+            const offset = (destY * width + destX) * 4;
+            const rgba = palette(paletteIndex);
+            pixels.set(rgba, offset);
+          }
+        }
+      }
+    }
+  }
+  return { width, height, pixels, frameId: "sonic1_sonic/stand", tileDataOffset, tileDataSize, paletteOffset, descriptorOffset };
+}
+
+function assertSonicStandOracles(romBytes, actual, context) {
+  const expected = renderExpectedSonicStand(romBytes);
+  const independentPng = renderExpectedSonicStand(romBytes);
+  const independent = assertExactPreviewPixels(
+    { width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels },
+    expected,
+    context
+  );
+  const independentPngPixelsSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
+  const expectedPixelsSha256 = "ce95ea66f2cfcec40a0fb12cb35fe5e88530de036de9f897333ce762f06b40d4";
+  if (independentPngPixelsSha256 !== expectedPixelsSha256) {
+    fail(`Oráculo Sonic stand não corresponde ao golden literal: ${JSON.stringify({ independentPngPixelsSha256, expectedPixelsSha256 })}`);
+  }
+  for (const [label, variant] of [
+    ["ordem de tiles row-major -> vertical", { tileOrder: "vertical" }],
+    ["paleta alterada", { paletteDelta: 0x0200 }],
+    ["flip horizontal", { flipX: true }],
+  ]) {
+    let rejected = false;
+    let candidate = expected;
+    if (variant.tileOrder === "vertical") {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    } else if (variant.paletteDelta) {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    } else if (variant.flipX) {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    }
+    try {
+      assertExactPreviewPixels(candidate, expected, `${context}: negativo ${label}`);
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) fail(`Negativo Sonic não foi detectado: ${label}`);
+  }
+  return {
+    ...independent,
+    independentPngPixelsSha256,
+    expectedPixelsSha256,
+    expectedIndexSha256: null,
+    expectedRgbaSha256: expectedPixelsSha256,
+    offsets: { tileData: [expected.tileDataOffset, expected.tileDataSize], palette: [expected.paletteOffset, 0x20], descriptor: [expected.descriptorOffset, 21] },
+  };
+}
+
 function assertSpriteFrameOracles(romBytes, actual, context) {
+  if (actual.frameId === "sonic1_sonic/stand") {
+    return assertSonicStandOracles(romBytes, actual, context);
+  }
   const expected = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId, transparentRgb: "canvas" });
   const independentPng = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId });
   const independent = assertExactPreviewPixels(
@@ -4608,7 +4743,7 @@ async function main() {
       currentE2eRunContext.project = options.project;
     }
 
-    if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-preview-unavailable"].includes(options.scenario)) {
+    if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
       let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
       let inspectionFixture = null;
       if (options.scenario === "inspection-preview-unavailable" && !process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM) {
@@ -4627,11 +4762,11 @@ async function main() {
       }
       const inspectionRomBytes = await readFile(inspectionRom);
       console.log(`[inspection-rom] ${JSON.stringify({ path: inspectionRom, size: inspectionRomBytes.length, sha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), fixture: inspectionFixture })}`);
-      const spriteResourceId = process.env.RDS_INSPECTION_SPRITE_RESOURCE_ID ?? "spr_ryo_100";
+      const spriteResourceId = process.env.RDS_INSPECTION_SPRITE_RESOURCE_ID ?? (options.scenario === "inspection-sonic" ? "sonic1_sonic" : "spr_ryo_100");
       const spriteSourcePng = process.env.RDS_INSPECTION_SPRITE_SOURCE_PNG ?? (spriteResourceId === "spr_spark0"
         ? "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/TAIKETSU ULTRA HERO GENESIS [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/spr_spark0.png"
         : "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/ryo/100.png");
-      const requiresSpriteOracle = options.scenario === "inspection" || options.scenario === "inspection-complete" || options.scenario === "inspection-sprite-secondary";
+      const requiresSpriteOracle = (options.scenario === "inspection" || options.scenario === "inspection-complete" || options.scenario === "inspection-sprite-secondary") && options.scenario !== "inspection-sonic";
       if (requiresSpriteOracle && !(await pathExists(spriteSourcePng))) {
         fail(`RDS_INSPECTION_SPRITE_SOURCE_PNG deve apontar para o PNG doador independente: ${spriteSourcePng}`);
       }
@@ -4753,6 +4888,101 @@ async function main() {
       );
       console.log(`[inspection-complete] terminal=${JSON.stringify(completedState)}`);
       const beforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-before-restart.png`);
+      if (options.scenario === "inspection-sonic") {
+        const baseSha256 = createHash("sha256").update(inspectionRomBytes).digest("hex");
+        const expectedBaseSha256 = "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb";
+        if (baseSha256 !== expectedBaseSha256 || spriteResourceId !== "sonic1_sonic") {
+          fail(`Cenário Sonic exige a ROM BYOR e o recurso verificados: ${JSON.stringify({ baseSha256, spriteResourceId })}`);
+        }
+        const frameId = "sonic1_sonic/stand";
+        await selectInspectionFrameNative(sessionId, frameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do Sonic stand antes da edição");
+        const baseProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frameId, "Sonic stand antes da edição");
+        const baseScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-base.png`);
+
+        const modifiedRomBytes = Buffer.from(inspectionRomBytes);
+        const editWord = (7 << 1) | (0 << 5) | (7 << 9);
+        modifiedRomBytes.writeUInt16BE(editWord, 0x2388 + 2);
+        const modifiedSha256 = createHash("sha256").update(modifiedRomBytes).digest("hex");
+        await fillInputByLabel(sessionId, "Índice", "1");
+        await fillInputByLabel(sessionId, "R", "7");
+        await fillInputByLabel(sessionId, "G", "0");
+        await fillInputByLabel(sessionId, "B", "7");
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-edit", "editar a paleta Sonic pela interface");
+        const editEvidence = await waitFor(
+          async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`),
+          15000,
+          "Edição Sonic não produziu o resultado persistido pela UI",
+          100
+        );
+        if (!String(editEvidence).includes(modifiedSha256) || !String(editEvidence).includes("0x00238A")) {
+          fail(`Resultado da edição Sonic não corresponde à mutação independente: ${JSON.stringify({ editEvidence, modifiedSha256 })}`);
+        }
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do Sonic stand após edição");
+        const editedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após edição");
+        const editedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-edited.png`);
+
+        await ensureValidationDir();
+        const pilotDir = path.join(validationDir, `sonic1-pilot-${artifactTimestamp()}`);
+        await mkdir(pilotDir, { recursive: true });
+        const patchPath = path.join(pilotDir, "sonic1-stand-palette.bps");
+        const patchedRomPath = path.join(pilotDir, "sonic1-stand-palette-applied.bin");
+        await fillInputByLabel(sessionId, "Exportar patch BPS", patchPath);
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-export-patch", "exportar patch Sonic pela interface");
+        await waitFor(async () => pathExists(patchPath), 15000, "Patch BPS Sonic não foi criado pela UI", 100);
+        const patchBytes = await readFile(patchPath);
+        const patchSha256 = createHash("sha256").update(patchBytes).digest("hex");
+        await fillInputByLabel(sessionId, "Salvar ROM modificada aplicada", patchedRomPath);
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-apply-patch", "aplicar patch Sonic pela interface");
+        await waitFor(async () => pathExists(patchedRomPath), 15000, "ROM aplicada não foi criada pela UI", 100);
+        const patchedRomBytes = await readFile(patchedRomPath);
+        const patchedSha256 = createHash("sha256").update(patchedRomBytes).digest("hex");
+        if (patchedSha256 !== modifiedSha256 || baseSha256 !== createHash("sha256").update(inspectionRomBytes).digest("hex") || !patchedRomBytes.equals(modifiedRomBytes)) {
+          fail(`Aplicação BPS não reproduziu exatamente a ROM editada: ${JSON.stringify({ baseSha256, modifiedSha256, patchedSha256 })}`);
+        }
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-patched", "executar ROM Sonic aplicada pela interface");
+        await waitFor(
+          async () => executeScript(sessionId, `return Boolean(window.__RDS_E2E__?.getState?.()?.consoleEntries?.some((entry) => String(entry?.message ?? '').includes('ROM modificada carregada e executada')));`),
+          30000,
+          "A execução da ROM aplicada não confirmou o caminho canônico do emulador",
+          100
+        );
+        const emulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator.png`);
+
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+        const persistedSessionId = completedState.session.id;
+        if (!persistedSessionId) fail(`Sessão Sonic concluída não tem identidade: ${JSON.stringify(completedState)}`);
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Salvar sessão Sonic não publicou a sessão", 100);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+        await deleteSession(sessionId);
+        sessionId = await createSession(options.app);
+        currentE2eRunContext.sessionId = sessionId;
+        await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App Sonic não reabriu após reinício");
+        await waitFor(async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API Sonic não voltou após reinício", 100);
+        await handleProjectWizardVisibly(sessionId, "sonic-after-restart");
+        await setSessionWindowRect(sessionId, 1920, 1080);
+        await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace Sonic após reinício");
+        await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace Sonic não voltou");
+        await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace Sonic não voltou");
+        await clickButtonByTestIdNative(sessionId, "reverse-tab-inspection", "abrir inspeção Sonic após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`), 15000, "Painel Sonic não voltou", 100);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-refresh-sessions", "atualizar sessões Sonic após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 30000, "Sessão Sonic não foi descoberta após reinício", 100);
+        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, `[data-testid='select-saved-session-${persistedSessionId}']`), "selecionar sessão Sonic após reinício");
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-reopen", "reabrir sessão Sonic após reinício");
+        const reopenedState = await waitFor(async () => { const state = await readInspectionUiState(sessionId); return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false; }, 30000, "Sessão Sonic não foi reaberta", 100);
+        const reopenedFrame = await waitFor(async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sprite-frame-select"]')?.value ?? '';`), 15000, "Frame Sonic salvo não foi restaurado", 100);
+        if (reopenedFrame !== frameId) fail(`Frame Sonic restaurado diverge: ${JSON.stringify({ expected: frameId, actual: reopenedFrame })}`);
+        const reopenedEdit = await executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`);
+        if (!String(reopenedEdit).includes(modifiedSha256)) fail(`Proveniência da edição Sonic não foi restaurada: ${reopenedEdit}`);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recompor Sonic após reinício");
+        const reopenedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após salvar/reiniciar/reabrir");
+        const reopenedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-reopened.png`);
+        console.log(`[inspection-sonic] ${JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulator: emulatorScreenshot, reopened: reopenedScreenshot }, sessionId: reopenedState.session.id })}`);
+        console.log("OK: Desktop Tauri Sonic identify/compose/edit/save/patch/apply/run/restart/reopen E2E passou.");
+        return;
+      }
       if (options.scenario === "inspection-sprite-secondary") {
         if (spriteResourceId !== "spr_spark0" || createHash("sha256").update(inspectionRomBytes).digest("hex") !== "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c") {
           fail(`Cenário secundário exige spr_spark0 e ROM Taiketsu verificada: ${JSON.stringify({ resource: spriteResourceId, rom: createHash("sha256").update(inspectionRomBytes).digest("hex") })}`);
