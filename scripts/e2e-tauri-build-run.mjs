@@ -1738,7 +1738,7 @@ function renderExpectedSonicStand(romBytes, options = {}) {
     0x04, 0xec, 0x08, 0x00, 0x00,
     0xf0, 0xf4, 0x0d, 0x00, 0x03,
     0xf0, 0x04, 0x08, 0x00, 0x0b,
-    0xf0, 0x0c, 0x08, 0x00, 0x0e,
+    0xf0, 0x0c, 0x08, 0x00, 0x0e, 0xf8,
   ]);
   const tileDataOffset = 0x21afe;
   const tileDataSize = 0xa120;
@@ -1787,7 +1787,9 @@ function renderExpectedSonicStand(romBytes, options = {}) {
             const sourceY = originY + part.y + localY * 8 + pixelY;
             const destX = options.flipX ? width - 1 - sourceX : sourceX;
             const destY = options.flipY ? height - 1 - sourceY : sourceY;
-            if (destX < 0 || destY < 0 || destX >= width || destY >= height) fail(`Mapping Sonic fora do canvas: ${destX},${destY}`);
+            if (destX < 0 || destY < 0 || destX >= width || destY >= height) {
+              fail(`Mapping Sonic fora do canvas: ${destX},${destY} part=${JSON.stringify(part)} local=${localX},${localY} pixel=${pixelX},${pixelY} options=${JSON.stringify(options)}`);
+            }
             const offset = (destY * width + destX) * 4;
             const rgba = palette(paletteIndex);
             pixels.set(rgba, offset);
@@ -4904,17 +4906,26 @@ async function main() {
         const editWord = (7 << 1) | (0 << 5) | (7 << 9);
         modifiedRomBytes.writeUInt16BE(editWord, 0x2388 + 2);
         const modifiedSha256 = createHash("sha256").update(modifiedRomBytes).digest("hex");
+        await closeVisibleConsoleDrawer(sessionId, "antes da edição Sonic");
         await fillInputByLabel(sessionId, "Índice", "1");
         await fillInputByLabel(sessionId, "R", "7");
         await fillInputByLabel(sessionId, "G", "0");
         await fillInputByLabel(sessionId, "B", "7");
         await clickButtonByTestIdNative(sessionId, "inspection-sonic-edit", "editar a paleta Sonic pela interface");
-        const editEvidence = await waitFor(
-          async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`),
-          15000,
-          "Edição Sonic não produziu o resultado persistido pela UI",
-          100
-        );
+        let editEvidence;
+        try {
+          editEvidence = await waitFor(
+            async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`),
+            15000,
+            "Edição Sonic não produziu o resultado persistido pela UI",
+            100
+          );
+        } catch (error) {
+          const editButton = await inspectNativeButtonTarget(sessionId, "inspection-sonic-edit");
+          const automation = await readAutomationState(sessionId);
+          console.log(`[inspection-sonic-edit-failure] ${JSON.stringify({ editButton, ui: await readInspectionUiState(sessionId), console: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
+          throw error;
+        }
         if (!String(editEvidence).includes(modifiedSha256) || !String(editEvidence).includes("0x00238A")) {
           fail(`Resultado da edição Sonic não corresponde à mutação independente: ${JSON.stringify({ editEvidence, modifiedSha256 })}`);
         }
