@@ -540,7 +540,10 @@ mod tests {
 
     #[test]
     fn artifact_name_components_cannot_turn_resource_ids_into_paths() {
-        assert_eq!(artifact_name_component("spr_ryo_100/frame-1"), "spr_ryo_100_frame-1");
+        assert_eq!(
+            artifact_name_component("spr_ryo_100/frame-1"),
+            "spr_ryo_100_frame-1"
+        );
         assert!(!artifact_name_component("spr_ryo_100/frame-1").contains('/'));
     }
 }
