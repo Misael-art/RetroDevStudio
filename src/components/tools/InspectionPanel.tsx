@@ -317,17 +317,18 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     const sessionId = sessionRef.current?.session_id;
     if (!sessionId) return;
     const requestedFrameId = spriteFrameId;
+    const resourceId = requestedFrameId.split("/", 1)[0] || "spr_ryo_100";
     const requestId = ++previewRequestSeq.current;
     setSpriteFrame(null);
     setSpriteFrameBusy(true);
     try {
-      const next = await inspectionSpriteFrame(sessionId, "spr_ryo_100", requestedFrameId, false, false);
+      const next = await inspectionSpriteFrame(sessionId, resourceId, requestedFrameId, false, false);
       if (requestId !== previewRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
-      if (next.resource_id !== "spr_ryo_100" || next.frame_id !== requestedFrameId) {
+      if (next.resource_id !== resourceId || next.frame_id !== requestedFrameId) {
         throw new Error(`Resposta de composição incompatível: esperado ${requestedFrameId}, recebido ${next.resource_id}/${next.frame_id}`);
       }
       setSpriteFrame(next);
-      logMessage("success", "[Inspeção] Frame composto HAMOOPIG verificado contra bytes e metadado doador.");
+      logMessage("success", `[Inspeção] Frame composto ${resourceId} verificado contra bytes e metadado doador.`);
     } catch (error) {
       if (requestId !== previewRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
       logMessage("error", `[Inspeção] Composição de sprite recusada: ${describeError(error)}`);
@@ -433,7 +434,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
         <div className="mt-3 rounded border border-[#313244] bg-[#0f172a] p-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-[10px] uppercase tracking-[0.12em] text-[#7f849c]">Sessões salvas</div>
-            <button type="button" onClick={() => void refreshSavedSessions()} disabled={savedSessionsBusy} className="rounded border border-[#313244] px-2 py-1 text-[10px] text-[#cdd6f4]">{savedSessionsBusy ? "Atualizando..." : "Atualizar lista"}</button>
+            <button type="button" data-testid="inspection-refresh-sessions" onClick={() => void refreshSavedSessions()} disabled={savedSessionsBusy} className="rounded border border-[#313244] px-2 py-1 text-[10px] text-[#cdd6f4]">{savedSessionsBusy ? "Atualizando..." : "Atualizar lista"}</button>
           </div>
           {savedSessions.length === 0 ? <div className="mt-2 text-[10px] text-[#7f849c]">Nenhuma sessão persistida encontrada neste aplicativo.</div> : <div className="mt-2 space-y-2">{savedSessions.map((saved) => <div data-testid="inspection-saved-session" data-session-id={saved.session_id} data-session-status={saved.status} key={saved.session_id} className={`flex flex-wrap items-center justify-between gap-2 rounded border p-2 ${selectedSavedSessionId === saved.session_id ? "border-[#cba6f7] bg-[#1b1630]" : "border-[#1e1e2e]"}`}><div className="min-w-0"><div className="truncate text-[10px] text-[#cdd6f4]">{saved.identity.header_title || "ROM sem título"} · {statusLabel(saved.status)}</div><div className="mt-1 truncate font-mono text-[9px] text-[#7f849c]">{saved.session_id} · {saved.identity.normalized_sha256.slice(0, 16)}…</div><div className="mt-1 truncate text-[9px] text-[#7f849c]">{saved.rom_path}</div></div><button type="button" data-testid={`select-saved-session-${saved.session_id}`} onClick={() => selectSavedSession(saved)} className="rounded border border-[#cba6f7]/50 px-2 py-1 text-[10px] text-[#cba6f7]">Selecionar</button></div>)}</div>}
         </div>
@@ -473,7 +474,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
           <div data-testid="inspection-sprite-frame-panel" className="rounded border border-[#cba6f7]/40 bg-[#11111b] p-3 text-[10px]">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.16em] text-[#cba6f7]">Frame composto · HAMOOPIG · Experimental</div>
+                <div className="text-[10px] uppercase tracking-[0.16em] text-[#cba6f7]">Frame composto · recurso assistido · Experimental</div>
                 <div className="mt-1 text-[#f9e2af]">Não é prévia de tile: composição assistida por metadado doador, com bytes compilados verificados.</div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -481,6 +482,10 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                   <select data-testid="inspection-sprite-frame-select" value={spriteFrameId} onChange={(event) => { setSpriteFrameId(event.target.value); setSpriteFrame(null); }} className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] text-[#cdd6f4]">
                     <option value="spr_ryo_100/frame-0">spr_ryo_100 / frame 0</option>
                     <option value="spr_ryo_100/frame-1">spr_ryo_100 / frame 1</option>
+                    <option value="spr_ryo_100/frame-2">spr_ryo_100 / frame 2</option>
+                    <option value="spr_ryo_100/frame-3">spr_ryo_100 / frame 3</option>
+                    <option value="spr_ryo_100/frame-4">spr_ryo_100 / frame 4 (deduplicado)</option>
+                    <option value="spr_spark0/frame-0">spr_spark0 / frame 0 · Taiketsu</option>
                   </select>
                 </label>
                 <button type="button" data-testid="inspection-compose-sprite" onClick={() => void composeSpriteFrame()} aria-busy={spriteFrameBusy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">{spriteFrameBusy ? "Compondo..." : "Compor frame"}</button>
@@ -489,7 +494,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
             {spriteFrame?.available && spriteFrame.data_url && <div className="mt-3 flex min-w-0 flex-col gap-3">
               <div data-testid="inspection-sprite-frame-stage" className="min-w-0 overflow-auto rounded border border-[#313244] bg-[#0b0f19] p-2" aria-label="Área reservada do frame composto">
                 <div className="w-[196px] min-w-[196px] shrink-0">
-                  <img data-testid="inspection-sprite-frame-image" data-sprite-resource={spriteFrame.resource_id} data-sprite-frame={spriteFrame.frame_id} data-sprite-rom-sha256={spriteFrame.rom_sha256} data-sprite-width={spriteFrame.width} data-sprite-height={spriteFrame.height} data-sprite-scale="3" data-png-sha256={spriteFrame.png_sha256 ?? ""} data-pixels-sha256={spriteFrame.pixels_sha256 ?? ""} src={spriteFrame.data_url} alt="Frame composto HAMOOPIG spr_ryo_100" width={spriteFrame.width * 3} height={spriteFrame.height * 3} className="block shrink-0 border border-[#313244] bg-[#ff00ff] [image-rendering:pixelated]" style={{ boxSizing: "content-box", imageRendering: "pixelated", width: `${spriteFrame.width * 3}px`, height: `${spriteFrame.height * 3}px`, maxWidth: "none", maxHeight: "none" }} />
+                  <img data-testid="inspection-sprite-frame-image" data-sprite-resource={spriteFrame.resource_id} data-sprite-frame={spriteFrame.frame_id} data-sprite-rom-sha256={spriteFrame.rom_sha256} data-sprite-width={spriteFrame.width} data-sprite-height={spriteFrame.height} data-sprite-scale="3" data-png-sha256={spriteFrame.png_sha256 ?? ""} data-pixels-sha256={spriteFrame.pixels_sha256 ?? ""} src={spriteFrame.data_url} alt={`Frame composto ${spriteFrame.resource_id}`} width={spriteFrame.width * 3} height={spriteFrame.height * 3} className="block shrink-0 border border-[#313244] bg-[#ff00ff] [image-rendering:pixelated]" style={{ boxSizing: "content-box", imageRendering: "pixelated", width: `${spriteFrame.width * 3}px`, height: `${spriteFrame.height * 3}px`, maxWidth: "none", maxHeight: "none" }} />
                 </div>
               </div>
               <div data-testid="inspection-sprite-frame-metadata" className="min-w-0 space-y-1 break-words text-[#cdd6f4]">

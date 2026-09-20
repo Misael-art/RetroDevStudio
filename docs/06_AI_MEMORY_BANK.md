@@ -1,5 +1,13 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-20 — Sprite-Frame-02 multi-recurso (Experimental)
+
+Branch isolada `codex/rex-sprite-frame-02`, dependente de `codex/rex-sprite-frame-01-integration`, sem merge. A composição assistida foi generalizada para `spr_ryo_100/frame-0..4` (frame 4 deduplicado com frame 2) e para `spr_spark0/frame-0` de Taiketsu. ROMs BYOR: HAMOOPIG `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`; Taiketsu `3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c`. Fontes: Ryo `1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b`; Spark `cafaf180ba006903242aa822fb3c0dceb42424a9e0bd07a5a19b75f33a4bf196`.
+
+Destino local verificado: binário `src-tauri/target-test/debug/retro-dev-studio`, SHA `743e22d58668a47734b1ace47fd597e35554303c9e2527765d6a3f9ed0fba476`, frontend `791d6a7`. Taiketsu desktop passou seleção nativa, pixels independentes antes/depois, salvar, reinício, atualização visual da lista persistente, reabertura e recomposição na sessão `inspection-1789914271-00000000`; pixel independente `601829b5a8ab8853fdc1d9047f95ecdfcc6e0f91f73a88ae226ad55c3e70679f`; offsets `0x80060+0x120`, paleta `0x2e134+0x20`, descritor `0x22f94`, nativo `24×24`, CSS `72×72`. Cancelamento separado fechou `cancelled` na sessão `inspection-1789914403-00000000`. A prova Ryo dos frames 0–4 é histórica e vinculada ao binário `082c66d…`; matriz em `docs/REX_SPRITE_FRAME_02_MULTI_RESOURCE.md`.
+
+Classificação permanece Experimental e restrita às ROMs/recursos comprovados. A ROM fornece bytes/offsets/paleta/descritores; metadados do doador fornecem identidade semântica, frame, posições/flips/transparência e transformação do compilador. Não declarar extração automática geral, animação ou reconstrução do jogo.
+
 ### Checkpoint 2026-09-20 — destino combinado #70 + #71 certificado e reexecutado
 
 Ancestralidade revalidada por SHA: #69 = `ee70bc4444830eaaa5914175729e23feca06b94e`; #66/#67/#68 = `ba637cf`/`9f77b40`/`09e1d13`, nenhum ancestral de #69. `10c89d1` não é ancestral de #69; seu patch equivalente `e998bbd` é que está na linha de inspeção. O #70 (`8843018`) é ancestral do #71 (`d9fe40d`), e os heads REX chegaram ao destino por `177c831`, `63e730d` e `af6c0f3`. O resultado combinado está sendo preparado em `codex/rex-sprite-frame-01-integration`, sem merge. A comparação de código/testes e a distinção entre ausente, equivalente e presente estão registradas no Current Wave e em `docs/REX_SPRITE_FRAME_01_HAMOOPIG.md`.
