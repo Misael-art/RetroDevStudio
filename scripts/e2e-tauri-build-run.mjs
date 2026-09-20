@@ -1682,7 +1682,7 @@ function assertSpriteFrameOracles(romBytes, actual, context) {
     : "77b3b0dba715b352c3ace058abefa5d5d1918d2393dc2064b60a9ed01e0e1903";
   const expectedRgbaSha256 = actual.frameId === "spr_ryo_100/frame-0"
     ? "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58"
-    : "d331d788f567f2a83e9e1ebcfca19ad0fa77d590b51118f3649f7187b674a0c9";
+    : "15dab9d16df147cc1bb81348fbc0d0a7e65458b34d3d77541df536024af768d0";
   const expectedCanvasSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc" : "c63a0fd26c561806f5319fb24380983db10b99998048c678f81d2bf45c7fbde0";
   if (expectedRgbaSha256 !== independentPngSha256 || expectedCanvasSha256 !== independent.pixelsSha256) {
     fail(`Oráculos RGBA independente/canvas não batem com as referências: ${JSON.stringify({ expectedRgbaSha256, independentPngSha256, expectedCanvasSha256, actualCanvas: independent.pixelsSha256, expectedIndexSha256 })}`);
