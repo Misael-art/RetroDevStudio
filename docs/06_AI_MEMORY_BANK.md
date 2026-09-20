@@ -1,5 +1,15 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-20 — destino combinado #70 + #71 certificado e reexecutado
+
+Ancestralidade revalidada por SHA: #69 = `ee70bc4444830eaaa5914175729e23feca06b94e`; #66/#67/#68 = `ba637cf`/`9f77b40`/`09e1d13`, nenhum ancestral de #69. `10c89d1` não é ancestral de #69; seu patch equivalente `e998bbd` é que está na linha de inspeção. O #70 (`8843018`) é ancestral do #71 (`d9fe40d`), e os heads REX chegaram ao destino por `177c831`, `63e730d` e `af6c0f3`. O resultado combinado está sendo preparado em `codex/rex-sprite-frame-01-integration`, sem merge. A comparação de código/testes e a distinção entre ausente, equivalente e presente estão registradas no Current Wave e em `docs/REX_SPRITE_FRAME_01_HAMOOPIG.md`.
+
+Os holdouts `.mimosa`, `.zcode`, `src-tauri/.mimosa` e `src-tauri/src/tools/reverse/decomp-recovery/` permanecem não rastreados e não staged; não foram restaurados nem removidos. No destino `codex/rex-sprite-frame-01-integration`, `check:tree`, lint, tsc, Vitest `622/6`, Rust `615/40`, clippy/fmt e `host:certify` passaram; a certificação reportou frontend `625/3`, Rust `615/40` e upstream SGDK/PVSnesLib `Success: true`.
+
+O build canônico do `d9fe40d7b5fcf56127889e4e1095413083b8dd63` gerou `/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/debug/retro-dev-studio`, 370.695.936 bytes, SHA `e1174d3b0ef8ff45c41dea91535050f99e9f4fc55368a99cd379ca52c86d460c`. A prova desktop no mesmo binário passou com ROM HAMOOPIG SHA `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`, sessão `inspection-1789907881-00000000`, run `run-inspection-1789907881-00000000-00000001`, candidato `42128/192`, frames 0→1→0, pixels independentes, mutação rejeitada, salvar/reiniciar/reabrir e negativo de wizard. O cancelamento foi separado e passou com sessão/run `inspection-1789907951-00000000`/`run-inspection-1789907951-00000000-00000001`, ambos `cancelled`.
+
+Capturas do destino: frame-0 `inspection-2026-09-20T12-37-49-567Z-sprite-frame-0.png` SHA `0fd0d4c5bec385a8594cbb4a93f2d57c81698381588876306c35cb4c8c0a7784`; frame-1 `...sprite-frame-1.png` SHA `d25bc82ebfba9d2a1318dd77d8a8b42b04e167b338d33bb59eec4e7b931a6ec0`; sprite após reinício `...sprite-after-restart.png` SHA `7aa6a80a850159f9e1c8aeb02ee931012776e2640ae7a6706b8811d6dbb43685`. O fluxo permanece Experimental e sem merge.
+
 ### Checkpoint 2026-09-20 — PR #71 frame-0/frame-1 reexecutado no HEAD final
 
 No branch isolado `codex/rex-sprite-frame-01`, o HEAD `f0d33470f7e677ab6f5012e0488c152e1258c667` contém o código já provado do PR #71 e o rustfmt exigido pelo CI (`f0d3347`). O build canônico `/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/debug/retro-dev-studio` foi refeito com sucesso e tem SHA-256 `e0fec553aceb18df25d30fc22d3655ff8b8f3fdfc00b6fbbed69a28b87da8982`. O frontend runtime da prova desktop corresponde ao commit de código `5b16970d2c35057805e1ea509da077cade5c13fd`; `f0d3347` é apenas formatação de teste Rust.

@@ -2,6 +2,26 @@
 
 Status da fatia: **Experimental / prova desktop concluída no branch isolado**. A composição agora aceita dois frames rastreáveis do mesmo recurso; outros recursos permanecem recusados até possuírem bytes e metadados equivalentes. Esta entrega não promove a descoberta heurística de tiles a recuperação automática de sprites. O painel mostra explicitamente `Frame composto`, `Metadado doador + bytes compilados verificáveis` e `Não é prévia de tile`.
 
+## Rastreabilidade da integração
+
+O #69 (`ee70bc4`) e os heads dos PRs REX #66 (`ba637cf`), #67 (`9f77b40`) e #68 (`09e1d13`) eram linhas paralelas; nenhum head REX era ancestral de #69. `10c89d1` não era ancestral de #69: apenas seu patch equivalente `e998bbd` já estava presente ali. O #70 integrou os três heads por `177c831`, `63e730d` e `af6c0f3`; o #71 (`d9fe40d`) é descendente do HEAD do #70 (`8843018`). A proposta de destino usa `codex/rex-sprite-frame-01-integration`, sem merge.
+
+| Entrega | Código e testes presentes no destino | Equivalência/ausência no #69 |
+| --- | --- | --- |
+| #66 | holdout, gates de sobreposição/categorias e renderer chunky | holdout ausente; renderer chunky somente equivalente em `e998bbd` |
+| #67 | cache/avanço monotônico e negativos de streams/candidatos inválidos | melhorias do scanner ausentes |
+| #68 | oráculo independente de paleta/pixels e negativos de bits reservados | oráculo ausente |
+| #69 | IPC/UI, sessões, cancelamento, catálogo, prévias e E2E | base funcional preservada |
+| #71 | composição assistida, frames 0/1, oráculo RGBA independente, persistência e teste determinístico A→B→A | não existia na base de inspeção |
+
+## Reexecução no destino combinado
+
+No branch `codex/rex-sprite-frame-01-integration`, o HEAD `d9fe40d7b5fcf56127889e4e1095413083b8dd63` foi certificado e compilado no binário `/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/debug/retro-dev-studio` (370.695.936 bytes; SHA-256 `e1174d3b0ef8ff45c41dea91535050f99e9f4fc55368a99cd379ca52c86d460c`). O frontend carregado declarou `d9fe40d`; a árvore estava suja apenas pelos documentos desta proposta e pelos holdouts não rastreados preservados.
+
+O desktop completo passou com ROM `reference.bin` SHA `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`, sessão `inspection-1789907881-00000000` e run `run-inspection-1789907881-00000000-00000001`: identificação, análise, candidato `42128/192`, pixels independentes, mutação negativa, frames 0→1→0, salvar frame-1, reinício/reabertura, wizard bloqueador e releitura após reinício. O cancelamento foi executado separadamente na sessão `inspection-1789907951-00000000`/run `run-inspection-1789907951-00000000-00000001`, com ambos os estados `cancelled`.
+
+Capturas novas: [frame-0](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-20T12-37-49-567Z-sprite-frame-0.png) SHA `0fd0d4c5…`, [frame-1](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-20T12-37-49-567Z-sprite-frame-1.png) SHA `d25bc82e…`, [sprite pós-reinício](/mnt/sdcard/Projects/RetroDevStudio/src-tauri/target-test/validation/inspection-2026-09-20T12-37-49-567Z-sprite-after-restart.png) SHA `7aa6a80a…`. Os hashes completos e a matriz estão no Current Wave; a composição continua assistida por metadados e Experimental.
+
 Correção visual no produto foi preservada no PR #71; o HEAD verificável `f0d3347` contém apenas o rustfmt exigido pelo CI sobre o código já provado em `5b16970`. O frame tem área própria não encolhível, rolagem inteira quando necessário e metadados em bloco separado. A imagem usa `content-box` explícito de 192×312 CSS (64×104 nativos em escala 3×), bordas descontadas pelo E2E, proporção nativa, transparência e `image-rendering: pixelated`. Redução fracionária silenciosa é rejeitada pelo harness.
 
 ## Recurso rastreado
