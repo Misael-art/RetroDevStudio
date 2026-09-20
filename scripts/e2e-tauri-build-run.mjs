@@ -1677,8 +1677,12 @@ function assertSpriteFrameOracles(romBytes, actual, context) {
     context
   );
   const independentPngSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
-  const expectedIndexSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c" : createHash("sha256").update(Buffer.from(expected.pixels)).digest("hex");
-  const expectedRgbaSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58" : independentPngSha256;
+  const expectedIndexSha256 = actual.frameId === "spr_ryo_100/frame-0"
+    ? "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c"
+    : "77b3b0dba715b352c3ace058abefa5d5d1918d2393dc2064b60a9ed01e0e1903";
+  const expectedRgbaSha256 = actual.frameId === "spr_ryo_100/frame-0"
+    ? "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58"
+    : "d331d788f567f2a83e9e1ebcfca19ad0fa77d590b51118f3649f7187b674a0c9";
   const expectedCanvasSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc" : "c63a0fd26c561806f5319fb24380983db10b99998048c678f81d2bf45c7fbde0";
   if (expectedRgbaSha256 !== independentPngSha256 || expectedCanvasSha256 !== independent.pixelsSha256) {
     fail(`Oráculos RGBA independente/canvas não batem com as referências: ${JSON.stringify({ expectedRgbaSha256, independentPngSha256, expectedCanvasSha256, actualCanvas: independent.pixelsSha256, expectedIndexSha256 })}`);
@@ -1701,6 +1705,36 @@ function assertSpriteFrameOracles(romBytes, actual, context) {
     if (!rejected) fail(`Negativo do frame composto não foi detectado: ${label}`);
   }
   return { ...independent, expectedIndexSha256, expectedRgbaSha256, independentPngPixelsSha256: independentPngSha256, expectedCanvasSha256 };
+}
+
+async function verifyRenderedSpriteFrame(sessionId, romBytes, frameId, context) {
+  const romSha256 = createHash("sha256").update(romBytes).digest("hex");
+  const visualEvidence = await waitFor(
+    async () => readRenderedSpriteFramePixels(sessionId),
+    15000,
+    `Frame composto ${frameId} não carregou imagem, dimensões ou pixels`,
+    100
+  );
+  if (!visualEvidence?.image || visualEvidence.resourceId !== "spr_ryo_100" || visualEvidence.frameId !== frameId || visualEvidence.romSha256 !== romSha256) {
+    fail(`Identidade do frame composto divergente (${context}): ${JSON.stringify({ expected: { resourceId: "spr_ryo_100", frameId, romSha256 }, actual: visualEvidence })}`);
+  }
+  const independentEvidence = assertSpriteFrameOracles(romBytes, visualEvidence, `${context}: ${frameId}`);
+  const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+  if (!pngPayload) fail(`Frame composto ${frameId} não expôs uma fonte PNG data: válida.`);
+  const actualPngSha256 = createHash("sha256").update(Buffer.from(pngPayload, "base64")).digest("hex");
+  if (actualPngSha256 !== visualEvidence.pngSha256 || visualEvidence.pixelsSha256 !== independentEvidence.independentPngPixelsSha256 || actualPngSha256 === visualEvidence.pixelsSha256) {
+    fail(`Hashes PNG/RGBA do frame ${frameId} não estão separados ou não batem com o oráculo: ${JSON.stringify({ pngSha256: actualPngSha256, pixelsSha256: visualEvidence.pixelsSha256, expectedPngPixelsSha256: independentEvidence.independentPngPixelsSha256 })}`);
+  }
+  const layout = await waitFor(
+    async () => {
+      const next = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+      return next?.fullyVisible && next.unobstructed && next.exactContentDimensions && next.integerScale && next.pixelated && next.metadataBelow ? next : false;
+    },
+    15000,
+    `Frame composto ${frameId} encolheu, perdeu a escala inteira 3×, ficou obstruído ou sobrepôs os metadados`,
+    100
+  );
+  return { visualEvidence, independentEvidence, actualPngSha256, layout };
 }
 
 function renderExpectedTilePreview(romBytes, offset, size) {
@@ -3628,6 +3662,64 @@ async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = tes
   return clickButtonByTestIdNative(sessionId, testId, label);
 }
 
+async function selectInspectionFrameNative(sessionId, frameId) {
+  const selector = "[data-testid='inspection-sprite-frame-select']";
+  const diagnostic = await executeScript(
+    sessionId,
+    `
+      const select = document.querySelector(${JSON.stringify(selector)});
+      if (!(select instanceof HTMLSelectElement)) return { exists: false };
+      select.scrollIntoView({ block: "center", inline: "center" });
+      const rect = select.getBoundingClientRect();
+      const style = window.getComputedStyle(select);
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = document.elementFromPoint(x, y);
+      const topWithTestId = top instanceof Element ? top.closest("[data-testid]") : null;
+      return {
+        exists: true,
+        value: select.value,
+        visible: rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden",
+        disabled: Boolean(select.disabled),
+        focused: document.activeElement === select,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point: { x, y },
+        topTag: top?.tagName ?? "",
+        topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
+        unobstructed: Boolean(top && (top === select || select.contains(top))),
+      };
+    `
+  );
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled || !diagnostic.unobstructed) {
+    fail(`Seleção nativa de frame bloqueada: ${JSON.stringify({ frameId, diagnostic })}`);
+  }
+  if (diagnostic.value !== frameId) {
+    const elementId = await findElement(sessionId, selector);
+    await clickElement(sessionId, elementId);
+    const key = frameId.endsWith("/frame-1") ? "\uE015" : "\uE013";
+    await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "key", id: "inspection-frame-selector", actions: [
+        { type: "keyDown", value: key },
+        { type: "keyUp", value: key },
+      ] }],
+    });
+    await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "key", id: "inspection-frame-selector-enter", actions: [
+        { type: "keyDown", value: "\uE007" },
+        { type: "keyUp", value: "\uE007" },
+      ] }],
+    });
+  }
+  const selected = await waitFor(
+    async () => executeScript(sessionId, `return document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(frameId)};`),
+    5000,
+    `Seleção nativa não confirmou ${frameId}`,
+    50
+  );
+  if (!selected) fail(`Seleção de frame não foi confirmada: ${frameId}`);
+  return { frameId, diagnostic };
+}
+
 async function closeVisibleConsoleDrawer(sessionId, label = "console inicial") {
   const visible = await executeScript(
     sessionId,
@@ -4721,33 +4813,41 @@ async function main() {
       }
       if (!mutationRejected) fail("O oracle independente aceitou uma imagem com um pixel alterado; a asserção visual está permissiva.");
       console.log(`[inspection-preview] ${JSON.stringify({ candidate: selectedCandidateEvidence, dimensions: [independentPixelEvidence.width, independentPixelEvidence.height], pngSha256: actualPngSha256, pixelsSha256: independentPixelEvidence.pixelsSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, mutationRejected })}`);
-      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame HAMOOPIG");
-      const spriteVisualEvidence = await waitFor(
-        async () => readRenderedSpriteFramePixels(sessionId),
-        15000,
-        "Frame composto HAMOOPIG não carregou imagem, dimensões ou pixels",
-        100
-      );
-      if (!spriteVisualEvidence?.image || spriteVisualEvidence.resourceId !== "spr_ryo_100" || spriteVisualEvidence.frameId !== "spr_ryo_100/frame-0" || spriteVisualEvidence.romSha256 !== createHash("sha256").update(inspectionRomBytes).digest("hex")) {
-        fail(`Identidade do frame composto divergente: ${JSON.stringify(spriteVisualEvidence)}`);
+      const frame0Id = "spr_ryo_100/frame-0";
+      const frame1Id = "spr_ryo_100/frame-1";
+      await selectInspectionFrameNative(sessionId, frame0Id);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-0 HAMOOPIG");
+      const frame0Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "seleção inicial");
+      const spriteFrame0Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-0.png`);
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame0Proof.visualEvidence.romSha256, resource: frame0Proof.visualEvidence.resourceId, frame: frame0Proof.visualEvidence.frameId, nativeSize: [frame0Proof.visualEvidence.naturalWidth, frame0Proof.visualEvidence.naturalHeight], pngSha256: frame0Proof.actualPngSha256, pixelsSha256: frame0Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame0Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame0Proof.independentEvidence.expectedRgbaSha256, layout: frame0Proof.layout, screenshot: spriteFrame0Screenshot })}`);
+
+      await selectInspectionFrameNative(sessionId, frame1Id);
+      const afterFrame1Selection = await readRenderedSpriteFramePixels(sessionId);
+      if (afterFrame1Selection?.frameId === frame0Id) {
+        fail(`A seleção de frame-1 manteve a imagem/metadados do frame-0 durante a troca: ${JSON.stringify(afterFrame1Selection)}`);
       }
-      const spriteIndependentEvidence = assertSpriteFrameOracles(inspectionRomBytes, spriteVisualEvidence, "ROM/manifesto HAMOOPIG conhecidos");
-      const spritePngPayload = String(spriteVisualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
-      if (!spritePngPayload) fail("Frame composto não expôs uma fonte PNG data: válida.");
-      const spriteActualPngSha256 = createHash("sha256").update(Buffer.from(spritePngPayload, "base64")).digest("hex");
-      if (spriteActualPngSha256 !== spriteVisualEvidence.pngSha256 || spriteVisualEvidence.pixelsSha256 !== spriteIndependentEvidence.independentPngPixelsSha256 || spriteActualPngSha256 === spriteVisualEvidence.pixelsSha256) {
-        fail(`Hashes PNG/RGBA do frame composto não estão separados ou não batem com o oráculo: ${JSON.stringify({ pngSha256: spriteActualPngSha256, pixelsSha256: spriteVisualEvidence.pixelsSha256, expectedPngPixelsSha256: spriteIndependentEvidence.independentPngPixelsSha256 })}`);
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ from: frame0Id, to: frame1Id, pending: afterFrame1Selection ? { frame: afterFrame1Selection.frameId, resource: afterFrame1Selection.resourceId } : null, staleFrameRejected: !afterFrame1Selection || afterFrame1Selection.frameId !== frame0Id })}`);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-1 HAMOOPIG");
+      const frame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "troca frame-0 para frame-1");
+      const spriteFrame1Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-1.png`);
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame1Proof.visualEvidence.romSha256, resource: frame1Proof.visualEvidence.resourceId, frame: frame1Proof.visualEvidence.frameId, nativeSize: [frame1Proof.visualEvidence.naturalWidth, frame1Proof.visualEvidence.naturalHeight], pngSha256: frame1Proof.actualPngSha256, pixelsSha256: frame1Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame1Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame1Proof.independentEvidence.expectedRgbaSha256, layout: frame1Proof.layout, screenshot: spriteFrame1Screenshot })}`);
+
+      await selectInspectionFrameNative(sessionId, frame0Id);
+      const afterFrame0Return = await readRenderedSpriteFramePixels(sessionId);
+      if (afterFrame0Return?.frameId === frame1Id) {
+        fail(`A seleção de frame-0 manteve a imagem/metadados do frame-1 durante a troca: ${JSON.stringify(afterFrame0Return)}`);
       }
-      const spriteLayout = await waitFor(
-        async () => {
-          const layout = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
-          return layout?.fullyVisible && layout.unobstructed && layout.exactContentDimensions && layout.integerScale && layout.pixelated && layout.metadataBelow ? layout : false;
-        },
-        15000,
-        "Frame composto encolheu, perdeu a escala inteira 3×, ficou obstruído ou sobrepôs os metadados",
-        100
-      );
-      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: spriteVisualEvidence.romSha256, resource: spriteVisualEvidence.resourceId, frame: spriteVisualEvidence.frameId, nativeSize: [spriteVisualEvidence.naturalWidth, spriteVisualEvidence.naturalHeight], pngSha256: spriteActualPngSha256, pixelsSha256: spriteIndependentEvidence.pixelsSha256, expectedIndexSha256: spriteIndependentEvidence.expectedIndexSha256, expectedRgbaSha256: spriteIndependentEvidence.expectedRgbaSha256, layout: spriteLayout })}`);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do frame-0 HAMOOPIG");
+      const frame0ReturnProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "retorno frame-1 para frame-0");
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ from: frame1Id, to: frame0Id, pending: afterFrame0Return ? { frame: afterFrame0Return.frameId, resource: afterFrame0Return.resourceId } : null, staleFrameRejected: !afterFrame0Return || afterFrame0Return.frameId !== frame1Id, returnedPixelsSha256: frame0ReturnProof.independentEvidence.pixelsSha256 })}`);
+
+      await selectInspectionFrameNative(sessionId, frame1Id);
+      const beforePersistFrame1 = await readRenderedSpriteFramePixels(sessionId);
+      if (beforePersistFrame1?.frameId === frame0Id) {
+        fail(`A seleção final de frame-1 manteve a prévia anterior antes de salvar: ${JSON.stringify(beforePersistFrame1)}`);
+      }
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição final do frame-1 HAMOOPIG");
+      const persistedFrame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "frame-1 antes de salvar");
       const spriteBeforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-before-restart.png`);
       await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
       const persistedSessionId = completedState.session.id;
@@ -4870,6 +4970,16 @@ async function main() {
         100
       );
       console.log(`[inspection-reopen] state=${JSON.stringify(reopenedState)}`);
+      const reopenedFrameSelection = await waitFor(
+        async () => executeScript(sessionId, `return document.querySelector("[data-testid='inspection-sprite-frame-select']")?.value ?? "";`),
+        15000,
+        "Seleção persistida de frame-1 não foi restaurada após reinício",
+        100
+      );
+      if (reopenedFrameSelection !== "spr_ryo_100/frame-1") {
+        fail(`Seleção de frame restaurada diverge do frame salvo: ${JSON.stringify({ expected: "spr_ryo_100/frame-1", actual: reopenedFrameSelection })}`);
+      }
+      console.log(`[inspection-reopen-frame-selection] ${JSON.stringify({ sessionId: reopenedState.session.id, frameId: reopenedFrameSelection, restored: true })}`);
       const reopenedCandidate = await waitFor(
         async () => executeScript(sessionId, `return document.querySelector("[data-testid='${candidateTestId}']")?.getAttribute("data-testid") ?? "";`),
         30000,
@@ -4929,27 +5039,12 @@ async function main() {
         fail(`Hashes PNG/RGBA reabertos não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256AfterRestart, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256 })}`);
       }
       console.log(`[inspection-reopen-visual] ${JSON.stringify({ romSha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), sessionId: reopenedState.session.id, identitySha256: reopenedState.session.identitySha256, candidate: reopenedCandidateEvidence, dimensions: [independentPixelEvidenceAfterRestart.width, independentPixelEvidenceAfterRestart.height], pngSha256: actualPngSha256AfterRestart, pixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, previewLayout: reopenedPreviewLayout, reopenDiagnostic })}`);
-      await clickButtonByTestIdNative(sessionId, "inspection-compose-sprite", "composição do frame após reinício");
-      const reopenedSpriteVisualEvidence = await waitFor(
-        async () => readRenderedSpriteFramePixels(sessionId),
-        15000,
-        "Frame composto HAMOOPIG não voltou após reabrir a sessão",
-        100
-      );
-      const reopenedSpriteIndependentEvidence = assertSpriteFrameOracles(inspectionRomBytes, reopenedSpriteVisualEvidence, "ROM/manifesto HAMOOPIG após reinício");
-      if (reopenedSpriteVisualEvidence?.romSha256 !== reopenedState.session.identitySha256 || reopenedSpriteVisualEvidence?.resourceId !== "spr_ryo_100" || reopenedSpriteVisualEvidence?.frameId !== "spr_ryo_100/frame-0") {
-        fail(`Frame composto reaberto diverge da identidade persistida: ${JSON.stringify({ sprite: reopenedSpriteVisualEvidence, session: reopenedState })}`);
+      await clickButtonByTestIdNative(sessionId, "inspection-compose-sprite", "composição do frame-1 após reinício");
+      const reopenedSpriteProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, "spr_ryo_100/frame-1", "ROM/manifesto HAMOOPIG após reinício");
+      if (reopenedSpriteProof.visualEvidence.romSha256 !== reopenedState.session.identitySha256 || reopenedSpriteProof.visualEvidence.resourceId !== "spr_ryo_100" || reopenedSpriteProof.visualEvidence.frameId !== "spr_ryo_100/frame-1") {
+        fail(`Frame composto reaberto diverge da identidade persistida: ${JSON.stringify({ sprite: reopenedSpriteProof.visualEvidence, session: reopenedState })}`);
       }
-      const reopenedSpriteLayout = await waitFor(
-        async () => {
-          const layout = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
-          return layout?.fullyVisible && layout.unobstructed && layout.exactContentDimensions && layout.integerScale && layout.pixelated && layout.metadataBelow ? layout : false;
-        },
-        15000,
-        "Frame composto reaberto encolheu, perdeu a escala inteira 3×, ficou obstruído ou sobrepôs os metadados",
-        100
-      );
-      console.log(`[inspection-reopen-sprite-frame] ${JSON.stringify({ romSha256: reopenedSpriteVisualEvidence.romSha256, resource: reopenedSpriteVisualEvidence.resourceId, frame: reopenedSpriteVisualEvidence.frameId, dimensions: [reopenedSpriteVisualEvidence.naturalWidth, reopenedSpriteVisualEvidence.naturalHeight], pngSha256: reopenedSpriteVisualEvidence.pngSha256, pixelsSha256: reopenedSpriteIndependentEvidence.pixelsSha256, expectedRgbaSha256: reopenedSpriteIndependentEvidence.expectedRgbaSha256, layout: reopenedSpriteLayout })}`);
+      console.log(`[inspection-reopen-sprite-frame] ${JSON.stringify({ romSha256: reopenedSpriteProof.visualEvidence.romSha256, resource: reopenedSpriteProof.visualEvidence.resourceId, frame: reopenedSpriteProof.visualEvidence.frameId, dimensions: [reopenedSpriteProof.visualEvidence.naturalWidth, reopenedSpriteProof.visualEvidence.naturalHeight], pngSha256: reopenedSpriteProof.actualPngSha256, pixelsSha256: reopenedSpriteProof.independentEvidence.pixelsSha256, expectedRgbaSha256: reopenedSpriteProof.independentEvidence.expectedRgbaSha256, layout: reopenedSpriteProof.layout, frameSelection: reopenedFrameSelection })}`);
       const spriteAfterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-after-restart.png`);
       const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
       console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
@@ -4958,6 +5053,8 @@ async function main() {
       console.log(`Prévia após reinício: pixels PNG recalculados (${reopenedVisualEvidence.naturalWidth}x${reopenedVisualEvidence.naturalHeight})`);
       console.log(`Evidências: ${beforeRestartScreenshot}`);
       console.log(`Evidências: ${afterRestartScreenshot}`);
+      console.log(`Evidências do frame-0: ${spriteFrame0Screenshot}`);
+      console.log(`Evidências do frame-1: ${spriteFrame1Screenshot}`);
       console.log(`Evidências do frame composto: ${spriteBeforeRestartScreenshot}`);
       console.log(`Evidências do frame composto após reinício: ${spriteAfterRestartScreenshot}`);
       return;

@@ -70,6 +70,17 @@ const FRAME_MANIFESTS: [SpriteManifest; 2] = [
     },
 ];
 
+fn manifest_for(resource_id: &str, frame_id: &str) -> Result<&'static SpriteManifest, String> {
+    FRAME_MANIFESTS
+        .iter()
+        .find(|manifest| manifest.frame_id == frame_id && resource_id == RESOURCE_ID)
+        .ok_or_else(|| {
+            format!(
+                "sprite_manifest_missing: nenhum frame HAMOOPIG rastreável para '{resource_id}/{frame_id}'"
+            )
+        })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SpriteFramePart {
     pub tile_start: u16,
@@ -270,14 +281,7 @@ pub fn compose_for_session(
     flip_x: bool,
     flip_y: bool,
 ) -> Result<InspectionSpriteFrame, String> {
-    let manifest = FRAME_MANIFESTS
-        .iter()
-        .find(|manifest| manifest.frame_id == frame_id && resource_id == RESOURCE_ID)
-        .ok_or_else(|| {
-            format!(
-                "sprite_manifest_missing: nenhum frame HAMOOPIG rastreável para '{resource_id}/{frame_id}'"
-            )
-        })?;
+    let manifest = manifest_for(resource_id, frame_id)?;
     let rom_path = Path::new(&session.rom_path);
     let (identity, rom) = rex_read_rom(rom_path)?;
     if identity.normalized_sha256 != HAMOOPIG_REFERENCE_SHA256 {
@@ -511,5 +515,11 @@ mod tests {
         assert_eq!(parts.iter().map(|part| part.tile_count).sum::<usize>(), 66);
         assert_eq!(FRAME_MANIFESTS[1].tile_data_offset, 0x86ba0);
         assert_eq!(FRAME_MANIFESTS[1].descriptor_offset, 0x222a2);
+    }
+
+    #[test]
+    fn unknown_or_mismatched_manifest_is_rejected_without_fallback() {
+        assert!(manifest_for("spr_ryo_100", "spr_ryo_100/frame-9").is_err());
+        assert!(manifest_for("spr_ryo_101", "spr_ryo_100/frame-1").is_err());
     }
 }

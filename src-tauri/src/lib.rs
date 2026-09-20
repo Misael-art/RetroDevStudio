@@ -2159,11 +2159,12 @@ fn rex_inspection_save_palette_choice(
 #[tauri::command]
 fn rex_inspection_save(
     session_id: String,
+    sprite_frame_id: Option<String>,
 ) -> Result<
     tools::reverse::decomp::inspection::InspectionSession,
     tools::reverse::decomp::inspection::InspectionError,
 > {
-    tools::reverse::decomp::inspection::save(&session_id)
+    tools::reverse::decomp::inspection::save(&session_id, sprite_frame_id.as_deref())
         .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
 }
 

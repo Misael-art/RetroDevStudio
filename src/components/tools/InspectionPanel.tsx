@@ -139,6 +139,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       if (requestId !== statusRequestSeq.current || sessionRef.current?.session_id !== sessionId || generation.current !== expectedGeneration) return;
       sessionRef.current = status.session;
       setSession(status.session);
+      setSpriteFrameId(status.session.sprite_frame_id ?? "spr_ryo_100/frame-0");
       const nextRun = status.run && status.run.generation === expectedGeneration ? status.run : null;
       if (nextRun) {
         const buffered = bufferedProgress.current.get(`${sessionId}:${expectedGeneration}`);
@@ -216,6 +217,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       sessionRef.current = next;
       selectedRef.current = null;
       setSession(next);
+      setSpriteFrameId(next.sprite_frame_id ?? "spr_ryo_100/frame-0");
       setRun(null);
       setPage(null);
       setSelected(null);
@@ -247,6 +249,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       savedSessionId.current = next.session_id;
       setSelectedSavedSessionId(next.session_id);
       setSession(next);
+      setSpriteFrameId(next.sprite_frame_id ?? "spr_ryo_100/frame-0");
       setRun(null);
       if (next.status === "completed") await refreshCatalog(next.session_id, 0);
       logMessage("success", `[Inspeção] Sessão ${id} reaberta e identidade verificada.`);
@@ -313,11 +316,16 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   async function composeSpriteFrame() {
     const sessionId = sessionRef.current?.session_id;
     if (!sessionId) return;
+    const requestedFrameId = spriteFrameId;
     const requestId = ++previewRequestSeq.current;
+    setSpriteFrame(null);
     setSpriteFrameBusy(true);
     try {
-      const next = await inspectionSpriteFrame(sessionId, "spr_ryo_100", spriteFrameId, false, false);
+      const next = await inspectionSpriteFrame(sessionId, "spr_ryo_100", requestedFrameId, false, false);
       if (requestId !== previewRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
+      if (next.resource_id !== "spr_ryo_100" || next.frame_id !== requestedFrameId) {
+        throw new Error(`Resposta de composição incompatível: esperado ${requestedFrameId}, recebido ${next.resource_id}/${next.frame_id}`);
+      }
       setSpriteFrame(next);
       logMessage("success", "[Inspeção] Frame composto HAMOOPIG verificado contra bytes e metadado doador.");
     } catch (error) {
@@ -345,10 +353,11 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   async function save() {
     if (!session) return;
     try {
-      const next = await inspectionSave(session.session_id);
+      const next = await inspectionSave(session.session_id, spriteFrameId);
       if (sessionRef.current?.session_id !== next.session_id) return;
       sessionRef.current = next;
       setSession(next);
+      setSpriteFrameId(next.sprite_frame_id ?? spriteFrameId);
       logMessage("success", "[Inspeção] Snapshot da sessão salvo.");
       void refreshSavedSessions();
     } catch (error) {

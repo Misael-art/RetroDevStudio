@@ -316,4 +316,48 @@ describe("InspectionPanel", () => {
 
     expect(mocks.inspectionSpriteFrame).toHaveBeenCalledWith(completedSession.session_id, "spr_ryo_100", "spr_ryo_100/frame-1", false, false);
   });
+
+  it("rejects a delayed response carrying the wrong frame metadata without reusing the previous image", async () => {
+    mocks.inspectionOpen.mockResolvedValue(completedSession);
+    mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
+    mocks.inspectionCatalogPage.mockResolvedValue({ session_id: completedSession.session_id, run_id: completed.run_id, offset: 0, limit: 24, total_candidates: 0, candidates: [], unknown_regions: [], user_choices: [] });
+    mocks.inspectionSpriteFrame.mockResolvedValue({
+      session_id: completedSession.session_id,
+      resource_id: "spr_ryo_100",
+      frame_id: "spr_ryo_100/frame-0",
+      available: true,
+      width: 64,
+      height: 104,
+      data_url: "data:image/png;base64,wrong-frame",
+      png_sha256: "wrong",
+      pixels_sha256: "wrong",
+      rom_sha256: "b".repeat(64),
+      tile_data_offset: 0x863a0,
+      tile_data_size: 0x800,
+      palette_offset: 0x2cc68,
+      palette_size: 0x20,
+      descriptor_offset: 0x22260,
+      flip_x: false,
+      flip_y: false,
+      transparency_index: 0,
+      parts: [],
+      metadata_source: "wrong",
+      rom_evidence: [],
+      donor_evidence: [],
+      limitations: [],
+    });
+
+    await act(async () => { root.render(<InspectionPanel logMessage={vi.fn()} />); await flush(); });
+    setTextInput(container.querySelector("input[type='text']") as Element, "/roms/test.md");
+    await act(async () => { await flush(); });
+    const identifyButton = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Identificar base") as HTMLButtonElement;
+    await act(async () => { identifyButton.click(); await flush(); await flush(); });
+    const frameSelect = container.querySelector("[data-testid='inspection-sprite-frame-select']") as HTMLSelectElement;
+    frameSelect.value = "spr_ryo_100/frame-1";
+    frameSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    await act(async () => { await flush(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-compose-sprite']") as HTMLButtonElement).click(); await flush(); });
+
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")).toBeNull();
+  });
 });

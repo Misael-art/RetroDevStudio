@@ -115,6 +115,8 @@ pub struct InspectionSession {
     pub created_at_unix: u64,
     pub completed_at_unix: Option<u64>,
     pub error: Option<InspectionError>,
+    #[serde(default)]
+    pub sprite_frame_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -205,6 +207,7 @@ pub struct InspectionPreview {
     pub pixels_sha256: Option<String>,
 }
 
+#[derive(Clone)]
 struct StoredInspection {
     session: InspectionSession,
     catalog: ExtractionCatalog,
@@ -883,6 +886,7 @@ pub fn open(rom_path: &str) -> Result<InspectionSession, String> {
         created_at_unix: now_unix(),
         completed_at_unix: None,
         error: None,
+        sprite_frame_id: None,
     };
     persist_session(&decomp_work_dir(), &session)?;
     sessions().lock().map_err(|e| e.to_string())?.insert(
@@ -1291,9 +1295,14 @@ pub fn save_palette_choice(
     })
 }
 
-pub fn save(session_id: &str) -> Result<InspectionSession, String> {
-    let stored = get_stored_session(session_id)?;
+pub fn save(session_id: &str, sprite_frame_id: Option<&str>) -> Result<InspectionSession, String> {
+    let mut stored = get_stored_session(session_id)?;
+    stored.session.sprite_frame_id = sprite_frame_id.map(str::to_string);
     persist_session(&decomp_work_dir(), &stored.session)?;
+    sessions()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(session_id.to_string(), stored.clone());
     Ok(stored.session)
 }
 

@@ -383,6 +383,7 @@ export interface InspectionSession {
   created_at_unix: number;
   completed_at_unix?: number | null;
   error?: InspectionError | null;
+  sprite_frame_id?: string | null;
 }
 
 export interface InspectionProgress {
@@ -578,8 +579,8 @@ export function inspectionSavePaletteChoice(
   });
 }
 
-export function inspectionSave(sessionId: string): Promise<InspectionSession> {
-  return invoke<InspectionSession>("rex_inspection_save", { sessionId });
+export function inspectionSave(sessionId: string, spriteFrameId?: string): Promise<InspectionSession> {
+  return invoke<InspectionSession>("rex_inspection_save", { sessionId, spriteFrameId });
 }
 
 export function listenInspectionProgress(
