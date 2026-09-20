@@ -15,6 +15,7 @@ import { constants as fsConstants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -422,6 +423,10 @@ function parseArgs(argv) {
           "onboarding-shell",
           "qa-rc",
           "create-game-from-zero",
+          "inspection",
+          "inspection-cancel",
+          "inspection-complete",
+          "inspection-preview-unavailable",
         ].includes(
           value
         )
@@ -1062,7 +1067,7 @@ async function detectBuildFailure(sessionId, sinceIndex = 0) {
   return `build falhou (${failure.diagnostic.area}): ${detail}`;
 }
 
-async function webdriverRequest(method, route, body) {
+async function webdriverRequestDetailed(method, route, body) {
   const response = await fetch(`${driverServerUrl}${route}`, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -1070,18 +1075,36 @@ async function webdriverRequest(method, route, body) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { raw_body: text };
+  }
 
-  if (!response.ok) {
-    const details = payload?.value?.message ?? response.statusText;
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    headers: Object.fromEntries(response.headers.entries()),
+    body: text,
+    payload,
+  };
+}
+
+async function webdriverRequest(method, route, body) {
+  const result = await webdriverRequestDetailed(method, route, body);
+
+  if (!result.ok) {
+    const details = result.payload?.value?.message ?? result.statusText;
     throw new Error(`${method} ${route} falhou: ${details}`);
   }
 
-  if (payload?.value?.error) {
-    throw new Error(payload.value.message ?? `${method} ${route} retornou erro WebDriver.`);
+  if (result.payload?.value?.error) {
+    throw new Error(result.payload.value.message ?? `${method} ${route} retornou erro WebDriver.`);
   }
 
-  return payload;
+  return result.payload;
 }
 
 async function isDriverOnline() {
@@ -1392,6 +1415,561 @@ async function fillInputBySelector(sessionId, selector, value) {
   if (!result) {
     fail(`Falha ao preencher input via seletor: ${selector}`);
   }
+}
+
+async function readInspectionUiState(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const panel = document.querySelector('[data-testid="reverse-inspection-panel"]');
+      const identify = panel?.querySelector('[data-testid="inspection-identify-state"]');
+      const session = panel?.querySelector('[data-testid="inspection-session"]');
+      const run = panel?.querySelector('[data-testid="inspection-run"]');
+      const input = panel?.querySelector('input[type="text"]');
+      const image = panel?.querySelector('[data-testid="inspection-preview-image"]');
+      return {
+        inputValue: input instanceof HTMLInputElement ? input.value : null,
+        identify: identify ? {
+          state: identify.getAttribute('data-state'),
+          inputValue: identify.getAttribute('data-input-value'),
+          error: identify.getAttribute('data-error'),
+          sessionId: identify.getAttribute('data-session-id'),
+          sessionStatus: identify.getAttribute('data-session-status'),
+        } : null,
+        session: session ? {
+          id: session.getAttribute('data-session-id'),
+          status: session.getAttribute('data-session-status'),
+          identitySha256: session.getAttribute('data-identity-sha256'),
+        } : null,
+        run: run ? {
+          id: run.getAttribute('data-run-id'),
+          status: run.getAttribute('data-run-status'),
+          generation: run.getAttribute('data-run-generation'),
+        } : null,
+        preview: image ? {
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          declaredWidth: Number(image.getAttribute('data-preview-width') || 0),
+          declaredHeight: Number(image.getAttribute('data-preview-height') || 0),
+          pngSha256: image.getAttribute('data-png-sha256'),
+          pixelsSha256: image.getAttribute('data-pixels-sha256'),
+          artifactSha256: image.getAttribute('data-artifact-sha256'),
+          src: image.getAttribute('src'),
+        } : null,
+        unavailable: Boolean(panel?.querySelector('[data-testid="inspection-preview-unavailable"]')),
+      };
+    `
+  );
+}
+
+async function readRenderedPreviewPixels(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-preview-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return {
+        image: true,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        pngSha256: image.getAttribute("data-png-sha256") || "",
+        pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+        artifactSha256: image.getAttribute("data-artifact-sha256") || "",
+        src: image.currentSrc || image.src,
+        pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+      };
+    `
+  );
+}
+
+async function readRenderedSpriteFramePixels(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-sprite-frame-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return {
+        image: true,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        romSha256: image.getAttribute("data-sprite-rom-sha256") || "",
+        resourceId: image.getAttribute("data-sprite-resource") || "",
+        frameId: image.getAttribute("data-sprite-frame") || "",
+        pngSha256: image.getAttribute("data-png-sha256") || "",
+        pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+        src: image.currentSrc || image.src,
+        pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+      };
+    `
+  );
+}
+
+async function ensureSpriteFrameVisibleAndUnobstructed(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-sprite-frame-image"]');
+      const stage = document.querySelector('[data-testid="inspection-sprite-frame-stage"]');
+      const metadata = document.querySelector('[data-testid="inspection-sprite-frame-metadata"]');
+      if (!(image instanceof HTMLImageElement) || !(stage instanceof HTMLElement) || !(metadata instanceof HTMLElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      image.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = image.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const metadataRect = metadata.getBoundingClientRect();
+      const style = window.getComputedStyle(image);
+      const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0;
+      const borderRight = Number.parseFloat(style.borderRightWidth) || 0;
+      const borderTop = Number.parseFloat(style.borderTopWidth) || 0;
+      const borderBottom = Number.parseFloat(style.borderBottomWidth) || 0;
+      const contentWidth = rect.width - borderLeft - borderRight;
+      const contentHeight = rect.height - borderTop - borderBottom;
+      const cssWidth = Number.parseFloat(style.width) || 0;
+      const cssHeight = Number.parseFloat(style.height) || 0;
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
+      const unobstructed = Boolean(top && (top === image || image.contains(top)));
+      const expectedWidth = 192;
+      const expectedHeight = 312;
+      const exactContentDimensions = Math.abs(contentWidth - expectedWidth) < 0.01 && Math.abs(contentHeight - expectedHeight) < 0.01;
+      const integerScale = Math.abs(contentWidth / image.naturalWidth - 3) < 0.01 && Math.abs(contentHeight / image.naturalHeight - 3) < 0.01;
+      const metadataBelow = metadataRect.top >= rect.bottom - 0.01;
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        content: { width: contentWidth, height: contentHeight },
+        css: { width: cssWidth, height: cssHeight, boxSizing: style.boxSizing, imageRendering: style.imageRendering },
+        borders: { left: borderLeft, right: borderRight, top: borderTop, bottom: borderBottom },
+        stageRect: { x: stageRect.x, y: stageRect.y, width: stageRect.width, height: stageRect.height },
+        metadataRect: { x: metadataRect.x, y: metadataRect.y, width: metadataRect.width, height: metadataRect.height },
+        naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
+        fullyVisible,
+        unobstructed,
+        exactContentDimensions,
+        integerScale,
+        pixelated: style.imageRendering === 'pixelated',
+        metadataBelow,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: topWithTestId?.getAttribute('data-testid') ?? '',
+        stageOverflowX: window.getComputedStyle(stage).overflowX,
+      };
+    `
+  );
+}
+
+function renderExpectedSpriteFrame(romBytes, options = {}) {
+  const frameId = options.frameId ?? "spr_ryo_100/frame-0";
+  const manifests = {
+    "spr_ryo_100/frame-0": {
+      tileDataOffset: 0x863a0,
+      descriptorOffset: 0x22260,
+      tileCount: 64,
+      descriptors: [
+        [0x2c, 0x1c, 0x0f, 0x05, 0x1b, 0x10], [0x0c, 0x3c, 0x0f, 0x04, 0x1c, 0x10],
+        [0x37, 0x11, 0x07, 0x25, 0x0b, 0x08], [0x14, 0x3c, 0x06, 0x24, 0x0c, 0x06],
+        [0x4c, 0x0c, 0x09, 0x05, 0x23, 0x06], [0x57, 0x01, 0x09, 0x25, 0x03, 0x06],
+        [0x58, 0x00, 0x05, 0x00, 0x30, 0x04], [0x04, 0x5c, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-1": {
+      tileDataOffset: 0x86ba0,
+      descriptorOffset: 0x222a2,
+      tileCount: 66,
+      descriptors: [
+        [0x11, 0x37, 0x0f, 0x07, 0x19, 0x10], [0x31, 0x1f, 0x0e, 0x08, 0x18, 0x0c],
+        [0x37, 0x11, 0x07, 0x24, 0x0c, 0x08], [0x11, 0x3f, 0x06, 0x27, 0x09, 0x06],
+        [0x49, 0x0f, 0x09, 0x05, 0x23, 0x06], [0x57, 0x01, 0x09, 0x24, 0x04, 0x06],
+        [0x58, 0x00, 0x09, 0x00, 0x28, 0x06], [0x04, 0x54, 0x09, 0x0c, 0x1c, 0x06],
+      ],
+    },
+  };
+  const manifest = manifests[frameId];
+  if (!manifest) fail(`Manifesto independente ausente para ${frameId}`);
+  const tileDataOffset = manifest.tileDataOffset;
+  const paletteOffset = 0x2cc68;
+  const width = 64;
+  const height = 104;
+  const descriptors = manifest.descriptors;
+  const descriptorBytes = Buffer.from(descriptors.flat());
+  if (!descriptorBytes.equals(romBytes.subarray(manifest.descriptorOffset, manifest.descriptorOffset + descriptorBytes.length))) {
+    fail(`Descritores independentes de ${frameId} divergiram da ROM de referência.`);
+  }
+  const pixels = Buffer.alloc(width * height * 4);
+  const tileOrdering = options.tileOrdering ?? "vertical";
+  const paletteDelta = options.paletteDelta ?? 0;
+  const flipX = Boolean(options.flipX);
+  const flipY = Boolean(options.flipY);
+  let tileStart = 0;
+  const color = (index) => {
+    const wordOffset = paletteOffset + index * 2;
+    let word = romBytes.readUInt16BE(wordOffset);
+    if (index === 1) word ^= paletteDelta;
+    return [((word >> 1) & 7) * 36, ((word >> 5) & 7) * 36, ((word >> 9) & 7) * 36, index === 0 ? 0 : 255];
+  };
+  const put = (x, y, index) => {
+    const pixel = (y * width + x) * 4;
+    const rgba = index === 0 && options.transparentRgb === "canvas" ? [0, 0, 0, 0] : color(index);
+    pixels[pixel] = rgba[0];
+    pixels[pixel + 1] = rgba[1];
+    pixels[pixel + 2] = rgba[2];
+    pixels[pixel + 3] = rgba[3];
+  };
+  const transparent = options.transparentRgb === "canvas" ? [0, 0, 0, 0] : color(0);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const offset = pixel * 4;
+    pixels[offset] = transparent[0];
+    pixels[offset + 1] = transparent[1];
+    pixels[offset + 2] = transparent[2];
+    pixels[offset + 3] = transparent[3];
+  }
+  for (const [offsetY, offsetYFlip, size, offsetX, offsetXFlip, tileCount] of descriptors) {
+    const tileWidth = (size >> 2) + 1;
+    const tileHeight = (size & 3) + 1;
+    if (tileCount !== tileWidth * tileHeight) fail(`Descritor com tileCount inconsistente: ${JSON.stringify({ size, tileCount })}`);
+    for (let localX = 0; localX < tileWidth; localX += 1) {
+      for (let localY = 0; localY < tileHeight; localY += 1) {
+        const sourceX = flipX ? tileWidth - 1 - localX : localX;
+        const sourceY = flipY ? tileHeight - 1 - localY : localY;
+        const tileInPart = tileOrdering === "vertical"
+          ? sourceX * tileHeight + sourceY
+          : sourceY * tileWidth + sourceX;
+        const tileIndex = tileStart + tileInPart;
+        const destX = (flipX ? offsetXFlip : offsetX) + localX * 8;
+        const destY = (flipY ? offsetYFlip : offsetY) + localY * 8;
+        for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+          for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+            const sourcePixelX = flipX ? 7 - pixelX : pixelX;
+            const sourcePixelY = flipY ? 7 - pixelY : pixelY;
+            const packedByte = romBytes[tileDataOffset + tileIndex * 32 + sourcePixelY * 4 + Math.floor(sourcePixelX / 2)];
+            const index = sourcePixelX % 2 === 0 ? packedByte >> 4 : packedByte & 0x0f;
+            put(destX + pixelX, destY + pixelY, index);
+          }
+        }
+      }
+    }
+    tileStart += tileCount;
+  }
+  if (tileStart !== manifest.tileCount) fail(`Oráculo independente esperava ${manifest.tileCount} tiles e obteve ${tileStart}`);
+  return { width, height, pixels, frameId };
+}
+
+function assertSpriteFrameOracles(romBytes, actual, context) {
+  const expected = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId, transparentRgb: "canvas" });
+  const independentPng = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId });
+  const independent = assertExactPreviewPixels(
+    { width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels },
+    expected,
+    context
+  );
+  const independentPngSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
+  const expectedIndexSha256 = actual.frameId === "spr_ryo_100/frame-0"
+    ? "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c"
+    : "77b3b0dba715b352c3ace058abefa5d5d1918d2393dc2064b60a9ed01e0e1903";
+  const expectedRgbaSha256 = actual.frameId === "spr_ryo_100/frame-0"
+    ? "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58"
+    : "15dab9d16df147cc1bb81348fbc0d0a7e65458b34d3d77541df536024af768d0";
+  const expectedCanvasSha256 = actual.frameId === "spr_ryo_100/frame-0" ? "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc" : "c63a0fd26c561806f5319fb24380983db10b99998048c678f81d2bf45c7fbde0";
+  if (expectedRgbaSha256 !== independentPngSha256 || expectedCanvasSha256 !== independent.pixelsSha256) {
+    fail(`Oráculos RGBA independente/canvas não batem com as referências: ${JSON.stringify({ expectedRgbaSha256, independentPngSha256, expectedCanvasSha256, actualCanvas: independent.pixelsSha256, expectedIndexSha256 })}`);
+  }
+  for (const [label, variant] of [
+    ["ordem vertical -> row-major", { tileOrdering: "row-major" }],
+    ["paleta alterada", { paletteDelta: 0x0200 }],
+    ["flip horizontal", { flipX: true }],
+  ]) {
+    let rejected = false;
+    try {
+      assertExactPreviewPixels(
+        { width: actual.naturalWidth, height: actual.naturalHeight, pixels: renderExpectedSpriteFrame(romBytes, { ...variant, transparentRgb: "canvas" }).pixels },
+        expected,
+        `${context}: negativo ${label}`
+      );
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) fail(`Negativo do frame composto não foi detectado: ${label}`);
+  }
+  return { ...independent, expectedIndexSha256, expectedRgbaSha256, independentPngPixelsSha256: independentPngSha256, expectedCanvasSha256 };
+}
+
+async function verifyRenderedSpriteFrame(sessionId, romBytes, frameId, context) {
+  const romSha256 = createHash("sha256").update(romBytes).digest("hex");
+  let visualEvidence;
+  try {
+    visualEvidence = await waitFor(
+      async () => readRenderedSpriteFramePixels(sessionId),
+      15000,
+      `Frame composto ${frameId} não carregou imagem, dimensões ou pixels`,
+      100
+    );
+  } catch (error) {
+    const uiState = await readInspectionUiState(sessionId);
+    const automation = await readAutomationState(sessionId);
+    const composeButton = await inspectNativeButtonTarget(sessionId, "inspection-compose-sprite");
+    console.log(`[inspection-sprite-frame-failure] ${JSON.stringify({ context, frameId, uiState, composeButton, inspectionLogs: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
+    throw error;
+  }
+  if (!visualEvidence?.image || visualEvidence.resourceId !== "spr_ryo_100" || visualEvidence.frameId !== frameId || visualEvidence.romSha256 !== romSha256) {
+    fail(`Identidade do frame composto divergente (${context}): ${JSON.stringify({ expected: { resourceId: "spr_ryo_100", frameId, romSha256 }, actual: visualEvidence })}`);
+  }
+  const independentEvidence = assertSpriteFrameOracles(romBytes, visualEvidence, `${context}: ${frameId}`);
+  const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+  if (!pngPayload) fail(`Frame composto ${frameId} não expôs uma fonte PNG data: válida.`);
+  const actualPngSha256 = createHash("sha256").update(Buffer.from(pngPayload, "base64")).digest("hex");
+  if (actualPngSha256 !== visualEvidence.pngSha256 || visualEvidence.pixelsSha256 !== independentEvidence.independentPngPixelsSha256 || actualPngSha256 === visualEvidence.pixelsSha256) {
+    fail(`Hashes PNG/RGBA do frame ${frameId} não estão separados ou não batem com o oráculo: ${JSON.stringify({ pngSha256: actualPngSha256, pixelsSha256: visualEvidence.pixelsSha256, expectedPngPixelsSha256: independentEvidence.independentPngPixelsSha256 })}`);
+  }
+  const layout = await waitFor(
+    async () => {
+      const next = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+      return next?.fullyVisible && next.unobstructed && next.exactContentDimensions && next.integerScale && next.pixelated && next.metadataBelow ? next : false;
+    },
+    15000,
+    `Frame composto ${frameId} encolheu, perdeu a escala inteira 3×, ficou obstruído ou sobrepôs os metadados`,
+    100
+  );
+  return { visualEvidence, independentEvidence, actualPngSha256, layout };
+}
+
+function renderExpectedTilePreview(romBytes, offset, size) {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset < 0 || size <= 0 || offset + size > romBytes.length) {
+    fail(`Especificação independente de candidato inválida: offset=${offset} size=${size} ROM=${romBytes.length}`);
+  }
+  const tileCount = Math.min(Math.floor(size / 32), 32);
+  if (tileCount < 1) fail(`Candidato conhecido não contém um tile completo: size=${size}`);
+  const width = 16 * 8 * 2;
+  const height = Math.ceil(tileCount / 16) * 8 * 2;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let tileIndex = 0; tileIndex < tileCount; tileIndex += 1) {
+    const base = offset + tileIndex * 32;
+    const column = tileIndex % 16;
+    const row = Math.floor(tileIndex / 16);
+    for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+      for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+        // Mega Drive/SGDK chunky 4bpp: each byte stores two pixels;
+        // high nibble is the left pixel, low nibble the right pixel.
+        const packedByte = romBytes[base + pixelY * 4 + Math.floor(pixelX / 2)];
+        const value = pixelX % 2 === 0 ? packedByte >> 4 : packedByte & 0x0f;
+        const shade = value * 17;
+        for (let scaleY = 0; scaleY < 2; scaleY += 1) {
+          for (let scaleX = 0; scaleX < 2; scaleX += 1) {
+            const x = column * 16 + pixelX * 2 + scaleX;
+            const y = row * 16 + pixelY * 2 + scaleY;
+            const pixel = (y * width + x) * 4;
+            pixels[pixel] = shade;
+            pixels[pixel + 1] = shade;
+            pixels[pixel + 2] = shade;
+            pixels[pixel + 3] = 255;
+          }
+        }
+      }
+    }
+  }
+  return { width, height, pixels };
+}
+
+function assertChunkyGoldenOracle() {
+  const goldenRows = [
+    [0x12, 0x34, 0x56, 0x78],
+    [0x87, 0x65, 0x43, 0x21],
+    [0x13, 0x57, 0x9b, 0xdf],
+    [0xf0, 0xe1, 0xd2, 0xc3],
+    [0x24, 0x68, 0xac, 0xef],
+    [0xfe, 0xdc, 0xba, 0x98],
+    [0x31, 0x42, 0x53, 0x64],
+    [0x75, 0x86, 0x97, 0xa8],
+  ];
+  const goldenRom = Buffer.alloc(32);
+  goldenRows.forEach((row, index) => row.forEach((value, byteIndex) => { goldenRom[index * 4 + byteIndex] = value; }));
+  const expected = renderExpectedTilePreview(goldenRom, 0, 32);
+  goldenRows.forEach((row, y) => row.flatMap((value) => [value >> 4, value & 0x0f]).forEach((index, x) => {
+    const pixel = (y * 2 * expected.width + x * 2) * 4;
+    const expectedShade = index * 17;
+    if (expected.pixels[pixel] !== expectedShade || expected.pixels[pixel + 1] !== expectedShade || expected.pixels[pixel + 2] !== expectedShade || expected.pixels[pixel + 3] !== 255) {
+      fail(`Golden chunky inválido no oracle: linha=${y} pixel=${x} valor=${index}`);
+    }
+  }));
+}
+
+function assertExactPreviewPixels(actual, expected, context) {
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    fail(`Dimensões independentes divergentes (${context}): ${JSON.stringify({ actual: [actual.width, actual.height], expected: [expected.width, expected.height] })}`);
+  }
+  const actualPixels = Buffer.from(actual.pixels);
+  if (!actualPixels.equals(expected.pixels)) {
+    let firstDifference = -1;
+    for (let index = 0; index < Math.min(actualPixels.length, expected.pixels.length); index += 1) {
+      if (actualPixels[index] !== expected.pixels[index]) {
+        firstDifference = index;
+        break;
+      }
+    }
+    fail(`Pixels RGBA divergentes (${context}): ${JSON.stringify({ firstDifference, actualSha256: createHash("sha256").update(actualPixels).digest("hex"), expectedSha256: createHash("sha256").update(expected.pixels).digest("hex") })}`);
+  }
+  return {
+    width: actual.width,
+    height: actual.height,
+    pixelsSha256: createHash("sha256").update(actualPixels).digest("hex"),
+  };
+}
+
+async function createUnavailablePreviewFixture() {
+  const size = 0x10000;
+  const bytes = Buffer.alloc(size, 0xa5);
+  bytes.fill(0, 0, 0x200);
+  bytes.write("SEGA", 0x100, "ascii");
+  bytes.write("RDS PREVIEW NEGATIVE", 0x120, "ascii");
+  bytes.write("RDS CONTROLLED FIXTURE", 0x150, "ascii");
+  bytes.writeUInt32BE(0x200, 0x1a0);
+  bytes.writeUInt32BE(size - 1, 0x1a4);
+  bytes.write("JUE", 0x1f0, "ascii");
+  for (let candidateIndex = 0; candidateIndex < 17; candidateIndex += 1) {
+    const offset = 0x2000 + candidateIndex * 0x200;
+    for (let tileIndex = 0; tileIndex < 4; tileIndex += 1) {
+      const base = offset + tileIndex * 32;
+      for (let row = 0; row < 8; row += 1) {
+        // Keep the fixture graphic-like without making it an exact short
+        // period. The scanner must accept these 1bpp-like rows while the
+        // two constant-tile gaps keep the 17 blocks separate. The 17th
+        // candidate is intentionally beyond the preview export cap (16),
+        // which exercises a real candidate with no preview artifact.
+        const seed = candidateIndex * 29 + tileIndex * 11 + row * 7;
+        bytes[base + row * 4] = (0x31 + seed) & 0xff;
+        bytes[base + row * 4 + 1] = (0x8d ^ seed) & 0xff;
+        bytes[base + row * 4 + 2] = 0;
+        bytes[base + row * 4 + 3] = 0;
+      }
+    }
+  }
+  const fixtureDir = await mkdtemp(path.join(os.tmpdir(), "rds-inspection-preview-unavailable-"));
+  const romPath = path.join(fixtureDir, "controlled-preview-unavailable.bin");
+  await writeFile(romPath, bytes);
+  return {
+    fixtureDir,
+    romPath,
+    size: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    expectedCandidateCount: 17,
+  };
+}
+
+async function inspectElementInteraction(sessionId, selector) {
+  return executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return { selector: arguments[0], found: false };
+      const rect = target.getBoundingClientRect();
+      const style = getComputedStyle(target);
+      const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const stack = document.elementsFromPoint(point.x, point.y).slice(0, 8).map((node) => ({
+        tag: node.tagName,
+        testId: node.getAttribute?.('data-testid') ?? null,
+        id: node.id || null,
+        className: typeof node.className === 'string' ? node.className.slice(0, 160) : null,
+        text: (node.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120),
+      }));
+      const active = document.activeElement;
+      const scrollParents = [];
+      let parent = target.parentElement;
+      while (parent) {
+        const parentStyle = getComputedStyle(parent);
+        if (parent.scrollHeight > parent.clientHeight || parent.scrollWidth > parent.clientWidth) {
+          const parentRect = parent.getBoundingClientRect();
+          scrollParents.push({
+            tag: parent.tagName,
+            testId: parent.getAttribute('data-testid'),
+            overflowY: parentStyle.overflowY,
+            scrollTop: parent.scrollTop,
+            scrollHeight: parent.scrollHeight,
+            clientHeight: parent.clientHeight,
+            rect: { top: parentRect.top, height: parentRect.height },
+          });
+        }
+        parent = parent.parentElement;
+      }
+      return {
+        selector: arguments[0],
+        found: true,
+        tag: target.tagName,
+        outerHTML: target.outerHTML.slice(0, 1200),
+        visible: Boolean(rect.width && rect.height && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0),
+        disabled: target instanceof HTMLButtonElement || target instanceof HTMLInputElement ? target.disabled : false,
+        ariaDisabled: target.getAttribute('aria-disabled'),
+        focused: active === target,
+        activeElement: active instanceof HTMLElement ? { tag: active.tagName, testId: active.getAttribute('data-testid'), id: active.id || null } : null,
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        style: { display: style.display, visibility: style.visibility, pointerEvents: style.pointerEvents, zIndex: style.zIndex, position: style.position },
+        elementAtCenter: document.elementFromPoint(point.x, point.y)?.outerHTML?.slice(0, 500) ?? null,
+        overlayStack: stack,
+        scrollParents,
+        viewport: { width: window.innerWidth, height: window.innerHeight, scrollX: window.scrollX, scrollY: window.scrollY, devicePixelRatio: window.devicePixelRatio },
+        effectiveValue: target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ? target.value : null,
+      };
+    `,
+    [selector]
+  );
+}
+
+async function clickElementWithDiagnostics(sessionId, elementId, selector) {
+  const preparation = await executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return false;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      const scrollParents = [];
+      let parent = target.parentElement;
+      while (parent) {
+        const style = getComputedStyle(parent);
+        if (parent.scrollHeight > parent.clientHeight) {
+          const targetRect = target.getBoundingClientRect();
+          const parentRect = parent.getBoundingClientRect();
+          parent.scrollTop += targetRect.top - parentRect.top - (parentRect.height - targetRect.height) / 2;
+          scrollParents.push({ testId: parent.getAttribute('data-testid'), scrollTop: parent.scrollTop });
+        }
+        parent = parent.parentElement;
+      }
+      target.scrollIntoView({ block: "center", inline: "center" });
+      target.focus();
+      return { rect: target.getBoundingClientRect().toJSON?.() ?? null, scrollParents };
+    `,
+    [selector]
+  );
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  console.log(`[inspection-click] preparation=${JSON.stringify(preparation)}`);
+  const before = await inspectElementInteraction(sessionId, selector);
+  let response;
+  try {
+    response = await webdriverRequestDetailed("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+  } catch (error) {
+    response = { exception: error instanceof Error ? error.message : String(error) };
+  }
+  const after = await inspectElementInteraction(sessionId, selector);
+  const uiState = await readInspectionUiState(sessionId);
+  console.log(`[inspection-click] selected=${JSON.stringify(before)}`);
+  console.log(`[inspection-click] http=${JSON.stringify(response)}`);
+  console.log(`[inspection-click] after=${JSON.stringify(after)}`);
+  console.log(`[inspection-click] ui=${JSON.stringify(uiState)}`);
+  if (response.exception || !response.ok || response.payload?.value?.error) {
+    throw new Error(`Clique WebDriver falhou com diagnóstico completo: ${JSON.stringify(response)}`);
+  }
+  return { before, response, after, uiState };
 }
 
 async function waitForBodyText(sessionId, fragment, timeoutMs, label) {
@@ -2975,6 +3553,17 @@ async function clickByTestId(sessionId, testId) {
   }
 }
 
+async function activateByTestIdWithEnter(sessionId, testId) {
+  const visible = await executeScript(
+    sessionId,
+    `const element = document.querySelector('[data-testid="' + String(arguments[0]) + '"]'); if (!(element instanceof HTMLElement)) return false; element.scrollIntoView({ block: "center", inline: "center" }); element.focus(); return true;`,
+    [testId]
+  );
+  if (!visible) throw new Error(`Elemento não encontrado para teclado: ${testId}`);
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/value`, { text: "\uE007", value: ["\uE007"] });
+}
+
 async function clickButtonByText(sessionId, expectedText, mode = "contains") {
   const clicked = await executeScript(
     sessionId,
@@ -3001,6 +3590,297 @@ async function clickButtonByText(sessionId, expectedText, mode = "contains") {
   if (!clicked) {
     fail(`Botao nao encontrado para clique: '${expectedText}'.`);
   }
+}
+
+async function clickButtonByTestIdWithPointerEvents(sessionId, testId) {
+  const result = await executeScript(
+    sessionId,
+    `const button = document.querySelector('[data-testid="' + String(arguments[0]) + '"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({ block: "center", inline: "center" }); button.focus(); for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); return true;`,
+    [testId]
+  );
+  if (!result) fail(`Botao nao encontrado para eventos: '${testId}'.`);
+}
+
+async function inspectNativeButtonTarget(sessionId, testId) {
+  return executeScript(
+    sessionId,
+    `
+      const testId = String(arguments[0] ?? "");
+      const button = document.querySelector('[data-testid="' + testId + '"]');
+      if (!(button instanceof HTMLButtonElement)) {
+        return { exists: false, testId };
+      }
+      button.scrollIntoView({ block: "center", inline: "center" });
+      const rect = button.getBoundingClientRect();
+      const style = window.getComputedStyle(button);
+      const visible = rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = visible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest("[data-testid]") : null;
+      const unobstructed = Boolean(top && (top === button || button.contains(top)));
+      const wizard = document.querySelector('[data-testid="project-wizard-body"]');
+      return {
+        exists: true,
+        testId,
+        visible,
+        disabled: Boolean(button.disabled),
+        focused: document.activeElement === button,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point: { x, y },
+        topTag: top?.tagName ?? "",
+        topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
+        topClass: top instanceof Element ? String(top.className ?? "") : "",
+        unobstructed,
+        wizardVisible: Boolean(wizard),
+      };
+    `,
+    [testId]
+  );
+}
+
+async function clickButtonByTestIdNative(sessionId, testId, label = testId, options = {}) {
+  const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled) {
+    fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  if (options.expectBlocked) {
+    if (diagnostic.unobstructed) {
+      fail(`Negativo de obstrução não encontrou bloqueador para '${label}': ${JSON.stringify(diagnostic)}`);
+    }
+    return { blocked: true, diagnostic };
+  }
+  if (!diagnostic.unobstructed) {
+    fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  await clickElement(sessionId, elementId);
+  return { blocked: false, diagnostic };
+}
+
+async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = testId, timeoutMs = 30000) {
+  await waitFor(
+    async () => {
+      const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+      return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+    },
+    timeoutMs,
+    `Controle nativo não ficou disponível: ${label}`,
+    100
+  );
+  return clickButtonByTestIdNative(sessionId, testId, label);
+}
+
+async function selectInspectionFrameNative(sessionId, frameId) {
+  const selector = "[data-testid='inspection-sprite-frame-select']";
+  const diagnostic = await executeScript(
+    sessionId,
+    `
+      const select = document.querySelector(${JSON.stringify(selector)});
+      if (!(select instanceof HTMLSelectElement)) return { exists: false };
+      select.scrollIntoView({ block: "center", inline: "center" });
+      const rect = select.getBoundingClientRect();
+      const style = window.getComputedStyle(select);
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = document.elementFromPoint(x, y);
+      const topWithTestId = top instanceof Element ? top.closest("[data-testid]") : null;
+      return {
+        exists: true,
+        value: select.value,
+        visible: rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden",
+        disabled: Boolean(select.disabled),
+        focused: document.activeElement === select,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point: { x, y },
+        topTag: top?.tagName ?? "",
+        topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
+        unobstructed: Boolean(top && (top === select || select.contains(top))),
+      };
+    `
+  );
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled || !diagnostic.unobstructed) {
+    fail(`Seleção nativa de frame bloqueada: ${JSON.stringify({ frameId, diagnostic })}`);
+  }
+  if (diagnostic.value !== frameId) {
+    const elementId = await findElement(sessionId, selector);
+    await clickElement(sessionId, elementId);
+    const key = frameId.endsWith("/frame-1") ? "\uE015" : "\uE013";
+    await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "key", id: "inspection-frame-selector", actions: [
+        { type: "keyDown", value: key },
+        { type: "keyUp", value: key },
+      ] }],
+    });
+    await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "key", id: "inspection-frame-selector-enter", actions: [
+        { type: "keyDown", value: "\uE007" },
+        { type: "keyUp", value: "\uE007" },
+      ] }],
+    });
+  }
+  const selected = await waitFor(
+    async () => executeScript(sessionId, `return document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(frameId)};`),
+    5000,
+    `Seleção nativa não confirmou ${frameId}`,
+    50
+  );
+  if (!selected) fail(`Seleção de frame não foi confirmada: ${frameId}`);
+  return { frameId, diagnostic };
+}
+
+async function closeVisibleConsoleDrawer(sessionId, label = "console inicial") {
+  const visible = await executeScript(
+    sessionId,
+    `return document.querySelector('[data-testid="console-drawer"][data-visible="true"]') ? true : false;`
+  );
+  if (!visible) {
+    return { closed: false, reason: "not-visible" };
+  }
+  const selector = '[data-testid="console-drawer"] > div:first-child > button';
+  const before = await inspectElementInteraction(sessionId, selector);
+  if (!before?.found || !before.visible || before.disabled || before.elementAtCenter?.includes('console-details')) {
+    fail(`Console visível não ficou fechável por controle nativo (${label}): ${JSON.stringify(before)}`);
+  }
+  const elementId = await findElement(sessionId, selector);
+  await clickElement(sessionId, elementId);
+  await waitFor(
+    async () => !(await executeScript(sessionId, `return document.querySelector('[data-testid="console-drawer"][data-visible="true"]') ? true : false;`)),
+    5000,
+    `Console não fechou pelo controle visível (${label})`,
+    100
+  );
+  const after = await inspectElementInteraction(sessionId, selector);
+  console.log(`[inspection-console] ${JSON.stringify({ label, before, after, closed: true })}`);
+  return { closed: true, before, after };
+}
+
+async function readSavedSessionSelection(sessionId, persistedSessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const card = document.querySelector('[data-testid="inspection-saved-session"][data-session-id="' + String(arguments[0]) + '"]');
+      if (!(card instanceof HTMLElement)) return null;
+      const button = card.querySelector('[data-testid="select-saved-session-' + String(arguments[0]) + '"]');
+      const className = String(card.className || '');
+      return {
+        sessionId: card.getAttribute('data-session-id') || '',
+        status: card.getAttribute('data-session-status') || '',
+        selected: className.includes('border-[#cba6f7]'),
+        cardClass: className,
+        buttonDisabled: button instanceof HTMLButtonElement ? button.disabled : null,
+      };
+    `,
+    [persistedSessionId]
+  );
+}
+
+async function ensurePreviewVisibleAndUnobstructed(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-preview-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      let scrollParent = image.parentElement;
+      while (scrollParent && scrollParent !== document.body) {
+        const style = window.getComputedStyle(scrollParent);
+        if (scrollParent.scrollHeight > scrollParent.clientHeight && /(auto|scroll|overlay)/.test(style.overflowY)) break;
+        scrollParent = scrollParent.parentElement;
+      }
+      image.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = image.getBoundingClientRect();
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const renderedSizeSufficient = rect.width >= Math.min(image.naturalWidth, 32) && rect.height >= Math.min(image.naturalHeight, 8);
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
+      const unobstructed = Boolean(top && (top === image || image.contains(top)));
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        fullyVisible,
+        naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
+        renderedSizeSufficient,
+        unobstructed,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: topWithTestId?.getAttribute('data-testid') ?? '',
+        topClass: top instanceof Element ? String(top.className ?? '') : '',
+        scrollParentTestId: scrollParent?.getAttribute('data-testid') ?? '',
+        scrollParentTag: scrollParent?.tagName ?? '',
+        scrollTop: scrollParent ? scrollParent.scrollTop : null,
+      };
+    `
+  );
+}
+
+async function handleProjectWizardVisibly(sessionId, label) {
+  const wizardVisible = await executeScript(
+    sessionId,
+    `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`
+  );
+  if (!wizardVisible) {
+    return { label, action: "not-visible" };
+  }
+
+  const existingProject = await executeScript(
+    sessionId,
+    `return Boolean(document.querySelector('[data-testid="wizard-open-existing-project"]'));`
+  );
+  if (existingProject) {
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-open-existing-project", `${label}: abrir projeto existente`);
+  } else {
+    await clickButtonByTestIdNativeWhenReady(sessionId, "template-card-empty", `${label}: selecionar Projeto Vazio`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-target-megadrive", `${label}: selecionar Mega Drive`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-create-project", `${label}: concluir wizard`);
+  }
+
+  const state = await waitFor(
+    async () => {
+      const wizard = await executeScript(
+        sessionId,
+        `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`
+      );
+      const automation = await readAutomationState(sessionId);
+      return !wizard && automation?.activeProjectDir ? automation : false;
+    },
+    30000,
+    `Wizard não foi concluído por controles visíveis (${label})`,
+    100
+  );
+  console.log(`[inspection-wizard] ${JSON.stringify({ label, action: existingProject ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir })}`);
+  return { label, action: existingProject ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir };
+}
+
+async function clickButtonByTextWithPointerEvents(sessionId, expectedText) {
+  const result = await executeScript(
+    sessionId,
+    `const expected = String(arguments[0]); const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.replace(/\\s+/g, " ").trim().includes(expected)); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({ block: "center", inline: "center" }); button.focus(); for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); return true;`,
+    [expectedText]
+  );
+  if (!result) fail(`Botao nao encontrado para eventos: '${expectedText}'.`);
+}
+
+async function clickButtonByTextAtCoordinates(sessionId, expectedText) {
+  const rect = await executeScript(
+    sessionId,
+    `const expected = String(arguments[0]); const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.replace(/\\s+/g, " ").trim().includes(expected)); if (!(button instanceof HTMLButtonElement) || button.disabled) return null; button.scrollIntoView({ block: "center", inline: "center" }); const rect = button.getBoundingClientRect(); return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };`,
+    [expectedText]
+  );
+  if (!rect) fail(`Botao nao encontrado para clique coordenado: '${expectedText}'.`);
+  await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-inspection-mouse",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: rect.x, y: rect.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
 }
 
 async function clickButtonByTestId(sessionId, testId) {
@@ -3445,6 +4325,7 @@ async function main() {
     options.scenario !== "qa-rc" &&
     options.scenario !== "create-game-from-zero";
   let temporaryProjectDir = "";
+  let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
     await assertPathExists(
       options.project,
@@ -3641,6 +4522,551 @@ async function main() {
       options.project = path.join(temporaryProjectDir, path.basename(sourceProject));
       await cp(sourceProject, options.project, { recursive: true });
       currentE2eRunContext.project = options.project;
+    }
+
+    if (["inspection", "inspection-cancel", "inspection-complete", "inspection-preview-unavailable"].includes(options.scenario)) {
+      let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
+      let inspectionFixture = null;
+      if (options.scenario === "inspection-preview-unavailable" && !process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM) {
+        inspectionFixture = await createUnavailablePreviewFixture();
+        temporaryInspectionFixtureDir = inspectionFixture.fixtureDir;
+        inspectionRom = inspectionFixture.romPath;
+      } else if (options.scenario === "inspection-preview-unavailable") {
+        inspectionRom = process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM;
+      }
+      if (!inspectionRom || !(await pathExists(inspectionRom))) {
+        fail(
+          options.scenario === "inspection-preview-unavailable"
+            ? "RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM deve apontar para um fixture BYOR controlado existente."
+            : "RDS_INSPECTION_ROM deve apontar para uma ROM BYOR real existente; nenhuma ROM e criada pelo E2E."
+        );
+      }
+      const inspectionRomBytes = await readFile(inspectionRom);
+      console.log(`[inspection-rom] ${JSON.stringify({ path: inspectionRom, size: inspectionRomBytes.length, sha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), fixture: inspectionFixture })}`);
+      const spriteSourcePng = process.env.RDS_INSPECTION_SPRITE_SOURCE_PNG ?? "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/ryo/100.png";
+      const requiresSpriteOracle = options.scenario === "inspection" || options.scenario === "inspection-complete";
+      if (requiresSpriteOracle && !(await pathExists(spriteSourcePng))) {
+        fail(`RDS_INSPECTION_SPRITE_SOURCE_PNG deve apontar para o PNG doador independente: ${spriteSourcePng}`);
+      }
+      const spriteSourcePngSha256 = !requiresSpriteOracle
+        ? null
+        : createHash("sha256").update(await readFile(spriteSourcePng)).digest("hex");
+      if (requiresSpriteOracle && spriteSourcePngSha256 !== "1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b") {
+        fail(`PNG doador independente divergente: ${JSON.stringify({ path: spriteSourcePng, sha256: spriteSourcePngSha256 })}`);
+      }
+      console.log(`[inspection-sprite-source] ${JSON.stringify({ path: spriteSourcePng, sha256: spriteSourcePngSha256, frame: "spr_ryo_100/frame-0", nativeSize: [64, 104] })}`);
+      const artifactPrefix = `inspection-${artifactTimestamp()}`;
+      const inspectionPanel = "[data-testid='reverse-inspection-panel']";
+      const inspectionInput = `${inspectionPanel} input[type='text']`;
+      const gitEvidence = await readGitEvidence();
+      const binarySha256 = createHash("sha256").update(await readFile(options.app)).digest("hex");
+      const frontendEvidence = await executeScript(sessionId, `return { buildCommit: window.__RDS_BUILD_COMMIT__ ?? null, scripts: Array.from(document.scripts).map((script) => script.src || script.textContent?.slice(0, 80) || "") };`);
+      console.log(`[inspection-build] binary=${JSON.stringify({ path: options.app, sha256: binarySha256 })}`);
+      console.log(`[inspection-build] frontend=${JSON.stringify(frontendEvidence)} git=${JSON.stringify(gitEvidence)}`);
+      if (!gitEvidence.commit || frontendEvidence?.buildCommit !== gitEvidence.commit) {
+        fail(`Binário/frontend não correspondem ao commit corrente: ${JSON.stringify({ binary: options.app, frontend: frontendEvidence, git: gitEvidence })}`);
+      }
+      try {
+        await setSessionWindowRect(sessionId, 1280, 800);
+      } catch (error) {
+        console.warn(`[inspection] janela não aceitou 1280x800; seguindo somente se o hit-test validar o controle: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await handleProjectWizardVisibly(sessionId, "initial");
+      await closeVisibleConsoleDrawer(sessionId);
+      await clickByTestId(sessionId, "workspace-rail-debug");
+      await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace nao abriu");
+      await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+      try {
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace nao terminou de montar");
+      } catch (error) {
+        console.log(`[inspection] estado apos abrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
+        console.log(`[inspection] botoes apos abrir reverse: ${JSON.stringify(await executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).map((button) => button.textContent?.replace(/\\s+/g, " ").trim()).filter(Boolean).slice(-20);`))}`);
+        throw error;
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
+        15000,
+        "Painel de inspeção visual nao abriu",
+        250
+      );
+      await fillInputBySelector(sessionId, inspectionInput, inspectionRom);
+      const inputState = await readInspectionUiState(sessionId);
+      console.log(`[inspection-identify] input=${JSON.stringify(inputState)}`);
+      const identifySelector = "[data-testid='inspection-identify']";
+      const identifyElement = await findElement(sessionId, identifySelector);
+      await clickElementWithDiagnostics(sessionId, identifyElement, identifySelector);
+      let identifiedState;
+      try {
+        identifiedState = await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.identify?.state === "succeeded" && state.session?.id ? state : false;
+          },
+          30000,
+          "handler React/IPC de identificação não produziu estado de sessão",
+          100
+        );
+      } catch (error) {
+        const state = await readInspectionUiState(sessionId);
+        const automation = await readAutomationState(sessionId);
+        console.log(`[inspection-identify] final-ui=${JSON.stringify(state)}`);
+        console.log(`[inspection-identify] console=${JSON.stringify(automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [])}`);
+        throw error;
+      }
+      const identifyAutomation = await readAutomationState(sessionId);
+      console.log(`[inspection-identify] success=${JSON.stringify(identifiedState)}`);
+      console.log(`[inspection-identify] ipc-log=${JSON.stringify(identifyAutomation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [])}`);
+
+      const startAvailable = await executeScript(
+        sessionId,
+        `return Boolean(document.querySelector("[data-testid='inspection-start']"));`
+      );
+      if (!startAvailable) {
+        fail(`Identificação terminou sem o controle de análise: ${JSON.stringify(await readInspectionUiState(sessionId))}`);
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-start");
+
+      if (options.scenario === "inspection-cancel") {
+        await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.run?.status === "running" ? state : false;
+          },
+          10000,
+          "Cancelamento não foi testado: a UI não exibiu um run em andamento",
+          100
+        );
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-cancel");
+        const cancelledState = await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.run?.status === "cancelled" && state.session?.status === "cancelled" ? state : false;
+          },
+          30000,
+          "Cancelamento não chegou ao estado terminal cancelled",
+          100
+        );
+        console.log(`[inspection-cancel] OK: estado terminal ${JSON.stringify(cancelledState)}`);
+        console.log("OK: Desktop Tauri inspection/cancel E2E passou com cancelamento comprovado.");
+        return;
+      }
+
+      const completedState = await waitFor(
+        async () => {
+          const state = await readInspectionUiState(sessionId);
+          return state?.run?.status === "completed" && state.session?.status === "completed" ? state : false;
+        },
+        120000,
+        "Descoberta visual não chegou ao estado terminal completed",
+        250
+      );
+      console.log(`[inspection-complete] terminal=${JSON.stringify(completedState)}`);
+      const beforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-before-restart.png`);
+      const candidateAvailable = await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid^='inspection-candidate-']"));`),
+        30000,
+        "Catálogo concluído não exibiu candidato visual",
+        250
+      );
+      if (!candidateAvailable) fail("Catálogo concluído não exibiu candidato visual.");
+      const expectedCandidateId = options.scenario === "inspection-preview-unavailable"
+        ? process.env.RDS_INSPECTION_UNAVAILABLE_CANDIDATE_ID ?? ""
+        : process.env.RDS_INSPECTION_EXPECTED_CANDIDATE_ID ?? "";
+      const expectedOffset = options.scenario === "inspection-preview-unavailable"
+        ? null
+        : Number(process.env.RDS_INSPECTION_EXPECTED_OFFSET ?? "");
+      const expectedSize = options.scenario === "inspection-preview-unavailable"
+        ? null
+        : Number(process.env.RDS_INSPECTION_EXPECTED_SIZE ?? "");
+      const expectedKind = options.scenario === "inspection-preview-unavailable"
+        ? ""
+        : process.env.RDS_INSPECTION_EXPECTED_KIND ?? "tile4bpp_block";
+      if (options.scenario !== "inspection-preview-unavailable" && (!Number.isSafeInteger(expectedOffset) || !Number.isSafeInteger(expectedSize) || expectedOffset < 0 || expectedSize <= 0)) {
+        fail("A prova positiva exige RDS_INSPECTION_EXPECTED_OFFSET e RDS_INSPECTION_EXPECTED_SIZE independentes da UI.");
+      }
+      const candidateLookup = async () => executeScript(
+        sessionId,
+        `
+          const expected = String(arguments[0] || "");
+          const offset = arguments[2];
+          const size = arguments[3];
+          const kind = String(arguments[4] || "");
+          const unavailable = String(arguments[1]) === "unavailable";
+          const selector = expected ? "[data-testid='inspection-candidate-" + expected + "']" : (unavailable ? "[data-preview-expected='false']" : "[data-preview-expected='true']");
+          const candidates = Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']"));
+          const match = expected ? document.querySelector(selector) : candidates.find((candidate) =>
+            (unavailable || (
+              Number(candidate.getAttribute("data-candidate-offset")) === offset &&
+              Number(candidate.getAttribute("data-candidate-size")) === size &&
+              (!kind || candidate.getAttribute("data-candidate-kind") === kind)
+            )) &&
+            (unavailable ? candidate.getAttribute("data-preview-expected") === "false" : candidate.getAttribute("data-preview-expected") === "true")
+          );
+          return match?.getAttribute("data-testid") ?? "";
+        `,
+        [expectedCandidateId, options.scenario === "inspection-preview-unavailable" ? "unavailable" : "available", expectedOffset, expectedSize, expectedKind]
+      );
+      let candidateTestId = await candidateLookup();
+      // The controlled negative deliberately places the first unavailable
+      // candidate after the 16-preview export cap. If pagination hides it,
+      // reach it through the visible paginator so the scenario still
+      // exercises the UI path instead of selecting it through IPC.
+      if (!candidateTestId && options.scenario === "inspection-preview-unavailable") {
+        for (let pageTurn = 0; pageTurn < 32 && !candidateTestId; pageTurn += 1) {
+          const nextPage = await executeScript(
+            sessionId,
+            `return Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.replace(/\\s+/g, " ").trim() === "Próxima" && !button.disabled) ? true : false;`
+          );
+          if (!nextPage) break;
+          const beforeCount = await executeScript(sessionId, `return document.querySelectorAll("[data-testid^='inspection-candidate-']").length;`);
+          await clickButtonByTextWithPointerEvents(sessionId, "Próxima");
+          await waitFor(
+            async () => executeScript(sessionId, `return document.querySelectorAll("[data-testid^='inspection-candidate-']").length !== ${Number(beforeCount)};`),
+            5000,
+            "Paginação do catálogo não atualizou a página",
+            100
+          );
+          candidateTestId = await candidateLookup();
+        }
+      }
+      if (!candidateTestId) {
+        const catalogSummary = await executeScript(
+          sessionId,
+          `return Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']")).map((candidate) => ({ id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") }));`
+        );
+        console.log(`[inspection-candidate-negative] catalog=${JSON.stringify(catalogSummary)}`);
+        fail(expectedCandidateId ? `Candidato esperado não foi localizado: ${expectedCandidateId}` : options.scenario === "inspection-preview-unavailable" ? "Catálogo concluído não expôs candidato explicitamente sem prévia." : "Catálogo concluído não expôs candidato com prévia esperada.");
+      }
+      const selectedCandidateEvidence = await executeScript(
+        sessionId,
+        `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${candidateTestId}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
+      );
+      console.log(`[inspection-candidate] ${JSON.stringify(selectedCandidateEvidence)}`);
+      if (options.scenario !== "inspection-preview-unavailable" && (selectedCandidateEvidence?.offset !== expectedOffset || selectedCandidateEvidence?.size !== expectedSize || selectedCandidateEvidence?.kind !== expectedKind || selectedCandidateEvidence?.previewExpected !== "true")) {
+        fail(`Candidato conhecido divergente da especificação independente: ${JSON.stringify({ selected: selectedCandidateEvidence, expected: { offset: expectedOffset, size: expectedSize, kind: expectedKind } })}`);
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, candidateTestId);
+      if (options.scenario === "inspection-preview-unavailable") {
+        const unavailable = await waitFor(
+          async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-preview-unavailable']")) && !document.querySelector("[data-testid='inspection-preview-image']");`),
+          15000,
+          "O cenário de prévia indisponível não expôs o estado negativo explícito",
+          100
+        );
+        if (!unavailable) fail("Prévia indisponível não foi representada como estado negativo separado.");
+        if (inspectionFixture && selectedCandidateEvidence?.previewExpected !== "false") fail(`Fixture controlado não produziu candidato sem prévia: ${JSON.stringify({ fixture: inspectionFixture, selected: selectedCandidateEvidence })}`);
+        console.log("OK: Desktop Tauri inspection/preview-unavailable E2E passou como cenário negativo separado.");
+        return;
+      }
+      const visualEvidence = await waitFor(
+        async () => executeScript(sessionId, `
+          const image = document.querySelector("[data-testid='inspection-preview-image']");
+          if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          if (!context) return false;
+          context.drawImage(image, 0, 0);
+          const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          return {
+            image: true,
+            naturalWidth: image.naturalWidth,
+            naturalHeight: image.naturalHeight,
+            declaredWidth: Number(image.getAttribute("data-preview-width") || 0),
+            declaredHeight: Number(image.getAttribute("data-preview-height") || 0),
+            pngSha256: image.getAttribute("data-png-sha256") || "",
+            pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+            artifactSha256: image.getAttribute("data-artifact-sha256") || "",
+            src: image.currentSrc || image.src,
+            pixels: Array.from(pixels),
+          };
+        `),
+        15000,
+        "Prévia real não carregou imagem, dimensões ou pixels",
+        100
+      );
+      if (!visualEvidence.image || !Array.isArray(visualEvidence.pixels) || !visualEvidence.src) {
+        fail(`Prévia real inválida: ${JSON.stringify({ ...visualEvidence, pixels: undefined })}`);
+      }
+      assertChunkyGoldenOracle();
+      const expectedPreview = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      console.log(`[inspection-preview-oracle] ${JSON.stringify({ offset: expectedOffset, size: expectedSize, dimensions: [expectedPreview.width, expectedPreview.height], pixelsSha256: createHash("sha256").update(expectedPreview.pixels).digest("hex"), firstBytes: Array.from(inspectionRomBytes.subarray(expectedOffset, expectedOffset + 16)) })}`);
+      const independentPixelEvidence = assertExactPreviewPixels(
+        { width: visualEvidence.naturalWidth, height: visualEvidence.naturalHeight, pixels: visualEvidence.pixels },
+        expectedPreview,
+        "ROM/offset/tamanho conhecidos"
+      );
+      const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!pngPayload) fail(`A prévia carregada não expôs uma fonte PNG data: válida: ${String(visualEvidence.src).slice(0, 80)}`);
+      const actualPngSha256 = createHash("sha256").update(Buffer.from(pngPayload, "base64")).digest("hex");
+      if (actualPngSha256 !== visualEvidence.pngSha256 || actualPngSha256 !== visualEvidence.artifactSha256) {
+        fail(`Hash do PNG carregado diverge do contrato de artefato: ${JSON.stringify({ actualPngSha256, pngSha256: visualEvidence.pngSha256, artifactSha256: visualEvidence.artifactSha256 })}`);
+      }
+      if (visualEvidence.pixelsSha256 !== independentPixelEvidence.pixelsSha256 || actualPngSha256 === independentPixelEvidence.pixelsSha256) {
+        fail(`Hashes PNG/RGBA não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidence.pixelsSha256 })}`);
+      }
+      const mutatedPixels = Buffer.from(expectedPreview.pixels);
+      mutatedPixels[0] ^= 1;
+      let mutationRejected = false;
+      try {
+        assertExactPreviewPixels(
+          { width: expectedPreview.width, height: expectedPreview.height, pixels: mutatedPixels },
+          expectedPreview,
+          "mutação de um pixel com atributos HTML inalterados"
+        );
+      } catch (error) {
+        mutationRejected = true;
+        console.log(`[inspection-preview-negative] mutation-rejected=${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (!mutationRejected) fail("O oracle independente aceitou uma imagem com um pixel alterado; a asserção visual está permissiva.");
+      console.log(`[inspection-preview] ${JSON.stringify({ candidate: selectedCandidateEvidence, dimensions: [independentPixelEvidence.width, independentPixelEvidence.height], pngSha256: actualPngSha256, pixelsSha256: independentPixelEvidence.pixelsSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, mutationRejected })}`);
+      const frame0Id = "spr_ryo_100/frame-0";
+      const frame1Id = "spr_ryo_100/frame-1";
+      await selectInspectionFrameNative(sessionId, frame0Id);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-0 HAMOOPIG");
+      const frame0Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "seleção inicial");
+      const spriteFrame0Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-0.png`);
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame0Proof.visualEvidence.romSha256, resource: frame0Proof.visualEvidence.resourceId, frame: frame0Proof.visualEvidence.frameId, nativeSize: [frame0Proof.visualEvidence.naturalWidth, frame0Proof.visualEvidence.naturalHeight], pngSha256: frame0Proof.actualPngSha256, pixelsSha256: frame0Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame0Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame0Proof.independentEvidence.expectedRgbaSha256, layout: frame0Proof.layout, screenshot: spriteFrame0Screenshot })}`);
+
+      await selectInspectionFrameNative(sessionId, frame1Id);
+      const afterFrame1Selection = await readRenderedSpriteFramePixels(sessionId);
+      if (afterFrame1Selection?.frameId === frame0Id) {
+        fail(`A seleção de frame-1 manteve a imagem/metadados do frame-0 durante a troca: ${JSON.stringify(afterFrame1Selection)}`);
+      }
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frame0Id, to: frame1Id, pending: afterFrame1Selection ? { frame: afterFrame1Selection.frameId, resource: afterFrame1Selection.resourceId } : null, previousPreviewRemovedOnChange: !afterFrame1Selection || afterFrame1Selection.frameId !== frame0Id })}`);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-1 HAMOOPIG");
+      const frame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "troca frame-0 para frame-1");
+      const spriteFrame1Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-1.png`);
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame1Proof.visualEvidence.romSha256, resource: frame1Proof.visualEvidence.resourceId, frame: frame1Proof.visualEvidence.frameId, nativeSize: [frame1Proof.visualEvidence.naturalWidth, frame1Proof.visualEvidence.naturalHeight], pngSha256: frame1Proof.actualPngSha256, pixelsSha256: frame1Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame1Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame1Proof.independentEvidence.expectedRgbaSha256, layout: frame1Proof.layout, screenshot: spriteFrame1Screenshot })}`);
+
+      await selectInspectionFrameNative(sessionId, frame0Id);
+      const afterFrame0Return = await readRenderedSpriteFramePixels(sessionId);
+      if (afterFrame0Return?.frameId === frame1Id) {
+        fail(`A seleção de frame-0 manteve a imagem/metadados do frame-1 durante a troca: ${JSON.stringify(afterFrame0Return)}`);
+      }
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do frame-0 HAMOOPIG");
+      const frame0ReturnProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "retorno frame-1 para frame-0");
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frame1Id, to: frame0Id, pending: afterFrame0Return ? { frame: afterFrame0Return.frameId, resource: afterFrame0Return.resourceId } : null, previousPreviewRemovedOnChange: !afterFrame0Return || afterFrame0Return.frameId !== frame1Id, returnedPixelsSha256: frame0ReturnProof.independentEvidence.pixelsSha256 })}`);
+
+      await selectInspectionFrameNative(sessionId, frame1Id);
+      const beforePersistFrame1 = await readRenderedSpriteFramePixels(sessionId);
+      if (beforePersistFrame1?.frameId === frame0Id) {
+        fail(`A seleção final de frame-1 manteve a prévia anterior antes de salvar: ${JSON.stringify(beforePersistFrame1)}`);
+      }
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição final do frame-1 HAMOOPIG");
+      const persistedFrame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "frame-1 antes de salvar");
+      const spriteBeforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-before-restart.png`);
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+      const persistedSessionId = completedState.session.id;
+      if (!persistedSessionId) fail(`Sessão concluída não tem identidade para validar persistência: ${JSON.stringify(completedState)}`);
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`),
+        15000,
+        "Salvar sessão não publicou a sessão corrente na lista persistida",
+        100
+      );
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+      await deleteSession(sessionId);
+      sessionId = await createSession(options.app);
+      currentE2eRunContext.sessionId = sessionId;
+      await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App não reabriu após reinício real");
+      await waitFor(
+        async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"),
+        uiBootstrapTimeoutMs,
+        "API de automação não voltou após reinício real"
+      );
+      await handleProjectWizardVisibly(sessionId, "after-restart");
+      await setSessionWindowRect(sessionId, 1920, 1080);
+      console.log(`[inspection-reopen-window] ${JSON.stringify(await executeScript(sessionId, `return { width: window.innerWidth, height: window.innerHeight, outerWidth: window.outerWidth, outerHeight: window.outerHeight };`))}`);
+      await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace após reinício");
+      await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace não voltou após reinício");
+      await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+      try {
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace nao terminou de remontar");
+      } catch (error) {
+        console.log(`[inspection] estado apos reabrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
+        throw error;
+      }
+      await clickButtonByTestIdNative(sessionId, "reverse-tab-inspection", "abrir aba Inspeção após reinício");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
+        15000,
+        "Painel de inspeção não voltou após reinício",
+        250
+      );
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`),
+        30000,
+        "Sessão persistida não foi descoberta após reinício",
+        100
+      );
+
+      // Negative control: deliberately reopen the real wizard through its
+      // visible menu control. A native WebDriver click must be rejected by
+      // hit-test and must not activate the saved-session control underneath it.
+      await clickButtonByTestIdNative(sessionId, "unified-topbar-menu-trigger", "abrir menu superior para o negativo");
+      await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, "menu-action-project-new");
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        10000,
+        "Menu superior não expôs o controle Novo Projeto",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, "menu-action-project-new", "abrir wizard deliberadamente para o negativo");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`),
+        15000,
+        "Wizard não ficou visível para o negativo deliberado de obstrução",
+        100
+      );
+      const selectionBeforeBlockedClick = await readSavedSessionSelection(sessionId, persistedSessionId);
+      if (!selectionBeforeBlockedClick) {
+        fail(`Sessão salva não estava disponível para o negativo de obstrução: ${persistedSessionId}`);
+      }
+      const blockedSelectionClick = await clickButtonByTestIdNative(
+        sessionId,
+        `select-saved-session-${persistedSessionId}`,
+        "seleção da sessão salva atrás do wizard",
+        { expectBlocked: true }
+      );
+      const selectionAfterBlockedClick = await readSavedSessionSelection(sessionId, persistedSessionId);
+      if (!selectionAfterBlockedClick || JSON.stringify(selectionAfterBlockedClick) !== JSON.stringify(selectionBeforeBlockedClick)) {
+        fail(`Clique obstruído alterou a seleção da sessão: ${JSON.stringify({ before: selectionBeforeBlockedClick, after: selectionAfterBlockedClick })}`);
+      }
+      console.log(`[inspection-reopen-negative] click-rejected=${JSON.stringify({ ...blockedSelectionClick.diagnostic, selectionUnchanged: true, syntheticEvents: false })}`);
+      await clickButtonByTestIdNative(sessionId, "wizard-cancel", "fechar wizard pelo controle visível");
+      await waitFor(
+        async () => executeScript(sessionId, `return !document.querySelector('[data-testid="project-wizard-body"]');`),
+        15000,
+        "Wizard permaneceu como bloqueador após tratamento visual",
+        100
+      );
+      await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, `select-saved-session-${persistedSessionId}`);
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        30000,
+        "Controle nativo de seleção da sessão permaneceu obstruído após fechar o wizard",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, `select-saved-session-${persistedSessionId}`, "seleção da sessão salva após reinício");
+      const reopenDiagnostic = await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, "inspection-reopen");
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        15000,
+        "Controle nativo de reabertura não ficou disponível após selecionar a sessão",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, "inspection-reopen", "reabertura da sessão após reinício");
+      const reopenedState = await waitFor(
+        async () => {
+          const state = await readInspectionUiState(sessionId);
+          return state?.session?.id === persistedSessionId &&
+            state.session.status === "completed" &&
+            state.session.identitySha256 === completedState.session.identitySha256
+            ? state
+            : false;
+        },
+        30000,
+        "Sessão persistida não foi reaberta com a mesma identidade após reinício",
+        100
+      );
+      console.log(`[inspection-reopen] state=${JSON.stringify(reopenedState)}`);
+      const reopenedFrameSelection = await waitFor(
+        async () => executeScript(sessionId, `return document.querySelector("[data-testid='inspection-sprite-frame-select']")?.value ?? "";`),
+        15000,
+        "Seleção persistida de frame-1 não foi restaurada após reinício",
+        100
+      );
+      if (reopenedFrameSelection !== "spr_ryo_100/frame-1") {
+        fail(`Seleção de frame restaurada diverge do frame salvo: ${JSON.stringify({ expected: "spr_ryo_100/frame-1", actual: reopenedFrameSelection })}`);
+      }
+      console.log(`[inspection-reopen-frame-selection] ${JSON.stringify({ sessionId: reopenedState.session.id, frameId: reopenedFrameSelection, restored: true })}`);
+      const reopenedCandidate = await waitFor(
+        async () => executeScript(sessionId, `return document.querySelector("[data-testid='${candidateTestId}']")?.getAttribute("data-testid") ?? "";`),
+        30000,
+        "Catálogo da sessão reaberta não expôs o candidato esperado",
+        100
+      );
+      const reopenedCandidateEvidence = await executeScript(
+        sessionId,
+        `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${reopenedCandidate}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
+      );
+      if (!reopenedCandidateEvidence ||
+        reopenedCandidateEvidence.offset !== expectedOffset ||
+        reopenedCandidateEvidence.size !== expectedSize ||
+        reopenedCandidateEvidence.kind !== expectedKind ||
+        reopenedCandidateEvidence.previewExpected !== "true") {
+        fail(`Candidato reaberto diverge da especificação independente: ${JSON.stringify({ selected: reopenedCandidateEvidence, expected: { offset: expectedOffset, size: expectedSize, kind: expectedKind } })}`);
+      }
+      await clickButtonByTestIdNative(sessionId, reopenedCandidate, "seleção do candidato após reinício");
+      const reopenedVisualEvidence = await waitFor(
+        async () => {
+          const evidence = await readRenderedPreviewPixels(sessionId);
+          return evidence?.image && evidence.pixels?.length > 0 ? evidence : false;
+        },
+        15000,
+        "Prévia real não voltou após reabrir a sessão",
+        100
+      );
+      let reopenedPreviewLayout;
+      try {
+        reopenedPreviewLayout = await waitFor(
+          async () => {
+            const layout = await ensurePreviewVisibleAndUnobstructed(sessionId);
+            return layout?.fullyVisible && layout.unobstructed && layout.renderedSizeSufficient ? layout : false;
+          },
+          15000,
+          "Prévia reaberta não ficou integralmente visível e sem obstrução após o scroll do painel",
+          100
+        );
+      } catch (error) {
+        const lastLayout = await ensurePreviewVisibleAndUnobstructed(sessionId);
+        fail(`${error instanceof Error ? error.message : String(error)}; último layout=${JSON.stringify(lastLayout)}`);
+      }
+      assertChunkyGoldenOracle();
+      const expectedPreviewAfterRestart = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      const independentPixelEvidenceAfterRestart = assertExactPreviewPixels(
+        { width: reopenedVisualEvidence.naturalWidth, height: reopenedVisualEvidence.naturalHeight, pixels: reopenedVisualEvidence.pixels },
+        expectedPreviewAfterRestart,
+        "ROM/offset/tamanho conhecidos após reinício"
+      );
+      const pngPayloadAfterRestart = String(reopenedVisualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!pngPayloadAfterRestart) fail(`A prévia reaberta não expôs uma fonte PNG data: válida: ${String(reopenedVisualEvidence.src).slice(0, 80)}`);
+      const actualPngSha256AfterRestart = createHash("sha256").update(Buffer.from(pngPayloadAfterRestart, "base64")).digest("hex");
+      if (actualPngSha256AfterRestart !== reopenedVisualEvidence.pngSha256 || actualPngSha256AfterRestart !== reopenedVisualEvidence.artifactSha256) {
+        fail(`Hash do PNG reaberto diverge do contrato de artefato: ${JSON.stringify({ actualPngSha256: actualPngSha256AfterRestart, pngSha256: reopenedVisualEvidence.pngSha256, artifactSha256: reopenedVisualEvidence.artifactSha256 })}`);
+      }
+      if (reopenedVisualEvidence.pixelsSha256 !== independentPixelEvidenceAfterRestart.pixelsSha256 || actualPngSha256AfterRestart === independentPixelEvidenceAfterRestart.pixelsSha256) {
+        fail(`Hashes PNG/RGBA reabertos não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256AfterRestart, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256 })}`);
+      }
+      console.log(`[inspection-reopen-visual] ${JSON.stringify({ romSha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), sessionId: reopenedState.session.id, identitySha256: reopenedState.session.identitySha256, candidate: reopenedCandidateEvidence, dimensions: [independentPixelEvidenceAfterRestart.width, independentPixelEvidenceAfterRestart.height], pngSha256: actualPngSha256AfterRestart, pixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, previewLayout: reopenedPreviewLayout, reopenDiagnostic })}`);
+      await clickButtonByTestIdNative(sessionId, "inspection-compose-sprite", "composição do frame-1 após reinício");
+      const reopenedSpriteProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, "spr_ryo_100/frame-1", "ROM/manifesto HAMOOPIG após reinício");
+      if (reopenedSpriteProof.visualEvidence.romSha256 !== reopenedState.session.identitySha256 || reopenedSpriteProof.visualEvidence.resourceId !== "spr_ryo_100" || reopenedSpriteProof.visualEvidence.frameId !== "spr_ryo_100/frame-1") {
+        fail(`Frame composto reaberto diverge da identidade persistida: ${JSON.stringify({ sprite: reopenedSpriteProof.visualEvidence, session: reopenedState })}`);
+      }
+      console.log(`[inspection-reopen-sprite-frame] ${JSON.stringify({ romSha256: reopenedSpriteProof.visualEvidence.romSha256, resource: reopenedSpriteProof.visualEvidence.resourceId, frame: reopenedSpriteProof.visualEvidence.frameId, dimensions: [reopenedSpriteProof.visualEvidence.naturalWidth, reopenedSpriteProof.visualEvidence.naturalHeight], pngSha256: reopenedSpriteProof.actualPngSha256, pixelsSha256: reopenedSpriteProof.independentEvidence.pixelsSha256, expectedRgbaSha256: reopenedSpriteProof.independentEvidence.expectedRgbaSha256, layout: reopenedSpriteProof.layout, frameSelection: reopenedFrameSelection })}`);
+      const spriteAfterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-after-restart.png`);
+      const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
+      console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
+      console.log(`ROM BYOR: ${inspectionRom}`);
+      console.log(`Sessão reaberta: ${persistedSessionId}`);
+      console.log(`Prévia após reinício: pixels PNG recalculados (${reopenedVisualEvidence.naturalWidth}x${reopenedVisualEvidence.naturalHeight})`);
+      console.log(`Evidências: ${beforeRestartScreenshot}`);
+      console.log(`Evidências: ${afterRestartScreenshot}`);
+      console.log(`Evidências do frame-0: ${spriteFrame0Screenshot}`);
+      console.log(`Evidências do frame-1: ${spriteFrame1Screenshot}`);
+      console.log(`Evidências do frame composto: ${spriteBeforeRestartScreenshot}`);
+      console.log(`Evidências do frame composto após reinício: ${spriteAfterRestartScreenshot}`);
+      return;
     }
 
     if (options.scenario === "onboarding-shell") {
@@ -6389,6 +7815,9 @@ async function main() {
           `[cleanup] Nao foi possivel remover o projeto temporario criado pelo onboarding: ${temporaryProjectDir}`
         );
       }
+    }
+    if (temporaryInspectionFixtureDir) {
+      await rm(temporaryInspectionFixtureDir, { recursive: true, force: true });
     }
   }
 }
