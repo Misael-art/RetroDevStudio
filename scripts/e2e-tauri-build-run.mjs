@@ -4835,7 +4835,7 @@ async function main() {
       if (afterFrame1Selection?.frameId === frame0Id) {
         fail(`A seleção de frame-1 manteve a imagem/metadados do frame-0 durante a troca: ${JSON.stringify(afterFrame1Selection)}`);
       }
-      console.log(`[inspection-sprite-transition] ${JSON.stringify({ from: frame0Id, to: frame1Id, pending: afterFrame1Selection ? { frame: afterFrame1Selection.frameId, resource: afterFrame1Selection.resourceId } : null, staleFrameRejected: !afterFrame1Selection || afterFrame1Selection.frameId !== frame0Id })}`);
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frame0Id, to: frame1Id, pending: afterFrame1Selection ? { frame: afterFrame1Selection.frameId, resource: afterFrame1Selection.resourceId } : null, previousPreviewRemovedOnChange: !afterFrame1Selection || afterFrame1Selection.frameId !== frame0Id })}`);
       await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-1 HAMOOPIG");
       const frame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "troca frame-0 para frame-1");
       const spriteFrame1Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-1.png`);
@@ -4848,7 +4848,7 @@ async function main() {
       }
       await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do frame-0 HAMOOPIG");
       const frame0ReturnProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "retorno frame-1 para frame-0");
-      console.log(`[inspection-sprite-transition] ${JSON.stringify({ from: frame1Id, to: frame0Id, pending: afterFrame0Return ? { frame: afterFrame0Return.frameId, resource: afterFrame0Return.resourceId } : null, staleFrameRejected: !afterFrame0Return || afterFrame0Return.frameId !== frame1Id, returnedPixelsSha256: frame0ReturnProof.independentEvidence.pixelsSha256 })}`);
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frame1Id, to: frame0Id, pending: afterFrame0Return ? { frame: afterFrame0Return.frameId, resource: afterFrame0Return.resourceId } : null, previousPreviewRemovedOnChange: !afterFrame0Return || afterFrame0Return.frameId !== frame1Id, returnedPixelsSha256: frame0ReturnProof.independentEvidence.pixelsSha256 })}`);
 
       await selectInspectionFrameNative(sessionId, frame1Id);
       const beforePersistFrame1 = await readRenderedSpriteFramePixels(sessionId);

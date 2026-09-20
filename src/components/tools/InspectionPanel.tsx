@@ -483,7 +483,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                     <option value="spr_ryo_100/frame-1">spr_ryo_100 / frame 1</option>
                   </select>
                 </label>
-                <button type="button" data-testid="inspection-compose-sprite" onClick={() => void composeSpriteFrame()} disabled={spriteFrameBusy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">{spriteFrameBusy ? "Compondo..." : "Compor frame"}</button>
+                <button type="button" data-testid="inspection-compose-sprite" onClick={() => void composeSpriteFrame()} aria-busy={spriteFrameBusy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">{spriteFrameBusy ? "Compondo..." : "Compor frame"}</button>
               </div>
             </div>
             {spriteFrame?.available && spriteFrame.data_url && <div className="mt-3 flex min-w-0 flex-col gap-3">

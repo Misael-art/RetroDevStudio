@@ -25,6 +25,21 @@ function flush() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const session = {
@@ -315,6 +330,119 @@ describe("InspectionPanel", () => {
     await act(async () => { (container.querySelector("[data-testid='inspection-compose-sprite']") as HTMLButtonElement).click(); await flush(); });
 
     expect(mocks.inspectionSpriteFrame).toHaveBeenCalledWith(completedSession.session_id, "spr_ryo_100", "spr_ryo_100/frame-1", false, false);
+  });
+
+  it("keeps frame B image, selection, and provenance when frame A resolves out of order", async () => {
+    const frameA = createDeferred<Record<string, unknown>>();
+    const frameB = createDeferred<Record<string, unknown>>();
+    const startedA = createDeferred<void>();
+    const startedB = createDeferred<void>();
+    mocks.inspectionOpen.mockResolvedValue(completedSession);
+    mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
+    mocks.inspectionCatalogPage.mockResolvedValue({ session_id: completedSession.session_id, run_id: completed.run_id, offset: 0, limit: 24, total_candidates: 0, candidates: [], unknown_regions: [], user_choices: [] });
+    mocks.inspectionSpriteFrame.mockImplementation((_sessionId: string, _resourceId: string, frameId: string) => {
+      if (frameId === "spr_ryo_100/frame-0") {
+        startedA.resolve();
+        return frameA.promise;
+      }
+      startedB.resolve();
+      return frameB.promise;
+    });
+
+    await act(async () => {
+      root.render(<InspectionPanel logMessage={vi.fn()} />);
+      await flushMicrotasks();
+    });
+    setTextInput(container.querySelector("input[type='text']") as Element, "/roms/test.md");
+    await act(async () => { await flushMicrotasks(); });
+    const identifyButton = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Identificar base") as HTMLButtonElement;
+    await act(async () => { identifyButton.click(); await flushMicrotasks(); });
+
+    const frameSelect = container.querySelector("[data-testid='inspection-sprite-frame-select']") as HTMLSelectElement;
+    const composeButton = () => container.querySelector("[data-testid='inspection-compose-sprite']") as HTMLButtonElement;
+    await act(async () => {
+      composeButton().click();
+      await startedA.promise;
+    });
+
+    frameSelect.value = "spr_ryo_100/frame-1";
+    frameSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    await act(async () => { await flushMicrotasks(); });
+    await act(async () => {
+      composeButton().click();
+      await startedB.promise;
+    });
+
+    await act(async () => {
+      frameB.resolve({
+        session_id: completedSession.session_id,
+        resource_id: "spr_ryo_100",
+        frame_id: "spr_ryo_100/frame-1",
+        available: true,
+        width: 64,
+        height: 104,
+        data_url: "data:image/png;base64,frame-B",
+        artifact: null,
+        png_sha256: "png-B",
+        pixels_sha256: "pixels-B",
+        rom_sha256: "b".repeat(64),
+        tile_data_offset: 0x86ba0,
+        tile_data_size: 0x840,
+        palette_offset: 0x2cc68,
+        palette_size: 0x20,
+        descriptor_offset: 0x222a2,
+        flip_x: false,
+        flip_y: false,
+        transparency_index: 0,
+        parts: [],
+        metadata_source: "proveniência B",
+        rom_evidence: [],
+        donor_evidence: [],
+        limitations: [],
+      });
+      await flushMicrotasks();
+    });
+
+    expect((container.querySelector("[data-testid='inspection-sprite-frame-select']") as HTMLSelectElement).value).toBe("spr_ryo_100/frame-1");
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")?.getAttribute("src")).toBe("data:image/png;base64,frame-B");
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")?.getAttribute("data-sprite-frame")).toBe("spr_ryo_100/frame-1");
+    expect(container.textContent).toContain("proveniência B");
+
+    await act(async () => {
+      frameA.resolve({
+        session_id: completedSession.session_id,
+        resource_id: "spr_ryo_100",
+        frame_id: "spr_ryo_100/frame-0",
+        available: true,
+        width: 64,
+        height: 104,
+        data_url: "data:image/png;base64,frame-A",
+        artifact: null,
+        png_sha256: "png-A",
+        pixels_sha256: "pixels-A",
+        rom_sha256: "b".repeat(64),
+        tile_data_offset: 0x863a0,
+        tile_data_size: 0x800,
+        palette_offset: 0x2cc68,
+        palette_size: 0x20,
+        descriptor_offset: 0x22260,
+        flip_x: false,
+        flip_y: false,
+        transparency_index: 0,
+        parts: [],
+        metadata_source: "proveniência A",
+        rom_evidence: [],
+        donor_evidence: [],
+        limitations: [],
+      });
+      await flushMicrotasks();
+    });
+
+    expect((container.querySelector("[data-testid='inspection-sprite-frame-select']") as HTMLSelectElement).value).toBe("spr_ryo_100/frame-1");
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")?.getAttribute("src")).toBe("data:image/png;base64,frame-B");
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")?.getAttribute("data-sprite-frame")).toBe("spr_ryo_100/frame-1");
+    expect(container.textContent).toContain("proveniência B");
+    expect(container.textContent).not.toContain("proveniência A");
   });
 
   it("rejects a delayed response carrying the wrong frame metadata without reusing the previous image", async () => {
