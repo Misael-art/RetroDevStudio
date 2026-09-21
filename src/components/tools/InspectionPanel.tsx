@@ -533,6 +533,16 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     logMessage("info", `[Emulador] Jogar versão modificada solicitado pela superfície Game View: ${modifiedPath}`);
   }
 
+  function playBaseRom() {
+    const basePath = session?.rom_path?.trim() || "";
+    if (!basePath) {
+      logMessage("warn", "[Emulador] Identifique uma ROM antes de jogar a versão base pela superfície canônica.");
+      return;
+    }
+    requestEmulatorLaunch(basePath, "ROM base · comparação de controles");
+    logMessage("info", `[Emulador] Jogar ROM base solicitado pela superfície Game View: ${basePath}`);
+  }
+
   function closeSession() {
     const currentSessionId = sessionRef.current?.session_id;
     if (currentSessionId) {
@@ -695,7 +705,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                 <ToolPathField label="Exportar patch BPS" value={patchPath} set={setPatchPath} extensions={["bps"]} accentColor="f9e2af" />
                 <button type="button" data-testid="inspection-sonic-export-patch" disabled={patchBusy || !patchPath.trim()} onClick={() => void exportPilotPatch()} className="rounded border border-[#f9e2af]/50 px-3 py-1 text-[#f9e2af]">Exportar patch BPS</button>
                 <ToolPathField label="Salvar ROM modificada aplicada" value={patchedRomPath} set={setPatchedRomPath} extensions={["bin", "md", "gen"]} accentColor="f9e2af" />
-                <div className="flex flex-wrap gap-2"><button type="button" data-testid="inspection-sonic-apply-patch" disabled={patchBusy || !patchPath.trim() || !patchedRomPath.trim()} onClick={() => void applyPilotPatch()} className="rounded border border-[#a6e3a1]/50 px-3 py-1 text-[#a6e3a1]">Aplicar à base</button><button type="button" data-testid="inspection-sonic-run-base" disabled={patchBusy || !session.rom_path} onClick={() => void runBaseRom()} className="rounded border border-[#cdd6f4]/50 px-3 py-1 text-[#cdd6f4]">Observar ROM base</button><button type="button" data-testid="inspection-sonic-run-patched" disabled={patchBusy || !patchedRomPath.trim()} onClick={() => void runPatchedRom()} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]">Observar ROM aplicada</button><button type="button" data-testid="inspection-sonic-play-modified" disabled={patchBusy || !patchedRomPath.trim()} onClick={playModifiedRom} className="rounded bg-[#89b4fa] px-3 py-1 font-semibold text-[#111827]">Jogar versão modificada</button></div>
+                <div className="flex flex-wrap gap-2"><button type="button" data-testid="inspection-sonic-apply-patch" disabled={patchBusy || !patchPath.trim() || !patchedRomPath.trim()} onClick={() => void applyPilotPatch()} className="rounded border border-[#a6e3a1]/50 px-3 py-1 text-[#a6e3a1]">Aplicar à base</button><button type="button" data-testid="inspection-sonic-run-base" disabled={patchBusy || !session.rom_path} onClick={() => void runBaseRom()} className="rounded border border-[#cdd6f4]/50 px-3 py-1 text-[#cdd6f4]">Observar ROM base</button><button type="button" data-testid="inspection-sonic-run-patched" disabled={patchBusy || !patchedRomPath.trim()} onClick={() => void runPatchedRom()} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]">Observar ROM aplicada</button><button type="button" data-testid="inspection-sonic-play-base" disabled={patchBusy || !session.rom_path} onClick={playBaseRom} className="rounded border border-[#cdd6f4]/50 px-3 py-1 text-[#cdd6f4]">Jogar ROM base</button><button type="button" data-testid="inspection-sonic-play-modified" disabled={patchBusy || !patchedRomPath.trim()} onClick={playModifiedRom} className="rounded bg-[#89b4fa] px-3 py-1 font-semibold text-[#111827]">Jogar versão modificada</button></div>
                 <div data-testid="inspection-emulator-run-controls" className="rounded border border-[#313244] bg-[#0f172a] p-2 text-[9px] text-[#bac2de]">
                   <div className="font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">Cenário de execução real</div>
                   <div className="mt-1">Cada observação recarrega a ROM no core, executa um orçamento explícito e envia START pelo IPC; 60 frames isolados não são aceitos como prova de gameplay.</div>

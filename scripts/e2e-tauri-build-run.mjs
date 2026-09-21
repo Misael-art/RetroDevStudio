@@ -1753,6 +1753,7 @@ function renderExpectedSonicStand(romBytes, options = {}) {
     fail("ROM Sonic independente não contém os intervalos do frame stand.");
   }
   const pixels = Buffer.alloc(width * height * 4);
+  const paletteIndices = Buffer.alloc(width * height);
   const palette = (index) => {
     let word = romBytes.readUInt16BE(paletteOffset + index * 2);
     if (index === 1 && Number.isInteger(options.paletteDelta)) word ^= options.paletteDelta;
@@ -1792,13 +1793,249 @@ function renderExpectedSonicStand(romBytes, options = {}) {
             }
             const offset = (destY * width + destX) * 4;
             const rgba = palette(paletteIndex);
+            paletteIndices[destY * width + destX] = paletteIndex;
             pixels.set(rgba, offset);
           }
         }
       }
     }
   }
-  return { width, height, pixels, frameId: "sonic1_sonic/stand", tileDataOffset, tileDataSize, paletteOffset, descriptorOffset };
+  return { width, height, pixels, paletteIndices, frameId: "sonic1_sonic/stand", tileDataOffset, tileDataSize, paletteOffset, descriptorOffset };
+}
+
+const MD_CHANNEL_LEVELS = [0, 33, 66, 99, 140, 173, 206, 239];
+
+function quantizeMdChannel(value) {
+  let best = 0;
+  let distance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < MD_CHANNEL_LEVELS.length; index += 1) {
+    const nextDistance = Math.abs(value - MD_CHANNEL_LEVELS[index]);
+    if (nextDistance < distance) {
+      distance = nextDistance;
+      best = index;
+    }
+  }
+  return best;
+}
+
+function sonicPaletteCodes(romBytes) {
+  const paletteCodes = [];
+  for (let index = 0; index < 16; index += 1) {
+    const word = romBytes.readUInt16BE(0x2388 + index * 2);
+    paletteCodes.push({
+      r: (word >> 1) & 7,
+      g: (word >> 5) & 7,
+      b: (word >> 9) & 7,
+    });
+  }
+  return paletteCodes;
+}
+
+/**
+ * Localiza Sonic pela aparência do frame independente, não por uma cor ou
+ * região fixa. O template vem do mapping/tile bytes/paleta da ROM já
+ * verificados; o framebuffer é quantizado para os níveis MD e comparado por
+ * índice de paleta. Assim o HUD magenta, mesmo na mesma região, não pode ser
+ * aceito como Sonic.
+ */
+function locateSonicInFramebuffer(frame, romBytes, options = {}) {
+  const template = renderExpectedSonicStand(romBytes, { flipX: options.flipX === true });
+  const { width, height, paletteIndices } = template;
+  const rgba = frame?.rgba;
+  if (!rgba || rgba.length !== frame.width * frame.height * 4) return null;
+  const paletteCodes = sonicPaletteCodes(romBytes);
+  const previous = options.previous ?? null;
+  const minX = Math.max(0, Math.floor(previous?.x ?? 0) - (previous ? 24 : frame.width));
+  const maxX = Math.min(frame.width - width, Math.ceil(previous?.x ?? (frame.width - width)) + (previous ? 24 : 0));
+  const minY = Math.max(0, Math.floor(previous?.y ?? 0) - (previous ? 32 : frame.height));
+  const maxY = Math.min(frame.height - height, Math.ceil(previous?.y ?? (frame.height - height)) + (previous ? 32 : 0));
+  const candidates = [];
+  let opaquePixels = 0;
+  for (const index of paletteIndices) if (index !== 0) opaquePixels += 1;
+  const allowedPaletteCodes = sonicPaletteCodes(romBytes).slice(1).map((code) => `${code.r}:${code.g}:${code.b}`);
+  const allowedPaletteCodeSet = new Set(allowedPaletteCodes);
+  const scoreCandidate = (originX, originY) => {
+    let matchedPixels = 0;
+    let nearPixels = 0;
+    let paletteMatchedPixels = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const paletteIndex = paletteIndices[y * width + x];
+        if (paletteIndex === 0) continue;
+        const offset = ((originY + y) * frame.width + originX + x) * 4;
+        const expected = paletteCodes[paletteIndex];
+        const actualR = quantizeMdChannel(rgba[offset]);
+        const actualG = quantizeMdChannel(rgba[offset + 1]);
+        const actualB = quantizeMdChannel(rgba[offset + 2]);
+        const distance = Math.abs(actualR - expected.r) + Math.abs(actualG - expected.g) + Math.abs(actualB - expected.b);
+        if (distance === 0) matchedPixels += 1;
+        if (distance <= 1) nearPixels += 1;
+        if (allowedPaletteCodeSet.has(`${actualR}:${actualG}:${actualB}`)) paletteMatchedPixels += 1;
+      }
+    }
+    return { originX, originY, matchedPixels, nearPixels, paletteMatchedPixels, score: nearPixels / opaquePixels, paletteScore: paletteMatchedPixels / opaquePixels };
+  };
+  const originStep = previous ? 1 : 8;
+  for (let originY = minY; originY <= maxY; originY += originStep) {
+    for (let originX = minX; originX <= maxX; originX += originStep) {
+      candidates.push(scoreCandidate(originX, originY));
+    }
+  }
+  if (!previous && originStep > 1) {
+    const refinementOrigins = new Set();
+    const remember = (candidate) => {
+      for (let y = Math.max(minY, candidate.originY - originStep + 1); y <= Math.min(maxY, candidate.originY + originStep - 1); y += 1) {
+        for (let x = Math.max(minX, candidate.originX - originStep + 1); x <= Math.min(maxX, candidate.originX + originStep - 1); x += 1) {
+          refinementOrigins.add(`${x},${y}`);
+        }
+      }
+    };
+    [...candidates].sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels).slice(0, 12).forEach(remember);
+    [...candidates].sort((a, b) => b.paletteScore - a.paletteScore || b.paletteMatchedPixels - a.paletteMatchedPixels).slice(0, 12).forEach(remember);
+    for (const origin of refinementOrigins) {
+      const [originX, originY] = origin.split(",").map(Number);
+      candidates.push(scoreCandidate(originX, originY));
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels);
+  let best = candidates[0];
+  let matchMode = "template";
+  if (!best || best.score < 0.12) {
+    candidates.sort((a, b) => b.paletteScore - a.paletteScore || b.paletteMatchedPixels - a.paletteMatchedPixels);
+    best = candidates[0];
+    matchMode = "palette-component";
+    if (!best || best.paletteScore < 0.22) return null;
+    best = { ...best, score: best.paletteScore, matchedPixels: best.paletteMatchedPixels, nearPixels: best.paletteMatchedPixels };
+  }
+  let minOpaqueX = width;
+  let minOpaqueY = height;
+  let maxOpaqueX = -1;
+  let maxOpaqueY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (paletteIndices[y * width + x] === 0) continue;
+      minOpaqueX = Math.min(minOpaqueX, x);
+      minOpaqueY = Math.min(minOpaqueY, y);
+      maxOpaqueX = Math.max(maxOpaqueX, x);
+      maxOpaqueY = Math.max(maxOpaqueY, y);
+    }
+  }
+  return {
+    x: best.originX,
+    y: best.originY,
+    width,
+    height,
+    bounds: { x0: best.originX + minOpaqueX, y0: best.originY + minOpaqueY, x1: best.originX + maxOpaqueX, y1: best.originY + maxOpaqueY },
+    center: { x: best.originX + (minOpaqueX + maxOpaqueX) / 2, y: best.originY + (minOpaqueY + maxOpaqueY) / 2 },
+    score: best.score,
+    matchedPixels: best.matchedPixels,
+    nearPixels: best.nearPixels,
+    opaquePixels,
+    matchMode,
+    flipX: options.flipX === true,
+    reference: { frameId: "sonic1_sonic/stand", descriptorOffset: template.descriptorOffset, tileDataOffset: template.tileDataOffset, paletteOffset: template.paletteOffset },
+  };
+}
+
+function locateSonicPaletteComponent(frame, romBytes, options = {}) {
+  const previous = options.previous ?? null;
+  const rgba = frame?.rgba;
+  if (!previous || !rgba || rgba.length !== frame.width * frame.height * 4) return null;
+  const paletteCodeSet = new Set(sonicPaletteCodes(romBytes).slice(1).map((code) => `${code.r}:${code.g}:${code.b}`));
+  const minX = Math.max(0, Math.floor(previous.bounds.x0) - 56);
+  const maxX = Math.min(frame.width - 1, Math.ceil(previous.bounds.x1) + 56);
+  const minY = Math.max(0, Math.floor(previous.bounds.y0) - 72);
+  const maxY = Math.min(frame.height - 1, Math.ceil(previous.bounds.y1) + 140);
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const mask = new Uint8Array(width * height);
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const offset = (y * frame.width + x) * 4;
+      const code = `${quantizeMdChannel(rgba[offset])}:${quantizeMdChannel(rgba[offset + 1])}:${quantizeMdChannel(rgba[offset + 2])}`;
+      if (paletteCodeSet.has(code)) mask[(y - minY) * width + (x - minX)] = 1;
+    }
+  }
+  const visited = new Uint8Array(mask.length);
+  const components = [];
+  const queue = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (!mask[start] || visited[start]) continue;
+      visited[start] = 1;
+      queue.length = 0;
+      queue.push(start);
+      let count = 0;
+      let minComponentX = x;
+      let maxComponentX = x;
+      let minComponentY = y;
+      let maxComponentY = y;
+      for (let cursor = 0; cursor < queue.length; cursor += 1) {
+        const index = queue[cursor];
+        const cy = Math.floor(index / width);
+        const cx = index - cy * width;
+        count += 1;
+        minComponentX = Math.min(minComponentX, cx);
+        maxComponentX = Math.max(maxComponentX, cx);
+        minComponentY = Math.min(minComponentY, cy);
+        maxComponentY = Math.max(maxComponentY, cy);
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            const next = ny * width + nx;
+            if (!mask[next] || visited[next]) continue;
+            visited[next] = 1;
+            queue.push(next);
+          }
+        }
+      }
+      const bounds = {
+        x0: minX + minComponentX,
+        y0: minY + minComponentY,
+        x1: minX + maxComponentX,
+        y1: minY + maxComponentY,
+      };
+      const componentWidth = bounds.x1 - bounds.x0 + 1;
+      const componentHeight = bounds.y1 - bounds.y0 + 1;
+      const center = { x: (bounds.x0 + bounds.x1) / 2, y: (bounds.y0 + bounds.y1) / 2 };
+      const previousCenter = previous.center ?? { x: (previous.bounds.x0 + previous.bounds.x1) / 2, y: (previous.bounds.y0 + previous.bounds.y1) / 2 };
+      const distance = Math.hypot(center.x - previousCenter.x, center.y - previousCenter.y);
+      if (count >= 24 && componentWidth >= 6 && componentWidth <= 56 && componentHeight >= 8 && componentHeight <= 64 && distance <= 150) {
+        components.push({ bounds, center, count, componentWidth, componentHeight, distance });
+      }
+    }
+  }
+  components.sort((a, b) => b.count - a.count || a.distance - b.distance);
+  const best = components[0];
+  if (!best) return null;
+  return {
+    x: best.bounds.x0,
+    y: best.bounds.y0,
+    width: best.componentWidth,
+    height: best.componentHeight,
+    bounds: best.bounds,
+    center: best.center,
+    score: best.count / Math.max(1, previous.opaquePixels ?? best.count),
+    matchedPixels: best.count,
+    nearPixels: best.count,
+    opaquePixels: previous.opaquePixels ?? best.count,
+    matchMode: "palette-connected-component",
+    flipX: false,
+    reference: { frameId: "sonic1_sonic/component", paletteOffset: 0x2388, previous: { x: previous.x, y: previous.y, bounds: previous.bounds } },
+  };
+}
+
+function locateSonicVisual(frame, romBytes, options = {}) {
+  const direct = locateSonicInFramebuffer(frame, romBytes, options);
+  const flipped = locateSonicInFramebuffer(frame, romBytes, { ...options, flipX: true });
+  const component = locateSonicPaletteComponent(frame, romBytes, options);
+  if (options.previous && component) return component;
+  if (direct && direct.score >= 0.12) return direct;
+  return [direct, flipped, component].filter(Boolean).sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels)[0] ?? null;
 }
 
 function assertSonicStandOracles(romBytes, actual, context) {
@@ -2308,7 +2545,8 @@ async function focusGameCanvasNatively(sessionId) {
   await webdriverRequest("POST", `/session/${sessionId}/element/${canvas}/click`, {});
 }
 
-async function readCanonicalGameFrame(sessionId) {
+async function readCanonicalGameFrame(sessionId, options = {}) {
+  const includePixels = options.includePixels === true;
   const frame = await executeScript(
     sessionId,
     `
@@ -2374,7 +2612,7 @@ async function readCanonicalGameFrame(sessionId) {
   const rgba = Buffer.from(frame.rgba);
   return {
     ...frame,
-    rgba: undefined,
+    rgba: includePixels ? rgba : undefined,
     framebufferSha256: createHash("sha256").update(rgba).digest("hex"),
     rgbaBytes: rgba.length,
   };
@@ -2403,6 +2641,235 @@ async function readCanonicalGameProgress(sessionId) {
       };
     `
   );
+}
+
+function readU16le(bytes, offset) {
+  return (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8);
+}
+
+function readI16le(bytes, offset) {
+  const value = readU16le(bytes, offset);
+  return value & 0x8000 ? value - 0x10000 : value;
+}
+
+async function readEmulatorMemory(sessionId, region, offset, length) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const [region, offset, length] = arguments;
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") {
+        done({ ok: false, error: "Tauri invoke indisponivel na janela" });
+        return;
+      }
+      invoke("emulator_read_memory", { region, offset, length })
+        .then((value) => done({ ok: true, value }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [region, offset, length]
+  );
+  if (!result?.ok) fail(`Falha ao ler memoria do core: ${result?.error ?? "sem diagnostico"}`);
+  return result.value;
+}
+
+async function readSonic1PlayerMemory(sessionId) {
+  // Sonic 1 player object candidate in 68k WRAM. The run validates this
+  // candidate by correlating deltas with the independently located initial
+  // framebuffer and with native input ACKs before using it as trajectory oracle.
+  const objectOffset = 0xd000;
+  const result = await readEmulatorMemory(sessionId, 2, objectOffset, 0x40);
+  const bytes = result.data ?? [];
+  return {
+    source: "WRAM region 2, Sonic 1 player object candidate 0xD000",
+    objectOffset,
+    totalSize: result.total_size,
+    rawSha256: createHash("sha256").update(Buffer.from(bytes)).digest("hex"),
+    id: bytes[0] ?? null,
+    renderFlags: bytes[1] ?? null,
+    x: readI16le(bytes, 0x08),
+    xSub: readU16le(bytes, 0x0a),
+    y: readI16le(bytes, 0x0c),
+    ySub: readU16le(bytes, 0x0e),
+    xVel: readI16le(bytes, 0x10),
+    yVel: readI16le(bytes, 0x12),
+    inertia: readI16le(bytes, 0x14),
+    status: bytes[0x22] ?? null,
+  };
+}
+
+async function runCanonicalSonicTrajectory(sessionId, options) {
+  const { buttonTestId, label, expectedSha256, romBytes, artifactPrefix } = options;
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "launch" })}`);
+  await clickButtonByTestIdNativeWhenReady(sessionId, buttonTestId, `jogar ${label} na Game View`);
+  const identity = await waitFor(async () => {
+    const frame = await readCanonicalGameFrame(sessionId);
+    return frame && frame.romSha256 === expectedSha256 && frame.romSize === romBytes.length && frame.coreLabel && frame.corePath ? frame : false;
+  }, 15000, `Game View não confirmou a identidade da ${label}`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "identity", romSha256: identity.romSha256, core: identity.coreLabel })}`);
+  await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 10 ? progress : false;
+  }, 10000, `Game View não produziu frames para a ${label}`, 100);
+  const bootFrame = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 890 ? progress : false;
+  }, 120000, `${label} não atravessou o boot até o ponto de entrada`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "boot", renderedFrames: bootFrame.renderedFrames })}`);
+  await focusGameCanvasNatively(sessionId);
+  const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  await sendNativeGameKey(sessionId, "Enter", "keyDown", `START de entrada da fase ${label}`);
+  const startHoldProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= bootFrame.renderedFrames + 30 ? progress : false;
+  }, 15000, `START não avançou frames para a ${label}`, 100);
+  await sendNativeGameKey(sessionId, "Enter", "keyUp", `liberação de START da ${label}`);
+  const startInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0) ? current : false;
+  }, 10000, `START não foi confirmado para a ${label}`, 100);
+  const gameplayProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 1800 ? progress : false;
+  }, 120000, `${label} não alcançou a cena de gameplay`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "gameplay", renderedFrames: gameplayProgress.renderedFrames })}`);
+  const trajectory = [];
+  const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-trajectory.json`);
+  const persistTrajectory = async (extra = {}) => {
+    await writeFile(
+      trajectoryPath,
+      JSON.stringify(
+        {
+          label,
+          romSha256: expectedSha256,
+          core: identity.coreLabel,
+          initial: { onGround, groundTop },
+          input: { start: startInput, right: rightInput, rightReleased, jump: jumpInput, jumpReleased: jumpReleasedInput },
+          frames: trajectory,
+          pause: extra.pause ?? null,
+          ...extra,
+        },
+        null,
+        2
+      )
+    );
+  };
+  let onGround = false;
+  let groundTop = null;
+  let rightInput = null;
+  let rightReleased = null;
+  let jumpInput = null;
+  let jumpReleasedInput = null;
+  const capture = async (captureLabel, input, previous, minFrameExclusive = -1) => {
+    const raw = await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames > minFrameExclusive ? readCanonicalGameFrame(sessionId, { includePixels: true }) : false;
+    }, 10000, `${label}/${captureLabel} não avançou para um novo frame`, 100);
+    const sonic = locateSonicVisual(raw, romBytes, { previous });
+    if (!sonic) fail(`Localizador independente não encontrou Sonic em ${label}/${captureLabel}`);
+    const memory = await readSonic1PlayerMemory(sessionId);
+    const entry = { label: captureLabel, frame: raw.renderedFrames, input, framebufferSha256: raw.framebufferSha256, sonic, memory };
+    trajectory.push(entry);
+    return { raw, sonic, entry };
+  };
+  const gameplayRaw = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  const gameplaySonic = locateSonicVisual(gameplayRaw, romBytes);
+  if (!gameplaySonic) fail(`Localizador independente não encontrou Sonic no gameplay de ${label}`);
+  const gameplayMemory = await readSonic1PlayerMemory(sessionId);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "located", frame: gameplayRaw.renderedFrames, sonic: gameplaySonic, memory: gameplayMemory })}`);
+  groundTop = (() => {
+    for (let y = gameplaySonic.bounds.y1 + 1; y < gameplayRaw.height; y += 1) {
+      let greenPixels = 0;
+      for (let x = Math.max(0, gameplaySonic.bounds.x0 - 12); x <= Math.min(gameplayRaw.width - 1, gameplaySonic.bounds.x1 + 12); x += 1) {
+        const offset = (y * gameplayRaw.width + x) * 4;
+        if (gameplayRaw.rgba[offset + 1] > gameplayRaw.rgba[offset] + 20 && gameplayRaw.rgba[offset + 1] > gameplayRaw.rgba[offset + 2] + 10 && gameplayRaw.rgba[offset + 1] >= 90) greenPixels += 1;
+      }
+      if (greenPixels >= 8) return y;
+    }
+    return null;
+  })();
+  onGround = groundTop !== null && groundTop - gameplaySonic.bounds.y1 <= 4;
+  trajectory.push({ label: "before-controls", frame: gameplayRaw.renderedFrames, input: "neutral", framebufferSha256: gameplayRaw.framebufferSha256, sonic: gameplaySonic, memory: gameplayMemory });
+  if (!onGround) {
+    await persistTrajectory({ failure: "initial-not-grounded" });
+    fail(`Situação inicial não comprovou ${label} no chão: ${JSON.stringify({ sonic: gameplaySonic, groundTop })}`);
+  }
+  const before = { raw: gameplayRaw, sonic: gameplaySonic };
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", `movimento ${label}`);
+  rightInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.right === true ? current : false;
+  }, 10000, `ArrowRight não chegou ao core para ${label}`, 100);
+  const movementSamples = [];
+  let movementHoldProgress = null;
+  for (const frames of [45, 90, 135]) {
+    movementHoldProgress = await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= before.raw.renderedFrames + frames ? progress : false;
+    }, 20000, `movimento não avançou ${frames} frames para ${label}`, 100);
+    movementSamples.push(await capture(`movement-held-${frames}`, { right: true }, movementSamples.at(-1)?.sonic ?? before.sonic, movementSamples.at(-1)?.raw.renderedFrames ?? before.raw.renderedFrames));
+    console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: `movement-held-${frames}`, frame: movementSamples.at(-1).raw.renderedFrames, sonic: movementSamples.at(-1).sonic })}`);
+  }
+  const duringMovement = movementSamples.at(-1);
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", `parada do movimento ${label}`);
+  rightReleased = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.right === false ? current : false;
+  }, 10000, `liberação de ArrowRight não chegou para ${label}`, 100);
+  const afterMovement = await capture("movement-released", { right: false }, duringMovement.sonic, duringMovement.raw.renderedFrames);
+  const movementDeltaX = Math.max(...[...movementSamples.map((sample) => sample.entry), afterMovement.entry].map((entry) => Math.abs(entry.memory.x - gameplayMemory.x)));
+  if (movementDeltaX < 2) {
+    await persistTrajectory({ failure: "movement-not-observed", movementDeltaX });
+    fail(`Movimento de ${label} não mudou a posição visual independente`);
+  }
+  const beforeJump = await capture("jump-before", { right: false, a: false }, afterMovement.sonic, afterMovement.raw.renderedFrames);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", `salto A ${label}`);
+  jumpInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.a === true ? current : false;
+  }, 10000, `KeyZ/A não chegou ao core para ${label}`, 100);
+  const jumpHoldProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= beforeJump.raw.renderedFrames + 2 ? progress : false;
+  }, 20000, `salto não avançou frames para ${label}`, 100);
+  const jumpHeld = await capture("jump-held", { a: true }, beforeJump.sonic, beforeJump.raw.renderedFrames);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", `liberação do salto ${label}`);
+  jumpReleasedInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.a === false ? current : false;
+  }, 10000, `liberação de KeyZ/A não chegou para ${label}`, 100);
+  const jumpReleased = await capture("jump-released", { a: false }, jumpHeld.sonic, jumpHeld.raw.renderedFrames);
+  let lastJumpSample = jumpReleased;
+  const after = async (captureLabel, frames) => {
+    await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= jumpReleased.raw.renderedFrames + frames ? progress : false;
+    }, 30000, `${label} não avançou ${frames} frames após o salto`, 100);
+    lastJumpSample = await capture(captureLabel, { a: false }, lastJumpSample.sonic, lastJumpSample.raw.renderedFrames);
+    return lastJumpSample;
+  };
+  const jumpLater = await after("jump-after-15", 15);
+  const jumpMid = await after("jump-after-45", 45);
+  const jumpReturn90 = await after("jump-after-90", 90);
+  const jumpReturn150 = await after("jump-after-150", 150);
+  const jumpReturn240 = await after("jump-after-240", 240);
+  const jumpReturn = [jumpMid, jumpReturn90, jumpReturn150, jumpReturn240].find((sample) => sample.entry.memory.yVel === 0) ?? jumpReturn240;
+  const jumpLift = beforeJump.entry.memory.y - Math.min(...trajectory.filter((entry) => entry.label.startsWith("jump-")).map((entry) => entry.memory.y));
+  const returnedToGround = jumpReturn.entry.memory.yVel === 0 && jumpReturn.entry.memory.y >= beforeJump.entry.memory.y - jumpLift;
+  if (jumpLift < 3 || !returnedToGround) {
+    await persistTrajectory({ failure: "jump-trajectory-not-observed", jumpLift, returnedToGround });
+    fail(`Trajetória de salto não comprovou subida e retorno em ${label}: ${JSON.stringify({ jumpLift, returnedToGround, trajectory })}`);
+  }
+  await clickButtonByTestIdNative(sessionId, "viewport-pause", `pausar ${label}`);
+  await waitFor(async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"), 10000, `pausa não ficou visível em ${label}`, 100);
+  const paused = await readCanonicalGameProgress(sessionId);
+  await clickButtonByTestIdNative(sessionId, "viewport-resume", `retomar ${label}`);
+  const resumed = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames > paused.renderedFrames + 5 ? progress : false;
+  }, 10000, `retomada não avançou em ${label}`, 100);
+  await persistTrajectory({ pause: { paused, resumed }, movementDeltaX });
+  return { identity, bootFrame, startHoldProgress, gameplayProgress, movement: { before: trajectory.find((entry) => entry.label === "before-controls"), samples: movementSamples.map((sample) => sample.entry), after: afterMovement.entry, holdProgress: movementHoldProgress, deltaX: movementDeltaX }, jump: { before: beforeJump.entry, held: jumpHeld.entry, released: jumpReleased.entry, later: jumpLater.entry, mid: jumpMid.entry, after: jumpReturn.entry, holdProgress: jumpHoldProgress }, pause: { paused, resumed }, trajectoryPath, screenshot: await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-${label}.png`) };
 }
 
 async function clickHierarchyEntityByLabel(sessionId, label) {
@@ -5344,6 +5811,13 @@ async function main() {
         const reopenedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após salvar/reiniciar/reabrir");
         const reopenedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-reopened.png`);
         const oldGameFrame = await readCanonicalGameFrame(sessionId);
+        const baseCanonicalPlayEvidence = await runCanonicalSonicTrajectory(sessionId, {
+          buttonTestId: "inspection-sonic-play-base",
+          label: "base",
+          expectedSha256: baseSha256,
+          romBytes: inspectionRomBytes,
+          artifactPrefix,
+        });
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-sonic-play-modified", "jogar versão modificada na Game View após reinício");
         const canonicalIdentity = await waitFor(
           async () => {
@@ -5427,10 +5901,12 @@ async function main() {
           console.error(`[inspection-canonical-gameplay-failure] ${JSON.stringify({ lastGameplayProgress, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
           throw error;
         }
-        const gameplayFrame = await readCanonicalGameFrame(sessionId);
-        if (gameplayFrame.nonBlackPixels <= 1000 || gameplayFrame.sonicRoiMagentaLikePixels < 50) {
-          fail(`A ROM modificada atravessou o boot, mas não apresentou Sonic localizado no ROI independente: ${JSON.stringify({ gameplayProgress, gameplayFrame })}`);
+        const gameplayFrameWithPixels = await readCanonicalGameFrame(sessionId, { includePixels: true });
+        const gameplaySonic = locateSonicVisual(gameplayFrameWithPixels, modifiedRomBytes);
+        if (gameplayFrameWithPixels.nonBlackPixels <= 1000 || !gameplaySonic) {
+          fail(`A ROM modificada atravessou o boot, mas o localizador visual independente não encontrou Sonic: ${JSON.stringify({ gameplayProgress, frame: { ...gameplayFrameWithPixels, rgba: undefined }, gameplaySonic })}`);
         }
+        const gameplayFrame = { ...gameplayFrameWithPixels, rgba: undefined, sonic: gameplaySonic };
         const canonicalGameBeforeControlsScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-modified-before-controls.png`);
         const oldImageReused = Boolean(oldGameFrame && oldGameFrame.nonBlackPixels > 0 && oldGameFrame.framebufferSha256 === gameplayFrame.framebufferSha256);
         if (oldImageReused) {
@@ -5445,7 +5921,45 @@ async function main() {
           fail(`Entrada não mapeada foi aceita como input do jogo: ${JSON.stringify({ before: negativeInputBefore, after: negativeInputAfter })}`);
         }
         console.log(`[inspection-canonical-negatives] ${JSON.stringify({ wrongRomRejected: canonicalIdentity.romSha256 !== baseSha256 && canonicalIdentity.romSha256 === patchedSha256, staleImageRejected: !oldImageReused, unmappedInputRejected: negativeInputRejected, input: { before: negativeInputBefore?.lastJoypadAck, after: negativeInputAfter?.lastJoypadAck } })}`);
-        const movementBefore = gameplayFrame;
+        const trajectory = [];
+        const recordTrajectoryFrame = async (label, input, previous, minFrameExclusive = -1) => {
+          const raw = await waitFor(async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames > minFrameExclusive ? readCanonicalGameFrame(sessionId, { includePixels: true }) : false;
+          }, 10000, `${label} não avançou para um novo frame`, 100);
+          const sonic = locateSonicVisual(raw, modifiedRomBytes, { previous });
+          if (!sonic) fail(`Localizador independente não encontrou Sonic na trajetória: ${label}`);
+          const memory = await readSonic1PlayerMemory(sessionId);
+          const entry = { label, frame: raw.renderedFrames, input, framebufferSha256: raw.framebufferSha256, sonic, memory };
+          trajectory.push(entry);
+          return { raw, sonic, entry };
+        };
+        const detectGroundTop = (raw, sonic) => {
+          if (!raw?.rgba) return null;
+          for (let y = sonic.bounds.y1 + 1; y < raw.height; y += 1) {
+            let greenPixels = 0;
+            for (let x = Math.max(0, sonic.bounds.x0 - 12); x <= Math.min(raw.width - 1, sonic.bounds.x1 + 12); x += 1) {
+              const offset = (y * raw.width + x) * 4;
+              const red = raw.rgba[offset];
+              const green = raw.rgba[offset + 1];
+              const blue = raw.rgba[offset + 2];
+              if (green > red + 20 && green > blue + 10 && green >= 90) greenPixels += 1;
+            }
+            if (greenPixels >= 8) return y;
+          }
+          return null;
+        };
+        const initialVisual = { raw: gameplayFrameWithPixels, sonic: gameplaySonic };
+        const gameplayMemory = await readSonic1PlayerMemory(sessionId);
+        trajectory.push({ label: "before-controls", frame: gameplayFrameWithPixels.renderedFrames, input: "neutral", framebufferSha256: gameplayFrameWithPixels.framebufferSha256, sonic: gameplaySonic, memory: gameplayMemory });
+        console.log(`[inspection-trajectory] ${JSON.stringify({ label: "modified", step: "located", frame: gameplayFrameWithPixels.renderedFrames, sonic: gameplaySonic, memory: gameplayMemory })}`);
+        const initialGroundTop = detectGroundTop(gameplayFrameWithPixels, gameplaySonic);
+        const initialOnGround = initialGroundTop !== null && initialGroundTop - gameplaySonic.bounds.y1 <= 4;
+        if (!initialOnGround) {
+          fail(`Situação inicial não comprovou Sonic no chão: ${JSON.stringify({ sonic: gameplaySonic, initialGroundTop })}`);
+        }
+
+        const movementBefore = initialVisual;
         await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "movimento para direita");
         const rightInput = await waitFor(
           async () => {
@@ -5456,24 +5970,41 @@ async function main() {
           "ArrowRight nativa não chegou ao core pelo handler do produto",
           100
         );
-        const movementHoldProgress = await waitFor(
+        const movementSamples = [];
+        let movementHoldProgress = null;
+        for (const frames of [45, 90, 135]) {
+          movementHoldProgress = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              return progress && progress.renderedFrames >= movementBefore.raw.renderedFrames + frames ? progress : false;
+            },
+            20000,
+            `Game View não avançou ${frames} frames durante o movimento para direita`,
+            100
+          );
+          movementSamples.push(await recordTrajectoryFrame(`movement-held-${frames}`, { right: true }, movementSamples.at(-1)?.sonic ?? movementBefore.sonic, movementSamples.at(-1)?.raw.renderedFrames ?? movementBefore.raw.renderedFrames));
+          console.log(`[inspection-trajectory] ${JSON.stringify({ label: "modified", step: `movement-held-${frames}`, frame: movementSamples.at(-1).raw.renderedFrames, sonic: movementSamples.at(-1).sonic })}`);
+        }
+        const movementDuring = movementSamples.at(-1);
+        await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "parada do movimento para direita");
+        await waitFor(
           async () => {
-            const progress = await readCanonicalGameProgress(sessionId);
-            return progress && progress.renderedFrames >= movementBefore.renderedFrames + 90 ? progress : false;
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.right === false ? current : false;
           },
-          20000,
-          "Game View não avançou frames durante o movimento para direita",
+          10000,
+          "liberação de ArrowRight não chegou ao core",
           100
         );
-        await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "parada do movimento para direita");
-        const movementAfter = await readCanonicalGameFrame(sessionId);
-        const movementCentroidDelta = movementBefore.sonicRoiMagentaLikeCentroid && movementAfter?.sonicRoiMagentaLikeCentroid
-          ? Math.abs(movementAfter.sonicRoiMagentaLikeCentroid.x - movementBefore.sonicRoiMagentaLikeCentroid.x)
-          : 0;
-        if (!movementAfter || movementAfter.framebufferSha256 === movementBefore.framebufferSha256 || movementCentroidDelta < 2) {
-          fail(`Movimento de Sonic não produziu deslocamento visual observável: ${JSON.stringify({ before: movementBefore, after: movementAfter, input: rightInput })}`);
+        const movementAfter = await recordTrajectoryFrame("movement-released", { right: false }, movementDuring.sonic, movementDuring.raw.renderedFrames);
+        const movementDeltaX = Math.max(...[...movementSamples.map((sample) => sample.entry), movementAfter.entry].map((entry) => Math.abs(entry.memory.x - gameplayMemory.x)));
+        if (movementAfter.raw.framebufferSha256 === movementBefore.raw.framebufferSha256 || movementDeltaX < 2) {
+          const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+          await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput }, frames: trajectory, failure: "movement-not-observed", movementDeltaX }, null, 2));
+          fail(`Movimento de Sonic não produziu deslocamento independente: ${JSON.stringify({ before: movementBefore.sonic, after: movementAfter.sonic, input: rightInput })}`);
         }
-        const jumpBefore = movementAfter;
+
+        const jumpBefore = await recordTrajectoryFrame("jump-before", { right: false, a: false }, movementAfter.sonic, movementAfter.raw.renderedFrames);
         await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "salto pelo botão A");
         const jumpInputA = await waitFor(
           async () => {
@@ -5484,59 +6015,66 @@ async function main() {
           "KeyZ/A nativa não chegou ao core pelo handler do produto",
           100
         );
-        const jumpHoldProgress = await waitFor(
+        const jumpDownProgress = await waitFor(
           async () => {
             const progress = await readCanonicalGameProgress(sessionId);
-            return progress && progress.renderedFrames >= jumpBefore.renderedFrames + 10 ? progress : false;
+            return progress && progress.renderedFrames >= jumpBefore.raw.renderedFrames + 2 ? progress : false;
           },
           20000,
           "Game View não avançou frames durante o salto",
           100
         );
-        let jumpAfter = await readCanonicalGameFrame(sessionId);
+        const jumpDuring = await recordTrajectoryFrame("jump-held", { a: true }, jumpBefore.sonic, jumpBefore.raw.renderedFrames);
         await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "liberação do salto");
-        let jumpInput = jumpInputA;
-        let jumpControl = "KeyZ/A";
-        const jumpCentroidDelta = jumpBefore.sonicRoiMagentaLikeCentroid && jumpAfter?.sonicRoiMagentaLikeCentroid
-          ? Math.abs(jumpAfter.sonicRoiMagentaLikeCentroid.y - jumpBefore.sonicRoiMagentaLikeCentroid.y)
-          : 0;
-        if (jumpCentroidDelta < 2) {
-          await sendNativeGameKey(sessionId, "KeyC", "keyDown", "salto pelo botão C");
-          const jumpInputC = await waitFor(
-            async () => {
-              const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-              return current?.lastJoypadAck?.joypad?.y === true ? current : false;
-            },
-            10000,
-            "KeyC/C nativa não chegou ao core pelo handler do produto",
-            100
-          );
-          await waitFor(
-            async () => {
-              const progress = await readCanonicalGameProgress(sessionId);
-              return progress && progress.renderedFrames >= jumpAfter.renderedFrames + 30 ? progress : false;
-            },
-            20000,
-            "Game View não avançou frames durante a tentativa de salto pelo botão C",
-            100
-          );
-          await sendNativeGameKey(sessionId, "KeyC", "keyUp", "liberação do salto pelo botão C");
-          const jumpAfterC = await readCanonicalGameFrame(sessionId);
-          const jumpCentroidDeltaC = jumpBefore.sonicRoiMagentaLikeCentroid && jumpAfterC?.sonicRoiMagentaLikeCentroid
-            ? Math.abs(jumpAfterC.sonicRoiMagentaLikeCentroid.y - jumpBefore.sonicRoiMagentaLikeCentroid.y)
-            : 0;
-          if (jumpAfterC?.framebufferSha256 !== jumpBefore.framebufferSha256 && jumpCentroidDeltaC >= 2) {
-            jumpAfter = jumpAfterC;
-            jumpInput = jumpInputC;
-            jumpControl = "KeyC/C";
-          }
+        await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.a === false ? current : false;
+          },
+          10000,
+          "liberação de KeyZ/A não chegou ao core",
+          100
+        );
+        const jumpReleased = await recordTrajectoryFrame("jump-released", { a: false }, jumpDuring.sonic, jumpDuring.raw.renderedFrames);
+        let lastJumpSample = jumpReleased;
+        const captureAfterFrames = async (label, frames) => {
+          const target = jumpReleased.raw.renderedFrames + frames;
+          await waitFor(async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= target ? progress : false;
+          }, 30000, `Game View não avançou ${frames} frames após o salto`, 100);
+          lastJumpSample = await recordTrajectoryFrame(label, { a: false }, lastJumpSample.sonic, lastJumpSample.raw.renderedFrames);
+          return lastJumpSample;
+        };
+        const jumpLater = await captureAfterFrames("jump-after-15", 15);
+        const jumpMid = await captureAfterFrames("jump-after-45", 45);
+        const jumpReturn90 = await captureAfterFrames("jump-after-90", 90);
+        const jumpReturn150 = await captureAfterFrames("jump-after-150", 150);
+        const jumpReturn240 = await captureAfterFrames("jump-after-240", 240);
+        const jumpReturn = [jumpMid, jumpReturn90, jumpReturn150, jumpReturn240].find((sample) => sample.entry.memory.yVel === 0) ?? jumpReturn240;
+        const trajectoryY = trajectory.filter((entry) => entry.label.startsWith("jump-")).map((entry) => entry.memory.y);
+        const lowestY = Math.min(...trajectoryY);
+        const jumpLift = jumpBefore.entry.memory.y - lowestY;
+        const returnedToGround = jumpReturn.entry.memory.yVel === 0 && jumpReturn.entry.memory.y >= jumpBefore.entry.memory.y - jumpLift;
+        if (jumpLift < 3 || !returnedToGround) {
+          const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+          await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput, jump: jumpInputA }, frames: trajectory, failure: "jump-trajectory-not-observed", jumpLift, returnedToGround }, null, 2));
+          fail(`Trajetória de salto não comprovou subida e retorno: ${JSON.stringify({ jumpLift, returnedToGround, trajectory })}`);
         }
-        const finalJumpCentroidDelta = jumpBefore.sonicRoiMagentaLikeCentroid && jumpAfter?.sonicRoiMagentaLikeCentroid
-          ? Math.abs(jumpAfter.sonicRoiMagentaLikeCentroid.y - jumpBefore.sonicRoiMagentaLikeCentroid.y)
-          : 0;
-        if (!jumpAfter || jumpAfter.framebufferSha256 === jumpBefore.framebufferSha256 || finalJumpCentroidDelta < 2) {
-          fail(`Salto de Sonic não produziu mudança vertical observável: ${JSON.stringify({ before: jumpBefore, after: jumpAfter, input: jumpInput, controlsTried: ["KeyZ/A", "KeyC/C"] })}`);
-        }
+
+        await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar gameplay Sonic");
+        await waitFor(async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"), 10000, "Pausa não ficou visível", 100);
+        const pausedProgress = await readCanonicalGameProgress(sessionId);
+        await clickButtonByTestIdNative(sessionId, "viewport-resume", "retomar gameplay Sonic");
+        const resumedProgress = await waitFor(async () => {
+          const progress = await readCanonicalGameProgress(sessionId);
+          return progress && progress.renderedFrames > pausedProgress.renderedFrames + 5 ? progress : false;
+        }, 10000, "Retomada não avançou frames", 100);
+        const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+        await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput, jump: jumpInputA }, frames: trajectory, pause: { paused: pausedProgress, resumed: resumedProgress } }, null, 2));
+        const jumpAfter = jumpReturn;
+        const jumpInput = jumpInputA;
+        const jumpControl = "KeyZ/A";
         const canonicalGameScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-modified-after-restart.png`);
         const canonicalPlayEvidence = {
           identity: canonicalIdentity,
@@ -5544,8 +6082,8 @@ async function main() {
           bootFrame,
           startHoldProgress,
           gameplayFrame,
-          movement: { before: movementBefore, after: movementAfter, input: rightInput, holdProgress: movementHoldProgress },
-          jump: { before: jumpBefore, after: jumpAfter, input: jumpInput, holdProgress: jumpHoldProgress },
+          movement: { before: trajectory.find((entry) => entry.label === "before-controls"), samples: movementSamples.map((sample) => sample.entry), after: movementAfter.entry, input: rightInput, holdProgress: movementHoldProgress, deltaX: movementDeltaX },
+          jump: { before: jumpBefore.entry, during: jumpDuring.entry, released: jumpReleased.entry, later: jumpLater.entry, mid: jumpMid.entry, after: jumpAfter.entry, input: jumpInput, holdProgress: jumpDownProgress },
           jumpControl,
           oldImageReused,
           screenshot: canonicalGameScreenshot,
@@ -5559,7 +6097,7 @@ async function main() {
           fail("ROM BYOR original foi alterada durante o fluxo: " + JSON.stringify({ initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 } }));
         }
         console.log(`[inspection-base-integrity] ` + JSON.stringify({ path: inspectionRom, initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 }, unchanged: true }));
-        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "passed", paletteOracle: "base has no edited RGB333 color; applied has >=100 magenta-like pixels and >=50 in Sonic ROI", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas, canonicalPlayEvidence }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot, canonicalGameScreenshot }, sessionId: reopenedState.session.id }));
+        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "passed", paletteOracle: "independent framebuffer comparison; character identity uses the verified shape/palette template, not a magenta ROI", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas, baseCanonicalPlayEvidence, canonicalPlayEvidence }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot, canonicalGameScreenshot }, sessionId: reopenedState.session.id }));
         console.log("OK: Desktop Tauri Sonic identify/compose/edit/save/patch/apply/canonical-play/restart/reopen E2E passou.");
         return;
       }
