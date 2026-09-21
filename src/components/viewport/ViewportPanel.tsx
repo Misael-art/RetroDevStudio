@@ -52,7 +52,11 @@ import {
 } from "../../core/sceneWorldModel";
 import SceneAssetHealthBadge from "./SceneAssetHealthBadge";
 import { TilePalette } from "../tools/ContextualPalette";
-import { getGameViewportScale } from "./gameViewportScale";
+import AdaptivePanel from "../common/AdaptivePanel";
+import Button from "../common/Button";
+import Icon from "../common/Icon";
+import IconButton from "../common/IconButton";
+import { getGameViewportDimensions, getGameViewportScale } from "./gameViewportScale";
 
 const VIEWPORT_TABS = [
   { id: "scene", label: "Cena", icon: "SC" },
@@ -66,8 +70,6 @@ const NodeGraphEditor = lazy(() => import("../nodegraph/NodeGraphEditor"));
 const ArtStudioPanel = lazy(() => import("../artstudio/ArtStudioPanel"));
 const RetroFXDesigner = lazy(() => import("../retrofx/RetroFXDesigner"));
 
-const MD_WIDTH = 320;
-const MD_HEIGHT = 224;
 const GRID_SNAP_SIZE = 8;
 const SUB_GRID_SIZE = 4;
 const ZOOM_STEP = 0.25;
@@ -582,6 +584,8 @@ export default function ViewportPanel({
   const [showKeyColor, setShowKeyColor] = useState(false);
   const [guideSnap, setGuideSnap] = useState(true);
   const [gameViewLight, setGameViewLight] = useState(false);
+  const [sceneAdvancedOpen, setSceneAdvancedOpen] = useState(false);
+  const [gameAdvancedOpen, setGameAdvancedOpen] = useState(false);
   const [sceneGuides, setSceneGuides] = useState<SceneGuide[]>([]);
   const [guideDrag, setGuideDrag] = useState<GuideDragState | null>(null);
   const [saveStateBusy, setSaveStateBusy] = useState(false);
@@ -1555,6 +1559,11 @@ export default function ViewportPanel({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    if (canvas.width !== payload.width || canvas.height !== payload.height) {
+      canvas.width = payload.width;
+      canvas.height = payload.height;
+    }
+
     const context = canvas.getContext("2d");
     if (!context) return;
 
@@ -2038,9 +2047,12 @@ export default function ViewportPanel({
       }
 
       const rect = stage.getBoundingClientRect();
+      const frame = getGameViewportDimensions(activeTarget);
       const nextScale = getGameViewportScale(
         rect.width - GAME_VIEWPORT_PADDING,
-        rect.height - GAME_VIEWPORT_PADDING
+        rect.height - GAME_VIEWPORT_PADDING,
+        frame.width,
+        frame.height
       );
 
       setGameViewportScale((current) => (current === nextScale ? current : nextScale));
@@ -2063,7 +2075,7 @@ export default function ViewportPanel({
 
     window.addEventListener("resize", updateGameScale);
     return () => window.removeEventListener("resize", updateGameScale);
-  }, [activeViewportTab]);
+  }, [activeTarget, activeViewportTab]);
 
   useEffect(() => {
     if (activeViewportTab !== "game") {
@@ -4280,8 +4292,9 @@ export default function ViewportPanel({
   })();
 
   const isSnes = activeTarget === "snes";
+  const gameFrame = getGameViewportDimensions(activeTarget);
   const targetLabel = isSnes ? "SNES" : "Mega Drive";
-  const resolution = isSnes ? "256x224" : "320x224";
+  const resolution = `${gameFrame.width}x${gameFrame.height}`;
   const spriteLimit = isSnes ? 128 : 80;
   const bgLayerLimit = 4;
   const overlayInteractionBusy =
@@ -4295,7 +4308,7 @@ export default function ViewportPanel({
     showViewportWarnings && showWorldAuthoringStrip && !overlayInteractionBusy;
 
   return (
-    <div className="flex h-full flex-col bg-[#1e1e2e]">
+    <div className="flex h-full flex-col bg-[var(--rds-surface-base)]">
       {denseStackPicker && activeViewportTab === "scene" ? (
         <div
           data-testid="viewport-dense-stack-picker"
@@ -4427,7 +4440,7 @@ export default function ViewportPanel({
         </div>
       ) : null}
       {(showWorkspaceTabs || activeViewportTab === "game") && (
-        <div className="flex items-center justify-between border-b border-[#313244] bg-[#181825] pr-3">
+        <div className="flex items-center justify-between border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] pr-3">
           {showWorkspaceTabs ? (
             <Tabs
               tabs={VIEWPORT_TABS}
@@ -4439,25 +4452,23 @@ export default function ViewportPanel({
             <div className="min-h-8 flex-1" />
           )}
           {activeViewportTab === "game" && (
-            <button
-              type="button"
+            <Button
+              aria-pressed={showPerformanceOverlay}
+              iconStart={<Icon name="info-circle" size={16} />}
               onClick={() => setShowPerformanceOverlay((current) => !current)}
-              className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                showPerformanceOverlay
-                  ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
-                  : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-              }`}
+              size="sm"
               title="Alternar overlay de performance no Game View"
+              variant={showPerformanceOverlay ? "primary" : "ghost"}
             >
-              Overlay {showPerformanceOverlay ? "ON" : "OFF"}
-            </button>
+              Métricas
+            </Button>
           )}
         </div>
       )}
 
-      <div className="relative flex-1 overflow-hidden bg-[#11111b] flex flex-col">
+      <div className="relative flex flex-1 flex-col overflow-hidden bg-[var(--rds-surface-canvas)]">
         <div
-          className={`flex-1 overflow-hidden bg-[#11111b] h-full min-h-0 ${
+          className={`h-full min-h-0 flex-1 overflow-hidden bg-[var(--rds-surface-canvas)] ${
             activeViewportTab === "logic" || activeViewportTab === "retrofx" || activeViewportTab === "artstudio"
               ? "flex"
               : "flex flex-col"
@@ -4465,265 +4476,193 @@ export default function ViewportPanel({
         >
           {activeViewportTab === "scene" && (
             <div className="flex flex-1 flex-col min-h-0">
-            {/* Toolbar horizontal dedicada (V, B, E, C, G, Zoom) */}
             <div
               data-testid="viewport-scene-toolbar"
-              className="flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-[#313244] bg-[#181825] px-2 py-1.5 [scrollbar-width:thin] [&>button]:shrink-0 [&>div]:shrink-0 [&>span]:shrink-0"
+              role="toolbar"
+              aria-label="Ferramentas principais da cena"
+              className="flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2 py-1.5"
             >
               {([
-                { id: "select" as const, icon: "🖱️", label: "Selecionar (V)", activeColor: "bg-[#89b4fa]" },
-                { id: "paint" as const, icon: "✏️", label: "Pintar (B)", activeColor: "bg-[#89b4fa]" },
-                { id: "erase" as const, icon: "🧹", label: "Apagar (E)", activeColor: "bg-[#89b4fa]" },
-                { id: "collision" as const, icon: "🛡️", label: "Colis\u00e3o (C)", activeColor: "bg-[#f38ba8]" },
+                { id: "select" as const, icon: "drag" as const, label: "Selecionar (V)" },
+                { id: "paint" as const, icon: "palette" as const, label: "Pintar (B)" },
+                { id: "erase" as const, icon: "refresh" as const, label: "Apagar (E)" },
+                { id: "collision" as const, icon: "warning-triangle" as const, label: "Colisão (C)" },
               ]).map((tool) => (
-                <button
+                <IconButton
                   key={tool.id}
-                  type="button"
+                  aria-label={tool.label}
+                  aria-pressed={editorMode === tool.id}
+                  icon={<Icon name={tool.icon} size={16} />}
                   onClick={() => setEditorMode(tool.id)}
-                  className={`rounded px-2 py-1 text-[10px] font-semibold transition-all ${
-                    editorMode === tool.id
-                      ? `${tool.activeColor} text-[#11111b]`
-                      : "text-[#7f849c] hover:bg-[#313244] hover:text-[#cdd6f4]"
-                  }`}
+                  size="sm"
                   title={tool.label}
-                >
-                  {tool.icon}
-                </button>
+                  variant={editorMode === tool.id ? "primary" : "ghost"}
+                />
               ))}
-              <div className="mx-1 w-px bg-[#313244] self-stretch" />
-              <button
-                type="button"
+              <span className="mx-1 h-5 w-px bg-[var(--rds-border-subtle)]" aria-hidden="true" />
+              <Button
+                aria-pressed={gridSnap}
                 onClick={() => setGridSnap((current) => !current)}
-                className={`rounded px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  gridSnap
-                    ? "border border-[#94e2d5] bg-[#94e2d5]/15 text-[#94e2d5]"
-                    : "border border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
+                size="sm"
                 title="Snap ao grid 8px (G)"
+                variant={gridSnap ? "primary" : "ghost"}
               >
-                G
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowGrid((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  showGrid
-                    ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title="Mostrar grid principal"
-              >
-                Grid
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowSubGrid((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  showSubGrid
-                    ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title="Mostrar sub-grid"
-              >
-                Sub
-              </button>
-              <button
-                type="button"
-                onClick={() => setGuideSnap((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  guideSnap
-                    ? "border-[#94e2d5] bg-[#94e2d5]/15 text-[#94e2d5]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title="Snap para guias e grid"
-              >
-                Guide
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowBackground((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  showBackground
-                    ? "border-[#a6e3a1] bg-[#a6e3a1]/15 text-[#a6e3a1]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title="Mostrar background"
-              >
-                BG
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowTilemaps((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  showTilemaps
-                    ? "border-[#94e2d5] bg-[#94e2d5]/15 text-[#94e2d5]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title="Mostrar tilemaps"
-              >
-                TM
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowSprites((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  showSprites
-                    ? "border-[#cba6f7] bg-[#cba6f7]/15 text-[#cba6f7]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title="Mostrar sprites"
-              >
-                SP
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCollisionOverlay((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  showCollisionOverlay
-                    ? "border-[#f38ba8] bg-[#f38ba8]/15 text-[#f38ba8]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title={
-                  activeScene?.collision_map
-                    ? `Overlay de colisão (${activeScene.collision_map.width}×${activeScene.collision_map.height} tiles importados/cena)`
-                    : "Mostrar overlay de colisao (sem collision_map na cena)"
-                }
-              >
-                Col
-              </button>
-              {([
-                ["Cam", showCameraOverlay, setShowCameraOverlay, "Mostrar camera e janela MD"],
-                ["Bnd", showEntityBounds, setShowEntityBounds, "Mostrar bounds das entidades"],
-                ["Lbl", showEntityLabels, setShowEntityLabels, "Mostrar labels das entidades"],
-                ["Stg", showStagingOverlay, setShowStagingOverlay, "Mostrar staging importado"],
-                ["Warn", showViewportWarnings, setShowViewportWarnings, "Mostrar avisos de autoria no viewport"],
-                ["Nav", showSceneNavigator, setShowSceneNavigator, "Mostrar navegador do mundo"],
-                ["Key", showKeyColor, setShowKeyColor, "Mostrar cor-chave magenta para debug"],
-                ["Dock", showCommandDock, setShowCommandDock, "Mostrar dock do objeto selecionado"],
-              ] as const).map(([label, active, setter, title]) => (
-                <button
-                  key={label}
-                  type="button"
-                  data-testid={`viewport-toggle-${label.toLowerCase()}`}
-                  onClick={() => setter((current) => !current)}
-                  className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                    active
-                      ? "border-[#89dceb] bg-[#89dceb]/15 text-[#89dceb]"
-                      : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                  }`}
-                  title={title}
-                >
-                  {label}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setGameViewLight((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  gameViewLight
-                    ? "border-[#f9e2af] bg-[#f9e2af]/15 text-[#f9e2af]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title="Game View Light"
-              >
-                GV
-              </button>
-              <div className="mx-1 w-px bg-[#313244] self-stretch" />
-              <button
-                type="button"
+                Snap 8 px
+              </Button>
+              <Button
                 onClick={focusSelectedEntity}
                 disabled={!selectedEntity}
-                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa] disabled:cursor-not-allowed disabled:opacity-40"
+                iconStart={<Icon name="search" size={16} />}
+                size="sm"
                 title="Centralizar entidade selecionada"
+                variant="secondary"
               >
-                Foco
-              </button>
-              <button
+                Focar
+              </Button>
+              <Button
                 type="button"
                 data-testid="viewport-entity-solo-toggle"
+                aria-pressed={Boolean(selectedEntity && soloEntityId === selectedEntity.entity_id)}
                 onClick={toggleSelectedEntitySolo}
                 disabled={!selectedEntity}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                  selectedEntity && soloEntityId === selectedEntity.entity_id
-                    ? "border-[#f9e2af] bg-[#f9e2af]/15 text-[#f9e2af]"
-                    : "border-[#313244] bg-[#11111b] text-[#a6adc8] hover:border-[#f9e2af] hover:text-[#f9e2af]"
-                }`}
+                size="sm"
                 title="Isolar visualmente a entidade selecionada sem alterar a cena"
+                variant={selectedEntity && soloEntityId === selectedEntity.entity_id ? "primary" : "ghost"}
               >
                 Solo
-              </button>
-              <button
-                type="button"
-                onClick={centerViewportOnCamera}
-                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#f9e2af] transition-colors hover:border-[#f9e2af]"
-                title="Centralizar camera/janela MD visivel"
-              >
-                Camera
-              </button>
-              <button
-                type="button"
-                onClick={resetSceneView}
-                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
-                title="Resetar vista (zoom + pan)"
-              >
-                Reset View
-              </button>
-              <button
-                type="button"
-                onClick={() => setClampViewportToWorld((current) => !current)}
-                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  clampViewportToWorld
-                    ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/10 text-[#a6e3a1]"
-                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-                }`}
-                title="Travar pan nos limites do mundo"
-              >
-                Clamp
-              </button>
-              {sceneDensityStatus.shouldSuggestStaging ? (
-                <button
-                  type="button"
-                  onClick={applyAuthoringStagingLayout}
-                  className="rounded border border-[#fab387]/35 bg-[#fab387]/10 px-2 py-1 text-[10px] font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20"
-                  title="Distribuir cena densa em staging de autoria sem perder auditabilidade"
-                >
-                  Normalizar Cena
-                </button>
-              ) : null}
-              <span
-                className="hidden max-w-[10rem] truncate text-[9px] text-[#6c7086] xl:inline"
-                title="Shift+clique na pilha abre lista; Alt+clique cicla"
-              >
-                Shift=lista · Alt=ciclo
-              </span>
-              <div className="mx-1 w-px bg-[#313244] self-stretch" />
-              <button
-                type="button"
+              </Button>
+              <span className="mx-1 h-5 w-px bg-[var(--rds-border-subtle)]" aria-hidden="true" />
+              <Button
+                aria-label="Diminuir zoom"
                 onClick={() => setViewportZoom(Math.max(ZOOM_MIN, viewportZoom - ZOOM_STEP))}
-                className="rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8] disabled:opacity-30"
                 disabled={viewportZoom <= ZOOM_MIN}
-                title="Zoom out (Ctrl+-)"
+                size="sm"
+                title="Diminuir zoom (Ctrl+-)"
+                variant="ghost"
               >
                 −
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                aria-label={`Restaurar zoom. Zoom atual ${Math.round(viewportZoom * 100)}%`}
                 onClick={() => resetViewportZoom()}
-                className="min-w-[40px] rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-center text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8]"
-                title="Reset zoom (Ctrl+0)"
+                size="sm"
+                title="Restaurar zoom (Ctrl+0)"
+                variant="secondary"
               >
                 {Math.round(viewportZoom * 100)}%
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                aria-label="Aumentar zoom"
                 onClick={() => setViewportZoom(Math.min(ZOOM_MAX, viewportZoom + ZOOM_STEP))}
-                className="rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8] disabled:opacity-30"
                 disabled={viewportZoom >= ZOOM_MAX}
-                title="Zoom in (Ctrl+=)"
+                size="sm"
+                title="Aumentar zoom (Ctrl+=)"
+                variant="ghost"
               >
                 +
-              </button>
+              </Button>
+              <Button
+                aria-controls="viewport-scene-secondary-tools"
+                aria-expanded={sceneAdvancedOpen}
+                className="ml-auto"
+                iconStart={<Icon name="settings" size={16} />}
+                onClick={() => setSceneAdvancedOpen((current) => !current)}
+                size="sm"
+                variant="ghost"
+              >
+                Mais ferramentas
+              </Button>
             </div>
+            {sceneAdvancedOpen ? (
+              <div
+                id="viewport-scene-secondary-tools"
+                data-testid="viewport-scene-secondary-tools"
+                role="toolbar"
+                aria-label="Ferramentas secundárias da cena"
+                className="flex min-w-0 shrink-0 flex-wrap items-center gap-1 border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-2 py-1.5"
+              >
+                {([
+                  ["grid", "Grid", showGrid, setShowGrid, "Mostrar grid principal"],
+                  ["sub", "Sub-grid", showSubGrid, setShowSubGrid, "Mostrar sub-grid"],
+                  ["guide", "Guias", guideSnap, setGuideSnap, "Snap para guias e grid"],
+                  ["bg", "Background", showBackground, setShowBackground, "Mostrar background"],
+                  ["tm", "Tilemaps", showTilemaps, setShowTilemaps, "Mostrar tilemaps"],
+                  ["sp", "Sprites", showSprites, setShowSprites, "Mostrar sprites"],
+                  ["col", "Colisão", showCollisionOverlay, setShowCollisionOverlay, "Mostrar overlay de colisão"],
+                  ["cam", "Cam", showCameraOverlay, setShowCameraOverlay, "Mostrar câmera e janela do target"],
+                  ["bnd", "Bnd", showEntityBounds, setShowEntityBounds, "Mostrar limites das entidades"],
+                  ["lbl", "Lbl", showEntityLabels, setShowEntityLabels, "Mostrar nomes das entidades"],
+                  ["stg", "Stg", showStagingOverlay, setShowStagingOverlay, "Mostrar staging importado"],
+                  ["warn", "Warn", showViewportWarnings, setShowViewportWarnings, "Mostrar avisos de autoria"],
+                  ["nav", "Nav", showSceneNavigator, setShowSceneNavigator, "Mostrar navegador do mundo"],
+                  ["key", "Key", showKeyColor, setShowKeyColor, "Mostrar cor-chave magenta para debug"],
+                  ["dock", "Dock", showCommandDock, setShowCommandDock, "Mostrar contexto do objeto selecionado"],
+                ] as const).map(([id, label, active, setter, title]) => (
+                  <Button
+                    key={id}
+                    type="button"
+                    data-testid={`viewport-toggle-${id}`}
+                    aria-pressed={active}
+                    onClick={() => setter((current) => !current)}
+                    size="sm"
+                    title={title}
+                    variant={active ? "primary" : "ghost"}
+                  >
+                    {label}
+                  </Button>
+                ))}
+                <Button
+                  aria-pressed={gameViewLight}
+                  onClick={() => setGameViewLight((current) => !current)}
+                  size="sm"
+                  title="Visualização limpa da cena"
+                  variant={gameViewLight ? "primary" : "ghost"}
+                >
+                  Cena limpa
+                </Button>
+                <Button onClick={centerViewportOnCamera} size="sm" variant="secondary">
+                  Centralizar câmera
+                </Button>
+                <Button onClick={resetSceneView} size="sm" variant="secondary">
+                  Ajustar vista
+                </Button>
+                <Button
+                  aria-pressed={clampViewportToWorld}
+                  onClick={() => setClampViewportToWorld((current) => !current)}
+                  size="sm"
+                  variant={clampViewportToWorld ? "primary" : "ghost"}
+                >
+                  Limitar pan
+                </Button>
+                {sceneDensityStatus.shouldSuggestStaging ? (
+                  <Button onClick={applyAuthoringStagingLayout} size="sm" variant="secondary">
+                    Normalizar cena
+                  </Button>
+                ) : null}
+                <span className="ml-auto text-[10px] text-[var(--rds-text-muted)]">
+                  Shift+clique: lista · Alt+clique: ciclo
+                </span>
+              </div>
+            ) : null}
+            {hwStatus && hwStatus.errors.length > 0 ? (
+              <section
+                data-testid="viewport-build-blockers"
+                role="alert"
+                aria-label="Bloqueios de build da cena"
+                className="max-h-28 shrink-0 overflow-auto border-b border-[var(--rds-status-error)] bg-[var(--rds-surface-panel)] px-3 py-2 text-xs text-[var(--rds-text-primary)]"
+              >
+                <div className="flex items-center gap-2 font-semibold text-[var(--rds-status-error)]">
+                  <Icon name="warning-triangle" size={16} />
+                  Build bloqueado: {hwStatus.errors.length} {hwStatus.errors.length === 1 ? "erro" : "erros"}
+                </div>
+                <p className="mt-1 text-[var(--rds-text-muted)]">
+                  A ROM não deve ser gerada com estes limites. Corrija em Inspector → Hardware e valide novamente antes de Build &amp; Run.
+                </p>
+                <ul className="mt-1 list-inside list-disc space-y-1 text-[var(--rds-text-secondary)]">
+                  {hwStatus.errors.map((error) => <li key={error}>{error}</li>)}
+                </ul>
+              </section>
+            ) : null}
 
             {/* Área de canvas com overflow para mais espaço */}
             <div
@@ -4932,7 +4871,7 @@ export default function ViewportPanel({
                     width: cameraWindowRect.width,
                     height: cameraWindowRect.height,
                   }}
-                  title="Janela visivel Mega Drive (320x224)"
+                  title={`Janela visível ${targetLabel} (${resolution})`}
                 />
               )}
               {shortcutHint && (
@@ -4952,7 +4891,7 @@ export default function ViewportPanel({
               {showNonCriticalSceneOverlays ? (
                 <div className="pointer-events-none absolute left-2 top-2 z-20 rounded border border-[#313244] bg-[#11111b]/85 px-2 py-1 text-[9px] text-[#a6adc8]">
                   <p className="font-semibold text-[#cdd6f4]">
-                    Janela MD visivel: {sceneFrameWidth}x{sceneFrameHeight}
+                    Janela {targetLabel} visível: {sceneFrameWidth}x{sceneFrameHeight}
                   </p>
                   <p>
                     Mundo: {sceneWidth}x{sceneHeight} px
@@ -4979,131 +4918,12 @@ export default function ViewportPanel({
                   Overlays essenciais
                 </div>
               ) : null}
-              {selectedEntity && showCommandDock ? (
-                <div
-                  data-testid="viewport-creator-command-dock"
-                  className="absolute right-2 top-2 z-20 max-w-[340px] rounded border border-[#313244] bg-[#11111b]/94 px-3 py-2 text-[9px] text-[#a6adc8] shadow-lg"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
-                        Mesa de composicao
-                      </p>
-                      <p className="truncate text-[11px] font-semibold text-[#cdd6f4]">
-                        {creatorWorkflow.selectedLabel}
-                      </p>
-                      <p className="truncate font-mono text-[#6c7086]">
-                        {selectedEntity.entity_id} · {creatorWorkflow.selectedBoundsLabel}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 flex-col gap-1">
-                      <button
-                        type="button"
-                        onClick={focusSelectedEntity}
-                        className="rounded border border-[#313244] bg-[#181825] px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
-                      >
-                        Centralizar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={toggleSelectedEntitySolo}
-                        className={`rounded border px-2 py-1 text-[8px] font-semibold uppercase tracking-wide transition-colors ${
-                          soloEntityId === selectedEntity.entity_id
-                            ? "border-[#f9e2af] bg-[#f9e2af]/15 text-[#f9e2af]"
-                            : "border-[#313244] bg-[#181825] text-[#cdd6f4] hover:border-[#f9e2af] hover:text-[#f9e2af]"
-                        }`}
-                      >
-                        {soloEntityId === selectedEntity.entity_id ? "Solo on" : "Solo"}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2 grid gap-1 rounded border border-[#313244] bg-[#0b1020]/70 p-2 font-mono text-[8px] text-[#94a3b8]">
-                    <span>{creatorWorkflow.frameLabel}</span>
-                    <span>{creatorWorkflow.worldLabel}</span>
-                    <span>{creatorWorkflow.cameraLabel}</span>
-                    <span className="font-sans text-[9px] text-[#6c7086]">
-                      {creatorWorkflow.editableRegionLabel}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {selectedImportedContext?.roleLabel ? (
-                      <span className="rounded-full border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-0.5 text-[#89b4fa]">
-                        {selectedImportedContext.roleLabel}
-                      </span>
-                    ) : null}
-                    {selectedImportedContext?.positionLabel ? (
-                      <span
-                        className={`rounded-full border px-2 py-0.5 ${
-                          selectedImportedContext.positionMode === "donor"
-                            ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/10 text-[#a6e3a1]"
-                            : selectedImportedContext.positionMode === "staging"
-                              ? "border-[#fab387]/40 bg-[#fab387]/10 text-[#fab387]"
-                              : "border-[#89b4fa]/40 bg-[#89b4fa]/10 text-[#89b4fa]"
-                        }`}
-                        title={selectedImportedContext.positionDetail ?? undefined}
-                      >
-                        {selectedImportedContext.positionLabel}
-                      </span>
-                    ) : null}
-                    {selectedEntitySourceRefs.length > 0 ? (
-                      <span className="rounded-full border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-0.5 text-[#f9e2af]">
-                        {creatorWorkflow.sourceCountLabel}
-                      </span>
-                    ) : null}
-                    <span className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5 text-[#a6adc8]">
-                      {creatorWorkflow.soloLabel}
-                    </span>
-                  </div>
-                  {selectedImportedContext?.summary ? (
-                    <p className="mt-2 leading-relaxed text-[#94a3b8]">
-                      {selectedImportedContext.summary}
-                    </p>
-                  ) : null}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {selectedEntity.components.tilemap ? (
-                      <button
-                        type="button"
-                        onClick={openSelectedEntityTilemap}
-                        className="rounded border border-[#94e2d5]/35 bg-[#94e2d5]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
-                      >
-                        Tilemap
-                      </button>
-                    ) : null}
-                    {entityHasLogicWorkspace(selectedEntity) ? (
-                      <button
-                        type="button"
-                        onClick={openSelectedEntityLogic}
-                        className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20"
-                      >
-                        Objeto -&gt; Logica
-                      </button>
-                    ) : null}
-                    {selectedEntity.components.sprite ? (
-                      <button
-                        type="button"
-                        onClick={openSelectedEntityArt}
-                        className="rounded border border-[#a6e3a1]/35 bg-[#a6e3a1]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20"
-                      >
-                        Objeto -&gt; Art
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void openSelectedEntityPrimarySource()}
-                      disabled={selectedEntitySourceRefs.length === 0}
-                      className="rounded border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Fonte real
-                    </button>
-                  </div>
-                </div>
-              ) : null}
               {showWorldAuthoringOverlay ? (
                 <div
                   data-testid="viewport-world-authoring-strip"
                   className="pointer-events-auto absolute left-2 top-24 z-20 max-w-[280px] rounded border border-[#fab387]/45 bg-[#11111b]/95 px-2 py-2 text-[9px] text-[#cdd6f4] shadow-lg"
                 >
-                  <p className="font-semibold text-[#fab387]">Autoria: mundo vs janela MD</p>
+                  <p className="font-semibold text-[#fab387]">Autoria: mundo vs janela {targetLabel}</p>
                   <p className="mt-1 leading-relaxed text-[#a6adc8]">
                     O mundo util ou o mapa de colisao excede a area visivel ({sceneFrameWidth}×{sceneFrameHeight}).
                     Use as acoes abaixo em vez de depender apenas de avisos no log de hardware.
@@ -5172,7 +4992,7 @@ export default function ViewportPanel({
                     focusWorldPoint(worldX, worldY);
                   }}
                   className="relative block h-24 w-36 rounded border border-[#313244] bg-[#0b1020]"
-                  title="Mapa de navegacao: clique para centrar o pan no ponto. Moldura azul = area visivel no stage; amarelo = janela MD/camera quando definida."
+                  title={`Mapa de navegação: clique para centralizar. Moldura azul = área visível; amarelo = janela ${targetLabel}/câmera.`}
                 >
                   <div className="absolute inset-0 border border-[#6c7086]/40" />
                   {visibleWorldRect ? (
@@ -5204,6 +5024,95 @@ export default function ViewportPanel({
                 </div>
               ) : null}
             </div>
+            {selectedEntity && showCommandDock ? (
+              <AdaptivePanel
+                panelId="viewport-creator-command-dock"
+                title={`Contexto: ${creatorWorkflow.selectedLabel}`}
+                boundsRef={sceneStageRef}
+                defaultFloating
+                defaultPosition={{ x: 24, y: 88 }}
+                defaultSize={{ width: 360, height: 360 }}
+                minSize={{ width: 280, height: 220 }}
+                maxSize={{ width: 560, height: 560 }}
+                tone="info"
+              >
+                <p className="truncate font-mono text-[10px] text-[var(--rds-text-muted)]">
+                  {selectedEntity.entity_id} · {creatorWorkflow.selectedBoundsLabel}
+                </p>
+                <dl className="mt-2 grid gap-1 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-2 font-mono text-[10px] text-[var(--rds-text-secondary)]">
+                  <div>{creatorWorkflow.frameLabel}</div>
+                  <div>{creatorWorkflow.worldLabel}</div>
+                  <div>{creatorWorkflow.cameraLabel}</div>
+                  <div className="font-sans text-[var(--rds-text-muted)]">
+                    {creatorWorkflow.editableRegionLabel}
+                  </div>
+                </dl>
+                <div className="mt-2 flex flex-wrap gap-1 text-[10px] text-[var(--rds-text-secondary)]">
+                  {selectedImportedContext?.roleLabel ? (
+                    <span className="rounded-full border border-[var(--rds-border-default)] px-2 py-0.5">
+                      {selectedImportedContext.roleLabel}
+                    </span>
+                  ) : null}
+                  {selectedImportedContext?.positionLabel ? (
+                    <span
+                      className="rounded-full border border-[var(--rds-border-default)] px-2 py-0.5"
+                      title={selectedImportedContext.positionDetail ?? undefined}
+                    >
+                      {selectedImportedContext.positionLabel}
+                    </span>
+                  ) : null}
+                  {selectedEntitySourceRefs.length > 0 ? (
+                    <span className="rounded-full border border-[var(--rds-border-default)] px-2 py-0.5">
+                      {creatorWorkflow.sourceCountLabel}
+                    </span>
+                  ) : null}
+                  <span className="rounded-full border border-[var(--rds-border-default)] px-2 py-0.5">
+                    {creatorWorkflow.soloLabel}
+                  </span>
+                </div>
+                {selectedImportedContext?.summary ? (
+                  <p className="mt-2 text-[10px] leading-relaxed text-[var(--rds-text-muted)]">
+                    {selectedImportedContext.summary}
+                  </p>
+                ) : null}
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <Button onClick={focusSelectedEntity} size="sm" variant="secondary">
+                    Centralizar
+                  </Button>
+                  <Button
+                    aria-pressed={soloEntityId === selectedEntity.entity_id}
+                    onClick={toggleSelectedEntitySolo}
+                    size="sm"
+                    variant={soloEntityId === selectedEntity.entity_id ? "primary" : "ghost"}
+                  >
+                    Solo
+                  </Button>
+                  {selectedEntity.components.tilemap ? (
+                    <Button onClick={openSelectedEntityTilemap} size="sm" variant="secondary">
+                      Tilemap
+                    </Button>
+                  ) : null}
+                  {entityHasLogicWorkspace(selectedEntity) ? (
+                    <Button onClick={openSelectedEntityLogic} size="sm" variant="secondary">
+                      Objeto → Lógica
+                    </Button>
+                  ) : null}
+                  {selectedEntity.components.sprite ? (
+                    <Button onClick={openSelectedEntityArt} size="sm" variant="secondary">
+                      Objeto → Art
+                    </Button>
+                  ) : null}
+                  <Button
+                    onClick={() => void openSelectedEntityPrimarySource()}
+                    disabled={selectedEntitySourceRefs.length === 0}
+                    size="sm"
+                    variant="secondary"
+                  >
+                    Fonte real
+                  </Button>
+                </div>
+              </AdaptivePanel>
+            ) : null}
             {activeScene &&
               activeScene.entities.length === 0 &&
               activeScene.background_layers.length === 0 && (
@@ -5241,162 +5150,244 @@ export default function ViewportPanel({
         )}
 
         {activeViewportTab === "game" && (
-          <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex min-h-0 flex-1 flex-col bg-[var(--rds-surface-base)]">
+            <div
+              data-testid="viewport-game-primary-toolbar"
+              role="toolbar"
+              aria-label="Controles principais do jogo"
+              className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-2 py-1.5"
+            >
+              <div className="mr-2 min-w-36">
+                <p className="text-xs font-semibold text-[var(--rds-text-primary)]">{targetLabel}</p>
+                <p className="font-mono text-[10px] text-[var(--rds-text-muted)]">
+                  {resolution} · 60 fps · escala {gameViewportScale}x
+                </p>
+              </div>
+              <Button
+                type="button"
+                onClick={() => handlePause()}
+                disabled={!hasEmulatorSession || emulPaused}
+                data-testid="viewport-pause"
+                iconStart={<Icon name="square" size={15} />}
+                size="sm"
+                variant="secondary"
+              >
+                Pausar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => handleResume()}
+                disabled={!hasEmulatorSession || !emulPaused}
+                data-testid="viewport-resume"
+                iconStart={<Icon name="play" size={15} />}
+                size="sm"
+                variant="primary"
+              >
+                Retomar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleStepFrame()}
+                disabled={!hasEmulatorSession || !emulPaused || stepBusy}
+                data-testid="viewport-step-frame"
+                loading={stepBusy}
+                loadingLabel="Avançando um frame"
+                size="sm"
+                variant="secondary"
+              >
+                Step 1 frame
+              </Button>
+              <Button
+                type="button"
+                aria-pressed={audioMuted}
+                onClick={() => setAudioMuted((current) => !current)}
+                data-testid="viewport-audio-mute"
+                size="sm"
+                variant={audioMuted ? "secondary" : "ghost"}
+              >
+                {audioMuted ? "Ativar áudio" : "Mutar áudio"}
+              </Button>
+              <Button
+                aria-controls="viewport-game-advanced-controls"
+                aria-expanded={gameAdvancedOpen}
+                className="ml-auto"
+                iconStart={<Icon name="settings" size={16} />}
+                onClick={() => setGameAdvancedOpen((current) => !current)}
+                size="sm"
+                variant="ghost"
+              >
+                Controles avançados
+              </Button>
+            </div>
+            {gameAdvancedOpen ? (
+              <div
+                id="viewport-game-advanced-controls"
+                data-testid="viewport-game-advanced-controls"
+                role="toolbar"
+                aria-label="Controles avançados do jogo"
+                className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2 py-1.5"
+              >
+                <Button
+                  type="button"
+                  onClick={() => void handleSaveState()}
+                  disabled={!hasEmulatorSession || saveStateBusy}
+                  data-testid="viewport-save-state"
+                  loading={saveStateBusy}
+                  loadingLabel="Salvando state"
+                  size="sm"
+                  variant="secondary"
+                >
+                  Salvar state
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleLoadState()}
+                  disabled={!hasEmulatorSession || loadStateBusy}
+                  data-testid="viewport-load-state"
+                  loading={loadStateBusy}
+                  loadingLabel="Carregando state"
+                  size="sm"
+                  variant="secondary"
+                >
+                  Carregar state
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleRewind()}
+                  disabled={!hasEmulatorSession || !emulPaused || rewindBusy}
+                  data-testid="viewport-rewind"
+                  loading={rewindBusy}
+                  loadingLabel="Recuando emulador"
+                  size="sm"
+                  title="Recuar snapshots automáticos do emulador (atalho: R)"
+                  variant="secondary"
+                >
+                  Rewind
+                </Button>
+                <span className="mx-1 h-5 w-px bg-[var(--rds-border-subtle)]" aria-hidden="true" />
+                <Button
+                  type="button"
+                  onClick={() => void handleStartRecording()}
+                  disabled={!hasEmulatorSession || recordBusy || replayRecording}
+                  data-testid="viewport-replay-record"
+                  loading={recordBusy && !replayRecording}
+                  loadingLabel="Iniciando gravação"
+                  size="sm"
+                  variant="secondary"
+                >
+                  Gravar replay
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleStopRecording()}
+                  disabled={!hasEmulatorSession || recordBusy || !replayRecording || !activeProjectDir}
+                  data-testid="viewport-replay-stop"
+                  loading={recordBusy && replayRecording}
+                  loadingLabel="Finalizando gravação"
+                  size="sm"
+                  variant="danger"
+                >
+                  Parar gravação
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handlePlayReplay()}
+                  disabled={!hasEmulatorSession || playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
+                  data-testid="viewport-replay-play"
+                  iconStart={<Icon name="play" size={15} />}
+                  loading={playReplayBusy}
+                  loadingLabel="Reproduzindo replay"
+                  size="sm"
+                  title="Reproduzir o último replay salvo com o estado inicial gravado"
+                  variant="secondary"
+                >
+                  Reproduzir replay
+                </Button>
+              </div>
+            ) : null}
             {assetHotReloadNotice && (
               <div
                 data-testid="viewport-asset-hot-reload"
-                className="mx-auto rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-3 py-1 text-[10px] font-semibold text-[#f9e2af]"
+                role="status"
+                className="mx-2 mt-2 rounded border border-[var(--rds-status-warning)] bg-[var(--rds-surface-panel)] px-3 py-1 text-[10px] font-semibold text-[var(--rds-status-warning)]"
               >
                 Assets alterados no disco. {assetHotReloadNotice}
               </div>
             )}
             <div
               ref={gameViewportStageRef}
-              className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-2xl border border-[#313244] bg-[radial-gradient(circle_at_top,#111827,#05070f_72%)] p-3"
+              data-testid="viewport-game-frame-area"
+              className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[var(--rds-surface-canvas)] p-3"
             >
               <div
                 className="relative inline-block"
                 data-testid="viewport-game-stage"
                 style={{
-                  width: MD_WIDTH * gameViewportScale,
-                  height: MD_HEIGHT * gameViewportScale,
+                  width: gameFrame.width * gameViewportScale,
+                  height: gameFrame.height * gameViewportScale,
                 }}
               >
                 <canvas
                   ref={canvasRef}
-                  width={MD_WIDTH}
-                  height={MD_HEIGHT}
+                  width={gameFrame.width}
+                  height={gameFrame.height}
                   data-testid="viewport-game-canvas"
-                  className="border border-[#45475a] bg-black shadow-[0_16px_40px_rgba(0,0,0,0.35)]"
+                  aria-label={`Saída do emulador ${targetLabel}, resolução ${resolution}`}
+                  aria-describedby="viewport-game-keyboard-help"
+                  className="border border-[var(--rds-border-strong)] bg-[var(--rds-surface-overlay)] shadow-[var(--rds-shadow-elevated)]"
                   style={{
                     imageRendering: "pixelated",
-                    width: MD_WIDTH * gameViewportScale,
-                    height: MD_HEIGHT * gameViewportScale,
+                    width: gameFrame.width * gameViewportScale,
+                    height: gameFrame.height * gameViewportScale,
                   }}
                   tabIndex={0}
                 />
-                {showPerformanceOverlay && (
-                  <div
-                    data-testid="viewport-performance-overlay"
-                    className="pointer-events-none absolute left-2 top-2 flex flex-col gap-1 rounded border border-[#313244] bg-[#11111b]/80 px-2 py-1 font-mono text-[10px] text-[#cdd6f4]"
-                  >
-                    <span>FPS {overlayFps}</span>
-                    <span>Sprites {overlaySpriteCount}</span>
-                    <span>DMA est. {Math.round(dmaUsageBytes / 1024)}KB / {Math.round(dmaBudgetBytes / 1024)}KB ({dmaUsagePercent}%)</span>
-                  </div>
-                )}
-                <div className="pointer-events-none absolute bottom-2 right-2 rounded border border-[#313244] bg-[#11111b]/80 px-2 py-1 text-[10px] font-mono text-[#7f849c]">
-                  {MD_WIDTH}x{MD_HEIGHT} @ {gameViewportScale}x
+                <div className="pointer-events-none absolute bottom-2 right-2 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-overlay)] px-2 py-1 font-mono text-[10px] text-[var(--rds-text-muted)]">
+                  {resolution} @ {gameViewportScale}x
                 </div>
               </div>
+              {showPerformanceOverlay ? (
+                <AdaptivePanel
+                  panelId="viewport-performance-overlay"
+                  title="Métricas do emulador"
+                  boundsRef={gameViewportStageRef}
+                  defaultFloating
+                  defaultPosition={{ x: 24, y: 72 }}
+                  defaultSize={{ width: 280, height: 180 }}
+                  minSize={{ width: 220, height: 132 }}
+                  maxSize={{ width: 420, height: 320 }}
+                  tone="info"
+                >
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 font-mono text-[11px]">
+                    <dt className="text-[var(--rds-text-muted)]">FPS</dt>
+                    <dd className="text-right text-[var(--rds-text-primary)]">{overlayFps}</dd>
+                    <dt className="text-[var(--rds-text-muted)]">Sprites</dt>
+                    <dd className="text-right text-[var(--rds-text-primary)]">{overlaySpriteCount}</dd>
+                    <dt className="text-[var(--rds-text-muted)]">DMA estimado</dt>
+                    <dd className="text-right text-[var(--rds-text-primary)]">
+                      {Math.round(dmaUsageBytes / 1024)}KB / {Math.round(dmaBudgetBytes / 1024)}KB ({dmaUsagePercent}%)
+                    </dd>
+                  </dl>
+                </AdaptivePanel>
+              ) : null}
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => handlePause()}
-                disabled={!hasEmulatorSession || emulPaused}
-                data-testid="viewport-pause"
-                className="rounded border border-[#fab387]/40 bg-[#fab387]/10 px-2 py-1 text-[10px] font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Pausar
-              </button>
-              <button
-                type="button"
-                onClick={() => handleResume()}
-                disabled={!hasEmulatorSession || !emulPaused}
-                data-testid="viewport-resume"
-                className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Retomar
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleStepFrame()}
-                disabled={!hasEmulatorSession || !emulPaused || stepBusy}
-                data-testid="viewport-step-frame"
-                className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 text-[10px] font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {stepBusy ? "Step..." : "Step 1 frame"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleSaveState()}
-                disabled={!hasEmulatorSession || saveStateBusy}
-                data-testid="viewport-save-state"
-                className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {saveStateBusy ? "Salvando..." : "Salvar state"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleLoadState()}
-                disabled={!hasEmulatorSession || loadStateBusy}
-                data-testid="viewport-load-state"
-                className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loadStateBusy ? "Carregando..." : "Carregar state"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleRewind()}
-                disabled={!hasEmulatorSession || !emulPaused || rewindBusy}
-                data-testid="viewport-rewind"
-                className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
-                title="Recuar snapshots automáticos do emulador (atalho: R)"
-              >
-                {rewindBusy ? "Rewind..." : "Rewind"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleStartRecording()}
-                disabled={!hasEmulatorSession || recordBusy || replayRecording}
-                data-testid="viewport-replay-record"
-                className="rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 text-[10px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {recordBusy && !replayRecording ? "Record..." : "Record"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleStopRecording()}
-                disabled={!hasEmulatorSession || recordBusy || !replayRecording || !activeProjectDir}
-                data-testid="viewport-replay-stop"
-                className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {recordBusy && replayRecording ? "Stop..." : "Stop"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handlePlayReplay()}
-                disabled={!hasEmulatorSession || playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
-                data-testid="viewport-replay-play"
-                className="rounded border border-[#89dceb]/40 bg-[#89dceb]/10 px-2 py-1 text-[10px] font-semibold text-[#89dceb] transition-colors hover:bg-[#89dceb]/20 disabled:cursor-not-allowed disabled:opacity-40"
-                title="Reproduzir o ultimo replay salvo com o estado inicial gravado"
-              >
-                {playReplayBusy ? "Play..." : "Play Replay"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setAudioMuted((current) => !current)}
-                data-testid="viewport-audio-mute"
-                className="rounded border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[10px] font-semibold text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20"
-              >
-                {audioMuted ? "Ativar audio" : "Mutar audio"}
-              </button>
-            </div>
-            <div className="flex items-center gap-4 select-none text-[10px] text-[#6c7086]">
+            <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-3 py-1.5 text-[10px] text-[var(--rds-text-muted)]">
               <span
                 data-testid="viewport-game-status"
-                className={emulPaused || emulatorActive ? "text-[#a6e3a1]" : "text-[#45475a]"}
+                role="status"
+                className={emulPaused || emulatorActive ? "text-[var(--rds-status-success)]" : "text-[var(--rds-text-muted)]"}
               >
                 {gameStatus}
               </span>
-              {replayRecording && <span className="text-[#94e2d5]">REC ativo</span>}
+              {replayRecording && <span className="text-[var(--rds-status-info)]">REC ativo</span>}
               {lastReplayPath && !replayRecording && (
-                <span className="max-w-64 truncate text-[#89dceb]" title={lastReplayPath}>
+                <span className="max-w-64 truncate text-[var(--rds-status-info)]" title={lastReplayPath}>
                   Replay pronto
                 </span>
               )}
-              <span>Z=A | X=B | C=C | Enter=Start | Setas=D-Pad | R=Rewind (pausado)</span>
+              <span id="viewport-game-keyboard-help">
+                Foco no jogo: Z=A · X=B · C=C · Enter=Start · Setas=D-Pad · R=Rewind quando pausado
+              </span>
             </div>
           </div>
         )}

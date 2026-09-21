@@ -174,12 +174,60 @@ describe("ExplorerWorkspace", () => {
     );
 
     await act(async () => {
-      findButton(container, "hero.png").click();
+      (container.querySelector(
+        "[data-testid='explorer-grid-asset-assets/sprites/hero.png']"
+      ) as HTMLButtonElement).click();
       await flush();
     });
 
     expect(container.querySelector("[data-testid='explorer-selection-source']")?.textContent).toContain(
       "Origem: assets canônicos do overlay"
     );
+  });
+
+  it("uses one keyboard-operable asset catalog for grid, tree and details", async () => {
+    const assetCard = Array.from(container.querySelectorAll("[role='listitem']")).find(
+      (element) => element.textContent?.includes("hero.png")
+    );
+
+    expect(assetCard).toBeInstanceOf(HTMLButtonElement);
+    expect((assetCard as HTMLButtonElement).tabIndex).toBe(0);
+
+    await act(async () => {
+      (assetCard as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(container.querySelector("[aria-label='Detalhes da seleção']")?.textContent).toContain(
+      "hero.png"
+    );
+
+    await act(async () => {
+      findButton(container, "Árvore").click();
+      await flush();
+    });
+
+    expect(container.querySelector("[role='tree'][aria-label='Assets canônicos']")).not.toBeNull();
+    expect(
+      container
+        .querySelector("[data-testid='explorer-tree-asset-assets/sprites/hero.png']")
+        ?.getAttribute("role")
+    ).toBe("treeitem");
+  });
+
+  it("opens image assets in the existing Art Studio flow", async () => {
+    await act(async () => {
+      (container.querySelector(
+        "[data-testid='explorer-grid-asset-assets/sprites/hero.png']"
+      ) as HTMLButtonElement).click();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, "Abrir no Art Studio").click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("artstudio");
+    expect(useEditorStore.getState().artStudioAssetPath).toContain("hero.png");
   });
 });

@@ -1,7 +1,12 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import AssetPreview from "../common/AssetPreview";
+import Button from "../common/Button";
+import Dialog from "../common/Dialog";
+import Icon, { type IconName } from "../common/Icon";
+import Input from "../common/Input";
 import Panel from "../common/Panel";
 import SceneWorkspaceNotice from "../common/SceneWorkspaceNotice";
+import Tabs from "../common/Tabs";
 import { useEditorStore } from "../../core/store/editorStore";
 import ContextualPalette from "./ContextualPalette";
 import ToolPathField from "./ToolPathField";
@@ -106,6 +111,12 @@ function dependencyStatusTone(item: DependencyStatus) {
     text: "text-[#f38ba8]",
     pill: "bg-[#f38ba8]/12 text-[#f38ba8]",
   };
+}
+
+interface InstallConsent {
+  title: string;
+  description: string;
+  items: Array<{ label: string; detail: string }>;
 }
 
 function PatchStudio() {
@@ -535,7 +546,7 @@ function LegacySgdkProjectCard({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2">
         <div className="rounded border border-[#1f2937] bg-[#11111b] p-2">
           <div className="text-[9px] uppercase tracking-wide text-[#64748b]">Host root</div>
           <div className="mt-1 break-all font-mono text-[10px] text-[#cdd6f4]">
@@ -556,7 +567,7 @@ function LegacySgdkProjectCard({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-2">
         {sections.map((section) => (
           <div
             key={section.id}
@@ -571,7 +582,7 @@ function LegacySgdkProjectCard({
       </div>
 
       {expanded && (
-        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-2">
           {sections.map((section) => (
             <div
               key={`${section.id}-details`}
@@ -1344,18 +1355,46 @@ function RuntimeSetup() {
   const [reportPath, setReportPath] = useState<string>("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [setupError, setSetupError] = useState<string | null>(null);
   const [multiBuildBusy, setMultiBuildBusy] = useState(false);
   const [multiBuildReport, setMultiBuildReport] = useState<MultiTargetBuildResult | null>(null);
+  const [installConsent, setInstallConsent] = useState<InstallConsent | null>(null);
+  const consentResolverRef = useRef<((accepted: boolean) => void) | null>(null);
+
+  function requestInstallConsent(consent: InstallConsent) {
+    return new Promise<boolean>((resolve) => {
+      consentResolverRef.current?.(false);
+      consentResolverRef.current = resolve;
+      setInstallConsent(consent);
+    });
+  }
+
+  function finishInstallConsent(accepted: boolean) {
+    consentResolverRef.current?.(accepted);
+    consentResolverRef.current = null;
+    setInstallConsent(null);
+  }
+
+  useEffect(
+    () => () => {
+      consentResolverRef.current?.(false);
+      consentResolverRef.current = null;
+    },
+    []
+  );
 
   async function refreshStatus() {
     setLoading(true);
+    setSetupError(null);
     try {
       const report = await getThirdPartyStatus();
       setItems(report.items);
       setSummary(report.summary ?? summarizeDependencyItems(report.items));
       setReportPath(report.report_path ?? "");
     } catch (error) {
-      logMessage("error", `[Setup] Falha ao consultar dependencias: ${describeError(error)}`);
+      const message = describeError(error);
+      setSetupError(message);
+      logMessage("error", `[Setup] Falha ao consultar dependencias: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -1381,12 +1420,14 @@ function RuntimeSetup() {
         return true;
       }
 
-      const summary = missing
-        .map((item) => `- ${item.label}: ${item.issues[0] ?? item.install_dir}`)
-        .join("\n");
-      const confirmed = window.confirm(
-        `${reason}\n\nDependencias ausentes:\n${summary}\n\nInstalar automaticamente agora?`
-      );
+      const confirmed = await requestInstallConsent({
+        title: "Instalar dependências oficiais",
+        description: reason,
+        items: missing.map((item) => ({
+          label: item.label,
+          detail: item.issues[0] ?? item.install_dir,
+        })),
+      });
       if (!confirmed) {
         logMessage("warn", `${logPrefix} Operacao cancelada: dependencias externas pendentes.`);
         return false;
@@ -1424,12 +1465,15 @@ function RuntimeSetup() {
   }
 
   async function install(dependencyId: ThirdPartyDependencyId | string, label: string) {
-    const confirmed = window.confirm(
-      `Instalar ${label} agora? O download sera feito do upstream oficial e gravado apenas no ambiente local.`
-    );
+    const confirmed = await requestInstallConsent({
+      title: `Instalar ${label}`,
+      description: "O download será feito do upstream oficial e gravado apenas no ambiente local.",
+      items: [{ label, detail: "Instalação ou reinstalação no diretório local de toolchains." }],
+    });
     if (!confirmed) return;
 
     setBusyId(dependencyId);
+    setSetupError(null);
     try {
       const result = await installThirdPartyDependency(dependencyId, (line: DependencyLogLine) => {
         logMessage(line.level, `[Setup] ${line.message}`);
@@ -1444,7 +1488,9 @@ function RuntimeSetup() {
         await refreshStatus();
       }
     } catch (error) {
-      logMessage("error", `[Setup] Falha inesperada ao instalar ${label}: ${describeError(error)}`);
+      const message = describeError(error);
+      setSetupError(`Falha ao instalar ${label}: ${message}`);
+      logMessage("error", `[Setup] Falha inesperada ao instalar ${label}: ${message}`);
     } finally {
       setBusyId(null);
     }
@@ -1501,6 +1547,39 @@ function RuntimeSetup() {
       data-testid="runtime-setup-panel"
       className="flex h-full min-w-[300px] flex-col gap-3 overflow-y-auto overflow-x-hidden p-3"
     >
+      <Dialog
+        open={installConsent !== null}
+        title={installConsent?.title ?? "Confirmar instalação"}
+        description={installConsent?.description}
+        onClose={() => finishInstallConsent(false)}
+      >
+        <div className="space-y-3 text-xs text-[var(--rds-text-secondary)]">
+          <p>
+            A instalação altera apenas o ambiente local. Nenhum binário será versionado no projeto.
+          </p>
+          <ul className="space-y-2">
+            {installConsent?.items.map((item) => (
+              <li key={item.label} className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3">
+                <span className="font-semibold text-[var(--rds-text-primary)]">{item.label}</span>
+                <span className="mt-1 block text-[var(--rds-text-muted)]">{item.detail}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-end gap-2 border-t border-[var(--rds-border-subtle)] pt-3">
+            <Button variant="ghost" onClick={() => finishInstallConsent(false)}>
+              Cancelar
+            </Button>
+            <Button
+              data-rds-dialog-initial-focus=""
+              variant="primary"
+              iconStart={<Icon name="settings" size={15} />}
+              onClick={() => finishInstallConsent(true)}
+            >
+              Instalar dependências
+            </Button>
+          </div>
+        </div>
+      </Dialog>
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-xs font-semibold text-[#cdd6f4]">Runtime Setup</span>
@@ -1508,19 +1587,73 @@ function RuntimeSetup() {
             Instala sob demanda JDK (Temurin LTS), SGDK, PVSnesLib e cores Libretro oficiais sem versionar binarios no repositorio.
           </p>
         </div>
-        <button
+        <Button
           data-testid="runtime-setup-revalidate"
           onClick={() => void refreshStatus()}
           disabled={loading || busyId !== null}
-          className="shrink-0 rounded bg-[#313244] px-2 py-1 text-[10px] text-[#a6adc8] hover:bg-[#45475a] disabled:cursor-not-allowed disabled:opacity-40"
+          size="sm"
+          variant="secondary"
+          loading={loading}
+          loadingLabel="Revalidando dependências"
+          iconStart={<Icon name="refresh" size={15} />}
         >
           {loading ? "Revalidando..." : "Revalidar"}
-        </button>
+        </Button>
       </div>
 
       <div
+        data-testid="runtime-setup-state"
+        role="status"
+        aria-live="polite"
+        className="flex min-h-7 items-center gap-2 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-3 py-1.5 text-xs text-[var(--rds-text-secondary)]"
+      >
+        <Icon
+          name={setupError ? "warning-triangle" : busyId ? "settings" : loading ? "refresh" : "check-circle"}
+          size={15}
+          className={setupError ? "text-[var(--rds-status-error)]" : busyId ? "text-[var(--rds-status-warning)]" : loading ? "text-[var(--rds-status-info)]" : "text-[var(--rds-status-success)]"}
+        />
+        {setupError
+          ? "Erro na validação local"
+          : busyId
+            ? "Instalando dependência oficial…"
+            : loading
+              ? "Carregando diagnóstico do ambiente…"
+              : "Diagnóstico pronto"}
+      </div>
+
+      {setupError ? (
+        <div
+          data-testid="runtime-setup-error"
+          role="alert"
+          className="rounded border border-[var(--rds-status-error)] bg-[color-mix(in_srgb,var(--rds-status-error)_10%,transparent)] p-3 text-xs text-[var(--rds-text-primary)]"
+        >
+          <p className="font-semibold text-[var(--rds-status-error)]">
+            Não foi possível validar o ambiente local.
+          </p>
+          <p className="mt-1 text-[var(--rds-text-secondary)]">
+            O que quebrou: {setupError}. Por que importa: o estado das dependências pode estar desatualizado.
+          </p>
+          <Button
+            className="mt-2"
+            size="sm"
+            variant="secondary"
+            iconStart={<Icon name="refresh" size={15} />}
+            onClick={() => void refreshStatus()}
+          >
+            Tentar novamente
+          </Button>
+        </div>
+      ) : null}
+
+      {loading && items.length === 0 ? (
+        <div role="status" aria-live="polite" className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 text-xs text-[var(--rds-text-secondary)]">
+          Verificando JDK, toolchains e cores oficiais…
+        </div>
+      ) : null}
+
+      <div
         data-testid="runtime-diagnostics-summary"
-        className="grid grid-cols-2 gap-2 rounded border border-[#313244] bg-[#11111b] p-3 md:grid-cols-6"
+        className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3"
       >
         <div>
           <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Total</div>
@@ -1549,7 +1682,7 @@ function RuntimeSetup() {
           <div className="text-sm font-bold text-[#89b4fa]">{summary?.cache_available ?? 0}</div>
         </div>
         {reportPath && (
-          <p className="col-span-2 break-all font-mono text-[9px] text-[#6c7086] md:col-span-6">
+          <p className="col-span-full break-all font-mono text-[10px] text-[var(--rds-text-muted)]">
             JSON: {reportPath}
           </p>
         )}
@@ -1565,7 +1698,7 @@ function RuntimeSetup() {
 
       <ProjectCapabilityPanel compact />
 
-      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2" data-testid="runtime-diagnostic-grid">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-2" data-testid="runtime-diagnostic-grid">
         {items.map((item) => {
           const tone = dependencyStatusTone(item);
           const statusLabel = item.status_label ?? (item.installed ? "INSTALADO" : "AUSENTE");
@@ -1676,7 +1809,7 @@ function RuntimeSetup() {
         </p>
 
         {multiBuildReport && (
-          <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-2">
             {multiBuildReport.results.map((entry) => (
               <div key={entry.target} className="flex flex-col gap-2 rounded border border-[#313244] bg-[#1e1e2e] p-3">
                 <div className="flex items-center gap-2">
@@ -2319,27 +2452,60 @@ type ToolDescriptor = {
   experimental?: boolean;
 };
 
+function EvidenceReadiness({
+  title,
+  requirement,
+  limitation,
+}: {
+  title: string;
+  requirement: string;
+  limitation: string;
+}) {
+  return (
+    <div
+      data-testid="evidence-readiness"
+      className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 text-xs text-[var(--rds-text-secondary)]"
+    >
+      <p className="flex items-center gap-2 font-semibold text-[var(--rds-status-warning)]">
+        <Icon name="warning-triangle" size={15} />
+        {title} · Experimental
+      </p>
+      <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 leading-5">
+        <dt className="text-[var(--rds-text-muted)]">Requer</dt>
+        <dd>{requirement}</dd>
+        <dt className="text-[var(--rds-text-muted)]">Limite</dt>
+        <dd>{limitation}</dd>
+      </dl>
+    </div>
+  );
+}
+
 function ParityCaptureSection() {
   const { activeProjectDir, logMessage, lastParityReport, setLastParityReport } = useEditorStore();
   const [goldenPath, setGoldenPath] = useState("");
   const [frameCap, setFrameCap] = useState(60);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ParityRunResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function capture() {
     if (!activeProjectDir) {
+      setError("Abra um projeto antes de capturar.");
       logMessage("warn", "[Parity] Abra um projeto antes de capturar.");
       return;
     }
     if (!goldenPath.trim()) {
+      setError("Informe o caminho do golden inputs.");
       logMessage("warn", "[Parity] Informe o caminho do golden inputs.");
       return;
     }
     setBusy(true);
     setResult(null);
+    setError(null);
     try {
       const runResult = await runParityCapture(activeProjectDir, goldenPath.trim(), frameCap);
       setResult(runResult);
+      setError(runResult.ok ? null : runResult.message);
       if (runResult.ok && runResult.report) {
         setLastParityReport(runResult.report);
       }
@@ -2348,7 +2514,9 @@ function ParityCaptureSection() {
         : runResult.message;
       logMessage(runResult.ok ? "success" : "error", `[Parity] ${summary}`);
     } catch (error) {
-      logMessage("error", `[Parity] ${describeError(error)}`);
+      const message = describeError(error);
+      setError(message);
+      logMessage("error", `[Parity] ${message}`);
     } finally {
       setBusy(false);
     }
@@ -2366,36 +2534,50 @@ function ParityCaptureSection() {
         Executa a ROM sob o core Libretro com inputs gravados (golden) e compara o hash do framebuffer a cada frame.
       </p>
 
-      <div className="flex flex-col gap-2">
-        <label className="text-[10px] text-[#7f849c]">Golden inputs (.rds)</label>
-        <input
+      <EvidenceReadiness
+        title="Parity Capture"
+        requirement="Projeto aberto, golden inputs e core Libretro configurado."
+        limitation="Hashes de framebuffer medem esta execução; não provam equivalência de gameplay 1:1."
+      />
+
+      <Input
+          label="Golden inputs (.rds)"
+          helperText="Arquivo de entradas gravadas usado como evidência reproduzível."
+          controlSize="sm"
           value={goldenPath}
           onChange={(event) => setGoldenPath(event.target.value)}
           placeholder="/projetos/meu_jogo/golden/input.rds"
-          className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+          className="font-mono"
         />
-      </div>
 
-      <div className="flex items-center gap-2">
-        <label className="text-[10px] text-[#7f849c]">Frame cap</label>
-        <input
+      <Input
+          fieldClassName="max-w-32"
+          label="Limite de frames"
+          controlSize="sm"
           type="number"
           value={frameCap}
           min={1}
           max={9999}
           onChange={(event) => setFrameCap(Math.max(1, Number(event.target.value)))}
-          className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+          className="text-right font-mono"
         />
-      </div>
 
-      <button
-        type="button"
+      <Button
+        variant="primary"
+        loading={busy}
+        loadingLabel="Capturando parity"
+        iconStart={<Icon name="check-circle" size={15} />}
         onClick={() => void capture()}
         disabled={busy || !activeProjectDir}
-        className="rounded bg-[#cba6f7] px-3 py-1.5 text-[10px] font-semibold text-[#1e1e2e] transition-colors hover:bg-[#b4a0e0] disabled:cursor-not-allowed disabled:opacity-40"
       >
         {busy ? "Capturando..." : "Rodar Parity Capture"}
-      </button>
+      </Button>
+
+      {error ? (
+        <div role="alert" className="rounded border border-[var(--rds-status-error)] bg-[color-mix(in_srgb,var(--rds-status-error)_10%,transparent)] px-3 py-2 text-xs text-[var(--rds-status-error)]">
+          {error}
+        </div>
+      ) : null}
 
       {lastResult && (
         <div className="rounded border border-[#313244] bg-[#11111b] p-2 text-[10px]">
@@ -2542,54 +2724,68 @@ function CrossCoreParitySection() {
         Reexecuta o mesmo golden em dois cores Libretro e compara framebuffers, estado final e limites nao medidos.
       </p>
 
+      <EvidenceReadiness
+        title="Cross-Core Parity"
+        requirement="Projeto aberto, golden inputs e dois cores Libretro reais identificados."
+        limitation="Concordância entre cores é evidência comparativa; não certifica precisão do hardware nem gameplay 1:1."
+      />
+
       <div className="grid gap-2">
-        <input
+        <Input
+          label="Golden inputs (.rds)"
+          controlSize="sm"
           data-testid="cross-core-golden-path"
           value={goldenPath}
           onChange={(event) => setGoldenPath(event.target.value)}
           placeholder="/projetos/meu_jogo/golden/input.rds"
-          className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+          className="font-mono"
         />
-        <input
+        <Input
+          label="Core A"
+          controlSize="sm"
           data-testid="cross-core-core-a-path"
           value={coreAPath}
           onChange={(event) => setCoreAPath(event.target.value)}
           placeholder="/toolchains/libretro/cores/genesis_plus_gx_libretro.dll"
-          className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+          className="font-mono"
         />
-        <input
+        <Input
+          label="Core B"
+          controlSize="sm"
           data-testid="cross-core-core-b-path"
           value={coreBPath}
           onChange={(event) => setCoreBPath(event.target.value)}
           placeholder="/toolchains/libretro/cores/picodrive_libretro.dll"
-          className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+          className="font-mono"
         />
       </div>
 
-      <div className="flex items-center gap-2">
-        <label className="text-[10px] text-[#7f849c]">Frame cap</label>
-        <input
+      <Input
+          fieldClassName="max-w-32"
+          label="Limite de frames"
+          controlSize="sm"
           data-testid="cross-core-frame-cap"
           type="number"
           value={frameCap}
           min={1}
           max={9999}
           onChange={(event) => setFrameCap(Math.max(1, Number(event.target.value)))}
-          className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+          className="text-right font-mono"
         />
-      </div>
 
-      <button
-        type="button"
+      <Button
+        variant="primary"
+        loading={busy}
+        loadingLabel="Executando Cross-Core Parity"
+        iconStart={<Icon name="network" size={15} />}
         onClick={() => void run()}
         disabled={busy || !activeProjectDir}
-        className="rounded bg-[#cba6f7] px-3 py-1.5 text-[10px] font-semibold text-[#1e1e2e] transition-colors hover:bg-[#b4a0e0] disabled:cursor-not-allowed disabled:opacity-40"
       >
         {busy ? "Rodando..." : "Rodar Cross-Core Parity"}
-      </button>
+      </Button>
 
       {error ? (
-        <div className="rounded border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-3 py-2 text-[10px] text-[#f38ba8]">
+        <div role="alert" className="rounded border border-[var(--rds-status-error)] bg-[color-mix(in_srgb,var(--rds-status-error)_10%,transparent)] px-3 py-2 text-xs text-[var(--rds-status-error)]">
           {error}
         </div>
       ) : null}
@@ -2729,42 +2925,54 @@ function CycleReportSection() {
         Gera evidencia temporal do replay e registra explicitamente quais traces de ciclo nao foram medidos.
       </p>
 
-      <input
+      <EvidenceReadiness
+        title="Cycle Report"
+        requirement="Projeto aberto, golden inputs e um core Libretro real identificado."
+        limitation="Tempos do host e traces disponíveis não tornam o core cycle accurate; evidências ausentes permanecem marcadas como missing."
+      />
+
+      <Input
+        label="Golden inputs (.rds)"
+        controlSize="sm"
         data-testid="cycle-report-golden-path"
         value={goldenPath}
         onChange={(event) => setGoldenPath(event.target.value)}
         placeholder="/projetos/meu_jogo/golden/input.rds"
-        className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        className="font-mono"
       />
-      <input
+      <Input
+        label="Core Libretro"
+        controlSize="sm"
         data-testid="cycle-report-core-path"
         value={corePath}
         onChange={(event) => setCorePath(event.target.value)}
         placeholder="/toolchains/libretro/cores/genesis_plus_gx_libretro.dll"
-        className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        className="font-mono"
       />
-      <div className="flex items-center gap-2">
-        <label className="text-[10px] text-[#7f849c]">Frame cap</label>
-        <input
+      <Input
+          fieldClassName="max-w-32"
+          label="Limite de frames"
+          controlSize="sm"
           type="number"
           value={frameCap}
           min={1}
           max={9999}
           onChange={(event) => setFrameCap(Math.max(1, Number(event.target.value)))}
-          className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+          className="text-right font-mono"
         />
-      </div>
-      <button
-        type="button"
+      <Button
+        variant="primary"
+        loading={busy}
+        loadingLabel="Gerando Cycle Report"
+        iconStart={<Icon name="refresh" size={15} />}
         onClick={() => void run()}
         disabled={busy || !activeProjectDir}
-        className="rounded bg-[#cba6f7] px-3 py-1.5 text-[10px] font-semibold text-[#1e1e2e] transition-colors hover:bg-[#b4a0e0] disabled:cursor-not-allowed disabled:opacity-40"
       >
         {busy ? "Gerando..." : "Gerar Cycle Report"}
-      </button>
+      </Button>
 
       {error ? (
-        <div className="rounded border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-3 py-2 text-[10px] text-[#f38ba8]">
+        <div role="alert" className="rounded border border-[var(--rds-status-error)] bg-[color-mix(in_srgb,var(--rds-status-error)_10%,transparent)] px-3 py-2 text-xs text-[var(--rds-status-error)]">
           {error}
         </div>
       ) : null}
@@ -2930,6 +3138,21 @@ function getToolDescriptor(toolId: ToolTab): ToolDescriptor {
   return TOOL_TABS.find((tool) => tool.id === toolId) ?? TOOL_TABS[0];
 }
 
+const TOOL_ICON_NAMES: Record<ToolTab, IconName> = {
+  setup: "settings",
+  palette: "palette",
+  assets: "folder",
+  patch: "magic-wand",
+  profiler: "search",
+  extractor: "folder",
+  memory: "terminal",
+  vram: "palette",
+  reverse: "search",
+  parity: "check-circle",
+  crossCoreParity: "network",
+  cycleReport: "refresh",
+};
+
 function renderToolPanel(
   active: ToolTab,
   onRequestInspector?: () => void
@@ -3007,6 +3230,9 @@ export default function ToolsPanel({
     : visibleTools[0]?.id ?? "setup";
   const activeDescriptor = getToolDescriptor(safeActive);
   const toolsInCategory = visibleTools.filter((tool) => tool.category === activeCategory);
+  const visibleCategories = TOOL_CATEGORIES.filter((category) =>
+    visibleTools.some((tool) => tool.category === category.id)
+  );
   const fallbackCategory =
     toolsInCategory.length > 0
       ? activeCategory
@@ -3028,132 +3254,66 @@ export default function ToolsPanel({
   return (
     <Panel
       title={workspace === "debug" ? "Debug Workspace" : "Tools Workspace"}
-      className="flex h-full flex-col bg-[#11131f]"
+      className="flex h-full flex-col bg-[var(--rds-surface-panel-strong)]"
       headerActions={
         <>
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant={showAdvanced ? "secondary" : "ghost"}
+            iconStart={<Icon name="settings" size={15} />}
             onClick={() => setShowAdvanced((current) => !current)}
-            className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
-              showAdvanced
-                ? "border-[#f9e2af]/40 bg-[#f9e2af]/12 text-[#f9e2af]"
-                : "border-[#313244] bg-[#11111b] text-[#7f849c] hover:text-[#cdd6f4]"
-            }`}
           >
             {showAdvanced ? "Avancado ON" : "Avancado OFF"}
-          </button>
+          </Button>
           {onRequestInspector && (
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="ghost"
+              iconStart={<Icon name="sidebar-expand" size={15} />}
               onClick={onRequestInspector}
-              className="rounded-full border border-[#313244] bg-[#11111b] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
             >
               Inspector
-            </button>
+            </Button>
           )}
         </>
       }
     >
-      <div className="flex h-full min-h-0 flex-col xl:flex-row">
-        <aside className="flex w-full shrink-0 flex-col border-b border-[#1f2937] bg-[#0b1020] xl:w-[230px] xl:border-b-0 xl:border-r">
-          <div className="border-b border-[#1f2937] px-4 py-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#cba6f7]">
-              {workspace === "debug" ? "Modo avancado" : "Modo basico"}
-            </div>
-            <div className="mt-2 text-[12px] leading-5 text-[#94a3b8]">
-              {workspace === "debug"
-                ? "Ferramentas de leitura, runtime e analise ficam em destaque."
-                : "Mostre apenas o que faz sentido para autoria. Ferramentas tecnicas ficam fora do caminho por padrao."}
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-3 py-3">
-            <div className="space-y-3">
-              {TOOL_CATEGORIES.filter((category) =>
-                visibleTools.some((tool) => tool.category === category.id)
-              ).map((category) => {
-                const isActiveCategory = fallbackCategory === category.id;
-                const categoryTools = visibleTools.filter(
-                  (tool) => tool.category === category.id
-                );
-
-                return (
-                  <div
-                    key={category.id}
-                    className={`rounded-2xl border p-2 ${
-                      isActiveCategory
-                        ? "border-[#313244] bg-[#131a2a]"
-                        : "border-transparent bg-transparent"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setActiveCategory(category.id)}
-                      className={`flex w-full items-start justify-between rounded-xl px-2 py-2 text-left transition-colors ${
-                        isActiveCategory
-                          ? "bg-[#1b2334] text-[#e5e7eb]"
-                          : "text-[#94a3b8] hover:bg-[#131a2a] hover:text-[#e5e7eb]"
-                      }`}
-                    >
-                      <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em]">
-                          {category.label}
-                        </div>
-                        <div className="mt-1 text-[11px] text-[#64748b]">
-                          {category.caption}
-                        </div>
-                      </div>
-                      <span className="rounded-full border border-[#313244] bg-[#0b1020] px-2 py-0.5 text-[10px] font-mono text-[#cdd6f4]">
-                        {categoryTools.length}
-                      </span>
-                    </button>
-
-                    {isActiveCategory && (
-                      <div className="mt-2 space-y-1">
-                        {categoryTools.map((tool) => (
-                          <button
-                            key={tool.id}
-                            type="button"
-                            onClick={() => setActive(tool.id)}
-                            className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
-                              safeActive === tool.id
-                                ? "bg-[#cba6f7] text-[#111827]"
-                                : "bg-[#111827] text-[#cdd6f4] hover:bg-[#1f2937]"
-                            }`}
-                          >
-                            <span className="flex items-center gap-3">
-                              <span className="rounded-lg border border-current/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
-                                {tool.icon}
-                              </span>
-                              <span className="min-w-0 truncate">{tool.label}</span>
-                            </span>
-                            {tool.experimental && (
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] ${
-                                  safeActive === tool.id
-                                    ? "bg-[#111827]/14 text-[#111827]"
-                                    : "bg-[#fab387]/12 text-[#fab387]"
-                                }`}
-                              >
-                                Exp
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </aside>
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
+        <div className="shrink-0 overflow-x-auto border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)]">
+          <Tabs
+            ariaLabel="Categorias de ferramentas"
+            tabs={visibleCategories.map((category) => ({ id: category.id, label: category.label }))}
+            activeTab={fallbackCategory}
+            onTabChange={(id) => {
+              const nextCategory = id as ToolCategory;
+              const firstTool = visibleTools.find((tool) => tool.category === nextCategory);
+              setActiveCategory(nextCategory);
+              if (firstTool) {
+                setActive(firstTool.id);
+              }
+            }}
+            className="min-w-max"
+          />
+          <Tabs
+            ariaLabel={`Ferramentas em ${visibleCategories.find((category) => category.id === fallbackCategory)?.label ?? "categoria"}`}
+            tabs={visibleTools
+              .filter((tool) => tool.category === fallbackCategory)
+              .map((tool) => ({
+                id: tool.id,
+                label: `${tool.label}${tool.experimental ? " · Experimental" : ""}`,
+              }))}
+            activeTab={safeActive}
+            onTabChange={(id) => setActive(id as ToolTab)}
+            className="min-w-max"
+          />
+        </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="border-b border-[#1f2937] bg-[#0f172a] px-5 py-4">
+          <div className="border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-5 py-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--rds-status-info)]">
+                  <Icon name={TOOL_ICON_NAMES[safeActive]} size={17} />
                   {fallbackCategory === "create"
                     ? "Create"
                     : fallbackCategory === "configure"
@@ -3162,24 +3322,24 @@ export default function ToolsPanel({
                         ? "Analyze"
                         : "Experimental"}
                 </div>
-                <div className="mt-1 text-lg font-semibold text-[#e5e7eb]">
+                <div className="mt-1 text-lg font-semibold text-[var(--rds-text-primary)]">
                   {activeDescriptor.label}
                 </div>
-                <div className="mt-2 max-w-2xl text-[12px] leading-6 text-[#94a3b8]">
+                <div className="mt-2 max-w-2xl text-xs leading-6 text-[var(--rds-text-muted)]">
                   {activeDescriptor.description}
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <span className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#cdd6f4]">
+                <span className="rounded-full border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-text-secondary)]">
                   {workspace === "debug" ? "Debug" : "Editing"}
                 </span>
                 {activeDescriptor.experimental && (
-                  <span className="rounded-full border border-[#fab387]/40 bg-[#fab387]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#fab387]">
+                  <span className="rounded-full border border-[var(--rds-status-warning)] bg-[color-mix(in_srgb,var(--rds-status-warning)_10%,transparent)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-status-warning)]">
                     Experimental
                   </span>
                 )}
                 {activeDescriptor.advanced && (
-                  <span className="rounded-full border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+                  <span className="rounded-full border border-[var(--rds-status-info)] bg-[color-mix(in_srgb,var(--rds-status-info)_10%,transparent)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-status-info)]">
                     Analise
                   </span>
                 )}
@@ -3187,7 +3347,12 @@ export default function ToolsPanel({
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-[#11111b]">
+          <div
+            id={`tools-panel-${safeActive}`}
+            role="tabpanel"
+            aria-labelledby={`rds-tab-${safeActive}`}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden bg-[var(--rds-surface-panel-strong)]"
+          >
             {renderToolPanel(safeActive, onRequestInspector)}
           </div>
         </div>

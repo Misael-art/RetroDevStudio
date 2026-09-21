@@ -257,4 +257,67 @@ describe("RetroFXDesigner", () => {
       useEditorStore.getState().activeSceneSource?.retrofx?.parallax_layers[0]?.speed_x
     ).toBe(6);
   });
+
+  it("exposes accessible tabs and reorders layers without drag", async () => {
+    const tabs = Array.from(container.querySelectorAll<HTMLElement>("[role='tab']"));
+    expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(["Parallax", "Raster"]);
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+
+    const middleLayer = container.querySelector(
+      "[data-testid='retrofx-layer-p1']"
+    ) as HTMLElement | null;
+    expect(middleLayer?.getAttribute("aria-keyshortcuts")).toContain("Alt+ArrowUp");
+
+    await act(async () => {
+      middleLayer?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", altKey: true, bubbles: true })
+      );
+      await flush();
+    });
+
+    const orderedLayers = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-testid^='retrofx-layer-']")
+    );
+    expect(orderedLayers[0]?.getAttribute("data-testid")).toBe("retrofx-layer-p1");
+    expect(container.querySelector("[data-testid='retrofx-dirty-state']")?.textContent).toContain(
+      "Alterações não salvas"
+    );
+  });
+
+  it("keeps failed saves dirty and offers an inline retry", async () => {
+    mocks.persistActiveScene
+      .mockRejectedValueOnce(new Error("disco protegido"))
+      .mockResolvedValueOnce(true);
+
+    const number = container.querySelector(
+      "[data-testid='retrofx-speed-x-number']"
+    ) as HTMLInputElement | null;
+
+    await act(async () => {
+      setInputValue(number!, "9");
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Salvar RetroFX").click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='retrofx-save-error']")?.textContent).toContain(
+      "disco protegido"
+    );
+    expect(container.querySelector("[data-testid='retrofx-dirty-state']")?.textContent).toContain(
+      "Alterações não salvas"
+    );
+
+    await act(async () => {
+      findButton(container, "Tentar salvar novamente").click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.persistActiveScene).toHaveBeenCalledTimes(2);
+    expect(container.querySelector("[data-testid='retrofx-save-error']")).toBeNull();
+  });
 });

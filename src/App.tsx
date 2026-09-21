@@ -7,7 +7,15 @@ import {
   useDefaultLayout,
 } from "react-resizable-panels";
 import Console from "./components/common/Console";
+import AdaptivePanel, { type AdaptivePanelTone } from "./components/common/AdaptivePanel";
+import Button, { type ButtonVariant } from "./components/common/Button";
+import Dialog from "./components/common/Dialog";
+import Icon, { type IconName } from "./components/common/Icon";
+import Input from "./components/common/Input";
+import Select from "./components/common/Select";
+import Tabs from "./components/common/Tabs";
 import LayoutSplitter from "./components/common/LayoutSplitter";
+import type { LayoutResizeIntent } from "./components/common/LayoutSplitter";
 import UnifiedTopBar, {
   type UnifiedTopBarSection,
 } from "./components/common/UnifiedTopBar";
@@ -157,6 +165,8 @@ function formatEmulatorFailureMessage(message: string): string {
 
 function ToolbarButton({
   label,
+  icon,
+  compactLabel = false,
   onClick,
   disabled = false,
   accent = "default",
@@ -165,6 +175,8 @@ function ToolbarButton({
   describedBy,
 }: {
   label: string;
+  icon?: IconName;
+  compactLabel?: boolean;
   onClick: () => void;
   disabled?: boolean;
   accent?: "default" | "primary" | "success" | "danger";
@@ -172,26 +184,27 @@ function ToolbarButton({
   title?: string;
   describedBy?: string;
 }) {
-  const palette =
-    accent === "primary"
-      ? "bg-[#cba6f7] text-[#1e1e2e] hover:bg-[#b4a0e0]"
-      : accent === "success"
-        ? "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0]"
-        : accent === "danger"
-          ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
-          : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]";
+  const variant: ButtonVariant = accent === "danger"
+    ? "danger"
+    : accent === "primary" || accent === "success"
+      ? "primary"
+      : "secondary";
 
   return (
-    <button
+    <Button
+      type="button"
+      variant={variant}
+      size="sm"
       onClick={onClick}
       disabled={disabled}
       data-testid={testId}
       title={title}
       aria-describedby={describedBy}
-      className={`shrink-0 whitespace-nowrap rounded px-2 py-1 text-xs font-semibold leading-none transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
+      iconStart={icon ? <Icon name={icon} size={15} /> : undefined}
+      className="shrink-0"
     >
-      {label}
-    </button>
+      <span className={compactLabel ? "sr-only 2xl:not-sr-only" : undefined}>{label}</span>
+    </Button>
   );
 }
 
@@ -279,7 +292,7 @@ const EXECUTABLE_COMMAND_IDS = new Set([
 const WORKSPACE_ITEMS: {
   id: EditorWorkspace;
   label: string;
-  icon: string;
+  icon: IconName;
   description: string;
   group: WorkspaceGroupId;
   badge?: string;
@@ -287,35 +300,35 @@ const WORKSPACE_ITEMS: {
   {
     id: "scene",
     label: "Scene",
-    icon: "SC",
+    icon: "palette",
     description: "Composicao e edicao da cena",
     group: "core",
   },
   {
     id: "game",
     label: "Game",
-    icon: "GM",
+    icon: "gamepad",
     description: "Playtest e runtime",
     group: "core",
   },
   {
     id: "explorer",
     label: "Explorer",
-    icon: "EX",
+    icon: "folder",
     description: "Arquivos, assets e cenas",
     group: "core",
   },
   {
     id: "logic",
     label: "Logic",
-    icon: "LG",
+    icon: "network",
     description: "Fluxo visual e scripting",
     group: "authoring",
   },
   {
     id: "artstudio",
     label: "Art",
-    icon: "AT",
+    icon: "palette",
     description: "Sprites, slicing e preview",
     group: "authoring",
     badge: "Exp.",
@@ -323,7 +336,7 @@ const WORKSPACE_ITEMS: {
   {
     id: "retrofx",
     label: "FX",
-    icon: "FX",
+    icon: "magic-wand",
     description: "Profundidade e parallax",
     group: "authoring",
     badge: "Exp.",
@@ -331,7 +344,7 @@ const WORKSPACE_ITEMS: {
   {
     id: "debug",
     label: "Debug",
-    icon: "DB",
+    icon: "bug",
     description: "Analise e ferramentas avancadas",
     group: "advanced",
   },
@@ -479,7 +492,7 @@ function WorkspaceRailButton({
   badge,
   testId,
 }: {
-  icon: string;
+  icon: IconName;
   label: string;
   active: boolean;
   title: string;
@@ -490,8 +503,8 @@ function WorkspaceRailButton({
 }) {
   const activeTone =
     accent === "debug"
-      ? "border-[#f9e2af]/45 bg-[#f9e2af]/12 text-[#f9e2af]"
-      : "border-[#cba6f7]/45 bg-[#cba6f7]/14 text-[#e9d5ff]";
+      ? "border-[var(--rds-status-warning)]/45 bg-[var(--rds-status-warning)]/12 text-[var(--rds-status-warning)]"
+      : "border-[var(--rds-action-primary)]/45 bg-[var(--rds-action-primary)]/14 text-[var(--rds-text-primary)]";
 
   return (
     <button
@@ -503,20 +516,20 @@ function WorkspaceRailButton({
       className={`group flex w-full shrink-0 flex-col items-center gap-1 rounded-2xl border px-2 py-1.5 text-center transition-colors ${
         active
           ? activeTone
-          : "border-transparent text-[#7f849c] hover:border-[#313244] hover:bg-[#11111b] hover:text-[#e5e7eb]"
+          : "border-transparent text-[var(--rds-text-muted)] hover:border-[var(--rds-border-subtle)] hover:bg-[var(--rds-surface-panel-strong)] hover:text-[var(--rds-text-primary)]"
       }`}
     >
       <span
         aria-hidden="true"
-        className="rounded-xl border border-current/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]"
+        className="flex h-8 w-8 items-center justify-center rounded-xl border border-current/20"
       >
-        {icon}
+        <Icon name={icon} size={18} />
       </span>
       <span className="sr-only">{label}</span>
       {badge ? (
         <span
           aria-hidden="true"
-          className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#fab387]"
+          className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[var(--rds-status-warning)]"
         >
           {badge}
         </span>
@@ -557,14 +570,19 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
   const [expanded, setExpanded] = useState(getInitialWorkspaceGuideExpanded);
   const signalToneClass =
     guide.signal?.tone === "error"
-      ? "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]"
+      ? "border-[var(--rds-status-error)]/35 bg-[var(--rds-status-error)]/10 text-[var(--rds-status-error)]"
       : guide.signal?.tone === "warn"
-        ? "border-[#fab387]/35 bg-[#fab387]/10 text-[#fab387]"
+        ? "border-[var(--rds-status-warning)]/35 bg-[var(--rds-status-warning)]/10 text-[var(--rds-status-warning)]"
         : guide.signal?.tone === "success"
-          ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
-          : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]";
+          ? "border-[var(--rds-status-success)]/35 bg-[var(--rds-status-success)]/10 text-[var(--rds-status-success)]"
+          : "border-[var(--rds-status-info)]/35 bg-[var(--rds-status-info)]/10 text-[var(--rds-status-info)]";
   const primaryActions = guide.actions.slice(0, expanded ? 2 : 1);
   const secondaryActions = expanded ? guide.actions.slice(2) : [];
+  const panelTone: AdaptivePanelTone = guide.signal?.tone === "error"
+    ? "build-blocker"
+    : guide.signal?.tone === "warn"
+      ? "warning"
+      : "info";
 
   function toggleExpanded() {
     setExpanded((current) => {
@@ -575,27 +593,37 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
   }
 
   return (
+    <div className="mx-4 mt-2 shrink-0">
+    <AdaptivePanel
+      panelId="workspace-guide-window"
+      title="Guia do workspace"
+      tone={panelTone}
+      defaultSize={{ width: 560, height: 280 }}
+      minSize={{ width: 320, height: 180 }}
+      maxSize={{ width: 900, height: 560 }}
+      className="h-auto"
+    >
     <section
       data-testid="workspace-guide"
       data-expanded={expanded ? "true" : "false"}
       title={`${guide.title} — ${guide.summary}`}
-      className={`mx-4 mt-2 rounded-xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-3 shadow-[0_12px_24px_rgba(0,0,0,0.16)] ${
+      className={`rounded-xl border border-[var(--rds-border-subtle)] bg-[linear-gradient(135deg,var(--rds-surface-overlay),var(--rds-surface-input)_55%,var(--rds-surface-panel-strong))] px-3 shadow-[0_12px_24px_rgba(0,0,0,0.16)] ${
         expanded ? "py-2.5" : "py-1.5"
       }`}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#89b4fa]">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--rds-status-info)]">
             {guide.eyebrow}
           </p>
           <h2
             title={guide.title}
-            className={expanded ? "mt-1 text-sm font-semibold text-[#e2e8f0]" : "mt-0.5 truncate text-xs font-semibold text-[#e2e8f0]"}
+            className={expanded ? "mt-1 text-sm font-semibold text-[var(--rds-text-primary)]" : "mt-0.5 truncate text-xs font-semibold text-[var(--rds-text-primary)]"}
           >
             {guide.title}
           </h2>
           {expanded ? (
-            <p className="mt-1 text-[11px] leading-5 text-[#cbd5e1]">{guide.summary}</p>
+            <p className="mt-1 text-[11px] leading-5 text-[var(--rds-text-secondary)]">{guide.summary}</p>
           ) : null}
           {expanded && guide.checkpoints?.length ? (
             <div className="mt-2 flex flex-wrap gap-1.5" data-testid="workspace-guide-checkpoints">
@@ -603,7 +631,7 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
                 <span
                   key={checkpoint}
                   title={checkpoint}
-                  className="inline-flex items-center rounded-full border border-[#313244] bg-black/15 px-2 py-1 text-[10px] font-medium text-[#bac2de]"
+                  className="inline-flex items-center rounded-full border border-[var(--rds-border-subtle)] bg-black/15 px-2 py-1 text-[10px] font-medium text-[var(--rds-text-secondary)]"
                 >
                   {checkpoint}
                 </span>
@@ -633,32 +661,32 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
           <button
             type="button"
             onClick={toggleExpanded}
-            className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-xs font-semibold text-[#a6adc8] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
+            className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2 py-1 text-xs font-semibold text-[var(--rds-text-secondary)] transition-colors hover:border-[var(--rds-status-info)] hover:text-[var(--rds-status-info)]"
           >
             {expanded ? "Compactar guia" : "Expandir guia"}
           </button>
         </div>
       </div>
       {expanded ? (
-      <details className="mt-2 rounded-xl border border-[#1f2937] bg-black/10 px-3 py-2">
-        <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
+      <details className="mt-2 rounded-xl border border-[var(--rds-surface-hover)] bg-black/10 px-3 py-2">
+        <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-text-muted)]">
           Contexto e atalhos
         </summary>
-        <p className="mt-2 text-[11px] leading-5 text-[#94a3b8]">{guide.detail}</p>
-        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[#7f849c]">
-          <span className="rounded-full border border-[#1f2937] bg-black/10 px-2 py-1">
+        <p className="mt-2 text-[11px] leading-5 text-[var(--rds-text-muted)]">{guide.detail}</p>
+        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--rds-text-muted)]">
+          <span className="rounded-full border border-[var(--rds-surface-hover)] bg-black/10 px-2 py-1">
             Rail: troca workspace
           </span>
-          <span className="rounded-full border border-[#1f2937] bg-black/10 px-2 py-1">
+          <span className="rounded-full border border-[var(--rds-surface-hover)] bg-black/10 px-2 py-1">
             Presets: reorganizam o shell
           </span>
-          <span className="rounded-full border border-[#1f2937] bg-black/10 px-2 py-1">
+          <span className="rounded-full border border-[var(--rds-surface-hover)] bg-black/10 px-2 py-1">
             Tools: painel contextual
           </span>
         </div>
         {secondaryActions.length > 0 ? (
-          <div className="mt-3 border-t border-[#1f2937] pt-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">
+          <div className="mt-3 border-t border-[var(--rds-surface-hover)] pt-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-text-muted)]">
               Mais acoes
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -678,6 +706,8 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
       </details>
       ) : null}
     </section>
+    </AdaptivePanel>
+    </div>
   );
 }
 
@@ -692,34 +722,34 @@ function TemplateFirstSuccessCard({
 }) {
   function toneClass(tone: FirstSuccessStep["tone"]) {
     if (tone === "success") {
-      return "border-[#a6e3a1]/25 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+      return "border-[var(--rds-status-success)]/25 bg-[var(--rds-status-success)]/10 text-[var(--rds-status-success)]";
     }
     if (tone === "warn") {
-      return "border-[#fab387]/25 bg-[#fab387]/10 text-[#fab387]";
+      return "border-[var(--rds-status-warning)]/25 bg-[var(--rds-status-warning)]/10 text-[var(--rds-status-warning)]";
     }
-    return "border-[#89b4fa]/25 bg-[#89b4fa]/10 text-[#89b4fa]";
+    return "border-[var(--rds-status-info)]/25 bg-[var(--rds-status-info)]/10 text-[var(--rds-status-info)]";
   }
 
   return (
     <div
       data-testid="template-first-success"
-      className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]"
+      className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 text-[10px] text-[var(--rds-text-muted)]"
     >
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#94e2d5]">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-tool-active)]">
             Primeiro sucesso
           </p>
-          <p className="mt-1 text-[#cdd6f4]">
+          <p className="mt-1 text-[var(--rds-text-primary)]">
             Caminho recomendado para <span className="font-semibold">{templateName}</span>
           </p>
-          <p className="mt-1 leading-5 text-[#94a3b8]">
-            Fluxo canonico desta escolha: <span className="font-semibold text-[#cdd6f4]">Scene</span>{" "}
-            primeiro, depois <span className="font-semibold text-[#cdd6f4]">Game</span> para o
+          <p className="mt-1 leading-5 text-[var(--rds-text-muted)]">
+            Fluxo canonico desta escolha: <span className="font-semibold text-[var(--rds-text-primary)]">Scene</span>{" "}
+            primeiro, depois <span className="font-semibold text-[var(--rds-text-primary)]">Game</span> para o
             playtest em {targetLabel}.
           </p>
         </div>
-        <span className="rounded-full border border-[#313244] bg-[#181825] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#cdd6f4]">
+        <span className="rounded-full border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-text-primary)]">
           {targetLabel}
         </span>
       </div>
@@ -728,15 +758,15 @@ function TemplateFirstSuccessCard({
         {steps.map((step, index) => (
           <li
             key={`${step.label}-${index}`}
-            className="rounded border border-[#313244] bg-[#181825] px-3 py-2"
+            className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-3 py-2"
           >
             <div className="flex items-start gap-2">
-              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0b1020] text-[9px] font-semibold text-[#cba6f7]">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--rds-surface-overlay)] text-[9px] font-semibold text-[var(--rds-action-primary)]">
                 {index + 1}
               </span>
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-[11px] font-semibold text-[#e2e8f0]">{step.label}</p>
+                  <p className="text-[11px] font-semibold text-[var(--rds-text-primary)]">{step.label}</p>
                   <span className={`rounded-full border px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] ${toneClass(step.tone)}`}>
                     {step.tone === "success"
                       ? "Pronto"
@@ -745,7 +775,7 @@ function TemplateFirstSuccessCard({
                         : "Proximo"}
                   </span>
                 </div>
-                <p className="mt-1 leading-5 text-[#94a3b8]">{step.detail}</p>
+                <p className="mt-1 leading-5 text-[var(--rds-text-muted)]">{step.detail}</p>
               </div>
             </div>
           </li>
@@ -758,16 +788,16 @@ function TemplateFirstSuccessCard({
 function sgdkCapabilityToneClass(tone: CapabilityTone): string {
   switch (tone) {
     case "supported":
-      return "border-[#a6e3a1]/30 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+      return "border-[var(--rds-status-success)]/30 bg-[var(--rds-status-success)]/10 text-[var(--rds-status-success)]";
     case "bridge":
-      return "border-[#f9e2af]/30 bg-[#f9e2af]/10 text-[#f9e2af]";
+      return "border-[var(--rds-status-warning)]/30 bg-[var(--rds-status-warning)]/10 text-[var(--rds-status-warning)]";
     case "blocked":
-      return "border-[#f38ba8]/30 bg-[#f38ba8]/10 text-[#f38ba8]";
+      return "border-[var(--rds-status-error)]/30 bg-[var(--rds-status-error)]/10 text-[var(--rds-status-error)]";
     case "experimental":
-      return "border-[#cba6f7]/30 bg-[#cba6f7]/10 text-[#cba6f7]";
+      return "border-[var(--rds-action-primary)]/30 bg-[var(--rds-action-primary)]/10 text-[var(--rds-action-primary)]";
     case "partial":
     default:
-      return "border-[#89b4fa]/30 bg-[#89b4fa]/10 text-[#89b4fa]";
+      return "border-[var(--rds-status-info)]/30 bg-[var(--rds-status-info)]/10 text-[var(--rds-status-info)]";
   }
 }
 
@@ -776,21 +806,21 @@ function SgdkCapabilityMatrix({ profile }: { profile: ExternalImportProfileSumma
   return (
     <div
       data-testid="sgdk-capability-matrix"
-      className="mt-3 rounded border border-[#313244] bg-[#0b1020] p-3 text-[10px] text-[#94a3b8]"
+      className="mt-3 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-overlay)] p-3 text-[10px] text-[var(--rds-text-muted)]"
     >
-      <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-status-info)]">
         Matriz de capacidades SGDK
       </p>
       <div className="mt-2 grid gap-2 md:grid-cols-2">
         {items.map((item) => (
-          <div key={item.id} className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5">
+          <div key={item.id} className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2 py-1.5">
             <div className="flex items-start justify-between gap-2">
-              <span className="font-semibold text-[#cdd6f4]">{item.label}</span>
+              <span className="font-semibold text-[var(--rds-text-primary)]">{item.label}</span>
               <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold ${sgdkCapabilityToneClass(item.tone)}`}>
                 {item.statusLabel}
               </span>
             </div>
-            <p className="mt-1 leading-5 text-[#7f849c]">{item.detail}</p>
+            <p className="mt-1 leading-5 text-[var(--rds-text-muted)]">{item.detail}</p>
           </div>
         ))}
       </div>
@@ -809,33 +839,33 @@ function SgdkImportSummaryCard({ summary }: { summary: SgdkImportSummary }) {
     <section
       data-testid="sgdk-import-summary"
       title={`Resumo SGDK Logic — ${formatSgdkImportSummaryKind(summary)}`}
-      className="mx-3 mt-3 rounded border border-[#89b4fa]/30 bg-[#0b1020] p-3 text-[10px] text-[#94a3b8]"
+      className="mx-3 mt-3 rounded border border-[var(--rds-status-info)]/30 bg-[var(--rds-surface-overlay)] p-3 text-[10px] text-[var(--rds-text-muted)]"
     >
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-status-info)]">
             Resumo SGDK Logic
           </p>
-          <p className="mt-1 text-[#cdd6f4]">
+          <p className="mt-1 text-[var(--rds-text-primary)]">
             {formatSgdkImportSummaryKind(summary)}. Nodes funcionais, bridges e gaps ficam separados.
           </p>
         </div>
-        <span className="rounded-full border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+        <span className="rounded-full border border-[var(--rds-status-warning)]/35 bg-[var(--rds-status-warning)]/10 px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-status-warning)]">
           Equivalencia gameplay nao certificada
         </span>
       </div>
       <div className="mt-2 grid gap-2 md:grid-cols-4">
         {rows.map(([label, value]) => (
-          <div key={label} className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5">
-            <p className="text-[#7f849c]">{label}</p>
-            <p className="mt-1 font-mono text-sm text-[#cdd6f4]">{value}</p>
+          <div key={label} className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2 py-1.5">
+            <p className="text-[var(--rds-text-muted)]">{label}</p>
+            <p className="mt-1 font-mono text-sm text-[var(--rds-text-primary)]">{value}</p>
           </div>
         ))}
       </div>
       {summary.blocking_gaps?.length ? (
-        <div className="mt-2 rounded border border-[#f38ba8]/30 bg-[#f38ba8]/10 px-2 py-1.5">
-          <p className="font-semibold text-[#f38ba8]">gaps bloqueantes</p>
-          <ul className="mt-1 list-inside list-disc text-[#f9e2af]">
+        <div className="mt-2 rounded border border-[var(--rds-status-error)]/30 bg-[var(--rds-status-error)]/10 px-2 py-1.5">
+          <p className="font-semibold text-[var(--rds-status-error)]">gaps bloqueantes</p>
+          <ul className="mt-1 list-inside list-disc text-[var(--rds-status-warning)]">
             {summary.blocking_gaps.map((gap) => (
               <li key={gap}>{gap}</li>
             ))}
@@ -843,7 +873,7 @@ function SgdkImportSummaryCard({ summary }: { summary: SgdkImportSummary }) {
         </div>
       ) : null}
       {summary.mapped_source_files?.length ? (
-        <p className="mt-2 font-mono text-[9px] text-[#7f849c]">
+        <p className="mt-2 font-mono text-[9px] text-[var(--rds-text-muted)]">
           arquivos fonte mapeados: {summary.mapped_source_files.join(", ")}
         </p>
       ) : null}
@@ -853,7 +883,7 @@ function SgdkImportSummaryCard({ summary }: { summary: SgdkImportSummary }) {
 
 function WorkspacePanelPlaceholder({ label }: { label: string }) {
   return (
-    <div className="flex h-full min-h-0 items-center justify-center bg-[#09090b] px-4 text-center text-[11px] text-[#64748b]">
+    <div className="flex h-full min-h-0 items-center justify-center bg-[var(--rds-surface-canvas)] px-4 text-center text-[11px] text-[var(--rds-text-muted)]">
       {label}
     </div>
   );
@@ -876,24 +906,24 @@ function BuildPhasePanel({
 
   const statusLabel = blocked ? "Acao necessaria" : warning ? "Seguro continuar" : "Pronto para build";
   const statusClass = blocked
-    ? "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]"
+    ? "border-[var(--rds-status-error)]/35 bg-[var(--rds-status-error)]/10 text-[var(--rds-status-error)]"
     : warning
-      ? "border-[#fab387]/35 bg-[#fab387]/10 text-[#fab387]"
-      : "border-[#a6e3a1]/30 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+      ? "border-[var(--rds-status-warning)]/35 bg-[var(--rds-status-warning)]/10 text-[var(--rds-status-warning)]"
+      : "border-[var(--rds-status-success)]/30 bg-[var(--rds-status-success)]/10 text-[var(--rds-status-success)]";
 
   return (
     <div
       data-testid="build-phase-panel"
-      className="hidden max-w-[21rem] items-center gap-2 rounded border border-[#313244] bg-[#0b1020] px-2 py-1 text-[9px] 2xl:flex"
+      className="hidden max-w-[21rem] items-center gap-2 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-overlay)] px-2 py-1 text-[9px] 2xl:flex"
       title="Fases do fluxo canonico Build -> ROM -> Emulacao."
     >
       <span className={`shrink-0 rounded-full border px-2 py-0.5 font-semibold ${statusClass}`}>
         {statusLabel}
       </span>
-      <span className="truncate text-[#94a3b8]">
+      <span className="truncate text-[var(--rds-text-muted)]">
         Validando -&gt; Compilando -&gt; Gerando ROM -&gt; Carregando emulador
       </span>
-      <span className="shrink-0 rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 font-mono text-[#7f849c]">
+      <span className="shrink-0 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-1.5 py-0.5 font-mono text-[var(--rds-text-muted)]">
         ROM {romMasteringStatus.replace(/_/g, " ")}
       </span>
     </div>
@@ -913,22 +943,22 @@ function ToolbarVramBudget({
 }) {
   const percent = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
   const toneClass = hasErrors
-    ? "bg-[#f38ba8]"
+    ? "bg-[var(--rds-status-error)]"
     : hasWarnings || percent >= 80
-      ? "bg-[#fab387]"
-      : "bg-[#a6e3a1]";
+      ? "bg-[var(--rds-status-warning)]"
+      : "bg-[var(--rds-status-success)]";
 
   return (
     <div
       data-testid="toolbar-vram-budget"
-      className="pointer-events-none flex h-7 min-w-[6.5rem] shrink-0 items-center gap-1 rounded border border-[#313244] bg-[#11111b] px-2"
+      className="pointer-events-none flex h-7 min-w-[6.5rem] shrink-0 items-center gap-1 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2"
       title={`VRAM ${Math.round(used / 1024)}KB / ${Math.round(limit / 1024)}KB (${percent}%)`}
     >
-      <span className="text-[10px] text-[#7f849c]">VRAM</span>
-        <span data-testid="toolbar-vram-budget-label" className="font-mono text-[#cdd6f4]">
+      <span className="text-[10px] text-[var(--rds-text-muted)]">VRAM</span>
+        <span data-testid="toolbar-vram-budget-label" className="font-mono text-[var(--rds-text-primary)]">
           {Math.round(used / 1024)} / {Math.round(limit / 1024)} KB
         </span>
-      <div className="h-1 w-9 overflow-hidden rounded bg-[#313244]">
+      <div className="h-1 w-9 overflow-hidden rounded bg-[var(--rds-border-subtle)]">
         <div
           data-testid="toolbar-vram-budget-bar"
           className={`h-full ${toneClass}`}
@@ -949,22 +979,22 @@ function ToolbarScanlineBudget({
   const percent = Math.min(100, Math.round((peak / Math.max(limit, 1)) * 100));
   const toneClass =
     peak > limit
-      ? "bg-[#f38ba8]"
+      ? "bg-[var(--rds-status-error)]"
       : percent >= 80
-        ? "bg-[#fab387]"
-        : "bg-[#89b4fa]";
+        ? "bg-[var(--rds-status-warning)]"
+        : "bg-[var(--rds-status-info)]";
 
   return (
     <div
       data-testid="toolbar-scanline-budget"
-      className="pointer-events-none hidden h-7 min-w-[5rem] shrink-0 items-center gap-1 rounded border border-[#313244] bg-[#11111b] px-2 2xl:flex"
+      className="pointer-events-none hidden h-7 min-w-[5rem] shrink-0 items-center gap-1 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2 2xl:flex"
       title={`Sprites por scanline ${peak} / ${limit} (${percent}%)`}
     >
-      <span className="text-[10px] text-[#7f849c]">SL</span>
-        <span data-testid="toolbar-scanline-budget-label" className="font-mono text-[#cdd6f4]">
+      <span className="text-[10px] text-[var(--rds-text-muted)]">SL</span>
+        <span data-testid="toolbar-scanline-budget-label" className="font-mono text-[var(--rds-text-primary)]">
           {peak} / {limit}
         </span>
-      <div className="h-1 w-7 overflow-hidden rounded bg-[#313244]">
+      <div className="h-1 w-7 overflow-hidden rounded bg-[var(--rds-border-subtle)]">
         <div
           data-testid="toolbar-scanline-budget-bar"
           className={`h-full ${toneClass}`}
@@ -985,22 +1015,22 @@ function ToolbarPaletteBudget({
   const percent = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
   const toneClass =
     used > limit
-      ? "bg-[#f38ba8]"
+      ? "bg-[var(--rds-status-error)]"
       : percent >= 80
-        ? "bg-[#fab387]"
-        : "bg-[#f9e2af]";
+        ? "bg-[var(--rds-status-warning)]"
+        : "bg-[var(--rds-status-warning)]";
 
   return (
     <div
       data-testid="toolbar-palette-budget"
-      className="pointer-events-none hidden h-7 min-w-[4.5rem] shrink-0 items-center gap-1 rounded border border-[#313244] bg-[#11111b] px-2 2xl:flex"
+      className="pointer-events-none hidden h-7 min-w-[4.5rem] shrink-0 items-center gap-1 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2 2xl:flex"
       title={`Bancos de paleta ${used} / ${limit} (${percent}%)`}
     >
-      <span className="text-[10px] text-[#7f849c]">PAL</span>
-        <span data-testid="toolbar-palette-budget-label" className="font-mono text-[#cdd6f4]">
+      <span className="text-[10px] text-[var(--rds-text-muted)]">PAL</span>
+        <span data-testid="toolbar-palette-budget-label" className="font-mono text-[var(--rds-text-primary)]">
           {used} / {limit}
         </span>
-      <div className="h-1 w-7 overflow-hidden rounded bg-[#313244]">
+      <div className="h-1 w-7 overflow-hidden rounded bg-[var(--rds-border-subtle)]">
         <div
           data-testid="toolbar-palette-budget-bar"
           className={`h-full ${toneClass}`}
@@ -1028,23 +1058,23 @@ function ToolbarWarningBadge({
         type="button"
         data-testid="toolbar-warning-badge"
         onClick={() => setOpen((current) => !current)}
-        className="relative flex h-7 min-w-7 items-center justify-center rounded border border-[#fab387]/45 bg-[#fab387]/14 px-2 text-[10px] font-bold text-[#fab387] shadow-[0_0_0_1px_rgba(250,179,135,0.08)]"
+        className="relative flex h-7 min-w-7 items-center justify-center rounded border border-[var(--rds-status-warning)]/45 bg-[var(--rds-status-warning)]/14 px-2 text-[10px] font-bold text-[var(--rds-status-warning)] shadow-[0_0_0_1px_rgba(250,179,135,0.08)]"
         title={`${issues.length} warning(s) / erro(s). Clique para detalhes.`}
       >
-        !
+        <Icon name="warning-triangle" size={14} />
         <span className="ml-1 font-mono">{issues.length}</span>
       </button>
       {open ? (
         <div
           data-testid="toolbar-warning-popover"
-          className="absolute right-0 top-[calc(100%+8px)] z-30 w-80 rounded border border-[#313244] bg-[#0b1120] p-3 text-[11px] text-[#cbd5e1] shadow-[0_24px_60px_rgba(0,0,0,0.45)]"
+          className="absolute right-0 top-[calc(100%+8px)] z-30 w-80 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-overlay)] p-3 text-[11px] text-[var(--rds-text-secondary)] shadow-[0_24px_60px_rgba(0,0,0,0.45)]"
         >
-          <p className="text-[10px] font-semibold uppercase text-[#fab387]">
+          <p className="text-[10px] font-semibold uppercase text-[var(--rds-status-warning)]">
             Diagnostico
           </p>
           <ul className="mt-2 max-h-52 space-y-2 overflow-y-auto">
             {issues.map((issue, index) => (
-              <li key={`${issue}-${index}`} className="rounded border border-[#313244] bg-[#111827] px-2 py-1.5">
+              <li key={`${issue}-${index}`} className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-input)] px-2 py-1.5">
                 {issue}
               </li>
             ))}
@@ -1073,21 +1103,21 @@ function ProductionStatusBar({
   return (
     <div
       data-testid="production-status-bar"
-      className="flex h-7 shrink-0 items-center gap-3 border-t border-[#27272a] bg-[#0b1020] px-3 text-[10px] text-[#94a3b8]"
+      className="flex h-7 shrink-0 items-center gap-3 border-t border-[var(--rds-border-subtle)] bg-[var(--rds-surface-overlay)] px-3 text-[10px] text-[var(--rds-text-muted)]"
     >
       <span className="min-w-0 flex-1 truncate" title={lastMessage}>
         {lastMessage || "Sem alertas recentes"}
       </span>
-      <span className="hidden font-mono text-[#cdd6f4] sm:inline">Build: {buildStatus}</span>
-      <span className="hidden font-mono text-[#cdd6f4] md:inline">Import: {importStatus}</span>
-      <span className="hidden font-mono text-[#cdd6f4] md:inline">Emulacao: {emulationStatus}</span>
-      <span className="hidden font-mono text-[#cdd6f4] lg:inline">{hardwareSummary}</span>
+      <span className="hidden items-center gap-1 font-mono text-[var(--rds-text-primary)] sm:inline-flex"><Icon name="check-circle" size={13} />Build: {buildStatus}</span>
+      <span className="hidden font-mono text-[var(--rds-text-primary)] md:inline">Importacao: {importStatus}</span>
+      <span className="hidden font-mono text-[var(--rds-text-primary)] md:inline">Emulacao: {emulationStatus}</span>
+      <span className="hidden font-mono text-[var(--rds-text-primary)] lg:inline">{hardwareSummary}</span>
       <button
         type="button"
         onClick={onOpenDetails}
-        className="rounded border border-[#313244] bg-[#111827] px-2 py-0.5 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
+        className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-input)] px-2 py-0.5 text-[10px] font-semibold text-[var(--rds-text-primary)] transition-colors hover:border-[var(--rds-status-info)] hover:text-[var(--rds-status-info)]"
       >
-        Details
+        Ver detalhes
       </button>
     </div>
   );
@@ -1172,28 +1202,30 @@ export function CommandPaletteDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/55 px-3 pt-[12vh]">
-      <div
-        data-testid="command-palette"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="command-palette-title"
-        className="flex w-[min(720px,calc(100vw-24px))] max-h-[72vh] flex-col overflow-hidden rounded border border-[#313244] bg-[#111827] shadow-2xl"
-      >
-        <div className="border-b border-[#313244] p-3">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <h2 id="command-palette-title" className="text-xs font-bold uppercase tracking-[0.16em] text-[#cba6f7]">
-              Command Palette
-            </h2>
-            <kbd className="rounded border border-[#334155] bg-[#020617] px-1.5 py-0.5 font-mono text-[10px] text-[#94a3b8]">
-              Esc
-            </kbd>
-          </div>
-          <input
+    <Dialog
+      open
+      title="Paleta de Comandos"
+      description="Busque comandos reais; itens indisponiveis explicam o contexto necessario."
+      onClose={onClose}
+      initialFocusRef={inputRef}
+      portal={false}
+      overlayClassName="items-start pt-[12vh]"
+      className="max-h-[72vh] w-[min(720px,calc(100vw-24px))]"
+    >
+      <div data-testid="command-palette" className="flex min-h-0 flex-col">
+        <div className="border-b border-[var(--rds-border-subtle)] pb-3">
+          <Input
             ref={inputRef}
             data-testid="command-palette-search"
+            label="Buscar comando"
+            hideLabel
+            leadingIcon={<Icon name="search" size={16} />}
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
+            role="combobox"
+            aria-controls="command-palette-results"
+            aria-expanded="true"
+            aria-activedescendant={activeResultCount > 0 ? `command-palette-option-${activeResults[Math.min(selectedIndex, activeResultCount - 1)]?.command.id}` : undefined}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
@@ -1210,12 +1242,12 @@ export function CommandPaletteDialog({
               }
             }}
             placeholder="Buscar comando..."
-            className="h-9 w-full rounded border border-[#334155] bg-[#020617] px-3 text-sm text-[#e2e8f0] outline-none focus:border-[#89b4fa]"
+            controlSize="lg"
           />
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div id="command-palette-results" role="listbox" aria-label="Resultados de comandos" className="min-h-0 flex-1 overflow-y-auto pt-2">
           {results.length === 0 ? (
-            <div className="rounded border border-[#313244] bg-[#0b1020] px-3 py-4 text-xs text-[#94a3b8]">
+            <div className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-overlay)] px-3 py-4 text-xs text-[var(--rds-text-muted)]">
               Nenhum comando real encontrado.
             </div>
           ) : (
@@ -1223,7 +1255,7 @@ export function CommandPaletteDialog({
               {activeResultCount === 0 ? (
                 <div
                   data-testid="command-palette-no-active-results"
-                  className="rounded border border-[#313244] bg-[#0b1020] px-3 py-2 text-xs text-[#94a3b8]"
+                  className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-overlay)] px-3 py-2 text-xs text-[var(--rds-text-muted)]"
                 >
                   Nenhum comando disponivel neste contexto.
                 </div>
@@ -1239,7 +1271,10 @@ export function CommandPaletteDialog({
                   return (
                     <button
                       key={command.id}
+                      id={`command-palette-option-${command.id}`}
                       type="button"
+                      role="option"
+                      aria-selected={selected}
                       data-testid={`command-palette-item-${command.id}`}
                       data-selected={selected ? "true" : "false"}
                       disabled={disabled}
@@ -1260,21 +1295,21 @@ export function CommandPaletteDialog({
                       }}
                       className={`grid grid-cols-[1fr_auto] items-center gap-3 rounded border px-3 py-2 text-left transition-colors ${
                         selected
-                          ? "border-[#89b4fa]/50 bg-[#1e293b]"
-                          : "border-transparent bg-[#0b1020] hover:border-[#334155]"
+                          ? "border-[var(--rds-status-info)]/50 bg-[var(--rds-surface-active)]"
+                          : "border-transparent bg-[var(--rds-surface-overlay)] hover:border-[var(--rds-border-default)]"
                       } disabled:cursor-not-allowed disabled:opacity-45`}
                     >
                       <span className="min-w-0">
-                        <span className="block truncate text-xs font-semibold text-[#e2e8f0]">
+                        <span className="block truncate text-xs font-semibold text-[var(--rds-text-primary)]">
                           {command.label}
                         </span>
-                        <span className="block truncate text-[10px] text-[#64748b]">
+                        <span className="block truncate text-[10px] text-[var(--rds-text-muted)]">
                           {command.group}
                           {command.description ? ` · ${command.description}` : ""}
                         </span>
                       </span>
                       {shortcut ? (
-                        <kbd className="rounded border border-[#334155] bg-[#020617] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#f9e2af]">
+                        <kbd className="rounded border border-[var(--rds-border-default)] bg-[var(--rds-surface-canvas)] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[var(--rds-status-warning)]">
                           {shortcut}
                         </kbd>
                       ) : null}
@@ -1286,7 +1321,7 @@ export function CommandPaletteDialog({
           )}
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -1308,23 +1343,21 @@ function ShortcutEditorDialog({
   const groups = groupShortcutsByGroup(shortcuts.filter((shortcut) => shortcut.editable !== false));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
-      <div
-        data-testid="shortcut-editor"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="shortcut-editor-title"
-        className="flex max-h-[86vh] w-[min(860px,calc(100vw-24px))] flex-col overflow-hidden rounded border border-[#313244] bg-[#181825] shadow-2xl"
-      >
-        <div className="flex items-start justify-between gap-3 border-b border-[#313244] p-3">
+    <Dialog
+      open
+      title="Atalhos"
+      description="Personalize os comandos locais; conflitos permanecem visiveis antes de fechar."
+      onClose={onClose}
+      portal={false}
+      className="max-h-[86vh] w-[min(860px,calc(100vw-24px))]"
+    >
+      <div data-testid="shortcut-editor" className="flex min-h-0 flex-col">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--rds-border-subtle)] pb-3">
           <div className="min-w-0">
-            <h2 id="shortcut-editor-title" className="text-sm font-bold text-[#cba6f7]">
-              Atalhos
-            </h2>
             <div
               data-testid="shortcut-editor-conflicts"
               className={`mt-1 text-[10px] ${
-                conflicts.length > 0 ? "text-[#f38ba8]" : "text-[#a6e3a1]"
+                conflicts.length > 0 ? "text-[var(--rds-status-error)]" : "text-[var(--rds-status-success)]"
               }`}
             >
               {conflicts.length > 0
@@ -1336,50 +1369,45 @@ function ShortcutEditorDialog({
           </div>
           <div className="flex shrink-0 gap-2">
             <ToolbarButton label="Resetar padrao" onClick={onResetAll} />
-            <ToolbarButton label="Fechar" onClick={onClose} />
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        <div className="min-h-0 flex-1 overflow-y-auto pt-3">
           <div className="grid gap-3 md:grid-cols-2">
             {groups.map((group) => (
-              <section key={group.group} className="rounded border border-[#313244] bg-[#0f172a]/70">
-                <h3 className="border-b border-[#1f2937] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7dd3fc]">
+              <section key={group.group} className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)]/70">
+                <h3 className="border-b border-[var(--rds-surface-hover)] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rds-focus-ring)]">
                   {group.group}
                 </h3>
-                <div className="divide-y divide-[#1f2937]">
+                <div className="divide-y divide-[var(--rds-surface-hover)]">
                   {group.shortcuts.map((shortcut) => {
                     const conflict = getShortcutConflictForCommand(conflicts, shortcut.id);
                     return (
                       <div key={shortcut.id} className="grid gap-2 px-3 py-2">
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="truncate text-xs font-semibold text-[#cdd6f4]" title={shortcut.label}>
+                            <div className="truncate text-xs font-semibold text-[var(--rds-text-primary)]" title={shortcut.label}>
                               {shortcut.label}
                             </div>
-                            <div className="text-[10px] text-[#64748b]">Escopo: {shortcut.scope ?? "global"}</div>
+                            <div className="text-[10px] text-[var(--rds-text-muted)]">Escopo: {shortcut.scope ?? "global"}</div>
                           </div>
                           <button
                             type="button"
                             data-testid={`shortcut-editor-reset-${shortcut.id}`}
                             onClick={() => onResetShortcut(shortcut.id)}
-                            className="rounded border border-[#334155] bg-[#020617] px-2 py-1 text-[10px] text-[#94a3b8] hover:text-[#e2e8f0]"
+                            className="rounded border border-[var(--rds-border-default)] bg-[var(--rds-surface-canvas)] px-2 py-1 text-[10px] text-[var(--rds-text-muted)] hover:text-[var(--rds-text-primary)]"
                           >
                             Reset
                           </button>
                         </div>
-                        <input
+                        <Input
                           data-testid={`shortcut-editor-input-${shortcut.id}`}
+                          label={`Atalho para ${shortcut.label}`}
+                          hideLabel
                           value={formatShortcutKeys(shortcut.keys)}
                           onChange={(event) => onShortcutChange(shortcut.id, event.target.value)}
-                          className={`h-8 rounded border bg-[#020617] px-2 font-mono text-[11px] text-[#f9e2af] outline-none focus:border-[#89b4fa] ${
-                            conflict ? "border-[#f38ba8]" : "border-[#334155]"
-                          }`}
+                          className="font-mono text-[11px]"
+                          errorMessage={conflict ? `Conflito: ${conflict.displayKey} com ${conflict.labels.join(" / ")}` : undefined}
                         />
-                        {conflict ? (
-                          <div className="truncate text-[10px] text-[#f38ba8]" title={conflict.labels.join(", ")}>
-                            Conflito: {conflict.displayKey} com {conflict.labels.join(" / ")}
-                          </div>
-                        ) : null}
                       </div>
                     );
                   })}
@@ -1388,8 +1416,11 @@ function ShortcutEditorDialog({
             ))}
           </div>
         </div>
+        <div className="mt-3 flex justify-end border-t border-[var(--rds-border-subtle)] pt-3">
+          <ToolbarButton label="Fechar" onClick={onClose} />
+        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -1568,6 +1599,7 @@ export default function App() {
   const [templateDonorPaths, setTemplateDonorPaths] = useState<Record<string, string>>({});
   const [lastSgdkImportSummary, setLastSgdkImportSummary] = useState<SgdkImportSummary | null>(null);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
   const [creatingProject, setCreatingProject] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
@@ -1853,6 +1885,68 @@ export default function App() {
     );
   }
 
+  function applyAutomaticLayout() {
+    const config = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
+    setFocusedShell(false);
+    lastNonFocusLayoutRef.current = config.panels;
+    applyShellLayout(config.panels);
+    logMessage("info", "[Layout] Ajuste automatico aplicado para o workspace e a largura atuais.");
+  }
+
+  function applyBalancedLayout() {
+    const config = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
+    const nextLayout: LayoutMap = !config.showLeft && !config.showRight
+      ? { left: 0, center: 100, right: 0 }
+      : !config.showLeft
+        ? { left: 0, center: 68, right: 32 }
+        : !config.showRight
+          ? { left: 24, center: 76, right: 0 }
+          : { left: 18, center: 60, right: 22 };
+    setFocusedShell(false);
+    lastNonFocusLayoutRef.current = nextLayout;
+    applyShellLayout(nextLayout);
+    logMessage("info", "[Layout] Preset Balanceado aplicado.");
+  }
+
+  function handleShellSplitterIntent(side: "left" | "right", intent: LayoutResizeIntent) {
+    if (intent.type === "auto") {
+      applyAutomaticLayout();
+      return;
+    }
+    const current = panelGroupRef.current?.getLayout();
+    if (!current) return;
+    const layout: LayoutMap = {
+      left: current.left ?? 0,
+      center: current.center ?? 100,
+      right: current.right ?? 0,
+    };
+    const stepPercent = intent.type === "step"
+      ? (intent.delta / Math.max(shellWidth - 56, 1)) * 100
+      : 0;
+    const minCenter = 20;
+
+    if (side === "left") {
+      const available = layout.left + layout.center - minCenter;
+      const desired = intent.type === "minimum"
+        ? 0
+        : intent.type === "maximum"
+          ? Math.min(42, available)
+          : layout.left + stepPercent;
+      const nextLeft = Math.max(0, Math.min(available, desired));
+      applyShellLayout({ ...layout, left: nextLeft, center: layout.left + layout.center - nextLeft });
+      return;
+    }
+
+    const available = layout.right + layout.center - minCenter;
+    const desired = intent.type === "minimum"
+      ? 0
+      : intent.type === "maximum"
+        ? Math.min(48, available)
+        : layout.right - stepPercent;
+    const nextRight = Math.max(0, Math.min(available, desired));
+    applyShellLayout({ ...layout, center: layout.right + layout.center - nextRight, right: nextRight });
+  }
+
   function saveCurrentLayout() {
     const layout = panelGroupRef.current?.getLayout();
     if (!layout) {
@@ -1939,15 +2033,16 @@ export default function App() {
   }, [activeWorkspace]);
 
   useEffect(() => {
-    if (showProjectWizard && inputRef.current) {
+    if (showProjectWizard && wizardStep === 2 && inputRef.current) {
       inputRef.current.focus();
       inputRef.current.select();
     }
-  }, [showProjectWizard]);
+  }, [showProjectWizard, wizardStep]);
 
   useEffect(() => {
     if (!showProjectWizard) {
       setShowExternalImportSection(false);
+      setWizardStep(1);
       return;
     }
 
@@ -2316,13 +2411,23 @@ export default function App() {
           title: getShortcutTitle("layout.save", "Salvar layout local do workspace", shortcuts),
         },
         {
+          label: "Layout automatico",
+          onClick: applyAutomaticLayout,
+          title: "Ajustar paineis ao workspace e a largura atuais",
+        },
+        {
+          label: "Layout balanceado",
+          onClick: applyBalancedLayout,
+          title: "Restaurar proporcoes equilibradas para autoria",
+        },
+        {
           label: "Restaurar layout",
           onClick: restoreSavedLayout,
           shortcut: getShortcutLabel("layout.restore", shortcuts),
           title: getShortcutTitle("layout.restore", "Restaurar layout salvo neste host", shortcuts),
         },
         {
-          label: "Command Palette",
+          label: "Paleta de Comandos",
           onClick: openCommandPalette,
           shortcut: getShortcutLabel("commandPalette.open", shortcuts),
           title: getShortcutTitle("commandPalette.open", "Buscar e executar comandos reais", shortcuts),
@@ -3574,8 +3679,8 @@ export default function App() {
         key={template.id}
         className={`overflow-hidden rounded border ${
           isSelected
-            ? "border-[#cba6f7] bg-[#1e1e2e]"
-            : "border-[#313244] bg-[#11111b]"
+            ? "border-[var(--rds-action-primary)] bg-[var(--rds-surface-panel)]"
+            : "border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)]"
         }`}
       >
         <button
@@ -3592,31 +3697,31 @@ export default function App() {
         >
           <div className="flex items-start justify-between gap-2">
             <div>
-              <h3 className="text-sm font-semibold text-[#cdd6f4]">{template.name}</h3>
-              <p className="text-[10px] uppercase tracking-wide text-[#7f849c]">
+              <h3 className="text-sm font-semibold text-[var(--rds-text-primary)]">{template.name}</h3>
+              <p className="text-[10px] uppercase tracking-wide text-[var(--rds-text-muted)]">
                 {template.genre}
               </p>
             </div>
             {template.experimental ? (
-              <span className="rounded border border-[#fab387] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#fab387]">
+              <span className="rounded border border-[var(--rds-status-warning)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--rds-status-warning)]">
                 Experimental
               </span>
             ) : null}
           </div>
-          <p className="min-h-[3rem] text-[11px] leading-5 text-[#a6adc8]">
+          <p className="min-h-[3rem] text-[11px] leading-5 text-[var(--rds-text-secondary)]">
             {template.description}
           </p>
           <div className="flex flex-wrap gap-1">
-            <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4]">
+            <span className="rounded bg-[var(--rds-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--rds-text-primary)]">
               {template.difficulty}
             </span>
             <span
               className={`rounded px-1.5 py-0.5 text-[10px] ${
                 availability.tone === "success"
-                  ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                  ? "bg-[var(--rds-status-success)]/15 text-[var(--rds-status-success)]"
                   : availability.tone === "warn"
-                    ? "bg-[#fab387]/15 text-[#fab387]"
-                    : "bg-[#f38ba8]/15 text-[#f38ba8]"
+                    ? "bg-[var(--rds-status-warning)]/15 text-[var(--rds-status-warning)]"
+                    : "bg-[var(--rds-status-error)]/15 text-[var(--rds-status-error)]"
               }`}
             >
               {availability.statusLabel}
@@ -3627,29 +3732,29 @@ export default function App() {
               template.features.map((feature) => (
                 <span
                   key={feature}
-                  className="rounded bg-[#181825] px-1.5 py-0.5 text-[10px] text-[#7f849c]"
+                  className="rounded bg-[var(--rds-surface-panel)] px-1.5 py-0.5 text-[10px] text-[var(--rds-text-muted)]"
                 >
                   {feature}
                 </span>
               ))
             ) : (
-              <span className="text-[10px] text-[#6c7086]">Sem presets iniciais.</span>
+              <span className="text-[10px] text-[var(--rds-text-muted)]">Sem presets iniciais.</span>
             )}
           </div>
         </button>
 
         {isExternalSgdk ? (
-          <div className="border-t border-[#313244] p-3 text-[10px] text-[#7f849c]">
+          <div className="border-t border-[var(--rds-border-subtle)] p-3 text-[10px] text-[var(--rds-text-muted)]">
             <div className="mb-2">
-              <p className="text-[#a6adc8]">Template doador</p>
-              <p className="truncate font-mono text-[#cdd6f4]">
+              <p className="text-[var(--rds-text-secondary)]">Template doador</p>
+              <p className="truncate font-mono text-[var(--rds-text-primary)]">
                 {donorPath || "(selecione uma pasta doadora)"}
               </p>
             </div>
             {availability.reason ? (
-              <p className="mb-2 text-[#fab387]">{availability.reason}</p>
+              <p className="mb-2 text-[var(--rds-status-warning)]">{availability.reason}</p>
             ) : (
-              <p className="mb-2 text-[#7f849c]">
+              <p className="mb-2 text-[var(--rds-text-muted)]">
                 Usa assets limpos do template SGDK externo sem copiar ROM, VGM ou artefatos.
               </p>
             )}
@@ -4051,30 +4156,80 @@ export default function App() {
   }, [automationEnabled, rightPanelMode]);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#11111b] text-[#cdd6f4]">
-      {showProjectWizard && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
-          <div className="flex max-h-[calc(100vh-1.5rem)] min-h-0 w-[52rem] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
-            <div className="space-y-1">
-              <h2 className="text-sm font-bold text-[#cba6f7]">
-                {activeProjectDir ? "Novo Projeto" : "Wizard de Primeiro Uso"}
-              </h2>
-              <p className="text-[10px] leading-tight text-[#7f849c]">
-                Escolha um template, ajuste target/nome/pasta base e crie um projeto editavel
-                sem sair do fluxo canonico do editor.
-              </p>
-            </div>
-
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--rds-surface-panel-strong)] text-[var(--rds-text-primary)]">
+      <Dialog
+        open={showProjectWizard}
+        title={activeProjectDir ? "Novo Projeto" : "Wizard de Primeiro Uso"}
+        description="Crie um projeto editável pelo fluxo canônico em três passos claros."
+        onClose={() => {
+          setShowProjectWizard(false);
+          setWizardStep(1);
+        }}
+        closeLabel="Fechar assistente de projeto"
+        portal={false}
+        className="min-h-0 w-[52rem] max-w-[calc(100vw-1.5rem)]"
+      >
+        <nav aria-label="Etapas do assistente" className="mb-4">
+          <ol className="grid grid-cols-3 gap-2">
+            {([
+              [1, "Template", "Escolha a base"],
+              [2, "Destino", "Plataforma e pasta"],
+              [3, "Revisão", "Confirme e crie"],
+            ] as const).map(([step, label, detail]) => {
+              const active = wizardStep === step;
+              const complete = wizardStep > step;
+              return (
+                <li key={step}>
+                  <button
+                    type="button"
+                    aria-current={active ? "step" : undefined}
+                    onClick={() => setWizardStep(step)}
+                    className={`flex min-h-12 w-full items-center gap-2 rounded border px-3 py-2 text-left transition-colors ${
+                      active
+                        ? "border-[var(--rds-action-primary)] bg-[var(--rds-action-primary-soft)]"
+                        : "border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] hover:border-[var(--rds-border-strong)]"
+                    }`}
+                  >
+                    <span
+                      className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                        complete
+                          ? "bg-[var(--rds-status-success)] text-[var(--rds-surface-panel)]"
+                          : active
+                            ? "bg-[var(--rds-action-primary)] text-[var(--rds-surface-panel)]"
+                            : "bg-[var(--rds-border-subtle)] text-[var(--rds-text-secondary)]"
+                      }`}
+                    >
+                      {complete ? <Icon name="check-circle" size={14} /> : step}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-xs font-semibold text-[var(--rds-text-primary)]">
+                        {label}
+                      </span>
+                      <span className="block truncate text-[9px] text-[var(--rds-text-muted)]">
+                        {detail}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
             <div
               data-testid="project-wizard-body"
-              className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1"
+              data-wizard-step={wizardStep}
+              className="min-h-0 flex-1 space-y-4"
             >
-              <div data-testid="wizard-recommended-start" className="grid gap-3 md:grid-cols-2">
-                <p className="col-span-full text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">
+              <div
+                data-testid="wizard-recommended-start"
+                hidden={wizardStep !== 1}
+                className="grid gap-3 md:grid-cols-2"
+              >
+                <p className="col-span-full text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-status-success)]">
                   Primeiro Projeto
                 </p>
               {templatesLoading ? (
-                <div className="col-span-full rounded border border-[#313244] bg-[#11111b] p-4 text-xs text-[#7f849c]">
+                <div className="col-span-full rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-4 text-xs text-[var(--rds-text-muted)]">
                   Carregando galeria de templates...
                 </div>
               ) : (
@@ -4090,8 +4245,8 @@ export default function App() {
                       key={template.id}
                       className={`overflow-hidden rounded border ${
                         isSelected
-                          ? "border-[#cba6f7] bg-[#1e1e2e]"
-                          : "border-[#313244] bg-[#11111b]"
+                          ? "border-[var(--rds-action-primary)] bg-[var(--rds-surface-panel)]"
+                          : "border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)]"
                       }`}
                     >
                       <button
@@ -4108,31 +4263,31 @@ export default function App() {
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                            <h3 className="text-sm font-semibold text-[#cdd6f4]">{template.name}</h3>
-                            <p className="text-[10px] uppercase tracking-wide text-[#7f849c]">
+                            <h3 className="text-sm font-semibold text-[var(--rds-text-primary)]">{template.name}</h3>
+                            <p className="text-[10px] uppercase tracking-wide text-[var(--rds-text-muted)]">
                               {template.genre}
                             </p>
                           </div>
                           {template.experimental ? (
-                            <span className="rounded border border-[#fab387] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#fab387]">
+                            <span className="rounded border border-[var(--rds-status-warning)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--rds-status-warning)]">
                               Experimental
                             </span>
                           ) : null}
                         </div>
-                        <p className="min-h-[3rem] text-[11px] leading-5 text-[#a6adc8]">
+                        <p className="min-h-[3rem] text-[11px] leading-5 text-[var(--rds-text-secondary)]">
                           {template.description}
                         </p>
                         <div className="flex flex-wrap gap-1">
-                          <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4]">
+                          <span className="rounded bg-[var(--rds-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--rds-text-primary)]">
                             {template.difficulty}
                           </span>
                           <span
                             className={`rounded px-1.5 py-0.5 text-[10px] ${
                               availability.tone === "success"
-                                ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                                ? "bg-[var(--rds-status-success)]/15 text-[var(--rds-status-success)]"
                                 : availability.tone === "warn"
-                                  ? "bg-[#fab387]/15 text-[#fab387]"
-                                  : "bg-[#f38ba8]/15 text-[#f38ba8]"
+                                  ? "bg-[var(--rds-status-warning)]/15 text-[var(--rds-status-warning)]"
+                                  : "bg-[var(--rds-status-error)]/15 text-[var(--rds-status-error)]"
                             }`}
                           >
                             {availability.statusLabel}
@@ -4143,29 +4298,29 @@ export default function App() {
                             template.features.map((feature) => (
                               <span
                                 key={feature}
-                                className="rounded bg-[#181825] px-1.5 py-0.5 text-[10px] text-[#7f849c]"
+                                className="rounded bg-[var(--rds-surface-panel)] px-1.5 py-0.5 text-[10px] text-[var(--rds-text-muted)]"
                               >
                                 {feature}
                               </span>
                             ))
                           ) : (
-                            <span className="text-[10px] text-[#6c7086]">Sem presets iniciais.</span>
+                            <span className="text-[10px] text-[var(--rds-text-muted)]">Sem presets iniciais.</span>
                           )}
                         </div>
                       </button>
 
                       {isExternalSgdk ? (
-                        <div className="border-t border-[#313244] p-3 text-[10px] text-[#7f849c]">
+                        <div className="border-t border-[var(--rds-border-subtle)] p-3 text-[10px] text-[var(--rds-text-muted)]">
                           <div className="mb-2">
-                            <p className="text-[#a6adc8]">Template doador</p>
-                            <p className="truncate font-mono text-[#cdd6f4]">
+                            <p className="text-[var(--rds-text-secondary)]">Template doador</p>
+                            <p className="truncate font-mono text-[var(--rds-text-primary)]">
                               {donorPath || "(selecione uma pasta doadora)"}
                             </p>
                           </div>
                           {availability.reason ? (
-                            <p className="mb-2 text-[#fab387]">{availability.reason}</p>
+                            <p className="mb-2 text-[var(--rds-status-warning)]">{availability.reason}</p>
                           ) : (
-                            <p className="mb-2 text-[#7f849c]">
+                            <p className="mb-2 text-[var(--rds-text-muted)]">
                               Usa assets limpos do template SGDK externo sem copiar ROM, VGM ou artefatos.
                             </p>
                           )}
@@ -4184,18 +4339,19 @@ export default function App() {
             {!templatesLoading && importAdvancedProjectTemplates.length > 0 ? (
               <section
                 data-testid="wizard-import-advanced"
-                className="rounded border border-[#313244] bg-[#11111b]/70 p-3"
+                hidden={wizardStep !== 1}
+                className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)]/70 p-3"
               >
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#fab387]">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-status-warning)]">
                       Importar / Avancado
                     </p>
-                    <p className="mt-1 text-[10px] leading-5 text-[#94a3b8]">
+                    <p className="mt-1 text-[10px] leading-5 text-[var(--rds-text-muted)]">
                       Templates doadores e experimentais ficam fora do primeiro caminho para manter o fluxo MVP claro.
                     </p>
                   </div>
-                  <span className="shrink-0 rounded-full border border-[#fab387]/35 bg-[#fab387]/10 px-2 py-1 text-[9px] font-semibold text-[#fab387]">
+                  <span className="shrink-0 rounded-full border border-[var(--rds-status-warning)]/35 bg-[var(--rds-status-warning)]/10 px-2 py-1 text-[9px] font-semibold text-[var(--rds-status-warning)]">
                     Experimental
                   </span>
                 </div>
@@ -4205,9 +4361,9 @@ export default function App() {
               </section>
             ) : null}
 
-            <div className="grid gap-3">
-              <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]">
-                <p className="mb-1 text-[#cdd6f4]">
+            <div hidden={wizardStep !== 1} className="grid gap-3">
+              <div className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 text-[10px] text-[var(--rds-text-muted)]">
+                <p className="mb-1 text-[var(--rds-text-primary)]">
                   Template selecionado: <span className="font-semibold">{selectedTemplate?.name ?? "Nenhum"}</span>
                 </p>
                 <p className="leading-5">
@@ -4215,22 +4371,22 @@ export default function App() {
                     "A galeria de templates sera exibida assim que o catalogo for carregado."}
                 </p>
                 {selectedTemplateMegadriveOnly ? (
-                  <p className="mt-2 text-[#fab387]">
+                  <p className="mt-2 text-[var(--rds-status-warning)]">
                     Este seed experimental e Mega Drive only nesta wave.
                   </p>
                 ) : null}
                 {selectedTemplate ? (
-                  <div className="mt-3 rounded border border-[#313244] bg-[#181825] px-3 py-2">
-                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">
+                  <div className="mt-3 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-3 py-2">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-tool-active)]">
                       Validacao do fluxo
                     </p>
                     <p
                       className={`mt-1 leading-5 ${
                         selectedTemplateAvailability?.readyToCreate
-                          ? "text-[#a6e3a1]"
+                          ? "text-[var(--rds-status-success)]"
                           : selectedTemplateAvailability?.available
-                            ? "text-[#fab387]"
-                            : "text-[#f38ba8]"
+                            ? "text-[var(--rds-status-warning)]"
+                            : "text-[var(--rds-status-error)]"
                       }`}
                     >
                       {selectedTemplateAvailability?.readyToCreate
@@ -4238,13 +4394,13 @@ export default function App() {
                         : selectedTemplateAvailability?.reason || "Template ainda indisponivel para este fluxo."}
                     </p>
                     {selectedTemplate.source_kind === "external_sgdk" ? (
-                      <p className="mt-1 leading-5 text-[#fab387]">
+                      <p className="mt-1 leading-5 text-[var(--rds-status-warning)]">
                         {selectedTemplateDonorPath
                           ? `Template doador atual: ${selectedTemplateDonorPath}`
                           : "Escolha uma pasta doadora SGDK antes de criar este template experimental."}
                       </p>
                     ) : (
-                      <p className="mt-1 leading-5 text-[#94a3b8]">
+                      <p className="mt-1 leading-5 text-[var(--rds-text-muted)]">
                         Template interno: nenhuma pasta doadora externa e necessaria.
                       </p>
                     )}
@@ -4254,17 +4410,17 @@ export default function App() {
 
               <div
                 data-testid="wizard-external-import-section"
-                className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]"
+                className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 text-[10px] text-[var(--rds-text-muted)]"
               >
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0">
-                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#fab387]">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-status-warning)]">
                       Trilha secundaria
                     </p>
-                    <p className="mt-1 text-[#cdd6f4]">
+                    <p className="mt-1 text-[var(--rds-text-primary)]">
                       Importar projeto existente
                     </p>
-                    <p className="mt-1 leading-5 text-[#94a3b8]">
+                    <p className="mt-1 leading-5 text-[var(--rds-text-muted)]">
                       Use esta area quando voce ja tiver um projeto externo real e quiser
                       converter esse projeto para o formato nativo do RetroDev sem misturar isso com o
                       primeiro sucesso do wizard.
@@ -4279,8 +4435,8 @@ export default function App() {
                   />
                 </div>
                 {showExternalImportSection ? (
-                  <div className="mt-3 rounded border border-[#313244] bg-[#181825] p-3">
-                    <p className="mb-1 text-[#cdd6f4]">
+                  <div className="mt-3 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] p-3">
+                    <p className="mb-1 text-[var(--rds-text-primary)]">
                       Importador externo:{" "}
                       <span className="font-semibold">
                         {selectedExternalImportProfile?.name ?? "Nenhum"}
@@ -4291,14 +4447,14 @@ export default function App() {
                         "Escolha um adaptador externo para importar projetos reais para o formato nativo do RetroDev."}
                     </p>
                     <div className="mt-3 flex flex-wrap gap-1">
-                      <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4]">
+                      <span className="rounded bg-[var(--rds-border-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--rds-text-primary)]">
                         {selectedExternalImportProfile?.family ?? "External"}
                       </span>
                       <span
                         className={`rounded px-1.5 py-0.5 text-[10px] ${
                           selectedExternalImportProfile?.importable
-                            ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
-                            : "bg-[#fab387]/15 text-[#fab387]"
+                            ? "bg-[var(--rds-status-success)]/15 text-[var(--rds-status-success)]"
+                            : "bg-[var(--rds-status-warning)]/15 text-[var(--rds-status-warning)]"
                         }`}
                       >
                         {selectedExternalImportProfile?.support_status ?? "Nao suportado"}
@@ -4306,7 +4462,7 @@ export default function App() {
                       {selectedExternalImportProfile?.supported_levels.map((level) => (
                         <span
                           key={level}
-                          className="rounded bg-[#11111b] px-1.5 py-0.5 text-[10px] text-[#7f849c]"
+                          className="rounded bg-[var(--rds-surface-panel-strong)] px-1.5 py-0.5 text-[10px] text-[var(--rds-text-muted)]"
                         >
                           {level}
                         </span>
@@ -4316,7 +4472,7 @@ export default function App() {
                       data-testid="external-import-profile-select"
                       value={selectedExternalImportProfileId}
                       onChange={(event) => setSelectedExternalImportProfileId(event.target.value)}
-                      className="mt-3 w-full rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-[11px] text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+                      className="mt-3 w-full rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-2 py-1.5 text-[11px] text-[var(--rds-text-primary)] focus:border-[var(--rds-action-primary)] focus:outline-none"
                     >
                       {externalImportProfiles.map((profile) => (
                         <option key={profile.id} value={profile.id}>
@@ -4324,7 +4480,7 @@ export default function App() {
                         </option>
                       ))}
                     </select>
-                    <p className="mt-2 leading-5 text-[#94a3b8]">
+                    <p className="mt-2 leading-5 text-[var(--rds-text-muted)]">
                       {selectedExternalImportProfile?.mega_drive_only
                         ? "Esta wave de importacao externa continua Mega Drive only para manter o caminho canonico enxuto."
                         : "Perfil externo compativel com o fluxo atual do wizard."}
@@ -4341,9 +4497,9 @@ export default function App() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-3 rounded border border-[#313244] bg-[#181825] px-3 py-2 text-[10px] leading-5 text-[#94a3b8]">
+                  <div className="mt-3 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-3 py-2 text-[10px] leading-5 text-[var(--rds-text-muted)]">
                     Perfil atual:{" "}
-                    <span className="font-semibold text-[#cdd6f4]">
+                    <span className="font-semibold text-[var(--rds-text-primary)]">
                       {selectedExternalImportProfile?.name ?? "Nenhum"}
                     </span>
                     . Abra o importador quando precisar converter um projeto existente em vez
@@ -4353,20 +4509,26 @@ export default function App() {
               </div>
             </div>
 
-            {selectedTemplate ? (
-              <TemplateFirstSuccessCard
-                templateName={selectedTemplate.name}
-                targetLabel={getTargetLabel(newProjTarget)}
-                steps={selectedTemplateFirstSuccessSteps}
-              />
-            ) : (
-              <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] leading-5 text-[#7f849c]">
-                Escolha um template para o wizard montar um caminho recomendado ate o primeiro
-                playtest no fluxo canonico atual.
-              </div>
-            )}
+            <div hidden={wizardStep !== 1}>
+              {selectedTemplate ? (
+                <TemplateFirstSuccessCard
+                  templateName={selectedTemplate.name}
+                  targetLabel={getTargetLabel(newProjTarget)}
+                  steps={selectedTemplateFirstSuccessSteps}
+                />
+              ) : (
+                <div className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 text-[10px] leading-5 text-[var(--rds-text-muted)]">
+                  Escolha um template para o wizard montar um caminho recomendado ate o primeiro
+                  playtest no fluxo canonico atual.
+                </div>
+              )}
+            </div>
 
-            <div className="flex gap-2">
+            <div
+              data-testid="wizard-step-destination"
+              hidden={wizardStep !== 2}
+              className="flex gap-2"
+            >
               {(["megadrive", "snes"] as const).map((target) => (
                 <button
                   key={target}
@@ -4376,9 +4538,9 @@ export default function App() {
                   className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
                     newProjTarget === target
                       ? target === "megadrive"
-                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                        : "bg-[#89b4fa] text-[#1e1e2e]"
-                      : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
+                        ? "bg-[var(--rds-status-success)] text-[var(--rds-surface-panel)]"
+                        : "bg-[var(--rds-status-info)] text-[var(--rds-surface-panel)]"
+                      : "bg-[var(--rds-border-subtle)] text-[var(--rds-text-secondary)] hover:bg-[var(--rds-text-disabled)]"
                   } disabled:cursor-not-allowed disabled:opacity-40`}
                 >
                   {target === "megadrive" ? "Mega Drive" : "SNES"}
@@ -4386,7 +4548,7 @@ export default function App() {
               ))}
             </div>
 
-            <div className="grid gap-3 md:grid-cols-[1fr_1.1fr]">
+            <div hidden={wizardStep !== 2} className="grid gap-3 md:grid-cols-[1fr_1.1fr]">
               <div className="space-y-2">
                 <input
                   ref={inputRef}
@@ -4395,24 +4557,24 @@ export default function App() {
                   onChange={(event) => handleProjectNameChange(event.target.value)}
                   onKeyDown={(event) => event.key === "Enter" && void confirmNewProject()}
                   placeholder="Nome do projeto"
-                  className="w-full rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-sm text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+                  className="w-full rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] px-2 py-1.5 text-sm text-[var(--rds-text-primary)] focus:border-[var(--rds-action-primary)] focus:outline-none"
                 />
 
                 {pendingSuggestedProjectName ? (
-                  <div className="rounded border border-[#45475a] bg-[#11111b] p-2">
+                  <div className="rounded border border-[var(--rds-text-disabled)] bg-[var(--rds-surface-panel-strong)] p-2">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-[10px] text-[#7f849c]">Nome sugerido</p>
+                        <p className="text-[10px] text-[var(--rds-text-muted)]">Nome sugerido</p>
                         <p
                           data-testid="wizard-project-name-suggestion"
-                          className="truncate text-xs font-semibold text-[#a6e3a1]"
+                          className="truncate text-xs font-semibold text-[var(--rds-status-success)]"
                         >
                           {pendingSuggestedProjectName}
                         </p>
                       </div>
                       <ToolbarButton label="Usar" onClick={applySuggestedProjectName} />
                     </div>
-                    <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
+                    <p className="mt-2 text-[10px] leading-5 text-[var(--rds-text-muted)]">
                       {projectDestinationPreview?.collision_status === "existing_project"
                         ? "O nome original aponta para um projeto RetroDev ja valido. Use o nome sugerido para criar outro sem sobrescrever o existente."
                         : "O nome atual ja ocupa a pasta preferida. Use o nome sugerido para o RetroDev criar o projeto em um destino livre ja nesta tentativa."}
@@ -4421,26 +4583,26 @@ export default function App() {
                 ) : null}
               </div>
 
-              <div className="rounded border border-[#313244] bg-[#11111b] p-2">
+              <div className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-2">
                 <div className="flex items-center gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[10px] text-[#7f849c]">Pasta base</p>
-                    <p className="truncate font-mono text-[10px] text-[#cdd6f4]">
+                    <p className="text-[10px] text-[var(--rds-text-muted)]">Pasta base</p>
+                    <p className="truncate font-mono text-[10px] text-[var(--rds-text-primary)]">
                       {newProjBaseDir || automaticBaseDirHint || "(automatico pelo sistema)"}
                     </p>
                   </div>
                   <ToolbarButton label="Escolher" onClick={() => void chooseNewProjectBaseDir()} />
                 </div>
-                <div className="mt-2 border-t border-[#313244] pt-2">
-                  <p className="text-[10px] text-[#7f849c]">Destino estimado</p>
+                <div className="mt-2 border-t border-[var(--rds-border-subtle)] pt-2">
+                  <p className="text-[10px] text-[var(--rds-text-muted)]">Destino estimado</p>
                   <p
                     data-testid="wizard-project-destination"
-                    className="truncate font-mono text-[10px] text-[#f9e2af]"
+                    className="truncate font-mono text-[10px] text-[var(--rds-status-warning)]"
                   >
                     {estimatedProjectDestination}
                   </p>
                 </div>
-                <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
+                <p className="mt-2 text-[10px] leading-5 text-[var(--rds-text-muted)]">
                   {detectedExistingProjectPreview
                     ? `Ja existe um projeto RetroDev valido em '${detectedExistingProjectPreview.preferred_path}'. Se quiser continuar nele, use 'Abrir projeto existente'. Se preferir criar outro, o wizard sugere um nome livre automaticamente.`
                     : newProjBaseDir
@@ -4455,25 +4617,26 @@ export default function App() {
             {detectedExistingProjectPreview?.existing_project_path ? (
               <div
                 data-testid="wizard-existing-project-card"
-                className="mt-3 rounded border border-[#89b4fa]/40 bg-[#11111b] p-3"
+                hidden={wizardStep !== 2}
+                className="mt-3 rounded border border-[var(--rds-status-info)]/40 bg-[var(--rds-surface-panel-strong)] p-3"
               >
-                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#89b4fa]">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rds-status-info)]">
                   Projeto RetroDev encontrado
                 </p>
-                <p className="mt-2 text-xs text-[#cdd6f4]">
+                <p className="mt-2 text-xs text-[var(--rds-text-primary)]">
                   O nome original ja aponta para{" "}
-                  <span className="font-semibold text-[#a6e3a1]">
+                  <span className="font-semibold text-[var(--rds-status-success)]">
                     {detectedExistingProjectPreview.existing_project_name ?? "um projeto existente"}
                   </span>
                   .
                 </p>
                 <p
                   data-testid="wizard-existing-project-path"
-                  className="mt-2 truncate font-mono text-[10px] text-[#94e2d5]"
+                  className="mt-2 truncate font-mono text-[10px] text-[var(--rds-tool-active)]"
                 >
                   {detectedExistingProjectPreview.existing_project_path}
                 </p>
-                <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
+                <p className="mt-2 text-[10px] leading-5 text-[var(--rds-text-muted)]">
                   {pendingSuggestedProjectName
                     ? `Se a sua intencao era continuar no projeto original, abra-o agora. Se voce queria um projeto novo, o wizard pode trocar o campo para '${pendingSuggestedProjectName}' sem interromper o fluxo.`
                     : `Se voce queria um projeto novo, o wizard ja ajustou o nome para '${newProjName}' e manteve o projeto original intacto. Se a intencao era continuar no original, voce pode abri-lo daqui.`}
@@ -4491,150 +4654,217 @@ export default function App() {
                 </div>
               </div>
             ) : null}
+
+            <section
+              data-testid="wizard-step-review"
+              hidden={wizardStep !== 3}
+              aria-label="Resumo do novo projeto"
+              className="space-y-3"
+            >
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-text-muted)]">
+                    Template
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-[var(--rds-text-primary)]">
+                    {selectedTemplate?.name ?? "Não selecionado"}
+                  </p>
+                  <p className="mt-1 text-[10px] text-[var(--rds-text-muted)]">
+                    {selectedTemplateAvailability?.statusLabel ?? "Aguardando seleção"}
+                  </p>
+                </div>
+                <div className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-text-muted)]">
+                    Plataforma
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-[var(--rds-text-primary)]">
+                    {getTargetLabel(newProjTarget)}
+                  </p>
+                  <p className="mt-1 text-[10px] text-[var(--rds-text-muted)]">
+                    Fluxo canônico Build → ROM → Emulação
+                  </p>
+                </div>
+                <div className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-text-muted)]">
+                    Projeto
+                  </p>
+                  <p className="mt-2 truncate text-sm font-semibold text-[var(--rds-text-primary)]">
+                    {newProjName || "Sem nome"}
+                  </p>
+                  <p className="mt-1 truncate font-mono text-[10px] text-[var(--rds-text-muted)]">
+                    {estimatedProjectDestination}
+                  </p>
+                </div>
+              </div>
+              <div
+                className={`flex items-start gap-3 rounded border p-3 ${
+                  selectedTemplateAvailability?.readyToCreate
+                    ? "border-[var(--rds-status-success)]/40 bg-[var(--rds-status-success-soft)]"
+                    : "border-[var(--rds-status-warning)]/40 bg-[var(--rds-status-warning-soft)]"
+                }`}
+              >
+                <Icon
+                  name={selectedTemplateAvailability?.readyToCreate ? "check-circle" : "warning-triangle"}
+                  size={20}
+                  className={
+                    selectedTemplateAvailability?.readyToCreate
+                      ? "text-[var(--rds-status-success)]"
+                      : "text-[var(--rds-status-warning)]"
+                  }
+                />
+                <div>
+                  <p className="text-xs font-semibold text-[var(--rds-text-primary)]">
+                    {selectedTemplateAvailability?.readyToCreate
+                      ? "Tudo pronto para criar"
+                      : "Revise os requisitos do template"}
+                  </p>
+                  <p className="mt-1 text-[10px] leading-5 text-[var(--rds-text-secondary)]">
+                    {selectedTemplateAvailability?.readyToCreate
+                      ? "O projeto será criado sem sobrescrever destinos existentes."
+                      : selectedTemplateAvailability?.reason || "Selecione um template disponível no primeiro passo."}
+                  </p>
+                </div>
+              </div>
+            </section>
             </div>
 
             <div
               data-testid="project-wizard-actions"
-              className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#313244] bg-[#181825] pt-3"
+              className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] pt-3"
             >
-              {activeProjectDir ? (
-                <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
-              ) : null}
-              <ToolbarButton label="Abrir Projeto" onClick={() => void handleOpenProject()} />
-              <ToolbarButton
-                label={creatingProject ? "Criando..." : "Criar Projeto"}
-                onClick={() => void confirmNewProject()}
-                accent="primary"
-                disabled={
-                  creatingProject ||
-                  templatesLoading ||
-                  !selectedTemplate ||
-                  !selectedTemplateAvailability?.readyToCreate
-                }
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showProjectSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="project-settings-title"
-            className="flex max-h-[calc(100vh-1.5rem)] w-[min(560px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded border border-[#313244] bg-[#181825] p-5 shadow-2xl"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <h2 id="project-settings-title" className="text-sm font-bold text-[#cba6f7]">
-                  Configuracoes do Projeto
-                </h2>
-                <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-[#7f849c]">
-                  project.rds
-                </p>
+              <div>
+                {wizardStep > 1 ? (
+                  <ToolbarButton
+                    label="Voltar"
+                    icon="nav-arrow-left"
+                    onClick={() => setWizardStep((wizardStep - 1) as 1 | 2)}
+                  />
+                ) : null}
               </div>
-              <div className="rounded border border-[#313244] bg-[#11111b] px-2.5 py-1 text-[10px] font-semibold text-[#a6adc8]">
-                {activeProjectName || "Projeto ativo"}
+              <div className="flex flex-wrap justify-end gap-2">
+                {activeProjectDir ? (
+                  <ToolbarButton
+                    label="Cancelar"
+                    onClick={() => {
+                      setShowProjectWizard(false);
+                      setWizardStep(1);
+                    }}
+                  />
+                ) : null}
+                {wizardStep < 3 ? (
+                  <ToolbarButton
+                    label="Continuar"
+                    icon="nav-arrow-right"
+                    onClick={() => setWizardStep((wizardStep + 1) as 2 | 3)}
+                    accent="primary"
+                  />
+                ) : null}
+                <div hidden={wizardStep !== 3} className="flex flex-wrap justify-end gap-2">
+                    <ToolbarButton label="Abrir Projeto" onClick={() => void handleOpenProject()} />
+                    <ToolbarButton
+                      label={creatingProject ? "Criando..." : "Criar Projeto"}
+                      icon="plus-circle"
+                      onClick={() => void confirmNewProject()}
+                      accent="primary"
+                      disabled={
+                        creatingProject ||
+                        templatesLoading ||
+                        !selectedTemplate ||
+                        !selectedTemplateAvailability?.readyToCreate
+                      }
+                    />
+                </div>
               </div>
             </div>
+      </Dialog>
 
-            <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+      <Dialog
+        open={showProjectSettings}
+        title="Configuracoes do Projeto"
+        description={`project.rds · ${activeProjectName || "Projeto ativo"}`}
+        onClose={() => {
+          setShowProjectSettings(false);
+          setProjectSettingsMessage("");
+          setProjectSettingsError("");
+        }}
+        closeLabel="Fechar configurações do projeto"
+        portal={false}
+        className="w-[min(560px,calc(100vw-1.5rem))]"
+      >
+            <div className="min-h-0 flex-1">
               {projectSettingsLoading && !projectSettingsDraft ? (
-                <div className="rounded border border-[#313244] bg-[#11111b] p-4 text-xs text-[#7f849c]">
+                <div className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-4 text-xs text-[var(--rds-text-muted)]">
                   Carregando configuracoes...
                 </div>
               ) : projectSettingsDraft ? (
                 <div className="space-y-4">
                   <div className="grid gap-3 md:grid-cols-2">
-                    <label className="space-y-1 text-xs text-[#cdd6f4]">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
-                        Target
-                      </span>
-                      <select
-                        value={projectSettingsDraft.target}
-                        onChange={(event) => {
-                          const target = event.currentTarget.value as "megadrive" | "snes";
-                          setProjectSettingsDraft((current) =>
-                            current ? { ...current, target } : current
-                          );
-                        }}
-                        className="h-8 w-full rounded border border-[#313244] bg-[#11111b] px-2 text-xs text-[#cdd6f4]"
-                      >
-                        <option value="megadrive">Mega Drive</option>
-                        <option value="snes">SNES</option>
-                      </select>
-                    </label>
+                    <Select
+                      label="Plataforma alvo"
+                      controlSize="sm"
+                      value={projectSettingsDraft.target}
+                      onChange={(event) => {
+                        const target = event.currentTarget.value as "megadrive" | "snes";
+                        setProjectSettingsDraft((current) =>
+                          current ? { ...current, target } : current
+                        );
+                      }}
+                    >
+                      <option value="megadrive">Mega Drive</option>
+                      <option value="snes">SNES</option>
+                    </Select>
 
-                    <label className="space-y-1 text-xs text-[#cdd6f4]">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
-                        Regiao
-                      </span>
-                      <select
-                        value={projectSettingsDraft.region}
-                        onChange={(event) => {
-                          const region = event.currentTarget.value;
-                          setProjectSettingsDraft((current) =>
-                            current ? { ...current, region } : current
-                          );
-                        }}
-                        className="h-8 w-full rounded border border-[#313244] bg-[#11111b] px-2 text-xs text-[#cdd6f4]"
-                      >
-                        <option value="world">World</option>
-                        <option value="japan">Japan</option>
-                        <option value="usa">USA</option>
-                        <option value="europe">Europe</option>
-                      </select>
-                    </label>
+                    <Select
+                      label="Região"
+                      controlSize="sm"
+                      value={projectSettingsDraft.region}
+                      onChange={(event) => {
+                        const region = event.currentTarget.value;
+                        setProjectSettingsDraft((current) =>
+                          current ? { ...current, region } : current
+                        );
+                      }}
+                    >
+                      <option value="world">World</option>
+                      <option value="japan">Japan</option>
+                      <option value="usa">USA</option>
+                      <option value="europe">Europe</option>
+                    </Select>
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-[1fr_8rem]">
-                    <label className="space-y-1 text-xs text-[#cdd6f4]">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
-                        Nome interno da ROM
-                      </span>
-                      <input
-                        data-testid="project-settings-internal-name"
-                        value={projectSettingsDraft.internal_rom_name}
-                        onInput={(event) => {
-                          const internal_rom_name = event.currentTarget.value;
-                          setProjectSettingsDraft((current) =>
-                            current ? { ...current, internal_rom_name } : current
-                          );
-                        }}
-                        className={`h-8 w-full rounded border bg-[#11111b] px-2 text-xs text-[#cdd6f4] ${
-                          projectSettingsNameError ? "border-[#f38ba8]" : "border-[#313244]"
-                        }`}
-                      />
-                      {projectSettingsNameError ? (
-                        <span className="block text-[10px] font-semibold text-[#f38ba8]">
-                          {projectSettingsNameError}
-                        </span>
-                      ) : null}
-                    </label>
+                    <Input
+                      label="Nome interno da ROM"
+                      controlSize="sm"
+                      data-testid="project-settings-internal-name"
+                      value={projectSettingsDraft.internal_rom_name}
+                      errorMessage={projectSettingsNameError || undefined}
+                      onInput={(event) => {
+                        const internal_rom_name = event.currentTarget.value;
+                        setProjectSettingsDraft((current) =>
+                          current ? { ...current, internal_rom_name } : current
+                        );
+                      }}
+                    />
 
-                    <label className="space-y-1 text-xs text-[#cdd6f4]">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
-                        Video
-                      </span>
-                      <select
-                        value={projectSettingsDraft.video_standard}
-                        onChange={(event) => {
-                          const video_standard = event.currentTarget.value;
-                          setProjectSettingsDraft((current) =>
-                            current ? { ...current, video_standard } : current
-                          );
-                        }}
-                        className="h-8 w-full rounded border border-[#313244] bg-[#11111b] px-2 text-xs text-[#cdd6f4]"
-                      >
-                        <option value="ntsc">NTSC</option>
-                        <option value="pal">PAL</option>
-                      </select>
-                    </label>
+                    <Select
+                      label="Vídeo"
+                      controlSize="sm"
+                      value={projectSettingsDraft.video_standard}
+                      onChange={(event) => {
+                        const video_standard = event.currentTarget.value;
+                        setProjectSettingsDraft((current) =>
+                          current ? { ...current, video_standard } : current
+                        );
+                      }}
+                    >
+                      <option value="ntsc">NTSC</option>
+                      <option value="pal">PAL</option>
+                    </Select>
                   </div>
 
-                  <div className="grid gap-3 rounded border border-[#313244] bg-[#11111b] p-3 md:grid-cols-[1fr_10rem_8rem]">
-                    <label className="flex items-center gap-2 text-xs font-semibold text-[#cdd6f4]">
+                  <div className="grid gap-3 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 md:grid-cols-[1fr_10rem_8rem]">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-[var(--rds-text-primary)]">
                       <input
                         data-testid="project-settings-sram-enabled"
                         type="checkbox"
@@ -4655,54 +4885,46 @@ export default function App() {
                       SRAM
                     </label>
 
-                    <label className="space-y-1 text-xs text-[#cdd6f4]">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
-                        Tamanho
-                      </span>
-                      <select
-                        value={projectSettingsDraft.sram.size_bytes}
-                        onChange={(event) => {
-                          const size_bytes = Number(event.currentTarget.value);
-                          setProjectSettingsDraft((current) =>
-                            current
-                              ? {
-                                  ...current,
-                                  sram: { ...current.sram, size_bytes },
-                                }
-                              : current
-                          );
-                        }}
-                        className="h-8 w-full rounded border border-[#313244] bg-[#181825] px-2 text-xs text-[#cdd6f4]"
-                      >
-                        {SRAM_SIZE_OPTIONS.map((size) => (
-                          <option key={size} value={size}>
-                            {size / 1024} KB
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <Select
+                      label="Tamanho"
+                      controlSize="sm"
+                      value={projectSettingsDraft.sram.size_bytes}
+                      onChange={(event) => {
+                        const size_bytes = Number(event.currentTarget.value);
+                        setProjectSettingsDraft((current) =>
+                          current
+                            ? {
+                                ...current,
+                                sram: { ...current.sram, size_bytes },
+                              }
+                            : current
+                        );
+                      }}
+                    >
+                      {SRAM_SIZE_OPTIONS.map((size) => (
+                        <option key={size} value={size}>
+                          {size / 1024} KB
+                        </option>
+                      ))}
+                    </Select>
 
-                    <label className="space-y-1 text-xs text-[#cdd6f4]">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
-                        Slots
-                      </span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={9}
-                        value={projectSettingsDraft.save_slots}
-                        onInput={(event) => {
-                          const save_slots = Number(event.currentTarget.value);
-                          setProjectSettingsDraft((current) =>
-                            current ? { ...current, save_slots } : current
-                          );
-                        }}
-                        className="h-8 w-full rounded border border-[#313244] bg-[#181825] px-2 text-xs text-[#cdd6f4]"
-                      />
-                    </label>
+                    <Input
+                      label="Slots"
+                      controlSize="sm"
+                      type="number"
+                      min={1}
+                      max={9}
+                      value={projectSettingsDraft.save_slots}
+                      onInput={(event) => {
+                        const save_slots = Number(event.currentTarget.value);
+                        setProjectSettingsDraft((current) =>
+                          current ? { ...current, save_slots } : current
+                        );
+                      }}
+                    />
                   </div>
 
-                  <label className="flex items-center gap-2 rounded border border-[#313244] bg-[#11111b] p-3 text-xs font-semibold text-[#cdd6f4]">
+                  <label className="flex items-center gap-2 rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 text-xs font-semibold text-[var(--rds-text-primary)]">
                     <input
                       type="checkbox"
                       checked={projectSettingsDraft.debug_overlay}
@@ -4721,7 +4943,7 @@ export default function App() {
                     {projectSettingsActiveWarnings.map((warning) => (
                       <div
                         key={warning}
-                        className="rounded border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-3 py-2 text-[11px] text-[#f9e2af]"
+                        className="rounded border border-[var(--rds-status-warning)]/30 bg-[var(--rds-status-warning)]/10 px-3 py-2 text-[11px] text-[var(--rds-status-warning)]"
                       >
                         {warning}
                       </div>
@@ -4729,24 +4951,24 @@ export default function App() {
                   </div>
                 </div>
               ) : (
-                <div className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 p-4 text-xs text-[#f38ba8]">
+                <div className="rounded border border-[var(--rds-status-error)]/40 bg-[var(--rds-status-error)]/10 p-4 text-xs text-[var(--rds-status-error)]">
                   Configuracoes indisponiveis para o projeto ativo.
                 </div>
               )}
             </div>
 
             {projectSettingsError ? (
-              <p className="mt-3 rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-3 py-2 text-[11px] text-[#f38ba8]">
+              <p className="mt-3 rounded border border-[var(--rds-status-error)]/40 bg-[var(--rds-status-error)]/10 px-3 py-2 text-[11px] text-[var(--rds-status-error)]">
                 {projectSettingsError}
               </p>
             ) : null}
             {projectSettingsMessage ? (
-              <p className="mt-3 rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-3 py-2 text-[11px] text-[#a6e3a1]">
+              <p className="mt-3 rounded border border-[var(--rds-status-success)]/40 bg-[var(--rds-status-success)]/10 px-3 py-2 text-[11px] text-[var(--rds-status-success)]">
                 {projectSettingsMessage}
               </p>
             ) : null}
 
-            <div className="mt-4 flex justify-end gap-2 border-t border-[#313244] pt-3">
+            <div className="mt-4 flex justify-end gap-2 border-t border-[var(--rds-border-subtle)] pt-3">
               <ToolbarButton
                 label="Cancelar"
                 onClick={() => {
@@ -4767,22 +4989,26 @@ export default function App() {
                 }
               />
             </div>
-          </div>
-        </div>
-      )}
+      </Dialog>
 
-      {showAbout && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="flex w-80 flex-col gap-3 rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
-            <h2 className="text-sm font-bold text-[#cba6f7]">RetroDev Studio</h2>
-            <p className="text-xs text-[#a6adc8]">Tauri 2 · React 19 · Rust</p>
-            <p className="text-[10px] text-[#45475a]">
-              Plataforma desktop para desenvolvimento de jogos 16-bit.
-            </p>
+      <Dialog
+        open={showAbout}
+        title="RetroDev Studio"
+        description="Plataforma desktop para desenvolvimento de jogos 16-bit."
+        onClose={() => setShowAbout(false)}
+        portal={false}
+        className="w-96"
+      >
+        <div className="grid gap-4">
+          <p className="text-xs text-[var(--rds-text-secondary)]">Tauri 2 · React 19 · Rust</p>
+          <p className="text-xs leading-5 text-[var(--rds-text-muted)]">
+            Autoria, preservacao e engenharia reversa com fluxo canonico Build, ROM e Emulacao.
+          </p>
+          <div className="flex justify-end">
             <ToolbarButton label="Fechar" onClick={() => setShowAbout(false)} />
           </div>
         </div>
-      )}
+      </Dialog>
 
       {showCommandPalette && (
         <CommandPaletteDialog
@@ -4817,23 +5043,23 @@ export default function App() {
         menuSections={topBarMenuSections}
         centerContent={
           <>
-            <select
-              aria-label="Target de build"
+            <Select
+              label="Target de build"
+              hideLabel
               title={`Target atual: ${getTargetLabel(activeTarget)}`}
               value={activeTarget}
               disabled={!activeProjectDir}
               onChange={(event) => void handleSwitchTarget(event.target.value as "megadrive" | "snes")}
-              className={`h-7 shrink-0 rounded-full border px-2 text-[10px] font-bold uppercase transition-colors ${
-                activeTarget === "megadrive"
-                  ? "border-[#a6e3a1]/40 bg-[#a6e3a1] text-[#1e1e2e]"
-                  : "border-[#89b4fa]/40 bg-[#89b4fa] text-[#1e1e2e]"
-              } disabled:cursor-not-allowed disabled:opacity-40`}
+              controlSize="sm"
+              fieldClassName="shrink-0"
+              className="w-[4.5rem] rounded-full text-[10px] font-bold uppercase"
             >
               <option value="megadrive">MD</option>
               <option value="snes">SNES</option>
-            </select>
+            </Select>
             <ToolbarButton
-              label="Build ▶"
+              label="Build & Run"
+              icon="play"
               onClick={() => void handleBuildAndRun()}
               disabled={building || !activeProjectDir || liveBuildBlocked}
               accent="success"
@@ -4849,11 +5075,13 @@ export default function App() {
             />
             <ToolbarButton
               label="Play"
+              icon="gamepad"
               onClick={() => void handlePlay()}
               disabled={!activeProjectDir}
             />
             <ToolbarButton
               label="Stop"
+              icon="square"
               onClick={() => void handleEmulatorStop()}
               disabled={!emulatorLoaded}
               accent="danger"
@@ -4868,12 +5096,12 @@ export default function App() {
                 data-testid="build-live-state"
                 className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
                   buildLiveIndicator.tone === "error"
-                    ? "bg-[#f38ba8]/15 text-[#f38ba8]"
+                    ? "bg-[var(--rds-status-error)]/15 text-[var(--rds-status-error)]"
                     : buildLiveIndicator.tone === "warn"
-                      ? "bg-[#fab387]/15 text-[#fab387]"
+                      ? "bg-[var(--rds-status-warning)]/15 text-[var(--rds-status-warning)]"
                       : buildLiveIndicator.tone === "info"
-                        ? "bg-[#89b4fa]/15 text-[#89b4fa]"
-                        : "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                        ? "bg-[var(--rds-status-info)]/15 text-[var(--rds-status-info)]"
+                        : "bg-[var(--rds-status-success)]/15 text-[var(--rds-status-success)]"
                 }`}
                 title={buildLiveIndicator.detail}
               >
@@ -4899,7 +5127,7 @@ export default function App() {
                 <span
                   data-testid="build-live-pending-summary"
                   aria-live="polite"
-                  className="max-w-52 truncate text-[10px] text-[#89b4fa]"
+                  className="max-w-52 truncate text-[10px] text-[var(--rds-status-info)]"
                   title={liveBuildPendingSummary}
                 >
                   Live em analise...
@@ -4909,7 +5137,7 @@ export default function App() {
               <>
                 <span
                   data-testid="build-stale-hint"
-                  className="max-w-52 truncate text-[10px] text-[#89b4fa]"
+                  className="max-w-52 truncate text-[10px] text-[var(--rds-status-info)]"
                   title="Edite a cena para acionar a revalidacao automatica ou use Revalidar agora."
                 >
                   Edite a cena para revalidar
@@ -4952,12 +5180,30 @@ export default function App() {
               />
             )}
             <ToolbarButton
+              label="Auto"
+              icon="refresh"
+              compactLabel
+              onClick={applyAutomaticLayout}
+              title="Ajustar paineis automaticamente"
+            />
+            <ToolbarButton
+              label="Balanceado"
+              icon="sidebar-expand"
+              compactLabel
+              onClick={applyBalancedLayout}
+              title="Aplicar layout balanceado"
+            />
+            <ToolbarButton
               label={focusedShell ? "Sair do foco" : "Focus"}
+              icon={focusedShell ? "sidebar-expand" : "maximize"}
+              compactLabel
               onClick={toggleFocusMode}
               title={getShortcutTitle("layout.focus", "Maximizar ou restaurar a area central", shortcuts)}
             />
             <ToolbarButton
               label="Console"
+              icon="terminal"
+              compactLabel
               onClick={toggleConsole}
               title={getShortcutTitle("console.open", "Abrir Console", shortcuts)}
             />
@@ -4991,7 +5237,7 @@ export default function App() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <aside
           data-testid="workspace-activity-bar"
-          className="flex w-[56px] shrink-0 flex-col border-r border-[#27272a] bg-[#09090b]"
+          className="flex w-[56px] shrink-0 flex-col border-r border-[var(--rds-border-subtle)] bg-[var(--rds-surface-canvas)]"
         >
           <div className="flex flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-1.5 py-3">
             {WORKSPACE_GROUPS.map((group) => {
@@ -5000,10 +5246,10 @@ export default function App() {
                 <div
                   key={group.id}
                   data-testid={`workspace-rail-group-${group.id}`}
-                  className="overflow-hidden rounded-2xl border border-[#18181b] bg-[#0b1120] px-1 py-1.5"
+                  className="overflow-hidden rounded-2xl border border-[var(--rds-surface-panel-strong)] bg-[var(--rds-surface-overlay)] px-1 py-1.5"
                 >
                   <p
-                    className="truncate px-1 text-center text-[8px] font-semibold uppercase text-[#475569]"
+                    className="truncate px-1 text-center text-[8px] font-semibold uppercase text-[var(--rds-border-strong)]"
                     title={group.label}
                   >
                     {group.label}
@@ -5051,39 +5297,31 @@ export default function App() {
             defaultSize={shellConfig.panels.left}
             minSize={shellConfig.showLeft ? 12 : 0}
             collapsible
-            className="flex flex-col overflow-hidden border-r border-[#313244]"
+            className="flex flex-col overflow-hidden border-r border-[var(--rds-border-subtle)]"
           >
             {shellConfig.showLeft ? (
               <>
-                <div className="flex shrink-0 border-b border-[#313244] bg-[#11111b]">
-                  <button
-                    onClick={() => setLeftPanelTab("scene")}
-                    className={`flex-1 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
-                      leftPanelTab === "scene"
-                        ? "bg-[#313244] text-[#cdd6f4]"
-                        : "text-[#45475a] hover:text-[#a6adc8]"
-                    }`}
-                  >
-                    {activeWorkspace === "logic" ? "Contexto" : "Cena"}
-                  </button>
-                  <button
-                    onClick={() => setLeftPanelTab("layers")}
-                    className={`flex-1 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
-                      leftPanelTab === "layers"
-                        ? "bg-[#313244] text-[#cdd6f4]"
-                        : "text-[#45475a] hover:text-[#a6adc8]"
-                    }`}
-                  >
-                    Camadas
-                  </button>
-                </div>
+                <Tabs
+                  tabs={[
+                    { id: "scene", label: activeWorkspace === "logic" ? "Contexto" : "Cena" },
+                    { id: "layers", label: "Camadas" },
+                  ]}
+                  activeTab={leftPanelTab}
+                  onTabChange={(id) => setLeftPanelTab(id as "scene" | "layers")}
+                  ariaLabel="Painel esquerdo"
+                  className="shrink-0 [&>button]:flex-1 [&>button]:px-2 [&>button]:text-[10px] [&>button]:uppercase"
+                />
                 <div className="min-h-0 flex-1 overflow-hidden">
                   {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
                 </div>
               </>
             ) : null}
           </Panel>
-          <LayoutSplitter />
+          <LayoutSplitter
+            id="shell-left-splitter"
+            ariaLabel="Redimensionar painel esquerdo"
+            onResizeIntent={(intent) => handleShellSplitterIntent("left", intent)}
+          />
           <Panel id="center" minSize={20} className="overflow-hidden">
             {activeWorkspace === "explorer" ? (
               <Suspense fallback={<WorkspacePanelPlaceholder label="Carregando Explorer..." />}>
@@ -5098,55 +5336,47 @@ export default function App() {
               </Suspense>
             )}
           </Panel>
-          <LayoutSplitter />
+          <LayoutSplitter
+            id="shell-right-splitter"
+            ariaLabel="Redimensionar painel direito"
+            onResizeIntent={(intent) => handleShellSplitterIntent("right", intent)}
+          />
           <Panel
             id="right"
             defaultSize={shellConfig.panels.right}
             minSize={shellConfig.showRight ? 16 : 0}
             collapsible
-            className="overflow-hidden border-l border-[#313244]"
+            className="overflow-hidden border-l border-[var(--rds-border-subtle)]"
           >
             {shellConfig.showRight ? (
-            <div className="flex h-full min-h-0 flex-col bg-[#09090b]">
-              <div className="flex items-center justify-between border-b border-[#27272a] bg-[#111827] px-3 py-1.5">
+            <div className="flex h-full min-h-0 flex-col bg-[var(--rds-surface-canvas)]">
+              <div className="flex items-center justify-between border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-input)] px-3 py-1.5">
                 <div className="min-w-0">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94a3b8]">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--rds-text-muted)]">
                     {rightPanelMode === "tools" ? shellConfig.rightLabel : shellConfig.rightLabel}
                   </div>
                 </div>
                 {shellConfig.defaultRightMode !== "hidden" ? (
-                <div className="flex shrink-0 items-center gap-1 rounded-full border border-[#313244] bg-[#09090b] p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setRightPanelMode("inspector")}
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
-                      rightPanelMode === "inspector"
-                        ? "bg-[#cba6f7] text-[#111827]"
-                        : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
-                    }`}
-                    title="Inspector de entidade"
-                  >
-                    Insp
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
+                  <Tabs
+                    tabs={[
+                      { id: "inspector", label: "Insp", ariaLabel: "Inspector" },
+                      { id: "tools", label: "Tools", ariaLabel: "Ferramentas" },
+                    ]}
+                    activeTab={rightPanelMode}
+                    onTabChange={(id) => {
+                      if (id === "inspector") {
+                        setRightPanelMode("inspector");
+                        return;
+                      }
                       openToolsWorkspace(
                         toolPanelActive === "setup" ? "palette" : toolPanelActive,
                         activeWorkspace === "debug" ? "debug" : "editing",
                         activeWorkspace === "debug" || toolPanelShowAdvanced
-                      )
-                    }
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
-                      rightPanelMode === "tools"
-                        ? "bg-[#cba6f7] text-[#111827]"
-                        : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
-                    }`}
-                    title="Ferramentas contextuais"
-                  >
-                    Tools
-                  </button>
-                </div>
+                      );
+                    }}
+                    ariaLabel="Painel direito"
+                    className="shrink-0 border-b-0 [&>button]:px-2 [&>button]:text-[10px]"
+                  />
                 ) : null}
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
@@ -5187,4 +5417,3 @@ export default function App() {
     </div>
   );
 }
-

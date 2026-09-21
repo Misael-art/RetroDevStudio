@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import Icon from "./Icon";
 
 export interface UnifiedTopBarAction {
   label: string;
@@ -26,15 +27,15 @@ export interface UnifiedTopBarProps {
 
 function menuActionTone(accent: UnifiedTopBarAction["accent"] = "default") {
   if (accent === "primary") {
-    return "border-[#cba6f7]/30 text-[#e9d5ff] hover:border-[#cba6f7]/45 hover:bg-[#cba6f7]/12";
+    return "border-[var(--rds-action-primary)] text-[var(--rds-status-info)] hover:bg-[color-mix(in_srgb,var(--rds-action-primary)_12%,transparent)]";
   }
   if (accent === "success") {
-    return "border-[#a6e3a1]/30 text-[#bbf7d0] hover:border-[#a6e3a1]/45 hover:bg-[#a6e3a1]/12";
+    return "border-[var(--rds-status-success)] text-[var(--rds-status-success)] hover:bg-[color-mix(in_srgb,var(--rds-status-success)_12%,transparent)]";
   }
   if (accent === "danger") {
-    return "border-[#f38ba8]/30 text-[#fecdd3] hover:border-[#f38ba8]/45 hover:bg-[#f38ba8]/12";
+    return "border-[var(--rds-status-error)] text-[var(--rds-status-error)] hover:bg-[color-mix(in_srgb,var(--rds-status-error)_12%,transparent)]";
   }
-  return "border-transparent text-[#cbd5e1] hover:border-[#334155] hover:bg-[#111827]";
+  return "border-transparent text-[var(--rds-text-secondary)] hover:border-[var(--rds-border-default)] hover:bg-[var(--rds-surface-hover)]";
 }
 
 export default function UnifiedTopBar({
@@ -59,37 +60,92 @@ export default function UnifiedTopBar({
       }
     }
 
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        menuRef.current?.querySelector<HTMLButtonElement>("[data-menu-trigger]")?.focus();
+      }
+    }
+
     window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (menuOpen) {
+      window.requestAnimationFrame(() => {
+        menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]:not(:disabled)")?.focus();
+      });
+    }
+  }, [menuOpen]);
+
+  function handleMenuNavigation(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") {
+      return;
+    }
+    const items = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not(:disabled)") ?? []
+    );
+    if (items.length === 0) return;
+    event.preventDefault();
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? items.length - 1
+        : event.key === "ArrowDown"
+          ? (currentIndex + 1 + items.length) % items.length
+          : (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex]?.focus();
+  }
 
   return (
     <header
       data-testid="unified-topbar"
-      className="relative z-20 flex min-h-[42px] shrink-0 items-center gap-2 overflow-hidden border-b border-[#27272a] bg-[#10131d] px-2 py-1"
+      className="relative z-20 flex min-h-[42px] shrink-0 items-center gap-2 overflow-hidden border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-base)] px-2 py-1"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <div ref={menuRef} className="relative shrink-0">
           <button
             type="button"
+            data-menu-trigger
             data-testid="unified-topbar-menu-trigger"
+            aria-label="Menu"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-controls="unified-topbar-menu"
             onClick={() => setMenuOpen((current) => !current)}
-            className="flex h-8 items-center justify-center rounded border border-[#3f3f46] bg-[#111827] px-2 text-[10px] font-semibold uppercase text-[#e2e8f0] transition-colors hover:border-[#6366f1]/30 hover:bg-[#1f2937]"
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setMenuOpen(true);
+              }
+            }}
+            className="flex h-8 items-center justify-center rounded border border-[var(--rds-border-default)] bg-[var(--rds-surface-input)] px-2 text-[10px] font-semibold uppercase text-[var(--rds-text-primary)] transition-colors hover:border-[var(--rds-action-primary)] hover:bg-[var(--rds-surface-hover)]"
           >
-            Menu
+            <Icon name="menu" size={17} />
+            <span className="sr-only">Menu</span>
           </button>
 
           {menuOpen && (
-            <div className="absolute left-0 top-[calc(100%+8px)] w-72 overflow-hidden rounded border border-[#313244] bg-[#0b1120] shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
+            <div
+              id="unified-topbar-menu"
+              role="menu"
+              aria-label="Menu principal"
+              onKeyDown={handleMenuNavigation}
+              className="absolute left-0 top-[calc(100%+8px)] w-72 overflow-hidden rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-overlay)] shadow-[var(--rds-shadow-elevated)]"
+            >
               {menuSections.map((section, sectionIndex) => (
                 <div
                   key={`${section.title ?? "section"}-${sectionIndex}`}
-                  className={sectionIndex > 0 ? "border-t border-[#1f2937]" : undefined}
+                  className={sectionIndex > 0 ? "border-t border-[var(--rds-border-subtle)]" : undefined}
                 >
                   {section.title && (
-                    <div className="px-3 py-2 text-[10px] font-semibold uppercase text-[#7dd3fc]">
+                    <div className="px-3 py-2 text-[10px] font-semibold uppercase text-[var(--rds-status-info)]">
                       {section.title}
                     </div>
                   )}
@@ -101,6 +157,7 @@ export default function UnifiedTopBar({
                         disabled={action.disabled}
                         title={action.title}
                         data-testid={action.testId}
+                        role="menuitem"
                         onClick={() => {
                           setMenuOpen(false);
                           action.onClick();
@@ -109,7 +166,7 @@ export default function UnifiedTopBar({
                       >
                         <span>{action.label}</span>
                         {action.shortcut ? (
-                          <kbd className="ml-3 rounded border border-[#334155] bg-[#020617] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#94a3b8]">
+                          <kbd className="ml-3 rounded border border-[var(--rds-border-default)] bg-[var(--rds-surface-panel-strong)] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[var(--rds-text-muted)]">
                             {action.shortcut}
                           </kbd>
                         ) : null}
@@ -123,7 +180,7 @@ export default function UnifiedTopBar({
         </div>
 
         <div className="min-w-0">
-          <div className="text-[10px] font-semibold uppercase text-[#cba6f7]">
+          <div className="text-[10px] font-semibold uppercase text-[var(--rds-status-info)]">
             {appName}
           </div>
           {appTagline ? (
@@ -134,14 +191,14 @@ export default function UnifiedTopBar({
         <nav
           aria-label="Breadcrumb"
           data-testid="unified-topbar-breadcrumbs"
-          className="min-w-0 flex-1 overflow-hidden rounded border border-[#27272a] bg-[#0b1220]/80 px-2 py-1"
+          className="min-w-0 flex-1 overflow-hidden rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-2 py-1"
         >
-          <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px] text-[#94a3b8]">
+          <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px] text-[var(--rds-text-muted)]">
             {breadcrumbs.map((crumb, index) => (
               <div key={`${crumb}-${index}`} className="flex min-w-0 items-center gap-2">
-                {index > 0 ? <span className="text-[#475569]">&gt;</span> : null}
+                {index > 0 ? <span className="text-[var(--rds-border-strong)]">&gt;</span> : null}
                 <span
-                  className={index === breadcrumbs.length - 1 ? "truncate text-[#e2e8f0]" : "truncate"}
+                  className={index === breadcrumbs.length - 1 ? "truncate text-[var(--rds-text-primary)]" : "truncate"}
                   title={crumb}
                 >
                   {crumb}

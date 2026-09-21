@@ -1073,9 +1073,41 @@ describe("ToolsPanel Asset Browser", () => {
     expect(mocks.getThirdPartyStatus).toHaveBeenCalledTimes(2);
   });
 
-  it("installs missing toolchains before Build All Targets", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("keeps Runtime Setup failures visible with an actionable retry", async () => {
+    mocks.getThirdPartyStatus.mockRejectedValueOnce(new Error("serviço indisponível"));
 
+    await act(async () => {
+      findButton(container, "Revalidar").click();
+      await flush();
+      await flush();
+    });
+
+    const error = container.querySelector("[data-testid='runtime-setup-error']");
+    expect(error?.getAttribute("role")).toBe("alert");
+    expect(error?.textContent).toContain("serviço indisponível");
+    expect(container.querySelector("[data-testid='runtime-setup-state']")?.textContent).toContain(
+      "Erro na validação local"
+    );
+
+    mocks.getThirdPartyStatus.mockResolvedValueOnce({
+      generated_at_unix: 125,
+      report_path: "runtime-dependency-diagnostics.json",
+      items: [createDependencyStatus("jdk")],
+    });
+
+    await act(async () => {
+      findButton(container, "Tentar novamente").click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='runtime-setup-error']")).toBeNull();
+    expect(container.querySelector("[data-testid='runtime-setup-state']")?.textContent).toContain(
+      "Diagnóstico pronto"
+    );
+  });
+
+  it("installs missing toolchains before Build All Targets", async () => {
     mocks.getThirdPartyStatus
       .mockResolvedValueOnce({
         items: [
@@ -1110,9 +1142,16 @@ describe("ToolsPanel Asset Browser", () => {
       await flush();
     });
 
-    expect(confirmSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Build multi-target requer JDK, SGDK e PVSnesLib")
-    );
+    const dialog = document.body.querySelector("[role='dialog']");
+    expect(dialog?.textContent).toContain("Build multi-target requer JDK, SGDK e PVSnesLib");
+
+    await act(async () => {
+      findButton(document.body, "Instalar dependências").click();
+      await flush();
+      await flush();
+      await flush();
+    });
+
     expect(mocks.installThirdPartyDependency).toHaveBeenCalledWith(
       "jdk",
       expect.any(Function)
@@ -1288,6 +1327,9 @@ describe("ToolsPanel Asset Browser", () => {
     expect(frameCap?.value).toBe("60");
     expect(() => findButton(container, /Rodar Parity Capture/)).not.toThrow();
     expect(section?.textContent).toContain("Experimental");
+    expect(section?.querySelector("[data-testid='evidence-readiness']")?.textContent).toContain(
+      "não provam equivalência de gameplay 1:1"
+    );
   });
 
   it("updates the store lastParityReport after a successful capture", async () => {
@@ -1393,6 +1435,9 @@ describe("ToolsPanel Asset Browser", () => {
     const section = container.querySelector("[data-testid='cross-core-parity-section']");
     expect(section).toBeTruthy();
     expect(section?.textContent).toContain("Experimental");
+    expect(section?.querySelector("[data-testid='evidence-readiness']")?.textContent).toContain(
+      "não certifica precisão do hardware"
+    );
     expect(container.querySelector("[data-testid='cross-core-golden-path']")).toBeInstanceOf(
       HTMLInputElement
     );
@@ -1570,6 +1615,9 @@ describe("ToolsPanel Asset Browser", () => {
     const section = container.querySelector("[data-testid='cycle-report-section']");
     expect(section).toBeTruthy();
     expect(section?.textContent).toContain("Experimental");
+    expect(section?.querySelector("[data-testid='evidence-readiness']")?.textContent).toContain(
+      "não tornam o core cycle accurate"
+    );
     expect(container.querySelector("[data-testid='cycle-report-golden-path']")).toBeInstanceOf(
       HTMLInputElement
     );

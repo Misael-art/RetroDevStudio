@@ -371,4 +371,64 @@ describe("ReverseWorkspace", () => {
     expect(edgeCards[0]?.textContent).toContain("Trace");
     expect(edgeCards[1]?.textContent).toContain("000200 → 000600");
   });
+
+  it("announces limitations and exposes keyboard-operable view tabs", async () => {
+    expect(container.querySelector("[data-testid='reverse-readiness']")?.textContent).toContain(
+      "não reconstrói gameplay"
+    );
+
+    const romInput = Array.from(container.querySelectorAll("input")).find((element) =>
+      element.getAttribute("placeholder")?.includes("/roms/game.md")
+    );
+    await act(async () => {
+      if (romInput instanceof HTMLInputElement) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(romInput, "F:/roms/tabs.md");
+        romInput.dispatchEvent(new Event("input", { bubbles: true }));
+        romInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await flush();
+      findButton(container, "Analisar ROM").click();
+      await flush();
+      await flush();
+    });
+
+    const tabs = Array.from(container.querySelectorAll<HTMLElement>("[role='tab']"));
+    expect(tabs).toHaveLength(7);
+    expect(tabs[0]?.getAttribute("aria-selected")).toBe("true");
+
+    await act(async () => {
+      tabs[0]?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await flush();
+    });
+
+    expect(container.querySelector("[role='tab'][aria-selected='true']")?.textContent).toBe("Hex");
+    expect(container.querySelector("[role='tabpanel']")?.getAttribute("aria-labelledby")).toBe(
+      "rds-tab-hex"
+    );
+  });
+
+  it("shows analysis failures inline instead of relying only on the Console", async () => {
+    mocks.romAnalyzeWithEmulatorTrace.mockRejectedValueOnce(new Error("ROM ilegível"));
+    const romInput = Array.from(container.querySelectorAll("input")).find((element) =>
+      element.getAttribute("placeholder")?.includes("/roms/game.md")
+    );
+
+    await act(async () => {
+      if (romInput instanceof HTMLInputElement) {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(romInput, "F:/roms/falha.md");
+        romInput.dispatchEvent(new Event("input", { bubbles: true }));
+        romInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await flush();
+      findButton(container, "Analisar ROM").click();
+      await flush();
+      await flush();
+    });
+
+    const alert = container.querySelector("[data-testid='reverse-workspace-error']");
+    expect(alert?.getAttribute("role")).toBe("alert");
+    expect(alert?.textContent).toContain("ROM ilegível");
+  });
 });

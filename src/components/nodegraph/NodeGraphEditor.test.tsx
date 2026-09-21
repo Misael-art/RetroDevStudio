@@ -18,6 +18,7 @@ import NodeGraphEditor, {
   getNodeParamDisplayName,
   getNodeGraphDotGridStyle,
   getNodeGraphWheelZoomState,
+  isEditableNodeGraphTarget,
   serializeNodeGraph,
   snapNodeGraphPoint,
   summarizeNodeGraph,
@@ -958,6 +959,92 @@ describe("NodeGraphEditor", () => {
     expect(overview?.closest("[data-testid='nodegraph-canvas']")).toBeNull();
     expect(overview?.closest("[data-testid='nodegraph-context-rail']")).toBe(contextRail);
     expect(contextRail?.textContent).toContain("Logic Context");
+  });
+
+  it("exposes clear context tabs without hiding the existing diagnostics rail", async () => {
+    const problemsTab = container.querySelector(
+      "[data-testid='nodegraph-context-rail'] [role='tab'][aria-controls='nodegraph-context-panel-problems']"
+    ) as HTMLButtonElement | null;
+
+    expect(problemsTab).toBeInstanceOf(HTMLButtonElement);
+    expect(problemsTab?.getAttribute("aria-selected")).toBe("false");
+
+    await act(async () => {
+      problemsTab?.click();
+      await flush();
+    });
+
+    expect(problemsTab?.getAttribute("aria-selected")).toBe("true");
+    expect(container.querySelector("[role='tabpanel']")?.textContent).toMatch(
+      /Nenhum problema|evento|desconectado|solto|entrada exec/i
+    );
+    expect(container.querySelector("[data-testid='nodegraph-overview']")).toBeInstanceOf(
+      HTMLDivElement
+    );
+
+    await act(async () => {
+      problemsTab?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" })
+      );
+      await flush();
+    });
+    expect(
+      container
+        .querySelector("[aria-controls='nodegraph-context-panel-source']")
+        ?.getAttribute("aria-selected")
+    ).toBe("true");
+    expect(document.activeElement?.id).toBe("nodegraph-context-tab-source");
+  });
+
+  it("adds palette nodes through the native button click path", async () => {
+    const before = container.querySelectorAll("[data-testid^='node-card-']").length;
+    const paletteButton = container.querySelector(
+      "[data-testid='nodegraph-palette-sprite_move']"
+    ) as HTMLButtonElement | null;
+
+    expect(paletteButton).toBeInstanceOf(HTMLButtonElement);
+    expect(paletteButton?.disabled).toBe(false);
+
+    await act(async () => {
+      paletteButton?.click();
+      await flush();
+    });
+
+    expect(container.querySelectorAll("[data-testid^='node-card-']")).toHaveLength(before + 1);
+  });
+
+  it("moves a focused node with arrows and preserves it when Delete comes from an editable field", async () => {
+    const node = container.querySelector(
+      "[data-testid='node-card-entry_node']"
+    ) as HTMLDivElement | null;
+    const search = container.querySelector("input[aria-label='Buscar nó']") as HTMLInputElement | null;
+    expect(node).toBeInstanceOf(HTMLDivElement);
+    expect(node?.tabIndex).toBe(0);
+    expect(search).toBeInstanceOf(HTMLInputElement);
+    expect(isEditableNodeGraphTarget(search)).toBe(true);
+
+    const beforeLeft = Number.parseFloat(node?.style.left ?? "0");
+    await act(async () => {
+      node?.focus();
+      node?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+      await flush();
+    });
+    expect(Number.parseFloat(node?.style.left ?? "0")).toBe(beforeLeft + 8);
+
+    const beforeDelete = container.querySelectorAll("[data-testid^='node-card-']").length;
+    await act(async () => {
+      search?.focus();
+      search?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" }));
+      await flush();
+    });
+    expect(container.querySelectorAll("[data-testid^='node-card-']")).toHaveLength(beforeDelete);
+
+    await act(async () => {
+      node?.focus();
+      node?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Delete" }));
+      await flush();
+    });
+    expect(container.querySelector("[data-testid='node-card-entry_node']")).toBeNull();
   });
 
   it("zooms and pans the canvas without losing the selected node or edge hover state", async () => {

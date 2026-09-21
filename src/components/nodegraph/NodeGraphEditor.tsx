@@ -17,6 +17,8 @@ import {
   type CapabilityTone,
 } from "../../core/sgdkLogicDiagnostics";
 import type { SpriteCommandBinding } from "../../core/ipc/sceneService";
+import Icon, { type IconName } from "../common/Icon";
+import Input from "../common/Input";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -91,6 +93,13 @@ export interface NodeEdge {
 export interface NodeGraph {
   nodes: GraphNode[];
   edges: NodeEdge[];
+}
+
+export function isEditableNodeGraphTarget(target: EventTarget | null): boolean {
+  const element = target instanceof HTMLElement ? target : null;
+  return Boolean(
+    element?.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']")
+  );
 }
 
 type ViewOffset = {
@@ -1693,18 +1702,30 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   y: "Y",
 };
 
-const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
-  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_update", "input_pressed", "input_held", "input_command", "event_vblank", "event_hblank", "event_dma_done"] },
-  { label: "Movimento", icon: "\ud83c\udfc3", types: ["sprite_move", "set_velocity", "set_position", "spawn_entity", "destroy_entity", "sprite_anim", "set_animation_state", "scroll_tilemap", "move_camera"] },
-  { label: "Condicoes", icon: "?", types: ["condition_overlap", "condition_compare", "logic_and"] },
-  { label: "Camera", icon: "\u25a3", types: ["camera_follow", "camera_bounds"] },
-  { label: "Tilemap", icon: "#", types: ["set_tile", "load_scene"] },
-  { label: "Som", icon: "\ud83d\udd0a", types: ["action_sound", "action_music"] },
-  { label: "Variaveis", icon: "\ud83d\udcca", types: ["var_set", "var_get", "logic_math"] },
-  { label: "Fluxo", icon: "\u2937", types: ["flow_if", "flow_while", "flow_for", "timer"] },
-  { label: "Estados", icon: "\u2690\ufe0f", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
-  { label: "Efeitos", icon: "\u2728", types: ["effect_parallax", "effect_raster"] },
-  { label: "Hardware", icon: "!", types: ["hardware_budget_check", "bridge_unconverted_source"] },
+const NODE_PALETTE_GROUPS: Array<{ label: string; icon: IconName; types: NodeType[] }> = [
+  { label: "Eventos", icon: "play", types: ["event_start", "event_update", "input_pressed", "input_held", "input_command", "event_vblank", "event_hblank", "event_dma_done"] },
+  { label: "Movimento", icon: "drag", types: ["sprite_move", "set_velocity", "set_position", "spawn_entity", "destroy_entity", "sprite_anim", "set_animation_state", "scroll_tilemap", "move_camera"] },
+  { label: "Condicoes", icon: "check-circle", types: ["condition_overlap", "condition_compare", "logic_and"] },
+  { label: "Camera", icon: "maximize", types: ["camera_follow", "camera_bounds"] },
+  { label: "Tilemap", icon: "menu", types: ["set_tile", "load_scene"] },
+  { label: "Som", icon: "gamepad", types: ["action_sound", "action_music"] },
+  { label: "Variaveis", icon: "settings", types: ["var_set", "var_get", "logic_math"] },
+  { label: "Fluxo", icon: "network", types: ["flow_if", "flow_while", "flow_for", "timer"] },
+  { label: "Estados", icon: "sidebar-expand", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
+  { label: "Efeitos", icon: "magic-wand", types: ["effect_parallax", "effect_raster"] },
+  { label: "Hardware", icon: "warning-triangle", types: ["hardware_budget_check", "bridge_unconverted_source"] },
+];
+
+type NodeGraphContextTabId = "summary" | "problems" | "source";
+
+const NODEGRAPH_CONTEXT_TABS: Array<{
+  id: NodeGraphContextTabId;
+  label: string;
+  icon: IconName;
+}> = [
+  { id: "summary", label: "Resumo", icon: "info-circle" },
+  { id: "problems", label: "Problemas", icon: "warning-triangle" },
+  { id: "source", label: "Fonte", icon: "open-new-window" },
 ];
 
 /** Header background por categoria (Blueprints-style) */
@@ -2575,6 +2596,8 @@ interface NodeCardProps {
   selected: boolean;
   executionReachable?: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
+  onSelect: () => void;
+  onKeyboardMove: (deltaX: number, deltaY: number) => void;
   onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
   onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
 }
@@ -2587,6 +2610,8 @@ function NodeCard({
   selected,
   executionReachable = false,
   onMouseDown,
+  onSelect,
+  onKeyboardMove,
   onPortMouseDown,
   onPortMouseUp,
 }: NodeCardProps) {
@@ -2602,6 +2627,9 @@ function NodeCard({
       data-selected={selected ? "true" : undefined}
       data-editable={editable ? "true" : "false"}
       data-execution-reachable={executionReachable ? "true" : undefined}
+      role="group"
+      tabIndex={0}
+      aria-label={`${getNodeDisplayName(node.type)}. Use as setas para mover; Shift mais setas move mais rápido.`}
       className={`absolute select-none min-w-[160px] rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg backdrop-blur-sm ${
         selected ? "ring-2 ring-blue-500 shadow-2xl" : ""
       } ${
@@ -2618,6 +2646,20 @@ function NodeCard({
         transformOrigin: "top left",
       }}
       onMouseDown={onMouseDown}
+      onFocus={onSelect}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? 32 : 8;
+        const direction = {
+          ArrowLeft: [-step, 0],
+          ArrowRight: [step, 0],
+          ArrowUp: [0, -step],
+          ArrowDown: [0, step],
+        }[event.key];
+        if (!direction) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onKeyboardMove(direction[0], direction[1]);
+      }}
     >
       {/* Header colorido por categoria */}
       <div
@@ -2821,6 +2863,7 @@ export default function NodeGraphEditor() {
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
   const [spacePressed, setSpacePressed] = useState(false);
+  const [contextTab, setContextTab] = useState<NodeGraphContextTabId>("summary");
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const panningRef = useRef<{
@@ -2905,19 +2948,9 @@ export default function NodeGraphEditor() {
   }, []);
 
   useEffect(() => {
-    const isEditableTarget = (target: EventTarget | null) => {
-      const element = target instanceof HTMLElement ? target : null;
-      return Boolean(
-        element &&
-          (element.tagName === "INPUT" ||
-            element.tagName === "TEXTAREA" ||
-            element.tagName === "SELECT" ||
-            element.isContentEditable)
-      );
-    };
     const isSpace = (event: KeyboardEvent) => event.code === "Space" || event.key === " ";
     const onKeyDown = (event: KeyboardEvent) => {
-      if (isSpace(event) && !isEditableTarget(event.target)) {
+      if (isSpace(event) && !isEditableNodeGraphTarget(event.target)) {
         event.preventDefault();
         setSpacePressed(true);
       }
@@ -3260,8 +3293,24 @@ export default function NodeGraphEditor() {
   const addNode = useCallback((type: NodeType) => {
     const node = makeNode(type, 200, 200);
     setGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
+    setSelectedId(node.id);
     logMessage("info", `No adicionado: ${getNodeDisplayName(type)}`);
   }, [logMessage]);
+
+  const moveNodeByKeyboard = useCallback(
+    (nodeId: string, deltaX: number, deltaY: number) => {
+      setSelectedId(nodeId);
+      setGraph((current) => ({
+        ...current,
+        nodes: current.nodes.map((node) =>
+          node.id === nodeId
+            ? { ...node, x: node.x + deltaX, y: node.y + deltaY }
+            : node
+        ),
+      }));
+    },
+    []
+  );
 
   const applyQuickActionTemplate = useCallback((template: QuickActionTemplate) => {
     const nextGraph = template.buildGraph(quickActionContext);
@@ -3431,7 +3480,12 @@ export default function NodeGraphEditor() {
   // ── Delete selected node ───────────────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selectedId &&
+        !isEditableNodeGraphTarget(e.target)
+      ) {
+        e.preventDefault();
         setGraph((g) => ({
           nodes: g.nodes.filter((n) => n.id !== selectedId),
           edges: g.edges.filter((e) => e.fromNode !== selectedId && e.toNode !== selectedId),
@@ -3612,30 +3666,53 @@ export default function NodeGraphEditor() {
     });
   }
 
+  function handleContextTabKeyDown(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    currentTab: NodeGraphContextTabId
+  ) {
+    const currentIndex = NODEGRAPH_CONTEXT_TABS.findIndex((tab) => tab.id === currentTab);
+    let nextIndex: number;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % NODEGRAPH_CONTEXT_TABS.length;
+    else if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + NODEGRAPH_CONTEXT_TABS.length) % NODEGRAPH_CONTEXT_TABS.length;
+    else if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = NODEGRAPH_CONTEXT_TABS.length - 1;
+    else return;
+
+    event.preventDefault();
+    const nextTab = NODEGRAPH_CONTEXT_TABS[nextIndex].id;
+    setContextTab(nextTab);
+    document.getElementById(`nodegraph-context-tab-${nextTab}`)?.focus();
+  }
+
   return (
-    <div className="flex h-full w-full overflow-hidden bg-[#11111b]">
+    <div className="flex h-full w-full overflow-hidden bg-[var(--rds-surface-canvas)]">
 
       {/* ── Palette sidebar ── */}
       <div
         data-testid="nodegraph-side-rail"
-        className="flex w-40 shrink-0 flex-col overflow-x-hidden border-r border-[#313244] bg-[#181825]"
+        aria-label="Paleta de nós"
+        className="flex w-52 shrink-0 flex-col overflow-x-hidden border-r border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)]"
       >
-        <div className="shrink-0 border-b border-[#313244] p-2">
-          <div className="relative">
-            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#6c7086]">
-              &#x1f50d;
-            </span>
-            <input
-              type="search"
-              placeholder="Buscar nó..."
-              value={paletteSearch}
-              onChange={(e) => setPaletteSearch(e.target.value)}
-              className="w-full rounded border border-[#313244] bg-[#11111b] py-1 pl-7 pr-2 text-[10px] text-[#cdd6f4] placeholder:text-[#6c7086] focus:border-[#89b4fa] focus:outline-none"
-            />
+        <div className="shrink-0 border-b border-[var(--rds-border-subtle)] p-2">
+          <div className="mb-2 flex items-center gap-2 px-1">
+            <Icon name="network" size={16} className="text-[var(--rds-status-info)]" />
+            <strong className="text-[11px] text-[var(--rds-text-primary)]">Nós</strong>
+            <span className="ml-auto rounded-full border border-[var(--rds-border-default)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--rds-status-warning)]">Experimental</span>
           </div>
+          <Input
+            type="search"
+            label="Buscar nó"
+            hideLabel
+            aria-label="Buscar nó"
+            placeholder="Buscar nó…"
+            value={paletteSearch}
+            onChange={(event) => setPaletteSearch(event.target.value)}
+            leadingIcon={<Icon name="search" size={15} />}
+            controlSize="sm"
+          />
         </div>
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-          <p className="mb-1 select-none px-1 text-[10px] text-[#45475a]">NÓS</p>
+          <p className="mb-1 select-none px-1 text-[10px] text-[var(--rds-text-muted)]">CATEGORIAS</p>
           {filteredGroups.map((group) => {
             const isCollapsed = collapsedGroups.has(group.label);
             return (
@@ -3643,23 +3720,25 @@ export default function NodeGraphEditor() {
                 <button
                   type="button"
                   onClick={() => toggleGroup(group.label)}
-                  className="flex w-full items-center gap-1.5 px-1 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-[#6c7086] transition-colors hover:text-[#a6adc8]"
+                  aria-expanded={!isCollapsed}
+                  className="flex min-h-7 w-full items-center gap-1.5 rounded-[var(--rds-radius-md)] px-1 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--rds-text-muted)] transition-colors hover:bg-[var(--rds-surface-hover)] hover:text-[var(--rds-text-primary)]"
                 >
-                  <span className="text-[9px]">{isCollapsed ? "\u25b8" : "\u25be"}</span>
-                  <span>{group.icon}</span>
+                  <Icon name={isCollapsed ? "sidebar-expand" : "sidebar-collapse"} size={13} />
+                  <Icon name={group.icon} size={14} className="text-[var(--rds-status-info)]" />
                   <span>{group.label}</span>
                 </button>
                 {!isCollapsed &&
                   group.types.map((type) => (
                     <button
                       key={type}
-                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-[#a6adc8] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:opacity-40"
-                      onMouseDown={() => addNode(type)}
+                      type="button"
+                      data-testid={`nodegraph-palette-${type}`}
+                      className="flex min-h-8 w-full items-center gap-2 rounded-[var(--rds-radius-md)] px-2 py-1.5 text-left text-[11px] text-[var(--rds-text-secondary)] transition-colors hover:bg-[var(--rds-surface-hover)] hover:text-[var(--rds-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={() => addNode(type)}
                       disabled={!selectedEntity}
+                      title={`Adicionar ${getNodeDisplayName(type)} ao grafo`}
                     >
-                      <span className="text-[12px] opacity-80">
-                        {NODE_PALETTE_GROUPS.find((g) => g.types.includes(type))?.icon ?? "\u2699\ufe0f"}
-                      </span>
+                      <Icon name={group.icon} size={15} className="text-[var(--rds-text-muted)]" />
                       <span className="min-w-0 truncate">{getNodeDisplayName(type)}</span>
                     </button>
                   ))}
@@ -3668,22 +3747,22 @@ export default function NodeGraphEditor() {
           })}
           <SgdkPatternTemplateGallery onInsertTemplate={appendSgdkPatternTemplate} />
         </div>
-        <div className="mt-auto shrink-0 border-t border-[#313244] p-2">
-          <p className="select-none px-1 text-[10px] text-[#45475a]">
+        <div className="mt-auto shrink-0 border-t border-[var(--rds-border-subtle)] p-2">
+          <p className="select-none px-1 text-[10px] text-[var(--rds-text-muted)]">
             {selectedEntity ? "Autosave 600ms no LogicComponent.graph" : "Selecione uma entidade para editar"}
           </p>
           {selectedEntity?.components.logic?.graph_ref ? (
-            <p className="mt-1 select-none px-1 text-[10px] text-[#45475a]">
+            <p className="mt-1 select-none px-1 text-[10px] text-[var(--rds-text-muted)]">
               Origem do grafo: {graphOriginLabel === "user_edited_ref" ? "editado no editor" : "importado do graph_ref"}
             </p>
           ) : null}
-          <p className="mt-1 select-none px-1 text-[10px] text-[#45475a]">
-            Dica: arraste da saída para a entrada para conectar.
+          <p className="mt-2 select-none px-1 text-[10px] leading-4 text-[var(--rds-text-secondary)]">
+            Enter/Espaço adiciona · Tab seleciona · Setas movem · Shift+setas acelera.
           </p>
-          <p className="select-none px-1 text-[10px] text-[#45475a]">
-            Space + drag ou botao do meio = pan.
+          <p className="select-none px-1 text-[10px] leading-4 text-[var(--rds-text-muted)]">
+            Arraste portas para conectar ou use “Encadear exec (layout)” no Contexto.
           </p>
-          <p className="select-none px-1 text-[10px] text-[#45475a]">Del = remover nó</p>
+          <p className="select-none px-1 text-[10px] text-[var(--rds-text-muted)]">Space + arraste = pan · Del = remover nó</p>
           {selectedEntity?.components.logic?.graph_ref && graph.nodes.length === 0 ? (
             <p className="mt-1 px-1 text-[9px] leading-snug text-[#f9e2af]">
               graph_ref {selectedEntity.components.logic.graph_ref}: grafo indisponivel para hidratacao.
@@ -3725,10 +3804,66 @@ export default function NodeGraphEditor() {
         {selectedEntity && (
           <aside
             data-testid="nodegraph-context-rail"
-            className="absolute inset-y-0 right-0 z-20 flex w-72 flex-col overflow-hidden border-l border-[#313244] bg-[#181825]/95 shadow-[-18px_0_40px_rgba(0,0,0,0.24)] backdrop-blur-sm"
+            aria-label="Contexto do grafo"
+            className="absolute inset-y-0 right-0 z-20 flex w-72 flex-col overflow-hidden border-l border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] backdrop-blur-sm"
             onMouseDown={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
           >
+          <div className="shrink-0 border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] p-2">
+            <div className="mb-2 flex items-center gap-2 px-1">
+              <Icon name="info-circle" size={16} className="text-[var(--rds-status-info)]" />
+              <strong className="min-w-0 flex-1 truncate text-[11px] text-[var(--rds-text-primary)]">Contexto · {getEntityDisplayName(selectedEntity)}</strong>
+              <span className="rounded-full border border-[var(--rds-border-default)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--rds-status-warning)]">Experimental</span>
+            </div>
+            <div role="tablist" aria-label="Seções do contexto" className="grid grid-cols-3 gap-1">
+              {NODEGRAPH_CONTEXT_TABS.map(({ id, label, icon }) => (
+                <button
+                  key={id}
+                  id={`nodegraph-context-tab-${id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={contextTab === id}
+                  aria-controls={`nodegraph-context-panel-${id}`}
+                  tabIndex={contextTab === id ? 0 : -1}
+                  onClick={() => setContextTab(id)}
+                  onKeyDown={(event) => handleContextTabKeyDown(event, id)}
+                  className={`flex min-h-8 items-center justify-center gap-1 rounded-[var(--rds-radius-md)] px-1 text-[9px] font-semibold transition-colors ${
+                    contextTab === id
+                      ? "bg-[var(--rds-action-primary)] text-[var(--rds-action-primary-text)]"
+                      : "text-[var(--rds-text-muted)] hover:bg-[var(--rds-surface-hover)] hover:text-[var(--rds-text-primary)]"
+                  }`}
+                >
+                  <Icon name={icon} size={13} />
+                  <span className="truncate">
+                    {label}
+                    {id === "problems"
+                      ? ` ${graphValidation.errors.length + graphValidation.warnings.length}`
+                      : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div
+              id={`nodegraph-context-panel-${contextTab}`}
+              role="tabpanel"
+              aria-labelledby={`nodegraph-context-tab-${contextTab}`}
+              className="mt-2 rounded-[var(--rds-radius-md)] border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-2 text-[10px] leading-4 text-[var(--rds-text-secondary)]"
+            >
+              {contextTab === "summary" ? (
+                <p>{graphSummary.totalNodes} nós · {graphSummary.totalEdges} conexões · {graphSummary.disconnectedNodeIds.length} desconectados. Tab foca nós e setas movem a seleção.</p>
+              ) : null}
+              {contextTab === "problems" ? (
+                graphValidationPreview.length ? (
+                  <ul className="space-y-1">
+                    {graphValidationPreview.map((issue, index) => <li key={`${issue.code}-${index}`}>• {issue.message}</li>)}
+                  </ul>
+                ) : <p className="text-[var(--rds-status-success)]">Nenhum problema local detectado. O fluxo continua Experimental até validação no build real.</p>
+              ) : null}
+              {contextTab === "source" ? (
+                selectedSourceMapping ? <p className="break-all font-mono">{selectedSourceMapping.file}{selectedSourceMapping.line ? `:${selectedSourceMapping.line}` : ""}</p> : <p>Sem fonte rastreável. Use o Inspector ou o projeto doador para localizar o arquivo.</p>
+              ) : null}
+            </div>
+          </div>
           <div
             data-testid="nodegraph-overview"
             className="scrollbar-thin flex min-h-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto px-3 py-2 text-[10px]"
@@ -4297,6 +4432,10 @@ export default function NodeGraphEditor() {
             selected={node.id === selectedId}
             executionReachable={reachableExecutionNodeIds.has(node.id)}
             onMouseDown={(e) => onNodeMouseDown(e, node.id)}
+            onSelect={() => setSelectedId(node.id)}
+            onKeyboardMove={(deltaX, deltaY) =>
+              moveNodeByKeyboard(node.id, deltaX, deltaY)
+            }
             onPortMouseDown={(e, portId, isOutput) => onPortMouseDown(e, node.id, portId, isOutput)}
             onPortMouseUp={(e, portId, isOutput) => onPortMouseUp(e, node.id, portId, isOutput)}
           />

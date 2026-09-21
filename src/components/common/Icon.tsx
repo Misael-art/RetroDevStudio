@@ -25,11 +25,14 @@ export type IconName =
   | "maximize"
   | "menu"
   | "network"
+  | "nav-arrow-left"
+  | "nav-arrow-right"
   | "open-new-window"
   | "palette"
   | "pin"
   | "pin-slash"
   | "play"
+  | "plus-circle"
   | "refresh"
   | "search"
   | "settings"
@@ -37,7 +40,8 @@ export type IconName =
   | "sidebar-expand"
   | "square"
   | "terminal"
-  | "warning-triangle";
+  | "warning-triangle"
+  | "xmark";
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "children"> {
   name: IconName;
@@ -48,8 +52,14 @@ function IconPaths({ name }: { name: IconName }) {
   switch (name) {
     case "menu":
       return <><path d="M3 5H21"/><path d="M3 12H21"/><path d="M3 19H21"/></>;
+    case "nav-arrow-left":
+      return <><path d="M15 6L9 12L15 18"/><path d="M9 12H21"/></>;
+    case "nav-arrow-right":
+      return <><path d="M9 6L15 12L9 18"/><path d="M15 12H3"/></>;
     case "play":
       return <path d="M6.90588 4.53682C6.50592 4.2998 6 4.58808 6 5.05299V18.947C6 19.4119 6.50592 19.7002 6.90588 19.4632L18.629 12.5162C19.0211 12.2838 19.0211 11.7162 18.629 11.4838L6.90588 4.53682Z"/>;
+    case "plus-circle":
+      return <><path d="M12 8V16M8 12H16"/><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z"/></>;
     case "square":
       return <path d="M21 3.6V20.4C21 20.7314 20.7314 21 20.4 21H3.6C3.26863 21 3 20.7314 3 20.4V3.6C3 3.26863 3.26863 3 3.6 3H20.4C20.7314 3 21 3.26863 21 3.6Z"/>;
     case "terminal":
@@ -72,6 +82,8 @@ function IconPaths({ name }: { name: IconName }) {
       return <><path d="M17 17L21 21"/><path d="M3 11C3 15.4183 6.58172 19 11 19C15.4183 19 19 15.4183 19 11C19 6.58172 15.4183 3 11 3C6.58172 3 3 6.58172 3 11Z"/></>;
     case "warning-triangle":
       return <><path d="M20.0429 21H3.95705C2.41902 21 1.45658 19.3364 2.22324 18.0031L10.2662 4.01533C11.0352 2.67792 12.9648 2.67791 13.7338 4.01532L21.7768 18.0031C22.5434 19.3364 21.581 21 20.0429 21Z"/><path d="M12 9V13M12 17.01L12.01 16.9989"/></>;
+    case "xmark":
+      return <path d="M6 6L18 18M18 6L6 18"/>;
     case "info-circle":
       return <><path d="M12 11.5V16.5M12 7.51L12.01 7.49889"/><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z"/></>;
     case "open-new-window":

@@ -6,6 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import Icon from "./Icon";
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -195,7 +196,7 @@ export default function Dialog({
             onClick={onClose}
             className="rds-border-subtle flex min-h-6 min-w-6 shrink-0 items-center justify-center rounded border text-base leading-none opacity-75 transition-opacity hover:opacity-100"
           >
-            <span aria-hidden="true">×</span>
+            <Icon name="xmark" size={16} />
           </button>
         </header>
         <div data-rds-dialog-body="" className="min-h-0 flex-1 overflow-auto p-4">

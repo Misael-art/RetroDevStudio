@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useEditorStore } from "../../core/store/editorStore";
+import Button from "../common/Button";
+import Icon from "../common/Icon";
+import Input from "../common/Input";
+import Select from "../common/Select";
+import Tabs from "../common/Tabs";
 import {
   type ReverseAnnotation,
   type ReverseExplorerResult,
@@ -57,6 +62,7 @@ export default function ReverseWorkspace() {
   const [annotationLabel, setAnnotationLabel] = useState("");
   const [annotationComment, setAnnotationComment] = useState("");
   const [annotationBusy, setAnnotationBusy] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!manifest) {
@@ -84,12 +90,19 @@ export default function ReverseWorkspace() {
       activeManifest.target === "snes"
         ? "snes"
         : ("megadrive" as "megadrive" | "snes");
-    const [hexInspection, disassembly] = await Promise.all([
-      reverseExplorerRead(romPath, target, offset, length),
-      romDisassemble(romPath, offset, length),
-    ]);
-    setHexResult(hexInspection);
-    setCodeResult(disassembly);
+    setWorkspaceError(null);
+    try {
+      const [hexInspection, disassembly] = await Promise.all([
+        reverseExplorerRead(romPath, target, offset, length),
+        romDisassemble(romPath, offset, length),
+      ]);
+      setHexResult(hexInspection);
+      setCodeResult(disassembly);
+    } catch (error) {
+      const message = describeError(error);
+      setWorkspaceError(`Falha ao atualizar Hex/Code: ${message}`);
+      logMessage("error", `[Reverse] Falha ao atualizar Hex/Code: ${message}`);
+    }
   }
 
   async function analyze() {
@@ -99,6 +112,7 @@ export default function ReverseWorkspace() {
     }
 
     setBusy(true);
+    setWorkspaceError(null);
     try {
       const nextManifest = await romAnalyzeWithEmulatorTrace(romPath);
       setManifest(nextManifest);
@@ -118,7 +132,9 @@ export default function ReverseWorkspace() {
       setOffsetHex(nextOffset);
       await inspectHex(nextManifest, nextOffset);
     } catch (error) {
-      logMessage("error", `[Reverse] Erro inesperado: ${describeError(error)}`);
+      const message = describeError(error);
+      setWorkspaceError(`Falha ao analisar a ROM: ${message}`);
+      logMessage("error", `[Reverse] Erro inesperado: ${message}`);
     } finally {
       setBusy(false);
     }
@@ -154,6 +170,7 @@ export default function ReverseWorkspace() {
     const nextAnnotations = [...manifest.annotations, nextAnnotation];
 
     setAnnotationBusy(true);
+    setWorkspaceError(null);
     try {
       await romSaveAnnotations(romPath, nextAnnotations);
       setManifest({
@@ -168,7 +185,9 @@ export default function ReverseWorkspace() {
         `[Reverse] Anotacao ${nextAnnotation.kind} salva em ${formatHex(nextAnnotation.start, 6)}.`
       );
     } catch (error) {
-      logMessage("error", `[Reverse] Falha ao salvar anotacao: ${describeError(error)}`);
+      const message = describeError(error);
+      setWorkspaceError(`Falha ao salvar a anotação: ${message}`);
+      logMessage("error", `[Reverse] Falha ao salvar anotacao: ${message}`);
     } finally {
       setAnnotationBusy(false);
     }
@@ -291,66 +310,89 @@ export default function ReverseWorkspace() {
     <div className="flex flex-col gap-3 p-3">
       <ExperimentalNotice summary="Workspace reverso canônico. O manifesto, a segmentação e a disassembly inicial já são reais; trace, projeção .rds e recuperação avançada de lógica seguem em hardening." />
 
+      <div
+        data-testid="reverse-readiness"
+        className="rounded border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3 text-xs text-[var(--rds-text-secondary)]"
+      >
+        <p className="flex items-center gap-2 font-semibold text-[var(--rds-status-warning)]">
+          <Icon name="warning-triangle" size={15} />
+          Readiness Experimental
+        </p>
+        <p className="mt-1 leading-5">
+          O mapa estrutural e a leitura Hex/Code são evidências locais. Trace depende de uma sessão compatível;
+          Projection continua informativa e não reconstrói gameplay nem prova equivalência 1:1.
+        </p>
+      </div>
+
       <ToolPathField
         label="ROM alvo"
         value={romPath}
         set={setRomPath}
         placeholder="/roms/game.md"
         extensions={["md", "bin", "gen", "smc", "sfc", "fig"]}
-        accentColor="f9e2af"
+        helperText="Use apenas uma ROM própria (BYOR). A análise não altera o arquivo original."
       />
 
+      {workspaceError ? (
+        <div
+          data-testid="reverse-workspace-error"
+          role="alert"
+          className="rounded border border-[var(--rds-status-error)] bg-[color-mix(in_srgb,var(--rds-status-error)_10%,transparent)] p-3 text-xs text-[var(--rds-text-primary)]"
+        >
+          <p className="font-semibold text-[var(--rds-status-error)]">A operação não foi concluída.</p>
+          <p className="mt-1 text-[var(--rds-text-secondary)]">
+            {workspaceError}. Revise o caminho e tente novamente; o Console mantém os detalhes técnicos.
+          </p>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-[#7f849c]">Offset</label>
-          <input
+        <Input
+            fieldClassName="w-28"
+            controlSize="sm"
+            label="Offset hexadecimal"
             type="text"
             value={offsetHex}
             onChange={(event) => setOffsetHex(event.target.value)}
-            className="w-24 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+            className="text-right font-mono"
           />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-[#7f849c]">Length</label>
-          <input
+        <Input
+            fieldClassName="w-28"
+            controlSize="sm"
+            label="Tamanho hexadecimal"
             type="text"
             value={lengthHex}
             onChange={(event) => setLengthHex(event.target.value)}
-            className="w-24 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+            className="text-right font-mono"
           />
-        </div>
-        <button
-          type="button"
+        <Button
+          variant="primary"
+          size="sm"
+          loading={busy}
+          loadingLabel="Analisando ROM"
+          iconStart={<Icon name="search" size={15} />}
           onClick={() => void analyze()}
           disabled={busy}
-          className={`rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
-            busy
-              ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-              : "bg-[#f9e2af] text-[#1e1e2e] hover:bg-[#f5d58b]"
-          }`}
         >
           {busy ? "Analisando..." : "Analisar ROM"}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          iconStart={<Icon name="refresh" size={15} />}
           onClick={() => void inspectHex()}
           disabled={!manifest || busy}
-          className={`rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
-            !manifest || busy
-              ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-              : "bg-[#89b4fa] text-[#1e1e2e] hover:bg-[#74a8f0]"
-          }`}
         >
           Atualizar Hex/Code
-        </button>
-        <span className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">
+        </Button>
+        <span className="rounded-full border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-text-muted)]">
           Target sugerido: {manifest?.target ?? activeTarget}
         </span>
       </div>
 
       {manifest && (
         <>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] gap-3">
             <div className="rounded border border-[#313244] bg-[#11111b] p-3">
               <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
                 Formato
@@ -458,23 +500,21 @@ export default function ReverseWorkspace() {
             </dl>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            {viewTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveView(tab.id)}
-                className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
-                  activeView === tab.id
-                    ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
-                    : "border-[#313244] bg-[#11111b] text-[#94a3b8] hover:text-[#e5e7eb]"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          <div className="overflow-x-auto">
+            <Tabs
+              ariaLabel="Visões do Reverse Workspace"
+              tabs={viewTabs}
+              activeTab={activeView}
+              onTabChange={(id) => setActiveView(id as ReverseView)}
+              className="min-w-max"
+            />
           </div>
 
+          <div
+            role="tabpanel"
+            aria-labelledby={`rds-tab-${activeView}`}
+            className="min-w-0"
+          >
           {activeView === "map" && (
             <div className="rounded border border-[#313244] bg-[#11111b] p-3">
               <div className="mb-3 text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
@@ -566,7 +606,7 @@ export default function ReverseWorkspace() {
           )}
 
           {activeView === "text" && (
-            <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,24rem),1fr))] gap-3">
               <div className="space-y-2 rounded border border-[#313244] bg-[#11111b] p-3">
                 <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
                   Strings
@@ -651,7 +691,7 @@ export default function ReverseWorkspace() {
           )}
 
           {activeView === "code" && (
-            <div className="grid gap-3 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-3">
               <div className="space-y-2 rounded border border-[#313244] bg-[#11111b] p-3">
                 <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
                   Funcoes
@@ -805,30 +845,27 @@ export default function ReverseWorkspace() {
                     Anotacoes
                   </div>
                   <div className="rounded border border-[#1e1e2e] bg-[#0f172a] p-3">
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <label className="flex flex-col gap-1 text-[10px] text-[#7f849c]">
-                        Tipo
-                        <select
+                    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,12rem),1fr))] gap-2">
+                      <Select
+                          label="Tipo"
+                          controlSize="sm"
                           value={annotationKind}
                           onChange={(event) => setAnnotationKind(event.target.value)}
-                          className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-xs text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
                         >
                           <option value="label">label</option>
                           <option value="comment">comment</option>
                           <option value="region">region</option>
                           <option value="pointer">pointer</option>
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-1 text-[10px] text-[#7f849c]">
-                        Fim (hex, opcional)
-                        <input
+                        </Select>
+                      <Input
+                          label="Fim (hex, opcional)"
+                          controlSize="sm"
                           type="text"
                           value={annotationEndHex}
                           onChange={(event) => setAnnotationEndHex(event.target.value)}
                           placeholder="000240"
-                          className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+                          className="font-mono"
                         />
-                      </label>
                     </div>
                     <label className="mt-2 flex flex-col gap-1 text-[10px] text-[#7f849c]">
                       Label
@@ -928,7 +965,7 @@ export default function ReverseWorkspace() {
               <div className="rounded border border-[#fab387]/35 bg-[#fab387]/8 p-3 text-[10px] text-[#fab387]">
                 {manifest.projection_status.message}
               </div>
-              <div className="grid gap-3 xl:grid-cols-2">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-3">
                 <div className="rounded border border-[#1e1e2e] bg-[#0f172a] p-3">
                   <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
                     Projection status
@@ -959,6 +996,7 @@ export default function ReverseWorkspace() {
               </div>
             </div>
           )}
+          </div>
         </>
       )}
     </div>

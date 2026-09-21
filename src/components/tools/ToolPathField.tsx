@@ -1,4 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import Icon from "../common/Icon";
+import IconButton from "../common/IconButton";
+import Input from "../common/Input";
 
 async function browseFile(
   setter: (value: string) => void,
@@ -24,6 +27,7 @@ interface PathFieldProps {
   placeholder?: string;
   directory?: boolean;
   extensions?: string[];
+  helperText?: string;
   accentColor?: string;
 }
 
@@ -34,33 +38,33 @@ export default function ToolPathField({
   placeholder = "/caminho/para/arquivo",
   directory = false,
   extensions,
-  accentColor = "cba6f7",
+  helperText,
 }: PathFieldProps) {
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-[10px] text-[#7f849c]">{label}</label>
-      <div className="flex gap-1">
-        <input
+    <div className="flex min-w-0 items-end gap-1">
+      <Input
+          fieldClassName="min-w-0 flex-1"
+          controlSize="sm"
+          label={label}
+          helperText={helperText}
           type="text"
           value={value}
           placeholder={placeholder}
-          className={`flex-1 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs font-mono text-[#cdd6f4] focus:outline-none focus:border-[#${accentColor}]`}
+          className="font-mono"
           onChange={(event) => set(event.target.value)}
         />
-        <button
-          type="button"
-          onClick={() =>
-            void browseFile(set, {
-              directory,
-              filters: extensions ? [{ name: "File", extensions }] : undefined,
-            })
-          }
-          className="shrink-0 rounded bg-[#313244] px-2 py-1 text-xs text-[#a6adc8] transition-colors hover:bg-[#45475a]"
-          title={directory ? "Selecionar pasta" : "Selecionar arquivo"}
-        >
-          ...
-        </button>
-      </div>
+      <IconButton
+        size="sm"
+        variant="secondary"
+        aria-label={directory ? `Selecionar pasta para ${label}` : `Selecionar arquivo para ${label}`}
+        icon={<Icon name="folder" size={16} />}
+        onClick={() =>
+          void browseFile(set, {
+            directory,
+            filters: extensions ? [{ name: "Arquivo", extensions }] : undefined,
+          })
+        }
+      />
     </div>
   );
 }

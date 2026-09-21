@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import Button from "../common/Button";
+import Icon from "../common/Icon";
+import Input from "../common/Input";
+import Tabs from "../common/Tabs";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { useEditorStore } from "../../core/store/editorStore";
 import type {
@@ -424,6 +428,8 @@ export default function RetroFXDesigner() {
   );
   const [tab, setTab] = useState<"parallax" | "raster">("parallax");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [restoredDraft, setRestoredDraft] = useState(false);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(() =>
     cloneRetroFXConfig(useEditorStore.getState().activeScene?.retrofx).parallax_layers[0]?.id ?? null
   );
@@ -431,6 +437,10 @@ export default function RetroFXDesigner() {
   const [previewTime, setPreviewTime] = useState(0);
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
   const previewLastTimeRef = useRef<number | null>(null);
+  const previousScenePathRef = useRef(activeScenePath);
+  const localConfigRef = useRef<RetroFXConfig>({ parallax_layers: parallax, raster_lines: raster });
+  const dirtyRef = useRef(false);
+  const sceneDraftsRef = useRef(new Map<string, RetroFXConfig>());
 
   const selectedLayer =
     parallax.find((layer) => layer.id === selectedLayerId) ?? parallax[0] ?? null;
@@ -443,17 +453,27 @@ export default function RetroFXDesigner() {
   const persistedRetroFX = cloneRetroFXConfig(activeScene?.retrofx);
   const hasUnsavedChanges =
     serializeRetroFXConfig(currentRetroFX) !== serializeRetroFXConfig(persistedRetroFX);
+  const hasPendingChanges = hasUnsavedChanges || saveError !== null;
 
   useEffect(() => {
-    const retrofx = cloneRetroFXConfig(activeScene?.retrofx);
+    const previousPath = previousScenePathRef.current;
+    if (previousPath && previousPath !== activeScenePath && dirtyRef.current) {
+      sceneDraftsRef.current.set(previousPath, cloneRetroFXConfig(localConfigRef.current));
+    }
+
+    const draft = activeScenePath ? sceneDraftsRef.current.get(activeScenePath) : undefined;
+    const retrofx = draft ?? cloneRetroFXConfig(activeScene?.retrofx);
     setParallax(retrofx.parallax_layers);
     setRaster(retrofx.raster_lines);
+    setRestoredDraft(Boolean(draft));
+    setSaveError(null);
+    previousScenePathRef.current = activeScenePath;
     setSelectedLayerId((current) =>
       retrofx.parallax_layers.some((layer) => layer.id === current)
         ? current
         : retrofx.parallax_layers[0]?.id ?? null
     );
-  }, [activeScene]);
+  }, [activeScene, activeScenePath]);
 
   useEffect(() => {
     if (!selectedLayerId || parallax.some((layer) => layer.id === selectedLayerId)) {
@@ -461,6 +481,11 @@ export default function RetroFXDesigner() {
     }
     setSelectedLayerId(parallax[0]?.id ?? null);
   }, [parallax, selectedLayerId]);
+
+  useEffect(() => {
+    localConfigRef.current = { parallax_layers: parallax, raster_lines: raster };
+    dirtyRef.current = hasPendingChanges;
+  }, [hasPendingChanges, parallax, raster]);
 
   useEffect(() => {
     if (!previewPlaying) {
@@ -493,6 +518,14 @@ export default function RetroFXDesigner() {
     setParallax((items) => {
       const fromIndex = items.findIndex((item) => item.id === sourceId);
       const toIndex = items.findIndex((item) => item.id === targetId);
+      return moveArrayItem(items, fromIndex, toIndex);
+    });
+  }
+
+  function moveParallaxBy(layerId: string, direction: -1 | 1) {
+    setParallax((items) => {
+      const fromIndex = items.findIndex((item) => item.id === layerId);
+      const toIndex = Math.min(items.length - 1, Math.max(0, fromIndex + direction));
       return moveArrayItem(items, fromIndex, toIndex);
     });
   }
@@ -540,6 +573,7 @@ export default function RetroFXDesigner() {
     }
 
     setSaving(true);
+    setSaveError(null);
     try {
       useEditorStore.setState((state) => {
         if (!state.activeScene) {
@@ -571,19 +605,27 @@ export default function RetroFXDesigner() {
         "RetroFX",
         "Configuracao salva no scene JSON. Emissao para build continua experimental."
       );
+      setSaveError(null);
+      if (activeScenePath) {
+        sceneDraftsRef.current.delete(activeScenePath);
+      }
+      setRestoredDraft(false);
     } catch (error: unknown) {
-      logMessage("error", `[RetroFX] Falha ao salvar configuracao: ${describeError(error)}`);
+      const message = describeError(error);
+      setSaveError(message);
+      logMessage("error", `[RetroFX] Falha ao salvar configuracao: ${message}`);
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-[#090d16]">
-      <div className="border-b border-[#313244] bg-[linear-gradient(180deg,#111827,#0b1220)] px-4 py-3">
+    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-[var(--rds-surface-canvas)]">
+      <div className="border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#cba6f7]">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--rds-status-warning)]">
+              <Icon name="magic-wand" size={16} />
               RetroFX Experimental
             </div>
             <div className="mt-1 text-sm font-semibold text-[#e5e7eb]">
@@ -594,26 +636,44 @@ export default function RetroFXDesigner() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 rounded-full border border-[#313244] bg-[#11111b] p-1">
-            {(["parallax", "raster"] as const).map((currentTab) => (
-              <button
-                key={currentTab}
-                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  tab === currentTab
-                    ? "bg-[#cba6f7] text-[#111827]"
-                    : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
-                }`}
-                onClick={() => setTab(currentTab)}
-              >
-                {currentTab === "parallax" ? "Parallax" : "Raster"}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <span
+              data-testid="retrofx-dirty-state"
+              role="status"
+              className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${hasPendingChanges ? "border-[var(--rds-status-warning)] text-[var(--rds-status-warning)]" : "border-[var(--rds-status-success)] text-[var(--rds-status-success)]"}`}
+            >
+              {hasPendingChanges ? "Alterações não salvas" : "Scene JSON sincronizado"}
+            </span>
+            <Tabs
+              ariaLabel="Modo do RetroFX"
+              tabs={[
+                { id: "parallax", label: "Parallax" },
+                { id: "raster", label: "Raster" },
+              ]}
+              activeTab={tab}
+              onTabChange={(id) => setTab(id as "parallax" | "raster")}
+            />
           </div>
         </div>
       </div>
 
+      {restoredDraft ? (
+        <div role="status" className="mx-3 mt-3 rounded border border-[var(--rds-status-info)] bg-[color-mix(in_srgb,var(--rds-status-info)_10%,transparent)] p-3 text-xs text-[var(--rds-text-secondary)]">
+          Rascunho local restaurado para esta cena. Revise e salve antes do build.
+        </div>
+      ) : null}
+
+      {saveError ? (
+        <div data-testid="retrofx-save-error" role="alert" className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded border border-[var(--rds-status-error)] bg-[color-mix(in_srgb,var(--rds-status-error)_10%,transparent)] p-3 text-xs text-[var(--rds-text-primary)]">
+          <span>Falha ao salvar: {saveError}. O rascunho continua local e o build ainda usa o scene JSON anterior.</span>
+          <Button size="sm" variant="secondary" iconStart={<Icon name="refresh" size={15} />} onClick={() => void applyFX()}>
+            Tentar salvar novamente
+          </Button>
+        </div>
+      ) : null}
+
       {tab === "parallax" ? (
-        <div className="grid min-h-0 flex-1 gap-3 p-3 xl:grid-cols-[320px_minmax(0,1fr)_340px]">
+        <div role="tabpanel" aria-labelledby="rds-tab-parallax" className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-3 overflow-y-auto p-3">
           <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0b1220)] shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
             <div className="border-b border-[#1f2937] px-4 py-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
@@ -634,7 +694,9 @@ export default function RetroFXDesigner() {
                   <div
                     key={layer.id}
                     data-testid={`retrofx-layer-${layer.id}`}
-                    role="button"
+                    role="group"
+                    aria-label={`${layer.name}, camada ${index + 1} de ${parallax.length}. Alt mais setas move a camada.`}
+                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
                     tabIndex={0}
                     draggable
                     className={`rounded-2xl border px-4 py-3 transition-colors ${
@@ -644,7 +706,14 @@ export default function RetroFXDesigner() {
                     } ${draggingLayerId === layer.id ? "opacity-70" : ""}`}
                     onClick={() => setSelectedLayerId(layer.id)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") {
+                      if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowLeft")) {
+                        event.preventDefault();
+                        moveParallaxBy(layer.id, -1);
+                      } else if (event.altKey && (event.key === "ArrowDown" || event.key === "ArrowRight")) {
+                        event.preventDefault();
+                        moveParallaxBy(layer.id, 1);
+                      } else if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
                         setSelectedLayerId(layer.id);
                       }
                     }}
@@ -688,6 +757,30 @@ export default function RetroFXDesigner() {
                       </div>
 
                       <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={index === 0}
+                          aria-label={`Mover ${layer.name} para cima`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            moveParallaxBy(layer.id, -1);
+                          }}
+                        >
+                          ↑
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={index === parallax.length - 1}
+                          aria-label={`Mover ${layer.name} para baixo`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            moveParallaxBy(layer.id, 1);
+                          }}
+                        >
+                          ↓
+                        </Button>
                         <label className="flex items-center gap-1 text-[11px] text-[#94a3b8]">
                           <input
                             type="checkbox"
@@ -786,7 +879,7 @@ export default function RetroFXDesigner() {
                 playing={previewPlaying}
               />
 
-              <div className="grid gap-3 lg:grid-cols-[1fr_240px]">
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))] gap-3">
                 <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#f9e2af]">
                     Como ler o preview
@@ -860,19 +953,14 @@ export default function RetroFXDesigner() {
                     </div>
                   </div>
 
-                  <label className="space-y-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#cdd6f4]">
-                      Nome da camada
-                    </span>
-                    <input
+                  <Input
+                      label="Nome da camada"
                       type="text"
                       value={selectedLayer.name}
-                      className="w-full rounded-2xl border border-[#313244] bg-[#11111b] px-4 py-3 text-sm font-semibold text-[#e5e7eb] focus:border-[#cba6f7] focus:outline-none"
                       onChange={(event) =>
                         updateParallax(selectedLayer.id, { name: event.target.value })
                       }
                     />
-                  </label>
 
                   <label className="flex items-center justify-between rounded-2xl border border-[#1f2937] bg-[#0b1220] px-4 py-3 text-[12px] text-[#cdd6f4]">
                     <span>Camada visivel no preview</span>
@@ -926,7 +1014,7 @@ export default function RetroFXDesigner() {
 
                   <RetroFXBuildPlanCard
                     scenePath={activeScenePath}
-                    hasUnsavedChanges={hasUnsavedChanges}
+                    hasUnsavedChanges={hasPendingChanges}
                     enabledParallaxCount={enabledParallaxCount}
                     enabledRasterCount={enabledRasterCount}
                   />
@@ -939,23 +1027,23 @@ export default function RetroFXDesigner() {
             </div>
 
             <div className="border-t border-[#1f2937] p-4">
-              <button
+              <Button
                 data-testid="retrofx-save"
-                className={`w-full rounded-2xl py-3 text-sm font-semibold transition-colors ${
-                  saving
-                    ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-                    : "bg-[#cba6f7] text-[#111827] hover:bg-[#b4a0e0]"
-                }`}
+                className="w-full"
+                variant="primary"
+                loading={saving}
+                loadingLabel="Salvando RetroFX"
+                iconStart={<Icon name="check-circle" size={16} />}
                 disabled={saving}
                 onClick={() => void applyFX()}
               >
                 {saving ? "Salvando..." : "Salvar RetroFX"}
-              </button>
+              </Button>
             </div>
           </section>
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 gap-3 p-3 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <div role="tabpanel" aria-labelledby="rds-tab-raster" className="grid min-h-0 min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-3 overflow-y-auto p-3">
           <section className="flex min-h-0 flex-col overflow-hidden rounded-3xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0b1220)] shadow-[0_18px_50px_rgba(0,0,0,0.22)]">
             <div className="border-b border-[#1f2937] px-4 py-3">
               <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
@@ -1006,7 +1094,7 @@ export default function RetroFXDesigner() {
                     </div>
                   </div>
 
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(min(100%,12rem),1fr))] gap-3">
                     <SpeedControl
                       label="Scanline"
                       help="Define a linha em que o deslocamento horizontal passa a valer."
@@ -1048,22 +1136,22 @@ export default function RetroFXDesigner() {
               </div>
               <RetroFXBuildPlanCard
                 scenePath={activeScenePath}
-                hasUnsavedChanges={hasUnsavedChanges}
+                hasUnsavedChanges={hasPendingChanges}
                 enabledParallaxCount={enabledParallaxCount}
                 enabledRasterCount={enabledRasterCount}
               />
-              <button
+              <Button
                 data-testid="retrofx-save"
-                className={`mt-auto w-full rounded-2xl py-3 text-sm font-semibold transition-colors ${
-                saving
-                  ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-                  : "bg-[#cba6f7] text-[#111827] hover:bg-[#b4a0e0]"
-              }`}
+                className="mt-auto w-full"
+                variant="primary"
+                loading={saving}
+                loadingLabel="Salvando RetroFX"
+                iconStart={<Icon name="check-circle" size={16} />}
               disabled={saving}
               onClick={() => void applyFX()}
             >
               {saving ? "Salvando..." : "Salvar RetroFX"}
-            </button>
+            </Button>
           </section>
         </div>
       )}

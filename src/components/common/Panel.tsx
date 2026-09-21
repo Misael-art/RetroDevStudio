@@ -9,10 +9,10 @@ interface PanelProps {
 
 export default function Panel({ title, children, className = "", headerActions }: PanelProps) {
   return (
-    <div className={`flex flex-col bg-[#1e1e2e] border border-[#313244] overflow-hidden ${className}`}>
+    <div className={`flex flex-col overflow-hidden border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] ${className}`}>
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-1 bg-[#181825] border-b border-[#313244] shrink-0">
-        <span className="text-xs font-semibold text-[#cdd6f4] uppercase tracking-wider select-none">
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] px-3 py-1">
+        <span className="select-none text-xs font-semibold uppercase tracking-wider text-[var(--rds-text-primary)]">
           {title}
         </span>
         {headerActions && (

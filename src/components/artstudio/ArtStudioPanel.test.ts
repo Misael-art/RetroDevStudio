@@ -1134,6 +1134,53 @@ describe("ArtStudioPanel import flow", () => {
     expect(findButton(container, /Aplicar/).disabled).toBe(true);
   });
 
+  it("uses accessible Inspector tabs without removing inactive content from the workflow", async () => {
+    const tablist = Array.from(container.querySelectorAll<HTMLElement>("[role='tablist']")).find(
+      (element) => element.getAttribute("aria-label") === "Seções do Inspector do Art Studio"
+    );
+    expect(tablist).toBeDefined();
+    expect(tablist?.querySelectorAll("[role='tab']")).toHaveLength(4);
+
+    await act(async () => {
+      findButton(container, "Exportar").click();
+      await flush();
+    });
+
+    expect(findButton(container, "Exportar").getAttribute("aria-selected")).toBe("true");
+    expect(
+      container.querySelector("[role='tabpanel'][aria-labelledby='rds-tab-art-export']")?.hasAttribute("hidden")
+    ).toBe(false);
+    expect(
+      container.querySelector("[role='tabpanel'][aria-labelledby='rds-tab-art-preview']")?.hasAttribute("hidden")
+    ).toBe(true);
+  });
+
+  it("reorders timeline frames with Alt plus arrow keys", async () => {
+    await act(async () => {
+      window.__RDS_ARTSTUDIO_E2E__?.setSequenceFrames("seq_attack", [0, 1, 2]);
+      await flush();
+    });
+
+    const middleFrame = container.querySelector(
+      "[data-testid='artstudio-frame-chip-seq_attack-1']"
+    ) as HTMLButtonElement | null;
+    expect(middleFrame?.getAttribute("aria-keyshortcuts")).toContain("Alt+ArrowRight");
+
+    await act(async () => {
+      middleFrame?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowRight", altKey: true, bubbles: true })
+      );
+      await flush();
+    });
+
+    const frames = Array.from(
+      container.querySelectorAll<HTMLButtonElement>(
+        "[data-testid^='artstudio-frame-chip-seq_attack-']"
+      )
+    ).map((button) => button.textContent?.trim());
+    expect(frames).toEqual(["0", "2", "1"]);
+  });
+
   it("returns from no-sprite context to Scene preserving tilemap authoring focus", async () => {
     await act(async () => {
       useEditorStore.setState({

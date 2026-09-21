@@ -2182,6 +2182,32 @@ describe("App build flow", () => {
     expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
       "Primeiro Projeto"
     );
+    const activeWizardStep = container.querySelector(
+      "[aria-label='Etapas do assistente'] [aria-current='step']"
+    );
+    expect(activeWizardStep?.textContent).toContain("Template");
+    expect(container.querySelector("[data-testid='wizard-step-destination']")?.hasAttribute("hidden")).toBe(true);
+
+    await act(async () => {
+      findButton(container, "Continuar").click();
+      await flush();
+    });
+
+    expect(
+      container.querySelector("[aria-label='Etapas do assistente'] [aria-current='step']")?.textContent
+    ).toContain("Destino");
+    expect(container.querySelector("[data-testid='wizard-step-destination']")?.hasAttribute("hidden")).toBe(false);
+
+    await act(async () => {
+      findButton(container, "Continuar").click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='wizard-step-review']")?.hasAttribute("hidden")).toBe(false);
+    expect(container.querySelector("[data-testid='wizard-step-review']")?.textContent).toContain(
+      "Tudo pronto para criar"
+    );
+    expect(findButton(container, "Criar Projeto").closest("[hidden]")).toBeNull();
     expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
       "Rodar Build & Run (Mega Drive)"
     );

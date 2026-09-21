@@ -92,7 +92,7 @@ export default function AssetPreview({
     <div className="relative inline-flex max-w-full flex-col items-center justify-center">
       {previewStatus === "loading" ? (
         <div
-          className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center rounded bg-black/25 text-[9px] font-semibold uppercase tracking-wide text-[#a6adc8]"
+          className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center rounded bg-[color-mix(in_srgb,var(--rds-surface-overlay)_72%,transparent)] text-[9px] font-semibold uppercase tracking-wide text-[var(--rds-text-secondary)]"
           aria-live="polite"
         >
           Carregando…

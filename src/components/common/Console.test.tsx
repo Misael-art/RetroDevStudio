@@ -61,6 +61,8 @@ describe("Console actionable diagnostics", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = null;
+    localStorage.removeItem("retrodev-console-height");
+    localStorage.removeItem("retrodev-console-details-width");
     useEditorStore.setState({ consoleEntries: [], consoleVisible: true });
     clipboardWrite = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -145,5 +147,43 @@ describe("Console actionable diagnostics", () => {
     click(container, "console-filter-area-build_sgdk");
     expect(container.textContent).not.toContain("Projeto carregado.");
     expect(container.textContent).toContain("Build falhou porque");
+  });
+
+  it("redimensiona o drawer e os detalhes por teclado e persiste a geometria", () => {
+    act(() => {
+      useEditorStore.getState().logDiagnostic(buildDiagnostic);
+    });
+    root = renderConsole(container);
+
+    const drawer = container.querySelector<HTMLElement>("[data-testid='console-drawer']");
+    const drawerSeparator = container.querySelector<HTMLButtonElement>(
+      "[role='separator'][aria-label='Redimensionar Console']"
+    );
+    expect(drawer?.style.height).toBe("300px");
+
+    act(() => {
+      drawerSeparator?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowUp", shiftKey: true, bubbles: true })
+      );
+    });
+
+    expect(drawer?.style.height).toBe("332px");
+    expect(drawerSeparator?.getAttribute("aria-valuenow")).toBe("332");
+    expect(localStorage.getItem("retrodev-console-height")).toBe("332");
+
+    const detailsSeparator = container.querySelector<HTMLButtonElement>(
+      "[role='separator'][aria-label='Redimensionar detalhes do Console']"
+    );
+    act(() => {
+      detailsSeparator?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })
+      );
+    });
+
+    expect(detailsSeparator?.getAttribute("aria-valuenow")).toBe("338");
+    expect(localStorage.getItem("retrodev-console-details-width")).toBe("338");
+    expect(container.querySelector<HTMLElement>("[data-testid='console-details']")?.style.width).toBe(
+      "338px"
+    );
   });
 });

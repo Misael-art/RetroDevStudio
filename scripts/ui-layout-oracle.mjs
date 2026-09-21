@@ -5,16 +5,104 @@ export const UI_LAYOUT_ORACLE_RESOLUTIONS = [
   { width: 2560, height: 1080, tag: "2560x1080" },
 ];
 
-export const UI_LAYOUT_ORACLE_TARGETS = [
-  { id: "import-wizard", label: "Import Wizard", workspaceId: null, visualKind: "wizard" },
-  { id: "scene", label: "Scene", workspaceId: "scene", visualKind: "scene" },
-  { id: "art", label: "Art", workspaceId: "artstudio", visualKind: "art" },
-  { id: "logic", label: "Logic", workspaceId: "logic", visualKind: "nodegraph" },
-  { id: "nodegraph", label: "NodeGraph", workspaceId: "logic", visualKind: "nodegraph" },
-  { id: "game", label: "Game", workspaceId: "game", visualKind: "game" },
-  { id: "debug", label: "Debug", workspaceId: "debug", visualKind: "debug" },
-  { id: "runtime-setup", label: "Runtime Setup", workspaceId: "debug", visualKind: "runtime" },
+export const UI_LAYOUT_ORACLE_SURFACES = [
+  { id: "design-system", label: "Design system / primitives", targetIds: ["shell-primitives"] },
+  { id: "wizard", label: "Wizard de primeiro uso", targetIds: ["import-wizard"] },
+  { id: "scene-shell", label: "Scene shell", targetIds: ["scene"] },
+  { id: "game", label: "Game", targetIds: ["game"] },
+  { id: "explorer-assets", label: "Explorer / Asset Browser", targetIds: ["explorer"] },
+  { id: "logic-nodegraph", label: "Logic / NodeGraph", targetIds: ["logic", "nodegraph"] },
+  { id: "art-fx", label: "Art + FX (Experimental)", targetIds: ["art", "retrofx"] },
+  { id: "debug-tools", label: "Debug / Tools", targetIds: ["debug"] },
+  { id: "runtime-setup", label: "Runtime Setup", targetIds: ["runtime-setup"] },
+  { id: "console-states", label: "Console + estados globais", targetIds: ["console"] },
+  { id: "command-dialog", label: "Command Palette + Dialog", targetIds: ["command-palette"] },
+  {
+    id: "reverse-evidence",
+    label: "Reverse + Laboratorio de Evidencias (Experimental)",
+    targetIds: ["reverse-evidence"],
+  },
 ];
+
+export const UI_LAYOUT_ORACLE_TARGETS = [
+  {
+    id: "shell-primitives",
+    surfaceId: "design-system",
+    label: "Shell / Primitives",
+    workspaceId: "scene",
+    visualKind: null,
+    requiredElements: ["topbar", "buildButton"],
+  },
+  {
+    id: "import-wizard",
+    surfaceId: "wizard",
+    label: "Import Wizard",
+    workspaceId: null,
+    visualKind: "wizard",
+    requiredElements: ["importWizard"],
+  },
+  { id: "scene", surfaceId: "scene-shell", label: "Scene", workspaceId: "scene", visualKind: "scene" },
+  { id: "art", surfaceId: "art-fx", label: "Art", workspaceId: "artstudio", visualKind: "art" },
+  { id: "logic", surfaceId: "logic-nodegraph", label: "Logic", workspaceId: "logic", visualKind: "nodegraph" },
+  {
+    id: "nodegraph",
+    surfaceId: "logic-nodegraph",
+    label: "NodeGraph",
+    workspaceId: "logic",
+    visualKind: "nodegraph",
+  },
+  { id: "game", surfaceId: "game", label: "Game", workspaceId: "game", visualKind: "game" },
+  { id: "debug", surfaceId: "debug-tools", label: "Debug", workspaceId: "debug", visualKind: "debug" },
+  {
+    id: "runtime-setup",
+    surfaceId: "runtime-setup",
+    label: "Runtime Setup",
+    workspaceId: "debug",
+    visualKind: "runtime",
+    requiredElements: ["runtimeSetup"],
+  },
+  {
+    id: "explorer",
+    surfaceId: "explorer-assets",
+    label: "Explorer / Asset Browser",
+    workspaceId: "explorer",
+    visualKind: null,
+  },
+  {
+    id: "retrofx",
+    surfaceId: "art-fx",
+    label: "RetroFX (Experimental)",
+    workspaceId: "retrofx",
+    visualKind: null,
+  },
+  {
+    id: "console",
+    surfaceId: "console-states",
+    label: "Console + estados globais",
+    workspaceId: "scene",
+    visualKind: null,
+    requiredElements: ["consoleDrawer"],
+  },
+  {
+    id: "command-palette",
+    surfaceId: "command-dialog",
+    label: "Command Palette + Dialog",
+    workspaceId: "scene",
+    visualKind: null,
+    requiredElements: ["commandPalette"],
+  },
+  {
+    id: "reverse-evidence",
+    surfaceId: "reverse-evidence",
+    label: "Reverse + Laboratorio de Evidencias (Experimental)",
+    workspaceId: "debug",
+    visualKind: null,
+    requiredElements: ["reverseWorkspace"],
+  },
+];
+
+export const UI_LAYOUT_ORACLE_REQUIRED_CELL_COUNT =
+  UI_LAYOUT_ORACLE_SURFACES.length * UI_LAYOUT_ORACLE_RESOLUTIONS.length;
 
 const SHELL_EXPECTATIONS = {
   scene: { showLeft: true, showRight: true },
@@ -40,6 +128,15 @@ const CENTER_MIN_HEIGHT_BY_RESOLUTION = {
   "2560x1080": 380,
 };
 
+const LAYOUT_PROFILE_BY_RESOLUTION = {
+  "1366x768": "compact",
+  "1600x900": "standard",
+  "1920x1080": "standard",
+  "2560x1080": "wide",
+};
+
+const MIN_INTERACTIVE_TARGET_PX = 24;
+
 const VISUAL_MINIMUMS = {
   scene: { width: 320, height: 224 },
   game: { width: 320, height: 224 },
@@ -49,6 +146,25 @@ const VISUAL_MINIMUMS = {
   wizard: { width: 520, height: 360 },
   debug: { width: 320, height: 220 },
 };
+
+const ACCESSIBLE_NAME_ROLES = new Set([
+  "button",
+  "checkbox",
+  "combobox",
+  "dialog",
+  "link",
+  "menuitem",
+  "option",
+  "radio",
+  "searchbox",
+  "slider",
+  "spinbutton",
+  "switch",
+  "tab",
+  "textbox",
+]);
+
+const CONTROL_TAGS = new Set(["button", "input", "select", "summary", "textarea"]);
 
 function roundMetric(value) {
   return Number.isFinite(value) ? Math.round(value) : 0;
@@ -138,6 +254,34 @@ function hasTooltip(item) {
   );
 }
 
+function hasAccessibleName(item) {
+  return Boolean(
+    String(item?.accessibleName ?? "").trim() ||
+      String(item?.ariaLabel ?? "").trim() ||
+      String(item?.ariaLabelledBy ?? "").trim() ||
+      String(item?.title ?? "").trim() ||
+      String(item?.text ?? "").trim()
+  );
+}
+
+function roleOf(item) {
+  return String(item?.role ?? "").trim().toLowerCase();
+}
+
+function isControlTarget(item) {
+  const role = roleOf(item);
+  return CONTROL_TAGS.has(String(item?.tag ?? "").toLowerCase()) || ACCESSIBLE_NAME_ROLES.has(role);
+}
+
+function recordLimitation(limitations, code, message, details = {}) {
+  if (limitations.some((limitation) => limitation.code === code)) return;
+  limitations.push({ code, message, details });
+}
+
+function requiredTargetIdsForSurface(surface) {
+  return [...surface.targetIds];
+}
+
 function pushIssue(issues, code, message, details = {}) {
   issues.push({ code, message, details });
 }
@@ -161,12 +305,40 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
   const target = findTarget(snapshot.targetId);
   const viewport = snapshot.viewport ?? { width: 0, height: 0 };
   const issues = [];
+  const limitations = [];
   const metrics = {
     viewportWidth: roundMetric(viewport.width),
     viewportHeight: roundMetric(viewport.height),
+    expectedLayoutProfile: LAYOUT_PROFILE_BY_RESOLUTION[snapshot.resolutionTag] ?? null,
   };
   const elements = snapshot.elements ?? {};
   const workspaceId = snapshot.workspaceId ?? target.workspaceId;
+
+  if (snapshot.layoutProfile) {
+    metrics.layoutProfile = snapshot.layoutProfile;
+    const expectedLayoutProfile = LAYOUT_PROFILE_BY_RESOLUTION[snapshot.resolutionTag];
+    if (expectedLayoutProfile && snapshot.layoutProfile !== expectedLayoutProfile) {
+      pushIssue(issues, "unexpected-layout-profile", "perfil responsivo diferente do esperado", {
+        actual: snapshot.layoutProfile,
+        expected: expectedLayoutProfile,
+      });
+    }
+  } else {
+    recordLimitation(
+      limitations,
+      "layout-profile-not-observed",
+      "snapshot nao informou o perfil responsivo computado"
+    );
+  }
+
+  for (const elementKey of target.requiredElements ?? []) {
+    if (!isVisible(elements[elementKey])) {
+      pushIssue(issues, "required-surface-element-missing", "elemento obrigatorio da superficie nao encontrado", {
+        elementKey,
+        targetId: target.id,
+      });
+    }
+  }
 
   if (snapshot.document) {
     metrics.documentClientWidth = roundMetric(snapshot.document.clientWidth);
@@ -176,6 +348,31 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
         scrollWidth: snapshot.document.scrollWidth,
         clientWidth: snapshot.document.clientWidth,
       });
+    }
+  }
+
+  if (snapshot.surfaceRoot) {
+    const rootRect = normalizeRect(snapshot.surfaceRoot.rect);
+    if (!isVisible(snapshot.surfaceRoot)) {
+      pushIssue(issues, "surface-root-not-visible", "raiz da superficie nao esta visivel", {
+        targetId: target.id,
+      });
+    } else {
+      if (rectOutsideViewport(rootRect, viewport) && !isAllowedScrollableOverflow(snapshot.surfaceRoot, rootRect, viewport)) {
+        pushIssue(issues, "surface-root-outside-viewport", "raiz da superficie ultrapassa a viewport", {
+          targetId: target.id,
+        });
+      }
+      if (
+        Number(snapshot.surfaceRoot.scrollWidth ?? 0) > Number(snapshot.surfaceRoot.clientWidth ?? 0) + 2 &&
+        !snapshot.surfaceRoot.horizontalScrollAllowed
+      ) {
+        pushIssue(issues, "surface-horizontal-overflow", "superficie com overflow horizontal indevido", {
+          targetId: target.id,
+          scrollWidth: snapshot.surfaceRoot.scrollWidth,
+          clientWidth: snapshot.surfaceRoot.clientWidth,
+        });
+      }
     }
   }
 
@@ -277,13 +474,17 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
   }
 
   const consoleDrawer = elements.consoleDrawer;
-  if (consoleDrawer?.dataVisible === "true") {
+  if (consoleDrawer?.dataVisible === "true" && target.id !== "console") {
     pushIssue(issues, "console-open-by-default", "console drawer aberto durante QA visual");
     if (isVisible(consoleDrawer) && isVisible(elements.statusBar)) {
       if (consoleDrawer.rect.bottom > elements.statusBar.rect.top + 1) {
         pushIssue(issues, "console-overlaps-status-bar", "console drawer cobre a status bar");
       }
     }
+  }
+
+  if (target.id === "console" && consoleDrawer?.dataVisible !== "true") {
+    pushIssue(issues, "console-surface-not-open", "console nao esta aberto no alvo dedicado");
   }
 
   const visibleClickables = (snapshot.clickables ?? []).filter((item) => isVisible(item) && !item.disabled);
@@ -301,6 +502,31 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
           right: roundMetric(rect.right),
           bottom: roundMetric(rect.bottom),
         },
+      });
+    }
+
+    if (
+      isControlTarget(clickable) &&
+      !clickable.targetSizeExempt &&
+      (rect.width < MIN_INTERACTIVE_TARGET_PX || rect.height < MIN_INTERACTIVE_TARGET_PX)
+    ) {
+      pushIssue(issues, "interactive-target-too-small", "alvo interativo menor que 24x24 px", {
+        key: clickable.key,
+        width: roundMetric(rect.width),
+        height: roundMetric(rect.height),
+        minimum: MIN_INTERACTIVE_TARGET_PX,
+      });
+    }
+
+    const role = roleOf(clickable);
+    const tag = String(clickable.tag ?? "").toLowerCase();
+    const requiresAccessibleName =
+      ACCESSIBLE_NAME_ROLES.has(role) || tag === "button" || (tag === "a" && Boolean(clickable.href));
+    if (requiresAccessibleName && !hasAccessibleName(clickable)) {
+      pushIssue(issues, "interactive-accessible-name-missing", "controle interativo sem nome acessivel", {
+        key: clickable.key,
+        role,
+        tag,
       });
     }
   }
@@ -363,6 +589,184 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
         key: scrollItem.key,
         scrollWidth: scrollItem.scrollWidth,
         clientWidth: scrollItem.clientWidth,
+      });
+    }
+  }
+
+  for (const region of (snapshot.trackedRegions ?? []).filter(isVisible)) {
+    const rect = normalizeRect(region.rect);
+    if (rectOutsideViewport(rect, viewport) && !isAllowedScrollableOverflow(region, rect, viewport)) {
+      pushIssue(issues, "tracked-region-outside-viewport", "regiao critica ultrapassa a viewport", {
+        key: region.key,
+      });
+    }
+    if (
+      Number(region.scrollWidth ?? 0) > Number(region.clientWidth ?? 0) + 2 &&
+      !region.horizontalScrollAllowed
+    ) {
+      pushIssue(issues, "tracked-region-horizontal-overflow", "regiao critica tem overflow horizontal indevido", {
+        key: region.key,
+        scrollWidth: region.scrollWidth,
+        clientWidth: region.clientWidth,
+      });
+    }
+  }
+
+  const semanticNodes = snapshot.semanticNodes ?? [];
+  if (semanticNodes.length === 0) {
+    recordLimitation(
+      limitations,
+      "aria-structure-not-observed",
+      "snapshot nao trouxe a estrutura ARIA de dialogs, tabs, menus e comboboxes"
+    );
+    if (snapshot.requireA11yEvidence) {
+      pushIssue(issues, "aria-evidence-missing", "evidencia ARIA obrigatoria nao foi coletada");
+    }
+  }
+  for (const node of semanticNodes.filter((item) => item?.visible ?? true)) {
+    const role = roleOf(node);
+    if (ACCESSIBLE_NAME_ROLES.has(role) && !hasAccessibleName(node)) {
+      pushIssue(issues, "aria-name-missing", "elemento ARIA sem nome acessivel", {
+        key: node.key,
+        role,
+      });
+    }
+    if (role === "dialog" && node.ariaModal !== true && node.ariaModal !== "true") {
+      pushIssue(issues, "dialog-aria-modal-missing", "dialog aberto sem aria-modal=true", {
+        key: node.key,
+      });
+    }
+    if (role === "tab") {
+      if (node.ariaSelected !== true && node.ariaSelected !== false && node.ariaSelected !== "true" && node.ariaSelected !== "false") {
+        pushIssue(issues, "tab-aria-selected-missing", "tab sem estado aria-selected", {
+          key: node.key,
+        });
+      }
+      if (!String(node.ariaControls ?? "").trim()) {
+        pushIssue(issues, "tab-aria-controls-missing", "tab sem referencia aria-controls", {
+          key: node.key,
+        });
+      }
+      if (node.parentRole && node.parentRole !== "tablist") {
+        pushIssue(issues, "tab-outside-tablist", "tab fora de um tablist", {
+          key: node.key,
+          parentRole: node.parentRole,
+        });
+      }
+    }
+    if (role === "menuitem" && node.parentRole && node.parentRole !== "menu") {
+      pushIssue(issues, "menuitem-outside-menu", "menuitem fora de um menu", {
+        key: node.key,
+        parentRole: node.parentRole,
+      });
+    }
+    if (role === "combobox") {
+      if (node.ariaExpanded !== true && node.ariaExpanded !== false && node.ariaExpanded !== "true" && node.ariaExpanded !== "false") {
+        pushIssue(issues, "combobox-aria-expanded-missing", "combobox sem estado aria-expanded", {
+          key: node.key,
+        });
+      }
+      if (!String(node.ariaControls ?? "").trim()) {
+        pushIssue(issues, "combobox-aria-controls-missing", "combobox sem referencia aria-controls", {
+          key: node.key,
+        });
+      }
+    }
+    if (role === "option" && node.ariaSelected == null) {
+      pushIssue(issues, "option-aria-selected-missing", "option sem estado aria-selected", {
+        key: node.key,
+      });
+    }
+  }
+
+  const focusChecks = snapshot.focusChecks ?? [];
+  if (focusChecks.length === 0) {
+    recordLimitation(
+      limitations,
+      "focus-evidence-not-observed",
+      "snapshot estatico nao exercitou foco visivel e nao obscurecido"
+    );
+    if (snapshot.requireA11yEvidence) {
+      pushIssue(issues, "focus-evidence-missing", "evidencia de foco obrigatoria nao foi coletada");
+    }
+  }
+  for (const focusCheck of focusChecks) {
+    if (focusCheck.focusVisible !== true) {
+      pushIssue(issues, "focus-indicator-not-visible", "controle focado sem indicador visivel", {
+        key: focusCheck.key,
+      });
+    }
+    if (focusCheck.obscured === true) {
+      pushIssue(issues, "focus-indicator-obscured", "controle focado esta obscurecido por outra regiao", {
+        key: focusCheck.key,
+        obscuredBy: focusCheck.obscuredBy ?? null,
+      });
+    }
+    const focusRect = normalizeRect(focusCheck.rect);
+    if (focusRect && rectOutsideViewport(focusRect, viewport)) {
+      pushIssue(issues, "focused-control-outside-viewport", "controle focado ficou fora da viewport", {
+        key: focusCheck.key,
+      });
+    }
+  }
+
+  const contrastSamples = snapshot.contrastSamples ?? [];
+  if (contrastSamples.length === 0) {
+    recordLimitation(
+      limitations,
+      "contrast-not-observed",
+      "snapshot nao trouxe razoes de contraste dos estilos computados"
+    );
+    if (snapshot.requireA11yEvidence) {
+      pushIssue(issues, "contrast-evidence-missing", "evidencia de contraste obrigatoria nao foi coletada");
+    }
+  }
+  for (const sample of contrastSamples.filter((item) => item?.visible ?? true)) {
+    const ratio = Number(sample.ratio);
+    if (!Number.isFinite(ratio)) {
+      recordLimitation(limitations, "contrast-sample-unreadable", "amostra de contraste sem razao calculavel", {
+        key: sample.key,
+      });
+      continue;
+    }
+    const minimum = sample.nonText || sample.largeText ? 3 : 4.5;
+    if (ratio + 0.001 < minimum) {
+      pushIssue(issues, sample.nonText ? "non-text-contrast-too-low" : "text-contrast-too-low", "contraste abaixo de WCAG 2.2 AA", {
+        key: sample.key,
+        ratio,
+        minimum,
+      });
+    }
+  }
+
+  const adjustableRegions = snapshot.adjustableRegions ?? [];
+  if (snapshot.requireAdaptiveEvidence && adjustableRegions.length === 0) {
+    pushIssue(issues, "adaptive-region-evidence-missing", "evidencia de resize/movimento/auto-ocultacao nao foi coletada");
+  }
+  for (const region of adjustableRegions) {
+    if (region.requiresManualResize && !region.manualResize) {
+      pushIssue(issues, "manual-resize-missing", "regiao ajustavel sem redimensionamento manual", {
+        key: region.key,
+      });
+    }
+    if (region.requiresAutomaticResize && !region.automaticResize) {
+      pushIssue(issues, "automatic-resize-missing", "regiao ajustavel sem redimensionamento automatico", {
+        key: region.key,
+      });
+    }
+    if (region.informationBox && !region.movable) {
+      pushIssue(issues, "information-box-move-missing", "caixa informativa sem alternativa de movimentacao", {
+        key: region.key,
+      });
+    }
+    if (region.informationBox && !region.autoHide) {
+      pushIssue(issues, "information-box-auto-hide-missing", "caixa informativa sem auto-ocultacao", {
+        key: region.key,
+      });
+    }
+    if (region.critical && region.autoHidden) {
+      pushIssue(issues, "critical-region-auto-hidden", "alerta critico foi auto-ocultado", {
+        key: region.key,
       });
     }
   }
@@ -437,18 +841,25 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
 
   return {
     targetId: target.id,
+    surfaceId: target.surfaceId ?? target.id,
     targetLabel: target.label,
     workspaceId,
     resolutionTag: snapshot.resolutionTag,
     ok: issues.length === 0,
     status: issues.length === 0 ? "passed" : "failed",
     issues,
+    limitations,
     metrics,
     screenshot: snapshot.screenshot ?? null,
   };
 }
 
-export function buildUiLayoutOracleReport({ artifactPrefix, records, generatedAt = new Date().toISOString() }) {
+export function buildUiLayoutOracleReport({
+  artifactPrefix,
+  records,
+  generatedAt = new Date().toISOString(),
+  requireCompleteMatrix = false,
+}) {
   const targets = {};
   for (const record of records) {
     if (!targets[record.targetId]) {
@@ -458,23 +869,78 @@ export function buildUiLayoutOracleReport({ artifactPrefix, records, generatedAt
       status: record.ok ? "passed" : "failed",
       workspaceId: record.workspaceId ?? null,
       issues: record.issues ?? [],
+      limitations: record.limitations ?? [],
       metrics: record.metrics ?? {},
       screenshot: record.screenshot ?? null,
     };
   }
 
   const failedRecords = records.filter((record) => !record.ok);
+  const surfaces = {};
+  let coveredSurfaceCells = 0;
+  let passedSurfaceCells = 0;
+  let failedSurfaceCells = 0;
+  const missingSurfaceCells = [];
+
+  for (const surface of UI_LAYOUT_ORACLE_SURFACES) {
+    surfaces[surface.id] = {};
+    const requiredTargetIds = requiredTargetIdsForSurface(surface);
+    for (const resolution of UI_LAYOUT_ORACLE_RESOLUTIONS) {
+      const matchingRecords = records.filter(
+        (record) =>
+          requiredTargetIds.includes(record.targetId) && record.resolutionTag === resolution.tag
+      );
+      const presentTargetIds = new Set(matchingRecords.map((record) => record.targetId));
+      const missingTargetIds = requiredTargetIds.filter((targetId) => !presentTargetIds.has(targetId));
+      const failedTargetIds = matchingRecords
+        .filter((record) => !record.ok)
+        .map((record) => record.targetId);
+      const complete = missingTargetIds.length === 0;
+      const passed = complete && failedTargetIds.length === 0;
+      const status = !complete ? "missing" : passed ? "passed" : "failed";
+      if (complete) coveredSurfaceCells += 1;
+      if (passed) passedSurfaceCells += 1;
+      if (status === "failed") failedSurfaceCells += 1;
+      if (!complete) {
+        missingSurfaceCells.push({
+          surfaceId: surface.id,
+          resolutionTag: resolution.tag,
+          missingTargetIds,
+        });
+      }
+      surfaces[surface.id][resolution.tag] = {
+        status,
+        requiredTargetIds,
+        presentTargetIds: [...presentTargetIds],
+        missingTargetIds,
+        failedTargetIds,
+      };
+    }
+  }
+
+  const coverageComplete = missingSurfaceCells.length === 0;
+  const reportFailed = failedRecords.length > 0 || (requireCompleteMatrix && !coverageComplete);
   return {
     generatedAt,
     artifactPrefix,
-    status: failedRecords.length === 0 ? "passed" : "failed",
+    status: reportFailed ? "failed" : "passed",
     summary: {
       total: records.length,
       passed: records.length - failedRecords.length,
       failed: failedRecords.length,
     },
+    coverage: {
+      status: coverageComplete ? "complete" : "incomplete",
+      requiredSurfaceCells: UI_LAYOUT_ORACLE_REQUIRED_CELL_COUNT,
+      coveredSurfaceCells,
+      passedSurfaceCells,
+      failedSurfaceCells,
+      missingSurfaceCells,
+    },
     requiredResolutions: UI_LAYOUT_ORACLE_RESOLUTIONS.map((resolution) => resolution.tag),
     requiredTargets: UI_LAYOUT_ORACLE_TARGETS.map((target) => target.id),
+    requiredSurfaces: UI_LAYOUT_ORACLE_SURFACES.map((surface) => surface.id),
     targets,
+    surfaces,
   };
 }

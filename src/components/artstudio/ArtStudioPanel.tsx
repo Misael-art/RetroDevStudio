@@ -16,7 +16,10 @@ import {
 import { flushSync } from "react-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Group, Panel } from "react-resizable-panels";
+import Button from "../common/Button";
+import Icon from "../common/Icon";
 import LayoutSplitter from "../common/LayoutSplitter";
+import Tabs from "../common/Tabs";
 import { useEditorStore, type HwStatus } from "../../core/store/editorStore";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import {
@@ -1658,9 +1661,28 @@ function ArtStudioTimelineSection() {
                           type="button"
                           draggable
                           data-testid={`artstudio-frame-chip-${sequence.id}-${frameIndex}`}
+                          aria-label={`Frame ${frame}, posição ${frameIndex + 1} de ${sequence.frames.length}. Alt mais setas move o frame.`}
+                          aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight"
                           onClick={(event) => {
                             event.stopPropagation();
                             dispatch({ type: "SELECT_SEQUENCE", id: sequence.id });
+                          }}
+                          onKeyDown={(event) => {
+                            if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const toIndex = Math.min(
+                              sequence.frames.length - 1,
+                              Math.max(0, frameIndex + (event.key === "ArrowLeft" ? -1 : 1))
+                            );
+                            dispatch({
+                              type: "MOVE_SEQUENCE_FRAME",
+                              id: sequence.id,
+                              fromIndex: frameIndex,
+                              toIndex,
+                            });
                           }}
                           onDragStart={(event) => {
                             event.stopPropagation();
@@ -1880,6 +1902,9 @@ function ArtStudioTimelineSection() {
 }
 
 function ArtStudioInspectorSection() {
+  const [inspectorTab, setInspectorTab] = useState<
+    "art-preview" | "art-animation" | "art-export" | "art-diagnostics"
+  >("art-preview");
   const {
     state,
     dispatch,
@@ -1952,7 +1977,27 @@ function ArtStudioInspectorSection() {
         <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">Preview, output e apply</h3>
       </div>
 
+      <div className="overflow-x-auto">
+        <Tabs
+          ariaLabel="Seções do Inspector do Art Studio"
+          tabs={[
+            { id: "art-preview", label: "Preview" },
+            { id: "art-animation", label: "Animação" },
+            { id: "art-export", label: "Exportar" },
+            { id: "art-diagnostics", label: "Diagnóstico" },
+          ]}
+          activeTab={inspectorTab}
+          onTabChange={(id) => setInspectorTab(id as typeof inspectorTab)}
+          className="min-w-max"
+        />
+      </div>
+
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <div
+          role="tabpanel"
+          aria-labelledby="rds-tab-art-preview"
+          hidden={inspectorTab !== "art-preview"}
+        >
         <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
           <div className="flex items-center justify-between">
             <div>
@@ -2020,7 +2065,13 @@ function ArtStudioInspectorSection() {
             </span>
           </div>
         </div>
+        </div>
 
+        <div
+          role="tabpanel"
+          aria-labelledby="rds-tab-art-animation"
+          hidden={inspectorTab !== "art-animation"}
+        >
         {activeSequence ? (
           <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
             <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
@@ -2320,7 +2371,14 @@ function ArtStudioInspectorSection() {
             </dl>
           </div>
         )}
+        </div>
 
+        <div
+          role="tabpanel"
+          aria-labelledby="rds-tab-art-diagnostics"
+          hidden={inspectorTab !== "art-diagnostics"}
+          className="space-y-3"
+        >
         <details className="rounded-2xl border border-[#1f2937] bg-[#0f172a] p-3">
           <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
             Diagnostico ({state.spriteSheetWarnings.length})
@@ -2478,7 +2536,14 @@ function ArtStudioInspectorSection() {
             </dd>
           </dl>
         </div>
+        </div>
 
+        <div
+          role="tabpanel"
+          aria-labelledby="rds-tab-art-export"
+          hidden={inspectorTab !== "art-export"}
+          className="space-y-3"
+        >
         <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
             Configuracoes de exportacao
@@ -2651,6 +2716,7 @@ function ArtStudioInspectorSection() {
               ? "Aplicar nesta entidade"
               : "Aplicar e criar entidade na cena"}
         </button>
+        </div>
       </div>
     </section>
   );
@@ -4029,7 +4095,8 @@ export default function ArtStudioPanel() {
       <div className="flex h-full flex-col gap-2 bg-[#0b0f19]">
       <div className="mx-3 mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#313244]/80 bg-[#111827]/90 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="rounded-full border border-[#fab387]/35 bg-[#fab387]/12 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#fab387]">
+          <span className="flex items-center gap-1 rounded-full border border-[var(--rds-status-warning)] bg-[color-mix(in_srgb,var(--rds-status-warning)_10%,transparent)] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--rds-status-warning)]">
+            <Icon name="palette" size={13} />
             Experimental
           </span>
           <span className="truncate text-[11px] font-semibold text-[#e2e8f0]">Art Studio</span>
@@ -4101,10 +4168,10 @@ export default function ArtStudioPanel() {
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-3 px-3 pb-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-wrap content-start gap-3 overflow-y-auto overflow-x-hidden px-3 pb-3">
         <Group
           orientation="vertical"
-          className="min-h-0"
+          className="min-h-[32rem] min-w-[min(100%,36rem)] flex-[999_1_44rem]"
         >
           <Panel minSize={52} defaultSize={78}>
             <section
@@ -4120,20 +4187,22 @@ export default function ArtStudioPanel() {
                 <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">Canvas de origem</h3>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  iconStart={<Icon name="terminal" size={15} />}
                   onClick={handleImportCommandDat}
-                  className="rounded-xl border border-[#94e2d5]/45 bg-[#94e2d5]/12 px-3 py-2 text-xs font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/22"
                 >
                   Importar command.dat
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  iconStart={<Icon name="folder" size={15} />}
                   onClick={handleLoadSpriteSheet}
-                  className="rounded-xl border border-[#f9e2af]/50 bg-[#f9e2af]/14 px-4 py-2 text-xs font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/22"
                 >
                   Importar imagem
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -4273,7 +4342,9 @@ export default function ArtStudioPanel() {
           </Panel>
         </Group>
 
-        <ArtStudioInspectorSection />
+        <div className="min-h-[32rem] min-w-[min(100%,20rem)] flex-[1_1_22rem]">
+          <ArtStudioInspectorSection />
+        </div>
       </div>
       </div>
     </ArtStudioContext.Provider>

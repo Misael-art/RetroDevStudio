@@ -1,5 +1,18 @@
 const MD_WIDTH = 320;
 const MD_HEIGHT = 224;
+const SNES_WIDTH = 256;
+const SNES_HEIGHT = 224;
+
+export type GameViewportTarget = "megadrive" | "snes";
+
+export function getGameViewportDimensions(target: GameViewportTarget): {
+  width: number;
+  height: number;
+} {
+  return target === "snes"
+    ? { width: SNES_WIDTH, height: SNES_HEIGHT }
+    : { width: MD_WIDTH, height: MD_HEIGHT };
+}
 
 export function getGameViewportScale(
   availableWidth: number,

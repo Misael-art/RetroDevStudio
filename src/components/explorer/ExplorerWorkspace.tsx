@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import AssetPreview from "../common/AssetPreview";
+import Button from "../common/Button";
+import Icon, { type IconName } from "../common/Icon";
+import Input from "../common/Input";
 import {
   listScenes,
   switchScene,
-  type SceneInfo,
   type LegacySgdkIndex,
+  type SceneInfo,
 } from "../../core/ipc/sceneService";
 import {
   listProjectAssets,
@@ -46,11 +49,10 @@ type ExplorerSelection =
   | { kind: "legacy"; path: string }
   | null;
 
-function buildLegacyIndexSections(index: LegacySgdkIndex | null): LegacyIndexSection[] {
-  if (!index) {
-    return [];
-  }
+type AssetView = "grid" | "tree";
 
+function buildLegacyIndexSections(index: LegacySgdkIndex | null): LegacyIndexSection[] {
+  if (!index) return [];
   return [
     { id: "source", label: "src/", files: index.source_files },
     { id: "headers", label: "inc/", files: index.header_files },
@@ -61,29 +63,22 @@ function buildLegacyIndexSections(index: LegacySgdkIndex | null): LegacyIndexSec
 }
 
 function countLegacyIndexedFiles(index: LegacySgdkIndex | null): number {
-  if (!index) {
-    return 0;
-  }
-
-  return (
-    index.source_files.length +
-    index.header_files.length +
-    index.manifest_files.length +
-    index.resource_files.length +
-    index.output_files.length
-  );
+  return index
+    ? index.source_files.length +
+        index.header_files.length +
+        index.manifest_files.length +
+        index.resource_files.length +
+        index.output_files.length
+    : 0;
 }
 
 function buildAssetTree(assets: ProjectAssetEntry[]): AssetTreeNode {
   const root: AssetTreeNode = { name: "", path: "", isDir: true, children: [], fileCount: 0 };
-
   for (const asset of assets) {
     const segments = asset.relative_path.replace(/\\/g, "/").split("/");
     let current = root;
-    for (let index = 0; index < segments.length; index += 1) {
-      const segment = segments[index];
+    segments.forEach((segment, index) => {
       const isLast = index === segments.length - 1;
-
       if (isLast) {
         current.children.push({
           name: segment,
@@ -93,9 +88,8 @@ function buildAssetTree(assets: ProjectAssetEntry[]): AssetTreeNode {
           asset,
           fileCount: 0,
         });
-        continue;
+        return;
       }
-
       let folder = current.children.find((child) => child.isDir && child.name === segment);
       if (!folder) {
         folder = {
@@ -108,20 +102,27 @@ function buildAssetTree(assets: ProjectAssetEntry[]): AssetTreeNode {
         current.children.push(folder);
       }
       current = folder;
-    }
+    });
   }
-
-  function countFiles(node: AssetTreeNode): number {
-    if (!node.isDir) {
-      return 1;
-    }
-    const total = node.children.reduce((sum, child) => sum + countFiles(child), 0);
-    node.fileCount = total;
-    return total;
-  }
-
+  const countFiles = (node: AssetTreeNode): number => {
+    if (!node.isDir) return 1;
+    node.fileCount = node.children.reduce((total, child) => total + countFiles(child), 0);
+    return node.fileCount;
+  };
   countFiles(root);
   return root;
+}
+
+function assetIcon(kind: ProjectAssetEntry["kind"]): IconName {
+  if (kind === "image") return "palette";
+  if (kind === "audio") return "gamepad";
+  return "info-circle";
+}
+
+function assetKindLabel(kind: ProjectAssetEntry["kind"]): string {
+  if (kind === "image") return "Imagem";
+  if (kind === "audio") return "Áudio";
+  return "Arquivo";
 }
 
 function AssetTreeBranch({
@@ -146,50 +147,53 @@ function AssetTreeBranch({
         {node.name ? (
           <button
             type="button"
+            role="treeitem"
+            aria-expanded={!isCollapsed}
             onClick={() => onToggle(node.path)}
-            className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-[#a1a1aa] transition-colors hover:bg-[#0f172a] hover:text-[#e4e4e7]"
+            className="flex min-h-7 w-full items-center gap-2 rounded-[var(--rds-radius-md)] px-2 py-1 text-left text-[11px] text-[var(--rds-text-secondary)] transition-colors hover:bg-[var(--rds-surface-hover)]"
             style={{ paddingLeft: `${depth * 14 + 8}px` }}
           >
-            <span className="text-[8px]">{isCollapsed ? "\u25b8" : "\u25be"}</span>
-            <span className="font-semibold">{node.name}/</span>
-            <span className="ml-auto text-[10px] text-[#52525b]">{node.fileCount}</span>
+            <Icon name={isCollapsed ? "sidebar-expand" : "sidebar-collapse"} size={14} />
+            <Icon name="folder" size={15} className="text-[var(--rds-status-warning)]" />
+            <span className="min-w-0 truncate font-semibold">{node.name}</span>
+            <span className="ml-auto text-[10px] text-[var(--rds-text-muted)]">{node.fileCount}</span>
           </button>
         ) : null}
-
-        {!isCollapsed &&
-          node.children.map((child) => (
-            <AssetTreeBranch
-              key={child.path}
-              node={child}
-              collapsed={collapsed}
-              selectedPath={selectedPath}
-              onToggle={onToggle}
-              onSelect={onSelect}
-              depth={node.name ? depth + 1 : depth}
-            />
-          ))}
+        {!isCollapsed
+          ? node.children.map((child) => (
+              <AssetTreeBranch
+                key={child.path}
+                node={child}
+                collapsed={collapsed}
+                selectedPath={selectedPath}
+                onToggle={onToggle}
+                onSelect={onSelect}
+                depth={node.name ? depth + 1 : depth}
+              />
+            ))
+          : null}
       </>
     );
   }
 
   const asset = node.asset!;
   const selected = asset.relative_path === selectedPath;
-
   return (
     <button
       type="button"
+      role="treeitem"
+      data-testid={`explorer-tree-asset-${asset.relative_path}`}
+      aria-selected={selected}
       onClick={() => onSelect(asset)}
       title={asset.relative_path}
-      className={`flex w-full items-center gap-2 rounded-lg py-1 text-left text-[11px] transition-colors ${
+      className={`flex min-h-8 w-full items-center gap-2 rounded-[var(--rds-radius-md)] py-1 text-left text-[11px] transition-colors ${
         selected
-          ? "bg-[#cba6f7]/10 text-[#f5e1ff]"
-          : "text-[#d4d4d8] hover:bg-[#0f172a] hover:text-[#ffffff]"
+          ? "bg-[var(--rds-surface-active)] text-[var(--rds-text-primary)]"
+          : "text-[var(--rds-text-secondary)] hover:bg-[var(--rds-surface-hover)]"
       }`}
       style={{ paddingLeft: `${depth * 14 + 8}px` }}
     >
-      <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[#27272a] bg-[#0b1120] text-[9px] font-semibold uppercase text-[#7dd3fc]">
-        {asset.kind === "image" ? "IMG" : asset.kind === "audio" ? "AUD" : "FILE"}
-      </span>
+      <Icon name={assetIcon(asset.kind)} size={15} className="text-[var(--rds-status-info)]" />
       <span className="min-w-0 truncate">{node.name}</span>
     </button>
   );
@@ -206,10 +210,11 @@ export default function ExplorerWorkspace({
     projectLegacyIndex,
     setActiveScene,
     setActiveScenePath,
+    setActiveWorkspace,
+    setArtStudioAssetPath,
     setSelectedEntityId,
     logMessage,
   } = useEditorStore();
-
   const [scenes, setScenes] = useState<SceneInfo[]>([]);
   const [assets, setAssets] = useState<ProjectAssetEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -220,8 +225,22 @@ export default function ExplorerWorkspace({
   const [legacyError, setLegacyError] = useState<string | null>(null);
   const [switchingScene, setSwitchingScene] = useState(false);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [assetView, setAssetView] = useState<AssetView>("grid");
+  const [assetQuery, setAssetQuery] = useState("");
 
-  const assetTree = useMemo(() => buildAssetTree(assets), [assets]);
+  const normalizedQuery = assetQuery.trim().toLocaleLowerCase("pt-BR");
+  const visibleAssets = useMemo(
+    () =>
+      normalizedQuery
+        ? assets.filter((asset) =>
+            `${asset.relative_path} ${assetKindLabel(asset.kind)}`
+              .toLocaleLowerCase("pt-BR")
+              .includes(normalizedQuery)
+          )
+        : assets,
+    [assets, normalizedQuery]
+  );
+  const assetTree = useMemo(() => buildAssetTree(visibleAssets), [visibleAssets]);
   const isLegacyOverlayProject = projectSourceKind === "external_sgdk" && Boolean(projectLegacyIndex);
   const legacyIndexedFileCount = useMemo(
     () => countLegacyIndexedFiles(projectLegacyIndex),
@@ -233,26 +252,10 @@ export default function ExplorerWorkspace({
   );
 
   useEffect(() => {
-    if (!onSelectionChange) {
-      return;
-    }
-
-    if (!selection) {
-      onSelectionChange(null);
-      return;
-    }
-
-    if (selection.kind === "scene") {
-      onSelectionChange(selection.scene.path);
-      return;
-    }
-
-    if (selection.kind === "asset") {
-      onSelectionChange(selection.asset.relative_path);
-      return;
-    }
-
-    onSelectionChange(selection.path);
+    if (!selection) onSelectionChange?.(null);
+    else if (selection.kind === "scene") onSelectionChange?.(selection.scene.path);
+    else if (selection.kind === "asset") onSelectionChange?.(selection.asset.relative_path);
+    else onSelectionChange?.(selection.path);
   }, [onSelectionChange, selection]);
 
   useEffect(() => {
@@ -263,76 +266,50 @@ export default function ExplorerWorkspace({
       setError(null);
       return;
     }
-
     let cancelled = false;
-
-    async function loadExplorerData() {
+    const load = async () => {
       setBusy(true);
       try {
         const [sceneList, assetList] = await Promise.all([
           listScenes(activeProjectDir),
           listProjectAssets(activeProjectDir),
         ]);
-
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setScenes(sceneList);
+          setAssets(assetList);
+          setError(null);
         }
-
-        setScenes(sceneList);
-        setAssets(assetList);
-        setError(null);
       } catch (loadError) {
-        if (!cancelled) {
-          setError(describeError(loadError));
-        }
+        if (!cancelled) setError(describeError(loadError));
       } finally {
-        if (!cancelled) {
-          setBusy(false);
-        }
+        if (!cancelled) setBusy(false);
       }
-    }
-
-    void loadExplorerData();
-
+    };
+    void load();
     return () => {
       cancelled = true;
     };
   }, [activeProjectDir]);
 
   useEffect(() => {
-    if (!activeProjectDir) {
-      return;
-    }
-
+    if (!activeProjectDir) return;
     let cancelled = false;
     let stopListening: (() => void) | null = null;
-
     void listenToProjectAssetChanges((payload) => {
-      if (cancelled || payload.project_dir !== activeProjectDir) {
-        return;
-      }
-
+      if (cancelled || payload.project_dir !== activeProjectDir) return;
       void listProjectAssets(activeProjectDir)
         .then((result) => {
-          if (!cancelled) {
-            setAssets(result);
-          }
+          if (!cancelled) setAssets(result);
         })
         .catch((loadError) => {
-          if (!cancelled) {
-            setError(describeError(loadError));
-          }
+          if (!cancelled) setError(describeError(loadError));
         });
     })
       .then((stop) => {
-        if (cancelled) {
-          stop();
-          return;
-        }
-        stopListening = stop;
+        if (cancelled) stop();
+        else stopListening = stop;
       })
       .catch(() => {});
-
     return () => {
       cancelled = true;
       stopListening?.();
@@ -346,63 +323,38 @@ export default function ExplorerWorkspace({
       setLegacyError(null);
       return;
     }
-
-    if (!activeProjectDir) {
-      return;
-    }
-
+    if (!activeProjectDir) return;
     const legacyPath = selection.path;
-
     let cancelled = false;
-
-    async function loadLegacyPreview() {
-      setLegacyBusy(true);
-      setLegacyError(null);
-      try {
-        const result = await readLegacyProjectFile(activeProjectDir, legacyPath);
-        if (!cancelled) {
-          setLegacyPreview(result);
-        }
-      } catch (previewError) {
+    setLegacyBusy(true);
+    setLegacyError(null);
+    void readLegacyProjectFile(activeProjectDir, legacyPath)
+      .then((result) => {
+        if (!cancelled) setLegacyPreview(result);
+      })
+      .catch((previewError) => {
         if (!cancelled) {
           setLegacyPreview(null);
           setLegacyError(describeError(previewError));
         }
-      } finally {
-        if (!cancelled) {
-          setLegacyBusy(false);
-        }
-      }
-    }
-
-    void loadLegacyPreview();
-
+      })
+      .finally(() => {
+        if (!cancelled) setLegacyBusy(false);
+      });
     return () => {
       cancelled = true;
     };
   }, [activeProjectDir, selection]);
 
   async function handleActivateScene(scenePath: string) {
-    if (!activeProjectDir || switchingScene) {
-      return;
-    }
-
-    if (!(await persistActiveScene(activeProjectDir, "Explorer"))) {
-      return;
-    }
-
+    if (!activeProjectDir || switchingScene) return;
+    if (!(await persistActiveScene(activeProjectDir, "Explorer"))) return;
     setSwitchingScene(true);
     try {
       const result = await switchScene(activeProjectDir, scenePath);
-      if (!result.ok) {
-        throw new Error(result.error);
-      }
-
+      if (!result.ok) throw new Error(result.error);
       const hydrated = await hydrateSceneResult(activeProjectDir, result);
-      if (!hydrated) {
-        throw new Error("Falha ao reidratar a cena selecionada.");
-      }
-
+      if (!hydrated) throw new Error("Falha ao reidratar a cena selecionada.");
       setSelectedEntityId(null);
       setActiveScenePath(result.scene_path);
       setActiveScene(hydrated.resolvedScene, hydrated.sourceScene);
@@ -414,10 +366,7 @@ export default function ExplorerWorkspace({
           scene_id: hydrated.resolvedScene.scene_id,
         },
       });
-      logMessage(
-        "success",
-        `[Explorer] Cena ativa: ${hydrated.resolvedScene.display_name ?? hydrated.resolvedScene.scene_id}`
-      );
+      logMessage("success", `[Explorer] Cena ativa: ${hydrated.resolvedScene.display_name ?? hydrated.resolvedScene.scene_id}`);
     } catch (sceneError) {
       logMessage("error", `[Explorer] Falha ao trocar cena: ${describeError(sceneError)}`);
     } finally {
@@ -426,10 +375,7 @@ export default function ExplorerWorkspace({
   }
 
   function handleRefresh() {
-    if (!activeProjectDir) {
-      return;
-    }
-
+    if (!activeProjectDir) return;
     setBusy(true);
     Promise.all([listScenes(activeProjectDir), listProjectAssets(activeProjectDir)])
       .then(([sceneList, assetList]) => {
@@ -437,372 +383,224 @@ export default function ExplorerWorkspace({
         setAssets(assetList);
         setError(null);
       })
-      .catch((refreshError) => {
-        setError(describeError(refreshError));
-      })
-      .finally(() => {
-        setBusy(false);
-      });
+      .catch((refreshError) => setError(describeError(refreshError)))
+      .finally(() => setBusy(false));
   }
 
   function toggleFolder(path: string) {
     setCollapsedFolders((current) => {
       const next = new Set(current);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
       return next;
     });
   }
 
-  const sceneCount = scenes.length;
-  const legacyCount = legacySections.reduce((count, section) => count + section.files.length, 0);
+  function openAssetInArtStudio(asset: ProjectAssetEntry) {
+    if (asset.kind !== "image") return;
+    setArtStudioAssetPath(asset.absolute_path);
+    setActiveWorkspace("artstudio");
+    logMessage("info", `[Explorer] Asset aberto no Art Studio: ${asset.relative_path}`);
+  }
+
   const selectedAssetPath = selection?.kind === "asset" ? selection.asset.relative_path : null;
+  const legacyCount = legacySections.reduce((count, section) => count + section.files.length, 0);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#09090b]">
-      <div className="flex items-center justify-between gap-3 border-b border-[#27272a] px-4 py-3">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--rds-surface-canvas)] text-[var(--rds-text-primary)]">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--rds-border-subtle)] bg-[var(--rds-surface-base)] px-4 py-3">
         <div>
+          <span className="rds-sr-only">
+            Workspace contextual de arquivos · Cenas {scenes.length}
+          </span>
           <div className="flex items-center gap-2">
-            <span className="rounded-full border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#f9e2af]">
-              Explorer
+            <Icon name="folder" size={18} className="text-[var(--rds-status-info)]" />
+            <h1 className="text-sm font-semibold">Explorer</h1>
+            <span className="rounded-full border border-[var(--rds-border-default)] px-2 py-0.5 text-[10px] font-semibold text-[var(--rds-status-warning)]">
+              Experimental
             </span>
-            <span className="text-[11px] text-[#64748b]">Workspace contextual de arquivos</span>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[#94a3b8]">
-            <span className="rounded-full border border-[#27272a] bg-[#111827] px-2.5 py-1">
-              Cenas {sceneCount}
-            </span>
-            <span className="rounded-full border border-[#27272a] bg-[#111827] px-2.5 py-1">
-              Assets {assets.length}
-            </span>
-            {legacyCount > 0 ? (
-              <span className="rounded-full border border-[#27272a] bg-[#111827] px-2.5 py-1">
-                Host SGDK {legacyCount}
-              </span>
-            ) : null}
-          </div>
+          <p className="mt-1 text-[11px] text-[var(--rds-text-muted)]">
+            Um catálogo canônico para navegar, visualizar e continuar a tarefa.
+          </p>
         </div>
+        <div className="flex items-center gap-2 text-[11px] text-[var(--rds-text-secondary)]">
+          <span>{scenes.length} cenas</span>
+          <span aria-hidden="true">·</span>
+          <span>{assets.length} assets</span>
+          {legacyCount > 0 ? <span>· {legacyCount} arquivos host</span> : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            iconStart={<Icon name="refresh" size={16} />}
+            onClick={handleRefresh}
+            disabled={!activeProjectDir}
+            loading={busy}
+            loadingLabel="Atualizando catálogo"
+          >
+            Atualizar
+          </Button>
+        </div>
+      </header>
 
-        <button
-          type="button"
-          onClick={handleRefresh}
-          disabled={!activeProjectDir || busy}
-          className="rounded-xl border border-[#313244] bg-[#111827] px-3 py-2 text-[11px] font-semibold text-[#cbd5e1] transition-colors hover:bg-[#1f2937] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {busy ? "Atualizando..." : "Atualizar"}
-        </button>
-      </div>
+      {error ? (
+        <div role="alert" className="m-3 flex items-start gap-2 rounded-[var(--rds-radius-lg)] border border-[var(--rds-status-error)] bg-[var(--rds-surface-panel)] px-3 py-2 text-xs text-[var(--rds-status-error)]">
+          <Icon name="warning-triangle" size={17} />
+          <span><strong>Não foi possível atualizar o Explorer.</strong> {error} Tente atualizar novamente.</span>
+        </div>
+      ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-0 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="min-h-0 overflow-auto border-r border-[#27272a] bg-[#0b1120]">
-          <div className="space-y-4 p-3">
-            {isLegacyOverlayProject ? (
-              <section
-                data-testid="legacy-host-summary"
-                className="rounded-2xl border border-[#3f3f46] bg-[#111827] p-3"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#f9e2af]">
-                      Overlay SGDK
-                    </div>
-                    <p className="mt-2 break-all font-mono text-[10px] text-[#cbd5e1]">
-                      {projectLegacyIndex?.host_root}
-                    </p>
-                  </div>
-                  <span className="rounded-full border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#f9e2af]">
-                    Read-only host
-                  </span>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-1.5 text-[9px] text-[#cbd5e1]">
-                  <span className="rounded-full border border-[#313244] bg-[#0b1120] px-2 py-0.5">
-                    Overlay rds/
-                  </span>
-                  <span className="rounded-full border border-[#313244] bg-[#0b1120] px-2 py-0.5">
-                    {legacyIndexedFileCount} arquivo(s) indexado(s)
-                  </span>
-                  <span className="rounded-full border border-[#313244] bg-[#0b1120] px-2 py-0.5">
-                    Build &amp; Run delega ao Makefile do host
-                  </span>
-                </div>
-                <p className="mt-3 text-[11px] leading-5 text-[#94a3b8]">
-                  Cenas e assets abaixo continuam editáveis no overlay <span className="font-mono text-[#e4e4e7]">rds/</span>.
-                  Arquivos do host SGDK seguem somente leitura nesta workspace.
-                </p>
-              </section>
-            ) : null}
-
-            <section className="rounded-2xl border border-[#1f2937] bg-[#0f172a]/60 p-3">
-              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#7dd3fc]">
-                Scenes
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(220px,0.7fr)_minmax(320px,1.4fr)_minmax(250px,0.9fr)]">
+        <aside aria-label="Estrutura do projeto" className="min-h-0 overflow-auto border-r border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3">
+          {isLegacyOverlayProject ? (
+            <section data-testid="legacy-host-summary" className="mb-3 rounded-[var(--rds-radius-lg)] border border-[var(--rds-border-default)] bg-[var(--rds-surface-panel)] p-3 text-[11px]">
+              <div className="flex items-center gap-2 font-semibold text-[var(--rds-status-warning)]">
+                <Icon name="info-circle" size={16} /> Overlay SGDK · somente leitura no host
               </div>
-              <div className="space-y-1">
-                {scenes.length > 0 ? (
-                  scenes.map((scene) => {
-                    const selected = selection?.kind === "scene" && selection.scene.path === scene.path;
-                    const active = activeScenePath === scene.path;
-                    return (
-                      <button
-                        key={scene.path}
-                        type="button"
-                        onClick={() => setSelection({ kind: "scene", scene })}
-                        className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[12px] transition-colors ${
-                          selected
-                            ? "bg-[#7dd3fc]/12 text-[#e0f2fe]"
-                            : "text-[#d4d4d8] hover:bg-[#111827] hover:text-[#ffffff]"
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate font-medium">{scene.display_name}</div>
-                          <div className="truncate text-[10px] text-[#64748b]">{scene.path}</div>
-                        </div>
-                        {active ? (
-                          <span className="rounded-full border border-[#a6e3a1]/30 bg-[#a6e3a1]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#bbf7d0]">
-                            Active
-                          </span>
-                        ) : null}
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="rounded-xl border border-dashed border-[#334155] px-3 py-4 text-[11px] text-[#64748b]">
-                    Nenhuma cena encontrada.
-                  </div>
-                )}
-              </div>
+              <p className="mt-2 break-all font-mono text-[var(--rds-text-secondary)]">{projectLegacyIndex?.host_root}</p>
+              <p className="mt-2 text-[var(--rds-text-muted)]">
+                Overlay rds/ editável · {legacyIndexedFileCount} arquivo(s) indexado(s) · Build &amp; Run delega ao Makefile do host.
+              </p>
             </section>
+          ) : null}
 
-            <section className="rounded-2xl border border-[#1f2937] bg-[#0f172a]/60 p-3">
-              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#cba6f7]">
-                Assets
-              </div>
-              <div className="space-y-1">
-                {assets.length > 0 ? (
-                  <AssetTreeBranch
-                    node={assetTree}
-                    collapsed={collapsedFolders}
-                    selectedPath={selectedAssetPath}
-                    onToggle={toggleFolder}
-                    onSelect={(asset) => setSelection({ kind: "asset", asset })}
-                    depth={0}
-                  />
-                ) : (
-                  <div className="rounded-xl border border-dashed border-[#334155] px-3 py-4 text-[11px] text-[#64748b]">
-                    Sem assets canonicos no projeto.
+          <section aria-labelledby="explorer-scenes-title">
+            <h2 id="explorer-scenes-title" className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-text-muted)]">Cenas</h2>
+            <div className="space-y-1">
+              {scenes.length ? scenes.map((scene) => {
+                const selected = selection?.kind === "scene" && selection.scene.path === scene.path;
+                return (
+                  <button
+                    key={scene.path}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setSelection({ kind: "scene", scene })}
+                    className={`flex min-h-10 w-full items-center gap-2 rounded-[var(--rds-radius-md)] px-2 py-1.5 text-left text-[11px] transition-colors ${selected ? "bg-[var(--rds-surface-active)]" : "hover:bg-[var(--rds-surface-hover)]"}`}
+                  >
+                    <Icon name="network" size={16} className="text-[var(--rds-status-info)]" />
+                    <span className="min-w-0 flex-1"><span className="block truncate font-semibold">{scene.display_name}</span><span className="block truncate text-[10px] text-[var(--rds-text-muted)]">{scene.path}</span></span>
+                    {activeScenePath === scene.path ? <span className="text-[9px] font-semibold text-[var(--rds-status-success)]">Ativa</span> : null}
+                  </button>
+                );
+              }) : <p className="rounded-[var(--rds-radius-md)] border border-dashed border-[var(--rds-border-default)] p-3 text-[11px] text-[var(--rds-text-muted)]">Nenhuma cena encontrada.</p>}
+            </div>
+          </section>
+
+          {legacySections.length ? (
+            <section className="mt-4" aria-labelledby="explorer-host-title">
+              <h2 id="explorer-host-title" className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-text-muted)]">Host SGDK</h2>
+              {legacySections.map((section) => (
+                <details key={section.id} className="mb-1" open={section.id === "source"}>
+                  <summary className="min-h-7 cursor-pointer rounded-[var(--rds-radius-md)] px-2 py-1 text-[11px] font-semibold hover:bg-[var(--rds-surface-hover)]">{section.label} <span className="text-[var(--rds-text-muted)]">{section.files.length}</span></summary>
+                  <div className="ml-2 space-y-1 border-l border-[var(--rds-border-subtle)] pl-2">
+                    {section.files.map((file) => (
+                      <button key={file} type="button" onClick={() => setSelection({ kind: "legacy", path: file })} className="min-h-7 w-full truncate rounded-[var(--rds-radius-md)] px-2 py-1 text-left font-mono text-[10px] text-[var(--rds-text-secondary)] hover:bg-[var(--rds-surface-hover)]" title={file}>{file}</button>
+                    ))}
                   </div>
-                )}
-              </div>
+                </details>
+              ))}
             </section>
-
-            {legacySections.length > 0 ? (
-              <section className="rounded-2xl border border-[#1f2937] bg-[#0f172a]/60 p-3">
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#f9e2af]">
-                  Host SGDK
-                </div>
-                <div className="space-y-3">
-                  {legacySections.map((section) => (
-                    <div key={section.id} className="rounded-xl border border-[#1f2937] bg-[#0b1120] p-2">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
-                          {section.label}
-                        </span>
-                        <span className="text-[10px] text-[#52525b]">{section.files.length}</span>
-                      </div>
-                      <div className="space-y-1">
-                        {section.files.map((file) => {
-                          const selected = selection?.kind === "legacy" && selection.path === file;
-                          return (
-                            <button
-                              key={file}
-                              type="button"
-                              onClick={() => setSelection({ kind: "legacy", path: file })}
-                              className={`w-full rounded-lg px-2 py-1 text-left font-mono text-[10px] transition-colors ${
-                                selected
-                                  ? "bg-[#f9e2af]/10 text-[#f9e2af]"
-                                  : "text-[#d4d4d8] hover:bg-[#111827]"
-                              }`}
-                              title={file}
-                            >
-                              {file}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ) : null}
-          </div>
+          ) : null}
         </aside>
 
-        <section className="min-h-0 overflow-auto bg-[radial-gradient(circle_at_top,rgba(30,41,59,0.35),transparent_45%),linear-gradient(180deg,#09090b,#111827)]">
-          <div className="min-h-full p-4">
-            {error ? (
-              <div className="rounded-2xl border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-4 py-3 text-[12px] text-[#fecdd3]">
-                {error}
-              </div>
-            ) : null}
-
-            {!error && !selection ? (
-              <div className="flex min-h-[360px] items-center justify-center rounded-3xl border border-dashed border-[#334155] bg-[#0b1120]/60 px-8 text-center">
-                <div>
-                  <div className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[#7dd3fc]">
-                    Explorer Ready
-                  </div>
-                  <p
-                    data-testid="explorer-empty-state-copy"
-                    className="mt-3 max-w-lg text-[13px] leading-6 text-[#94a3b8]"
-                  >
-                    {isLegacyOverlayProject
-                      ? "Selecione uma cena do overlay, um asset canonico ou um arquivo legado do host SGDK para navegar entre o que continua editavel em rds/ e o que permanece somente leitura."
-                      : "Selecione uma cena, asset ou arquivo legado para navegar pela estrutura sintetizada do projeto."}
-                  </p>
-                </div>
-              </div>
-            ) : null}
-
-            {selection?.kind === "scene" ? (
-              <div className="space-y-4">
-                <div className="rounded-3xl border border-[#1f2937] bg-[#0b1120]/70 p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#7dd3fc]">
-                        Scene File
-                      </div>
-                      <h2 className="mt-2 text-xl font-semibold text-[#f8fafc]">
-                        {selection.scene.display_name}
-                      </h2>
-                      <p className="mt-2 font-mono text-[12px] text-[#94a3b8]">{selection.scene.path}</p>
-                      <p
-                        data-testid="explorer-selection-source"
-                        className="mt-3 text-[11px] text-[#94a3b8]"
-                      >
-                        Origem:{" "}
-                        <span className="font-semibold text-[#e4e4e7]">
-                          {isLegacyOverlayProject ? "overlay rds/scenes" : "projeto canônico"}
-                        </span>
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void handleActivateScene(selection.scene.path)}
-                        disabled={!activeProjectDir || switchingScene || activeScenePath === selection.scene.path}
-                        className="rounded-xl border border-[#7dd3fc]/30 bg-[#7dd3fc]/10 px-3 py-2 text-[12px] font-semibold text-[#dff6ff] transition-colors hover:bg-[#7dd3fc]/18 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {switchingScene && activeScenePath !== selection.scene.path ? "Abrindo..." : "Ativar cena"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onOpenSceneEditor?.()}
-                        className="rounded-xl border border-[#313244] bg-[#111827] px-3 py-2 text-[12px] font-semibold text-[#cbd5e1] transition-colors hover:bg-[#1f2937]"
-                      >
-                        Abrir no Scene Editor
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {selection?.kind === "asset" ? (
-              <div className="space-y-4">
-                <div className="rounded-3xl border border-[#1f2937] bg-[#0b1120]/70 p-5">
-                  <div className="flex flex-wrap items-start gap-5">
-                    <div className="flex h-48 w-full max-w-[260px] items-center justify-center overflow-hidden rounded-2xl border border-[#1f2937] bg-[#030712]">
-                      {selection.asset.kind === "image" ? (
-                        <AssetPreview
-                          absolutePath={selection.asset.absolute_path}
-                          alt={selection.asset.relative_path}
-                          imageClassName="h-full w-full object-contain"
-                          fallbackClassName="flex h-full w-full items-center justify-center text-[11px] font-semibold uppercase tracking-[0.2em] text-[#7dd3fc]"
-                          fallbackLabel="Preview"
-                          pixelated
-                        />
-                      ) : (
-                        <span className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[#7dd3fc]">
-                          {selection.asset.kind}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#cba6f7]">
-                        Asset
-                      </div>
-                      <h2 className="mt-2 text-xl font-semibold text-[#f8fafc]">
-                        {selection.asset.relative_path.split("/").pop() ?? selection.asset.relative_path}
-                      </h2>
-                      <p
-                        data-testid="explorer-selection-source"
-                        className="mt-3 text-[11px] text-[#94a3b8]"
-                      >
-                        Origem:{" "}
-                        <span className="font-semibold text-[#e4e4e7]">
-                          {isLegacyOverlayProject ? "assets canônicos do overlay" : "projeto canônico"}
-                        </span>
-                      </p>
-                      <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[12px]">
-                        <dt className="text-[#64748b]">Caminho</dt>
-                        <dd className="break-all font-mono text-[#e4e4e7]">{selection.asset.relative_path}</dd>
-                        <dt className="text-[#64748b]">Tipo</dt>
-                        <dd className="text-[#e4e4e7]">{selection.asset.kind}</dd>
-                        <dt className="text-[#64748b]">Origem</dt>
-                        <dd className="break-all font-mono text-[#94a3b8]">{selection.asset.absolute_path}</dd>
-                      </dl>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            {selection?.kind === "legacy" ? (
-              <div className="space-y-4">
-                <div className="rounded-3xl border border-[#1f2937] bg-[#0b1120]/70 p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#f9e2af]">
-                        Legacy Host File
-                      </div>
-                      <h2 className="mt-2 break-all font-mono text-[16px] font-semibold text-[#f8fafc]">
-                        {selection.path}
-                      </h2>
-                    </div>
-                    <span className="rounded-full border border-[#313244] bg-[#111827] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#f9e2af]">
-                      Read-only
-                    </span>
-                  </div>
-
-                  {legacyBusy ? (
-                    <div className="mt-4 text-[12px] text-[#89b4fa]">Carregando preview...</div>
-                  ) : null}
-
-                  {legacyError ? (
-                    <div className="mt-4 rounded-2xl border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-4 py-3 text-[12px] text-[#fecdd3]">
-                      {legacyError}
-                    </div>
-                  ) : null}
-
-                  {legacyPreview ? (
-                    <>
-                      <p className="mt-4 break-all font-mono text-[11px] text-[#64748b]">
-                        {legacyPreview.absolute_path}
-                      </p>
-                      <p className="mt-2 text-[12px] text-[#94a3b8]">{legacyPreview.note}</p>
-                      <pre className="mt-4 max-h-[420px] overflow-auto rounded-2xl border border-[#1f2937] bg-[#020617] p-4 text-[11px] leading-6 text-[#cbd5e1]">
-                        {legacyPreview.content}
-                      </pre>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
+        <main className="flex min-h-0 min-w-0 flex-col bg-[var(--rds-surface-base)]">
+          <div className="flex items-end gap-2 border-b border-[var(--rds-border-subtle)] p-3">
+            <Input
+              type="search"
+              label="Buscar assets"
+              hideLabel
+              placeholder="Buscar por nome, tipo ou caminho"
+              value={assetQuery}
+              onChange={(event) => setAssetQuery(event.target.value)}
+              leadingIcon={<Icon name="search" size={16} />}
+              fieldClassName="min-w-0 flex-1"
+            />
+            <div role="group" aria-label="Modo de visualização" className="flex gap-1">
+              <Button size="sm" variant={assetView === "grid" ? "primary" : "ghost"} aria-pressed={assetView === "grid"} onClick={() => setAssetView("grid")} iconStart={<Icon name="menu" size={15} />}>Grade</Button>
+              <Button size="sm" variant={assetView === "tree" ? "primary" : "ghost"} aria-pressed={assetView === "tree"} onClick={() => setAssetView("tree")} iconStart={<Icon name="folder" size={15} />}>Árvore</Button>
+            </div>
           </div>
-        </section>
+          <div className="min-h-0 flex-1 overflow-auto p-3">
+            <div className="mb-3 flex items-center justify-between text-[11px] text-[var(--rds-text-muted)]">
+              <span>{visibleAssets.length} de {assets.length} assets</span>
+              {normalizedQuery ? <Button size="sm" variant="ghost" onClick={() => setAssetQuery("")}>Limpar busca</Button> : null}
+            </div>
+            {!activeProjectDir ? (
+              <div className="grid min-h-64 place-items-center rounded-[var(--rds-radius-lg)] border border-dashed border-[var(--rds-border-default)] text-center text-sm text-[var(--rds-text-muted)]"><div><Icon name="folder" size={30} className="mx-auto mb-3" /><strong className="block text-[var(--rds-text-primary)]">Abra um projeto para navegar</strong><span className="mt-1 block">O catálogo aparece aqui assim que o projeto estiver ativo.</span></div></div>
+            ) : visibleAssets.length === 0 ? (
+              <div className="grid min-h-64 place-items-center rounded-[var(--rds-radius-lg)] border border-dashed border-[var(--rds-border-default)] text-center text-sm text-[var(--rds-text-muted)]"><div><Icon name="search" size={30} className="mx-auto mb-3" /><strong className="block text-[var(--rds-text-primary)]">Nenhum asset corresponde à busca</strong><span className="mt-1 block">Ajuste o termo ou limpe a busca para ver todo o catálogo.</span></div></div>
+            ) : assetView === "tree" ? (
+              <div role="tree" aria-label="Assets canônicos" className="space-y-1 rounded-[var(--rds-radius-lg)] border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] p-2">
+                <AssetTreeBranch node={assetTree} collapsed={collapsedFolders} selectedPath={selectedAssetPath} onToggle={toggleFolder} onSelect={(asset) => setSelection({ kind: "asset", asset })} depth={0} />
+              </div>
+            ) : (
+              <div role="list" aria-label="Assets canônicos" className="grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-2">
+                {visibleAssets.map((asset) => {
+                  const selected = asset.relative_path === selectedAssetPath;
+                  const fileName = asset.relative_path.split("/").pop() ?? asset.relative_path;
+                  return (
+                    <button
+                      key={asset.relative_path}
+                      type="button"
+                      role="listitem"
+                      data-testid={`explorer-grid-asset-${asset.relative_path}`}
+                      aria-pressed={selected}
+                      onClick={() => setSelection({ kind: "asset", asset })}
+                      onDoubleClick={() => openAssetInArtStudio(asset)}
+                      className={`group min-h-32 rounded-[var(--rds-radius-lg)] border p-3 text-left transition-colors ${selected ? "border-[var(--rds-focus-ring)] bg-[var(--rds-surface-active)]" : "border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel)] hover:border-[var(--rds-border-strong)] hover:bg-[var(--rds-surface-hover)]"}`}
+                    >
+                      <span className="flex h-16 items-center justify-center rounded-[var(--rds-radius-md)] bg-[var(--rds-surface-canvas)] text-[var(--rds-status-info)]"><Icon name={assetIcon(asset.kind)} size={28} /></span>
+                      <span className="mt-2 block truncate text-xs font-semibold">{fileName}</span>
+                      <span className="mt-1 block text-[10px] text-[var(--rds-text-muted)]">{assetKindLabel(asset.kind)} · Enter para detalhes</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </main>
+
+        <aside aria-label="Detalhes da seleção" className="min-h-0 overflow-auto border-l border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)] p-3">
+          <h2 className="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--rds-text-muted)]">Detalhes</h2>
+          {!selection ? (
+            <div className="rounded-[var(--rds-radius-lg)] border border-dashed border-[var(--rds-border-default)] p-4 text-center text-[11px] text-[var(--rds-text-muted)]" data-testid="explorer-empty-state-copy">
+              <Icon name="info-circle" size={24} className="mx-auto mb-2" />
+              {isLegacyOverlayProject ? "Selecione uma cena ou asset do overlay, ou um arquivo host somente leitura." : "Selecione uma cena ou asset para visualizar e continuar a tarefa."}
+            </div>
+          ) : null}
+
+          {selection?.kind === "scene" ? (
+            <div className="space-y-3">
+              <Icon name="network" size={28} className="text-[var(--rds-status-info)]" />
+              <div><h3 className="font-semibold">{selection.scene.display_name}</h3><p className="mt-1 break-all font-mono text-[10px] text-[var(--rds-text-muted)]">{selection.scene.path}</p></div>
+              <p data-testid="explorer-selection-source" className="text-[11px] text-[var(--rds-text-secondary)]">Origem: {isLegacyOverlayProject ? "overlay rds/scenes" : "projeto canônico"}</p>
+              <Button className="w-full" variant="primary" loading={switchingScene} disabled={!activeProjectDir || activeScenePath === selection.scene.path} onClick={() => void handleActivateScene(selection.scene.path)}>Ativar cena</Button>
+              <Button className="w-full" variant="secondary" iconStart={<Icon name="open-new-window" size={16} />} onClick={() => onOpenSceneEditor?.()}>Abrir no Scene Editor</Button>
+            </div>
+          ) : null}
+
+          {selection?.kind === "asset" ? (
+            <div className="space-y-3">
+              <div className="flex h-44 items-center justify-center overflow-hidden rounded-[var(--rds-radius-lg)] border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-canvas)]">
+                {selection.asset.kind === "image" ? <AssetPreview absolutePath={selection.asset.absolute_path} alt={selection.asset.relative_path} imageClassName="h-full w-full object-contain" fallbackClassName="text-xs text-[var(--rds-text-muted)]" fallbackLabel="Preview indisponível" pixelated /> : <Icon name={assetIcon(selection.asset.kind)} size={40} className="text-[var(--rds-status-info)]" />}
+              </div>
+              <div><h3 className="break-all font-semibold">{selection.asset.relative_path.split("/").pop()}</h3><p className="mt-1 text-[11px] text-[var(--rds-text-muted)]">{assetKindLabel(selection.asset.kind)}</p></div>
+              <p data-testid="explorer-selection-source" className="text-[11px] text-[var(--rds-text-secondary)]">Origem: {isLegacyOverlayProject ? "assets canônicos do overlay" : "projeto canônico"}</p>
+              <dl className="grid grid-cols-[auto_1fr] gap-2 text-[11px]"><dt className="text-[var(--rds-text-muted)]">Caminho</dt><dd className="break-all font-mono">{selection.asset.relative_path}</dd></dl>
+              {selection.asset.kind === "image" ? <Button className="w-full" variant="primary" iconStart={<Icon name="palette" size={16} />} onClick={() => openAssetInArtStudio(selection.asset)}>Abrir no Art Studio</Button> : null}
+            </div>
+          ) : null}
+
+          {selection?.kind === "legacy" ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[var(--rds-status-warning)]"><Icon name="warning-triangle" size={18} /><strong className="text-xs">Host somente leitura</strong></div>
+              <h3 className="break-all font-mono text-xs">{selection.path}</h3>
+              {legacyBusy ? <p role="status" className="text-xs text-[var(--rds-status-info)]">Carregando preview…</p> : null}
+              {legacyError ? <p role="alert" className="text-xs text-[var(--rds-status-error)]">{legacyError}</p> : null}
+              {legacyPreview ? <><p className="text-[11px] text-[var(--rds-text-muted)]">{legacyPreview.note}</p><pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-[var(--rds-radius-md)] border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-canvas)] p-3 text-[10px] leading-5 text-[var(--rds-text-secondary)]">{legacyPreview.content}</pre></> : null}
+            </div>
+          ) : null}
+        </aside>
       </div>
     </div>
   );
