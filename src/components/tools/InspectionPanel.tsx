@@ -69,6 +69,7 @@ function statusLabel(status: string): string {
 
 export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
+  const requestEmulatorLaunch = useEditorStore((state) => state.requestEmulatorLaunch);
   const [romPath, setRomPath] = useState("");
   const [session, setSession] = useState<InspectionSession | null>(null);
   const [run, setRun] = useState<InspectionRun | null>(null);
@@ -301,6 +302,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       setSession(next);
       setSpriteFrameId(next.sprite_frame_id ?? "spr_ryo_100/frame-0");
       setRun(null);
+      setPatchedRomPath(next.edit?.modified_rom_path ?? "");
       if (next.status === "completed") await refreshCatalog(next.session_id, 0);
       logMessage("success", `[Inspeção] Sessão ${id} reaberta e identidade verificada.`);
     } catch (error) {
@@ -520,6 +522,17 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     await runRomAndObserve(patchedRomPath.trim(), "ROM aplicada");
   }
 
+  function playModifiedRom() {
+    const modifiedPath = patchedRomPath.trim() || session?.edit?.modified_rom_path?.trim() || "";
+    if (!modifiedPath) {
+      logMessage("warn", "[Emulador] Salve/aplique a ROM modificada antes de jogar pela superfície canônica.");
+      return;
+    }
+    setPatchedRomPath(modifiedPath);
+    requestEmulatorLaunch(modifiedPath, "ROM modificada · sessão de inspeção");
+    logMessage("info", `[Emulador] Jogar versão modificada solicitado pela superfície Game View: ${modifiedPath}`);
+  }
+
   function closeSession() {
     const currentSessionId = sessionRef.current?.session_id;
     if (currentSessionId) {
@@ -554,6 +567,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     savedSessionId.current = saved.session_id;
     lastSessionId.current = saved.session_id;
     setRomPath(saved.rom_path);
+    setPatchedRomPath(saved.edit?.modified_rom_path ?? "");
     setSelectedSavedSessionId(saved.session_id);
     setBusy(false);
     setSession(null);
@@ -681,7 +695,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                 <ToolPathField label="Exportar patch BPS" value={patchPath} set={setPatchPath} extensions={["bps"]} accentColor="f9e2af" />
                 <button type="button" data-testid="inspection-sonic-export-patch" disabled={patchBusy || !patchPath.trim()} onClick={() => void exportPilotPatch()} className="rounded border border-[#f9e2af]/50 px-3 py-1 text-[#f9e2af]">Exportar patch BPS</button>
                 <ToolPathField label="Salvar ROM modificada aplicada" value={patchedRomPath} set={setPatchedRomPath} extensions={["bin", "md", "gen"]} accentColor="f9e2af" />
-                <div className="flex flex-wrap gap-2"><button type="button" data-testid="inspection-sonic-apply-patch" disabled={patchBusy || !patchPath.trim() || !patchedRomPath.trim()} onClick={() => void applyPilotPatch()} className="rounded border border-[#a6e3a1]/50 px-3 py-1 text-[#a6e3a1]">Aplicar à base</button><button type="button" data-testid="inspection-sonic-run-base" disabled={patchBusy || !session.rom_path} onClick={() => void runBaseRom()} className="rounded border border-[#cdd6f4]/50 px-3 py-1 text-[#cdd6f4]">Observar ROM base</button><button type="button" data-testid="inspection-sonic-run-patched" disabled={patchBusy || !patchedRomPath.trim()} onClick={() => void runPatchedRom()} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]">Observar ROM aplicada</button></div>
+                <div className="flex flex-wrap gap-2"><button type="button" data-testid="inspection-sonic-apply-patch" disabled={patchBusy || !patchPath.trim() || !patchedRomPath.trim()} onClick={() => void applyPilotPatch()} className="rounded border border-[#a6e3a1]/50 px-3 py-1 text-[#a6e3a1]">Aplicar à base</button><button type="button" data-testid="inspection-sonic-run-base" disabled={patchBusy || !session.rom_path} onClick={() => void runBaseRom()} className="rounded border border-[#cdd6f4]/50 px-3 py-1 text-[#cdd6f4]">Observar ROM base</button><button type="button" data-testid="inspection-sonic-run-patched" disabled={patchBusy || !patchedRomPath.trim()} onClick={() => void runPatchedRom()} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]">Observar ROM aplicada</button><button type="button" data-testid="inspection-sonic-play-modified" disabled={patchBusy || !patchedRomPath.trim()} onClick={playModifiedRom} className="rounded bg-[#89b4fa] px-3 py-1 font-semibold text-[#111827]">Jogar versão modificada</button></div>
                 <div data-testid="inspection-emulator-run-controls" className="rounded border border-[#313244] bg-[#0f172a] p-2 text-[9px] text-[#bac2de]">
                   <div className="font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">Cenário de execução real</div>
                   <div className="mt-1">Cada observação recarrega a ROM no core, executa um orçamento explícito e envia START pelo IPC; 60 frames isolados não são aceitos como prova de gameplay.</div>

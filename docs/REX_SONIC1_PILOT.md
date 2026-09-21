@@ -2,6 +2,8 @@
 
 Estado em 2026-09-21: implementação publicada na branch isolada `codex/rex-sonic1-pilot`, sem merge. A prova desktop final desta rodada foi executada no commit de código `c0ad292095c259498e8e67e9168e3d1d3f82d258`, com o binário canônico `src-tauri/target-test/debug/retro-dev-studio`, SHA-256 `b069a5fb8928023699816e164876bb39faf58615cbc62fcac3c04bc51f42d77d`; o frontend carregado foi `index-tGPqe_u5.js` (SHA-256 `74d3c8b61a5ff3e25accb547b60f3526d6d96d5a621f69985ba37d612cfc7952`) e declarou `c0ad292`. O estado Git aparece dirty somente pelos holdouts preservados de outras sessões, que não foram incluídos. As capturas históricas permanecem preservadas abaixo.
 
+Nota de rastreabilidade: o parágrafo acima é evidência histórica de `c0ad292`, não resultado da continuação atual. A continuação em 2026-09-21 está registrada ao final deste documento; seu código ainda não foi promovido a aceite porque o salto por teclado permanece bloqueado por uma falha reproduzível de efeito no core.
+
 ## Corpus e referência
 
 ROM BYOR preservada localmente:
@@ -63,3 +65,18 @@ A aplicação não sobrescreve a ROM BYOR. O BPS valida tamanho e CRC da base; a
 | salvar/reiniciar/reabrir e recompor | `c0ad292` / `b069a5…` | mesma sessão e ROM modificada | PASS; seleção/proveniência restauradas; RGBA reaberto `91ee4a…`; BYOR original intacto | `inspection-2026-09-21T03-56-06-406Z-sonic-stand-reopened.png` |
 
 O primeiro marco desta fatia está concluído: a prova desktop foi executada no binário identificado e deixou capturas, hashes, sessão, BPS, ROM aplicada e limitações rastreáveis. Esta fatia não declara extração automática, equivalência com o jogo original, reconstrução integral, animação ou uma fatia de lógica/nós. O avanço para lógica/nós permanece fora desta entrega porque ainda não há, para Sonic 1, uma rotina delimitada com semântica, source mapping, larguras/flags e execução pelo pipeline canônico demonstrados de forma independente; não se deve promovê-lo a partir da prova visual.
+
+## Continuação 2026-09-21 — superfície canônica de jogo
+
+Código em trabalho sobre `5284d458` (PR #74, sem merge), com binário canônico atual `src-tauri/target-test/debug/retro-dev-studio` SHA-256 `7b6ad560b899195b1b22b6a415c38bf6c2d594bbf4f806a7486858a9ac6158ff` e frontend `dist/assets/index-N1yRKj1H.js` SHA-256 `45523954b6c9cdd8cca8adf727e81ccde60b16973c9b77eb84ce9871150a04eb`. A ação `Jogar versão modificada` usa o mesmo `loadRomIntoEmulator` da superfície canônica; o painel expõe hash/tamanho/core, framebuffer, frames e ACK de input. Não foi criado emulador paralelo.
+
+Execução desktop mais completa: `inspection-sonic`, sessão `inspection-1789983205-00000000`, diretório de artefatos `src-tauri/target-test/validation/sonic1-pilot-2026-09-21T09-33-38-764Z/`. ROM base `c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb` / 531.577 bytes; ROM aplicada `d381b1eed8f47dcd08890007b58b90cd5e3cabdaed96deac9b1e7336b1558e4d`; BPS `35c91e8d31a64d72a09f664deb67ec9ebe42015f0dd4aeb20cb95f9283ab817c`; core `07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1`. A captura `src-tauri/target-test/validation/inspection-2026-09-21T09-33-12-050Z-sonic-game-modified-before-controls.png` (SHA-256 `8a8b9b0de5bdeea7ea2f6cb2a7bbf27e01a1f304911922ce4484252b284bb03f`) mostra o framebuffer canônico em escala 3× com Sonic após a transição do cartão de fase.
+
+Resultado atual:
+
+- **PASS herdado e reexercitado:** identificação, composição/pixels independentes, edição, salvar/reabrir, BPS, identidade da ROM aplicada, base/aplicada sob o mesmo core e preservação da BYOR.
+- **PASS novo:** `Jogar versão modificada` carregou `d381b1…`, produziu framebuffer real `320×224`, avançou até frames `>=1800`, e a máscara independente do personagem ficou visível; ArrowRight foi confirmado pelo ACK e alterou a máscara/centróide horizontal.
+- **NEGATIVOS:** hash diferente da base é exigido antes de jogar; imagem anterior é rejeitada por hash; tecla não mapeada `Q` não pode avançar ACK. A execução que falhou no salto ainda não emitiu o marcador final desses negativos; eles permanecem no harness para a próxima execução verde.
+- **BLOQUEIO:** A/B/C chegaram como estados ACK (`a`, `b`, `y`), mas nenhum produziu deslocamento vertical observável após a entrada em gameplay. A prova reprova; não há captura “aprovada” pós-salto. O estado final da última falha está em `src-tauri/target-test/validation/desktop-e2e-failure-inspection-sonic.json` (hash `911236bcf4da520ea203b4c01295e1bf17c5c5215b3ae3aa2926df7db753b21d`). A hipótese restante é integração de amostragem/mapeamento do input no core, não ausência de ROM.
+
+Este bloqueio impede declarar o fluxo completo utilizável e impede aceite/merge. A classificação permanece **Experimental**; a alteração de paleta continua sujeita aos efeitos compartilhados da paleta do jogo, e a composição Sonic segue assistida por metadados. Não avançar para lógica/nós antes de fechar o salto real.

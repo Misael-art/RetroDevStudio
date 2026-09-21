@@ -467,6 +467,9 @@ export default function ViewportPanel({
     hwStatus,
     emulatorLoaded,
     setEmulatorLoaded,
+    emulatorRomIdentity,
+    lastJoypadRequest,
+    lastJoypadAck,
     selectedEntityId,
     setSelectedEntityId,
     updateEntity,
@@ -509,7 +512,9 @@ export default function ViewportPanel({
   const sceneRulerTopRef = useRef<HTMLCanvasElement>(null);
   const sceneRulerLeftRef = useRef<HTMLCanvasElement>(null);
   const [sceneStageSize, setSceneStageSize] = useState({ width: 0, height: 0 });
+  const [renderedFrameCount, setRenderedFrameCount] = useState(0);
   const stopLoopRef = useRef<(() => void) | null>(null);
+  const renderedFrameCounterRef = useRef(0);
   const loopStartingRef = useRef(false);
   const loopTokenRef = useRef(0);
   const activeTabRef = useRef(activeViewportTab);
@@ -1569,6 +1574,11 @@ export default function ViewportPanel({
     imageData.data.set(new Uint8Array(payload.rgba));
     context.putImageData(imageData, 0, 0);
 
+    renderedFrameCounterRef.current += 1;
+    if (renderedFrameCounterRef.current % 10 === 0) {
+      setRenderedFrameCount(renderedFrameCounterRef.current);
+    }
+
     const now = performance.now();
     if (frameTimingRef.current.lastFrameAt > 0) {
       const deltaMs = now - frameTimingRef.current.lastFrameAt;
@@ -1579,6 +1589,11 @@ export default function ViewportPanel({
     }
     frameTimingRef.current.lastFrameAt = now;
   }, []);
+
+  useEffect(() => {
+    renderedFrameCounterRef.current = 0;
+    setRenderedFrameCount(0);
+  }, [emulatorRomIdentity?.sha256]);
 
   const clearAudioQueue = useCallback(() => {
     audioQueueRef.current = [];
@@ -5455,6 +5470,22 @@ export default function ViewportPanel({
                 </span>
               )}
               <span>Z=A | X=B | C=C | Enter=Start | Setas=D-Pad | R=Rewind (pausado)</span>
+            </div>
+            <div
+              data-testid="viewport-emulator-identity"
+              data-rom-path={emulatorRomIdentity?.path ?? ""}
+              data-rom-sha256={emulatorRomIdentity?.sha256 ?? ""}
+              data-rom-size={emulatorRomIdentity?.size ?? 0}
+              data-core-label={emulatorRomIdentity?.coreLabel ?? ""}
+              data-core-path={emulatorRomIdentity?.corePath ?? ""}
+              data-rendered-frames={renderedFrameCount}
+              data-last-input-request-seq={lastJoypadRequest?.seq ?? 0}
+              data-last-input-ack-seq={lastJoypadAck?.seq ?? 0}
+              className="break-all rounded border border-[#313244] bg-[#0b1020] px-2 py-1 font-mono text-[9px] text-[#94a3b8]"
+            >
+              {emulatorRomIdentity
+                ? `${emulatorRomIdentity.sourceLabel} · ROM ${emulatorRomIdentity.sha256} · ${emulatorRomIdentity.size} bytes · ${emulatorRomIdentity.coreLabel} · frames renderizados ${renderedFrameCount} · input ACK ${lastJoypadAck?.seq ?? 0}`
+                : "Identidade da ROM ainda não observada"}
             </div>
           </div>
         )}

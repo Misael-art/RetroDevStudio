@@ -2275,6 +2275,136 @@ async function pressKey(sessionId, key, options = {}) {
   }
 }
 
+const NATIVE_GAME_KEYS = {
+  ArrowRight: "\uE014",
+  ArrowLeft: "\uE012",
+  ArrowUp: "\uE013",
+  ArrowDown: "\uE015",
+  Enter: "\uE007",
+  KeyZ: "z",
+  KeyX: "x",
+  KeyC: "c",
+  KeyQ: "q",
+};
+
+async function sendNativeGameKey(sessionId, code, action, label) {
+  const value = NATIVE_GAME_KEYS[code];
+  if (!value) fail(`Tecla nativa não mapeada para ${label}: ${code}`);
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "key",
+      id: `rds-game-${code}`,
+      actions: [{ type: action, value }],
+    }],
+  });
+  if (!response.ok || response.payload?.value?.error) {
+    fail(`Entrada nativa recusada (${label}): ${JSON.stringify(response)}`);
+  }
+  return response;
+}
+
+async function focusGameCanvasNatively(sessionId) {
+  const canvas = await findElement(sessionId, "[data-testid='viewport-game-canvas']");
+  await webdriverRequest("POST", `/session/${sessionId}/element/${canvas}/click`, {});
+}
+
+async function readCanonicalGameFrame(sessionId) {
+  const frame = await executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      if (!(canvas instanceof HTMLCanvasElement) || !(identity instanceof HTMLElement)) return null;
+      const context = canvas.getContext('2d');
+      if (!context || !canvas.width || !canvas.height) return null;
+      const data = Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data);
+      let nonBlackPixels = 0;
+      const magentaLike = [];
+      const sonicRoiMagentaLike = [];
+      for (let offset = 0; offset < data.length; offset += 4) {
+        const r = data[offset];
+        const g = data[offset + 1];
+        const b = data[offset + 2];
+        if (r !== 0 || g !== 0 || b !== 0) nonBlackPixels += 1;
+        if (r >= 224 && g <= 32 && b >= 224) {
+          const pixel = offset / 4;
+          const point = { x: pixel % canvas.width, y: Math.floor(pixel / canvas.width) };
+          magentaLike.push(point);
+          if (point.x < Math.min(canvas.width, 128) && point.y >= Math.floor(canvas.height * 0.55)) sonicRoiMagentaLike.push(point);
+        }
+      }
+      const bounds = magentaLike.length === 0 ? null : {
+        x0: Math.min(...magentaLike.map((point) => point.x)),
+        y0: Math.min(...magentaLike.map((point) => point.y)),
+        x1: Math.max(...magentaLike.map((point) => point.x)),
+        y1: Math.max(...magentaLike.map((point) => point.y)),
+      };
+      const sonicRoiBounds = sonicRoiMagentaLike.length === 0 ? null : {
+        x0: Math.min(...sonicRoiMagentaLike.map((point) => point.x)),
+        y0: Math.min(...sonicRoiMagentaLike.map((point) => point.y)),
+        x1: Math.max(...sonicRoiMagentaLike.map((point) => point.x)),
+        y1: Math.max(...sonicRoiMagentaLike.map((point) => point.y)),
+      };
+      const sonicRoiCentroid = sonicRoiMagentaLike.length === 0 ? null : {
+        x: sonicRoiMagentaLike.reduce((sum, point) => sum + point.x, 0) / sonicRoiMagentaLike.length,
+        y: sonicRoiMagentaLike.reduce((sum, point) => sum + point.y, 0) / sonicRoiMagentaLike.length,
+      };
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        rgba: data,
+        nonBlackPixels,
+        magentaLikePixels: magentaLike.length,
+        magentaLikeBounds: bounds,
+        sonicRoiMagentaLikePixels: sonicRoiMagentaLike.length,
+        sonicRoiMagentaLikeBounds: sonicRoiBounds,
+        sonicRoiMagentaLikeCentroid: sonicRoiCentroid,
+        renderedFrames: Number(identity.getAttribute('data-rendered-frames') || 0),
+        romPath: identity.getAttribute('data-rom-path') || '',
+        romSha256: identity.getAttribute('data-rom-sha256') || '',
+        romSize: Number(identity.getAttribute('data-rom-size') || 0),
+        coreLabel: identity.getAttribute('data-core-label') || '',
+        corePath: identity.getAttribute('data-core-path') || '',
+        lastInputRequestSeq: Number(identity.getAttribute('data-last-input-request-seq') || 0),
+        lastInputAckSeq: Number(identity.getAttribute('data-last-input-ack-seq') || 0),
+      };
+    `
+  );
+  if (!frame) return null;
+  const rgba = Buffer.from(frame.rgba);
+  return {
+    ...frame,
+    rgba: undefined,
+    framebufferSha256: createHash("sha256").update(rgba).digest("hex"),
+    rgbaBytes: rgba.length,
+  };
+}
+
+async function readCanonicalGameProgress(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      const status = document.querySelector('[data-testid="viewport-game-status"]');
+      if (!(canvas instanceof HTMLCanvasElement) || !(identity instanceof HTMLElement)) return null;
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        renderedFrames: Number(identity.getAttribute('data-rendered-frames') || 0),
+        romPath: identity.getAttribute('data-rom-path') || '',
+        romSha256: identity.getAttribute('data-rom-sha256') || '',
+        romSize: Number(identity.getAttribute('data-rom-size') || 0),
+        coreLabel: identity.getAttribute('data-core-label') || '',
+        corePath: identity.getAttribute('data-core-path') || '',
+        lastInputRequestSeq: Number(identity.getAttribute('data-last-input-request-seq') || 0),
+        lastInputAckSeq: Number(identity.getAttribute('data-last-input-ack-seq') || 0),
+        gameStatus: status?.textContent?.trim() || '',
+      };
+    `
+  );
+}
+
 async function clickHierarchyEntityByLabel(sessionId, label) {
   const result = await executeScript(
     sessionId,
@@ -5213,14 +5343,224 @@ async function main() {
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recompor Sonic após reinício");
         const reopenedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após salvar/reiniciar/reabrir");
         const reopenedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-reopened.png`);
+        const oldGameFrame = await readCanonicalGameFrame(sessionId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-sonic-play-modified", "jogar versão modificada na Game View após reinício");
+        const canonicalIdentity = await waitFor(
+          async () => {
+            const frame = await readCanonicalGameFrame(sessionId);
+            return frame && frame.romSha256 === patchedSha256 && frame.romSha256 !== baseSha256 && frame.romSize === patchedRomBytes.length && frame.coreLabel && frame.corePath ? frame : false;
+          },
+          15000,
+          "Game View não confirmou a identidade da ROM modificada",
+          100
+        );
+        let firstCanonicalFrame;
+        let lastCanonicalFrame = null;
+        try {
+          firstCanonicalFrame = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastCanonicalFrame = progress;
+              return progress && progress.renderedFrames >= 10 ? readCanonicalGameFrame(sessionId) : false;
+            },
+            10000,
+            "Game View não produziu frames renderizados após Jogar versão modificada",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-first-failure] ${JSON.stringify({ lastCanonicalFrame, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        let lastBootProgress = null;
+        let bootFrame;
+        try {
+          bootFrame = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastBootProgress = progress;
+              return progress && progress.renderedFrames >= 890 ? progress : false;
+            },
+            120000,
+            "Game View não atravessou o boot da ROM modificada até o ponto de entrada",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-boot-failure] ${JSON.stringify({ lastBootProgress, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        await focusGameCanvasNatively(sessionId);
+        const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        await sendNativeGameKey(sessionId, "Enter", "keyDown", "START de entrada da fase");
+        const startHoldProgress = await waitFor(
+          async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= (bootFrame?.renderedFrames ?? 890) + 30 ? progress : false;
+          },
+          15000,
+          "Game View não avançou frames enquanto START estava pressionado",
+          100
+        );
+        await sendNativeGameKey(sessionId, "Enter", "keyUp", "liberação de START de entrada da fase");
+        const startInput = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0) ? current : false;
+          },
+          10000,
+          "START nativo não foi confirmado pelo handler/IPC do produto",
+          100
+        );
+        let lastGameplayProgress = null;
+        let gameplayProgress;
+        try {
+          gameplayProgress = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastGameplayProgress = progress;
+              return progress && progress.renderedFrames >= 1800 ? progress : false;
+            },
+            120000,
+            "A ROM modificada não alcançou a cena de gameplay com Sonic localizado no ROI independente",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-gameplay-failure] ${JSON.stringify({ lastGameplayProgress, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        const gameplayFrame = await readCanonicalGameFrame(sessionId);
+        if (gameplayFrame.nonBlackPixels <= 1000 || gameplayFrame.sonicRoiMagentaLikePixels < 50) {
+          fail(`A ROM modificada atravessou o boot, mas não apresentou Sonic localizado no ROI independente: ${JSON.stringify({ gameplayProgress, gameplayFrame })}`);
+        }
+        const canonicalGameBeforeControlsScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-modified-before-controls.png`);
+        const oldImageReused = Boolean(oldGameFrame && oldGameFrame.nonBlackPixels > 0 && oldGameFrame.framebufferSha256 === gameplayFrame.framebufferSha256);
+        if (oldImageReused) {
+          fail(`A Game View reutilizou a imagem anterior após carregar a ROM modificada: ${JSON.stringify({ old: oldGameFrame.framebufferSha256, gameplay: gameplayFrame.framebufferSha256 })}`);
+        }
+        const negativeInputBefore = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        await sendNativeGameKey(sessionId, "KeyQ", "keyDown", "negativo de tecla não mapeada");
+        await sendNativeGameKey(sessionId, "KeyQ", "keyUp", "liberação da tecla não mapeada");
+        const negativeInputAfter = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        const negativeInputRejected = negativeInputAfter?.lastJoypadAck?.seq === negativeInputBefore?.lastJoypadAck?.seq;
+        if (!negativeInputRejected) {
+          fail(`Entrada não mapeada foi aceita como input do jogo: ${JSON.stringify({ before: negativeInputBefore, after: negativeInputAfter })}`);
+        }
+        console.log(`[inspection-canonical-negatives] ${JSON.stringify({ wrongRomRejected: canonicalIdentity.romSha256 !== baseSha256 && canonicalIdentity.romSha256 === patchedSha256, staleImageRejected: !oldImageReused, unmappedInputRejected: negativeInputRejected, input: { before: negativeInputBefore?.lastJoypadAck, after: negativeInputAfter?.lastJoypadAck } })}`);
+        const movementBefore = gameplayFrame;
+        await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "movimento para direita");
+        const rightInput = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.right === true ? current : false;
+          },
+          10000,
+          "ArrowRight nativa não chegou ao core pelo handler do produto",
+          100
+        );
+        const movementHoldProgress = await waitFor(
+          async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= movementBefore.renderedFrames + 90 ? progress : false;
+          },
+          20000,
+          "Game View não avançou frames durante o movimento para direita",
+          100
+        );
+        await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "parada do movimento para direita");
+        const movementAfter = await readCanonicalGameFrame(sessionId);
+        const movementCentroidDelta = movementBefore.sonicRoiMagentaLikeCentroid && movementAfter?.sonicRoiMagentaLikeCentroid
+          ? Math.abs(movementAfter.sonicRoiMagentaLikeCentroid.x - movementBefore.sonicRoiMagentaLikeCentroid.x)
+          : 0;
+        if (!movementAfter || movementAfter.framebufferSha256 === movementBefore.framebufferSha256 || movementCentroidDelta < 2) {
+          fail(`Movimento de Sonic não produziu deslocamento visual observável: ${JSON.stringify({ before: movementBefore, after: movementAfter, input: rightInput })}`);
+        }
+        const jumpBefore = movementAfter;
+        await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "salto pelo botão A");
+        const jumpInputA = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.a === true ? current : false;
+          },
+          10000,
+          "KeyZ/A nativa não chegou ao core pelo handler do produto",
+          100
+        );
+        const jumpHoldProgress = await waitFor(
+          async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= jumpBefore.renderedFrames + 10 ? progress : false;
+          },
+          20000,
+          "Game View não avançou frames durante o salto",
+          100
+        );
+        let jumpAfter = await readCanonicalGameFrame(sessionId);
+        await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "liberação do salto");
+        let jumpInput = jumpInputA;
+        let jumpControl = "KeyZ/A";
+        const jumpCentroidDelta = jumpBefore.sonicRoiMagentaLikeCentroid && jumpAfter?.sonicRoiMagentaLikeCentroid
+          ? Math.abs(jumpAfter.sonicRoiMagentaLikeCentroid.y - jumpBefore.sonicRoiMagentaLikeCentroid.y)
+          : 0;
+        if (jumpCentroidDelta < 2) {
+          await sendNativeGameKey(sessionId, "KeyC", "keyDown", "salto pelo botão C");
+          const jumpInputC = await waitFor(
+            async () => {
+              const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+              return current?.lastJoypadAck?.joypad?.y === true ? current : false;
+            },
+            10000,
+            "KeyC/C nativa não chegou ao core pelo handler do produto",
+            100
+          );
+          await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              return progress && progress.renderedFrames >= jumpAfter.renderedFrames + 30 ? progress : false;
+            },
+            20000,
+            "Game View não avançou frames durante a tentativa de salto pelo botão C",
+            100
+          );
+          await sendNativeGameKey(sessionId, "KeyC", "keyUp", "liberação do salto pelo botão C");
+          const jumpAfterC = await readCanonicalGameFrame(sessionId);
+          const jumpCentroidDeltaC = jumpBefore.sonicRoiMagentaLikeCentroid && jumpAfterC?.sonicRoiMagentaLikeCentroid
+            ? Math.abs(jumpAfterC.sonicRoiMagentaLikeCentroid.y - jumpBefore.sonicRoiMagentaLikeCentroid.y)
+            : 0;
+          if (jumpAfterC?.framebufferSha256 !== jumpBefore.framebufferSha256 && jumpCentroidDeltaC >= 2) {
+            jumpAfter = jumpAfterC;
+            jumpInput = jumpInputC;
+            jumpControl = "KeyC/C";
+          }
+        }
+        const finalJumpCentroidDelta = jumpBefore.sonicRoiMagentaLikeCentroid && jumpAfter?.sonicRoiMagentaLikeCentroid
+          ? Math.abs(jumpAfter.sonicRoiMagentaLikeCentroid.y - jumpBefore.sonicRoiMagentaLikeCentroid.y)
+          : 0;
+        if (!jumpAfter || jumpAfter.framebufferSha256 === jumpBefore.framebufferSha256 || finalJumpCentroidDelta < 2) {
+          fail(`Salto de Sonic não produziu mudança vertical observável: ${JSON.stringify({ before: jumpBefore, after: jumpAfter, input: jumpInput, controlsTried: ["KeyZ/A", "KeyC/C"] })}`);
+        }
+        const canonicalGameScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-modified-after-restart.png`);
+        const canonicalPlayEvidence = {
+          identity: canonicalIdentity,
+          firstFrame: firstCanonicalFrame,
+          bootFrame,
+          startHoldProgress,
+          gameplayFrame,
+          movement: { before: movementBefore, after: movementAfter, input: rightInput, holdProgress: movementHoldProgress },
+          jump: { before: jumpBefore, after: jumpAfter, input: jumpInput, holdProgress: jumpHoldProgress },
+          jumpControl,
+          oldImageReused,
+          screenshot: canonicalGameScreenshot,
+          beforeControlsScreenshot: canonicalGameBeforeControlsScreenshot,
+          controls: "WebDriver W3C native key actions routed through ViewportPanel key handlers and emulator_send_input",
+        };
+        console.log(`[inspection-canonical-gameplay] ${JSON.stringify(canonicalPlayEvidence)}`);
         const baseAfterFlowBytes = await readFile(inspectionRom);
         const baseAfterFlowSha256 = createHash("sha256").update(baseAfterFlowBytes).digest("hex");
         if (baseAfterFlowBytes.length !== inspectionRomBytes.length || baseAfterFlowSha256 !== baseSha256) {
           fail("ROM BYOR original foi alterada durante o fluxo: " + JSON.stringify({ initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 } }));
         }
         console.log(`[inspection-base-integrity] ` + JSON.stringify({ path: inspectionRom, initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 }, unchanged: true }));
-        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "passed", paletteOracle: "base has no edited RGB333 color; applied has >=100 magenta-like pixels and >=50 in Sonic ROI", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot }, sessionId: reopenedState.session.id }));
-        console.log("OK: Desktop Tauri Sonic identify/compose/edit/save/patch/apply/run/restart/reopen E2E passou.");
+        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "passed", paletteOracle: "base has no edited RGB333 color; applied has >=100 magenta-like pixels and >=50 in Sonic ROI", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas, canonicalPlayEvidence }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot, canonicalGameScreenshot }, sessionId: reopenedState.session.id }));
+        console.log("OK: Desktop Tauri Sonic identify/compose/edit/save/patch/apply/canonical-play/restart/reopen E2E passou.");
         return;
       }
       if (options.scenario === "inspection-sprite-secondary") {

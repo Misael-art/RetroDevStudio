@@ -18,6 +18,7 @@ import { buildProject, generateCCode, validateProject } from "./core/ipc/buildSe
 import {
   emulatorGetCoreEpoch,
   emulatorLoadRom,
+  emulatorObserve,
   emulatorStop,
 } from "./core/ipc/emulatorService";
 import { inspectRomMastering } from "./core/ipc/projectCapabilityService";
@@ -1546,6 +1547,9 @@ export default function App() {
     setActiveTarget,
     emulatorLoaded,
     setEmulatorLoaded,
+    emulatorLaunchRequest,
+    clearEmulatorLaunchRequest,
+    setEmulatorRomIdentity,
     setActiveScene,
     setActiveScenePath,
     activeWorkspace,
@@ -3088,7 +3092,7 @@ export default function App() {
    * diálogo nativo de arquivos do sistema operacional. */
   async function loadRomIntoEmulator(
     romPath: string,
-    options?: { startPaused?: boolean }
+    options?: { startPaused?: boolean; sourceLabel?: string }
   ) {
     // Invalidação ANTES de qualquer await: durante a carga em voo a época
     // antiga já não existe — inputs da sessão velha são bloqueados (e
@@ -3103,7 +3107,7 @@ export default function App() {
 
   async function loadRomIntoEmulatorInner(
     romPath: string,
-    options?: { startPaused?: boolean }
+    options?: { startPaused?: boolean; sourceLabel?: string }
   ) {
     const romDependency = await detectRomDependency(romPath);
     if (romDependency.dependency_id) {
@@ -3138,11 +3142,31 @@ export default function App() {
     // obsoleta — ver CORE_EPOCH em lib.rs).
     const coreEpoch = await emulatorGetCoreEpoch().catch(() => null);
     useEditorStore.getState().setCoreEpoch(coreEpoch);
+    const identity = await emulatorObserve().catch(() => null);
+    if (identity?.ok) {
+      setEmulatorRomIdentity({
+        path: identity.rom_path,
+        size: identity.rom_size,
+        sha256: identity.rom_sha256,
+        coreLabel: identity.core_label,
+        corePath: identity.core_path,
+        sourceLabel: options?.sourceLabel ?? "ROM carregada",
+      });
+    }
     trackProductMetric({ kind: "rom_loaded" });
-    logMessage("success", `ROM carregada: ${romPath}`);
+    logMessage("success", `ROM carregada: ${romPath}${options?.sourceLabel ? ` (${options.sourceLabel})` : ""}`);
     setActiveViewportTab("game");
     setEmulPaused(Boolean(options?.startPaused));
   }
+
+  useEffect(() => {
+    const request = emulatorLaunchRequest;
+    if (!request) return;
+    clearEmulatorLaunchRequest();
+    void loadRomIntoEmulator(request.romPath, { sourceLabel: request.sourceLabel });
+    // The request is consumed exactly once. Loading still goes through the
+    // same canonical function used by the visible ROM loader and Build & Run.
+  }, [emulatorLaunchRequest, clearEmulatorLaunchRequest]);
 
   function handleEmulatorPause() {
     if (!emulatorLoaded) {
@@ -4144,6 +4168,7 @@ export default function App() {
           activeViewportTab: state.activeViewportTab,
           activeScenePath: state.activeScenePath,
           emulatorLoaded: state.emulatorLoaded,
+          emulatorRomIdentity: state.emulatorRomIdentity,
           emulPaused: state.emulPaused,
           sceneRevision: state.sceneRevision,
           selectedEntityId: state.selectedEntityId,

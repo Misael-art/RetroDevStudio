@@ -116,7 +116,23 @@ export interface JoypadObservation {
   joypad: Record<string, boolean>;
 }
 
+export interface EmulatorRomIdentity {
+  path: string;
+  size: number;
+  sha256: string;
+  coreLabel: string;
+  corePath: string;
+  sourceLabel: string;
+}
+
+export interface EmulatorLaunchRequest {
+  requestId: number;
+  romPath: string;
+  sourceLabel: string;
+}
+
 let joypadSessionCounter = 0;
+let emulatorLaunchRequestCounter = 0;
 
 export interface StoreState {
   activeProjectDir: string;
@@ -124,6 +140,11 @@ export interface StoreState {
   activeTarget: "megadrive" | "snes";
   activeScenePath: string;
   emulatorLoaded: boolean;
+  /** Identidade observada da ROM realmente carregada no core canônico. */
+  emulatorRomIdentity: EmulatorRomIdentity | null;
+  /** Solicitação de carga originada por outra superfície do produto. O App
+   * consome-a usando o mesmo loadRomIntoEmulator do fluxo existente. */
+  emulatorLaunchRequest: EmulatorLaunchRequest | null;
   /** Última INTENÇÃO de joypad formada pelo caminho de teclado do produto,
    * registrada antes do IPC. Prova que o handler rodou — NÃO prova entrega.
    * null = nada solicitado desde a abertura. */
@@ -192,6 +213,9 @@ export interface StoreActions {
   setActiveTarget: (target: "megadrive" | "snes") => void;
   setActiveScenePath: (path: string) => void;
   setEmulatorLoaded: (loaded: boolean) => void;
+  setEmulatorRomIdentity: (identity: EmulatorRomIdentity | null) => void;
+  requestEmulatorLaunch: (romPath: string, sourceLabel: string) => void;
+  clearEmulatorLaunchRequest: () => void;
   setSelectedEntityId: (id: string | null) => void;
   setActiveLayerId: (id: string | null) => void;
   setActiveWorkspace: (workspace: EditorWorkspace) => void;
@@ -461,9 +485,12 @@ export const useEditorStore = create<EditorState>((set) => ({
   activeScenePath: "",
   setActiveScenePath: (path) => set({ activeScenePath: path }),
   emulatorLoaded: false,
+  emulatorRomIdentity: null,
+  emulatorLaunchRequest: null,
   setEmulatorLoaded: (loaded) =>
     set(() => ({
       emulatorLoaded: loaded,
+      emulatorRomIdentity: null,
       // Toda transição de carga abre uma época nova (ou nenhuma, ao parar):
       // solicitações e confirmações da carga anterior deixam de ser aceitáveis.
       // Ancorar aqui — e não em cada call site — torna a invalidação por
@@ -473,6 +500,16 @@ export const useEditorStore = create<EditorState>((set) => ({
       lastJoypadAck: null,
       lastJoypadSendError: null,
     })),
+  setEmulatorRomIdentity: (identity) => set({ emulatorRomIdentity: identity }),
+  requestEmulatorLaunch: (romPath, sourceLabel) =>
+    set({
+      emulatorLaunchRequest: {
+        requestId: (emulatorLaunchRequestCounter += 1),
+        romPath,
+        sourceLabel,
+      },
+    }),
+  clearEmulatorLaunchRequest: () => set({ emulatorLaunchRequest: null }),
 
   selectedEntityId: null,
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
