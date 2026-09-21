@@ -594,6 +594,44 @@ fn emulator_run_frame(app: AppHandle, emu: State<EmulatorCoreState>) -> Emulator
     }
 }
 
+/// Executa vários frames sem atravessar o IPC uma vez por frame. O frontend
+/// ainda observa o framebuffer somente depois do lote terminar; inputs
+/// discretos continuam passando por `emulator_send_input` entre lotes.
+#[tauri::command]
+fn emulator_run_frames(frames: u32, emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
+    };
+
+    let frame_count = frames.min(10_000);
+    if frame_count == 0 {
+        return EmulatorCommandResult {
+            ok: true,
+            message: "Nenhum frame solicitado.".to_string(),
+        };
+    }
+
+    for _ in 0..frame_count {
+        if let Err(error) = core.run_frame() {
+            return EmulatorCommandResult {
+                ok: false,
+                message: error,
+            };
+        }
+    }
+
+    EmulatorCommandResult {
+        ok: true,
+        message: format!("{frame_count} frame(s) executado(s) no core ativo."),
+    }
+}
+
 /// Observa o estado real após a execução: identidade da ROM e do core,
 /// avanço de frames e o framebuffer RGBA produzido pelo core. Esta chamada
 /// não infere sucesso a partir da mensagem de `emulator_run_frame`.
@@ -4846,6 +4884,7 @@ pub fn run() {
             // Emulator
             emulator_load_rom,
             emulator_run_frame,
+            emulator_run_frames,
             emulator_observe,
             emulator_save_state,
             emulator_load_state,

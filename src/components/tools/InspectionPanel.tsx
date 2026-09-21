@@ -24,7 +24,15 @@ import {
   patchApplyBps,
   patchCreateBps,
 } from "../../core/ipc/toolsService";
-import { emulatorLoadRom, emulatorObserve, emulatorRunFrame, type EmulatorObservationResult } from "../../core/ipc/emulatorService";
+import {
+  emulatorGetCoreEpoch,
+  emulatorLoadRom,
+  emulatorObserve,
+  emulatorRunFrames,
+  emulatorSendInput,
+  JOYPAD_DEFAULT,
+  type EmulatorObservationResult,
+} from "../../core/ipc/emulatorService";
 import { useEditorStore } from "../../core/store/editorStore";
 import ToolPathField from "./ToolPathField";
 
@@ -33,6 +41,8 @@ interface InspectionPanelProps {
 }
 
 const PAGE_SIZE = 24;
+const SONIC_BOOT_START_FRAME = 900;
+const SONIC_BOOT_FRAME_BUDGET = 1_200;
 
 function describeError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -88,6 +98,8 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [emulatorObservation, setEmulatorObservation] = useState<EmulatorObservationResult | null>(null);
   const [emulatorObservationLabel, setEmulatorObservationLabel] = useState("");
   const [emulatorObservationHistory, setEmulatorObservationHistory] = useState<Array<{ label: string; observation: EmulatorObservationResult }>>([]);
+  const [emulatorFrameBudget, setEmulatorFrameBudget] = useState(SONIC_BOOT_FRAME_BUDGET);
+  const [emulatorInputProfile, setEmulatorInputProfile] = useState<"sonic-boot-start" | "neutral">("sonic-boot-start");
   const emulatorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [patchPath, setPatchPath] = useState("");
   const [patchedRomPath, setPatchedRomPath] = useState("");
@@ -468,15 +480,29 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     try {
       const loaded = await emulatorLoadRom(romPathToRun.trim());
       if (!loaded.ok) throw new Error(loaded.message);
-      for (let frame = 0; frame < 60; frame += 1) {
-        const result = await emulatorRunFrame();
+      const frameBudget = Math.max(60, Math.min(10_000, Math.trunc(emulatorFrameBudget) || SONIC_BOOT_FRAME_BUDGET));
+      const inputEpoch = await emulatorGetCoreEpoch();
+      const runFrames = async (frames: number) => {
+        if (frames <= 0) return;
+        const result = await emulatorRunFrames(frames);
         if (!result.ok) throw new Error(result.message);
+      };
+      if (emulatorInputProfile === "sonic-boot-start" && SONIC_BOOT_START_FRAME < frameBudget) {
+        await runFrames(SONIC_BOOT_START_FRAME);
+        const inputResult = await emulatorSendInput({ ...JOYPAD_DEFAULT, start: true }, inputEpoch);
+        if (!inputResult.ok) throw new Error(inputResult.message);
+        await runFrames(1);
+        const releaseResult = await emulatorSendInput(JOYPAD_DEFAULT, inputEpoch);
+        if (!releaseResult.ok) throw new Error(releaseResult.message);
+        await runFrames(frameBudget - SONIC_BOOT_START_FRAME - 1);
+      } else {
+        await runFrames(frameBudget);
       }
       const observation = await emulatorObserve();
       if (!observation.ok) throw new Error(observation.message || "Observação do core recusada.");
       setEmulatorObservation(observation);
       setEmulatorObservationHistory((current) => [...current.filter((entry) => entry.label !== label), { label, observation }].slice(-4));
-      logMessage("success", `[Emulador] ${observation.message}`);
+      logMessage("success", `[Emulador] ${observation.message} Perfil=${emulatorInputProfile}; orçamento=${frameBudget}; START=${SONIC_BOOT_START_FRAME}.`);
     } catch (error) {
       logMessage("error", `[Emulador] Execução recusada: ${describeError(error)}`);
     } finally {
@@ -656,20 +682,32 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                 <button type="button" data-testid="inspection-sonic-export-patch" disabled={patchBusy || !patchPath.trim()} onClick={() => void exportPilotPatch()} className="rounded border border-[#f9e2af]/50 px-3 py-1 text-[#f9e2af]">Exportar patch BPS</button>
                 <ToolPathField label="Salvar ROM modificada aplicada" value={patchedRomPath} set={setPatchedRomPath} extensions={["bin", "md", "gen"]} accentColor="f9e2af" />
                 <div className="flex flex-wrap gap-2"><button type="button" data-testid="inspection-sonic-apply-patch" disabled={patchBusy || !patchPath.trim() || !patchedRomPath.trim()} onClick={() => void applyPilotPatch()} className="rounded border border-[#a6e3a1]/50 px-3 py-1 text-[#a6e3a1]">Aplicar à base</button><button type="button" data-testid="inspection-sonic-run-base" disabled={patchBusy || !session.rom_path} onClick={() => void runBaseRom()} className="rounded border border-[#cdd6f4]/50 px-3 py-1 text-[#cdd6f4]">Observar ROM base</button><button type="button" data-testid="inspection-sonic-run-patched" disabled={patchBusy || !patchedRomPath.trim()} onClick={() => void runPatchedRom()} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]">Observar ROM aplicada</button></div>
+                <div data-testid="inspection-emulator-run-controls" className="rounded border border-[#313244] bg-[#0f172a] p-2 text-[9px] text-[#bac2de]">
+                  <div className="font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">Cenário de execução real</div>
+                  <div className="mt-1">Cada observação recarrega a ROM no core, executa um orçamento explícito e envia START pelo IPC; 60 frames isolados não são aceitos como prova de gameplay.</div>
+                  <div className="mt-2 flex flex-wrap items-end gap-2">
+                    <label className="flex flex-col gap-1">Frames<input data-testid="inspection-emulator-frame-budget" type="number" min={60} max={10000} step={1} value={emulatorFrameBudget} onChange={(event) => setEmulatorFrameBudget(Number(event.target.value))} className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                    <label className="flex flex-col gap-1">Perfil<input data-testid="inspection-emulator-input-profile" readOnly value={emulatorInputProfile === "sonic-boot-start" ? "boot Sonic + START" : "neutro"} className="w-36 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                    <button type="button" data-testid="inspection-emulator-neutral-profile" onClick={() => setEmulatorInputProfile("neutral")} className={`rounded border px-2 py-1 ${emulatorInputProfile === "neutral" ? "border-[#cba6f7] text-[#cba6f7]" : "border-[#313244] text-[#7f849c]"}`}>Neutro</button>
+                    <button type="button" data-testid="inspection-emulator-sonic-profile" onClick={() => setEmulatorInputProfile("sonic-boot-start")} className={`rounded border px-2 py-1 ${emulatorInputProfile === "sonic-boot-start" ? "border-[#89b4fa] text-[#89b4fa]" : "border-[#313244] text-[#7f849c]"}`}>Boot + START</button>
+                  </div>
+                  <div className="mt-1 text-[#f9e2af]">Boot + START: neutro até o frame {SONIC_BOOT_START_FRAME}, START por um frame, depois neutro. A saída só é evidência positiva se o framebuffer mostrar uma cena reconhecível.</div>
+                </div>
               </div>}
-              {emulatorObservation && <div data-testid="inspection-emulator-observation" data-observation-label={emulatorObservationLabel} data-rom-path={emulatorObservation.rom_path} data-rom-sha256={emulatorObservation.rom_sha256} data-rom-size={emulatorObservation.rom_size} data-core-label={emulatorObservation.core_label} data-core-path={emulatorObservation.core_path} data-frames-run={emulatorObservation.frames_run} data-framebuffer-width={emulatorObservation.framebuffer_width} data-framebuffer-height={emulatorObservation.framebuffer_height} data-framebuffer-sha256={emulatorObservation.framebuffer_sha256} data-non-black-pixels={emulatorObservation.non_black_pixels} className="mt-3 rounded border border-[#89b4fa]/40 bg-[#101b2e] p-3 text-[10px]">
+              {emulatorObservation && <div data-testid="inspection-emulator-observation" data-observation-label={emulatorObservationLabel} data-rom-path={emulatorObservation.rom_path} data-rom-sha256={emulatorObservation.rom_sha256} data-rom-size={emulatorObservation.rom_size} data-core-label={emulatorObservation.core_label} data-core-path={emulatorObservation.core_path} data-frames-run={emulatorObservation.frames_run} data-frames-requested={emulatorFrameBudget} data-input-profile={emulatorInputProfile} data-input-start-frame={emulatorInputProfile === "sonic-boot-start" ? SONIC_BOOT_START_FRAME : ""} data-framebuffer-width={emulatorObservation.framebuffer_width} data-framebuffer-height={emulatorObservation.framebuffer_height} data-framebuffer-sha256={emulatorObservation.framebuffer_sha256} data-non-black-pixels={emulatorObservation.non_black_pixels} className="mt-3 rounded border border-[#89b4fa]/40 bg-[#101b2e] p-3 text-[10px]">
                 <div className="font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">Observação real do core · {emulatorObservationLabel}</div>
                 <div className="mt-1 break-all text-[#cdd6f4]">{emulatorObservation.message}</div>
                 <div className="mt-2 grid gap-1 font-mono text-[9px] text-[#bac2de] md:grid-cols-2">
                   <div>ROM: {emulatorObservation.rom_sha256} · {emulatorObservation.rom_size} bytes</div>
                   <div>Core: {emulatorObservation.core_label} · {emulatorObservation.core_path}</div>
-                  <div>Frames observados: {emulatorObservation.frames_run}</div>
+                  <div>Frames observados: {emulatorObservation.frames_run} / orçamento {emulatorFrameBudget}</div>
+                  <div>Input: {emulatorInputProfile === "sonic-boot-start" ? `START no frame ${SONIC_BOOT_START_FRAME}` : "neutro"}</div>
                   <div>Framebuffer: {emulatorObservation.framebuffer_width}×{emulatorObservation.framebuffer_height} · {emulatorObservation.non_black_pixels} pixels não pretos</div>
                   <div className="break-all md:col-span-2">RGBA SHA-256: {emulatorObservation.framebuffer_sha256}</div>
                 </div>
                 <canvas ref={emulatorCanvasRef} data-testid="inspection-emulator-framebuffer" width={emulatorObservation.framebuffer_width} height={emulatorObservation.framebuffer_height} aria-label={"Framebuffer observado da " + emulatorObservationLabel} className="mt-3 block h-auto w-full max-w-[640px] border border-[#313244] bg-black [image-rendering:pixelated]" style={{ imageRendering: "pixelated" }} />
                 <div className="mt-2 text-[#a6e3a1]">Critério 1 — ROM carregada e frames/framebuffer produzidos: PASS quando esta observação tem identidade, frames e pixels reais.</div>
-                <div data-testid="inspection-palette-effect-status" className="mt-1 text-[#f9e2af]">Critério 2 — alteração de paleta apareceu no jogo: PENDENTE até comparar base e cópia com Sonic visível sob condições equivalentes.</div>
+                <div data-testid="inspection-palette-effect-status" className="mt-1 text-[#f9e2af]">Critério 2 — alteração de paleta no jogo: a tela expõe a observação real do framebuffer; a confirmação de Sonic visível, ROI e cor editada é feita pelo E2E independente, com base e cópia sob as mesmas condições.</div>
                 {emulatorObservationHistory.length > 1 && <div data-testid="inspection-emulator-observation-history" className="mt-2 space-y-1 border-t border-[#313244] pt-2">{emulatorObservationHistory.map((entry) => <div key={entry.label + "-" + entry.observation.rom_sha256} data-testid={"inspection-emulator-observation-" + (entry.label === "ROM base" ? "base" : "applied")} className="break-all text-[#bac2de]">{entry.label}: ROM {entry.observation.rom_sha256} · frames {entry.observation.frames_run} · framebuffer {entry.observation.framebuffer_sha256}</div>)}</div>}
               </div>}
             </div>}

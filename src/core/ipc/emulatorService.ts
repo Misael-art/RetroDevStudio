@@ -84,6 +84,10 @@ export function emulatorRunFrame(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_run_frame");
 }
 
+export function emulatorRunFrames(frames: number): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_run_frames", { frames });
+}
+
 export function emulatorObserve(): Promise<EmulatorObservationResult> {
   return invoke<EmulatorObservationResult>("emulator_observe");
 }

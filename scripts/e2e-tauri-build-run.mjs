@@ -3325,7 +3325,8 @@ async function readFramebufferStats(sessionId) {
   );
 }
 
-async function readInspectionEmulatorObservation(sessionId) {
+async function readInspectionEmulatorObservation(sessionId, options = {}) {
+  const includePixels = options.includePixels === true;
   return executeScript(
     sessionId,
     `
@@ -3348,6 +3349,9 @@ async function readInspectionEmulatorObservation(sessionId) {
         coreLabel: observation.getAttribute("data-core-label") || "",
         corePath: observation.getAttribute("data-core-path") || "",
         framesRun: Number(observation.getAttribute("data-frames-run") || "0"),
+        framesRequested: Number(observation.getAttribute("data-frames-requested") || "0"),
+        inputProfile: observation.getAttribute("data-input-profile") || "",
+        inputStartFrame: observation.getAttribute("data-input-start-frame") === "" ? null : Number(observation.getAttribute("data-input-start-frame") || "0"),
         framebufferWidth: Number(observation.getAttribute("data-framebuffer-width") || "0"),
         framebufferHeight: Number(observation.getAttribute("data-framebuffer-height") || "0"),
         framebufferSha256: observation.getAttribute("data-framebuffer-sha256") || "",
@@ -3356,6 +3360,7 @@ async function readInspectionEmulatorObservation(sessionId) {
         canvasHeight: canvas.height,
         canvasRgbaBytes: pixels?.length ?? 0,
         canvasNonBlackPixels: nonBlackPixels,
+        canvasRgba: ${includePixels ? "pixels ? Array.from(pixels) : null" : "null"},
         text: observation.textContent?.replace(/\\s+/g, " ").trim() || "",
       };
     `
@@ -5071,6 +5076,7 @@ async function main() {
         if (patchedSha256 !== modifiedSha256 || baseSha256 !== createHash("sha256").update(inspectionRomBytes).digest("hex") || !patchedRomBytes.equals(modifiedRomBytes)) {
           fail(`Aplicação BPS não reproduziu exatamente a ROM editada: ${JSON.stringify({ baseSha256, modifiedSha256, patchedSha256 })}`);
         }
+        const expectedGameplayFrames = 1200;
         const assertEmulatorObservation = async (label, expectedRomSha256) => {
           let lastObservation = null;
           let observation;
@@ -5082,7 +5088,10 @@ async function main() {
                 return current &&
                   current.label === label &&
                   current.romSha256 === expectedRomSha256 &&
-                  current.framesRun >= 60 &&
+                  current.framesRun >= expectedGameplayFrames &&
+                  current.framesRequested >= expectedGameplayFrames &&
+                  current.inputProfile === "sonic-boot-start" &&
+                  current.inputStartFrame === 900 &&
                   current.coreLabel &&
                   current.corePath &&
                   current.framebufferWidth > 0 &&
@@ -5102,8 +5111,44 @@ async function main() {
             console.error(`[inspection-emulator-observation] timeout ${label} ` + JSON.stringify({ expectedRomSha256, lastObservation, error: String(error) }));
             throw error;
           }
-          console.log(`[inspection-emulator-observation] ` + JSON.stringify(observation));
-          return observation;
+          const withPixels = await readInspectionEmulatorObservation(sessionId, { includePixels: true });
+          if (!withPixels?.canvasRgba || withPixels.canvasRgba.length !== withPixels.canvasWidth * withPixels.canvasHeight * 4) {
+            fail(`Framebuffer do canvas não pôde ser relido integralmente para ${label}: ${JSON.stringify(withPixels)}`);
+          }
+          const pixels = Buffer.from(withPixels.canvasRgba);
+          const width = withPixels.canvasWidth;
+          const height = withPixels.canvasHeight;
+          const gameplayRoi = { x0: 0, y0: Math.floor(height * 0.55), x1: Math.min(width, 128), y1: height };
+          let roiNonBlackPixels = 0;
+          let roiMagentaPixels = 0;
+          let magentaPixels = 0;
+          let roiMagentaLikePixels = 0;
+          let magentaLikePixels = 0;
+          const colorCounts = new Map();
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const offset = (y * width + x) * 4;
+              const r = pixels[offset];
+              const g = pixels[offset + 1];
+              const b = pixels[offset + 2];
+              const nonBlack = r !== 0 || g !== 0 || b !== 0;
+              const magenta = r === 255 && g === 0 && b === 255;
+              const magentaLike = r >= 224 && g <= 32 && b >= 224;
+              const colorKey = `${r},${g},${b}`;
+              colorCounts.set(colorKey, (colorCounts.get(colorKey) ?? 0) + 1);
+              if (nonBlack && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiNonBlackPixels += 1;
+              if (magenta) magentaPixels += 1;
+              if (magenta && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiMagentaPixels += 1;
+              if (magentaLike) magentaLikePixels += 1;
+              if (magentaLike && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiMagentaLikePixels += 1;
+            }
+          }
+          if (withPixels.canvasNonBlackPixels < 1000 || roiNonBlackPixels < 1000) {
+            fail(`A cena Sonic não ficou reconhecível no framebuffer de ${label}: ${JSON.stringify({ width, height, canvasNonBlackPixels: withPixels.canvasNonBlackPixels, roiNonBlackPixels, gameplayRoi })}`);
+          }
+          const topColors = Array.from(colorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12);
+          console.log(`[inspection-emulator-observation] ` + JSON.stringify({ ...withPixels, canvasRgba: undefined, gameplayRoi, roiNonBlackPixels, magentaPixels, roiMagentaPixels, magentaLikePixels, roiMagentaLikePixels, topColors }));
+          return { ...withPixels, gameplayRoi, roiNonBlackPixels, magentaPixels, roiMagentaPixels, magentaLikePixels, roiMagentaLikePixels, topColors };
         };
 
         await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-base", "observar ROM Sonic base pela interface");
@@ -5121,12 +5166,21 @@ async function main() {
           fail(`Framebuffer da ROM aplicada não ficou visível/desobstruído para captura: ${JSON.stringify(appliedEmulatorCanvas)}`);
         }
         const emulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator-applied.png`);
+        if (baseEmulatorObservation.magentaLikePixels !== 0 || baseEmulatorObservation.roiMagentaLikePixels !== 0) {
+          fail(`A ROM base já contém a cor de paleta editada na cena Sonic: ${JSON.stringify({ magentaPixels: baseEmulatorObservation.magentaPixels, magentaLikePixels: baseEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: baseEmulatorObservation.roiMagentaLikePixels, topColors: baseEmulatorObservation.topColors })}`);
+        }
+        if (appliedEmulatorObservation.magentaLikePixels < 100 || appliedEmulatorObservation.roiMagentaLikePixels < 50) {
+          fail(`A ROM aplicada não mostrou a alteração de paleta no ROI do Sonic: ${JSON.stringify({ magentaPixels: appliedEmulatorObservation.magentaPixels, magentaLikePixels: appliedEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: appliedEmulatorObservation.roiMagentaLikePixels, topColors: appliedEmulatorObservation.topColors })}`);
+        }
         const framebufferDiverged = baseEmulatorObservation.framebufferSha256 !== appliedEmulatorObservation.framebufferSha256;
         const sameConditions = baseEmulatorObservation.framesRun === appliedEmulatorObservation.framesRun &&
           baseEmulatorObservation.framebufferWidth === appliedEmulatorObservation.framebufferWidth &&
           baseEmulatorObservation.framebufferHeight === appliedEmulatorObservation.framebufferHeight &&
           baseEmulatorObservation.coreLabel === appliedEmulatorObservation.coreLabel;
-        console.log(`[inspection-palette-effect] ` + JSON.stringify({ status: "pending", reason: "Sonic visível não foi identificado por um marcador independente nesta sequência; divergência do framebuffer é apenas observação", framebufferDiverged, sameConditions, base: { romSha256: baseEmulatorObservation.romSha256, framebufferSha256: baseEmulatorObservation.framebufferSha256 }, applied: { romSha256: appliedEmulatorObservation.romSha256, framebufferSha256: appliedEmulatorObservation.framebufferSha256 }, baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }));
+        if (!sameConditions || !framebufferDiverged) {
+          fail(`A comparação base/aplicada não ocorreu sob condições equivalentes ou não divergiu: ${JSON.stringify({ sameConditions, framebufferDiverged, base: { framesRun: baseEmulatorObservation.framesRun, framebufferWidth: baseEmulatorObservation.framebufferWidth, framebufferHeight: baseEmulatorObservation.framebufferHeight, coreLabel: baseEmulatorObservation.coreLabel }, applied: { framesRun: appliedEmulatorObservation.framesRun, framebufferWidth: appliedEmulatorObservation.framebufferWidth, framebufferHeight: appliedEmulatorObservation.framebufferHeight, coreLabel: appliedEmulatorObservation.coreLabel } })}`);
+        }
+        console.log(`[inspection-palette-effect] ` + JSON.stringify({ status: "passed", oracle: "independent framebuffer ROI + expected RGB333 palette mutation", framebufferDiverged, sameConditions, base: { romSha256: baseEmulatorObservation.romSha256, framebufferSha256: baseEmulatorObservation.framebufferSha256, roiNonBlackPixels: baseEmulatorObservation.roiNonBlackPixels, magentaPixels: baseEmulatorObservation.magentaPixels, magentaLikePixels: baseEmulatorObservation.magentaLikePixels }, applied: { romSha256: appliedEmulatorObservation.romSha256, framebufferSha256: appliedEmulatorObservation.framebufferSha256, roiNonBlackPixels: appliedEmulatorObservation.roiNonBlackPixels, magentaPixels: appliedEmulatorObservation.magentaPixels, magentaLikePixels: appliedEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: appliedEmulatorObservation.roiMagentaLikePixels }, baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }));
 
         await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
         const persistedSessionId = completedState.session.id;
@@ -5165,7 +5219,7 @@ async function main() {
           fail("ROM BYOR original foi alterada durante o fluxo: " + JSON.stringify({ initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 } }));
         }
         console.log(`[inspection-base-integrity] ` + JSON.stringify({ path: inspectionRom, initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 }, unchanged: true }));
-        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "pending", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot }, sessionId: reopenedState.session.id }));
+        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "passed", paletteOracle: "base has no edited RGB333 color; applied has >=100 magenta-like pixels and >=50 in Sonic ROI", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot }, sessionId: reopenedState.session.id }));
         console.log("OK: Desktop Tauri Sonic identify/compose/edit/save/patch/apply/run/restart/reopen E2E passou.");
         return;
       }
