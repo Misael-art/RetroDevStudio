@@ -3382,14 +3382,23 @@ async function inspectNativeButtonTarget(sessionId, testId) {
   );
 }
 
-async function clickButtonByTestIdNative(sessionId, testId, label = testId) {
+async function clickButtonByTestIdNative(sessionId, testId, label = testId, options = {}) {
   const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
-  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled || !diagnostic.unobstructed) {
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled) {
+    fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  if (options.expectBlocked) {
+    if (diagnostic.unobstructed) {
+      fail(`Negativo de obstrução não encontrou bloqueador para '${label}': ${JSON.stringify(diagnostic)}`);
+    }
+    return { blocked: true, diagnostic };
+  }
+  if (!diagnostic.unobstructed) {
     fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
   }
   const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
   await clickElement(sessionId, elementId);
-  return diagnostic;
+  return { blocked: false, diagnostic };
 }
 
 async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = testId, timeoutMs = 30000) {
@@ -3405,16 +3414,64 @@ async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = tes
   return clickButtonByTestIdNative(sessionId, testId, label);
 }
 
-async function assertNativeButtonBlockedByOverlay(sessionId, testId, label = testId) {
-  const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
-  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled) {
-    fail(`Negativo de obstrução não pôde testar '${label}': ${JSON.stringify(diagnostic)}`);
-  }
-  if (diagnostic.unobstructed) {
-    fail(`Negativo de obstrução não encontrou bloqueador para '${label}': ${JSON.stringify(diagnostic)}`);
-  }
-  console.log(`[inspection-reopen-negative] blocked=${JSON.stringify({ label, ...diagnostic })}`);
-  return diagnostic;
+async function readSavedSessionSelection(sessionId, persistedSessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const card = document.querySelector('[data-testid="inspection-saved-session"][data-session-id="' + String(arguments[0]) + '"]');
+      if (!(card instanceof HTMLElement)) return null;
+      const button = card.querySelector('[data-testid="select-saved-session-' + String(arguments[0]) + '"]');
+      const className = String(card.className || '');
+      return {
+        sessionId: card.getAttribute('data-session-id') || '',
+        status: card.getAttribute('data-session-status') || '',
+        selected: className.includes('border-[#cba6f7]'),
+        cardClass: className,
+        buttonDisabled: button instanceof HTMLButtonElement ? button.disabled : null,
+      };
+    `,
+    [persistedSessionId]
+  );
+}
+
+async function ensurePreviewVisibleAndUnobstructed(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-preview-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      let scrollParent = image.parentElement;
+      while (scrollParent && scrollParent !== document.body) {
+        const style = window.getComputedStyle(scrollParent);
+        if (scrollParent.scrollHeight > scrollParent.clientHeight && /(auto|scroll|overlay)/.test(style.overflowY)) break;
+        scrollParent = scrollParent.parentElement;
+      }
+      image.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = image.getBoundingClientRect();
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const renderedSizeSufficient = rect.width >= Math.min(image.naturalWidth, 32) && rect.height >= Math.min(image.naturalHeight, 8);
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
+      const unobstructed = Boolean(top && (top === image || image.contains(top)));
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        fullyVisible,
+        naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
+        renderedSizeSufficient,
+        unobstructed,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: topWithTestId?.getAttribute('data-testid') ?? '',
+        topClass: top instanceof Element ? String(top.className ?? '') : '',
+        scrollParentTestId: scrollParent?.getAttribute('data-testid') ?? '',
+        scrollParentTag: scrollParent?.tagName ?? '',
+        scrollTop: scrollParent ? scrollParent.scrollTop : null,
+      };
+    `
+  );
 }
 
 async function handleProjectWizardVisibly(sessionId, label) {
@@ -4430,6 +4487,8 @@ async function main() {
         "API de automação não voltou após reinício real"
       );
       await handleProjectWizardVisibly(sessionId, "after-restart");
+      await setSessionWindowRect(sessionId, 1920, 1080);
+      console.log(`[inspection-reopen-window] ${JSON.stringify(await executeScript(sessionId, `return { width: window.innerWidth, height: window.innerHeight, outerWidth: window.outerWidth, outerHeight: window.outerHeight };`))}`);
       await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace após reinício");
       await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace não voltou após reinício");
       await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
@@ -4473,11 +4532,21 @@ async function main() {
         "Wizard não ficou visível para o negativo deliberado de obstrução",
         100
       );
-      await assertNativeButtonBlockedByOverlay(
+      const selectionBeforeBlockedClick = await readSavedSessionSelection(sessionId, persistedSessionId);
+      if (!selectionBeforeBlockedClick) {
+        fail(`Sessão salva não estava disponível para o negativo de obstrução: ${persistedSessionId}`);
+      }
+      const blockedSelectionClick = await clickButtonByTestIdNative(
         sessionId,
         `select-saved-session-${persistedSessionId}`,
-        "seleção da sessão salva atrás do wizard"
+        "seleção da sessão salva atrás do wizard",
+        { expectBlocked: true }
       );
+      const selectionAfterBlockedClick = await readSavedSessionSelection(sessionId, persistedSessionId);
+      if (!selectionAfterBlockedClick || JSON.stringify(selectionAfterBlockedClick) !== JSON.stringify(selectionBeforeBlockedClick)) {
+        fail(`Clique obstruído alterou a seleção da sessão: ${JSON.stringify({ before: selectionBeforeBlockedClick, after: selectionAfterBlockedClick })}`);
+      }
+      console.log(`[inspection-reopen-negative] click-rejected=${JSON.stringify({ ...blockedSelectionClick.diagnostic, selectionUnchanged: true, syntheticEvents: false })}`);
       await clickButtonByTestIdNative(sessionId, "wizard-cancel", "fechar wizard pelo controle visível");
       await waitFor(
         async () => executeScript(sessionId, `return !document.querySelector('[data-testid="project-wizard-body"]');`),
@@ -4546,6 +4615,21 @@ async function main() {
         "Prévia real não voltou após reabrir a sessão",
         100
       );
+      let reopenedPreviewLayout;
+      try {
+        reopenedPreviewLayout = await waitFor(
+          async () => {
+            const layout = await ensurePreviewVisibleAndUnobstructed(sessionId);
+            return layout?.fullyVisible && layout.unobstructed && layout.renderedSizeSufficient ? layout : false;
+          },
+          15000,
+          "Prévia reaberta não ficou integralmente visível e sem obstrução após o scroll do painel",
+          100
+        );
+      } catch (error) {
+        const lastLayout = await ensurePreviewVisibleAndUnobstructed(sessionId);
+        fail(`${error instanceof Error ? error.message : String(error)}; último layout=${JSON.stringify(lastLayout)}`);
+      }
       assertChunkyGoldenOracle();
       const expectedPreviewAfterRestart = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
       const independentPixelEvidenceAfterRestart = assertExactPreviewPixels(
@@ -4562,7 +4646,7 @@ async function main() {
       if (reopenedVisualEvidence.pixelsSha256 !== independentPixelEvidenceAfterRestart.pixelsSha256 || actualPngSha256AfterRestart === independentPixelEvidenceAfterRestart.pixelsSha256) {
         fail(`Hashes PNG/RGBA reabertos não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256AfterRestart, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256 })}`);
       }
-      console.log(`[inspection-reopen-visual] ${JSON.stringify({ romSha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), sessionId: reopenedState.session.id, identitySha256: reopenedState.session.identitySha256, candidate: reopenedCandidateEvidence, dimensions: [independentPixelEvidenceAfterRestart.width, independentPixelEvidenceAfterRestart.height], pngSha256: actualPngSha256AfterRestart, pixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, reopenDiagnostic })}`);
+      console.log(`[inspection-reopen-visual] ${JSON.stringify({ romSha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), sessionId: reopenedState.session.id, identitySha256: reopenedState.session.identitySha256, candidate: reopenedCandidateEvidence, dimensions: [independentPixelEvidenceAfterRestart.width, independentPixelEvidenceAfterRestart.height], pngSha256: actualPngSha256AfterRestart, pixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, previewLayout: reopenedPreviewLayout, reopenDiagnostic })}`);
       const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
       console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
       console.log(`ROM BYOR: ${inspectionRom}`);
