@@ -8723,6 +8723,18 @@ pub extern "C" fn retro_run() {
         let (after_input, size, pixel_format) = emulator
             .get_framebuffer()
             .expect("capture reference gameplay framebuffer");
+        let (audio_sample_rate, audio_samples) = emulator
+            .take_audio_samples()
+            .expect("capture reference audio stream");
+        assert!(
+            audio_sample_rate > 0 && !audio_samples.is_empty(),
+            "reference game should deliver a non-empty audio stream from the authored theme"
+        );
+        let audio_non_zero_samples = audio_samples.iter().filter(|sample| **sample != 0).count();
+        assert!(
+            audio_non_zero_samples > 0,
+            "reference game audio stream must not be silent"
+        );
         assert_ne!(
             before_input, after_input,
             "the reference game framebuffer should respond to right input"

@@ -15083,7 +15083,7 @@ fn reference_player_prefab() -> Entity {
                 frame_width: 16,
                 frame_height: 16,
                 pivot: None,
-                palette_slot: 0,
+                palette_slot: 1,
                 animations,
                 priority: "foreground".to_string(),
                 meta_sprite: false,
@@ -15164,7 +15164,7 @@ fn reference_goal_prefab() -> Entity {
                 frame_width: 16,
                 frame_height: 16,
                 pivot: None,
-                palette_slot: 0,
+                palette_slot: 2,
                 animations: BTreeMap::from([(
                     "idle".to_string(),
                     AnimationDef {
@@ -15238,16 +15238,35 @@ fn reference_platformer_scene() -> Scene {
         DEFAULT_SCENE_ID,
         Some("Reference Platformer — Goal Run".to_string()),
     );
-    scene.palettes = vec![PaletteEntry {
-        slot: 0,
-        colors: vec![
-            "#0C1420".to_string(),
-            "#2AB4E8".to_string(),
-            "#F8BE30".to_string(),
-            "#34B85A".to_string(),
-            "#F2F4F8".to_string(),
-        ],
-    }];
+    scene.palettes = vec![
+        PaletteEntry {
+            slot: 0,
+            colors: vec![
+                "#0C1420".to_string(),
+                "#2AB4E8".to_string(),
+                "#F8BE30".to_string(),
+                "#34B85A".to_string(),
+                "#F2F4F8".to_string(),
+            ],
+        },
+        PaletteEntry {
+            slot: 1,
+            colors: vec![
+                "#0C1420".to_string(),
+                "#2AB4E8".to_string(),
+                "#2484D6".to_string(),
+                "#FFD048".to_string(),
+            ],
+        },
+        PaletteEntry {
+            slot: 2,
+            colors: vec![
+                "#141C2C".to_string(),
+                "#F0F0F0".to_string(),
+                "#F8BE30".to_string(),
+            ],
+        },
+    ];
     scene.layers = Some(vec![
         SceneLayer {
             id: "layer_background".to_string(),

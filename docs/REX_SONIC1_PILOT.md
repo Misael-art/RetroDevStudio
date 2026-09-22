@@ -101,3 +101,9 @@ Além do piloto Sonic, esta sessão materializou o próximo marco de autoria em 
 Prova local: card e criação pelo wizard cobertos em `src/App.test.tsx`; seed e componentes canônicos cobertos em `project_mgr`; build real com SGDK oficial, ROM `SEGA`, carga no núcleo Libretro oficial, 45 frames com `Right` e framebuffer alterado cobertos pelo teste manual ignorado `reference_platformer_real_toolchain_build`. A colisão Assembly encontrada entre sprite e SFX `goal` foi corrigida com o nome de recurso `goal_sound`.
 
 Esta prova não promove o piloto Sonic a reconstrução, não fecha save/restart/reopen desktop para o novo template e não converte importação/Phase D em equivalência ou AST completo. O template permanece Experimental até a prova visual de autoria e persistência ser reexecutada no desktop final.
+
+### Continuação 2026-09-22 — evidência local consolidada
+
+O template de autoria foi reexecutado no desktop canônico e o relatório `src-tauri/target-test/validation/reference-platformer-2026-09-22T01-29-49-822Z-report.json` registra wizard, quatro entidades, NodeGraph, save, ROM `SEGA`, movimento/salto, pausa/retomada, reabertura e rebuild. A prova de áudio real do mesmo template passou no teste SGDK/Libretro ignorado, com amostras não vazias e não silenciosas.
+
+As provas de inspeção foram reexecutadas contra as referências locais: HAMOOPIG (`558bea6c…f8529be9`) fechou candidato `42128/192`, frames Ryo `0..4`, oráculo de pixels e save/restart/reopen; Taiketsu (`3967996a…42bc7c`) fechou `spr_spark0/frame-0`, `24×24`, e pixels iguais antes/depois da reabertura. Na tentativa nova de `inspection-sonic`, composição/edição/BPS e comparação de framebuffer base/aplicada passaram, mas a trajetória da ROM base expirou aguardando `renderedFrames >= 890`; o resultado não é contado como novo aceite de gameplay. A rotina ROM→nós continua fora do aceite por falta de fronteiras, semântica, source mapping e equivalência independente comprovados.

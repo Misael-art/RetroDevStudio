@@ -79,6 +79,7 @@ pub enum AstNode {
         max_velocity_y: i32,
         friction: i32,
         bounce: i32,
+        floor_y: Option<i32>,
     },
     SetAnimation {
         var_name: String,
@@ -193,6 +194,7 @@ pub struct PhysicsApplication {
     pub max_velocity_y: i32,
     pub friction: i32,
     pub bounce: i32,
+    pub floor_y: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -649,7 +651,11 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         }
 
         if let Some(physics) = &entity.components.physics {
-            physics_applications.push(physics_application(&var_name, physics));
+            physics_applications.push(physics_application(
+                &var_name,
+                physics,
+                scene.collision_map.as_ref(),
+            ));
         }
     }
 
@@ -725,6 +731,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                 max_velocity_y: application.max_velocity_y,
                 friction: application.friction,
                 bounce: application.bounce,
+                floor_y: application.floor_y,
             }),
     );
     nodes.extend(logic_output.runtime_nodes.iter().cloned());
@@ -810,12 +817,29 @@ fn animation_frame_time(project_fps: u32, animation_fps: u32) -> u32 {
     ((project_fps + (animation_fps / 2)) / animation_fps).max(1)
 }
 
-fn physics_application(var_name: &str, physics: &PhysicsComponent) -> PhysicsApplication {
+fn physics_application(
+    var_name: &str,
+    physics: &PhysicsComponent,
+    collision_map: Option<&crate::ugdm::entities::CollisionMap>,
+) -> PhysicsApplication {
     let (max_velocity_x, max_velocity_y) = physics
         .max_velocity
         .as_ref()
         .map(|velocity| (velocity.x, velocity.y))
         .unwrap_or((i16::MAX as i32, i16::MAX as i32));
+
+    let floor_y = collision_map.and_then(|map| {
+        let solid_rows = map
+            .data
+            .chunks(map.width as usize)
+            .map(|row| row.iter().any(|cell| *cell != 0))
+            .collect::<Vec<_>>();
+        let mut floor_row = solid_rows.iter().rposition(|solid| *solid)?;
+        while floor_row > 0 && solid_rows[floor_row - 1] {
+            floor_row -= 1;
+        }
+        Some(floor_row as i32 * i32::from(map.tile_height) - 16)
+    });
 
     PhysicsApplication {
         var_name: var_name.to_string(),
@@ -825,6 +849,7 @@ fn physics_application(var_name: &str, physics: &PhysicsComponent) -> PhysicsApp
         max_velocity_y,
         friction: physics.friction,
         bounce: physics.bounce,
+        floor_y,
     }
 }
 
@@ -2735,6 +2760,7 @@ pub fn collect_physics_applications(ast: &AstOutput) -> Vec<PhysicsApplication> 
                 max_velocity_y,
                 friction,
                 bounce,
+                floor_y,
             } => Some(PhysicsApplication {
                 var_name: var_name.clone(),
                 gravity: *gravity,
@@ -2743,6 +2769,7 @@ pub fn collect_physics_applications(ast: &AstOutput) -> Vec<PhysicsApplication> 
                 max_velocity_y: *max_velocity_y,
                 friction: *friction,
                 bounce: *bounce,
+                floor_y: *floor_y,
             }),
             _ => None,
         })
@@ -3307,6 +3334,7 @@ mod tests {
                 max_velocity_y: 96,
                 friction: 2,
                 bounce: 35,
+                floor_y: None,
             }]
         );
         assert!(ast.nodes.iter().any(|node| matches!(
@@ -3319,6 +3347,7 @@ mod tests {
                 max_velocity_y,
                 friction,
                 bounce,
+                ..
             } if var_name == "spr_hero"
                 && *gravity
                 && *gravity_strength == 6

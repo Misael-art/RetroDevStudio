@@ -48,6 +48,7 @@
     "test:e2e:desktop:onboarding-shell": "node scripts/e2e-tauri-build-run.mjs --scenario onboarding-shell",
     "test:e2e:desktop:qa-rc": "node scripts/e2e-tauri-build-run.mjs --scenario qa-rc",
     "test:e2e:desktop:create-game-from-zero": "node scripts/e2e-tauri-build-run.mjs --scenario create-game-from-zero",
+    "test:e2e:desktop:reference-platformer": "node scripts/e2e-tauri-build-run.mjs --scenario reference-platformer",
     "test:e2e:desktop:inspection": "node scripts/e2e-tauri-build-run.mjs --scenario inspection-complete",
     "test:e2e:desktop:inspection:cancel": "node scripts/e2e-tauri-build-run.mjs --scenario inspection-cancel",
     "test:e2e:desktop:inspection:sprite-secondary": "node scripts/e2e-tauri-build-run.mjs --scenario inspection-sprite-secondary",

@@ -60,6 +60,7 @@ fn build_main_c_with_collision(
     let input_commands = collect_input_commands(ast);
     let unsupported_semantics = crate::compiler::ast_generator::collect_unsupported_semantics(ast);
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
+    let logic_velocity_targets = collect_logic_velocity_targets(ast);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
     let runtime_probe_enabled = runtime_evidence_probe_enabled();
@@ -122,6 +123,17 @@ fn build_main_c_with_collision(
     for physics in &physics_applications {
         out.push_str(&format!("static s32 {}_vel_x = 0;\n", physics.var_name));
         out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
+    }
+    for target_name in logic_velocity_targets {
+        let runtime_var = sprite_runtime_var(&target_name);
+        if physics_applications
+            .iter()
+            .any(|physics| physics.var_name == runtime_var)
+        {
+            continue;
+        }
+        out.push_str(&format!("static s32 {}_vel_x = 0;\n", runtime_var));
+        out.push_str(&format!("static s32 {}_vel_y = 0;\n", runtime_var));
     }
     if !physics_applications.is_empty() {
         out.push('\n');
@@ -270,6 +282,15 @@ fn build_main_c_with_collision(
                     "    // Load spritesheet: {} ({}x{} px, palette {})\n",
                     resource_name, frame_width, frame_height, palette_slot
                 ));
+                let palette_conflicts_with_tilemap =
+                    *palette_slot == 0 && !tilemap_assets.is_empty();
+                if !palette_conflicts_with_tilemap {
+                    out.push_str(&format!(
+                        "    PAL_setPalette({}, {}.palette->data, CPU);\n",
+                        palette_const(*palette_slot),
+                        resource_name
+                    ));
+                }
             }
             AstNode::SpawnSprite {
                 var_name,
@@ -300,6 +321,7 @@ fn build_main_c_with_collision(
                         var_name, resource_name, var_name, var_name, palette, priority
                     ));
                 }
+                out.push_str(&format!("    SPR_setVisibility({}, VISIBLE);\n", var_name));
             }
             AstNode::DrawTilemap {
                 resource_name,
@@ -412,6 +434,7 @@ fn build_main_c_with_collision(
                 max_velocity_y,
                 friction,
                 bounce,
+                floor_y,
             } => render_apply_physics(
                 &mut out,
                 &PhysicsApplication {
@@ -422,6 +445,7 @@ fn build_main_c_with_collision(
                     max_velocity_y: *max_velocity_y,
                     friction: *friction,
                     bounce: *bounce,
+                    floor_y: *floor_y,
                 },
             ),
             AstNode::SetAnimation {
@@ -798,6 +822,15 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
         next_y_var = next_y_var,
         var_name = physics.var_name
     ));
+
+    if let Some(floor_y) = physics.floor_y {
+        out.push_str(&format!(
+            "        if ({next_y_var} > {floor_y}) {{ {next_y_var} = {floor_y}; {var_name}_vel_y = 0; }}\n",
+            next_y_var = next_y_var,
+            floor_y = floor_y,
+            var_name = physics.var_name
+        ));
+    }
 
     if physics.bounce > 0 {
         out.push_str(&format!(
@@ -1217,6 +1250,19 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 vx,
                 vy,
             } => {
+                let runtime_var = sprite_runtime_var(target_name);
+                out.push_str(&format!(
+                    "{indent}{runtime_var}_vel_x = {vx};\n",
+                    indent = indent_str,
+                    runtime_var = runtime_var,
+                    vx = render_math_expr(vx)
+                ));
+                out.push_str(&format!(
+                    "{indent}{runtime_var}_vel_y = {vy};\n",
+                    indent = indent_str,
+                    runtime_var = runtime_var,
+                    vy = render_math_expr(vy)
+                ));
                 out.push_str(&format!(
                     "{indent}logic_var_{target}_vx = {vx};\n",
                     indent = indent_str,
@@ -1448,6 +1494,93 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     "#error \"Source Bridge blocks codegen: {gap} at {source_file}:{source_line}. Enable bridge compatibility mode or replace with native nodes.\"\n",
                 ));
             }
+        }
+    }
+}
+
+fn sprite_runtime_var(target_name: &str) -> String {
+    let target = target_name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if target.starts_with("spr_") {
+        target
+    } else {
+        format!("spr_{target}")
+    }
+}
+
+fn collect_logic_velocity_targets(ast: &AstOutput) -> std::collections::BTreeSet<String> {
+    let mut targets = std::collections::BTreeSet::new();
+    for script in &ast.logic_scripts {
+        collect_logic_velocity_targets_from_ops(&script.ops, &mut targets);
+    }
+    targets
+}
+
+fn collect_logic_velocity_targets_from_ops(
+    ops: &[LogicOp],
+    targets: &mut std::collections::BTreeSet<String>,
+) {
+    for op in ops {
+        match op {
+            LogicOp::SourceMapped { op, .. } => {
+                collect_logic_velocity_targets_from_ops(std::slice::from_ref(op.as_ref()), targets);
+            }
+            LogicOp::SetVelocity { target_name, .. } => {
+                targets.insert(target_name.clone());
+            }
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            }
+            | LogicOp::ConditionBool {
+                if_true, if_false, ..
+            } => {
+                collect_logic_velocity_targets_from_ops(if_true, targets);
+                collect_logic_velocity_targets_from_ops(if_false, targets);
+            }
+            LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+                collect_logic_velocity_targets_from_ops(body, targets);
+                collect_logic_velocity_targets_from_ops(done, targets);
+            }
+            LogicOp::TimelineSequence { slots, .. } => {
+                for slot in slots {
+                    collect_logic_velocity_targets_from_ops(&slot.actions, targets);
+                }
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_logic_velocity_targets_from_ops(if_ok, targets);
+                collect_logic_velocity_targets_from_ops(if_warn, targets);
+            }
+            LogicOp::HardwareEvent { ops, .. } => {
+                collect_logic_velocity_targets_from_ops(ops, targets);
+            }
+            LogicOp::StateMachine { states, .. } => {
+                for state in states {
+                    collect_logic_velocity_targets_from_ops(&state.body, targets);
+                    for transition in &state.transitions {
+                        collect_logic_velocity_targets_from_ops(&transition.if_matched, targets);
+                        collect_logic_velocity_targets_from_ops(&transition.if_unmatched, targets);
+                    }
+                }
+            }
+            LogicOp::SetSpritePosition { .. }
+            | LogicOp::MoveSprite { .. }
+            | LogicOp::SetAnimationState { .. }
+            | LogicOp::SetTile { .. }
+            | LogicOp::CameraFollow { .. }
+            | LogicOp::ShowSprite { .. }
+            | LogicOp::HideSprite { .. }
+            | LogicOp::SetVar { .. }
+            | LogicOp::PlaySound { .. }
+            | LogicOp::PlayMusic { .. }
+            | LogicOp::SourceBridgeError { .. } => {}
         }
     }
 }
@@ -2354,6 +2487,13 @@ mod tests {
                 let ast = AstOutput {
                     nodes: vec![
                         AstNode::SpriteSystemInit,
+                        AstNode::LoadSpritesheet {
+                            resource_name: "hero".into(),
+                            asset_path: "assets/sprites/hero.png".into(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            palette_slot: 1,
+                        },
                         AstNode::SpawnSprite {
                             var_name: "spr_hero".into(),
                             resource_name: "hero".into(),
@@ -2371,6 +2511,8 @@ mod tests {
                     output.contains(&format!("TILE_ATTR(PAL1, {priority}, FALSE, FALSE)")),
                     "priority mapping failed: managed={managed}, high={high}"
                 );
+                assert!(output.contains("PAL_setPalette(PAL1, hero.palette->data, CPU);"));
+                assert!(output.contains("SPR_setVisibility(spr_hero, VISIBLE);"));
             }
         }
     }
@@ -2827,6 +2969,7 @@ mod tests {
                     max_velocity_y: 96,
                     friction: 2,
                     bounce: 35,
+                    floor_y: None,
                 },
                 AstNode::SpriteUpdate,
                 AstNode::VSync,
@@ -3119,7 +3262,9 @@ mod tests {
         assert!(output
             .main_c
             .contains("static s32 logic_var_player_vy = 0;"));
+        assert!(output.main_c.contains("static s32 spr_player_vel_y = 0;"));
         assert!(output.main_c.contains("logic_var_player_vx = 2;"));
+        assert!(output.main_c.contains("spr_player_vel_y = 0;"));
     }
 
     #[test]

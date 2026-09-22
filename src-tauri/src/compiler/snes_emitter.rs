@@ -399,6 +399,7 @@ fn build_main_c_with_collision(
                 max_velocity_y,
                 friction,
                 bounce,
+                floor_y: _,
             } => render_apply_physics(
                 &mut out,
                 &context,
@@ -410,6 +411,7 @@ fn build_main_c_with_collision(
                     max_velocity_y: *max_velocity_y,
                     friction: *friction,
                     bounce: *bounce,
+                    floor_y: None,
                 },
             ),
             AstNode::DrawText { x, y, text, .. } => {
@@ -2718,6 +2720,7 @@ mod tests {
                     max_velocity_y: 96,
                     friction: 2,
                     bounce: 35,
+                    floor_y: None,
                 },
                 AstNode::SpriteUpdate,
                 AstNode::VSync,

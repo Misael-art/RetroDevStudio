@@ -423,6 +423,7 @@ function parseArgs(argv) {
           "onboarding-shell",
           "qa-rc",
           "create-game-from-zero",
+          "reference-platformer",
           "inspection",
           "inspection-cancel",
           "inspection-complete",
@@ -4273,6 +4274,410 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
   };
 }
 
+async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCreated) {
+  const artifactPrefix = `reference-platformer-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: null,
+    scenario: "reference-platformer",
+    projectName: "",
+    projectDir: "",
+    templateId: "reference_platformer",
+    artifacts: [],
+    steps: [],
+    roms: [],
+    frames: [],
+    input: {},
+    persistence: {},
+  };
+
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-01-wizard.png`),
+    "reference template wizard"
+  );
+  await clickByTestId(sessionId, "template-card-reference_platformer");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const generatedProjectName = `Reference_Platformer_${Date.now()}`;
+  await fillInputBySelector(
+    sessionId,
+    'input[placeholder="Nome do projeto"]',
+    generatedProjectName
+  );
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+
+  const createdState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entities = Array.isArray(state?.activeScene?.entities)
+        ? state.activeScene.entities
+        : [];
+      return state?.activeProjectDir &&
+        state.activeProjectName === generatedProjectName &&
+        state.activeTarget === "megadrive" &&
+        entities.length === 4
+        ? state
+        : false;
+    },
+    45000,
+    "Template reference_platformer nao criou a cena completa pelo wizard.",
+    500
+  );
+  onProjectCreated(createdState.activeProjectDir);
+  report.projectName = generatedProjectName;
+  report.projectDir = createdState.activeProjectDir;
+  currentE2eRunContext.project = createdState.activeProjectDir;
+  currentE2eRunContext.projectName = generatedProjectName;
+  currentE2eRunContext.projectTarget = "megadrive";
+  const entityIds = (createdState.activeScene.entities ?? []).map((entity) => entity.id ?? entity.entity_id);
+  for (const requiredId of ["reference_tilemap", "player", "goal", "main_camera"]) {
+    if (!entityIds.includes(requiredId)) {
+      fail(`Template reference_platformer nao expos a entidade '${requiredId}'.`);
+    }
+  }
+  addReportStep(report, "create_reference_platformer_from_wizard", "passed", {
+    projectDir: createdState.activeProjectDir,
+    entityIds,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-02-editor.png`),
+    "reference platformer editor"
+  );
+
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.selectedEntityId === "player" ? state : false;
+    },
+    10000,
+    "Hierarchy nao selecionou o player do template de referencia.",
+    250
+  );
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const cards = await executeScript(
+        sessionId,
+        "return document.querySelectorAll('[data-testid^=\"node-card-\"]').length;"
+      );
+      return state?.activeWorkspace === "logic" && cards >= 10 ? { state, cards } : false;
+    },
+    15000,
+    "NodeGraph do template de referencia nao ficou visivel com os nodes gerados.",
+    250
+  );
+  const logicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+  if (!logicState?.resolved?.has_graph || logicState.resolved.graph_ref !== "graphs/reference_platformer_logic.json") {
+    fail(`NodeGraph do player nao persistiu como referencia canonica: ${JSON.stringify(logicState)}`);
+  }
+  addReportStep(report, "inspect_visible_reference_nodegraph", "passed", {
+    graphRef: logicState.resolved.graph_ref,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-03-nodegraph.png`),
+    "reference platformer NodeGraph"
+  );
+
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.consoleEntries?.some((entry) =>
+        String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+      )
+        ? state
+        : false;
+    },
+    15000,
+    "Salvar nao confirmou a cena do template de referencia.",
+    250
+  );
+  addReportStep(report, "save_reference_platformer", "passed");
+
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao abriu para o template de referencia.",
+    250
+  );
+  const firstBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer initial build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  report.roms.push(firstBuild);
+  report.frames.push({ label: firstBuild.label, ...firstBuild.framebuffer });
+  for (const generatedName of ["main.c", "resources.res", "resources.rs"]) {
+    const generatedPath = path.join(
+      createdState.activeProjectDir,
+      "build",
+      "megadrive",
+      generatedName === "main.c" ? "src" : "res",
+      generatedName
+    );
+    if (await pathExists(generatedPath)) {
+      const evidencePath = path.join(validationDir, `${artifactPrefix}-${generatedName}`);
+      await cp(generatedPath, evidencePath);
+      addReportArtifact(report, evidencePath, `generated ${generatedName}`);
+    }
+  }
+  for (const generatedDirectory of ["res", "src"]) {
+    const generatedDirectoryPath = path.join(
+      createdState.activeProjectDir,
+      "build",
+      "megadrive",
+      generatedDirectory
+    );
+    if (!(await pathExists(generatedDirectoryPath))) continue;
+    for (const generatedName of await readdir(generatedDirectoryPath)) {
+      if (!/resource|player|goal/i.test(generatedName)) continue;
+      const generatedPath = path.join(generatedDirectoryPath, generatedName);
+      const evidencePath = path.join(
+        validationDir,
+        `${artifactPrefix}-${generatedDirectory}-${generatedName}`
+      );
+      await cp(generatedPath, evidencePath);
+      addReportArtifact(report, evidencePath, `generated ${generatedDirectory}/${generatedName}`);
+    }
+  }
+  addReportStep(report, "build_real_rom_and_start_game_view", "passed", {
+    rom: firstBuild.rom_path,
+    framebuffer: firstBuild.framebuffer,
+  });
+
+  await focusGameCanvasNatively(sessionId);
+  const beforeControls = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "reference movement");
+  const rightAck = await waitFor(
+    async () => {
+      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return observation?.lastJoypadAck?.joypad?.right === true ? observation : false;
+    },
+    10000,
+    "ArrowRight nao foi confirmado para o template de referencia.",
+    100
+  );
+  const movementFrame = await waitFor(
+    async () => {
+      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+      return frame && frame.renderedFrames > beforeControls.renderedFrames + 30 ? frame : false;
+    },
+    20000,
+    "Movimento do template de referencia nao avancou frames.",
+    100
+  );
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "reference movement release");
+  const rightReleaseAck = await waitFor(
+    async () => {
+      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return observation?.lastJoypadAck?.joypad?.right === false ? observation : false;
+    },
+    10000,
+    "liberacao de ArrowRight nao foi confirmada para a referencia.",
+    100
+  );
+  const movementDiffPixels = beforeControls.rgba.reduce(
+    (count, value, index) => count + (value === movementFrame.rgba[index] ? 0 : 1),
+    0
+  );
+  if (movementDiffPixels === 0) {
+    fail("Movimento confirmado pelo ACK nao alterou o framebuffer da referencia.");
+  }
+
+  const beforeJump = movementFrame;
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump");
+  const jumpAck = await waitFor(
+    async () => {
+      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return observation?.lastJoypadAck?.joypad?.a === true ? observation : false;
+    },
+    10000,
+    "KeyZ/A nao foi confirmado para o salto da referencia.",
+    100
+  );
+  const jumpFrame = await waitFor(
+    async () => {
+      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+      return frame && frame.renderedFrames > beforeJump.renderedFrames + 12 ? frame : false;
+    },
+    20000,
+    "Salto do template de referencia nao avancou frames.",
+    100
+  );
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
+  const jumpReleaseAck = await waitFor(
+    async () => {
+      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return observation?.lastJoypadAck?.joypad?.a === false ? observation : false;
+    },
+    10000,
+    "liberacao de KeyZ/A nao foi confirmada para a referencia.",
+    100
+  );
+  const jumpDiffPixels = beforeJump.rgba.reduce(
+    (count, value, index) => count + (value === jumpFrame.rgba[index] ? 0 : 1),
+    0
+  );
+  if (jumpDiffPixels === 0) {
+    const jumpDiagnostic = {
+      before: {
+        width: beforeJump.width,
+        height: beforeJump.height,
+        rgbaBytes: beforeJump.rgbaBytes,
+        renderedFrames: beforeJump.renderedFrames,
+        framebufferSha256: beforeJump.framebufferSha256,
+        magentaLikeBounds: beforeJump.magentaLikeBounds,
+        sonicRoiMagentaLikeBounds: beforeJump.sonicRoiMagentaLikeBounds,
+      },
+      after: {
+        width: jumpFrame.width,
+        height: jumpFrame.height,
+        rgbaBytes: jumpFrame.rgbaBytes,
+        renderedFrames: jumpFrame.renderedFrames,
+        framebufferSha256: jumpFrame.framebufferSha256,
+        magentaLikeBounds: jumpFrame.magentaLikeBounds,
+        sonicRoiMagentaLikeBounds: jumpFrame.sonicRoiMagentaLikeBounds,
+      },
+      jumpDiffPixels,
+      jumpAck: jumpAck?.lastJoypadAck ?? null,
+      jumpReleaseAck: jumpReleaseAck?.lastJoypadAck ?? null,
+      generatedMain: report.artifacts.find((artifact) => artifact.label === "generated main.c")?.path ?? null,
+    };
+    const jumpDiagnosticPath = path.join(validationDir, `${artifactPrefix}-jump-diagnostic.json`);
+    await writeFile(jumpDiagnosticPath, JSON.stringify(jumpDiagnostic, null, 2));
+    await captureScreenshot(sessionId, `${artifactPrefix}-04-jump-before.png`);
+    await captureScreenshot(sessionId, `${artifactPrefix}-05-jump-after.png`);
+    fail("Salto confirmado pelo ACK nao alterou o framebuffer da referencia.");
+  }
+
+  await closeVisibleConsoleDrawer(sessionId, "reference platformer gameplay");
+  await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar reference platformer");
+  await waitFor(
+    async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"),
+    10000,
+    "Pausa nao ficou visivel na Game View da referencia.",
+    100
+  );
+  const paused = await readCanonicalGameProgress(sessionId);
+  await clickButtonByTestIdNative(sessionId, "viewport-resume", "retomar reference platformer");
+  const resumed = await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames > paused.renderedFrames + 5 ? progress : false;
+    },
+    10000,
+    "Retomada nao avancou frames na Game View da referencia.",
+    100
+  );
+  report.input = {
+    before: { frame: beforeControls.renderedFrames, sha256: beforeControls.framebufferSha256 },
+    movement: { frame: movementFrame.renderedFrames, sha256: movementFrame.framebufferSha256, diffBytes: movementDiffPixels, ack: rightAck?.lastJoypadAck ?? null, releaseAck: rightReleaseAck?.lastJoypadAck ?? null },
+    jump: { frame: jumpFrame.renderedFrames, sha256: jumpFrame.framebufferSha256, diffBytes: jumpDiffPixels, ack: jumpAck?.lastJoypadAck ?? null, releaseAck: jumpReleaseAck?.lastJoypadAck ?? null },
+    pause: { paused, resumed },
+  };
+  report.frames.push({ label: "movement", width: movementFrame.width, height: movementFrame.height, non_black_pixels: movementFrame.nonBlackPixels, sha256: movementFrame.framebufferSha256 });
+  report.frames.push({ label: "jump", width: jumpFrame.width, height: jumpFrame.height, non_black_pixels: jumpFrame.nonBlackPixels, sha256: jumpFrame.framebufferSha256 });
+  addReportStep(report, "movement_jump_pause_resume", "passed", report.input);
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-04-gameplay-controls.png`),
+    "reference gameplay controls"
+  );
+
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await clickTopBarMenuAction(sessionId, "Fechar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const wizardVisible = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"project-wizard-body\"]'));" );
+      return !state?.activeProjectDir && wizardVisible ? true : false;
+    },
+    15000,
+    "Projeto de referencia nao fechou com retorno ao wizard.",
+    250
+  );
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', generatedProjectName);
+  await waitFor(
+    async () => {
+      const card = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"wizard-existing-project-card\"]'));" );
+      const pathText = await executeScript(sessionId, "return document.querySelector('[data-testid=\"wizard-existing-project-path\"]')?.textContent ?? '';" );
+      return card && pathText.includes(createdState.activeProjectDir) ? true : false;
+    },
+    30000,
+    "Wizard nao detectou o projeto de referencia salvo.",
+    500
+  );
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  const reopenedState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entities = Array.isArray(state?.activeScene?.entities) ? state.activeScene.entities : [];
+      return state?.activeProjectDir === createdState.activeProjectDir && entities.length === 4 ? state : false;
+    },
+    45000,
+    "Projeto de referencia nao reabriu com as quatro entidades.",
+    500
+  );
+  const reopenedLogicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+  if (!reopenedLogicState?.resolved?.has_graph || reopenedLogicState.resolved.graph_ref !== "graphs/reference_platformer_logic.json") {
+    fail(`NodeGraph do template nao persistiu apos reabertura: ${JSON.stringify(reopenedLogicState)}`);
+  }
+  report.persistence = {
+    projectDir: createdState.activeProjectDir,
+    entityIds: (reopenedState.activeScene.entities ?? []).map((entity) => entity.id ?? entity.entity_id),
+    graphRef: reopenedLogicState.resolved.graph_ref,
+  };
+  addReportStep(report, "reopen_project_and_validate_persisted_graph", "passed", report.persistence);
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-05-reopened.png`),
+    "reference project reopened"
+  );
+
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao reabriu para a referencia.",
+    250
+  );
+  const reopenedBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer reopened build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  report.roms.push(reopenedBuild);
+  report.frames.push({ label: reopenedBuild.label, ...reopenedBuild.framebuffer });
+  addReportStep(report, "rebuild_and_run_after_reopen", "passed", {
+    rom: reopenedBuild.rom_path,
+    framebuffer: reopenedBuild.framebuffer,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-06-reopened-build-run.png`),
+    "reference reopened build run"
+  );
+
+  const savedReport = await writeCreateGameReport(report, reportPath);
+  console.log("OK: Desktop Tauri reference-platformer E2E passou.");
+  console.log(`Projeto criado: ${generatedProjectName}`);
+  console.log(`Diretorio do projeto: ${createdState.activeProjectDir}`);
+  console.log(`ROM inicial: ${firstBuild.rom_path}`);
+  console.log(`ROM reaberta: ${reopenedBuild.rom_path}`);
+  console.log(`Relatorio: ${savedReport}`);
+}
+
 async function cleanupTemporaryProject(projectDir) {
   if (!projectDir) {
     return true;
@@ -5255,7 +5660,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -5266,7 +5671,8 @@ async function main() {
   const requiresExistingProject =
     options.scenario !== "onboarding-shell" &&
     options.scenario !== "qa-rc" &&
-    options.scenario !== "create-game-from-zero";
+    options.scenario !== "create-game-from-zero" &&
+    options.scenario !== "reference-platformer";
   let temporaryProjectDir = "";
   let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
@@ -6670,6 +7076,17 @@ async function main() {
       console.log(`Evidencias: ${wizardScreenshot}`);
       console.log(`Evidencias: ${editorScreenshot}`);
       console.log(`Evidencias: ${layerScreenshot}`);
+      return;
+    }
+
+    if (options.scenario === "reference-platformer") {
+      await runReferencePlatformerScenario(
+        sessionId,
+        emulatorActivationTimeoutMs,
+        (projectDir) => {
+          temporaryProjectDir = projectDir;
+        }
+      );
       return;
     }
 
