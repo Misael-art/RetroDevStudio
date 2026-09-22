@@ -1,78 +1,58 @@
-# REX — decisão de objetivo no jogo de referência (Experimental)
+# REX — passagem de objetivo no jogo de referência (Experimental)
 
-Fatia dependente de `codex/rex-branch-compare-pilot`, publicada em
-`codex/rex-reference-goal-pilot`, sem merge. O código desta fatia mantém o
-perfil Experimental de autoria e reutiliza o perfil condicional apenas no
-comportamento delimitado abaixo; não amplia o conjunto de instruções M68K.
+Fatia dependente `codex/rex-reference-goal-pilot`, sem merge. Reutiliza o jogo builtin `reference_platformer`; não recupera uma rotina de ROM externa e não amplia instruções nem perfil. O comportamento permanece **Experimental**, restrito a esta cena e ao caminho SGDK/Mega Drive comprovado.
 
-## Resultado demonstrado
+## O que está ligado no jogo
 
-O comportamento é autoria do template builtin `reference_platformer`, não
-recuperação de uma ROM externa. O grafo lê `reference_score`, soma um ponto
-por frame em que a entrada real `BUTTON_RIGHT` é consumida, grava o resultado,
-compara `reference_score >= threshold` e, no ramo verdadeiro, grava
-`goal_open=1` e destrói o sprite `goal` real; no ramo falso, mantém o sprite
-visível. O parâmetro exposto no editor é `threshold`, rotulado “Limiar de
-score”, com semântica e origem autoral visíveis. O source mapping persistido é
-`graphs/reference_platformer_logic.json:24`.
+O bloqueador da passagem (`passage_blocker`) é uma entidade visual com colisão sólida 16×32. O marcador visual do objetivo (`goal`) é separado e não colide; a entidade `goal_sensor` é uma AABB invisível, não sólida, que detecta a conclusão. Com a passagem fechada, o ramo de movimento consulta simultaneamente a colisão e `goal_open`; movimento fica impedido enquanto há sobreposição. Ao abrir, o bloqueador fica oculto e a condição permite o movimento através da mesma AABB. A aparência acompanha a colisão: a cena inicial mede pixels da barreira e o core mostra posição do player antes/depois — não se usa o desaparecimento do sprite como prova de travessia.
 
-A mesma sequência foi executada nos dois caminhos:
+No ciclo real do jogo, `BUTTON_RIGHT` incrementa `reference_score` uma vez e grava o valor. Em seguida o grafo lê de novo a variável armazenada e compara `reference_score >= threshold`, sem somar na comparação. O ramo altera `goal_open` e só oculta o bloqueador. Ao tocar o sensor, o evento one-shot chama `XGM_startPlayPCM(SFX_GOAL_SOUND, ...)` antes de definir `goal_reached=1`; o valor `goal_reached` foi observado na RAM real da ROM após o contato. A forma de onda de saída não é capturada por este teste; o que fica provado é a chamada de áudio dentro do ramo que foi executado e a gravação one-shot observada.
 
-| estado | limiar | entrada | score esperado | ramo esperado | observação do framebuffer real |
-| --- | ---: | --- | ---: | --- | --- |
-| ROM gerada antes da edição | 6 | `right=true` por 8 frames, depois neutro | 8 | true / passagem aberta | core Libretro `320×224`: marcador amarelo `38 → 0`, bounds `x=236..243, y=162..167` |
-| ROM gerada após edição | 12 | `right=true` por 8 frames, depois neutro | 8 | false / passagem fechada | core Libretro `320×224`: marcador amarelo `38 → 38`, mesmos bounds |
+## Autoria, persistência e prova da ROM
 
-Essa é a observação que comprova a ROM gerada pelo grafo: o passo
-`persist_reopen_compile_and_execute_edited_goal_threshold` do relatório
-identifica a ROM recompilada após a reabertura e a execução controlada observa
-o estado visual correspondente. Hashes e build verde são apenas identificação,
-não a prova causal.
+É autoria do template builtin, não recuperação assistida. No editor, o parâmetro editável aparece como **“Pontos para abrir passagem”**, com origem `authored_builtin_reference_platformer`, semântica e source mapping `graphs/reference_platformer_logic.json:24`. O perfil condicional reutilizado continua experimental. Save, fechar/reiniciar, reabrir, confirmar limiar/mapping, compilar e executar foram exercitados pela interface.
 
-## Rastreabilidade da execução
+Evidência de execução: `src-tauri/target-test/validation/reference-platformer-2026-09-22T22-54-19-868Z-report.json` (gerada pelo E2E desktop). O app exercitado é `src-tauri/target-test/debug/retro-dev-studio`, SHA-256 `f0eada419f91f8b05b0a0ddf2484684f14ef0bf0b9fbb85eb23235e68c72e319`. O relatório contém snapshots imutáveis das ROMs original e editada, hashes dos C gerados, sequência de input, score e estado lidos dos símbolos na RAM 68K do core, pixels do framebuffer e screenshots. As cópias `*-goal-original.rom` e `*-goal-edited.rom` preservam exatamente as duas ROMs testadas, antes dos builds de tilemap/reabertura que reutilizam o caminho de saída.
 
-Relatório final local:
-`src-tauri/target-test/validation/reference-platformer-2026-09-22T19-30-25-133Z-report.json`.
+Com a entrada comum `Right` por 8 frames, a ROM gerada antes da edição (`threshold=6`) observou score real `8` e `goal_open=1`; a cópia gerada após editar/reabrir (`threshold=12`) observou score real `8` e `goal_open=0`. O código C gerado registra incremento antes de comparar a variável gravada. As ROMs efetivamente observadas pelo core são identificadas por seus SHA no relatório: original `33258082e6b5b64c12dc14d7fb6c9d7da17410d62b6a826ff6b7b547c46b6d00`; ROM recompilada/editada `0ed0e439c82dc3bb94699b58ef66a2ae5110afb0da4605ee0494f85835899a75`. A prova causal não é a diferença de hash/build: é o mesmo input produzindo score 8, estados opostos de `goal_open` lidos da RAM e o estado visual correspondente na ROM identificada.
 
-- Binário realmente exercitado nos três E2Es: `src-tauri/target-test/debug/retro-dev-studio`, SHA-256 `9d403c96214f81262553676213ab39b6afc49865450a59ae57c90ec78e316d2f`.
-- ROM original antes da edição: SHA-256 `1cd050a94201ba71bfcece016799154adbdc2dc937b83a8c1de4dfecb96284a0`.
-- ROM recompilada após `threshold=12`: SHA-256 `2b5fa899ba453e0d26f1f8336cd1c12cc2914aa5893b3b6e10bb5eb3644a3c00`.
-- `main.c` gerado após a edição/reabertura: SHA-256 `39c1e963c5b0d1a09fce2d69bb5f957651b054592a91080d828255da3851aa4e`.
-- ROM gerada pelo grafo e observada antes da edição: o próprio relatório registra o caminho de build e o core observa o ramo verdadeiro com `yellowPixels=0` após 8 frames de entrada; a ROM editada registra `yellowPixels=38` após os mesmos 8 frames.
-- Capturas legíveis: [`04-goal-open-before-edit.png`](../src-tauri/target-test/validation/reference-platformer-2026-09-22T19-30-25-133Z-04-goal-open-before-edit.png), [`05-authored-threshold-editor.png`](../src-tauri/target-test/validation/reference-platformer-2026-09-22T19-30-25-133Z-05-authored-threshold-editor.png) e [`06-goal-closed-after-edit.png`](../src-tauri/target-test/validation/reference-platformer-2026-09-22T19-30-25-133Z-06-goal-closed-after-edit.png).
+## Fronteiras e travessia observadas
 
-Hashes das capturas, na mesma ordem: `3104ec32b4ae96dab1288adc8061a87e775d913db3fbc357340a990c0a4d4a9f`, `9e2dc6eb0cdb444a5546f316572c18d8a120670f84266905a19108044c16ee23` e `c832ffbc22a171c2d4cbba4fa47ff2cb81b2699b971c4b47def677644d6802dc`.
+O teste reinicia cada ROM no mesmo estado, alimenta inputs equivalentes e lê o score real após cada sequência. Posição abaixo/do limiar permanece em `x=41..50` com a barreira renderizada; após a abertura, a posição chega a `x=57..66`, passando o limite `x=50`, e o pixel count da barreira cai para zero. A comparação é `>=`, por isso igualdade abre o estado lógico no mesmo frame em que o score é incrementado. O framebuffer ainda mostra a barreira nesse instante de fronteira (atualização visual do VDP até o frame seguinte); no passo seguinte os pixels da barreira são zero. A posição permanece inalterada no frame da abertura e só avança depois.
 
-O fluxo de interface comprovado foi: wizard → NodeGraph → alterar o limiar
-→ salvar → fechar/reiniciar → reabrir → confirmar `12` e o mapping → compilar
-→ executar. A entrada e a saída são as do jogo builtin executado pelo core;
-não há simulação exclusiva do harness.
+| Limiar salvo | Sequência | Score RAM | `goal_open` RAM | Barreira / posição observadas |
+| ---: | --- | ---: | ---: | --- |
+| 6 | abaixo: 5 frames | 5 | 0 | 399 pixels; player `x=41..50` (bloqueado) |
+| 6 | igual: +1 frame | 6 | 1 | player ainda `x=41..50`; visual antigo durante o frame de transição |
+| 6 | acima: +1 frame | 7 | 1 | 0 pixels de barreira |
+| 6 | travessia: +8 frames | 15 | 1 | player `x=57..66` |
+| 12 | abaixo: 11 frames | 11 | 0 | 399 pixels; player `x=41..50` (bloqueado) |
+| 12 | igual: +1 frame | 12 | 1 | player ainda `x=41..50`; visual antigo durante o frame de transição |
+| 12 | acima: +1 frame | 13 | 1 | 0 pixels de barreira |
+| 12 | travessia: +8 frames | 21 | 1 | player `x=57..66` |
+
+Após a sequência longa até o sensor, `goal_reached=1` foi lido na RAM nas duas ROMs; o evento one-shot do sensor contém a chamada PCM anterior à gravação de conclusão. Valores finais de score após inputs continuados: 75 (limiar 6) e 81 (limiar 12).
 
 ## Matriz de aceite
 
 ### Comprovado
 
-| critério | evidência |
+| Critério | Evidência |
 | --- | --- |
-| autoria explícita e parâmetro editável | nó `condition_compare` builtin com `authoring_origin=authored_builtin_reference_platformer`, semântica visível e input `node-param-score_threshold-b` |
-| entrada/saída no jogo real | `BUTTON_RIGHT` consumido pelo loop da ROM; `reference_score` e `goal_open` observados pelo IPC/core e marcador do framebuffer |
-| persistência | save, reinício, reabertura e leitura do limiar `12` + mapping `graphs/reference_platformer_logic.json:24` |
-| ROM gerada pelo grafo | ROM original e recompilada identificadas no passo de build; cada uma executada no core com a mesma sequência e resultado visual diferente |
-| ADDQ como regressão | `logic-recovery-2026-09-22T19-29-22-989Z-report.json`: original `0x12340058→0x12340059`, patch #2 `→0x1234005A`, original/original, no-op, overflow `0x1234FFFF→0x12340000`, flags e wrap comprovados |
-| branch-compare como regressão | `logic-recovery-branch-2026-09-22T19-29-49-280Z-report.json`: vetor comum `[3,4,5,0,0xFFFF,0x1234]`, ramos `[0,1,1,0,0,1]`; fronteiras assinadas, limiar e word-wrap preservados |
-| limite de instruções | o comportamento autoral usa apenas nós existentes de entrada, variável, soma, comparação, desvio, escrita e destruição; não declara suporte geral nem adiciona instrução M68K ao perfil |
+| Entidades de passagem e conclusão separadas | Cena reaberta contém `passage_blocker`, `goal` e `goal_sensor`; o sensor não é sólido, o bloqueador é sólido e o marcador não colide. |
+| Fechada bloqueia, aberta permite atravessar | Inputs equivalentes; player `x=41..50` enquanto fechado e `x=57..66` depois de aberto; contagem visual da barreira `399→0`. |
+| Fronteiras abaixo/igual/acima | RAM medida para `5/6/7` e `11/12/13`, com `goal_open` `0/1/1`; regra `>=`. |
+| Sem somar de novo no teste do limiar | C gerado incrementa e grava `reference_score`; a comparação usa leitura posterior; RAM lê score 8 após 8 inputs e não 9/16. |
+| Edição e reabertura | UI muda 6→12, salva, reinicia/fecha, reabre e confirma valor + mapping antes da compilação. |
+| ROM do grafo de fato exercitada | Hash da ROM copiada antes de ser sobrescrita é ligado à observação do core; os estados de RAM e framebuffer distinguem os limiares sob o mesmo input. Relatório e capturas são artefatos do workflow Desktop E2E. |
+| Objetivo, vitória e evento | Contato real com o sensor produz `goal_reached=1`; C gerado despacha a chamada PCM no mesmo ramo one-shot antes da gravação observada. |
+| ADDQ e branch-compare preservados | Reexecutados no mesmo binário f0eada4: `logic-recovery-2026-09-22T22-58-17-445Z-report.json` prova original #1/node/no-op `0x12340058→0x12340059`, patch #2 `→0x1234005A`, original/original, flags e wrap. `logic-recovery-branch-2026-09-22T22-58-44-489Z-report.json` prova dois ramos e `[3,4,5,0,0xFFFF,0x1234]→[0,1,1,0,0,1]`, incluindo fronteiras assinadas e wrap de word. Fixtures duráveis continuam em `src-tauri/tests/fixtures/`. |
 
-### Pendências
+### Pendências e limites
 
-- Não é reconstrução de Sonic nem recuperação da rotina autoral; autoria e recuperação assistida continuam explicitamente separadas.
-- Não há equivalência geral de M68K, callers indiretos/PC-relative, contexto de chamada, outras larguras/operações ou suporte SNES.
-- O marcador amarelo é um oráculo visual independente para este sprite próprio; não constitui um detector visual geral de objetivos.
-- CI e Desktop E2E do commit `a5604af77cfc6f10521a3a587512d499b7b706ac` terminaram com sucesso: runs [CI #35775883898](https://github.com/Misael-art/RetroDevStudio/actions/runs/35775883898) e [Desktop E2E #35775883908](https://github.com/Misael-art/RetroDevStudio/actions/runs/35775883908). Esta linha documental será publicada em commit dependente próprio; o workflow disparado por esse HEAD também será acompanhado.
+- O teste prova despacho da função PCM pelo evento do sensor, mas não faz loopback/captura acústica desta chamada específica.
+- Não é recuperação da rotina autoral nem reconstrução de Sonic; autoria e recuperação assistida continuam separadas.
+- Não certifica equivalência geral M68K, callers indiretos/PC-relative, outras larguras/operações, SNES ou suporte geral ao jogo.
+- O perfil e a funcionalidade permanecem **Experimental**, sem promoção ou merge.
 
-## Regressões preservadas
-
-As fixtures duráveis permanecem em `src-tauri/tests/fixtures/logic_recovery_sgdk/`
-e `src-tauri/tests/fixtures/logic_recovery_branch_sgdk/`. Os artefatos em
-`src-tauri/target-test/validation/` são regeneráveis e serão publicados pelos
-artefatos do workflow; corpus BYOR, ROMs comerciais e trabalhos alheios não
-entram no commit.
+As regressões ADDQ e branch-compare usam as fixtures duráveis em `src-tauri/tests/fixtures/logic_recovery_sgdk/` e `src-tauri/tests/fixtures/logic_recovery_branch_sgdk/`. Corpus BYOR local, ROM comercial e arquivos de terceiros não fazem parte desta entrega.

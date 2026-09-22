@@ -1,5 +1,13 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-22 — passagem transitável ligada ao objetivo autoral (Experimental; sem merge)
+
+A branch dependente `codex/rex-reference-goal-pilot` agora mantém entidade `passage_blocker`, marcador `goal` e sensor `goal_sensor` separados. O bloqueador visual e sólido é contornado somente quando `goal_open` vale 1; inputs equivalentes observaram player `x=41..50` bloqueado e `x=57..66` após atravessar, com pixels da barreira `399→0`. O score foi lido da RAM real nas fronteiras abaixo/igual/acima de 6 e 12, e após 8 frames: score 8 em ambas as ROMs, abrindo só limiar 6. O grafo/C compara o score já armazenado após incrementar. A UI expõe `Pontos para abrir passagem`; foi exercitado editar 6→12, salvar, fechar/reiniciar, reabrir e confirmar source mapping antes de compilar/executar.
+
+E2E desktop final `src-tauri/target-test/validation/reference-platformer-2026-09-22T22-54-19-868Z-report.json`; binário exercitado SHA `f0eada419f91f8b05b0a0ddf2484684f14ef0bf0b9fbb85eb23235e68c72e319`. As ROMs imutáveis testadas: limiar 6 `33258082e6b5b64c12dc14d7fb6c9d7da17410d62b6a826ff6b7b547c46b6d00`, limiar 12 `0ed0e439c82dc3bb94699b58ef66a2ae5110afb0da4605ee0494f85835899a75`. O contato real com sensor leu `goal_reached=1`; no C gerado, a chamada PCM precede a escrita one-shot observada. A captura acústica desta chamada não é medida. As capturas, fonte e cópias ROM são anexadas pelo workflow Desktop E2E.
+
+O perfil e o comportamento seguem **Experimental**, limitados ao grafo/template Mega Drive provado. ADDQ e branch-compare continuam regressões separadas; sem aumento do conjunto de instruções, sem declaração de suporte geral e sem merge. Consulte `docs/REX_REFERENCE_GOAL_PILOT.md` para a matriz comprovado/pendente.
+
 ### Checkpoint 2026-09-22 — perfil ROM→Node delimitado (Experimental; implementado; equivalência e causalidade pendentes)
 
 Foi implementado o primeiro perfil de recuperação de lógica ROM com contrato exato: Mega Drive/M68K, `ADDQ.W #1,D0; RTS` em quatro bytes contíguos, source mapping por offset/hash, flags word completas, nenhum efeito de memória, estados independentes e patch somente para cópia distinta com SHA-256 e imediato `1..8`. A UI `ReverseWorkspace` e o NodeGraph carregam o nó `rom_addq_word`, com origem `rom_recovered`, sem sobrescrever lógica existente. O emissor SGDK materializa a semântica preservando `D0[31:16]`; o emissor SNES bloqueia explicitamente esse perfil MD-only.
