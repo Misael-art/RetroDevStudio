@@ -1,5 +1,9 @@
 # REX — piloto visual Sonic 1 (Experimental)
 
+### Continuação dependente 2026-09-22 — decisão de objetivo autoral (Experimental; sem merge)
+
+No jogo builtin `reference_platformer`, a interface agora prova uma decisão de gameplay própria: o jogador segura `Right` por oito frames, o score real chega a `8` e o limiar editável decide se o sprite de objetivo desaparece. `threshold=6` abriu a passagem (`38→0` pixels amarelos no framebuffer `320×224`); depois de editar/salvar/reiniciar/reabrir/compilar para `threshold=12`, a mesma sequência manteve a passagem (`38→38`). Isso é autoria builtin com source mapping `graphs/reference_platformer_logic.json:24`, não recuperação de uma rotina Sonic. O relatório e a matriz completa estão em `docs/REX_REFERENCE_GOAL_PILOT.md`; as regressões ADDQ e branch-compare foram reexecutadas e continuam delimitadas, sem merge.
+
 Estado em 2026-09-21: implementação publicada na branch isolada `codex/rex-sonic1-pilot`, sem merge. A prova desktop final desta rodada foi executada no commit de código `c0ad292095c259498e8e67e9168e3d1d3f82d258`, com o binário canônico `src-tauri/target-test/debug/retro-dev-studio`, SHA-256 `b069a5fb8928023699816e164876bb39faf58615cbc62fcac3c04bc51f42d77d`; o frontend carregado foi `index-tGPqe_u5.js` (SHA-256 `74d3c8b61a5ff3e25accb547b60f3526d6d96d5a621f69985ba37d612cfc7952`) e declarou `c0ad292`. O estado Git aparece dirty somente pelos holdouts preservados de outras sessões, que não foram incluídos. As capturas históricas permanecem preservadas abaixo.
 
 Nota de rastreabilidade: o parágrafo acima é evidência histórica de `c0ad292`, não resultado da continuação atual. A continuação em 2026-09-21 está registrada ao final deste documento; o salto por teclado foi fechado na superfície canônica por observação da WRAM do core correlacionada com a identidade visual inicial do personagem.
