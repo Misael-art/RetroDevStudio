@@ -1,6 +1,6 @@
 ### Fechamento local 2026-09-22 — autoria de tilemap e runtime observável
 
-O Desktop E2E canônico `reference-platformer` passou com controles nativos e SGDK/Libretro oficial: paleta PPM `P6` via IPC, pintura de `reference_tilemap[1001]` `0→2`, undo/redo, colisão `88` inalterada, persistência no arquivo/reabertura e ROM autoral observável. A emissão inclui `rds_reference_tilemap_tilemap_map` e `VDP_setTileMapDataRectEx`; relatório: `src-tauri/target-test/validation/reference-platformer-2026-09-22T02-45-27-246Z-report.json`, ROI `92e737c5→26a7da45` e mesmo resultado após rebuild/reopen. Mantido `Experimental`.
+O Desktop E2E canônico `reference-platformer` passou com controles nativos e SGDK/Libretro oficial: paleta PPM `P6` via IPC, pintura de `reference_tilemap[1001]` `0→2`, undo/redo, colisão `88` inalterada, persistência no arquivo/reabertura e ROM autoral observável. A emissão aplica o overlay esparso com `VDP_setTileMapXY` depois de `VDP_drawImageEx`, preservando o mapa-base; relatório fresco: `src-tauri/target-test/validation/reference-platformer-2026-09-22T02-58-57-254Z-report.json`, ROI `92e737c5→26a7da45` e mesmo resultado após rebuild/reopen. Mantido `Experimental`.
 
 Limite de governança: o bloco F continua sem aceite ROM→nodes para uma rotina delimitada; não fabricar source mapping/equivalência a partir do NodeGraph builtin.
 

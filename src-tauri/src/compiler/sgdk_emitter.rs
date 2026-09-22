@@ -104,24 +104,6 @@ fn build_main_c_with_collision(
         out.push_str("#include \"resources.h\"\n");
     }
     out.push('\n');
-    for asset in tilemap_assets
-        .iter()
-        .filter(|asset| !asset.cells.is_empty())
-    {
-        let total = (asset.map_width as usize).saturating_mul(asset.map_height as usize);
-        out.push_str(&format!(
-            "static const u16 rds_{}_map[{}] = {{\n",
-            asset.resource_name, total
-        ));
-        for index in 0..total {
-            let value = asset.cells.get(index).copied().unwrap_or(0);
-            out.push_str(&format!("    {},", value));
-            if index % 16 == 15 || index + 1 == total {
-                out.push('\n');
-            }
-        }
-        out.push_str("};\n\n");
-    }
     render_sound_id_macros(&mut out, ast);
     if managed_sprites {
         let count = ast
@@ -362,17 +344,19 @@ fn build_main_c_with_collision(
                     .iter()
                     .find(|asset| asset.resource_name == *resource_name && !asset.cells.is_empty())
                 {
-                    out.push_str(&format!(
-                        "    VDP_setTileMapDataRectEx({}, rds_{}_map, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {}), {}, {}, {}, {}, {}, CPU);\n",
-                        plane,
-                        asset.resource_name,
-                        base_tile,
-                        (*x).max(0) / 8,
-                        (*y).max(0) / 8,
-                        asset.map_width,
-                        asset.map_height,
-                        asset.map_width,
-                    ));
+                    let total =
+                        (asset.map_width as usize).saturating_mul(asset.map_height as usize);
+                    for (index, value) in asset.cells.iter().copied().enumerate().take(total) {
+                        if value == 0 {
+                            continue;
+                        }
+                        let cell_x = index % asset.map_width as usize;
+                        let cell_y = index / asset.map_width as usize;
+                        out.push_str(&format!(
+                            "    VDP_setTileMapXY({}, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {} + {}), {}, {});\n",
+                            plane, base_tile, value, cell_x, cell_y
+                        ));
+                    }
                 }
                 if *scroll_x != 0 {
                     out.push_str(&format!(
@@ -2898,6 +2882,40 @@ mod tests {
         ));
         assert!(output.main_c.contains("VDP_setHorizontalScroll(BG_B, 8);"));
         assert!(output.main_c.contains("VDP_setVerticalScroll(BG_B, 4);"));
+    }
+
+    #[test]
+    fn main_c_applies_painted_tilemap_cells_as_sparse_overlay() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::LoadTilemap {
+                    resource_name: "background_tilemap".to_string(),
+                    asset_path: "assets/tilesets/level.ppm".to_string(),
+                    map_width: 2,
+                    map_height: 2,
+                    cells: vec![0, 2, 0, 1],
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "background_tilemap".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Tilemap Overlay Demo");
+
+        assert!(output.main_c.contains(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, TILE_USER_INDEX + 2), 1, 0);"
+        ));
+        assert!(output.main_c.contains(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, TILE_USER_INDEX + 1), 1, 1);"
+        ));
+        assert!(!output.main_c.contains("VDP_setTileMapDataRectEx"));
     }
 
     #[test]
