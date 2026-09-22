@@ -335,6 +335,8 @@ function getNodeVisualCategory(nodeOrType: GraphNode | NodeType): NodeVisualCate
         return "collision";
       case "hardware_budget_check":
         return "hardware_budget";
+      case "rom_addq_word":
+        return "bridge_source_mapping";
       case "event_vblank":
       case "event_hblank":
       case "event_dma_done":
@@ -562,6 +564,7 @@ export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
   flow_for: "Repetir (For)",
   timeline_sequence: "Sequencia (Timeline)",
   hardware_budget_check: "Checar Budget",
+  rom_addq_word: "ADDQ.W recuperado",
   bridge_unconverted_source: "Bridge de Fonte",
   event_vblank: "Evento VBlank",
   event_hblank: "Evento HBlank",
@@ -619,6 +622,17 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   vy: "Velocidade Y",
   x: "X",
   y: "Y",
+  register: "Registrador",
+  immediate: "Imediato",
+  width_bits: "Largura (bits)",
+  signedness: "Sinal",
+  rom_sha256: "SHA-256 da ROM",
+  rom_start: "Inicio ROM",
+  rom_end: "Fim ROM",
+  instruction_offsets: "Offsets",
+  flags: "Flags",
+  memory_effects: "Efeito memoria",
+  profile_id: "Perfil",
 };
 
 const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
@@ -633,6 +647,7 @@ const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[
   { label: "Estados", icon: "\u2690\ufe0f", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
   { label: "Efeitos", icon: "\u2728", types: ["effect_parallax", "effect_raster"] },
   { label: "Hardware", icon: "!", types: ["hardware_budget_check", "bridge_unconverted_source"] },
+  { label: "ROM recuperada", icon: "R", types: ["rom_addq_word"] },
 ];
 
 /** Header background por categoria (Blueprints-style) */
@@ -648,6 +663,7 @@ const GROUP_HEADER_BG: Record<string, string> = {
   Estados: "bg-[#5c4a7a]",
   Efeitos: "bg-[#5c4a7a]",
   Hardware: "bg-[#5f2f2f]",
+  "ROM recuperada": "bg-[#5f2f2f]",
 };
 
 function getGroupForType(type: NodeType): string {
@@ -667,6 +683,7 @@ const AUTO_LAYOUT_GROUP_ORDER = [
   "Estados",
   "Efeitos",
   "Hardware",
+  "ROM recuperada",
   "Outros",
 ];
 
@@ -682,6 +699,7 @@ const AUTO_LAYOUT_TYPE_SEQUENCE: NodeType[] = [
   "effect_parallax",
   "effect_raster",
   "bridge_unconverted_source",
+  "rom_addq_word",
   "event_vblank",
   "event_hblank",
   "event_dma_done",

@@ -3,8 +3,9 @@
  *
  * Modulo puro e deterministico. Ele concentra a validacao canonica do
  * NodeGraph e a execucao local simulada (trace local). Este modulo NAO observa
- * emulador, ROM ou runtime real; nao existe source mapping confiavel
- * ROM/PC -> node (decisao registrada na rodada 79).
+ * emulador, ROM ou runtime real; nao existe source mapping generico
+ * ROM/PC -> node. A unica excecao local e o perfil exacto `rom_addq_word`,
+ * cuja semantica pura fica exposta abaixo para testes independentes.
  *
  * Separacao explicita de evidencia:
  * - `LocalNodeTrace`: unica evidencia produzida aqui; sempre `simulated`.
@@ -115,6 +116,39 @@ export type NodeExecutionEvidence =
 
 export const LOCAL_TRACE_EVIDENCE_LABEL =
   "simulado / nao instrumentado (Experimental)";
+
+export type RecoveredRomWordState = {
+  d0: number;
+  n: boolean;
+  z: boolean;
+  v: boolean;
+  c: boolean;
+  x: boolean;
+};
+
+/** Avaliador puro do unico perfil ROM recuperado e aceito nesta wave. */
+export function evaluateRecoveredAddQWord(
+  d0: number,
+  immediate = 1,
+): RecoveredRomWordState {
+  if (!Number.isInteger(immediate) || immediate < 1 || immediate > 8) {
+    throw new Error("ADDQ immediate must be an integer between 1 and 8");
+  }
+  const input = d0 >>> 0;
+  const word = input & 0xffff;
+  const sum = word + immediate;
+  const result = sum & 0xffff;
+  const carry = sum > 0xffff;
+  const overflow = word <= 0x7fff && (result & 0x8000) !== 0;
+  return {
+    d0: (((input & 0xffff0000) >>> 0) | result) >>> 0,
+    n: (result & 0x8000) !== 0,
+    z: result === 0,
+    v: overflow,
+    c: carry,
+    x: carry,
+  };
+}
 
 export function isRuntimeEvidence(
   evidence: NodeExecutionEvidence,

@@ -56,13 +56,35 @@ fn build_main_c_with_collision(
     let raster_lines = collect_raster_lines(ast);
     let scroll_tilemap_layers = collect_scroll_tilemap_layers(ast);
     let logic_vars = collect_logic_var_names(ast);
+    let has_rom_addq_word = ast
+        .logic_scripts
+        .iter()
+        .any(|script| ops_contain_rom_addq_word(&script.ops));
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let input_commands = collect_input_commands(ast);
     let unsupported_semantics = crate::compiler::ast_generator::collect_unsupported_semantics(ast);
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
+    let logic_velocity_targets = collect_logic_velocity_targets(ast);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
     let runtime_probe_enabled = runtime_evidence_probe_enabled();
+    let managed_sprites = ast
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            if let AstNode::SpawnSprite { resource_name, .. } = node {
+                ast.sprite_assets
+                    .iter()
+                    .find(|a| a.resource_name == *resource_name)
+                    .map(|a| {
+                        u64::from(a.frame_width.div_ceil(8)) * u64::from(a.frame_height.div_ceil(8))
+                    })
+            } else {
+                None
+            }
+        })
+        .sum::<u64>()
+        > 420;
     let runtime_probe_scene_id = stable_runtime_probe_id(project_name);
     let runtime_probe_framebuffer_useful = (!ast.sprite_assets.is_empty()
         || !tilemap_assets.is_empty()
@@ -87,6 +109,14 @@ fn build_main_c_with_collision(
     }
     out.push('\n');
     render_sound_id_macros(&mut out, ast);
+    if managed_sprites {
+        let count = ast
+            .nodes
+            .iter()
+            .filter(|n| matches!(n, AstNode::SpawnSprite { .. }))
+            .count();
+        render_sprite_residency_runtime(&mut out, count);
+    }
 
     for asset in &ast.sprite_assets {
         out.push_str(&format!("static Sprite* spr_{};\n", asset.resource_name));
@@ -97,6 +127,17 @@ fn build_main_c_with_collision(
     for physics in &physics_applications {
         out.push_str(&format!("static s32 {}_vel_x = 0;\n", physics.var_name));
         out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
+    }
+    for target_name in logic_velocity_targets {
+        let runtime_var = sprite_runtime_var(&target_name);
+        if physics_applications
+            .iter()
+            .any(|physics| physics.var_name == runtime_var)
+        {
+            continue;
+        }
+        out.push_str(&format!("static s32 {}_vel_x = 0;\n", runtime_var));
+        out.push_str(&format!("static s32 {}_vel_y = 0;\n", runtime_var));
     }
     if !physics_applications.is_empty() {
         out.push('\n');
@@ -110,10 +151,26 @@ fn build_main_c_with_collision(
         out.push('\n');
     }
     for var_name in &logic_vars {
-        out.push_str(&format!("static s32 logic_var_{} = 0;\n", var_name));
+        let initial_value = if has_rom_addq_word && var_name == "rom_d0" {
+            "0x12340058"
+        } else {
+            "0"
+        };
+        out.push_str(&format!(
+            "static s32 logic_var_{} = {};\n",
+            var_name, initial_value
+        ));
     }
     if !logic_vars.is_empty() {
         out.push('\n');
+    }
+    if has_rom_addq_word {
+        out.push_str(
+            "static volatile u32 *const rds_logic_recovery_oracle_value = (volatile u32 *)0xE0FFFF00;\n",
+        );
+        out.push_str(
+            "static volatile u16 *const rds_logic_recovery_oracle_flags = (volatile u16 *)0xE0FFFF04;\n\n",
+        );
     }
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
         out.push_str("static s16 retro_hscroll_table[224];\n");
@@ -205,7 +262,23 @@ fn build_main_c_with_collision(
     for node in &ast.nodes {
         match node {
             AstNode::SpriteSystemInit => {
-                out.push_str("    SPR_init();\n");
+                if managed_sprites {
+                    let background_tiles = tilemap_assets
+                        .iter()
+                        .map(|a| format!("{}.tileset->numTile", a.resource_name))
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    let background_tiles = if background_tiles.is_empty() {
+                        "0"
+                    } else {
+                        &background_tiles
+                    };
+                    out.push_str(&format!(
+                        "    rds_init_sprite_residency({background_tiles});\n"
+                    ));
+                } else {
+                    out.push_str("    SPR_init();\n");
+                }
             }
             AstNode::LoadTilemap {
                 resource_name,
@@ -229,6 +302,15 @@ fn build_main_c_with_collision(
                     "    // Load spritesheet: {} ({}x{} px, palette {})\n",
                     resource_name, frame_width, frame_height, palette_slot
                 ));
+                let palette_conflicts_with_tilemap =
+                    *palette_slot == 0 && !tilemap_assets.is_empty();
+                if !palette_conflicts_with_tilemap {
+                    out.push_str(&format!(
+                        "    PAL_setPalette({}, {}.palette->data, CPU);\n",
+                        palette_const(*palette_slot),
+                        resource_name
+                    ));
+                }
             }
             AstNode::SpawnSprite {
                 var_name,
@@ -251,10 +333,15 @@ fn build_main_c_with_collision(
                     x = x,
                     y = y
                 ));
-                out.push_str(&format!(
-                    "    {} = SPR_addSprite(&{}, {}_x, {}_y, TILE_ATTR({}, 1, FALSE, {}));\n",
-                    var_name, resource_name, var_name, var_name, palette, priority
-                ));
+                if managed_sprites {
+                    out.push_str(&format!("    rds_register_sprite(&{var_name}, &{resource_name}, &{var_name}_x, &{var_name}_y, TILE_ATTR({palette}, {priority}, FALSE, FALSE));\n"));
+                } else {
+                    out.push_str(&format!(
+                        "    {} = SPR_addSprite(&{}, {}_x, {}_y, TILE_ATTR({}, {}, FALSE, FALSE));\n",
+                        var_name, resource_name, var_name, var_name, palette, priority
+                    ));
+                }
+                out.push_str(&format!("    SPR_setVisibility({}, VISIBLE);\n", var_name));
             }
             AstNode::DrawTilemap {
                 resource_name,
@@ -273,6 +360,24 @@ fn build_main_c_with_collision(
                     (*x).max(0) / 8,
                     (*y).max(0) / 8
                 ));
+                if let Some(asset) = tilemap_assets
+                    .iter()
+                    .find(|asset| asset.resource_name == *resource_name && !asset.cells.is_empty())
+                {
+                    let total =
+                        (asset.map_width as usize).saturating_mul(asset.map_height as usize);
+                    for (index, value) in asset.cells.iter().copied().enumerate().take(total) {
+                        if value == 0 {
+                            continue;
+                        }
+                        let cell_x = index % asset.map_width as usize;
+                        let cell_y = index / asset.map_width as usize;
+                        out.push_str(&format!(
+                            "    VDP_setTileMapXY({}, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {} + {}), {}, {});\n",
+                            plane, base_tile, value, cell_x, cell_y
+                        ));
+                    }
+                }
                 if *scroll_x != 0 {
                     out.push_str(&format!(
                         "    VDP_setHorizontalScroll({}, {});\n",
@@ -367,6 +472,7 @@ fn build_main_c_with_collision(
                 max_velocity_y,
                 friction,
                 bounce,
+                floor_y,
             } => render_apply_physics(
                 &mut out,
                 &PhysicsApplication {
@@ -377,6 +483,7 @@ fn build_main_c_with_collision(
                     max_velocity_y: *max_velocity_y,
                     friction: *friction,
                     bounce: *bounce,
+                    floor_y: *floor_y,
                 },
             ),
             AstNode::SetAnimation {
@@ -413,6 +520,13 @@ fn build_main_c_with_collision(
                 }
             }
             AstNode::GameLoopBegin => {
+                if managed_sprites {
+                    out.push_str("    rds_sync_sprite_residency();\n");
+                }
+                if has_rom_addq_word {
+                    out.push_str("    *rds_logic_recovery_oracle_value = (u32)logic_var_rom_d0;\n");
+                    out.push_str("    *rds_logic_recovery_oracle_flags = 0;\n");
+                }
                 out.push_str("    {\n");
                 out.push_str("        u16 rds_boot_frame;\n");
                 out.push_str(
@@ -422,6 +536,16 @@ fn build_main_c_with_collision(
                 out.push_str("            SYS_doVBlankProcess();\n");
                 out.push_str("        }\n");
                 out.push_str("    }\n");
+                if has_rom_addq_word {
+                    out.push_str("    {\n");
+                    out.push_str("        u16 rds_logic_recovery_prelude_frame;\n");
+                    out.push_str(
+                        "        for (rds_logic_recovery_prelude_frame = 0; rds_logic_recovery_prelude_frame < 83; rds_logic_recovery_prelude_frame++) {\n",
+                    );
+                    out.push_str("            SYS_doVBlankProcess();\n");
+                    out.push_str("        }\n");
+                    out.push_str("    }\n");
+                }
                 out.push_str("#ifdef RDS_CORPUS_VISIBLE_SMOKE\n");
                 out.push_str("    {\n");
                 out.push_str("        u16 rds_smoke_palette = 0x0EEE;\n");
@@ -449,7 +573,18 @@ fn build_main_c_with_collision(
                     ));
                 }
                 render_logic_scripts(&mut out, &ast.logic_scripts, 8);
+                if has_rom_addq_word {
+                    out.push_str(
+                        "        *rds_logic_recovery_oracle_value = (u32)logic_var_rom_d0;\n",
+                    );
+                    out.push_str(
+                        "        *rds_logic_recovery_oracle_flags = (logic_var_rom_d0_n ? 1 : 0) | (logic_var_rom_d0_z ? 2 : 0) | (logic_var_rom_d0_v ? 4 : 0) | (logic_var_rom_d0_c ? 8 : 0) | (logic_var_rom_d0_x ? 16 : 0);\n",
+                    );
+                }
                 render_retrofx_frame(&mut out, &parallax_layers, &raster_lines, 8);
+                if managed_sprites {
+                    out.push_str("        rds_sync_sprite_residency();\n");
+                }
                 out.push_str("        SPR_update();\n");
             }
             AstNode::VSync => {
@@ -503,6 +638,106 @@ fn build_resources_res(ast: &AstOutput) -> String {
     }
 
     out
+}
+
+fn render_sprite_residency_runtime(out: &mut String, count: usize) {
+    out.push_str(&format!("#define RDS_SPRITE_SLOTS {count}\n"));
+    out.push_str(r#"
+/* Keep logical state offscreen; only viewport residents consume sprite VRAM.
+ * Macros below adapt the generated operations, not SGDK library internals. */
+typedef struct {
+    Sprite **instance;
+    const SpriteDefinition *definition;
+    s16 *x, *y;
+    u16 attributes;
+    s16 animation, visibility;
+    bool looping;
+} RdsSpriteSlot;
+static RdsSpriteSlot rds_sprite_slots[RDS_SPRITE_SLOTS];
+static u16 rds_sprite_slot_count;
+static volatile u16 rds_residency_error;
+static volatile u16 rds_residency_ticks;
+static bool rds_residency_ready;
+
+static RdsSpriteSlot *rds_sprite_slot(Sprite **instance) {
+    u16 i;
+    for (i = 0; i < rds_sprite_slot_count; i++)
+        if (rds_sprite_slots[i].instance == instance) return &rds_sprite_slots[i];
+    return NULL;
+}
+static void rds_init_sprite_residency(u32 backgroundTiles) {
+    u32 available = TILE_FONT_INDEX - TILE_USER_INDEX;
+    if (backgroundTiles >= available) { rds_residency_error = 1; return; }
+    SPR_initEx((u16)(available - backgroundTiles));
+    rds_residency_ready = TRUE;
+}
+static void rds_register_sprite(Sprite **instance, const SpriteDefinition *definition,
+                               s16 *x, s16 *y, u16 attributes) {
+    RdsSpriteSlot *slot = &rds_sprite_slots[rds_sprite_slot_count++];
+    slot->instance = instance; slot->definition = definition;
+    slot->x = x; slot->y = y; slot->attributes = attributes;
+    slot->animation = 0; slot->visibility = VISIBLE; slot->looping = TRUE;
+    *instance = NULL;
+}
+static bool rds_sprite_in_view(const RdsSpriteSlot *slot) {
+    return slot->visibility != HIDDEN && *slot->x < VDP_getScreenWidth()
+        && *slot->y < VDP_getScreenHeight()
+        && (s32)*slot->x + slot->definition->w > 0
+        && (s32)*slot->y + slot->definition->h > 0;
+}
+static void rds_sync_sprite_residency(void) {
+    u16 i;
+    if (!rds_residency_ready) return;
+    /* Release first, so entrants can use VRAM freed by departures. */
+    for (i = 0; i < rds_sprite_slot_count; i++) {
+        RdsSpriteSlot *slot = &rds_sprite_slots[i];
+        if (*slot->instance && !rds_sprite_in_view(slot)) {
+            SPR_releaseSprite(*slot->instance); *slot->instance = NULL;
+        }
+    }
+    rds_residency_ticks++;
+    for (i = 0; i < rds_sprite_slot_count; i++) {
+        RdsSpriteSlot *slot = &rds_sprite_slots[i];
+        if (!*slot->instance && rds_sprite_in_view(slot)) {
+            Sprite *sprite = SPR_addSprite(slot->definition, *slot->x, *slot->y, slot->attributes);
+            *slot->instance = sprite;
+            if (!sprite) { rds_residency_error = 1; continue; }
+            SPR_setAnim(sprite, slot->animation);
+            SPR_setAnimationLoop(sprite, slot->looping);
+            SPR_setVisibility(sprite, slot->visibility);
+        }
+    }
+    if (rds_residency_error) VDP_drawText("Sprite capacity or animation error", 1, 1);
+}
+static void rds_sprite_position(Sprite **instance, s16 x, s16 y) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) { *slot->x = x; *slot->y = y; }
+    if (*instance) SPR_setPosition(*instance, x, y);
+}
+static void rds_sprite_animation(Sprite **instance, s16 animation) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) {
+        if (animation < 0 || animation >= slot->definition->numAnimation) { rds_residency_error = 2; return; }
+        slot->animation = animation;
+    }
+    if (*instance) SPR_setAnim(*instance, animation);
+}
+static void rds_sprite_loop(Sprite **instance, bool looping) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) slot->looping = looping;
+    if (*instance) SPR_setAnimationLoop(*instance, looping);
+}
+static void rds_sprite_visibility(Sprite **instance, s16 visibility) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) slot->visibility = visibility;
+    if (*instance) SPR_setVisibility(*instance, visibility);
+}
+#define SPR_setPosition(sprite, x, y) rds_sprite_position(&(sprite), (x), (y))
+#define SPR_setAnim(sprite, animation) rds_sprite_animation(&(sprite), (animation))
+#define SPR_setAnimationLoop(sprite, looping) rds_sprite_loop(&(sprite), (looping))
+#define SPR_setVisibility(sprite, visibility) rds_sprite_visibility(&(sprite), (visibility))
+
+"#);
 }
 
 fn runtime_evidence_probe_enabled() -> bool {
@@ -647,6 +882,15 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
         next_y_var = next_y_var,
         var_name = physics.var_name
     ));
+
+    if let Some(floor_y) = physics.floor_y {
+        out.push_str(&format!(
+            "        if ({next_y_var} > {floor_y}) {{ {next_y_var} = {floor_y}; {var_name}_vel_y = 0; }}\n",
+            next_y_var = next_y_var,
+            floor_y = floor_y,
+            var_name = physics.var_name
+        ));
+    }
 
     if physics.bounce > 0 {
         out.push_str(&format!(
@@ -1066,6 +1310,19 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 vx,
                 vy,
             } => {
+                let runtime_var = sprite_runtime_var(target_name);
+                out.push_str(&format!(
+                    "{indent}{runtime_var}_vel_x = {vx};\n",
+                    indent = indent_str,
+                    runtime_var = runtime_var,
+                    vx = render_math_expr(vx)
+                ));
+                out.push_str(&format!(
+                    "{indent}{runtime_var}_vel_y = {vy};\n",
+                    indent = indent_str,
+                    runtime_var = runtime_var,
+                    vy = render_math_expr(vy)
+                ));
                 out.push_str(&format!(
                     "{indent}logic_var_{target}_vx = {vx};\n",
                     indent = indent_str,
@@ -1221,6 +1478,17 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     value_expr = value_expr
                 ));
             }
+            LogicOp::RomAddQWord {
+                var_name,
+                immediate,
+            } => {
+                out.push_str(&format!(
+                    "{indent}{{ u16 rds_rom_word_before = (u16)logic_var_{var_name}; u16 rds_rom_word_result = (u16)(rds_rom_word_before + {immediate}); logic_var_{var_name} = (logic_var_{var_name} & ~0xFFFF) | rds_rom_word_result; logic_var_{var_name}_n = (rds_rom_word_result & 0x8000) != 0; logic_var_{var_name}_z = rds_rom_word_result == 0; logic_var_{var_name}_v = (rds_rom_word_before == 0x7FFF); logic_var_{var_name}_c = (rds_rom_word_before > (u16)(0xFFFF - {immediate})); logic_var_{var_name}_x = logic_var_{var_name}_c; }}\n",
+                    indent = indent_str,
+                    var_name = var_name,
+                    immediate = immediate
+                ));
+            }
             LogicOp::WhileLoop {
                 condition,
                 body,
@@ -1297,6 +1565,94 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     "#error \"Source Bridge blocks codegen: {gap} at {source_file}:{source_line}. Enable bridge compatibility mode or replace with native nodes.\"\n",
                 ));
             }
+        }
+    }
+}
+
+fn sprite_runtime_var(target_name: &str) -> String {
+    let target = target_name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if target.starts_with("spr_") {
+        target
+    } else {
+        format!("spr_{target}")
+    }
+}
+
+fn collect_logic_velocity_targets(ast: &AstOutput) -> std::collections::BTreeSet<String> {
+    let mut targets = std::collections::BTreeSet::new();
+    for script in &ast.logic_scripts {
+        collect_logic_velocity_targets_from_ops(&script.ops, &mut targets);
+    }
+    targets
+}
+
+fn collect_logic_velocity_targets_from_ops(
+    ops: &[LogicOp],
+    targets: &mut std::collections::BTreeSet<String>,
+) {
+    for op in ops {
+        match op {
+            LogicOp::SourceMapped { op, .. } => {
+                collect_logic_velocity_targets_from_ops(std::slice::from_ref(op.as_ref()), targets);
+            }
+            LogicOp::SetVelocity { target_name, .. } => {
+                targets.insert(target_name.clone());
+            }
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            }
+            | LogicOp::ConditionBool {
+                if_true, if_false, ..
+            } => {
+                collect_logic_velocity_targets_from_ops(if_true, targets);
+                collect_logic_velocity_targets_from_ops(if_false, targets);
+            }
+            LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+                collect_logic_velocity_targets_from_ops(body, targets);
+                collect_logic_velocity_targets_from_ops(done, targets);
+            }
+            LogicOp::TimelineSequence { slots, .. } => {
+                for slot in slots {
+                    collect_logic_velocity_targets_from_ops(&slot.actions, targets);
+                }
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_logic_velocity_targets_from_ops(if_ok, targets);
+                collect_logic_velocity_targets_from_ops(if_warn, targets);
+            }
+            LogicOp::HardwareEvent { ops, .. } => {
+                collect_logic_velocity_targets_from_ops(ops, targets);
+            }
+            LogicOp::StateMachine { states, .. } => {
+                for state in states {
+                    collect_logic_velocity_targets_from_ops(&state.body, targets);
+                    for transition in &state.transitions {
+                        collect_logic_velocity_targets_from_ops(&transition.if_matched, targets);
+                        collect_logic_velocity_targets_from_ops(&transition.if_unmatched, targets);
+                    }
+                }
+            }
+            LogicOp::SetSpritePosition { .. }
+            | LogicOp::MoveSprite { .. }
+            | LogicOp::SetAnimationState { .. }
+            | LogicOp::SetTile { .. }
+            | LogicOp::CameraFollow { .. }
+            | LogicOp::ShowSprite { .. }
+            | LogicOp::HideSprite { .. }
+            | LogicOp::SetVar { .. }
+            | LogicOp::RomAddQWord { .. }
+            | LogicOp::PlaySound { .. }
+            | LogicOp::PlayMusic { .. }
+            | LogicOp::SourceBridgeError { .. } => {}
         }
     }
 }
@@ -1607,6 +1963,41 @@ fn collect_logic_var_names(ast: &AstOutput) -> std::collections::BTreeSet<String
     vars
 }
 
+fn ops_contain_rom_addq_word(ops: &[LogicOp]) -> bool {
+    ops.iter().any(op_contains_rom_addq_word)
+}
+
+fn op_contains_rom_addq_word(op: &LogicOp) -> bool {
+    match op {
+        LogicOp::RomAddQWord { .. } => true,
+        LogicOp::SourceMapped { op, .. } => op_contains_rom_addq_word(op),
+        LogicOp::ConditionOverlap {
+            if_true, if_false, ..
+        }
+        | LogicOp::ConditionBool {
+            if_true, if_false, ..
+        } => ops_contain_rom_addq_word(if_true) || ops_contain_rom_addq_word(if_false),
+        LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+            ops_contain_rom_addq_word(body) || ops_contain_rom_addq_word(done)
+        }
+        LogicOp::TimelineSequence { slots, .. } => slots
+            .iter()
+            .any(|slot| ops_contain_rom_addq_word(&slot.actions)),
+        LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+            ops_contain_rom_addq_word(if_ok) || ops_contain_rom_addq_word(if_warn)
+        }
+        LogicOp::HardwareEvent { ops, .. } => ops_contain_rom_addq_word(ops),
+        LogicOp::StateMachine { states, .. } => states.iter().any(|state| {
+            ops_contain_rom_addq_word(&state.body)
+                || state.transitions.iter().any(|transition| {
+                    ops_contain_rom_addq_word(&transition.if_matched)
+                        || ops_contain_rom_addq_word(&transition.if_unmatched)
+                })
+        }),
+        _ => false,
+    }
+}
+
 fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<String>) {
     match op {
         LogicOp::SourceMapped { op, .. } => extract_vars_from_op(op, vars),
@@ -1635,6 +2026,14 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
         LogicOp::SetVar { var_name, value } => {
             vars.insert(var_name.clone());
             extract_vars_from_math(value, vars);
+        }
+        LogicOp::RomAddQWord { var_name, .. } => {
+            vars.insert(var_name.clone());
+            vars.insert(format!("{var_name}_n"));
+            vars.insert(format!("{var_name}_z"));
+            vars.insert(format!("{var_name}_v"));
+            vars.insert(format!("{var_name}_c"));
+            vars.insert(format!("{var_name}_x"));
         }
         LogicOp::ConditionOverlap {
             if_true, if_false, ..
@@ -2190,6 +2589,79 @@ mod tests {
     }
 
     #[test]
+    fn sprite_priority_controls_priority_bit_without_horizontal_flip() {
+        // SGDK TILE_ATTR(palette, priority, flipV, flipH): foreground and
+        // background selection must not mirror artwork in either allocator.
+        for managed in [false, true] {
+            for high in [false, true] {
+                let mut asset = sprite_asset_with_animation(6, true);
+                if managed {
+                    asset.frame_width = 192;
+                    asset.frame_height = 160;
+                }
+                let ast = AstOutput {
+                    nodes: vec![
+                        AstNode::SpriteSystemInit,
+                        AstNode::LoadSpritesheet {
+                            resource_name: "hero".into(),
+                            asset_path: "assets/sprites/hero.png".into(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            palette_slot: 1,
+                        },
+                        AstNode::SpawnSprite {
+                            var_name: "spr_hero".into(),
+                            resource_name: "hero".into(),
+                            x: 0,
+                            y: 0,
+                            priority_high: high,
+                        },
+                    ],
+                    sprite_assets: vec![asset],
+                    logic_scripts: Vec::new(),
+                };
+                let output = emit_sgdk(&ast, "Priority").main_c;
+                let priority = if high { "TRUE" } else { "FALSE" };
+                assert!(
+                    output.contains(&format!("TILE_ATTR(PAL1, {priority}, FALSE, FALSE)")),
+                    "priority mapping failed: managed={managed}, high={high}"
+                );
+                assert!(output.contains("PAL_setPalette(PAL1, hero.palette->data, CPU);"));
+                assert!(output.contains("SPR_setVisibility(spr_hero, VISIBLE);"));
+            }
+        }
+    }
+
+    #[test]
+    fn large_scene_uses_viewport_residency_before_sprite_update() {
+        let mut asset = sprite_asset_with_animation(6, true);
+        asset.frame_width = 192;
+        asset.frame_height = 160; // 480 tiles, beyond SGDK's default 420.
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::SpriteSystemInit,
+                AstNode::SpawnSprite {
+                    var_name: "spr_hero".into(),
+                    resource_name: "hero".into(),
+                    x: 400,
+                    y: 0,
+                    priority_high: true,
+                },
+                AstNode::SpriteUpdate,
+            ],
+            sprite_assets: vec![asset],
+            logic_scripts: Vec::new(),
+        };
+        let output = emit_sgdk(&ast, "Large scene").main_c;
+        assert!(output.contains("rds_register_sprite(&spr_hero"));
+        assert!(!output.contains("spr_hero = SPR_addSprite"));
+        assert!(output.contains("rds_init_sprite_residency(0)"));
+        let sync = output.rfind("rds_sync_sprite_residency();").unwrap();
+        let update = output.rfind("SPR_update();").unwrap();
+        assert!(sync < update);
+    }
+
+    #[test]
     fn resources_res_preserves_distinct_animation_row_timings() {
         let mut asset = sprite_asset_with_animation(10, true);
         asset.animations[0].frames = vec![0];
@@ -2262,6 +2734,7 @@ mod tests {
                 asset_path: "assets/tilesets/level.ppm".to_string(),
                 map_width: 32,
                 map_height: 32,
+                cells: vec![],
             }],
             sprite_assets: Vec::new(),
             logic_scripts: Vec::new(),
@@ -2480,6 +2953,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.ppm".to_string(),
                     map_width: 64,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "background_tilemap".to_string(),
@@ -2505,6 +2979,40 @@ mod tests {
         ));
         assert!(output.main_c.contains("VDP_setHorizontalScroll(BG_B, 8);"));
         assert!(output.main_c.contains("VDP_setVerticalScroll(BG_B, 4);"));
+    }
+
+    #[test]
+    fn main_c_applies_painted_tilemap_cells_as_sparse_overlay() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::LoadTilemap {
+                    resource_name: "background_tilemap".to_string(),
+                    asset_path: "assets/tilesets/level.ppm".to_string(),
+                    map_width: 2,
+                    map_height: 2,
+                    cells: vec![0, 2, 0, 1],
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "background_tilemap".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Tilemap Overlay Demo");
+
+        assert!(output.main_c.contains(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, TILE_USER_INDEX + 2), 1, 0);"
+        ));
+        assert!(output.main_c.contains(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, TILE_USER_INDEX + 1), 1, 1);"
+        ));
+        assert!(!output.main_c.contains("VDP_setTileMapDataRectEx"));
     }
 
     #[test]
@@ -2612,6 +3120,7 @@ mod tests {
                     max_velocity_y: 96,
                     friction: 2,
                     bounce: 35,
+                    floor_y: None,
                 },
                 AstNode::SpriteUpdate,
                 AstNode::VSync,
@@ -2649,6 +3158,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2733,6 +3243,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2746,6 +3257,7 @@ mod tests {
                     asset_path: "assets/tilesets/foreground.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "foreground".to_string(),
@@ -2904,7 +3416,47 @@ mod tests {
         assert!(output
             .main_c
             .contains("static s32 logic_var_player_vy = 0;"));
+        assert!(output.main_c.contains("static s32 spr_player_vel_y = 0;"));
         assert!(output.main_c.contains("logic_var_player_vx = 2;"));
+        assert!(output.main_c.contains("spr_player_vel_y = 0;"));
+    }
+
+    #[test]
+    fn main_c_emits_exact_recovered_addq_word_semantics() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::RomAddQWord {
+                    var_name: "rom_d0".to_string(),
+                    immediate: 1,
+                }],
+            }],
+        };
+
+        let output = emit_sgdk(&ast, "Recovered ROM Logic");
+
+        assert!(output
+            .main_c
+            .contains("static s32 logic_var_rom_d0 = 0x12340058;"));
+        assert!(output.main_c.contains("rds_logic_recovery_oracle_value"));
+        assert!(output
+            .main_c
+            .contains("rds_logic_recovery_prelude_frame < 83"));
+        assert!(output
+            .main_c
+            .contains("rds_rom_word_result = (u16)(rds_rom_word_before + 1)"));
+        assert!(output
+            .main_c
+            .contains("logic_var_rom_d0_n = (rds_rom_word_result & 0x8000) != 0"));
+        assert!(output
+            .main_c
+            .contains("logic_var_rom_d0_c = (rds_rom_word_before > (u16)(0xFFFF - 1))"));
     }
 
     #[test]

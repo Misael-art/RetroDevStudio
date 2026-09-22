@@ -1,0 +1,129 @@
+{
+  "schema": "rds-logic-recovery-e2e-proof/v1",
+  "classification": "implementado; equivalência e causalidade pendentes fora do perfil delimitado",
+  "profile_id": "m68k.addq_word_d0_rts.v1",
+  "detailed_report": "src-tauri/target-test/validation/logic-recovery-2026-09-22T14-06-47-769Z-report.json",
+  "generated_at": "2026-09-22T14:06:47.769Z",
+  "finished_at": "2026-09-22T14:07:00.162Z",
+  "tested_binary": {
+    "path": "src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "47afc7269b9873d8664abe9594375482c00f3b77b09b76235b1f14d457cb8c78"
+  },
+  "routine": {
+    "rom_sha256": "2e0a6b19b6f73891e16a5a23c4df211721e13eb59b0431b43ceb9601bb181ce2",
+    "patched_immediate_2_rom_sha256": "08c69960430610c983f0721a63ac8f538d74fc8896c7927abfda8e9621af7e86",
+    "offset": 29498,
+    "offset_hex": "0x00733A",
+    "bytes_hex": "52404E75",
+    "patched_bytes_hex": "54404E75",
+    "size_bytes_unchanged": true
+  },
+  "node_path": {
+    "rom_sha256": "6d4fb26780426fd73c010840d4facbd8059ddeb29e4e777106a1fa9fb63f18a4",
+    "source_sha256": "0cc6f731951b9ecfbe22628b876a77e121c880e77ac73604053df740405c9890",
+    "generated_semantics": "rds_rom_word_result + logic_var_rom_d0",
+    "status": "passed"
+  },
+  "routine_path": {
+    "source_sha256": "e07506c377c716f4da0b32293cd6dc69cd5f35d0e6184d9eff03aa0c8e9ac3fe",
+    "linked_body": "ADDQ.W #1,D0; RTS",
+    "generated_bridge": "C ABI stack argument -> D0 -> JSR recovered_addq_word",
+    "status": "passed"
+  },
+  "controlled_execution": {
+    "startup_warmup_frames": 120,
+    "controlled_frames": 1,
+    "input": "all buttons released",
+    "input_ack": true,
+    "free_loop_concurrent": false,
+    "original_and_patched_same_frames_and_input": true,
+    "routine_framebuffer_sha256": "811a21a28045551ab6fdb3a94f27d5aee5043f0ba626f166295fc2e5813444b0",
+    "generated_graph_framebuffer_sha256": "64631b47c129ef3fc6adb176a84f6c5bd59ad5bcc39657cd80effa2de852c39f",
+    "generated_main_sha256_after_reopen": "9143bee177d5775951d210e534baae120a8f2d49a59a73bf8d89c2338f9e2197",
+    "oracle": {
+      "region": 2,
+      "value_offset": "0xFF00",
+      "flags_offset": "0xFF04",
+      "original_before_value": "0x12340058",
+      "original_expected_after_value": "0x12340059",
+      "original_after_flags": 0,
+      "patched_before_value": "0x12340058",
+      "patched_expected_after_value": "0x1234005A",
+      "patched_after_flags": 0
+    }
+  },
+  "controls": {
+    "original_vs_original": {
+      "rom_sha256_equal": true,
+      "framebuffer_sha256_equal": true,
+      "oracle_equal": true,
+      "frame_delta_each": 1,
+      "status": "passed"
+    },
+    "negative_noop": {
+      "input_sha256": "2e0a6b19b6f73891e16a5a23c4df211721e13eb59b0431b43ceb9601bb181ce2",
+      "output_sha256": "2e0a6b19b6f73891e16a5a23c4df211721e13eb59b0431b43ceb9601bb181ce2",
+      "bytes_equal": true,
+      "oracle_equal_to_original": true,
+      "status": "passed"
+    },
+    "patched_immediate_2": {
+      "input_sha256": "2e0a6b19b6f73891e16a5a23c4df211721e13eb59b0431b43ceb9601bb181ce2",
+      "output_sha256": "08c69960430610c983f0721a63ac8f538d74fc8896c7927abfda8e9621af7e86",
+      "bytes_outside_instruction_equal": true,
+      "oracle_before_value": "0x12340058",
+      "oracle_after_value": "0x1234005A",
+      "status": "passed"
+    }
+  },
+  "generated_graph_rom": {
+    "rom_origin": "generated_from_reopened_nodegraph",
+    "rom_sha256": "728be5cb72b7a38704a1acdd70db7e47801265f921cf6b14902ca060461aa7a8",
+    "generated_main_sha256": "9143bee177d5775951d210e534baae120a8f2d49a59a73bf8d89c2338f9e2197",
+    "common_before_value": "0x12340058",
+    "expected_after_value": "0x12340059",
+    "observed_after_value": "0x12340059",
+    "controlled_frames": 1,
+    "observation": "WRAM oracle region 2, offset 0xFF00, raw 341259000000 após 120 frames de warmup + 1 frame neutro",
+    "status": "passed"
+  },
+  "full_hashes": {
+    "node_fixture": "6d4fb26780426fd73c010840d4facbd8059ddeb29e4e777106a1fa9fb63f18a4",
+    "generated_graph": "728be5cb72b7a38704a1acdd70db7e47801265f921cf6b14902ca060461aa7a8",
+    "original": "2e0a6b19b6f73891e16a5a23c4df211721e13eb59b0431b43ceb9601bb181ce2",
+    "no_op": "2e0a6b19b6f73891e16a5a23c4df211721e13eb59b0431b43ceb9601bb181ce2",
+    "patched_2": "08c69960430610c983f0721a63ac8f538d74fc8896c7927abfda8e9621af7e86"
+  },
+  "independent_semantic_coverage": {
+    "upper_d0_preserved": true,
+    "word_wrap": true,
+    "flags": ["N", "Z", "V", "C", "X"],
+    "states": [
+      {"input_d0": "0x00000000", "input_x": true, "output_d0": "0x00000001", "output_n": false, "output_z": false, "output_v": false, "output_c": false, "output_x": false},
+      {"input_d0": "0x00000001", "input_x": true, "output_d0": "0x00000002", "output_n": false, "output_z": false, "output_v": false, "output_c": false, "output_x": false},
+      {"input_d0": "0x00007FFF", "input_x": true, "output_d0": "0x00008000", "output_n": true, "output_z": false, "output_v": true, "output_c": false, "output_x": false},
+      {"input_d0": "0x00008000", "input_x": true, "output_d0": "0x00008001", "output_n": true, "output_z": false, "output_v": false, "output_c": false, "output_x": false},
+      {"input_d0": "0x1234FFFF", "input_x": true, "output_d0": "0x12340000", "output_n": false, "output_z": true, "output_v": false, "output_c": true, "output_x": true}
+    ],
+    "status": "passed"
+  },
+  "reopen": {
+    "graph_origin": "rom_recovered",
+    "operation_type": "rom_addq_word",
+    "register": "D0",
+    "immediate": 1,
+    "width_bits": 16,
+    "rom_start": 29498,
+    "rom_end": 29502,
+    "connection": "rom_addq_word_00733A_entry.exec -> rom_addq_word_00733A.exec",
+    "source_mapping_count": 2,
+    "status": "passed"
+  },
+  "limits": [
+    "callers indiretos e PC-relative não são modelados",
+    "retorno, stack, interrupções e contexto de chamada não são modelados",
+    "o efeito observado inclui instrumentação RAM da fixture, não memória da rotina recuperada",
+    "isto não é recuperação do Sonic 1 nem equivalência geral"
+  ],
+  "status": "passed_for_bounded_profile_only"
+}

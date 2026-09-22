@@ -15,6 +15,7 @@ import { constants as fsConstants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -422,6 +423,14 @@ function parseArgs(argv) {
           "onboarding-shell",
           "qa-rc",
           "create-game-from-zero",
+          "reference-platformer",
+          "inspection",
+          "inspection-cancel",
+          "inspection-complete",
+          "inspection-sprite-secondary",
+          "inspection-sonic",
+          "inspection-preview-unavailable",
+          "logic-recovery",
         ].includes(
           value
         )
@@ -1062,7 +1071,7 @@ async function detectBuildFailure(sessionId, sinceIndex = 0) {
   return `build falhou (${failure.diagnostic.area}): ${detail}`;
 }
 
-async function webdriverRequest(method, route, body) {
+async function webdriverRequestDetailed(method, route, body) {
   const response = await fetch(`${driverServerUrl}${route}`, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -1070,18 +1079,36 @@ async function webdriverRequest(method, route, body) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { raw_body: text };
+  }
 
-  if (!response.ok) {
-    const details = payload?.value?.message ?? response.statusText;
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    headers: Object.fromEntries(response.headers.entries()),
+    body: text,
+    payload,
+  };
+}
+
+async function webdriverRequest(method, route, body) {
+  const result = await webdriverRequestDetailed(method, route, body);
+
+  if (!result.ok) {
+    const details = result.payload?.value?.message ?? result.statusText;
     throw new Error(`${method} ${route} falhou: ${details}`);
   }
 
-  if (payload?.value?.error) {
-    throw new Error(payload.value.message ?? `${method} ${route} retornou erro WebDriver.`);
+  if (result.payload?.value?.error) {
+    throw new Error(result.payload.value.message ?? `${method} ${route} retornou erro WebDriver.`);
   }
 
-  return payload;
+  return result.payload;
 }
 
 async function isDriverOnline() {
@@ -1394,6 +1421,1051 @@ async function fillInputBySelector(sessionId, selector, value) {
   }
 }
 
+async function fillInputByLabel(sessionId, labelText, value) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const expected = String(arguments[0] ?? '').trim();
+      const label = Array.from(document.querySelectorAll('label')).find((candidate) => candidate.textContent?.trim() === expected);
+      const input = label?.querySelector('input') ?? label?.parentElement?.querySelector('input');
+      if (!(input instanceof HTMLInputElement)) return false;
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+      if (typeof descriptor?.set !== 'function') return false;
+      input.focus();
+      descriptor.set.call(input, String(arguments[1] ?? ''));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `,
+    [labelText, value]
+  );
+  if (!result) fail(`Falha ao preencher o campo rotulado: ${labelText}`);
+}
+
+async function readInspectionUiState(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const panel = document.querySelector('[data-testid="reverse-inspection-panel"]');
+      const identify = panel?.querySelector('[data-testid="inspection-identify-state"]');
+      const session = panel?.querySelector('[data-testid="inspection-session"]');
+      const run = panel?.querySelector('[data-testid="inspection-run"]');
+      const input = panel?.querySelector('input[type="text"]');
+      const image = panel?.querySelector('[data-testid="inspection-preview-image"]');
+      return {
+        inputValue: input instanceof HTMLInputElement ? input.value : null,
+        identify: identify ? {
+          state: identify.getAttribute('data-state'),
+          inputValue: identify.getAttribute('data-input-value'),
+          error: identify.getAttribute('data-error'),
+          sessionId: identify.getAttribute('data-session-id'),
+          sessionStatus: identify.getAttribute('data-session-status'),
+        } : null,
+        session: session ? {
+          id: session.getAttribute('data-session-id'),
+          status: session.getAttribute('data-session-status'),
+          identitySha256: session.getAttribute('data-identity-sha256'),
+        } : null,
+        run: run ? {
+          id: run.getAttribute('data-run-id'),
+          status: run.getAttribute('data-run-status'),
+          generation: run.getAttribute('data-run-generation'),
+        } : null,
+        preview: image ? {
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          declaredWidth: Number(image.getAttribute('data-preview-width') || 0),
+          declaredHeight: Number(image.getAttribute('data-preview-height') || 0),
+          pngSha256: image.getAttribute('data-png-sha256'),
+          pixelsSha256: image.getAttribute('data-pixels-sha256'),
+          artifactSha256: image.getAttribute('data-artifact-sha256'),
+          src: image.getAttribute('src'),
+        } : null,
+        unavailable: Boolean(panel?.querySelector('[data-testid="inspection-preview-unavailable"]')),
+      };
+    `
+  );
+}
+
+async function readRenderedPreviewPixels(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-preview-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return {
+        image: true,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        pngSha256: image.getAttribute("data-png-sha256") || "",
+        pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+        artifactSha256: image.getAttribute("data-artifact-sha256") || "",
+        src: image.currentSrc || image.src,
+        pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+      };
+    `
+  );
+}
+
+async function readRenderedSpriteFramePixels(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-sprite-frame-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return {
+        image: true,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        romSha256: image.getAttribute("data-sprite-rom-sha256") || "",
+        resourceId: image.getAttribute("data-sprite-resource") || "",
+        frameId: image.getAttribute("data-sprite-frame") || "",
+        pngSha256: image.getAttribute("data-png-sha256") || "",
+        pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+        src: image.currentSrc || image.src,
+        pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+      };
+    `
+  );
+}
+
+async function ensureSpriteFrameVisibleAndUnobstructed(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-sprite-frame-image"]');
+      const stage = document.querySelector('[data-testid="inspection-sprite-frame-stage"]');
+      const metadata = document.querySelector('[data-testid="inspection-sprite-frame-metadata"]');
+      if (!(image instanceof HTMLImageElement) || !(stage instanceof HTMLElement) || !(metadata instanceof HTMLElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      image.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = image.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const metadataRect = metadata.getBoundingClientRect();
+      const style = window.getComputedStyle(image);
+      const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0;
+      const borderRight = Number.parseFloat(style.borderRightWidth) || 0;
+      const borderTop = Number.parseFloat(style.borderTopWidth) || 0;
+      const borderBottom = Number.parseFloat(style.borderBottomWidth) || 0;
+      const contentWidth = rect.width - borderLeft - borderRight;
+      const contentHeight = rect.height - borderTop - borderBottom;
+      const cssWidth = Number.parseFloat(style.width) || 0;
+      const cssHeight = Number.parseFloat(style.height) || 0;
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
+      const unobstructed = Boolean(top && (top === image || image.contains(top)));
+      const expectedWidth = image.naturalWidth * 3;
+      const expectedHeight = image.naturalHeight * 3;
+      const exactContentDimensions = Math.abs(contentWidth - expectedWidth) < 0.01 && Math.abs(contentHeight - expectedHeight) < 0.01;
+      const integerScale = Math.abs(contentWidth / image.naturalWidth - 3) < 0.01 && Math.abs(contentHeight / image.naturalHeight - 3) < 0.01;
+      const metadataBelow = metadataRect.top >= rect.bottom - 0.01;
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        content: { width: contentWidth, height: contentHeight },
+        css: { width: cssWidth, height: cssHeight, boxSizing: style.boxSizing, imageRendering: style.imageRendering },
+        borders: { left: borderLeft, right: borderRight, top: borderTop, bottom: borderBottom },
+        stageRect: { x: stageRect.x, y: stageRect.y, width: stageRect.width, height: stageRect.height },
+        metadataRect: { x: metadataRect.x, y: metadataRect.y, width: metadataRect.width, height: metadataRect.height },
+        naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
+        fullyVisible,
+        unobstructed,
+        exactContentDimensions,
+        integerScale,
+        pixelated: style.imageRendering === 'pixelated',
+        metadataBelow,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: topWithTestId?.getAttribute('data-testid') ?? '',
+        stageOverflowX: window.getComputedStyle(stage).overflowX,
+      };
+    `
+  );
+}
+
+function renderExpectedSpriteFrame(romBytes, options = {}) {
+  const frameId = options.frameId ?? "spr_ryo_100/frame-0";
+  const manifests = {
+    "spr_ryo_100/frame-0": {
+      tileDataOffset: 0x863a0,
+      descriptorOffset: 0x22260,
+      tileCount: 64,
+      descriptors: [
+        [0x2c, 0x1c, 0x0f, 0x05, 0x1b, 0x10], [0x0c, 0x3c, 0x0f, 0x04, 0x1c, 0x10],
+        [0x37, 0x11, 0x07, 0x25, 0x0b, 0x08], [0x14, 0x3c, 0x06, 0x24, 0x0c, 0x06],
+        [0x4c, 0x0c, 0x09, 0x05, 0x23, 0x06], [0x57, 0x01, 0x09, 0x25, 0x03, 0x06],
+        [0x58, 0x00, 0x05, 0x00, 0x30, 0x04], [0x04, 0x5c, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-1": {
+      tileDataOffset: 0x86ba0,
+      descriptorOffset: 0x222a2,
+      tileCount: 66,
+      descriptors: [
+        [0x11, 0x37, 0x0f, 0x07, 0x19, 0x10], [0x31, 0x1f, 0x0e, 0x08, 0x18, 0x0c],
+        [0x37, 0x11, 0x07, 0x24, 0x0c, 0x08], [0x11, 0x3f, 0x06, 0x27, 0x09, 0x06],
+        [0x49, 0x0f, 0x09, 0x05, 0x23, 0x06], [0x57, 0x01, 0x09, 0x24, 0x04, 0x06],
+        [0x58, 0x00, 0x09, 0x00, 0x28, 0x06], [0x04, 0x54, 0x09, 0x0c, 0x1c, 0x06],
+      ],
+    },
+    "spr_ryo_100/frame-2": {
+      tileDataOffset: 0x873e0,
+      descriptorOffset: 0x222e4,
+      tileCount: 74,
+      descriptors: [
+        [0x0b, 0x3d, 0x0f, 0x01, 0x1f, 0x10], [0x2b, 0x1d, 0x0f, 0x08, 0x18, 0x10],
+        [0x0b, 0x3d, 0x0b, 0x21, 0x07, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x03, 0x5d, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-3": {
+      tileDataOffset: 0x87d20,
+      descriptorOffset: 0x22320,
+      tileCount: 74,
+      descriptors: [
+        [0x0a, 0x3e, 0x0f, 0x04, 0x1c, 0x10], [0x2a, 0x1e, 0x0f, 0x08, 0x18, 0x10],
+        [0x0a, 0x3e, 0x0b, 0x24, 0x04, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x02, 0x5e, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-4": {
+      tileDataOffset: 0x873e0,
+      descriptorOffset: 0x222e4,
+      tileCount: 74,
+      descriptors: [
+        [0x0b, 0x3d, 0x0f, 0x01, 0x1f, 0x10], [0x2b, 0x1d, 0x0f, 0x08, 0x18, 0x10],
+        [0x0b, 0x3d, 0x0b, 0x21, 0x07, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x03, 0x5d, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_spark0/frame-0": {
+      tileDataOffset: 0x80060,
+      descriptorOffset: 0x22f94,
+      tileCount: 9,
+      paletteOffset: 0x2e134,
+      width: 24,
+      height: 24,
+      descriptors: [[0x00, 0x00, 0x0a, 0x00, 0x00, 0x09]],
+    },
+  };
+  const manifest = manifests[frameId];
+  if (!manifest) fail(`Manifesto independente ausente para ${frameId}`);
+  const tileDataOffset = manifest.tileDataOffset;
+  const paletteOffset = manifest.paletteOffset ?? 0x2cc68;
+  const width = manifest.width ?? 64;
+  const height = manifest.height ?? 104;
+  const descriptors = manifest.descriptors;
+  const descriptorBytes = Buffer.from(descriptors.flat());
+  if (!descriptorBytes.equals(romBytes.subarray(manifest.descriptorOffset, manifest.descriptorOffset + descriptorBytes.length))) {
+    fail(`Descritores independentes de ${frameId} divergiram da ROM de referência.`);
+  }
+  const pixels = Buffer.alloc(width * height * 4);
+  const tileOrdering = options.tileOrdering ?? "vertical";
+  const paletteDelta = options.paletteDelta ?? 0;
+  const flipX = Boolean(options.flipX);
+  const flipY = Boolean(options.flipY);
+  let tileStart = 0;
+  const color = (index) => {
+    const wordOffset = paletteOffset + index * 2;
+    let word = romBytes.readUInt16BE(wordOffset);
+    if (index === 1) word ^= paletteDelta;
+    return [((word >> 1) & 7) * 36, ((word >> 5) & 7) * 36, ((word >> 9) & 7) * 36, index === 0 ? 0 : 255];
+  };
+  const put = (x, y, index) => {
+    const pixel = (y * width + x) * 4;
+    const rgba = index === 0 && options.transparentRgb === "canvas" ? [0, 0, 0, 0] : color(index);
+    pixels[pixel] = rgba[0];
+    pixels[pixel + 1] = rgba[1];
+    pixels[pixel + 2] = rgba[2];
+    pixels[pixel + 3] = rgba[3];
+  };
+  const transparent = options.transparentRgb === "canvas" ? [0, 0, 0, 0] : color(0);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const offset = pixel * 4;
+    pixels[offset] = transparent[0];
+    pixels[offset + 1] = transparent[1];
+    pixels[offset + 2] = transparent[2];
+    pixels[offset + 3] = transparent[3];
+  }
+  for (const [offsetY, offsetYFlip, size, offsetX, offsetXFlip, tileCount] of descriptors) {
+    const tileWidth = (size >> 2) + 1;
+    const tileHeight = (size & 3) + 1;
+    if (tileCount !== tileWidth * tileHeight) fail(`Descritor com tileCount inconsistente: ${JSON.stringify({ size, tileCount })}`);
+    for (let localX = 0; localX < tileWidth; localX += 1) {
+      for (let localY = 0; localY < tileHeight; localY += 1) {
+        const sourceX = flipX ? tileWidth - 1 - localX : localX;
+        const sourceY = flipY ? tileHeight - 1 - localY : localY;
+        const tileInPart = tileOrdering === "vertical"
+          ? sourceX * tileHeight + sourceY
+          : sourceY * tileWidth + sourceX;
+        const tileIndex = tileStart + tileInPart;
+        const destX = (flipX ? offsetXFlip : offsetX) + localX * 8;
+        const destY = (flipY ? offsetYFlip : offsetY) + localY * 8;
+        for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+          for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+            const sourcePixelX = flipX ? 7 - pixelX : pixelX;
+            const sourcePixelY = flipY ? 7 - pixelY : pixelY;
+            const packedByte = romBytes[tileDataOffset + tileIndex * 32 + sourcePixelY * 4 + Math.floor(sourcePixelX / 2)];
+            const index = sourcePixelX % 2 === 0 ? packedByte >> 4 : packedByte & 0x0f;
+            put(destX + pixelX, destY + pixelY, index);
+          }
+        }
+      }
+    }
+    tileStart += tileCount;
+  }
+  if (tileStart !== manifest.tileCount) fail(`Oráculo independente esperava ${manifest.tileCount} tiles e obteve ${tileStart}`);
+  return { width, height, pixels, frameId };
+}
+
+function renderExpectedSonicStand(romBytes, options = {}) {
+  const mapping = Buffer.from([
+    0x04, 0xec, 0x08, 0x00, 0x00,
+    0xf0, 0xf4, 0x0d, 0x00, 0x03,
+    0xf0, 0x04, 0x08, 0x00, 0x0b,
+    0xf0, 0x0c, 0x08, 0x00, 0x0e, 0xf8,
+  ]);
+  const tileDataOffset = 0x21afe;
+  const tileDataSize = 0xa120;
+  const paletteOffset = 0x2388;
+  const descriptorOffset = 0x21293;
+  const width = 32;
+  const height = 40;
+  if (!mapping.equals(romBytes.subarray(descriptorOffset, descriptorOffset + mapping.length))) {
+    fail("Mapping Sonic stand independente divergiu da ROM.");
+  }
+  if (romBytes.length < tileDataOffset + tileDataSize || romBytes.length < paletteOffset + 0x20) {
+    fail("ROM Sonic independente não contém os intervalos do frame stand.");
+  }
+  const pixels = Buffer.alloc(width * height * 4);
+  const paletteIndices = Buffer.alloc(width * height);
+  const palette = (index) => {
+    let word = romBytes.readUInt16BE(paletteOffset + index * 2);
+    if (index === 1 && Number.isInteger(options.paletteDelta)) word ^= options.paletteDelta;
+    return [((word >> 1) & 7) * 36, ((word >> 5) & 7) * 36, ((word >> 9) & 7) * 36, index === 0 ? 0 : 255];
+  };
+  for (let offset = 0; offset < pixels.length; offset += 4) pixels[offset + 3] = 0;
+  let mappingOffset = 1;
+  const originX = 16;
+  const originY = 20;
+  const tileStartByPart = [];
+  for (let partIndex = 0; partIndex < mapping[0]; partIndex += 1) {
+    const y = mapping[mappingOffset];
+    const size = mapping[mappingOffset + 1];
+    const tileStart = mapping.readUInt16BE(mappingOffset + 2);
+    const x = mapping[mappingOffset + 4] << 24 >> 24;
+    const tileWidth = ((size >> 2) & 3) + 1;
+    const tileHeight = (size & 3) + 1;
+    tileStartByPart.push({ tileStart, tileWidth, tileHeight, x, y: y << 24 >> 24 });
+    mappingOffset += 5;
+  }
+  for (const part of tileStartByPart) {
+    for (let localY = 0; localY < part.tileHeight; localY += 1) {
+      for (let localX = 0; localX < part.tileWidth; localX += 1) {
+        const tileIndex = part.tileStart + (options.tileOrder === "vertical"
+          ? localX * part.tileHeight + localY
+          : localY * part.tileWidth + localX);
+        for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+          for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+            const packed = romBytes[tileDataOffset + tileIndex * 32 + pixelY * 4 + Math.floor(pixelX / 2)];
+            const paletteIndex = pixelX % 2 === 0 ? packed >> 4 : packed & 0x0f;
+            const sourceX = originX + part.x + localX * 8 + pixelX;
+            const sourceY = originY + part.y + localY * 8 + pixelY;
+            const destX = options.flipX ? width - 1 - sourceX : sourceX;
+            const destY = options.flipY ? height - 1 - sourceY : sourceY;
+            if (destX < 0 || destY < 0 || destX >= width || destY >= height) {
+              fail(`Mapping Sonic fora do canvas: ${destX},${destY} part=${JSON.stringify(part)} local=${localX},${localY} pixel=${pixelX},${pixelY} options=${JSON.stringify(options)}`);
+            }
+            const offset = (destY * width + destX) * 4;
+            const rgba = palette(paletteIndex);
+            paletteIndices[destY * width + destX] = paletteIndex;
+            pixels.set(rgba, offset);
+          }
+        }
+      }
+    }
+  }
+  return { width, height, pixels, paletteIndices, frameId: "sonic1_sonic/stand", tileDataOffset, tileDataSize, paletteOffset, descriptorOffset };
+}
+
+const MD_CHANNEL_LEVELS = [0, 33, 66, 99, 140, 173, 206, 239];
+
+function quantizeMdChannel(value) {
+  let best = 0;
+  let distance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < MD_CHANNEL_LEVELS.length; index += 1) {
+    const nextDistance = Math.abs(value - MD_CHANNEL_LEVELS[index]);
+    if (nextDistance < distance) {
+      distance = nextDistance;
+      best = index;
+    }
+  }
+  return best;
+}
+
+function sonicPaletteCodes(romBytes) {
+  const paletteCodes = [];
+  for (let index = 0; index < 16; index += 1) {
+    const word = romBytes.readUInt16BE(0x2388 + index * 2);
+    paletteCodes.push({
+      r: (word >> 1) & 7,
+      g: (word >> 5) & 7,
+      b: (word >> 9) & 7,
+    });
+  }
+  return paletteCodes;
+}
+
+/**
+ * Localiza Sonic pela aparência do frame independente, não por uma cor ou
+ * região fixa. O template vem do mapping/tile bytes/paleta da ROM já
+ * verificados; o framebuffer é quantizado para os níveis MD e comparado por
+ * índice de paleta. Assim o HUD magenta, mesmo na mesma região, não pode ser
+ * aceito como Sonic.
+ */
+function locateSonicInFramebuffer(frame, romBytes, options = {}) {
+  const template = renderExpectedSonicStand(romBytes, { flipX: options.flipX === true });
+  const { width, height, paletteIndices } = template;
+  const rgba = frame?.rgba;
+  if (!rgba || rgba.length !== frame.width * frame.height * 4) return null;
+  const paletteCodes = sonicPaletteCodes(romBytes);
+  const previous = options.previous ?? null;
+  const minX = Math.max(0, Math.floor(previous?.x ?? 0) - (previous ? 24 : frame.width));
+  const maxX = Math.min(frame.width - width, Math.ceil(previous?.x ?? (frame.width - width)) + (previous ? 24 : 0));
+  const minY = Math.max(0, Math.floor(previous?.y ?? 0) - (previous ? 32 : frame.height));
+  const maxY = Math.min(frame.height - height, Math.ceil(previous?.y ?? (frame.height - height)) + (previous ? 32 : 0));
+  const candidates = [];
+  let opaquePixels = 0;
+  for (const index of paletteIndices) if (index !== 0) opaquePixels += 1;
+  const allowedPaletteCodes = sonicPaletteCodes(romBytes).slice(1).map((code) => `${code.r}:${code.g}:${code.b}`);
+  const allowedPaletteCodeSet = new Set(allowedPaletteCodes);
+  const scoreCandidate = (originX, originY) => {
+    let matchedPixels = 0;
+    let nearPixels = 0;
+    let paletteMatchedPixels = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const paletteIndex = paletteIndices[y * width + x];
+        if (paletteIndex === 0) continue;
+        const offset = ((originY + y) * frame.width + originX + x) * 4;
+        const expected = paletteCodes[paletteIndex];
+        const actualR = quantizeMdChannel(rgba[offset]);
+        const actualG = quantizeMdChannel(rgba[offset + 1]);
+        const actualB = quantizeMdChannel(rgba[offset + 2]);
+        const distance = Math.abs(actualR - expected.r) + Math.abs(actualG - expected.g) + Math.abs(actualB - expected.b);
+        if (distance === 0) matchedPixels += 1;
+        if (distance <= 1) nearPixels += 1;
+        if (allowedPaletteCodeSet.has(`${actualR}:${actualG}:${actualB}`)) paletteMatchedPixels += 1;
+      }
+    }
+    return { originX, originY, matchedPixels, nearPixels, paletteMatchedPixels, score: nearPixels / opaquePixels, paletteScore: paletteMatchedPixels / opaquePixels };
+  };
+  const originStep = previous ? 1 : 8;
+  for (let originY = minY; originY <= maxY; originY += originStep) {
+    for (let originX = minX; originX <= maxX; originX += originStep) {
+      candidates.push(scoreCandidate(originX, originY));
+    }
+  }
+  if (!previous && originStep > 1) {
+    const refinementOrigins = new Set();
+    const remember = (candidate) => {
+      for (let y = Math.max(minY, candidate.originY - originStep + 1); y <= Math.min(maxY, candidate.originY + originStep - 1); y += 1) {
+        for (let x = Math.max(minX, candidate.originX - originStep + 1); x <= Math.min(maxX, candidate.originX + originStep - 1); x += 1) {
+          refinementOrigins.add(`${x},${y}`);
+        }
+      }
+    };
+    [...candidates].sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels).slice(0, 12).forEach(remember);
+    [...candidates].sort((a, b) => b.paletteScore - a.paletteScore || b.paletteMatchedPixels - a.paletteMatchedPixels).slice(0, 12).forEach(remember);
+    for (const origin of refinementOrigins) {
+      const [originX, originY] = origin.split(",").map(Number);
+      candidates.push(scoreCandidate(originX, originY));
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels);
+  let best = candidates[0];
+  let matchMode = "template";
+  if (!best || best.score < 0.12) {
+    candidates.sort((a, b) => b.paletteScore - a.paletteScore || b.paletteMatchedPixels - a.paletteMatchedPixels);
+    best = candidates[0];
+    matchMode = "palette-component";
+    if (!best || best.paletteScore < 0.22) return null;
+    best = { ...best, score: best.paletteScore, matchedPixels: best.paletteMatchedPixels, nearPixels: best.paletteMatchedPixels };
+  }
+  let minOpaqueX = width;
+  let minOpaqueY = height;
+  let maxOpaqueX = -1;
+  let maxOpaqueY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (paletteIndices[y * width + x] === 0) continue;
+      minOpaqueX = Math.min(minOpaqueX, x);
+      minOpaqueY = Math.min(minOpaqueY, y);
+      maxOpaqueX = Math.max(maxOpaqueX, x);
+      maxOpaqueY = Math.max(maxOpaqueY, y);
+    }
+  }
+  return {
+    x: best.originX,
+    y: best.originY,
+    width,
+    height,
+    bounds: { x0: best.originX + minOpaqueX, y0: best.originY + minOpaqueY, x1: best.originX + maxOpaqueX, y1: best.originY + maxOpaqueY },
+    center: { x: best.originX + (minOpaqueX + maxOpaqueX) / 2, y: best.originY + (minOpaqueY + maxOpaqueY) / 2 },
+    score: best.score,
+    matchedPixels: best.matchedPixels,
+    nearPixels: best.nearPixels,
+    opaquePixels,
+    matchMode,
+    flipX: options.flipX === true,
+    reference: { frameId: "sonic1_sonic/stand", descriptorOffset: template.descriptorOffset, tileDataOffset: template.tileDataOffset, paletteOffset: template.paletteOffset },
+  };
+}
+
+function locateSonicPaletteComponent(frame, romBytes, options = {}) {
+  const previous = options.previous ?? null;
+  const rgba = frame?.rgba;
+  if (!previous || !rgba || rgba.length !== frame.width * frame.height * 4) return null;
+  const paletteCodeSet = new Set(sonicPaletteCodes(romBytes).slice(1).map((code) => `${code.r}:${code.g}:${code.b}`));
+  const minX = Math.max(0, Math.floor(previous.bounds.x0) - 56);
+  const maxX = Math.min(frame.width - 1, Math.ceil(previous.bounds.x1) + 56);
+  const minY = Math.max(0, Math.floor(previous.bounds.y0) - 72);
+  const maxY = Math.min(frame.height - 1, Math.ceil(previous.bounds.y1) + 140);
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const mask = new Uint8Array(width * height);
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const offset = (y * frame.width + x) * 4;
+      const code = `${quantizeMdChannel(rgba[offset])}:${quantizeMdChannel(rgba[offset + 1])}:${quantizeMdChannel(rgba[offset + 2])}`;
+      if (paletteCodeSet.has(code)) mask[(y - minY) * width + (x - minX)] = 1;
+    }
+  }
+  const visited = new Uint8Array(mask.length);
+  const components = [];
+  const queue = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (!mask[start] || visited[start]) continue;
+      visited[start] = 1;
+      queue.length = 0;
+      queue.push(start);
+      let count = 0;
+      let minComponentX = x;
+      let maxComponentX = x;
+      let minComponentY = y;
+      let maxComponentY = y;
+      for (let cursor = 0; cursor < queue.length; cursor += 1) {
+        const index = queue[cursor];
+        const cy = Math.floor(index / width);
+        const cx = index - cy * width;
+        count += 1;
+        minComponentX = Math.min(minComponentX, cx);
+        maxComponentX = Math.max(maxComponentX, cx);
+        minComponentY = Math.min(minComponentY, cy);
+        maxComponentY = Math.max(maxComponentY, cy);
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            const next = ny * width + nx;
+            if (!mask[next] || visited[next]) continue;
+            visited[next] = 1;
+            queue.push(next);
+          }
+        }
+      }
+      const bounds = {
+        x0: minX + minComponentX,
+        y0: minY + minComponentY,
+        x1: minX + maxComponentX,
+        y1: minY + maxComponentY,
+      };
+      const componentWidth = bounds.x1 - bounds.x0 + 1;
+      const componentHeight = bounds.y1 - bounds.y0 + 1;
+      const center = { x: (bounds.x0 + bounds.x1) / 2, y: (bounds.y0 + bounds.y1) / 2 };
+      const previousCenter = previous.center ?? { x: (previous.bounds.x0 + previous.bounds.x1) / 2, y: (previous.bounds.y0 + previous.bounds.y1) / 2 };
+      const distance = Math.hypot(center.x - previousCenter.x, center.y - previousCenter.y);
+      if (count >= 24 && componentWidth >= 6 && componentWidth <= 56 && componentHeight >= 8 && componentHeight <= 64 && distance <= 150) {
+        components.push({ bounds, center, count, componentWidth, componentHeight, distance });
+      }
+    }
+  }
+  components.sort((a, b) => b.count - a.count || a.distance - b.distance);
+  const best = components[0];
+  if (!best) return null;
+  return {
+    x: best.bounds.x0,
+    y: best.bounds.y0,
+    width: best.componentWidth,
+    height: best.componentHeight,
+    bounds: best.bounds,
+    center: best.center,
+    score: best.count / Math.max(1, previous.opaquePixels ?? best.count),
+    matchedPixels: best.count,
+    nearPixels: best.count,
+    opaquePixels: previous.opaquePixels ?? best.count,
+    matchMode: "palette-connected-component",
+    flipX: false,
+    reference: { frameId: "sonic1_sonic/component", paletteOffset: 0x2388, previous: { x: previous.x, y: previous.y, bounds: previous.bounds } },
+  };
+}
+
+function locateSonicVisual(frame, romBytes, options = {}) {
+  const direct = locateSonicInFramebuffer(frame, romBytes, options);
+  const flipped = locateSonicInFramebuffer(frame, romBytes, { ...options, flipX: true });
+  const component = locateSonicPaletteComponent(frame, romBytes, options);
+  if (options.previous && component) return component;
+  if (direct && direct.score >= 0.12) return direct;
+  return [direct, flipped, component].filter(Boolean).sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels)[0] ?? null;
+}
+
+function assertSonicStandOracles(romBytes, actual, context) {
+  const expected = renderExpectedSonicStand(romBytes);
+  const independentPng = renderExpectedSonicStand(romBytes);
+  const independent = assertExactPreviewPixels(
+    { width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels },
+    expected,
+    context
+  );
+  const independentPngPixelsSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
+  const romSha256 = createHash("sha256").update(romBytes).digest("hex");
+  const expectedPixelsByRomSha256 = {
+    // Golden literal independente da ROM BYOR sem edição.
+    c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb:
+      "ce95ea66f2cfcec40a0fb12cb35fe5e88530de036de9f897333ce762f06b40d4",
+    // Mutação determinística exercitada pela UI: palette[1] = RGB333(7,0,7).
+    d381b1eed8f47dcd08890007b58b90cd5e3cabdaed96deac9b1e7336b1558e4d:
+      "91ee4ab0c08987597918a4951020cac81c6d3903b415c32d0c1dd8d783850588",
+  };
+  const expectedPixelsSha256 = expectedPixelsByRomSha256[romSha256];
+  console.log(`[inspection-sonic-oracle] ${JSON.stringify({ context, romSha256, romLength: romBytes.length, mappingSha256: createHash("sha256").update(romBytes.subarray(0x21293, 0x21293 + 21)).digest("hex"), independentPngPixelsSha256 })}`);
+  if (!expectedPixelsSha256 || independentPngPixelsSha256 !== expectedPixelsSha256) {
+    fail(`Oráculo Sonic stand não corresponde ao golden literal da ROM exercitada: ${JSON.stringify({ romSha256, independentPngPixelsSha256, expectedPixelsSha256 })}`);
+  }
+  for (const [label, variant] of [
+    ["ordem de tiles row-major -> vertical", { tileOrder: "vertical" }],
+    ["paleta alterada", { paletteDelta: 0x0200 }],
+    ["flip horizontal", { flipX: true }],
+  ]) {
+    let rejected = false;
+    let candidate = expected;
+    if (variant.tileOrder === "vertical") {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    } else if (variant.paletteDelta) {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    } else if (variant.flipX) {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    }
+    try {
+      assertExactPreviewPixels(candidate, expected, `${context}: negativo ${label}`);
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) fail(`Negativo Sonic não foi detectado: ${label}`);
+  }
+  return {
+    ...independent,
+    independentPngPixelsSha256,
+    expectedPixelsSha256,
+    expectedIndexSha256: null,
+    expectedRgbaSha256: expectedPixelsSha256,
+    offsets: { tileData: [expected.tileDataOffset, expected.tileDataSize], palette: [expected.paletteOffset, 0x20], descriptor: [expected.descriptorOffset, 21] },
+  };
+}
+
+function assertSpriteFrameOracles(romBytes, actual, context) {
+  if (actual.frameId === "sonic1_sonic/stand") {
+    return assertSonicStandOracles(romBytes, actual, context);
+  }
+  const expected = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId, transparentRgb: "canvas" });
+  const independentPng = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId });
+  const independent = assertExactPreviewPixels(
+    { width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels },
+    expected,
+    context
+  );
+  const independentPngSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
+  const expectedIndexSha256 = {
+    "spr_ryo_100/frame-0": "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c",
+    "spr_ryo_100/frame-1": "77b3b0dba715b352c3ace058abefa5d5d1918d2393dc2064b60a9ed01e0e1903",
+    "spr_ryo_100/frame-2": "ef5072905140185e6353b372bc523ec28f71576204424892c30dd20ea3ee3be7",
+    "spr_ryo_100/frame-3": "c8917da4d036451d5090a905e2ddc34f68170cf958e1c2c8a8c16f5c987a4379",
+    "spr_ryo_100/frame-4": "ef5072905140185e6353b372bc523ec28f71576204424892c30dd20ea3ee3be7",
+    "spr_spark0/frame-0": "b474d8c417767ce822d0babf51bea71d342caf51d78d321867596a992784012b",
+  }[actual.frameId];
+  const expectedRgbaSha256 = {
+    "spr_ryo_100/frame-0": "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58",
+    "spr_ryo_100/frame-1": "15dab9d16df147cc1bb81348fbc0d0a7e65458b34d3d77541df536024af768d0",
+    "spr_ryo_100/frame-2": "63d238fcb0f2b7f6f3283d64ab6987be4f78b209f3d5aca11e2e2f2ea6003871",
+    "spr_ryo_100/frame-3": "af33e3e00eff92da8c2582f42b1ef5719b97506384ef1c0874e6fe6525ac53ee",
+    "spr_ryo_100/frame-4": "63d238fcb0f2b7f6f3283d64ab6987be4f78b209f3d5aca11e2e2f2ea6003871",
+    "spr_spark0/frame-0": "55045927d4b5bd9238a69a49264f625456abe51144ba9b14ee949ed8716223b3",
+  }[actual.frameId];
+  const expectedCanvasSha256 = {
+    "spr_ryo_100/frame-0": "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc",
+    "spr_ryo_100/frame-1": "c63a0fd26c561806f5319fb24380983db10b99998048c678f81d2bf45c7fbde0",
+    "spr_ryo_100/frame-2": "b09f31cd84b5b4b684ab0ef0b5e0fa185e33c0de6ac4ad4d468b9423d77a2a08",
+    "spr_ryo_100/frame-3": "dedd3c0838040bdf12868c7d6a6b93130247efd8b849244348149af95a8c1137",
+    "spr_ryo_100/frame-4": "b09f31cd84b5b4b684ab0ef0b5e0fa185e33c0de6ac4ad4d468b9423d77a2a08",
+    "spr_spark0/frame-0": "601829b5a8ab8853fdc1d9047f95ecdfcc6e0f91f73a88ae226ad55c3e70679f",
+  }[actual.frameId];
+  if (expectedRgbaSha256 !== independentPngSha256 || expectedCanvasSha256 !== independent.pixelsSha256) {
+    fail(`Oráculos RGBA independente/canvas não batem com as referências: ${JSON.stringify({ expectedRgbaSha256, independentPngSha256, expectedCanvasSha256, actualCanvas: independent.pixelsSha256, expectedIndexSha256 })}`);
+  }
+  for (const [label, variant] of [
+    ["ordem vertical -> row-major", { tileOrdering: "row-major" }],
+    ["paleta alterada", { paletteDelta: 0x0200 }],
+    ["flip horizontal", { flipX: true }],
+  ]) {
+    let rejected = false;
+    try {
+      assertExactPreviewPixels(
+        { width: actual.naturalWidth, height: actual.naturalHeight, pixels: renderExpectedSpriteFrame(romBytes, { ...variant, transparentRgb: "canvas" }).pixels },
+        expected,
+        `${context}: negativo ${label}`
+      );
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) fail(`Negativo do frame composto não foi detectado: ${label}`);
+  }
+  return { ...independent, expectedIndexSha256, expectedRgbaSha256, independentPngPixelsSha256: independentPngSha256, expectedCanvasSha256 };
+}
+
+async function verifyRenderedSpriteFrame(sessionId, romBytes, frameId, context) {
+  const romSha256 = createHash("sha256").update(romBytes).digest("hex");
+  let visualEvidence;
+  try {
+    visualEvidence = await waitFor(
+      async () => readRenderedSpriteFramePixels(sessionId),
+      15000,
+      `Frame composto ${frameId} não carregou imagem, dimensões ou pixels`,
+      100
+    );
+  } catch (error) {
+    const uiState = await readInspectionUiState(sessionId);
+    const automation = await readAutomationState(sessionId);
+    const composeButton = await inspectNativeButtonTarget(sessionId, "inspection-compose-sprite");
+    console.log(`[inspection-sprite-frame-failure] ${JSON.stringify({ context, frameId, uiState, composeButton, inspectionLogs: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
+    throw error;
+  }
+  const expectedResourceId = frameId.split("/", 1)[0];
+  if (!visualEvidence?.image || visualEvidence.resourceId !== expectedResourceId || visualEvidence.frameId !== frameId || visualEvidence.romSha256 !== romSha256) {
+    fail(`Identidade do frame composto divergente (${context}): ${JSON.stringify({ expected: { resourceId: expectedResourceId, frameId, romSha256 }, actual: visualEvidence })}`);
+  }
+  const independentEvidence = assertSpriteFrameOracles(romBytes, visualEvidence, `${context}: ${frameId}`);
+  const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+  if (!pngPayload) fail(`Frame composto ${frameId} não expôs uma fonte PNG data: válida.`);
+  const actualPngSha256 = createHash("sha256").update(Buffer.from(pngPayload, "base64")).digest("hex");
+  if (actualPngSha256 !== visualEvidence.pngSha256 || visualEvidence.pixelsSha256 !== independentEvidence.independentPngPixelsSha256 || actualPngSha256 === visualEvidence.pixelsSha256) {
+    fail(`Hashes PNG/RGBA do frame ${frameId} não estão separados ou não batem com o oráculo: ${JSON.stringify({ pngSha256: actualPngSha256, pixelsSha256: visualEvidence.pixelsSha256, expectedPngPixelsSha256: independentEvidence.independentPngPixelsSha256 })}`);
+  }
+  const layout = await waitFor(
+    async () => {
+      const next = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+      return next?.fullyVisible && next.unobstructed && next.exactContentDimensions && next.integerScale && next.pixelated && next.metadataBelow ? next : false;
+    },
+    15000,
+    `Frame composto ${frameId} encolheu, perdeu a escala inteira 3×, ficou obstruído ou sobrepôs os metadados`,
+    100
+  );
+  return { visualEvidence, independentEvidence, actualPngSha256, layout };
+}
+
+function renderExpectedTilePreview(romBytes, offset, size) {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset < 0 || size <= 0 || offset + size > romBytes.length) {
+    fail(`Especificação independente de candidato inválida: offset=${offset} size=${size} ROM=${romBytes.length}`);
+  }
+  const tileCount = Math.min(Math.floor(size / 32), 32);
+  if (tileCount < 1) fail(`Candidato conhecido não contém um tile completo: size=${size}`);
+  const width = 16 * 8 * 2;
+  const height = Math.ceil(tileCount / 16) * 8 * 2;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let tileIndex = 0; tileIndex < tileCount; tileIndex += 1) {
+    const base = offset + tileIndex * 32;
+    const column = tileIndex % 16;
+    const row = Math.floor(tileIndex / 16);
+    for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+      for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+        // Mega Drive/SGDK chunky 4bpp: each byte stores two pixels;
+        // high nibble is the left pixel, low nibble the right pixel.
+        const packedByte = romBytes[base + pixelY * 4 + Math.floor(pixelX / 2)];
+        const value = pixelX % 2 === 0 ? packedByte >> 4 : packedByte & 0x0f;
+        const shade = value * 17;
+        for (let scaleY = 0; scaleY < 2; scaleY += 1) {
+          for (let scaleX = 0; scaleX < 2; scaleX += 1) {
+            const x = column * 16 + pixelX * 2 + scaleX;
+            const y = row * 16 + pixelY * 2 + scaleY;
+            const pixel = (y * width + x) * 4;
+            pixels[pixel] = shade;
+            pixels[pixel + 1] = shade;
+            pixels[pixel + 2] = shade;
+            pixels[pixel + 3] = 255;
+          }
+        }
+      }
+    }
+  }
+  return { width, height, pixels };
+}
+
+function assertChunkyGoldenOracle() {
+  const goldenRows = [
+    [0x12, 0x34, 0x56, 0x78],
+    [0x87, 0x65, 0x43, 0x21],
+    [0x13, 0x57, 0x9b, 0xdf],
+    [0xf0, 0xe1, 0xd2, 0xc3],
+    [0x24, 0x68, 0xac, 0xef],
+    [0xfe, 0xdc, 0xba, 0x98],
+    [0x31, 0x42, 0x53, 0x64],
+    [0x75, 0x86, 0x97, 0xa8],
+  ];
+  const goldenRom = Buffer.alloc(32);
+  goldenRows.forEach((row, index) => row.forEach((value, byteIndex) => { goldenRom[index * 4 + byteIndex] = value; }));
+  const expected = renderExpectedTilePreview(goldenRom, 0, 32);
+  goldenRows.forEach((row, y) => row.flatMap((value) => [value >> 4, value & 0x0f]).forEach((index, x) => {
+    const pixel = (y * 2 * expected.width + x * 2) * 4;
+    const expectedShade = index * 17;
+    if (expected.pixels[pixel] !== expectedShade || expected.pixels[pixel + 1] !== expectedShade || expected.pixels[pixel + 2] !== expectedShade || expected.pixels[pixel + 3] !== 255) {
+      fail(`Golden chunky inválido no oracle: linha=${y} pixel=${x} valor=${index}`);
+    }
+  }));
+}
+
+function assertExactPreviewPixels(actual, expected, context) {
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    fail(`Dimensões independentes divergentes (${context}): ${JSON.stringify({ actual: [actual.width, actual.height], expected: [expected.width, expected.height] })}`);
+  }
+  const actualPixels = Buffer.from(actual.pixels);
+  if (!actualPixels.equals(expected.pixels)) {
+    let firstDifference = -1;
+    for (let index = 0; index < Math.min(actualPixels.length, expected.pixels.length); index += 1) {
+      if (actualPixels[index] !== expected.pixels[index]) {
+        firstDifference = index;
+        break;
+      }
+    }
+    fail(`Pixels RGBA divergentes (${context}): ${JSON.stringify({ firstDifference, actualSha256: createHash("sha256").update(actualPixels).digest("hex"), expectedSha256: createHash("sha256").update(expected.pixels).digest("hex") })}`);
+  }
+  return {
+    width: actual.width,
+    height: actual.height,
+    pixelsSha256: createHash("sha256").update(actualPixels).digest("hex"),
+  };
+}
+
+async function createUnavailablePreviewFixture() {
+  const size = 0x10000;
+  const bytes = Buffer.alloc(size, 0xa5);
+  bytes.fill(0, 0, 0x200);
+  bytes.write("SEGA", 0x100, "ascii");
+  bytes.write("RDS PREVIEW NEGATIVE", 0x120, "ascii");
+  bytes.write("RDS CONTROLLED FIXTURE", 0x150, "ascii");
+  bytes.writeUInt32BE(0x200, 0x1a0);
+  bytes.writeUInt32BE(size - 1, 0x1a4);
+  bytes.write("JUE", 0x1f0, "ascii");
+  for (let candidateIndex = 0; candidateIndex < 17; candidateIndex += 1) {
+    const offset = 0x2000 + candidateIndex * 0x200;
+    for (let tileIndex = 0; tileIndex < 4; tileIndex += 1) {
+      const base = offset + tileIndex * 32;
+      for (let row = 0; row < 8; row += 1) {
+        // Keep the fixture graphic-like without making it an exact short
+        // period. The scanner must accept these 1bpp-like rows while the
+        // two constant-tile gaps keep the 17 blocks separate. The 17th
+        // candidate is intentionally beyond the preview export cap (16),
+        // which exercises a real candidate with no preview artifact.
+        const seed = candidateIndex * 29 + tileIndex * 11 + row * 7;
+        bytes[base + row * 4] = (0x31 + seed) & 0xff;
+        bytes[base + row * 4 + 1] = (0x8d ^ seed) & 0xff;
+        bytes[base + row * 4 + 2] = 0;
+        bytes[base + row * 4 + 3] = 0;
+      }
+    }
+  }
+  const fixtureDir = await mkdtemp(path.join(os.tmpdir(), "rds-inspection-preview-unavailable-"));
+  const romPath = path.join(fixtureDir, "controlled-preview-unavailable.bin");
+  await writeFile(romPath, bytes);
+  return {
+    fixtureDir,
+    romPath,
+    size: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    expectedCandidateCount: 17,
+  };
+}
+
+async function inspectElementInteraction(sessionId, selector) {
+  return executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return { selector: arguments[0], found: false };
+      const rect = target.getBoundingClientRect();
+      const style = getComputedStyle(target);
+      const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const stack = document.elementsFromPoint(point.x, point.y).slice(0, 8).map((node) => ({
+        tag: node.tagName,
+        testId: node.getAttribute?.('data-testid') ?? null,
+        id: node.id || null,
+        className: typeof node.className === 'string' ? node.className.slice(0, 160) : null,
+        text: (node.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120),
+      }));
+      const active = document.activeElement;
+      const scrollParents = [];
+      let parent = target.parentElement;
+      while (parent) {
+        const parentStyle = getComputedStyle(parent);
+        if (parent.scrollHeight > parent.clientHeight || parent.scrollWidth > parent.clientWidth) {
+          const parentRect = parent.getBoundingClientRect();
+          scrollParents.push({
+            tag: parent.tagName,
+            testId: parent.getAttribute('data-testid'),
+            overflowY: parentStyle.overflowY,
+            scrollTop: parent.scrollTop,
+            scrollHeight: parent.scrollHeight,
+            clientHeight: parent.clientHeight,
+            rect: { top: parentRect.top, height: parentRect.height },
+          });
+        }
+        parent = parent.parentElement;
+      }
+      return {
+        selector: arguments[0],
+        found: true,
+        tag: target.tagName,
+        outerHTML: target.outerHTML.slice(0, 1200),
+        visible: Boolean(rect.width && rect.height && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0),
+        disabled: target instanceof HTMLButtonElement || target instanceof HTMLInputElement ? target.disabled : false,
+        ariaDisabled: target.getAttribute('aria-disabled'),
+        focused: active === target,
+        activeElement: active instanceof HTMLElement ? { tag: active.tagName, testId: active.getAttribute('data-testid'), id: active.id || null } : null,
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        style: { display: style.display, visibility: style.visibility, pointerEvents: style.pointerEvents, zIndex: style.zIndex, position: style.position },
+        elementAtCenter: document.elementFromPoint(point.x, point.y)?.outerHTML?.slice(0, 500) ?? null,
+        overlayStack: stack,
+        scrollParents,
+        viewport: { width: window.innerWidth, height: window.innerHeight, scrollX: window.scrollX, scrollY: window.scrollY, devicePixelRatio: window.devicePixelRatio },
+        effectiveValue: target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ? target.value : null,
+      };
+    `,
+    [selector]
+  );
+}
+
+async function clickElementWithDiagnostics(sessionId, elementId, selector) {
+  const preparation = await executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return false;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      const scrollParents = [];
+      let parent = target.parentElement;
+      while (parent) {
+        const style = getComputedStyle(parent);
+        if (parent.scrollHeight > parent.clientHeight) {
+          const targetRect = target.getBoundingClientRect();
+          const parentRect = parent.getBoundingClientRect();
+          parent.scrollTop += targetRect.top - parentRect.top - (parentRect.height - targetRect.height) / 2;
+          scrollParents.push({ testId: parent.getAttribute('data-testid'), scrollTop: parent.scrollTop });
+        }
+        parent = parent.parentElement;
+      }
+      target.scrollIntoView({ block: "center", inline: "center" });
+      target.focus();
+      return { rect: target.getBoundingClientRect().toJSON?.() ?? null, scrollParents };
+    `,
+    [selector]
+  );
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  console.log(`[inspection-click] preparation=${JSON.stringify(preparation)}`);
+  const before = await inspectElementInteraction(sessionId, selector);
+  let response;
+  try {
+    // O WebKitWebDriver pode conservar a referência geométrica do elemento
+    // antes do scroll. Reencontrar o mesmo nó depois da verificação mantém o
+    // clique nativo, mas evita enviar a operação para a posição anterior.
+    const currentElementId = await findElement(sessionId, selector);
+    if (currentElementId !== elementId) {
+      console.log(`[inspection-click] elemento re-resolvido após scroll: ${elementId} -> ${currentElementId}`);
+    }
+    response = await webdriverRequestDetailed("POST", `/session/${sessionId}/element/${currentElementId}/click`, {});
+  } catch (error) {
+    response = { exception: error instanceof Error ? error.message : String(error) };
+  }
+  const after = await inspectElementInteraction(sessionId, selector);
+  const uiState = await readInspectionUiState(sessionId);
+  console.log(`[inspection-click] selected=${JSON.stringify(before)}`);
+  console.log(`[inspection-click] http=${JSON.stringify(response)}`);
+  console.log(`[inspection-click] after=${JSON.stringify(after)}`);
+  console.log(`[inspection-click] ui=${JSON.stringify(uiState)}`);
+  if (response.exception || !response.ok || response.payload?.value?.error) {
+    throw new Error(`Clique WebDriver falhou com diagnóstico completo: ${JSON.stringify(response)}`);
+  }
+  return { before, response, after, uiState };
+}
+
+async function clickElementWithNativePointer(sessionId, selector, label) {
+  const preparation = await executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return null;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      target.focus();
+      const rect = target.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+    `,
+    [selector]
+  );
+  if (!preparation) fail(`Controle ausente para clique nativo por ponteiro: ${label}`);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const before = await inspectElementInteraction(sessionId, selector);
+  if (!before?.found || !before.visible || before.disabled || !before.elementAtCenter?.includes("inspection-sonic-edit")) {
+    fail(`Clique nativo por ponteiro bloqueado: ${JSON.stringify({ label, before })}`);
+  }
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-native-pointer",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: preparation.x, y: preparation.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
+  const after = await inspectElementInteraction(sessionId, selector);
+  const uiState = await readInspectionUiState(sessionId);
+  console.log(`[inspection-click-pointer] ${JSON.stringify({ label, preparation, before, response, after, uiState })}`);
+  if (!response.ok || response.payload?.value?.error) {
+    throw new Error(`Clique nativo por ponteiro falhou: ${JSON.stringify(response)}`);
+  }
+  return { before, response, after, uiState };
+}
+
 async function waitForBodyText(sessionId, fragment, timeoutMs, label) {
   return waitFor(
     async () =>
@@ -1440,6 +2512,401 @@ async function pressKey(sessionId, key, options = {}) {
   if (!result) {
     fail(`Falha ao disparar atalho de teclado: ${key}`);
   }
+}
+
+const NATIVE_GAME_KEYS = {
+  ArrowRight: "\uE014",
+  ArrowLeft: "\uE012",
+  ArrowUp: "\uE013",
+  ArrowDown: "\uE015",
+  Enter: "\uE007",
+  KeyZ: "z",
+  KeyX: "x",
+  KeyC: "c",
+  KeyQ: "q",
+};
+
+async function sendNativeGameKey(sessionId, code, action, label) {
+  const value = NATIVE_GAME_KEYS[code];
+  if (!value) fail(`Tecla nativa não mapeada para ${label}: ${code}`);
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "key",
+      id: `rds-game-${code}`,
+      actions: [{ type: action, value }],
+    }],
+  });
+  if (!response.ok || response.payload?.value?.error) {
+    fail(`Entrada nativa recusada (${label}): ${JSON.stringify(response)}`);
+  }
+  return response;
+}
+
+async function clickCanvasPointNatively(sessionId, selector, normalizedX, normalizedY, label) {
+  const point = await executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector(arguments[0]);
+      if (!(canvas instanceof HTMLElement)) return null;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      return {
+        x: Math.round(rect.left + rect.width * arguments[1]),
+        y: Math.round(rect.top + rect.height * arguments[2]),
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      };
+    `,
+    [selector, normalizedX, normalizedY]
+  );
+  if (!point) fail(`Canvas ausente para clique nativo: ${label}`);
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-scene-painter",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: point.x, y: point.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
+  if (!response.ok || response.payload?.value?.error) {
+    fail(`Clique nativo no canvas recusado (${label}): ${JSON.stringify({ point, response })}`);
+  }
+  return { point, response };
+}
+
+async function focusGameCanvasNatively(sessionId) {
+  const canvas = await findElement(sessionId, "[data-testid='viewport-game-canvas']");
+  await webdriverRequest("POST", `/session/${sessionId}/element/${canvas}/click`, {});
+}
+
+async function readCanonicalGameFrame(sessionId, options = {}) {
+  const includePixels = options.includePixels === true;
+  const frame = await executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      if (!(canvas instanceof HTMLCanvasElement) || !(identity instanceof HTMLElement)) return null;
+      const context = canvas.getContext('2d');
+      if (!context || !canvas.width || !canvas.height) return null;
+      const data = Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data);
+      let nonBlackPixels = 0;
+      const magentaLike = [];
+      const sonicRoiMagentaLike = [];
+      for (let offset = 0; offset < data.length; offset += 4) {
+        const r = data[offset];
+        const g = data[offset + 1];
+        const b = data[offset + 2];
+        if (r !== 0 || g !== 0 || b !== 0) nonBlackPixels += 1;
+        if (r >= 224 && g <= 32 && b >= 224) {
+          const pixel = offset / 4;
+          const point = { x: pixel % canvas.width, y: Math.floor(pixel / canvas.width) };
+          magentaLike.push(point);
+          if (point.x < Math.min(canvas.width, 128) && point.y >= Math.floor(canvas.height * 0.55)) sonicRoiMagentaLike.push(point);
+        }
+      }
+      const bounds = magentaLike.length === 0 ? null : {
+        x0: Math.min(...magentaLike.map((point) => point.x)),
+        y0: Math.min(...magentaLike.map((point) => point.y)),
+        x1: Math.max(...magentaLike.map((point) => point.x)),
+        y1: Math.max(...magentaLike.map((point) => point.y)),
+      };
+      const sonicRoiBounds = sonicRoiMagentaLike.length === 0 ? null : {
+        x0: Math.min(...sonicRoiMagentaLike.map((point) => point.x)),
+        y0: Math.min(...sonicRoiMagentaLike.map((point) => point.y)),
+        x1: Math.max(...sonicRoiMagentaLike.map((point) => point.x)),
+        y1: Math.max(...sonicRoiMagentaLike.map((point) => point.y)),
+      };
+      const sonicRoiCentroid = sonicRoiMagentaLike.length === 0 ? null : {
+        x: sonicRoiMagentaLike.reduce((sum, point) => sum + point.x, 0) / sonicRoiMagentaLike.length,
+        y: sonicRoiMagentaLike.reduce((sum, point) => sum + point.y, 0) / sonicRoiMagentaLike.length,
+      };
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        rgba: data,
+        nonBlackPixels,
+        magentaLikePixels: magentaLike.length,
+        magentaLikeBounds: bounds,
+        sonicRoiMagentaLikePixels: sonicRoiMagentaLike.length,
+        sonicRoiMagentaLikeBounds: sonicRoiBounds,
+        sonicRoiMagentaLikeCentroid: sonicRoiCentroid,
+        renderedFrames: Number(identity.getAttribute('data-rendered-frames') || 0),
+        romPath: identity.getAttribute('data-rom-path') || '',
+        romSha256: identity.getAttribute('data-rom-sha256') || '',
+        romSize: Number(identity.getAttribute('data-rom-size') || 0),
+        coreLabel: identity.getAttribute('data-core-label') || '',
+        corePath: identity.getAttribute('data-core-path') || '',
+        lastInputRequestSeq: Number(identity.getAttribute('data-last-input-request-seq') || 0),
+        lastInputAckSeq: Number(identity.getAttribute('data-last-input-ack-seq') || 0),
+      };
+    `
+  );
+  if (!frame) return null;
+  const rgba = Buffer.from(frame.rgba);
+  return {
+    ...frame,
+    rgba: includePixels ? rgba : undefined,
+    framebufferSha256: createHash("sha256").update(rgba).digest("hex"),
+    rgbaBytes: rgba.length,
+  };
+}
+
+async function readCanonicalGameProgress(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      const status = document.querySelector('[data-testid="viewport-game-status"]');
+      if (!(canvas instanceof HTMLCanvasElement) || !(identity instanceof HTMLElement)) return null;
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        renderedFrames: Number(identity.getAttribute('data-rendered-frames') || 0),
+        romPath: identity.getAttribute('data-rom-path') || '',
+        romSha256: identity.getAttribute('data-rom-sha256') || '',
+        romSize: Number(identity.getAttribute('data-rom-size') || 0),
+        coreLabel: identity.getAttribute('data-core-label') || '',
+        corePath: identity.getAttribute('data-core-path') || '',
+        lastInputRequestSeq: Number(identity.getAttribute('data-last-input-request-seq') || 0),
+        lastInputAckSeq: Number(identity.getAttribute('data-last-input-ack-seq') || 0),
+        gameStatus: status?.textContent?.trim() || '',
+      };
+    `
+  );
+}
+
+function readU16le(bytes, offset) {
+  return (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8);
+}
+
+function readI16le(bytes, offset) {
+  const value = readU16le(bytes, offset);
+  return value & 0x8000 ? value - 0x10000 : value;
+}
+
+async function readEmulatorMemory(sessionId, region, offset, length) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const [region, offset, length] = arguments;
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") {
+        done({ ok: false, error: "Tauri invoke indisponivel na janela" });
+        return;
+      }
+      invoke("emulator_read_memory", { region, offset, length })
+        .then((value) => done({ ok: true, value }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [region, offset, length]
+  );
+  if (!result?.ok) fail(`Falha ao ler memoria do core: ${result?.error ?? "sem diagnostico"}`);
+  return result.value;
+}
+
+async function readSonic1PlayerMemory(sessionId) {
+  // Sonic 1 player object candidate in 68k WRAM. The run validates this
+  // candidate by correlating deltas with the independently located initial
+  // framebuffer and with native input ACKs before using it as trajectory oracle.
+  const objectOffset = 0xd000;
+  const result = await readEmulatorMemory(sessionId, 2, objectOffset, 0x40);
+  const bytes = result.data ?? [];
+  return {
+    source: "WRAM region 2, Sonic 1 player object candidate 0xD000",
+    objectOffset,
+    totalSize: result.total_size,
+    rawSha256: createHash("sha256").update(Buffer.from(bytes)).digest("hex"),
+    id: bytes[0] ?? null,
+    renderFlags: bytes[1] ?? null,
+    x: readI16le(bytes, 0x08),
+    xSub: readU16le(bytes, 0x0a),
+    y: readI16le(bytes, 0x0c),
+    ySub: readU16le(bytes, 0x0e),
+    xVel: readI16le(bytes, 0x10),
+    yVel: readI16le(bytes, 0x12),
+    inertia: readI16le(bytes, 0x14),
+    status: bytes[0x22] ?? null,
+  };
+}
+
+async function runCanonicalSonicTrajectory(sessionId, options) {
+  const { buttonTestId, label, expectedSha256, romBytes, artifactPrefix } = options;
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "launch" })}`);
+  await clickButtonByTestIdNativeWhenReady(sessionId, buttonTestId, `jogar ${label} na Game View`);
+  const identity = await waitFor(async () => {
+    const frame = await readCanonicalGameFrame(sessionId);
+    return frame && frame.romSha256 === expectedSha256 && frame.romSize === romBytes.length && frame.coreLabel && frame.corePath ? frame : false;
+  }, 15000, `Game View não confirmou a identidade da ${label}`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "identity", romSha256: identity.romSha256, core: identity.coreLabel })}`);
+  await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 10 ? progress : false;
+  }, 10000, `Game View não produziu frames para a ${label}`, 100);
+  const bootFrame = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 890 ? progress : false;
+  }, 120000, `${label} não atravessou o boot até o ponto de entrada`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "boot", renderedFrames: bootFrame.renderedFrames })}`);
+  await focusGameCanvasNatively(sessionId);
+  const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  await sendNativeGameKey(sessionId, "Enter", "keyDown", `START de entrada da fase ${label}`);
+  const startHoldProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= bootFrame.renderedFrames + 30 ? progress : false;
+  }, 15000, `START não avançou frames para a ${label}`, 100);
+  await sendNativeGameKey(sessionId, "Enter", "keyUp", `liberação de START da ${label}`);
+  const startInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0) ? current : false;
+  }, 10000, `START não foi confirmado para a ${label}`, 100);
+  const gameplayProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 1800 ? progress : false;
+  }, 120000, `${label} não alcançou a cena de gameplay`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "gameplay", renderedFrames: gameplayProgress.renderedFrames })}`);
+  const trajectory = [];
+  const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-trajectory.json`);
+  const persistTrajectory = async (extra = {}) => {
+    await writeFile(
+      trajectoryPath,
+      JSON.stringify(
+        {
+          label,
+          romSha256: expectedSha256,
+          core: identity.coreLabel,
+          initial: { onGround, groundTop },
+          input: { start: startInput, right: rightInput, rightReleased, jump: jumpInput, jumpReleased: jumpReleasedInput },
+          frames: trajectory,
+          pause: extra.pause ?? null,
+          ...extra,
+        },
+        null,
+        2
+      )
+    );
+  };
+  let onGround = false;
+  let groundTop = null;
+  let rightInput = null;
+  let rightReleased = null;
+  let jumpInput = null;
+  let jumpReleasedInput = null;
+  const capture = async (captureLabel, input, previous, minFrameExclusive = -1) => {
+    const raw = await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames > minFrameExclusive ? readCanonicalGameFrame(sessionId, { includePixels: true }) : false;
+    }, 10000, `${label}/${captureLabel} não avançou para um novo frame`, 100);
+    const sonic = locateSonicVisual(raw, romBytes, { previous });
+    if (!sonic) fail(`Localizador independente não encontrou Sonic em ${label}/${captureLabel}`);
+    const memory = await readSonic1PlayerMemory(sessionId);
+    const entry = { label: captureLabel, frame: raw.renderedFrames, input, framebufferSha256: raw.framebufferSha256, sonic, memory };
+    trajectory.push(entry);
+    return { raw, sonic, entry };
+  };
+  const gameplayRaw = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  const gameplaySonic = locateSonicVisual(gameplayRaw, romBytes);
+  if (!gameplaySonic) fail(`Localizador independente não encontrou Sonic no gameplay de ${label}`);
+  const gameplayMemory = await readSonic1PlayerMemory(sessionId);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "located", frame: gameplayRaw.renderedFrames, sonic: gameplaySonic, memory: gameplayMemory })}`);
+  groundTop = (() => {
+    for (let y = gameplaySonic.bounds.y1 + 1; y < gameplayRaw.height; y += 1) {
+      let greenPixels = 0;
+      for (let x = Math.max(0, gameplaySonic.bounds.x0 - 12); x <= Math.min(gameplayRaw.width - 1, gameplaySonic.bounds.x1 + 12); x += 1) {
+        const offset = (y * gameplayRaw.width + x) * 4;
+        if (gameplayRaw.rgba[offset + 1] > gameplayRaw.rgba[offset] + 20 && gameplayRaw.rgba[offset + 1] > gameplayRaw.rgba[offset + 2] + 10 && gameplayRaw.rgba[offset + 1] >= 90) greenPixels += 1;
+      }
+      if (greenPixels >= 8) return y;
+    }
+    return null;
+  })();
+  onGround = groundTop !== null && groundTop - gameplaySonic.bounds.y1 <= 4;
+  trajectory.push({ label: "before-controls", frame: gameplayRaw.renderedFrames, input: "neutral", framebufferSha256: gameplayRaw.framebufferSha256, sonic: gameplaySonic, memory: gameplayMemory });
+  if (!onGround) {
+    await persistTrajectory({ failure: "initial-not-grounded" });
+    fail(`Situação inicial não comprovou ${label} no chão: ${JSON.stringify({ sonic: gameplaySonic, groundTop })}`);
+  }
+  const before = { raw: gameplayRaw, sonic: gameplaySonic };
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", `movimento ${label}`);
+  rightInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.right === true ? current : false;
+  }, 10000, `ArrowRight não chegou ao core para ${label}`, 100);
+  const movementSamples = [];
+  let movementHoldProgress = null;
+  for (const frames of [45, 90, 135]) {
+    movementHoldProgress = await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= before.raw.renderedFrames + frames ? progress : false;
+    }, 20000, `movimento não avançou ${frames} frames para ${label}`, 100);
+    movementSamples.push(await capture(`movement-held-${frames}`, { right: true }, movementSamples.at(-1)?.sonic ?? before.sonic, movementSamples.at(-1)?.raw.renderedFrames ?? before.raw.renderedFrames));
+    console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: `movement-held-${frames}`, frame: movementSamples.at(-1).raw.renderedFrames, sonic: movementSamples.at(-1).sonic })}`);
+  }
+  const duringMovement = movementSamples.at(-1);
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", `parada do movimento ${label}`);
+  rightReleased = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.right === false ? current : false;
+  }, 10000, `liberação de ArrowRight não chegou para ${label}`, 100);
+  const afterMovement = await capture("movement-released", { right: false }, duringMovement.sonic, duringMovement.raw.renderedFrames);
+  const movementDeltaX = Math.max(...[...movementSamples.map((sample) => sample.entry), afterMovement.entry].map((entry) => Math.abs(entry.memory.x - gameplayMemory.x)));
+  if (movementDeltaX < 2) {
+    await persistTrajectory({ failure: "movement-not-observed", movementDeltaX });
+    fail(`Movimento de ${label} não mudou a posição visual independente`);
+  }
+  const beforeJump = await capture("jump-before", { right: false, a: false }, afterMovement.sonic, afterMovement.raw.renderedFrames);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", `salto A ${label}`);
+  jumpInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.a === true ? current : false;
+  }, 10000, `KeyZ/A não chegou ao core para ${label}`, 100);
+  const jumpHoldProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= beforeJump.raw.renderedFrames + 2 ? progress : false;
+  }, 20000, `salto não avançou frames para ${label}`, 100);
+  const jumpHeld = await capture("jump-held", { a: true }, beforeJump.sonic, beforeJump.raw.renderedFrames);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", `liberação do salto ${label}`);
+  jumpReleasedInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.a === false ? current : false;
+  }, 10000, `liberação de KeyZ/A não chegou para ${label}`, 100);
+  const jumpReleased = await capture("jump-released", { a: false }, jumpHeld.sonic, jumpHeld.raw.renderedFrames);
+  let lastJumpSample = jumpReleased;
+  const after = async (captureLabel, frames) => {
+    await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= jumpReleased.raw.renderedFrames + frames ? progress : false;
+    }, 30000, `${label} não avançou ${frames} frames após o salto`, 100);
+    lastJumpSample = await capture(captureLabel, { a: false }, lastJumpSample.sonic, lastJumpSample.raw.renderedFrames);
+    return lastJumpSample;
+  };
+  const jumpLater = await after("jump-after-15", 15);
+  const jumpMid = await after("jump-after-45", 45);
+  const jumpReturn90 = await after("jump-after-90", 90);
+  const jumpReturn150 = await after("jump-after-150", 150);
+  const jumpReturn240 = await after("jump-after-240", 240);
+  const jumpReturn = [jumpMid, jumpReturn90, jumpReturn150, jumpReturn240].find((sample) => sample.entry.memory.yVel === 0) ?? jumpReturn240;
+  const jumpLift = beforeJump.entry.memory.y - Math.min(...trajectory.filter((entry) => entry.label.startsWith("jump-")).map((entry) => entry.memory.y));
+  const returnedToGround = jumpReturn.entry.memory.yVel === 0 && jumpReturn.entry.memory.y >= beforeJump.entry.memory.y - jumpLift;
+  if (jumpLift < 3 || !returnedToGround) {
+    await persistTrajectory({ failure: "jump-trajectory-not-observed", jumpLift, returnedToGround });
+    fail(`Trajetória de salto não comprovou subida e retorno em ${label}: ${JSON.stringify({ jumpLift, returnedToGround, trajectory })}`);
+  }
+  await clickButtonByTestIdNative(sessionId, "viewport-pause", `pausar ${label}`);
+  await waitFor(async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"), 10000, `pausa não ficou visível em ${label}`, 100);
+  const paused = await readCanonicalGameProgress(sessionId);
+  await clickButtonByTestIdNative(sessionId, "viewport-resume", `retomar ${label}`);
+  const resumed = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames > paused.renderedFrames + 5 ? progress : false;
+  }, 10000, `retomada não avançou em ${label}`, 100);
+  await persistTrajectory({ pause: { paused, resumed }, movementDeltaX });
+  return { identity, bootFrame, startHoldProgress, gameplayProgress, movement: { before: trajectory.find((entry) => entry.label === "before-controls"), samples: movementSamples.map((sample) => sample.entry), after: afterMovement.entry, holdProgress: movementHoldProgress, deltaX: movementDeltaX }, jump: { before: beforeJump.entry, held: jumpHeld.entry, released: jumpReleased.entry, later: jumpLater.entry, mid: jumpMid.entry, after: jumpReturn.entry, holdProgress: jumpHoldProgress }, pause: { paused, resumed }, trajectoryPath, screenshot: await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-${label}.png`) };
 }
 
 async function clickHierarchyEntityByLabel(sessionId, label) {
@@ -2478,15 +3945,100 @@ async function readFramebufferStats(sessionId) {
       if (!context) return null;
       const imageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
       let nonBlackPixels = 0;
+      let framebufferHash = 2166136261;
+      let tilemapCellHash = 2166136261;
       for (let index = 0; index < imageData.length; index += 4) {
+        for (let channel = 0; channel < 4; channel += 1) {
+          framebufferHash ^= imageData[index + channel];
+          framebufferHash = Math.imul(framebufferHash, 16777619);
+        }
         if (imageData[index] !== 0 || imageData[index + 1] !== 0 || imageData[index + 2] !== 0) {
           nonBlackPixels += 1;
+        }
+      }
+      for (let y = 200; y < 208 && y < canvas.height; y += 1) {
+        for (let x = 8; x < 16 && x < canvas.width; x += 1) {
+          const index = (y * canvas.width + x) * 4;
+          for (let channel = 0; channel < 4; channel += 1) {
+            tilemapCellHash ^= imageData[index + channel];
+            tilemapCellHash = Math.imul(tilemapCellHash, 16777619);
+          }
         }
       }
       return {
         width: canvas.width,
         height: canvas.height,
         non_black_pixels: nonBlackPixels,
+        framebuffer_hash: (framebufferHash >>> 0).toString(16).padStart(8, "0"),
+        tilemap_cell_hash: (tilemapCellHash >>> 0).toString(16).padStart(8, "0"),
+      };
+    `
+  );
+}
+
+async function readInspectionEmulatorObservation(sessionId, options = {}) {
+  const includePixels = options.includePixels === true;
+  return executeScript(
+    sessionId,
+    `
+      const observation = document.querySelector('[data-testid="inspection-emulator-observation"]');
+      const canvas = document.querySelector('[data-testid="inspection-emulator-framebuffer"]');
+      if (!observation || !(canvas instanceof HTMLCanvasElement)) return null;
+      const context = canvas.getContext("2d");
+      const pixels = context ? context.getImageData(0, 0, canvas.width, canvas.height).data : null;
+      let nonBlackPixels = 0;
+      if (pixels) {
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (pixels[index] !== 0 || pixels[index + 1] !== 0 || pixels[index + 2] !== 0) nonBlackPixels += 1;
+        }
+      }
+      return {
+        label: observation.getAttribute("data-observation-label") || "",
+        romPath: observation.getAttribute("data-rom-path") || "",
+        romSha256: observation.getAttribute("data-rom-sha256") || "",
+        romSize: Number(observation.getAttribute("data-rom-size") || "0"),
+        coreLabel: observation.getAttribute("data-core-label") || "",
+        corePath: observation.getAttribute("data-core-path") || "",
+        framesRun: Number(observation.getAttribute("data-frames-run") || "0"),
+        framesRequested: Number(observation.getAttribute("data-frames-requested") || "0"),
+        inputProfile: observation.getAttribute("data-input-profile") || "",
+        inputStartFrame: observation.getAttribute("data-input-start-frame") === "" ? null : Number(observation.getAttribute("data-input-start-frame") || "0"),
+        framebufferWidth: Number(observation.getAttribute("data-framebuffer-width") || "0"),
+        framebufferHeight: Number(observation.getAttribute("data-framebuffer-height") || "0"),
+        framebufferSha256: observation.getAttribute("data-framebuffer-sha256") || "",
+        declaredNonBlackPixels: Number(observation.getAttribute("data-non-black-pixels") || "0"),
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        canvasRgbaBytes: pixels?.length ?? 0,
+        canvasNonBlackPixels: nonBlackPixels,
+        canvasRgba: ${includePixels ? "pixels ? Array.from(pixels) : null" : "null"},
+        text: observation.textContent?.replace(/\\s+/g, " ").trim() || "",
+      };
+    `
+  );
+}
+
+async function ensureEmulatorObservationVisible(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="inspection-emulator-framebuffer"]');
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      canvas.scrollIntoView({ block: "center", inline: "nearest" });
+      const rect = canvas.getBoundingClientRect();
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const unobstructed = Boolean(top && (top === canvas || canvas.contains(top)));
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        fullyVisible,
+        unobstructed,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: top instanceof Element ? top.getAttribute('data-testid') ?? '' : '',
       };
     `
   );
@@ -2775,6 +4327,600 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
   };
 }
 
+async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCreated) {
+  const artifactPrefix = `reference-platformer-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: null,
+    scenario: "reference-platformer",
+    projectName: "",
+    projectDir: "",
+    templateId: "reference_platformer",
+    artifacts: [],
+    steps: [],
+    roms: [],
+    frames: [],
+    input: {},
+    tilemapAuthoring: {},
+    persistence: {},
+  };
+
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-01-wizard.png`),
+    "reference template wizard"
+  );
+  await clickByTestId(sessionId, "template-card-reference_platformer");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const generatedProjectName = `Reference_Platformer_${Date.now()}`;
+  await fillInputBySelector(
+    sessionId,
+    'input[placeholder="Nome do projeto"]',
+    generatedProjectName
+  );
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+
+  const createdState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entities = Array.isArray(state?.activeScene?.entities)
+        ? state.activeScene.entities
+        : [];
+      return state?.activeProjectDir &&
+        state.activeProjectName === generatedProjectName &&
+        state.activeTarget === "megadrive" &&
+        entities.length === 4
+        ? state
+        : false;
+    },
+    45000,
+    "Template reference_platformer nao criou a cena completa pelo wizard.",
+    500
+  );
+  onProjectCreated(createdState.activeProjectDir);
+  report.projectName = generatedProjectName;
+  report.projectDir = createdState.activeProjectDir;
+  currentE2eRunContext.project = createdState.activeProjectDir;
+  currentE2eRunContext.projectName = generatedProjectName;
+  currentE2eRunContext.projectTarget = "megadrive";
+  const entityIds = (createdState.activeScene.entities ?? []).map((entity) => entity.id ?? entity.entity_id);
+  for (const requiredId of ["reference_tilemap", "player", "goal", "main_camera"]) {
+    if (!entityIds.includes(requiredId)) {
+      fail(`Template reference_platformer nao expos a entidade '${requiredId}'.`);
+    }
+  }
+  addReportStep(report, "create_reference_platformer_from_wizard", "passed", {
+    projectDir: createdState.activeProjectDir,
+    entityIds,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-02-editor.png`),
+    "reference platformer editor"
+  );
+
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.selectedEntityId === "player" ? state : false;
+    },
+    10000,
+    "Hierarchy nao selecionou o player do template de referencia.",
+    250
+  );
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const cards = await executeScript(
+        sessionId,
+        "return document.querySelectorAll('[data-testid^=\"node-card-\"]').length;"
+      );
+      return state?.activeWorkspace === "logic" && cards >= 10 ? { state, cards } : false;
+    },
+    15000,
+    "NodeGraph do template de referencia nao ficou visivel com os nodes gerados.",
+    250
+  );
+  const logicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+  if (!logicState?.resolved?.has_graph || logicState.resolved.graph_ref !== "graphs/reference_platformer_logic.json") {
+    fail(`NodeGraph do player nao persistiu como referencia canonica: ${JSON.stringify(logicState)}`);
+  }
+  addReportStep(report, "inspect_visible_reference_nodegraph", "passed", {
+    graphRef: logicState.resolved.graph_ref,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-03-nodegraph.png`),
+    "reference platformer NodeGraph"
+  );
+
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.consoleEntries?.some((entry) =>
+        String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+      )
+        ? state
+        : false;
+    },
+    15000,
+    "Salvar nao confirmou a cena do template de referencia.",
+    250
+  );
+  addReportStep(report, "save_reference_platformer", "passed");
+
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao abriu para o template de referencia.",
+    250
+  );
+  const firstBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer initial build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  report.roms.push(firstBuild);
+  report.frames.push({ label: firstBuild.label, ...firstBuild.framebuffer });
+  for (const generatedName of ["main.c", "resources.res", "resources.rs"]) {
+    const generatedPath = path.join(
+      createdState.activeProjectDir,
+      "build",
+      "megadrive",
+      generatedName === "main.c" ? "src" : "res",
+      generatedName
+    );
+    if (await pathExists(generatedPath)) {
+      const evidencePath = path.join(validationDir, `${artifactPrefix}-${generatedName}`);
+      await cp(generatedPath, evidencePath);
+      addReportArtifact(report, evidencePath, `generated ${generatedName}`);
+    }
+  }
+  for (const generatedDirectory of ["res", "src"]) {
+    const generatedDirectoryPath = path.join(
+      createdState.activeProjectDir,
+      "build",
+      "megadrive",
+      generatedDirectory
+    );
+    if (!(await pathExists(generatedDirectoryPath))) continue;
+    for (const generatedName of await readdir(generatedDirectoryPath)) {
+      if (!/resource|player|goal/i.test(generatedName)) continue;
+      const generatedPath = path.join(generatedDirectoryPath, generatedName);
+      const evidencePath = path.join(
+        validationDir,
+        `${artifactPrefix}-${generatedDirectory}-${generatedName}`
+      );
+      await cp(generatedPath, evidencePath);
+      addReportArtifact(report, evidencePath, `generated ${generatedDirectory}/${generatedName}`);
+    }
+  }
+  addReportStep(report, "build_real_rom_and_start_game_view", "passed", {
+    rom: firstBuild.rom_path,
+    framebuffer: firstBuild.framebuffer,
+  });
+
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.activeWorkspace === "scene" &&
+        state?.activeViewportTab === "scene" &&
+        Boolean(state?.activeScene?.entities?.some((entity) => entity.id === "reference_tilemap"))
+        ? state
+        : false;
+    },
+    15000,
+    "Scene workspace nao reabriu para a autoria de tilemap da referencia.",
+    250
+  );
+  await closeVisibleConsoleDrawer(sessionId, "antes da autoria de tilemap");
+  await clickButtonByTestIdNative(
+    sessionId,
+    "hierarchy-tilemap-edit-reference_tilemap",
+    "abrir autoria do tilemap da referencia"
+  );
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-tile-paint-flow-strip\"]'));"),
+    15000,
+    "Fluxo de pintura do tilemap nao ficou visivel.",
+    250
+  );
+  const tilemapBefore = await readAutomationState(sessionId);
+  const tilemapBeforeEntity = tilemapBefore?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap");
+  const tilemapBeforeCells = tilemapBeforeEntity?.tilemap?.cells ?? [];
+  const tilemapWidth = Number(tilemapBeforeEntity?.tilemap?.mapWidth ?? 40);
+  const tilemapHeight = Number(tilemapBeforeEntity?.tilemap?.mapHeight ?? 28);
+  const tilemapTileWidth = Number(tilemapBeforeEntity?.tilemap?.tileWidth ?? 8);
+  const tilemapTileHeight = Number(tilemapBeforeEntity?.tilemap?.tileHeight ?? 8);
+  const tilemapCell = { col: 1, row: 25 };
+  const tilemapCellIndex = tilemapCell.row * tilemapWidth + tilemapCell.col;
+  const tilemapOriginalValue = Number(tilemapBeforeCells[tilemapCellIndex] ?? 0);
+  const tilemapCollisionBefore = Number(tilemapBefore?.activeScene?.collisionSolidCount ?? 0);
+  await clickButtonByTestIdNative(sessionId, "tile-palette-2", "selecionar tile 2 para pintura");
+  const worldBounds = tilemapBefore?.activeScene?.worldBounds;
+  const tilemapEntity = tilemapBefore?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap");
+  const targetWorldX = Number(tilemapEntity?.x ?? 0) + tilemapCell.col * tilemapTileWidth + tilemapTileWidth / 2;
+  const targetWorldY = Number(tilemapEntity?.y ?? 0) + tilemapCell.row * tilemapTileHeight + tilemapTileHeight / 2;
+  const normalizedX = (targetWorldX - Number(worldBounds?.minX ?? 0)) /
+    Math.max(1, Number(worldBounds?.maxX ?? 320) - Number(worldBounds?.minX ?? 0));
+  const normalizedY = (targetWorldY - Number(worldBounds?.minY ?? 0)) /
+    Math.max(1, Number(worldBounds?.maxY ?? 224) - Number(worldBounds?.minY ?? 0));
+  await clickCanvasPointNatively(
+    sessionId,
+    "[data-testid='viewport-scene-overlay']",
+    normalizedX,
+    normalizedY,
+    "pintar uma celula do tilemap"
+  );
+  const paintedState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex]) === 2 ? state : false;
+    },
+    10000,
+    "Pintura do tilemap nao persistiu no draft ativo.",
+    100
+  );
+  const paintedCollision = Number(paintedState?.activeScene?.collisionSolidCount ?? 0);
+  if (paintedCollision !== tilemapCollisionBefore) {
+    fail(`Pintura visual alterou indevidamente a colisao separada: ${JSON.stringify({ tilemapCollisionBefore, paintedCollision })}`);
+  }
+  await pressKey(sessionId, "z", { code: "KeyZ", ctrlKey: true });
+  const undoneState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex] ?? 0) === tilemapOriginalValue ? state : false;
+    },
+    10000,
+    "Undo nao restaurou a celula original do tilemap.",
+    100
+  );
+  await pressKey(sessionId, "y", { code: "KeyY", ctrlKey: true });
+  const redoneState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex]) === 2 ? state : false;
+    },
+    10000,
+    "Redo nao reaplicou a celula pintada do tilemap.",
+    100
+  );
+  const savesBeforeTilemapAuthoring = (redoneState?.consoleEntries ?? []).filter((entry) =>
+    String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+  ).length;
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const savesAfterTilemapAuthoring = (state?.consoleEntries ?? []).filter((entry) =>
+        String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+      ).length;
+      return savesAfterTilemapAuthoring > savesBeforeTilemapAuthoring
+        ? state
+        : false;
+    },
+    15000,
+    "Salvar nao confirmou a autoria do tilemap.",
+    250
+  );
+  const savedSceneJson = JSON.parse(
+    await readFile(path.join(createdState.activeProjectDir, "scenes", "main.json"), "utf8")
+  );
+  const savedTilemap = savedSceneJson.entities?.find((entity) => entity.entity_id === "reference_tilemap");
+  const savedTileValue = Number(savedTilemap?.components?.tilemap?.cells?.[tilemapCellIndex] ?? 0);
+  if (savedTileValue !== 2) {
+    fail(`Arquivo de cena nao recebeu a celula pintada: ${JSON.stringify({ cellIndex: tilemapCellIndex, expected: 2, actual: savedTileValue })}`);
+  }
+  addReportStep(report, "paint_tilemap_undo_redo_and_preserve_collision", "passed", {
+    cell: tilemapCell,
+    cellIndex: tilemapCellIndex,
+    originalValue: tilemapOriginalValue,
+    paintedValue: 2,
+    undoValue: undoneState?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells?.[tilemapCellIndex] ?? tilemapOriginalValue,
+    redoValue: redoneState?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells?.[tilemapCellIndex] ?? 2,
+    collisionSolidCount: tilemapCollisionBefore,
+    normalizedPoint: { x: normalizedX, y: normalizedY },
+  });
+  report.tilemapAuthoring = {
+    cell: tilemapCell,
+    cellIndex: tilemapCellIndex,
+    originalValue: tilemapOriginalValue,
+    paintedValue: 2,
+    collisionSolidCount: tilemapCollisionBefore,
+  };
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao voltou apos a autoria do tilemap.",
+    250
+  );
+  const paintedBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer tilemap-authored build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  report.roms.push(paintedBuild);
+  report.frames.push({ label: paintedBuild.label, ...paintedBuild.framebuffer });
+  const paintedMainEvidencePath = path.join(
+    validationDir,
+    `${artifactPrefix}-painted-main.c`
+  );
+  const paintedMainSourcePath = path.join(
+    createdState.activeProjectDir,
+    "build",
+    "megadrive",
+    "src",
+    "main.c"
+  );
+  if (await pathExists(paintedMainSourcePath)) {
+    await cp(paintedMainSourcePath, paintedMainEvidencePath);
+    addReportArtifact(report, paintedMainEvidencePath, "painted generated main.c");
+  }
+  if (paintedBuild.framebuffer.tilemap_cell_hash === firstBuild.framebuffer.tilemap_cell_hash) {
+    fail(`Build apos pintura nao alterou o framebuffer inicial: ${JSON.stringify({ initial: firstBuild.framebuffer, painted: paintedBuild.framebuffer })}`);
+  }
+  addReportStep(report, "build_tilemap_authored_rom_and_observe_change", "passed", {
+    initial: firstBuild.framebuffer,
+    painted: paintedBuild.framebuffer,
+  });
+
+  await focusGameCanvasNatively(sessionId);
+  const beforeControls = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "reference movement");
+  const rightAck = await waitFor(
+    async () => {
+      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return observation?.lastJoypadAck?.joypad?.right === true ? observation : false;
+    },
+    10000,
+    "ArrowRight nao foi confirmado para o template de referencia.",
+    100
+  );
+  const movementFrame = await waitFor(
+    async () => {
+      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+      return frame && frame.renderedFrames > beforeControls.renderedFrames + 30 ? frame : false;
+    },
+    20000,
+    "Movimento do template de referencia nao avancou frames.",
+    100
+  );
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "reference movement release");
+  const rightReleaseAck = await waitFor(
+    async () => {
+      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return observation?.lastJoypadAck?.joypad?.right === false ? observation : false;
+    },
+    10000,
+    "liberacao de ArrowRight nao foi confirmada para a referencia.",
+    100
+  );
+  const movementDiffPixels = beforeControls.rgba.reduce(
+    (count, value, index) => count + (value === movementFrame.rgba[index] ? 0 : 1),
+    0
+  );
+  if (movementDiffPixels === 0) {
+    fail("Movimento confirmado pelo ACK nao alterou o framebuffer da referencia.");
+  }
+
+  const beforeJump = movementFrame;
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump");
+  const jumpAck = await waitFor(
+    async () => {
+      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return observation?.lastJoypadAck?.joypad?.a === true ? observation : false;
+    },
+    10000,
+    "KeyZ/A nao foi confirmado para o salto da referencia.",
+    100
+  );
+  const jumpFrame = await waitFor(
+    async () => {
+      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+      return frame && frame.renderedFrames > beforeJump.renderedFrames + 12 ? frame : false;
+    },
+    20000,
+    "Salto do template de referencia nao avancou frames.",
+    100
+  );
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
+  const jumpReleaseAck = await waitFor(
+    async () => {
+      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return observation?.lastJoypadAck?.joypad?.a === false ? observation : false;
+    },
+    10000,
+    "liberacao de KeyZ/A nao foi confirmada para a referencia.",
+    100
+  );
+  const jumpDiffPixels = beforeJump.rgba.reduce(
+    (count, value, index) => count + (value === jumpFrame.rgba[index] ? 0 : 1),
+    0
+  );
+  if (jumpDiffPixels === 0) {
+    const jumpDiagnostic = {
+      before: {
+        width: beforeJump.width,
+        height: beforeJump.height,
+        rgbaBytes: beforeJump.rgbaBytes,
+        renderedFrames: beforeJump.renderedFrames,
+        framebufferSha256: beforeJump.framebufferSha256,
+        magentaLikeBounds: beforeJump.magentaLikeBounds,
+        sonicRoiMagentaLikeBounds: beforeJump.sonicRoiMagentaLikeBounds,
+      },
+      after: {
+        width: jumpFrame.width,
+        height: jumpFrame.height,
+        rgbaBytes: jumpFrame.rgbaBytes,
+        renderedFrames: jumpFrame.renderedFrames,
+        framebufferSha256: jumpFrame.framebufferSha256,
+        magentaLikeBounds: jumpFrame.magentaLikeBounds,
+        sonicRoiMagentaLikeBounds: jumpFrame.sonicRoiMagentaLikeBounds,
+      },
+      jumpDiffPixels,
+      jumpAck: jumpAck?.lastJoypadAck ?? null,
+      jumpReleaseAck: jumpReleaseAck?.lastJoypadAck ?? null,
+      generatedMain: report.artifacts.find((artifact) => artifact.label === "generated main.c")?.path ?? null,
+    };
+    const jumpDiagnosticPath = path.join(validationDir, `${artifactPrefix}-jump-diagnostic.json`);
+    await writeFile(jumpDiagnosticPath, JSON.stringify(jumpDiagnostic, null, 2));
+    await captureScreenshot(sessionId, `${artifactPrefix}-04-jump-before.png`);
+    await captureScreenshot(sessionId, `${artifactPrefix}-05-jump-after.png`);
+    fail("Salto confirmado pelo ACK nao alterou o framebuffer da referencia.");
+  }
+
+  await closeVisibleConsoleDrawer(sessionId, "reference platformer gameplay");
+  await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar reference platformer");
+  await waitFor(
+    async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"),
+    10000,
+    "Pausa nao ficou visivel na Game View da referencia.",
+    100
+  );
+  const paused = await readCanonicalGameProgress(sessionId);
+  await clickButtonByTestIdNative(sessionId, "viewport-resume", "retomar reference platformer");
+  const resumed = await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames > paused.renderedFrames + 5 ? progress : false;
+    },
+    10000,
+    "Retomada nao avancou frames na Game View da referencia.",
+    100
+  );
+  report.input = {
+    before: { frame: beforeControls.renderedFrames, sha256: beforeControls.framebufferSha256 },
+    movement: { frame: movementFrame.renderedFrames, sha256: movementFrame.framebufferSha256, diffBytes: movementDiffPixels, ack: rightAck?.lastJoypadAck ?? null, releaseAck: rightReleaseAck?.lastJoypadAck ?? null },
+    jump: { frame: jumpFrame.renderedFrames, sha256: jumpFrame.framebufferSha256, diffBytes: jumpDiffPixels, ack: jumpAck?.lastJoypadAck ?? null, releaseAck: jumpReleaseAck?.lastJoypadAck ?? null },
+    pause: { paused, resumed },
+  };
+  report.frames.push({ label: "movement", width: movementFrame.width, height: movementFrame.height, non_black_pixels: movementFrame.nonBlackPixels, sha256: movementFrame.framebufferSha256 });
+  report.frames.push({ label: "jump", width: jumpFrame.width, height: jumpFrame.height, non_black_pixels: jumpFrame.nonBlackPixels, sha256: jumpFrame.framebufferSha256 });
+  addReportStep(report, "movement_jump_pause_resume", "passed", report.input);
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-04-gameplay-controls.png`),
+    "reference gameplay controls"
+  );
+
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await clickTopBarMenuAction(sessionId, "Fechar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const wizardVisible = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"project-wizard-body\"]'));" );
+      return !state?.activeProjectDir && wizardVisible ? true : false;
+    },
+    15000,
+    "Projeto de referencia nao fechou com retorno ao wizard.",
+    250
+  );
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', generatedProjectName);
+  await waitFor(
+    async () => {
+      const card = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"wizard-existing-project-card\"]'));" );
+      const pathText = await executeScript(sessionId, "return document.querySelector('[data-testid=\"wizard-existing-project-path\"]')?.textContent ?? '';" );
+      return card && pathText.includes(createdState.activeProjectDir) ? true : false;
+    },
+    30000,
+    "Wizard nao detectou o projeto de referencia salvo.",
+    500
+  );
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  const reopenedState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entities = Array.isArray(state?.activeScene?.entities) ? state.activeScene.entities : [];
+      return state?.activeProjectDir === createdState.activeProjectDir && entities.length === 4 ? state : false;
+    },
+    45000,
+    "Projeto de referencia nao reabriu com as quatro entidades.",
+    500
+  );
+  const reopenedLogicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+  if (!reopenedLogicState?.resolved?.has_graph || reopenedLogicState.resolved.graph_ref !== "graphs/reference_platformer_logic.json") {
+    fail(`NodeGraph do template nao persistiu apos reabertura: ${JSON.stringify(reopenedLogicState)}`);
+  }
+  const reopenedTilemap = reopenedState.activeScene.entities.find((entity) => entity.id === "reference_tilemap");
+  const reopenedTileValue = Number(reopenedTilemap?.tilemap?.cells?.[tilemapCellIndex] ?? 0);
+  if (reopenedTileValue !== 2) {
+    fail(`Tilemap pintado nao persistiu apos reabertura: ${JSON.stringify({ cellIndex: tilemapCellIndex, expected: 2, actual: reopenedTileValue })}`);
+  }
+  report.persistence = {
+    projectDir: createdState.activeProjectDir,
+    entityIds: (reopenedState.activeScene.entities ?? []).map((entity) => entity.id ?? entity.entity_id),
+    graphRef: reopenedLogicState.resolved.graph_ref,
+    tilemapCell: tilemapCell,
+    tilemapCellIndex,
+    tilemapValue: reopenedTileValue,
+  };
+  addReportStep(report, "reopen_project_and_validate_persisted_graph", "passed", report.persistence);
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-05-reopened.png`),
+    "reference project reopened"
+  );
+
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao reabriu para a referencia.",
+    250
+  );
+  const reopenedBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer reopened build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  const reopenedPaintedFrame = await waitFor(
+    async () => {
+      const frame = await readFramebufferStats(sessionId);
+      return frame?.tilemap_cell_hash === paintedBuild.framebuffer.tilemap_cell_hash ? frame : false;
+    },
+    15000,
+    "ROM reaberta nao refletiu o tilemap persistido no framebuffer.",
+    250
+  );
+  reopenedBuild.framebuffer = reopenedPaintedFrame;
+  report.roms.push(reopenedBuild);
+  report.frames.push({ label: reopenedBuild.label, ...reopenedBuild.framebuffer });
+  addReportStep(report, "rebuild_and_run_after_reopen", "passed", {
+    rom: reopenedBuild.rom_path,
+    framebuffer: reopenedBuild.framebuffer,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-06-reopened-build-run.png`),
+    "reference reopened build run"
+  );
+
+  const savedReport = await writeCreateGameReport(report, reportPath);
+  console.log("OK: Desktop Tauri reference-platformer E2E passou.");
+  console.log(`Projeto criado: ${generatedProjectName}`);
+  console.log(`Diretorio do projeto: ${createdState.activeProjectDir}`);
+  console.log(`ROM inicial: ${firstBuild.rom_path}`);
+  console.log(`ROM reaberta: ${reopenedBuild.rom_path}`);
+  console.log(`Relatorio: ${savedReport}`);
+}
+
 async function cleanupTemporaryProject(projectDir) {
   if (!projectDir) {
     return true;
@@ -2975,6 +5121,17 @@ async function clickByTestId(sessionId, testId) {
   }
 }
 
+async function activateByTestIdWithEnter(sessionId, testId) {
+  const visible = await executeScript(
+    sessionId,
+    `const element = document.querySelector('[data-testid="' + String(arguments[0]) + '"]'); if (!(element instanceof HTMLElement)) return false; element.scrollIntoView({ block: "center", inline: "center" }); element.focus(); return true;`,
+    [testId]
+  );
+  if (!visible) throw new Error(`Elemento não encontrado para teclado: ${testId}`);
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/value`, { text: "\uE007", value: ["\uE007"] });
+}
+
 async function clickButtonByText(sessionId, expectedText, mode = "contains") {
   const clicked = await executeScript(
     sessionId,
@@ -3001,6 +5158,855 @@ async function clickButtonByText(sessionId, expectedText, mode = "contains") {
   if (!clicked) {
     fail(`Botao nao encontrado para clique: '${expectedText}'.`);
   }
+}
+
+async function clickButtonByTestIdWithPointerEvents(sessionId, testId) {
+  const result = await executeScript(
+    sessionId,
+    `const button = document.querySelector('[data-testid="' + String(arguments[0]) + '"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({ block: "center", inline: "center" }); button.focus(); for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); return true;`,
+    [testId]
+  );
+  if (!result) fail(`Botao nao encontrado para eventos: '${testId}'.`);
+}
+
+async function inspectNativeButtonTarget(sessionId, testId) {
+  return executeScript(
+    sessionId,
+    `
+      const testId = String(arguments[0] ?? "");
+      const button = document.querySelector('[data-testid="' + testId + '"]');
+      if (!(button instanceof HTMLButtonElement)) {
+        return { exists: false, testId };
+      }
+      button.scrollIntoView({ block: "center", inline: "center" });
+      const rect = button.getBoundingClientRect();
+      const style = window.getComputedStyle(button);
+      const visible = rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = visible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest("[data-testid]") : null;
+      const unobstructed = Boolean(top && (top === button || button.contains(top)));
+      const wizard = document.querySelector('[data-testid="project-wizard-body"]');
+      return {
+        exists: true,
+        testId,
+        visible,
+        disabled: Boolean(button.disabled),
+        focused: document.activeElement === button,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point: { x, y },
+        topTag: top?.tagName ?? "",
+        topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
+        topClass: top instanceof Element ? String(top.className ?? "") : "",
+        unobstructed,
+        wizardVisible: Boolean(wizard),
+      };
+    `,
+    [testId]
+  );
+}
+
+async function clickButtonByTestIdNative(sessionId, testId, label = testId, options = {}) {
+  const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled) {
+    fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  if (options.expectBlocked) {
+    if (diagnostic.unobstructed) {
+      fail(`Negativo de obstrução não encontrou bloqueador para '${label}': ${JSON.stringify(diagnostic)}`);
+    }
+    return { blocked: true, diagnostic };
+  }
+  if (!diagnostic.unobstructed) {
+    fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  await clickElement(sessionId, elementId);
+  return { blocked: false, diagnostic };
+}
+
+async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = testId, timeoutMs = 30000) {
+  await waitFor(
+    async () => {
+      const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+      return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+    },
+    timeoutMs,
+    `Controle nativo não ficou disponível: ${label}`,
+    100
+  );
+  return clickButtonByTestIdNative(sessionId, testId, label);
+}
+
+async function selectInspectionFrameNative(sessionId, frameId) {
+  const selector = "[data-testid='inspection-sprite-frame-select']";
+  const diagnostic = await waitFor(
+    async () => {
+      const next = await executeScript(
+        sessionId,
+        `
+      const select = document.querySelector(${JSON.stringify(selector)});
+      if (!(select instanceof HTMLSelectElement)) return { exists: false };
+      select.scrollIntoView({ block: "center", inline: "center" });
+      const rect = select.getBoundingClientRect();
+      const style = window.getComputedStyle(select);
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = document.elementFromPoint(x, y);
+      const topWithTestId = top instanceof Element ? top.closest("[data-testid]") : null;
+      return {
+        exists: true,
+        value: select.value,
+        options: Array.from(select.options, (option) => option.value),
+        visible: rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden",
+        disabled: Boolean(select.disabled),
+        focused: document.activeElement === select,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point: { x, y },
+        topTag: top?.tagName ?? "",
+        topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
+        unobstructed: Boolean(top && (top === select || select.contains(top))),
+      };
+        `
+      );
+      return next?.exists && next.visible ? next : false;
+    },
+    60000,
+    `Controle de seleção de frame não apareceu: ${frameId}`,
+    100
+  );
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled || !diagnostic.unobstructed) {
+    fail(`Seleção nativa de frame bloqueada: ${JSON.stringify({ frameId, diagnostic })}`);
+  }
+  if (diagnostic.value !== frameId) {
+    const elementId = await findElement(sessionId, selector);
+    await clickElement(sessionId, elementId);
+    const frameIndex = Array.isArray(diagnostic.options) ? diagnostic.options.indexOf(frameId) : -1;
+    if (frameIndex < 0) fail(`Frame não está exposto no controle nativo: ${JSON.stringify({ frameId, options: diagnostic.options })}`);
+    await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "key", id: "inspection-frame-selector-home", actions: [
+        { type: "keyDown", value: "\uE011" },
+        { type: "keyUp", value: "\uE011" },
+      ] }],
+    });
+    if (frameIndex > 0) {
+      await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+        actions: [{ type: "key", id: "inspection-frame-selector-down", actions: Array.from({ length: frameIndex }, () => [
+          { type: "keyDown", value: "\uE015" },
+          { type: "keyUp", value: "\uE015" },
+        ]).flat() }],
+      });
+    }
+    await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "key", id: "inspection-frame-selector-enter", actions: [
+        { type: "keyDown", value: "\uE007" },
+        { type: "keyUp", value: "\uE007" },
+      ] }],
+    });
+  }
+  const selected = await waitFor(
+    async () => executeScript(sessionId, `return document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(frameId)};`),
+    5000,
+    `Seleção nativa não confirmou ${frameId}`,
+    50
+  );
+  if (!selected) fail(`Seleção de frame não foi confirmada: ${frameId}`);
+  return { frameId, diagnostic };
+}
+
+async function closeVisibleConsoleDrawer(sessionId, label = "console inicial") {
+  const visible = await executeScript(
+    sessionId,
+    `return document.querySelector('[data-testid="console-drawer"][data-visible="true"]') ? true : false;`
+  );
+  if (!visible) {
+    return { closed: false, reason: "not-visible" };
+  }
+  const selector = '[data-testid="console-drawer"] > div:first-child > button';
+  const before = await inspectElementInteraction(sessionId, selector);
+  if (!before?.found || !before.visible || before.disabled || before.elementAtCenter?.includes('console-details')) {
+    fail(`Console visível não ficou fechável por controle nativo (${label}): ${JSON.stringify(before)}`);
+  }
+  const elementId = await findElement(sessionId, selector);
+  await clickElement(sessionId, elementId);
+  await waitFor(
+    async () => !(await executeScript(sessionId, `return document.querySelector('[data-testid="console-drawer"][data-visible="true"]') ? true : false;`)),
+    5000,
+    `Console não fechou pelo controle visível (${label})`,
+    100
+  );
+  const after = await inspectElementInteraction(sessionId, selector);
+  console.log(`[inspection-console] ${JSON.stringify({ label, before, after, closed: true })}`);
+  return { closed: true, before, after };
+}
+
+async function readSavedSessionSelection(sessionId, persistedSessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const card = document.querySelector('[data-testid="inspection-saved-session"][data-session-id="' + String(arguments[0]) + '"]');
+      if (!(card instanceof HTMLElement)) return null;
+      const button = card.querySelector('[data-testid="select-saved-session-' + String(arguments[0]) + '"]');
+      const className = String(card.className || '');
+      return {
+        sessionId: card.getAttribute('data-session-id') || '',
+        status: card.getAttribute('data-session-status') || '',
+        selected: className.includes('border-[#cba6f7]'),
+        cardClass: className,
+        buttonDisabled: button instanceof HTMLButtonElement ? button.disabled : null,
+      };
+    `,
+    [persistedSessionId]
+  );
+}
+
+async function ensurePreviewVisibleAndUnobstructed(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-preview-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      let scrollParent = image.parentElement;
+      while (scrollParent && scrollParent !== document.body) {
+        const style = window.getComputedStyle(scrollParent);
+        if (scrollParent.scrollHeight > scrollParent.clientHeight && /(auto|scroll|overlay)/.test(style.overflowY)) break;
+        scrollParent = scrollParent.parentElement;
+      }
+      image.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = image.getBoundingClientRect();
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const renderedSizeSufficient = rect.width >= Math.min(image.naturalWidth, 32) && rect.height >= Math.min(image.naturalHeight, 8);
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
+      const unobstructed = Boolean(top && (top === image || image.contains(top)));
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        fullyVisible,
+        naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
+        renderedSizeSufficient,
+        unobstructed,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: topWithTestId?.getAttribute('data-testid') ?? '',
+        topClass: top instanceof Element ? String(top.className ?? '') : '',
+        scrollParentTestId: scrollParent?.getAttribute('data-testid') ?? '',
+        scrollParentTag: scrollParent?.tagName ?? '',
+        scrollTop: scrollParent ? scrollParent.scrollTop : null,
+      };
+    `
+  );
+}
+
+async function handleProjectWizardVisibly(sessionId, label) {
+  const wizardVisible = await executeScript(
+    sessionId,
+    `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`
+  );
+  if (!wizardVisible) {
+    return { label, action: "not-visible" };
+  }
+
+  const wizardAction = await waitFor(
+    async () => executeScript(
+      sessionId,
+      `return document.querySelector('[data-testid="wizard-open-existing-project"]') ? "existing" : document.querySelector('[data-testid="template-card-empty"]') ? "empty" : false;`
+    ),
+    15000,
+    `Controles do wizard não apareceram (${label})`,
+    100
+  );
+  if (wizardAction === "existing") {
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-open-existing-project", `${label}: abrir projeto existente`);
+  } else {
+    await clickButtonByTestIdNativeWhenReady(sessionId, "template-card-empty", `${label}: selecionar Projeto Vazio`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-target-megadrive", `${label}: selecionar Mega Drive`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-create-project", `${label}: concluir wizard`);
+  }
+
+  const state = await waitFor(
+    async () => {
+      const wizard = await executeScript(
+        sessionId,
+        `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`
+      );
+      const automation = await readAutomationState(sessionId);
+      return !wizard && automation?.activeProjectDir ? automation : false;
+    },
+    30000,
+    `Wizard não foi concluído por controles visíveis (${label})`,
+    100
+  );
+  console.log(`[inspection-wizard] ${JSON.stringify({ label, action: wizardAction === "existing" ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir })}`);
+  return { label, action: wizardAction === "existing" ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir };
+}
+
+async function runLogicRecoveryScenario(sessionId, projectDir) {
+  const nodeRomPath = process.env.RDS_LOGIC_RECOVERY_NODE_ROM ?? "";
+  const routineRomPath = process.env.RDS_LOGIC_RECOVERY_ROUTINE_ROM ?? process.env.RDS_LOGIC_RECOVERY_ROM ?? "";
+  const offsetRaw = process.env.RDS_LOGIC_RECOVERY_OFFSET ?? "";
+  const offset = Number.parseInt(offsetRaw, 0);
+  if (
+    !nodeRomPath ||
+    !routineRomPath ||
+    !Number.isInteger(offset) ||
+    offset < 0 ||
+    !(await pathExists(nodeRomPath)) ||
+    !(await pathExists(routineRomPath))
+  ) {
+    fail("logic-recovery exige RDS_LOGIC_RECOVERY_NODE_ROM, RDS_LOGIC_RECOVERY_ROUTINE_ROM e RDS_LOGIC_RECOVERY_OFFSET.");
+  }
+  const nodeBytes = await readFile(nodeRomPath);
+  const routineBytes = await readFile(routineRomPath);
+  const expectedRoutineBytes = Buffer.from([0x52, 0x40, 0x4e, 0x75]);
+  if (!routineBytes.subarray(offset, offset + expectedRoutineBytes.length).equals(expectedRoutineBytes)) {
+    fail(`fixture routine não contém 52 40 4E 75 no offset 0x${offset.toString(16)}.`);
+  }
+  const nodeSourcePath = path.join(path.dirname(path.dirname(nodeRomPath)), "src", "main.c");
+  const routineSourcePath = path.join(path.dirname(path.dirname(routineRomPath)), "src", "main.c");
+  const nodeSource = await readFile(nodeSourcePath, "utf8");
+  const routineSource = await readFile(routineSourcePath, "utf8");
+  if (!nodeSource.includes("node_generated_rom_addq_word") || !nodeSource.includes("rds_rom_word_result")) {
+    fail(`source do caminho node não contém a semântica C esperada: ${nodeSourcePath}`);
+  }
+  if (!routineSource.includes("recovered_addq_word")) {
+    fail(`source do caminho routine não contém a chamada da rotina vinculada: ${routineSourcePath}`);
+  }
+
+  const artifactPrefix = `logic-recovery-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appBytes = await readFile(currentE2eRunContext?.appPath ?? "").catch(() => null);
+  const report = {
+    generatedAt: new Date().toISOString(),
+    scenario: "logic-recovery",
+    application: {
+      path: currentE2eRunContext?.appPath ?? null,
+      sha256: appBytes ? createHash("sha256").update(appBytes).digest("hex") : null,
+    },
+    fixture: {
+      nodeRomPath,
+      routineRomPath,
+      nodeRomSha256: createHash("sha256").update(nodeBytes).digest("hex"),
+      routineRomSha256: createHash("sha256").update(routineBytes).digest("hex"),
+      nodeSourcePath,
+      nodeSourceSha256: createHash("sha256").update(nodeSource).digest("hex"),
+      routineSourcePath,
+      routineSourceSha256: createHash("sha256").update(routineSource).digest("hex"),
+    },
+    offset,
+    steps: [],
+  };
+
+  await setSessionWindowRect(sessionId, 1280, 800);
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.activeProjectDir === projectDir ? state : false;
+    },
+    30000,
+    "Fixture do logic-recovery não abriu explicitamente",
+    250
+  );
+  await closeVisibleConsoleDrawer(sessionId);
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace não abriu para logic-recovery");
+
+  await fillInputBySelector(sessionId, 'input[placeholder="/roms/game.md"]', routineRomPath);
+  await clickButtonByTextWithPointerEvents(sessionId, "Analisar ROM");
+  await waitFor(
+    async () => executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Analisar ROM") && document.body?.textContent?.includes("ROM Map") ? true : false;`),
+    30000,
+    "Análise da fixture de lógica não concluiu",
+    250
+  );
+  const openedCode = await executeScript(sessionId, `
+    const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+      const text = candidate.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+      return text === "Code" || text === "Voltar para Code";
+    });
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    button.scrollIntoView({ block: "center", inline: "center" });
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
+    return true;
+  `);
+  if (!openedCode) {
+    const buttons = await executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).map((button) => button.textContent?.replace(/\\s+/g, " ").trim()).filter(Boolean).slice(-40);`);
+    console.error(`[logic-recovery] code-tab buttons=${JSON.stringify(buttons)}`);
+    fail("A aba Code não encontrou um controle visível no Reverse Workspace.");
+  }
+  await waitForBodyText(sessionId, "Lógica ROM → Nodes", 15000, "A aba Code não abriu a superfície de recuperação");
+  await fillInputByLabel(sessionId, "Offset", `0x${offset.toString(16)}`);
+  try {
+    await waitFor(
+      async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-recover-logic"]:not([disabled])'));`),
+      30000,
+      "Controle de recuperação exata não ficou habilitado após a análise",
+      250
+    );
+  } catch (error) {
+    const diagnostics = await executeScript(sessionId, `return {
+      button: (() => { const node = document.querySelector('[data-testid="reverse-recover-logic"]'); return node ? { disabled: node.disabled, text: node.textContent, outer: node.outerHTML } : null; })(),
+      inputs: Array.from(document.querySelectorAll('input')).map((node) => ({ value: node.value, placeholder: node.placeholder, aria: node.getAttribute('aria-label') })),
+      state: window.__RDS_E2E__?.getState?.() ?? null,
+      reverseText: document.body?.textContent?.replace(/\\s+/g, ' ').slice(-2400) ?? '',
+    };`);
+    console.error(`[logic-recovery] habilitação diagnostics=${JSON.stringify(diagnostics)}`);
+    throw error;
+  }
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-recover-logic");
+  let recovered;
+  try {
+    recovered = await waitFor(
+      async () => executeScript(sessionId, `
+        const card = document.querySelector('[data-testid="reverse-logic-recovery-card"]');
+        const button = document.querySelector('[data-testid="reverse-recover-logic"]');
+        const text = card?.textContent ?? "";
+        return card && button?.textContent?.includes("Recuperar rotina exata") && text.toLowerCase().includes("52 40 4e 75") ? text : false;
+      `),
+      30000,
+      "Recuperação exata não produziu o card da UI",
+      250
+    );
+  } catch (error) {
+    const diagnostics = await executeScript(sessionId, `return {
+      card: document.querySelector('[data-testid="reverse-logic-recovery-card"]')?.textContent ?? null,
+      button: document.querySelector('[data-testid="reverse-recover-logic"]')?.textContent ?? null,
+      console: window.__RDS_E2E__?.getState?.()?.consoleEntries?.slice(-12) ?? [],
+    };`);
+    console.error(`[logic-recovery] recovery diagnostics=${JSON.stringify(diagnostics)}`);
+    throw error;
+  }
+  const recoveredText = String(recovered);
+  if (!recoveredText.toLowerCase().includes("52 40 4e 75") || !recoveredText.includes("ADDQ")) {
+    fail(`Recuperação da fixture não confirmou bytes/semântica: ${recovered}`);
+  }
+  report.steps.push({ step: "recover_exact_profile", status: "passed", offset, bytes: [0x52, 0x40, 0x4e, 0x75] });
+
+  const invoke = async (command, args = {}) => executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponível" }); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [command, args]
+  );
+  const recoveryProbe = await invoke("rom_recover_logic", { romPath: routineRomPath, offset });
+  if (!recoveryProbe?.ok || !recoveryProbe.value?.ok) {
+    fail(`probe independente da recuperação falhou: ${JSON.stringify(recoveryProbe)}`);
+  }
+  const independentStates = recoveryProbe.value.independent_test_states ?? [];
+  const stateFor = (input) => independentStates.find((state) => state.input_d0 === input);
+  const upperWrap = stateFor(0x1234ffff);
+  const signedOverflow = stateFor(0x00007fff);
+  if (
+    !upperWrap ||
+    upperWrap.output_d0 !== 0x12340000 ||
+    !upperWrap.output_z ||
+    !upperWrap.output_c ||
+    !upperWrap.output_x ||
+    (upperWrap.output_d0 >>> 16) !== (upperWrap.input_d0 >>> 16) ||
+    !signedOverflow ||
+    signedOverflow.output_d0 !== 0x00008000 ||
+    !signedOverflow.output_n ||
+    !signedOverflow.output_v
+  ) {
+    fail(`cobertura independente de upper D0/wrap/flags incompleta: ${JSON.stringify(independentStates)}`);
+  }
+  report.steps.push({
+    step: "independent_semantic_coverage",
+    status: "passed",
+    profileId: recoveryProbe.value.profile_id,
+    operations: recoveryProbe.value.operations,
+    sourceMappings: recoveryProbe.value.source_mappings,
+    coverage: {
+      upperD0PreservedAndWrap: true,
+      zero: true,
+      negative: true,
+      signedOverflow: true,
+      carryAndExtend: true,
+    },
+    states: independentStates,
+  });
+
+  const noOpPath = `${routineRomPath}.addq1.patched.bin`;
+  const patchedPath = `${routineRomPath}.addq2.patched.bin`;
+  await rm(noOpPath, { force: true });
+  await rm(patchedPath, { force: true });
+  const noOpPatch = await invoke("rom_patch_recovered_logic", {
+    romPath: routineRomPath,
+    outputPath: noOpPath,
+    expectedSha256: report.fixture.routineRomSha256,
+    offset,
+    immediate: 1,
+  });
+  if (!noOpPatch?.ok || !noOpPatch.value?.output_path) {
+    fail(`patch no-op #1 via IPC falhou: ${JSON.stringify(noOpPatch)}`);
+  }
+  await waitFor(
+    async () => pathExists(noOpPath),
+    15000,
+    "cópia no-op da fixture não foi criada",
+    100
+  );
+  const noOpBytes = await readFile(noOpPath);
+  if (!noOpBytes.equals(routineBytes)) {
+    fail("controle negativo no-op (#1) alterou bytes ou tamanho da ROM.");
+  }
+  report.steps.push({
+    step: "negative_noop_patch",
+    status: "passed",
+    inputSha256: createHash("sha256").update(routineBytes).digest("hex"),
+    outputSha256: createHash("sha256").update(noOpBytes).digest("hex"),
+    outputPath: noOpPath,
+    bytesEqual: true,
+  });
+
+  await callAutomationApi(sessionId, "setSelectedEntityId", ["camera_root"]);
+  await clickButtonByTextWithPointerEvents(sessionId, "Aplicar ao NodeGraph selecionado");
+  await waitFor(
+    async () => executeScript(sessionId, `return document.body?.textContent?.includes("aplicado e persistido") ? true : false;`),
+    15000,
+    "Grafo recuperado não foi persistido pela UI",
+    250
+  );
+  report.steps.push({ step: "apply_recovered_graph", status: "passed", entityId: "camera_root" });
+
+  await callAutomationApi(sessionId, "closeProject");
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  const reopenedLogic = await waitFor(
+    async () => {
+      const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]);
+      return state?.source?.graph_origin === "rom_recovered" ? state : false;
+    },
+    30000,
+    "Grafo recuperado não foi relido após fechar/reabrir o projeto",
+    250
+  );
+  let reopenedGraph;
+  try {
+    reopenedGraph = JSON.parse(reopenedLogic.source?.graph_json ?? "");
+  } catch {
+    fail("grafo recuperado reaberto não é JSON válido.");
+  }
+  const reopenedOperation = (reopenedGraph.nodes ?? []).find((node) => node.type === "rom_addq_word");
+  const expectedInstructionOffsets = `0x${offset.toString(16).toUpperCase().padStart(6, "0")},0x${(offset + 2).toString(16).toUpperCase().padStart(6, "0")}`;
+  if (
+    reopenedLogic.source.graph_origin !== "rom_recovered" ||
+    !reopenedOperation ||
+    reopenedOperation.params?.register !== "D0" ||
+    reopenedOperation.params?.immediate !== 1 ||
+    reopenedOperation.params?.width_bits !== 16 ||
+    reopenedOperation.params?.rom_start !== offset ||
+    reopenedOperation.params?.rom_end !== offset + 4 ||
+    reopenedOperation.params?.rom_sha256 !== report.fixture.routineRomSha256 ||
+    reopenedOperation.params?.instruction_offsets !== expectedInstructionOffsets ||
+    reopenedGraph.edges?.length !== 1 ||
+    reopenedGraph.edges[0]?.fromNode !== `${reopenedOperation.id}_entry`
+  ) {
+    fail(`grafo recuperado reaberto não preservou operação, conexão e source mapping: ${JSON.stringify(reopenedLogic)}`);
+  }
+  report.steps.push({
+    step: "reopen_recovered_graph",
+    status: "passed",
+    graphOrigin: reopenedLogic.source.graph_origin,
+    operation: {
+      id: reopenedOperation.id,
+      type: reopenedOperation.type,
+      register: reopenedOperation.params.register,
+      immediate: reopenedOperation.params.immediate,
+      width_bits: reopenedOperation.params.width_bits,
+      rom_start: reopenedOperation.params.rom_start,
+      rom_end: reopenedOperation.params.rom_end,
+      rom_sha256: reopenedOperation.params.rom_sha256,
+      instruction_offsets: reopenedOperation.params.instruction_offsets,
+    },
+    edge: reopenedGraph.edges[0],
+    sourceMappingCount: recoveryProbe.value.source_mappings?.length ?? 0,
+  });
+
+  const beforeBuild = await readAutomationState(sessionId);
+  const beforeBuildCount = (beforeBuild?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
+  await clickButtonByTestIdWithPointerEvents(sessionId, "toolbar-build-run");
+  const builtState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const count = (state?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
+      return count > beforeBuildCount ? state : false;
+    },
+    120000,
+    "Projeto com grafo recuperado não concluiu Build & Run",
+    500
+  );
+  const builtRomPath = extractLatestRomPath(builtState);
+  if (!builtRomPath) fail("Build & Run não reportou ROM gerada para o grafo reaberto.");
+  const generatedMainPath = path.join(path.dirname(path.dirname(builtRomPath)), "src", "main.c");
+  const generatedMain = await readFile(generatedMainPath, "utf8").catch(() => "");
+  if (!generatedMain.includes("rds_rom_word_result") || !generatedMain.includes("logic_var_rom_d0")) {
+    fail(`C gerado pelo NodeGraph não contém a operação recuperada: ${generatedMainPath}`);
+  }
+  report.steps.push({
+    step: "build_reopened_project",
+    status: "passed",
+    romPath: builtRomPath,
+    romOrigin: "generated_from_reopened_nodegraph",
+    generatedMainPath,
+    generatedMainSha256: createHash("sha256").update(generatedMain).digest("hex"),
+    generatedSemantics: "rds_rom_word_result + logic_var_rom_d0",
+  });
+
+  const neutralInput = {
+    b: false, y: false, select: false, start: false,
+    up: false, down: false, left: false, right: false,
+    a: false, x: false, l: false, r: false,
+  };
+  const controlledFrames = 1;
+  const readOracle = async (label) => {
+    const memory = await invoke("emulator_read_memory", { region: 2, offset: 0xff00, length: 6 });
+    const stateProbe = await invoke("emulator_read_memory", { region: 2, offset: 0, length: 8 });
+    if (!memory?.ok || !memory.value?.ok || (memory.value.data ?? []).length < 6) {
+      fail(`oracle de WRAM indisponível após ${label}: ${JSON.stringify(memory)}`);
+    }
+    const bytes = Buffer.from(memory.value.data);
+    const readWordNative = (offset) => (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8);
+    return {
+      // Genesis Plus GX exposes 68000 WRAM as native 16-bit words in host
+      // order; decode each word explicitly, preserving the independent RAM
+      // oracle instead of comparing an opaque byte diff.
+      value: (((readWordNative(0) << 16) >>> 0) | readWordNative(2)) >>> 0,
+      flags: readWordNative(4),
+      region: 2,
+      valueOffset: 0xff00,
+      flagsOffset: 0xff04,
+      rawHex: bytes.toString("hex"),
+      stateProbe: stateProbe?.value?.data ?? null,
+    };
+  };
+  const applyAddQWordOracle = (value, immediate) => {
+    const before = value & 0xffff;
+    const result = (before + immediate) & 0xffff;
+    const flags =
+      (result & 0x8000 ? 1 : 0) |
+      (result === 0 ? 2 : 0) |
+      (before < 0x8000 && result >= 0x8000 ? 4 : 0) |
+      (before + immediate > 0xffff ? 8 | 16 : 0);
+    return { value: (((value & 0xffff0000) >>> 0) | result) >>> 0, flags };
+  };
+  const observeRom = async (pathToRun, label, expectedOracle) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [pathToRun, { startPaused: true }]);
+    if (loaded !== true) fail(`Emulador não confirmou carga de ${label}.`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.activeViewportTab === "game" && state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `${label} não ficou pausada antes da execução controlada`,
+      100
+    );
+    const preWarmup = await invoke("emulator_observe");
+    if (!preWarmup?.ok || !preWarmup.value?.ok) fail(`observação inicial de ${label} falhou: ${JSON.stringify(preWarmup)}`);
+    const epoch = await invoke("emulator_get_core_epoch");
+    if (!epoch?.ok || !Number.isInteger(epoch.value)) fail(`época do core indisponível para ${label}: ${JSON.stringify(epoch)}`);
+    const inputAck = await invoke("emulator_send_input", { joypad: neutralInput, sessionEpoch: epoch.value });
+    if (!inputAck?.ok || !inputAck.value?.ok) fail(`input neutro não confirmado para ${label}: ${JSON.stringify(inputAck)}`);
+    const startupFrames = 120;
+    const warmed = await invoke("emulator_run_frames", { frames: startupFrames });
+    const before = await invoke("emulator_observe");
+    const beforeOracle = await readOracle(`${label} após warmup`);
+    const warmupDelta = before?.value?.frames_run - preWarmup.value.frames_run;
+    if (
+      !warmed?.ok ||
+      !warmed.value?.ok ||
+      !before?.ok ||
+      !before.value?.ok ||
+      warmupDelta !== startupFrames ||
+      (expectedOracle.before && beforeOracle.value !== expectedOracle.before.value) ||
+      (expectedOracle.before && beforeOracle.flags !== expectedOracle.before.flags) ||
+      (beforeOracle.value >>> 16) !== 0x1234 ||
+      beforeOracle.flags !== 0
+    ) {
+      fail(`warmup/oracle inicial de ${label} não foi determinístico: ${JSON.stringify({ warmupDelta, startupFrames, before: { frames_run: before?.value?.frames_run, rom_sha256: before?.value?.rom_sha256, framebuffer_sha256: before?.value?.framebuffer_sha256 }, beforeOracle })}`);
+    }
+    const ran = await invoke("emulator_run_frames", { frames: controlledFrames });
+    if (!ran?.ok || !ran.value?.ok) fail(`Execução da ${label} falhou: ${JSON.stringify(ran)}`);
+    const observed = await invoke("emulator_observe");
+    const frameDelta = observed?.value?.frames_run - before.value.frames_run;
+    const oracle = await readOracle(label);
+    const expectedAfter = applyAddQWordOracle(beforeOracle.value, expectedOracle.immediate);
+    if (
+      !observed?.ok ||
+      !observed.value?.ok ||
+      frameDelta !== controlledFrames ||
+      (observed.value.framebuffer_rgba ?? []).length === 0 ||
+      oracle.value !== expectedAfter.value ||
+      oracle.flags !== expectedAfter.flags
+    ) {
+      fail(`Observação da ${label} não comprovou core/framebuffer/oracle: ${JSON.stringify({ observed: observed?.value ? { ok: observed.ok, rom_sha256: observed.value.rom_sha256, core_label: observed.value.core_label, frames_run: observed.value.frames_run, framebuffer_sha256: observed.value.framebuffer_sha256, framebuffer_rgba_bytes: (observed.value.framebuffer_rgba ?? []).length } : observed, oracle, beforeOracle, frameDelta })}`);
+    }
+    const stateAfter = await readAutomationState(sessionId);
+    if (stateAfter?.emulPaused !== true) fail(`${label} saiu do estado pausado após lote controlado.`);
+    return {
+      rom_sha256: observed.value.rom_sha256,
+      framebuffer_sha256: observed.value.framebuffer_sha256,
+      frames_before: before.value.frames_run,
+      frames_after: observed.value.frames_run,
+      frame_delta: frameDelta,
+      frames_requested: controlledFrames,
+      startup_frames: startupFrames,
+      warmup_delta: warmupDelta,
+      input: neutralInput,
+      input_ack: inputAck.value,
+      oracle_before: beforeOracle,
+      expected_oracle_after: expectedAfter,
+      oracle,
+    };
+  };
+  const expectedOriginalOracle = { immediate: 1, before: { value: 0x12340058, flags: 0 } };
+  const expectedPatchedOracle = { immediate: 2, before: { value: 0x12340058, flags: 0 } };
+  const nodeFixtureObservation = await observeRom(nodeRomPath, "ROM node fixture/code-generation", expectedOriginalOracle);
+  const generatedGraphObservation = await observeRom(
+    builtRomPath,
+    "ROM gerada pelo grafo NodeGraph",
+    expectedOriginalOracle
+  );
+  const originalObservationA = await observeRom(routineRomPath, "ROM original A", expectedOriginalOracle);
+  const originalObservationB = await observeRom(routineRomPath, "ROM original B", expectedOriginalOracle);
+  if (
+    nodeFixtureObservation.oracle_before.value !== expectedOriginalOracle.before.value ||
+    generatedGraphObservation.oracle_before.value !== expectedOriginalOracle.before.value ||
+    generatedGraphObservation.oracle.value !== originalObservationA.oracle.value ||
+    generatedGraphObservation.oracle.flags !== originalObservationA.oracle.flags ||
+    nodeFixtureObservation.oracle.value !== originalObservationA.oracle.value ||
+    nodeFixtureObservation.oracle.flags !== originalObservationA.oracle.flags ||
+    JSON.stringify(generatedGraphObservation.input) !== JSON.stringify(originalObservationA.input) ||
+    JSON.stringify(nodeFixtureObservation.input) !== JSON.stringify(originalObservationA.input) ||
+    originalObservationA.rom_sha256 !== originalObservationB.rom_sha256 ||
+    originalObservationA.framebuffer_sha256 !== originalObservationB.framebuffer_sha256 ||
+    JSON.stringify(originalObservationA.oracle) !== JSON.stringify(originalObservationB.oracle) ||
+    originalObservationA.frame_delta !== controlledFrames ||
+    originalObservationB.frame_delta !== controlledFrames
+  ) {
+    fail(`controle comum entre ROM gerada/original não foi determinístico: ${JSON.stringify({ nodeFixtureObservation, generatedGraphObservation, originalObservationA, originalObservationB })}`);
+  }
+  report.steps.push({
+    step: "generated_graph_rom_observation",
+    status: "passed",
+    romOrigin: "generated_from_reopened_nodegraph",
+    romPath: builtRomPath,
+    romSha256: generatedGraphObservation.rom_sha256,
+    generatedMainPath,
+    generatedMainSha256: createHash("sha256").update(generatedMain).digest("hex"),
+    observation: generatedGraphObservation,
+    expected: {
+      before: expectedOriginalOracle.before,
+      after: generatedGraphObservation.expected_oracle_after,
+    },
+  });
+  const noOpObservation = await observeRom(noOpPath, "patch no-op #1", expectedOriginalOracle);
+  const patchResult = await invoke("rom_patch_recovered_logic", {
+    romPath: routineRomPath,
+    outputPath: patchedPath,
+    expectedSha256: report.fixture.routineRomSha256,
+    offset,
+    immediate: 2,
+  });
+  if (!patchResult?.ok || !patchResult.value?.output_path) {
+    fail(`patch #2 via IPC falhou: ${JSON.stringify(patchResult)}`);
+  }
+  await waitFor(async () => pathExists(patchedPath), 15000, "Cópia patchada da fixture não foi criada", 100);
+  const finalPatchBytes = await readFile(patchedPath);
+  if (
+    finalPatchBytes.length !== routineBytes.length ||
+    !finalPatchBytes.subarray(0, offset).equals(routineBytes.subarray(0, offset)) ||
+    !finalPatchBytes.subarray(offset + 4).equals(routineBytes.subarray(offset + 4)) ||
+    !finalPatchBytes.subarray(offset, offset + 4).equals(Buffer.from([0x54, 0x40, 0x4e, 0x75]))
+  ) {
+    fail(`patch #2 não alterou somente o imediato esperado em 0x${offset.toString(16)}.`);
+  }
+  const patchedObservation = await observeRom(patchedPath, "ROM patchada #2", expectedPatchedOracle);
+  for (const [label, observation] of [
+    ["patch no-op #1", noOpObservation],
+    ["ROM patchada #2", patchedObservation],
+  ]) {
+    if (
+      observation.oracle_before.value !== expectedOriginalOracle.before.value ||
+      observation.oracle_before.flags !== expectedOriginalOracle.before.flags ||
+      JSON.stringify(observation.input) !== JSON.stringify(originalObservationA.input) ||
+      observation.frame_delta !== controlledFrames
+    ) {
+      fail(`estado inicial/input comum não foi preservado em ${label}: ${JSON.stringify({ observation, originalObservationA })}`);
+    }
+  }
+  if (
+    originalObservationA.rom_sha256 === patchedObservation.rom_sha256 ||
+    originalObservationA.oracle.value === patchedObservation.oracle.value
+  ) {
+    fail(`patch controlado não produziu diferença observável/oracular: ${JSON.stringify({ originalObservationA, patchedObservation })}`);
+  }
+  report.steps.push({
+    step: "deterministic_original_node_and_patch_runs",
+    status: "passed",
+    controlledFrames,
+    inputScript: [neutralInput],
+    expectedOriginalOracle,
+    expectedPatchedOracle,
+    nodeFixtureObservation,
+    generatedGraphObservation,
+    originalObservationA,
+    originalObservationB,
+    noOpObservation,
+    patchedObservation,
+    fullHashes: {
+      original: report.fixture.routineRomSha256,
+      noOp: createHash("sha256").update(noOpBytes).digest("hex"),
+      patched: createHash("sha256").update(finalPatchBytes).digest("hex"),
+      node: report.fixture.nodeRomSha256,
+      generatedGraph: generatedGraphObservation.rom_sha256,
+    },
+  });
+  report.finishedAt = new Date().toISOString();
+  await ensureValidationDir();
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  console.log(`[logic-recovery] relatório=${reportPath}`);
+  console.log("OK: Desktop Tauri logic-recovery E2E passou com recuperação, grafo, patch e efeito observado.");
+}
+
+async function clickButtonByTextWithPointerEvents(sessionId, expectedText) {
+  const result = await executeScript(
+    sessionId,
+    `const expected = String(arguments[0]); const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.replace(/\\s+/g, " ").trim().includes(expected)); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({ block: "center", inline: "center" }); button.focus(); for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); return true;`,
+    [expectedText]
+  );
+  if (!result) fail(`Botao nao encontrado para eventos: '${expectedText}'.`);
+}
+
+async function clickButtonByTextAtCoordinates(sessionId, expectedText) {
+  const rect = await executeScript(
+    sessionId,
+    `const expected = String(arguments[0]); const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.replace(/\\s+/g, " ").trim().includes(expected)); if (!(button instanceof HTMLButtonElement) || button.disabled) return null; button.scrollIntoView({ block: "center", inline: "center" }); const rect = button.getBoundingClientRect(); return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };`,
+    [expectedText]
+  );
+  if (!rect) fail(`Botao nao encontrado para clique coordenado: '${expectedText}'.`);
+  await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-inspection-mouse",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: rect.x, y: rect.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
 }
 
 async function clickButtonByTestId(sessionId, testId) {
@@ -3432,7 +6438,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -3443,8 +6449,10 @@ async function main() {
   const requiresExistingProject =
     options.scenario !== "onboarding-shell" &&
     options.scenario !== "qa-rc" &&
-    options.scenario !== "create-game-from-zero";
+    options.scenario !== "create-game-from-zero" &&
+    options.scenario !== "reference-platformer";
   let temporaryProjectDir = "";
+  let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
     await assertPathExists(
       options.project,
@@ -3643,6 +6651,1107 @@ async function main() {
       currentE2eRunContext.project = options.project;
     }
 
+    if (options.scenario === "logic-recovery") {
+      currentE2eRunContext.appPath = options.app;
+      await runLogicRecoveryScenario(sessionId, options.project);
+      return;
+    }
+
+    if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
+      let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
+      let inspectionFixture = null;
+      if (options.scenario === "inspection-preview-unavailable" && !process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM) {
+        inspectionFixture = await createUnavailablePreviewFixture();
+        temporaryInspectionFixtureDir = inspectionFixture.fixtureDir;
+        inspectionRom = inspectionFixture.romPath;
+      } else if (options.scenario === "inspection-preview-unavailable") {
+        inspectionRom = process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM;
+      }
+      if (!inspectionRom || !(await pathExists(inspectionRom))) {
+        fail(
+          options.scenario === "inspection-preview-unavailable"
+            ? "RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM deve apontar para um fixture BYOR controlado existente."
+            : "RDS_INSPECTION_ROM deve apontar para uma ROM BYOR real existente; nenhuma ROM e criada pelo E2E."
+        );
+      }
+      const inspectionRomBytes = await readFile(inspectionRom);
+      console.log(`[inspection-rom] ${JSON.stringify({ path: inspectionRom, size: inspectionRomBytes.length, sha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), fixture: inspectionFixture })}`);
+      const spriteResourceId = process.env.RDS_INSPECTION_SPRITE_RESOURCE_ID ?? (options.scenario === "inspection-sonic" ? "sonic1_sonic" : "spr_ryo_100");
+      const spriteSourcePng = process.env.RDS_INSPECTION_SPRITE_SOURCE_PNG ?? (spriteResourceId === "spr_spark0"
+        ? "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/TAIKETSU ULTRA HERO GENESIS [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/spr_spark0.png"
+        : "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/ryo/100.png");
+      const requiresSpriteOracle = (options.scenario === "inspection" || options.scenario === "inspection-complete" || options.scenario === "inspection-sprite-secondary") && options.scenario !== "inspection-sonic";
+      if (requiresSpriteOracle && !(await pathExists(spriteSourcePng))) {
+        fail(`RDS_INSPECTION_SPRITE_SOURCE_PNG deve apontar para o PNG doador independente: ${spriteSourcePng}`);
+      }
+      const spriteSourcePngSha256 = !requiresSpriteOracle
+        ? null
+        : createHash("sha256").update(await readFile(spriteSourcePng)).digest("hex");
+      const expectedSourceSha256 = process.env.RDS_INSPECTION_SPRITE_RESOURCE_ID === "spr_spark0"
+        ? "cafaf180ba006903242aa822fb3c0dceb42424a9e0bd07a5a19b75f33a4bf196"
+        : "1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b";
+      if (requiresSpriteOracle && spriteSourcePngSha256 !== expectedSourceSha256) {
+        fail(`PNG doador independente divergente: ${JSON.stringify({ path: spriteSourcePng, sha256: spriteSourcePngSha256 })}`);
+      }
+      console.log(`[inspection-sprite-source] ${JSON.stringify({ path: spriteSourcePng, resource: spriteResourceId, sha256: spriteSourcePngSha256, frame: `${spriteResourceId}/frame-0` })}`);
+      const artifactPrefix = `inspection-${artifactTimestamp()}`;
+      const inspectionPanel = "[data-testid='reverse-inspection-panel']";
+      const inspectionInput = `${inspectionPanel} input[type='text']`;
+      const gitEvidence = await readGitEvidence();
+      const binarySha256 = createHash("sha256").update(await readFile(options.app)).digest("hex");
+      const frontendEvidence = await executeScript(sessionId, `return { buildCommit: window.__RDS_BUILD_COMMIT__ ?? null, scripts: Array.from(document.scripts).map((script) => script.src || script.textContent?.slice(0, 80) || "") };`);
+      console.log(`[inspection-build] binary=${JSON.stringify({ path: options.app, sha256: binarySha256 })}`);
+      console.log(`[inspection-build] frontend=${JSON.stringify(frontendEvidence)} git=${JSON.stringify(gitEvidence)}`);
+      if (!gitEvidence.commit || frontendEvidence?.buildCommit !== gitEvidence.commit) {
+        fail(`Binário/frontend não correspondem ao commit corrente: ${JSON.stringify({ binary: options.app, frontend: frontendEvidence, git: gitEvidence })}`);
+      }
+      try {
+        await setSessionWindowRect(sessionId, 1280, 800);
+      } catch (error) {
+        console.warn(`[inspection] janela não aceitou 1280x800; seguindo somente se o hit-test validar o controle: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await handleProjectWizardVisibly(sessionId, "initial");
+      await closeVisibleConsoleDrawer(sessionId);
+      await clickByTestId(sessionId, "workspace-rail-debug");
+      await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace nao abriu");
+      await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+      try {
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace nao terminou de montar");
+      } catch (error) {
+        console.log(`[inspection] estado apos abrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
+        console.log(`[inspection] botoes apos abrir reverse: ${JSON.stringify(await executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).map((button) => button.textContent?.replace(/\\s+/g, " ").trim()).filter(Boolean).slice(-20);`))}`);
+        throw error;
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
+        15000,
+        "Painel de inspeção visual nao abriu",
+        250
+      );
+      await fillInputBySelector(sessionId, inspectionInput, inspectionRom);
+      const inputState = await readInspectionUiState(sessionId);
+      console.log(`[inspection-identify] input=${JSON.stringify(inputState)}`);
+      const identifySelector = "[data-testid='inspection-identify']";
+      const identifyElement = await findElement(sessionId, identifySelector);
+      await clickElementWithDiagnostics(sessionId, identifyElement, identifySelector);
+      let identifiedState;
+      try {
+        identifiedState = await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.identify?.state === "succeeded" && state.session?.id ? state : false;
+          },
+          30000,
+          "handler React/IPC de identificação não produziu estado de sessão",
+          100
+        );
+      } catch (error) {
+        const state = await readInspectionUiState(sessionId);
+        const automation = await readAutomationState(sessionId);
+        console.log(`[inspection-identify] final-ui=${JSON.stringify(state)}`);
+        console.log(`[inspection-identify] console=${JSON.stringify(automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [])}`);
+        throw error;
+      }
+      const identifyAutomation = await readAutomationState(sessionId);
+      console.log(`[inspection-identify] success=${JSON.stringify(identifiedState)}`);
+      console.log(`[inspection-identify] ipc-log=${JSON.stringify(identifyAutomation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [])}`);
+
+      const startAvailable = await executeScript(
+        sessionId,
+        `return Boolean(document.querySelector("[data-testid='inspection-start']"));`
+      );
+      if (!startAvailable) {
+        fail(`Identificação terminou sem o controle de análise: ${JSON.stringify(await readInspectionUiState(sessionId))}`);
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-start");
+
+      if (options.scenario === "inspection-cancel") {
+        await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.run?.status === "running" ? state : false;
+          },
+          10000,
+          "Cancelamento não foi testado: a UI não exibiu um run em andamento",
+          100
+        );
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-cancel");
+        const cancelledState = await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.run?.status === "cancelled" && state.session?.status === "cancelled" ? state : false;
+          },
+          30000,
+          "Cancelamento não chegou ao estado terminal cancelled",
+          100
+        );
+        console.log(`[inspection-cancel] OK: estado terminal ${JSON.stringify(cancelledState)}`);
+        console.log("OK: Desktop Tauri inspection/cancel E2E passou com cancelamento comprovado.");
+        return;
+      }
+
+      const completedState = await waitFor(
+        async () => {
+          const state = await readInspectionUiState(sessionId);
+          return state?.run?.status === "completed" && state.session?.status === "completed" ? state : false;
+        },
+        120000,
+        "Descoberta visual não chegou ao estado terminal completed",
+        250
+      );
+      console.log(`[inspection-complete] terminal=${JSON.stringify(completedState)}`);
+      const beforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-before-restart.png`);
+      if (options.scenario === "inspection-sonic") {
+        const baseSha256 = createHash("sha256").update(inspectionRomBytes).digest("hex");
+        const expectedBaseSha256 = "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb";
+        if (baseSha256 !== expectedBaseSha256 || spriteResourceId !== "sonic1_sonic") {
+          fail(`Cenário Sonic exige a ROM BYOR e o recurso verificados: ${JSON.stringify({ baseSha256, spriteResourceId })}`);
+        }
+        const frameId = "sonic1_sonic/stand";
+        await selectInspectionFrameNative(sessionId, frameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do Sonic stand antes da edição");
+        const baseProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frameId, "Sonic stand antes da edição");
+        const baseScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-base.png`);
+
+        const modifiedRomBytes = Buffer.from(inspectionRomBytes);
+        const editWord = (7 << 1) | (0 << 5) | (7 << 9);
+        modifiedRomBytes.writeUInt16BE(editWord, 0x2388 + 2);
+        const modifiedSha256 = createHash("sha256").update(modifiedRomBytes).digest("hex");
+        await closeVisibleConsoleDrawer(sessionId, "antes da edição Sonic");
+        await fillInputByLabel(sessionId, "Índice", "1");
+        await fillInputByLabel(sessionId, "R", "7");
+        await fillInputByLabel(sessionId, "G", "0");
+        await fillInputByLabel(sessionId, "B", "7");
+        await clickElementWithNativePointer(sessionId, "[data-testid='inspection-sonic-edit']", "editar a paleta Sonic pela interface");
+        let editEvidence;
+        try {
+          editEvidence = await waitFor(
+            async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`),
+            15000,
+            "Edição Sonic não produziu o resultado persistido pela UI",
+            100
+          );
+        } catch (error) {
+          const editButton = await inspectNativeButtonTarget(sessionId, "inspection-sonic-edit");
+          const automation = await readAutomationState(sessionId);
+          console.log(`[inspection-sonic-edit-failure] ${JSON.stringify({ editButton, ui: await readInspectionUiState(sessionId), console: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
+          throw error;
+        }
+        if (!String(editEvidence).includes(modifiedSha256) || !String(editEvidence).includes("0x00238A")) {
+          fail(`Resultado da edição Sonic não corresponde à mutação independente: ${JSON.stringify({ editEvidence, modifiedSha256 })}`);
+        }
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do Sonic stand após edição");
+        const editedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após edição");
+        const editedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-edited.png`);
+
+        await ensureValidationDir();
+        const pilotDir = path.join(validationDir, `sonic1-pilot-${artifactTimestamp()}`);
+        await mkdir(pilotDir, { recursive: true });
+        const patchPath = path.join(pilotDir, "sonic1-stand-palette.bps");
+        const patchedRomPath = path.join(pilotDir, "sonic1-stand-palette-applied.bin");
+        await fillInputByLabel(sessionId, "Exportar patch BPS", patchPath);
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-export-patch", "exportar patch Sonic pela interface");
+        await waitFor(async () => pathExists(patchPath), 15000, "Patch BPS Sonic não foi criado pela UI", 100);
+        const patchBytes = await readFile(patchPath);
+        const patchSha256 = createHash("sha256").update(patchBytes).digest("hex");
+        await fillInputByLabel(sessionId, "Salvar ROM modificada aplicada", patchedRomPath);
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-apply-patch", "aplicar patch Sonic pela interface");
+        await waitFor(async () => pathExists(patchedRomPath), 15000, "ROM aplicada não foi criada pela UI", 100);
+        const patchedRomBytes = await readFile(patchedRomPath);
+        const patchedSha256 = createHash("sha256").update(patchedRomBytes).digest("hex");
+        if (patchedSha256 !== modifiedSha256 || baseSha256 !== createHash("sha256").update(inspectionRomBytes).digest("hex") || !patchedRomBytes.equals(modifiedRomBytes)) {
+          fail(`Aplicação BPS não reproduziu exatamente a ROM editada: ${JSON.stringify({ baseSha256, modifiedSha256, patchedSha256 })}`);
+        }
+        const expectedGameplayFrames = 1200;
+        const assertEmulatorObservation = async (label, expectedRomSha256) => {
+          let lastObservation = null;
+          let observation;
+          try {
+            observation = await waitFor(
+              async () => {
+                const current = await readInspectionEmulatorObservation(sessionId);
+                lastObservation = current;
+                return current &&
+                  current.label === label &&
+                  current.romSha256 === expectedRomSha256 &&
+                  current.framesRun >= expectedGameplayFrames &&
+                  current.framesRequested >= expectedGameplayFrames &&
+                  current.inputProfile === "sonic-boot-start" &&
+                  current.inputStartFrame === 900 &&
+                  current.coreLabel &&
+                  current.corePath &&
+                  current.framebufferWidth > 0 &&
+                  current.framebufferHeight > 0 &&
+                  current.framebufferSha256.length === 64 &&
+                  current.canvasWidth === current.framebufferWidth &&
+                  current.canvasHeight === current.framebufferHeight &&
+                  current.canvasRgbaBytes === current.framebufferWidth * current.framebufferHeight * 4
+                  ? current
+                  : false;
+              },
+              30000,
+              "A observação real da " + label + " não comprovou ROM, core, frames e framebuffer",
+              100
+            );
+          } catch (error) {
+            console.error(`[inspection-emulator-observation] timeout ${label} ` + JSON.stringify({ expectedRomSha256, lastObservation, error: String(error) }));
+            throw error;
+          }
+          const withPixels = await readInspectionEmulatorObservation(sessionId, { includePixels: true });
+          if (!withPixels?.canvasRgba || withPixels.canvasRgba.length !== withPixels.canvasWidth * withPixels.canvasHeight * 4) {
+            fail(`Framebuffer do canvas não pôde ser relido integralmente para ${label}: ${JSON.stringify(withPixels)}`);
+          }
+          const pixels = Buffer.from(withPixels.canvasRgba);
+          const width = withPixels.canvasWidth;
+          const height = withPixels.canvasHeight;
+          const gameplayRoi = { x0: 0, y0: Math.floor(height * 0.55), x1: Math.min(width, 128), y1: height };
+          let roiNonBlackPixels = 0;
+          let roiMagentaPixels = 0;
+          let magentaPixels = 0;
+          let roiMagentaLikePixels = 0;
+          let magentaLikePixels = 0;
+          const colorCounts = new Map();
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const offset = (y * width + x) * 4;
+              const r = pixels[offset];
+              const g = pixels[offset + 1];
+              const b = pixels[offset + 2];
+              const nonBlack = r !== 0 || g !== 0 || b !== 0;
+              const magenta = r === 255 && g === 0 && b === 255;
+              const magentaLike = r >= 224 && g <= 32 && b >= 224;
+              const colorKey = `${r},${g},${b}`;
+              colorCounts.set(colorKey, (colorCounts.get(colorKey) ?? 0) + 1);
+              if (nonBlack && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiNonBlackPixels += 1;
+              if (magenta) magentaPixels += 1;
+              if (magenta && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiMagentaPixels += 1;
+              if (magentaLike) magentaLikePixels += 1;
+              if (magentaLike && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiMagentaLikePixels += 1;
+            }
+          }
+          if (withPixels.canvasNonBlackPixels < 1000 || roiNonBlackPixels < 1000) {
+            fail(`A cena Sonic não ficou reconhecível no framebuffer de ${label}: ${JSON.stringify({ width, height, canvasNonBlackPixels: withPixels.canvasNonBlackPixels, roiNonBlackPixels, gameplayRoi })}`);
+          }
+          const topColors = Array.from(colorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12);
+          console.log(`[inspection-emulator-observation] ` + JSON.stringify({ ...withPixels, canvasRgba: undefined, gameplayRoi, roiNonBlackPixels, magentaPixels, roiMagentaPixels, magentaLikePixels, roiMagentaLikePixels, topColors }));
+          return { ...withPixels, gameplayRoi, roiNonBlackPixels, magentaPixels, roiMagentaPixels, magentaLikePixels, roiMagentaLikePixels, topColors };
+        };
+
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-base", "observar ROM Sonic base pela interface");
+        const baseEmulatorObservation = await assertEmulatorObservation("ROM base", baseSha256);
+        const baseEmulatorCanvas = await ensureEmulatorObservationVisible(sessionId);
+        if (!baseEmulatorCanvas?.fullyVisible || !baseEmulatorCanvas.unobstructed) {
+          fail(`Framebuffer da ROM base não ficou visível/desobstruído para captura: ${JSON.stringify(baseEmulatorCanvas)}`);
+        }
+        const baseEmulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator-base.png`);
+
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-patched", "observar ROM Sonic aplicada pela interface");
+        const appliedEmulatorObservation = await assertEmulatorObservation("ROM aplicada", patchedSha256);
+        const appliedEmulatorCanvas = await ensureEmulatorObservationVisible(sessionId);
+        if (!appliedEmulatorCanvas?.fullyVisible || !appliedEmulatorCanvas.unobstructed) {
+          fail(`Framebuffer da ROM aplicada não ficou visível/desobstruído para captura: ${JSON.stringify(appliedEmulatorCanvas)}`);
+        }
+        const emulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator-applied.png`);
+        if (baseEmulatorObservation.magentaLikePixels !== 0 || baseEmulatorObservation.roiMagentaLikePixels !== 0) {
+          fail(`A ROM base já contém a cor de paleta editada na cena Sonic: ${JSON.stringify({ magentaPixels: baseEmulatorObservation.magentaPixels, magentaLikePixels: baseEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: baseEmulatorObservation.roiMagentaLikePixels, topColors: baseEmulatorObservation.topColors })}`);
+        }
+        if (appliedEmulatorObservation.magentaLikePixels < 100 || appliedEmulatorObservation.roiMagentaLikePixels < 50) {
+          fail(`A ROM aplicada não mostrou a alteração de paleta no ROI do Sonic: ${JSON.stringify({ magentaPixels: appliedEmulatorObservation.magentaPixels, magentaLikePixels: appliedEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: appliedEmulatorObservation.roiMagentaLikePixels, topColors: appliedEmulatorObservation.topColors })}`);
+        }
+        const framebufferDiverged = baseEmulatorObservation.framebufferSha256 !== appliedEmulatorObservation.framebufferSha256;
+        const sameConditions = baseEmulatorObservation.framesRun === appliedEmulatorObservation.framesRun &&
+          baseEmulatorObservation.framebufferWidth === appliedEmulatorObservation.framebufferWidth &&
+          baseEmulatorObservation.framebufferHeight === appliedEmulatorObservation.framebufferHeight &&
+          baseEmulatorObservation.coreLabel === appliedEmulatorObservation.coreLabel;
+        if (!sameConditions || !framebufferDiverged) {
+          fail(`A comparação base/aplicada não ocorreu sob condições equivalentes ou não divergiu: ${JSON.stringify({ sameConditions, framebufferDiverged, base: { framesRun: baseEmulatorObservation.framesRun, framebufferWidth: baseEmulatorObservation.framebufferWidth, framebufferHeight: baseEmulatorObservation.framebufferHeight, coreLabel: baseEmulatorObservation.coreLabel }, applied: { framesRun: appliedEmulatorObservation.framesRun, framebufferWidth: appliedEmulatorObservation.framebufferWidth, framebufferHeight: appliedEmulatorObservation.framebufferHeight, coreLabel: appliedEmulatorObservation.coreLabel } })}`);
+        }
+        console.log(`[inspection-palette-effect] ` + JSON.stringify({ status: "passed", oracle: "independent framebuffer ROI + expected RGB333 palette mutation", framebufferDiverged, sameConditions, base: { romSha256: baseEmulatorObservation.romSha256, framebufferSha256: baseEmulatorObservation.framebufferSha256, roiNonBlackPixels: baseEmulatorObservation.roiNonBlackPixels, magentaPixels: baseEmulatorObservation.magentaPixels, magentaLikePixels: baseEmulatorObservation.magentaLikePixels }, applied: { romSha256: appliedEmulatorObservation.romSha256, framebufferSha256: appliedEmulatorObservation.framebufferSha256, roiNonBlackPixels: appliedEmulatorObservation.roiNonBlackPixels, magentaPixels: appliedEmulatorObservation.magentaPixels, magentaLikePixels: appliedEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: appliedEmulatorObservation.roiMagentaLikePixels }, baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }));
+
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+        const persistedSessionId = completedState.session.id;
+        if (!persistedSessionId) fail(`Sessão Sonic concluída não tem identidade: ${JSON.stringify(completedState)}`);
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Salvar sessão Sonic não publicou a sessão", 100);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+        await deleteSession(sessionId);
+        sessionId = await createSession(options.app);
+        currentE2eRunContext.sessionId = sessionId;
+        await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App Sonic não reabriu após reinício");
+        await waitFor(async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API Sonic não voltou após reinício", 100);
+        await handleProjectWizardVisibly(sessionId, "sonic-after-restart");
+        await setSessionWindowRect(sessionId, 1920, 1080);
+        await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace Sonic após reinício");
+        await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace Sonic não voltou");
+        await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace Sonic não voltou");
+        await clickButtonByTestIdNative(sessionId, "reverse-tab-inspection", "abrir inspeção Sonic após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`), 15000, "Painel Sonic não voltou", 100);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-refresh-sessions", "atualizar sessões Sonic após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 30000, "Sessão Sonic não foi descoberta após reinício", 100);
+        const reopenedSessionSelector = `[data-testid='select-saved-session-${persistedSessionId}']`;
+        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, reopenedSessionSelector), reopenedSessionSelector);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-reopen", "reabrir sessão Sonic após reinício");
+        const reopenedState = await waitFor(async () => { const state = await readInspectionUiState(sessionId); return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false; }, 30000, "Sessão Sonic não foi reaberta", 100);
+        const reopenedFrame = await waitFor(async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sprite-frame-select"]')?.value ?? '';`), 15000, "Frame Sonic salvo não foi restaurado", 100);
+        if (reopenedFrame !== frameId) fail(`Frame Sonic restaurado diverge: ${JSON.stringify({ expected: frameId, actual: reopenedFrame })}`);
+        const reopenedEdit = await executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`);
+        if (!String(reopenedEdit).includes(modifiedSha256)) fail(`Proveniência da edição Sonic não foi restaurada: ${reopenedEdit}`);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recompor Sonic após reinício");
+        const reopenedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após salvar/reiniciar/reabrir");
+        const reopenedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-reopened.png`);
+        const oldGameFrame = await readCanonicalGameFrame(sessionId);
+        const baseCanonicalPlayEvidence = await runCanonicalSonicTrajectory(sessionId, {
+          buttonTestId: "inspection-sonic-play-base",
+          label: "base",
+          expectedSha256: baseSha256,
+          romBytes: inspectionRomBytes,
+          artifactPrefix,
+        });
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-sonic-play-modified", "jogar versão modificada na Game View após reinício");
+        const canonicalIdentity = await waitFor(
+          async () => {
+            const frame = await readCanonicalGameFrame(sessionId);
+            return frame && frame.romSha256 === patchedSha256 && frame.romSha256 !== baseSha256 && frame.romSize === patchedRomBytes.length && frame.coreLabel && frame.corePath ? frame : false;
+          },
+          15000,
+          "Game View não confirmou a identidade da ROM modificada",
+          100
+        );
+        let firstCanonicalFrame;
+        let lastCanonicalFrame = null;
+        try {
+          firstCanonicalFrame = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastCanonicalFrame = progress;
+              return progress && progress.renderedFrames >= 10 ? readCanonicalGameFrame(sessionId) : false;
+            },
+            10000,
+            "Game View não produziu frames renderizados após Jogar versão modificada",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-first-failure] ${JSON.stringify({ lastCanonicalFrame, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        let lastBootProgress = null;
+        let bootFrame;
+        try {
+          bootFrame = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastBootProgress = progress;
+              return progress && progress.renderedFrames >= 890 ? progress : false;
+            },
+            120000,
+            "Game View não atravessou o boot da ROM modificada até o ponto de entrada",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-boot-failure] ${JSON.stringify({ lastBootProgress, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        await focusGameCanvasNatively(sessionId);
+        const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        await sendNativeGameKey(sessionId, "Enter", "keyDown", "START de entrada da fase");
+        const startHoldProgress = await waitFor(
+          async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= (bootFrame?.renderedFrames ?? 890) + 30 ? progress : false;
+          },
+          15000,
+          "Game View não avançou frames enquanto START estava pressionado",
+          100
+        );
+        await sendNativeGameKey(sessionId, "Enter", "keyUp", "liberação de START de entrada da fase");
+        const startInput = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0) ? current : false;
+          },
+          10000,
+          "START nativo não foi confirmado pelo handler/IPC do produto",
+          100
+        );
+        let lastGameplayProgress = null;
+        let gameplayProgress;
+        try {
+          gameplayProgress = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastGameplayProgress = progress;
+              return progress && progress.renderedFrames >= 1800 ? progress : false;
+            },
+            120000,
+            "A ROM modificada não alcançou a cena de gameplay com Sonic localizado no ROI independente",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-gameplay-failure] ${JSON.stringify({ lastGameplayProgress, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        const gameplayFrameWithPixels = await readCanonicalGameFrame(sessionId, { includePixels: true });
+        const gameplaySonic = locateSonicVisual(gameplayFrameWithPixels, modifiedRomBytes);
+        if (gameplayFrameWithPixels.nonBlackPixels <= 1000 || !gameplaySonic) {
+          fail(`A ROM modificada atravessou o boot, mas o localizador visual independente não encontrou Sonic: ${JSON.stringify({ gameplayProgress, frame: { ...gameplayFrameWithPixels, rgba: undefined }, gameplaySonic })}`);
+        }
+        const gameplayFrame = { ...gameplayFrameWithPixels, rgba: undefined, sonic: gameplaySonic };
+        const canonicalGameBeforeControlsScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-modified-before-controls.png`);
+        const oldImageReused = Boolean(oldGameFrame && oldGameFrame.nonBlackPixels > 0 && oldGameFrame.framebufferSha256 === gameplayFrame.framebufferSha256);
+        if (oldImageReused) {
+          fail(`A Game View reutilizou a imagem anterior após carregar a ROM modificada: ${JSON.stringify({ old: oldGameFrame.framebufferSha256, gameplay: gameplayFrame.framebufferSha256 })}`);
+        }
+        const negativeInputBefore = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        await sendNativeGameKey(sessionId, "KeyQ", "keyDown", "negativo de tecla não mapeada");
+        await sendNativeGameKey(sessionId, "KeyQ", "keyUp", "liberação da tecla não mapeada");
+        const negativeInputAfter = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        const negativeInputRejected = negativeInputAfter?.lastJoypadAck?.seq === negativeInputBefore?.lastJoypadAck?.seq;
+        if (!negativeInputRejected) {
+          fail(`Entrada não mapeada foi aceita como input do jogo: ${JSON.stringify({ before: negativeInputBefore, after: negativeInputAfter })}`);
+        }
+        console.log(`[inspection-canonical-negatives] ${JSON.stringify({ wrongRomRejected: canonicalIdentity.romSha256 !== baseSha256 && canonicalIdentity.romSha256 === patchedSha256, staleImageRejected: !oldImageReused, unmappedInputRejected: negativeInputRejected, input: { before: negativeInputBefore?.lastJoypadAck, after: negativeInputAfter?.lastJoypadAck } })}`);
+        const trajectory = [];
+        const recordTrajectoryFrame = async (label, input, previous, minFrameExclusive = -1) => {
+          const raw = await waitFor(async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames > minFrameExclusive ? readCanonicalGameFrame(sessionId, { includePixels: true }) : false;
+          }, 10000, `${label} não avançou para um novo frame`, 100);
+          const sonic = locateSonicVisual(raw, modifiedRomBytes, { previous });
+          if (!sonic) fail(`Localizador independente não encontrou Sonic na trajetória: ${label}`);
+          const memory = await readSonic1PlayerMemory(sessionId);
+          const entry = { label, frame: raw.renderedFrames, input, framebufferSha256: raw.framebufferSha256, sonic, memory };
+          trajectory.push(entry);
+          return { raw, sonic, entry };
+        };
+        const detectGroundTop = (raw, sonic) => {
+          if (!raw?.rgba) return null;
+          for (let y = sonic.bounds.y1 + 1; y < raw.height; y += 1) {
+            let greenPixels = 0;
+            for (let x = Math.max(0, sonic.bounds.x0 - 12); x <= Math.min(raw.width - 1, sonic.bounds.x1 + 12); x += 1) {
+              const offset = (y * raw.width + x) * 4;
+              const red = raw.rgba[offset];
+              const green = raw.rgba[offset + 1];
+              const blue = raw.rgba[offset + 2];
+              if (green > red + 20 && green > blue + 10 && green >= 90) greenPixels += 1;
+            }
+            if (greenPixels >= 8) return y;
+          }
+          return null;
+        };
+        const initialVisual = { raw: gameplayFrameWithPixels, sonic: gameplaySonic };
+        const gameplayMemory = await readSonic1PlayerMemory(sessionId);
+        trajectory.push({ label: "before-controls", frame: gameplayFrameWithPixels.renderedFrames, input: "neutral", framebufferSha256: gameplayFrameWithPixels.framebufferSha256, sonic: gameplaySonic, memory: gameplayMemory });
+        console.log(`[inspection-trajectory] ${JSON.stringify({ label: "modified", step: "located", frame: gameplayFrameWithPixels.renderedFrames, sonic: gameplaySonic, memory: gameplayMemory })}`);
+        const initialGroundTop = detectGroundTop(gameplayFrameWithPixels, gameplaySonic);
+        const initialOnGround = initialGroundTop !== null && initialGroundTop - gameplaySonic.bounds.y1 <= 4;
+        if (!initialOnGround) {
+          fail(`Situação inicial não comprovou Sonic no chão: ${JSON.stringify({ sonic: gameplaySonic, initialGroundTop })}`);
+        }
+
+        const movementBefore = initialVisual;
+        await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "movimento para direita");
+        const rightInput = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.right === true ? current : false;
+          },
+          10000,
+          "ArrowRight nativa não chegou ao core pelo handler do produto",
+          100
+        );
+        const movementSamples = [];
+        let movementHoldProgress = null;
+        for (const frames of [45, 90, 135]) {
+          movementHoldProgress = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              return progress && progress.renderedFrames >= movementBefore.raw.renderedFrames + frames ? progress : false;
+            },
+            20000,
+            `Game View não avançou ${frames} frames durante o movimento para direita`,
+            100
+          );
+          movementSamples.push(await recordTrajectoryFrame(`movement-held-${frames}`, { right: true }, movementSamples.at(-1)?.sonic ?? movementBefore.sonic, movementSamples.at(-1)?.raw.renderedFrames ?? movementBefore.raw.renderedFrames));
+          console.log(`[inspection-trajectory] ${JSON.stringify({ label: "modified", step: `movement-held-${frames}`, frame: movementSamples.at(-1).raw.renderedFrames, sonic: movementSamples.at(-1).sonic })}`);
+        }
+        const movementDuring = movementSamples.at(-1);
+        await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "parada do movimento para direita");
+        await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.right === false ? current : false;
+          },
+          10000,
+          "liberação de ArrowRight não chegou ao core",
+          100
+        );
+        const movementAfter = await recordTrajectoryFrame("movement-released", { right: false }, movementDuring.sonic, movementDuring.raw.renderedFrames);
+        const movementDeltaX = Math.max(...[...movementSamples.map((sample) => sample.entry), movementAfter.entry].map((entry) => Math.abs(entry.memory.x - gameplayMemory.x)));
+        if (movementAfter.raw.framebufferSha256 === movementBefore.raw.framebufferSha256 || movementDeltaX < 2) {
+          const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+          await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput }, frames: trajectory, failure: "movement-not-observed", movementDeltaX }, null, 2));
+          fail(`Movimento de Sonic não produziu deslocamento independente: ${JSON.stringify({ before: movementBefore.sonic, after: movementAfter.sonic, input: rightInput })}`);
+        }
+
+        const jumpBefore = await recordTrajectoryFrame("jump-before", { right: false, a: false }, movementAfter.sonic, movementAfter.raw.renderedFrames);
+        await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "salto pelo botão A");
+        const jumpInputA = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.a === true ? current : false;
+          },
+          10000,
+          "KeyZ/A nativa não chegou ao core pelo handler do produto",
+          100
+        );
+        const jumpDownProgress = await waitFor(
+          async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= jumpBefore.raw.renderedFrames + 2 ? progress : false;
+          },
+          20000,
+          "Game View não avançou frames durante o salto",
+          100
+        );
+        const jumpDuring = await recordTrajectoryFrame("jump-held", { a: true }, jumpBefore.sonic, jumpBefore.raw.renderedFrames);
+        await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "liberação do salto");
+        await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.a === false ? current : false;
+          },
+          10000,
+          "liberação de KeyZ/A não chegou ao core",
+          100
+        );
+        const jumpReleased = await recordTrajectoryFrame("jump-released", { a: false }, jumpDuring.sonic, jumpDuring.raw.renderedFrames);
+        let lastJumpSample = jumpReleased;
+        const captureAfterFrames = async (label, frames) => {
+          const target = jumpReleased.raw.renderedFrames + frames;
+          await waitFor(async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= target ? progress : false;
+          }, 30000, `Game View não avançou ${frames} frames após o salto`, 100);
+          lastJumpSample = await recordTrajectoryFrame(label, { a: false }, lastJumpSample.sonic, lastJumpSample.raw.renderedFrames);
+          return lastJumpSample;
+        };
+        const jumpLater = await captureAfterFrames("jump-after-15", 15);
+        const jumpMid = await captureAfterFrames("jump-after-45", 45);
+        const jumpReturn90 = await captureAfterFrames("jump-after-90", 90);
+        const jumpReturn150 = await captureAfterFrames("jump-after-150", 150);
+        const jumpReturn240 = await captureAfterFrames("jump-after-240", 240);
+        const jumpReturn = [jumpMid, jumpReturn90, jumpReturn150, jumpReturn240].find((sample) => sample.entry.memory.yVel === 0) ?? jumpReturn240;
+        const trajectoryY = trajectory.filter((entry) => entry.label.startsWith("jump-")).map((entry) => entry.memory.y);
+        const lowestY = Math.min(...trajectoryY);
+        const jumpLift = jumpBefore.entry.memory.y - lowestY;
+        const returnedToGround = jumpReturn.entry.memory.yVel === 0 && jumpReturn.entry.memory.y >= jumpBefore.entry.memory.y - jumpLift;
+        if (jumpLift < 3 || !returnedToGround) {
+          const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+          await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput, jump: jumpInputA }, frames: trajectory, failure: "jump-trajectory-not-observed", jumpLift, returnedToGround }, null, 2));
+          fail(`Trajetória de salto não comprovou subida e retorno: ${JSON.stringify({ jumpLift, returnedToGround, trajectory })}`);
+        }
+
+        await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar gameplay Sonic");
+        await waitFor(async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"), 10000, "Pausa não ficou visível", 100);
+        const pausedProgress = await readCanonicalGameProgress(sessionId);
+        await clickButtonByTestIdNative(sessionId, "viewport-resume", "retomar gameplay Sonic");
+        const resumedProgress = await waitFor(async () => {
+          const progress = await readCanonicalGameProgress(sessionId);
+          return progress && progress.renderedFrames > pausedProgress.renderedFrames + 5 ? progress : false;
+        }, 10000, "Retomada não avançou frames", 100);
+        const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+        await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput, jump: jumpInputA }, frames: trajectory, pause: { paused: pausedProgress, resumed: resumedProgress } }, null, 2));
+        const jumpAfter = jumpReturn;
+        const jumpInput = jumpInputA;
+        const jumpControl = "KeyZ/A";
+        const canonicalGameScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-modified-after-restart.png`);
+        const canonicalPlayEvidence = {
+          identity: canonicalIdentity,
+          firstFrame: firstCanonicalFrame,
+          bootFrame,
+          startHoldProgress,
+          gameplayFrame,
+          movement: { before: trajectory.find((entry) => entry.label === "before-controls"), samples: movementSamples.map((sample) => sample.entry), after: movementAfter.entry, input: rightInput, holdProgress: movementHoldProgress, deltaX: movementDeltaX },
+          jump: { before: jumpBefore.entry, during: jumpDuring.entry, released: jumpReleased.entry, later: jumpLater.entry, mid: jumpMid.entry, after: jumpAfter.entry, input: jumpInput, holdProgress: jumpDownProgress },
+          jumpControl,
+          oldImageReused,
+          screenshot: canonicalGameScreenshot,
+          beforeControlsScreenshot: canonicalGameBeforeControlsScreenshot,
+          controls: "WebDriver W3C native key actions routed through ViewportPanel key handlers and emulator_send_input",
+        };
+        console.log(`[inspection-canonical-gameplay] ${JSON.stringify(canonicalPlayEvidence)}`);
+        const baseAfterFlowBytes = await readFile(inspectionRom);
+        const baseAfterFlowSha256 = createHash("sha256").update(baseAfterFlowBytes).digest("hex");
+        if (baseAfterFlowBytes.length !== inspectionRomBytes.length || baseAfterFlowSha256 !== baseSha256) {
+          fail("ROM BYOR original foi alterada durante o fluxo: " + JSON.stringify({ initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 } }));
+        }
+        console.log(`[inspection-base-integrity] ` + JSON.stringify({ path: inspectionRom, initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 }, unchanged: true }));
+        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "passed", paletteOracle: "independent framebuffer comparison; character identity uses the verified shape/palette template, not a magenta ROI", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas, baseCanonicalPlayEvidence, canonicalPlayEvidence }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot, canonicalGameScreenshot }, sessionId: reopenedState.session.id }));
+        console.log("OK: Desktop Tauri Sonic identify/compose/edit/save/patch/apply/canonical-play/restart/reopen E2E passou.");
+        return;
+      }
+      if (options.scenario === "inspection-sprite-secondary") {
+        if (spriteResourceId !== "spr_spark0" || createHash("sha256").update(inspectionRomBytes).digest("hex") !== "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c") {
+          fail(`Cenário secundário exige spr_spark0 e ROM Taiketsu verificada: ${JSON.stringify({ resource: spriteResourceId, rom: createHash("sha256").update(inspectionRomBytes).digest("hex") })}`);
+        }
+        const secondaryFrameId = "spr_spark0/frame-0";
+        await selectInspectionFrameNative(sessionId, secondaryFrameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do spr_spark0/frame-0");
+        const secondaryBefore = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, secondaryFrameId, "recurso secundário antes de salvar");
+        const secondaryBeforeScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-spark0-before-restart.png`);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+        const persistedSessionId = completedState.session.id;
+        if (!persistedSessionId) fail(`Sessão secundária concluída não tem identidade: ${JSON.stringify(completedState)}`);
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Salvar sessão secundária não publicou a sessão", 100);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+        await deleteSession(sessionId);
+        sessionId = await createSession(options.app);
+        currentE2eRunContext.sessionId = sessionId;
+        await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App secundário não reabriu após reinício");
+        await waitFor(async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API de automação secundária não voltou", 100);
+        await handleProjectWizardVisibly(sessionId, "secondary-after-restart");
+        await setSessionWindowRect(sessionId, 1280, 800);
+        await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace secundário após reinício");
+        await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace secundário não voltou");
+        await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace secundário não voltou");
+        await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`), 15000, "Painel secundário não voltou", 100);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-refresh-sessions", "atualizar sessões secundárias após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Sessão secundária persistida não apareceu após reinício", 100);
+        const secondarySessionSelector = `[data-testid='select-saved-session-${persistedSessionId}']`;
+        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, secondarySessionSelector), secondarySessionSelector);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-reopen", "reabrir sessão secundária");
+        await waitFor(async () => { const state = await readInspectionUiState(sessionId); return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false; }, 30000, "Sessão secundária não foi restaurada após reinício", 100);
+        await selectInspectionFrameNative(sessionId, secondaryFrameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do spr_spark0/frame-0 após reinício");
+        const secondaryAfter = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, secondaryFrameId, "recurso secundário após reabrir");
+        const secondaryAfterScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-spark0-after-restart.png`);
+        console.log(`[inspection-sprite-secondary] ${JSON.stringify({ resource: spriteResourceId, frame: secondaryFrameId, romSha256: secondaryAfter.visualEvidence.romSha256, sourcePngSha256: spriteSourcePngSha256, beforePixelsSha256: secondaryBefore.independentEvidence.pixelsSha256, afterPixelsSha256: secondaryAfter.independentEvidence.pixelsSha256, beforeScreenshot: secondaryBeforeScreenshot, afterScreenshot: secondaryAfterScreenshot, restoredSessionId: persistedSessionId, nativeSize: [secondaryAfter.visualEvidence.naturalWidth, secondaryAfter.visualEvidence.naturalHeight], offsets: { tileData: [0x80060, 0x120], palette: [0x2e134, 0x20], descriptor: 0x22f94 } })}`);
+        console.log("OK: Desktop Tauri inspection secondary sprite save/restart/reopen E2E passou.");
+        return;
+      }
+      const candidateAvailable = await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid^='inspection-candidate-']"));`),
+        30000,
+        "Catálogo concluído não exibiu candidato visual",
+        250
+      );
+      if (!candidateAvailable) fail("Catálogo concluído não exibiu candidato visual.");
+      const expectedCandidateId = options.scenario === "inspection-preview-unavailable"
+        ? process.env.RDS_INSPECTION_UNAVAILABLE_CANDIDATE_ID ?? ""
+        : process.env.RDS_INSPECTION_EXPECTED_CANDIDATE_ID ?? "";
+      const expectedOffset = options.scenario === "inspection-preview-unavailable"
+        ? null
+        : Number(process.env.RDS_INSPECTION_EXPECTED_OFFSET ?? "");
+      const expectedSize = options.scenario === "inspection-preview-unavailable"
+        ? null
+        : Number(process.env.RDS_INSPECTION_EXPECTED_SIZE ?? "");
+      const expectedKind = options.scenario === "inspection-preview-unavailable"
+        ? ""
+        : process.env.RDS_INSPECTION_EXPECTED_KIND ?? "tile4bpp_block";
+      if (options.scenario !== "inspection-preview-unavailable" && (!Number.isSafeInteger(expectedOffset) || !Number.isSafeInteger(expectedSize) || expectedOffset < 0 || expectedSize <= 0)) {
+        fail("A prova positiva exige RDS_INSPECTION_EXPECTED_OFFSET e RDS_INSPECTION_EXPECTED_SIZE independentes da UI.");
+      }
+      const candidateLookup = async () => executeScript(
+        sessionId,
+        `
+          const expected = String(arguments[0] || "");
+          const offset = arguments[2];
+          const size = arguments[3];
+          const kind = String(arguments[4] || "");
+          const unavailable = String(arguments[1]) === "unavailable";
+          const selector = expected ? "[data-testid='inspection-candidate-" + expected + "']" : (unavailable ? "[data-preview-expected='false']" : "[data-preview-expected='true']");
+          const candidates = Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']"));
+          const match = expected ? document.querySelector(selector) : candidates.find((candidate) =>
+            (unavailable || (
+              Number(candidate.getAttribute("data-candidate-offset")) === offset &&
+              Number(candidate.getAttribute("data-candidate-size")) === size &&
+              (!kind || candidate.getAttribute("data-candidate-kind") === kind)
+            )) &&
+            (unavailable ? candidate.getAttribute("data-preview-expected") === "false" : candidate.getAttribute("data-preview-expected") === "true")
+          );
+          return match?.getAttribute("data-testid") ?? "";
+        `,
+        [expectedCandidateId, options.scenario === "inspection-preview-unavailable" ? "unavailable" : "available", expectedOffset, expectedSize, expectedKind]
+      );
+      let candidateTestId = await candidateLookup();
+      // The controlled negative deliberately places the first unavailable
+      // candidate after the 16-preview export cap. If pagination hides it,
+      // reach it through the visible paginator so the scenario still
+      // exercises the UI path instead of selecting it through IPC.
+      if (!candidateTestId && options.scenario === "inspection-preview-unavailable") {
+        for (let pageTurn = 0; pageTurn < 32 && !candidateTestId; pageTurn += 1) {
+          const nextPage = await executeScript(
+            sessionId,
+            `return Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.replace(/\\s+/g, " ").trim() === "Próxima" && !button.disabled) ? true : false;`
+          );
+          if (!nextPage) break;
+          const beforeCount = await executeScript(sessionId, `return document.querySelectorAll("[data-testid^='inspection-candidate-']").length;`);
+          await clickButtonByTextWithPointerEvents(sessionId, "Próxima");
+          await waitFor(
+            async () => executeScript(sessionId, `return document.querySelectorAll("[data-testid^='inspection-candidate-']").length !== ${Number(beforeCount)};`),
+            5000,
+            "Paginação do catálogo não atualizou a página",
+            100
+          );
+          candidateTestId = await candidateLookup();
+        }
+      }
+      if (!candidateTestId) {
+        const catalogSummary = await executeScript(
+          sessionId,
+          `return Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']")).map((candidate) => ({ id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") }));`
+        );
+        console.log(`[inspection-candidate-negative] catalog=${JSON.stringify(catalogSummary)}`);
+        fail(expectedCandidateId ? `Candidato esperado não foi localizado: ${expectedCandidateId}` : options.scenario === "inspection-preview-unavailable" ? "Catálogo concluído não expôs candidato explicitamente sem prévia." : "Catálogo concluído não expôs candidato com prévia esperada.");
+      }
+      const selectedCandidateEvidence = await executeScript(
+        sessionId,
+        `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${candidateTestId}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
+      );
+      console.log(`[inspection-candidate] ${JSON.stringify(selectedCandidateEvidence)}`);
+      if (options.scenario !== "inspection-preview-unavailable" && (selectedCandidateEvidence?.offset !== expectedOffset || selectedCandidateEvidence?.size !== expectedSize || selectedCandidateEvidence?.kind !== expectedKind || selectedCandidateEvidence?.previewExpected !== "true")) {
+        fail(`Candidato conhecido divergente da especificação independente: ${JSON.stringify({ selected: selectedCandidateEvidence, expected: { offset: expectedOffset, size: expectedSize, kind: expectedKind } })}`);
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, candidateTestId);
+      if (options.scenario === "inspection-preview-unavailable") {
+        const unavailable = await waitFor(
+          async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-preview-unavailable']")) && !document.querySelector("[data-testid='inspection-preview-image']");`),
+          15000,
+          "O cenário de prévia indisponível não expôs o estado negativo explícito",
+          100
+        );
+        if (!unavailable) fail("Prévia indisponível não foi representada como estado negativo separado.");
+        if (inspectionFixture && selectedCandidateEvidence?.previewExpected !== "false") fail(`Fixture controlado não produziu candidato sem prévia: ${JSON.stringify({ fixture: inspectionFixture, selected: selectedCandidateEvidence })}`);
+        console.log("OK: Desktop Tauri inspection/preview-unavailable E2E passou como cenário negativo separado.");
+        return;
+      }
+      const visualEvidence = await waitFor(
+        async () => executeScript(sessionId, `
+          const image = document.querySelector("[data-testid='inspection-preview-image']");
+          if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          if (!context) return false;
+          context.drawImage(image, 0, 0);
+          const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          return {
+            image: true,
+            naturalWidth: image.naturalWidth,
+            naturalHeight: image.naturalHeight,
+            declaredWidth: Number(image.getAttribute("data-preview-width") || 0),
+            declaredHeight: Number(image.getAttribute("data-preview-height") || 0),
+            pngSha256: image.getAttribute("data-png-sha256") || "",
+            pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+            artifactSha256: image.getAttribute("data-artifact-sha256") || "",
+            src: image.currentSrc || image.src,
+            pixels: Array.from(pixels),
+          };
+        `),
+        15000,
+        "Prévia real não carregou imagem, dimensões ou pixels",
+        100
+      );
+      if (!visualEvidence.image || !Array.isArray(visualEvidence.pixels) || !visualEvidence.src) {
+        fail(`Prévia real inválida: ${JSON.stringify({ ...visualEvidence, pixels: undefined })}`);
+      }
+      assertChunkyGoldenOracle();
+      const expectedPreview = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      console.log(`[inspection-preview-oracle] ${JSON.stringify({ offset: expectedOffset, size: expectedSize, dimensions: [expectedPreview.width, expectedPreview.height], pixelsSha256: createHash("sha256").update(expectedPreview.pixels).digest("hex"), firstBytes: Array.from(inspectionRomBytes.subarray(expectedOffset, expectedOffset + 16)) })}`);
+      const independentPixelEvidence = assertExactPreviewPixels(
+        { width: visualEvidence.naturalWidth, height: visualEvidence.naturalHeight, pixels: visualEvidence.pixels },
+        expectedPreview,
+        "ROM/offset/tamanho conhecidos"
+      );
+      const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!pngPayload) fail(`A prévia carregada não expôs uma fonte PNG data: válida: ${String(visualEvidence.src).slice(0, 80)}`);
+      const actualPngSha256 = createHash("sha256").update(Buffer.from(pngPayload, "base64")).digest("hex");
+      if (actualPngSha256 !== visualEvidence.pngSha256 || actualPngSha256 !== visualEvidence.artifactSha256) {
+        fail(`Hash do PNG carregado diverge do contrato de artefato: ${JSON.stringify({ actualPngSha256, pngSha256: visualEvidence.pngSha256, artifactSha256: visualEvidence.artifactSha256 })}`);
+      }
+      if (visualEvidence.pixelsSha256 !== independentPixelEvidence.pixelsSha256 || actualPngSha256 === independentPixelEvidence.pixelsSha256) {
+        fail(`Hashes PNG/RGBA não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidence.pixelsSha256 })}`);
+      }
+      const mutatedPixels = Buffer.from(expectedPreview.pixels);
+      mutatedPixels[0] ^= 1;
+      let mutationRejected = false;
+      try {
+        assertExactPreviewPixels(
+          { width: expectedPreview.width, height: expectedPreview.height, pixels: mutatedPixels },
+          expectedPreview,
+          "mutação de um pixel com atributos HTML inalterados"
+        );
+      } catch (error) {
+        mutationRejected = true;
+        console.log(`[inspection-preview-negative] mutation-rejected=${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (!mutationRejected) fail("O oracle independente aceitou uma imagem com um pixel alterado; a asserção visual está permissiva.");
+      console.log(`[inspection-preview] ${JSON.stringify({ candidate: selectedCandidateEvidence, dimensions: [independentPixelEvidence.width, independentPixelEvidence.height], pngSha256: actualPngSha256, pixelsSha256: independentPixelEvidence.pixelsSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, mutationRejected })}`);
+      const frame0Id = "spr_ryo_100/frame-0";
+      const frame1Id = "spr_ryo_100/frame-1";
+      await selectInspectionFrameNative(sessionId, frame0Id);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-0 HAMOOPIG");
+      const frame0Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "seleção inicial");
+      const spriteFrame0Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-0.png`);
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame0Proof.visualEvidence.romSha256, resource: frame0Proof.visualEvidence.resourceId, frame: frame0Proof.visualEvidence.frameId, nativeSize: [frame0Proof.visualEvidence.naturalWidth, frame0Proof.visualEvidence.naturalHeight], pngSha256: frame0Proof.actualPngSha256, pixelsSha256: frame0Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame0Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame0Proof.independentEvidence.expectedRgbaSha256, layout: frame0Proof.layout, screenshot: spriteFrame0Screenshot })}`);
+
+      await selectInspectionFrameNative(sessionId, frame1Id);
+      const afterFrame1Selection = await readRenderedSpriteFramePixels(sessionId);
+      if (afterFrame1Selection?.frameId === frame0Id) {
+        fail(`A seleção de frame-1 manteve a imagem/metadados do frame-0 durante a troca: ${JSON.stringify(afterFrame1Selection)}`);
+      }
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frame0Id, to: frame1Id, pending: afterFrame1Selection ? { frame: afterFrame1Selection.frameId, resource: afterFrame1Selection.resourceId } : null, previousPreviewRemovedOnChange: !afterFrame1Selection || afterFrame1Selection.frameId !== frame0Id })}`);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-1 HAMOOPIG");
+      const frame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "troca frame-0 para frame-1");
+      const spriteFrame1Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-1.png`);
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame1Proof.visualEvidence.romSha256, resource: frame1Proof.visualEvidence.resourceId, frame: frame1Proof.visualEvidence.frameId, nativeSize: [frame1Proof.visualEvidence.naturalWidth, frame1Proof.visualEvidence.naturalHeight], pngSha256: frame1Proof.actualPngSha256, pixelsSha256: frame1Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame1Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame1Proof.independentEvidence.expectedRgbaSha256, layout: frame1Proof.layout, screenshot: spriteFrame1Screenshot })}`);
+
+      for (const frameNumber of [2, 3, 4]) {
+        const frameId = `spr_ryo_100/frame-${frameNumber}`;
+        await selectInspectionFrameNative(sessionId, frameId);
+        const staleFrame = await readRenderedSpriteFramePixels(sessionId);
+        if (staleFrame?.frameId === frame1Id || staleFrame?.frameId === `spr_ryo_100/frame-${frameNumber - 1}`) {
+          fail(`A troca para ${frameId} reutilizou a prévia anterior: ${JSON.stringify(staleFrame)}`);
+        }
+        console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frameNumber === 2 ? frame1Id : `spr_ryo_100/frame-${frameNumber - 1}`, to: frameId, pending: staleFrame ? { frame: staleFrame.frameId, resource: staleFrame.resourceId } : null, previousPreviewRemovedOnChange: !staleFrame || staleFrame.frameId !== frameId })}`);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", `composição do ${frameId}`);
+        const proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frameId, `troca para ${frameId}`);
+        const screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-${frameNumber}.png`);
+        console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: proof.visualEvidence.romSha256, resource: proof.visualEvidence.resourceId, frame: proof.visualEvidence.frameId, nativeSize: [proof.visualEvidence.naturalWidth, proof.visualEvidence.naturalHeight], pngSha256: proof.actualPngSha256, pixelsSha256: proof.independentEvidence.pixelsSha256, expectedIndexSha256: proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: proof.independentEvidence.expectedRgbaSha256, layout: proof.layout, screenshot })}`);
+      }
+
+      await selectInspectionFrameNative(sessionId, frame0Id);
+      const afterFrame0Return = await readRenderedSpriteFramePixels(sessionId);
+      if (afterFrame0Return?.frameId === frame1Id) {
+        fail(`A seleção de frame-0 manteve a imagem/metadados do frame-1 durante a troca: ${JSON.stringify(afterFrame0Return)}`);
+      }
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do frame-0 HAMOOPIG");
+      const frame0ReturnProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "retorno frame-1 para frame-0");
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frame1Id, to: frame0Id, pending: afterFrame0Return ? { frame: afterFrame0Return.frameId, resource: afterFrame0Return.resourceId } : null, previousPreviewRemovedOnChange: !afterFrame0Return || afterFrame0Return.frameId !== frame1Id, returnedPixelsSha256: frame0ReturnProof.independentEvidence.pixelsSha256 })}`);
+
+      await selectInspectionFrameNative(sessionId, frame1Id);
+      const beforePersistFrame1 = await readRenderedSpriteFramePixels(sessionId);
+      if (beforePersistFrame1?.frameId === frame0Id) {
+        fail(`A seleção final de frame-1 manteve a prévia anterior antes de salvar: ${JSON.stringify(beforePersistFrame1)}`);
+      }
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição final do frame-1 HAMOOPIG");
+      const persistedFrame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "frame-1 antes de salvar");
+      const spriteBeforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-before-restart.png`);
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+      const persistedSessionId = completedState.session.id;
+      if (!persistedSessionId) fail(`Sessão concluída não tem identidade para validar persistência: ${JSON.stringify(completedState)}`);
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`),
+        15000,
+        "Salvar sessão não publicou a sessão corrente na lista persistida",
+        100
+      );
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+      await deleteSession(sessionId);
+      sessionId = await createSession(options.app);
+      currentE2eRunContext.sessionId = sessionId;
+      await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App não reabriu após reinício real");
+      await waitFor(
+        async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"),
+        uiBootstrapTimeoutMs,
+        "API de automação não voltou após reinício real"
+      );
+      await handleProjectWizardVisibly(sessionId, "after-restart");
+      await setSessionWindowRect(sessionId, 1920, 1080);
+      console.log(`[inspection-reopen-window] ${JSON.stringify(await executeScript(sessionId, `return { width: window.innerWidth, height: window.innerHeight, outerWidth: window.outerWidth, outerHeight: window.outerHeight };`))}`);
+      await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace após reinício");
+      await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace não voltou após reinício");
+      await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+      try {
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace nao terminou de remontar");
+      } catch (error) {
+        console.log(`[inspection] estado apos reabrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
+        throw error;
+      }
+      await clickButtonByTestIdNative(sessionId, "reverse-tab-inspection", "abrir aba Inspeção após reinício");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
+        15000,
+        "Painel de inspeção não voltou após reinício",
+        250
+      );
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`),
+        30000,
+        "Sessão persistida não foi descoberta após reinício",
+        100
+      );
+
+      // Negative control: deliberately reopen the real wizard through its
+      // visible menu control. A native WebDriver click must be rejected by
+      // hit-test and must not activate the saved-session control underneath it.
+      await clickButtonByTestIdNative(sessionId, "unified-topbar-menu-trigger", "abrir menu superior para o negativo");
+      await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, "menu-action-project-new");
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        10000,
+        "Menu superior não expôs o controle Novo Projeto",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, "menu-action-project-new", "abrir wizard deliberadamente para o negativo");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`),
+        15000,
+        "Wizard não ficou visível para o negativo deliberado de obstrução",
+        100
+      );
+      const selectionBeforeBlockedClick = await readSavedSessionSelection(sessionId, persistedSessionId);
+      if (!selectionBeforeBlockedClick) {
+        fail(`Sessão salva não estava disponível para o negativo de obstrução: ${persistedSessionId}`);
+      }
+      const blockedSelectionClick = await clickButtonByTestIdNative(
+        sessionId,
+        `select-saved-session-${persistedSessionId}`,
+        "seleção da sessão salva atrás do wizard",
+        { expectBlocked: true }
+      );
+      const selectionAfterBlockedClick = await readSavedSessionSelection(sessionId, persistedSessionId);
+      if (!selectionAfterBlockedClick || JSON.stringify(selectionAfterBlockedClick) !== JSON.stringify(selectionBeforeBlockedClick)) {
+        fail(`Clique obstruído alterou a seleção da sessão: ${JSON.stringify({ before: selectionBeforeBlockedClick, after: selectionAfterBlockedClick })}`);
+      }
+      console.log(`[inspection-reopen-negative] click-rejected=${JSON.stringify({ ...blockedSelectionClick.diagnostic, selectionUnchanged: true, syntheticEvents: false })}`);
+      await clickButtonByTestIdNative(sessionId, "wizard-cancel", "fechar wizard pelo controle visível");
+      await waitFor(
+        async () => executeScript(sessionId, `return !document.querySelector('[data-testid="project-wizard-body"]');`),
+        15000,
+        "Wizard permaneceu como bloqueador após tratamento visual",
+        100
+      );
+      await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, `select-saved-session-${persistedSessionId}`);
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        30000,
+        "Controle nativo de seleção da sessão permaneceu obstruído após fechar o wizard",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, `select-saved-session-${persistedSessionId}`, "seleção da sessão salva após reinício");
+      const reopenDiagnostic = await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, "inspection-reopen");
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        15000,
+        "Controle nativo de reabertura não ficou disponível após selecionar a sessão",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, "inspection-reopen", "reabertura da sessão após reinício");
+      const reopenedState = await waitFor(
+        async () => {
+          const state = await readInspectionUiState(sessionId);
+          return state?.session?.id === persistedSessionId &&
+            state.session.status === "completed" &&
+            state.session.identitySha256 === completedState.session.identitySha256
+            ? state
+            : false;
+        },
+        30000,
+        "Sessão persistida não foi reaberta com a mesma identidade após reinício",
+        100
+      );
+      console.log(`[inspection-reopen] state=${JSON.stringify(reopenedState)}`);
+      const reopenedFrameSelection = await waitFor(
+        async () => executeScript(sessionId, `return document.querySelector("[data-testid='inspection-sprite-frame-select']")?.value ?? "";`),
+        15000,
+        "Seleção persistida de frame-1 não foi restaurada após reinício",
+        100
+      );
+      if (reopenedFrameSelection !== "spr_ryo_100/frame-1") {
+        fail(`Seleção de frame restaurada diverge do frame salvo: ${JSON.stringify({ expected: "spr_ryo_100/frame-1", actual: reopenedFrameSelection })}`);
+      }
+      console.log(`[inspection-reopen-frame-selection] ${JSON.stringify({ sessionId: reopenedState.session.id, frameId: reopenedFrameSelection, restored: true })}`);
+      const reopenedCandidate = await waitFor(
+        async () => executeScript(sessionId, `return document.querySelector("[data-testid='${candidateTestId}']")?.getAttribute("data-testid") ?? "";`),
+        30000,
+        "Catálogo da sessão reaberta não expôs o candidato esperado",
+        100
+      );
+      const reopenedCandidateEvidence = await executeScript(
+        sessionId,
+        `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${reopenedCandidate}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
+      );
+      if (!reopenedCandidateEvidence ||
+        reopenedCandidateEvidence.offset !== expectedOffset ||
+        reopenedCandidateEvidence.size !== expectedSize ||
+        reopenedCandidateEvidence.kind !== expectedKind ||
+        reopenedCandidateEvidence.previewExpected !== "true") {
+        fail(`Candidato reaberto diverge da especificação independente: ${JSON.stringify({ selected: reopenedCandidateEvidence, expected: { offset: expectedOffset, size: expectedSize, kind: expectedKind } })}`);
+      }
+      await clickButtonByTestIdNative(sessionId, reopenedCandidate, "seleção do candidato após reinício");
+      const reopenedVisualEvidence = await waitFor(
+        async () => {
+          const evidence = await readRenderedPreviewPixels(sessionId);
+          return evidence?.image && evidence.pixels?.length > 0 ? evidence : false;
+        },
+        15000,
+        "Prévia real não voltou após reabrir a sessão",
+        100
+      );
+      let reopenedPreviewLayout;
+      try {
+        reopenedPreviewLayout = await waitFor(
+          async () => {
+            const layout = await ensurePreviewVisibleAndUnobstructed(sessionId);
+            return layout?.fullyVisible && layout.unobstructed && layout.renderedSizeSufficient ? layout : false;
+          },
+          15000,
+          "Prévia reaberta não ficou integralmente visível e sem obstrução após o scroll do painel",
+          100
+        );
+      } catch (error) {
+        const lastLayout = await ensurePreviewVisibleAndUnobstructed(sessionId);
+        fail(`${error instanceof Error ? error.message : String(error)}; último layout=${JSON.stringify(lastLayout)}`);
+      }
+      assertChunkyGoldenOracle();
+      const expectedPreviewAfterRestart = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      const independentPixelEvidenceAfterRestart = assertExactPreviewPixels(
+        { width: reopenedVisualEvidence.naturalWidth, height: reopenedVisualEvidence.naturalHeight, pixels: reopenedVisualEvidence.pixels },
+        expectedPreviewAfterRestart,
+        "ROM/offset/tamanho conhecidos após reinício"
+      );
+      const pngPayloadAfterRestart = String(reopenedVisualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!pngPayloadAfterRestart) fail(`A prévia reaberta não expôs uma fonte PNG data: válida: ${String(reopenedVisualEvidence.src).slice(0, 80)}`);
+      const actualPngSha256AfterRestart = createHash("sha256").update(Buffer.from(pngPayloadAfterRestart, "base64")).digest("hex");
+      if (actualPngSha256AfterRestart !== reopenedVisualEvidence.pngSha256 || actualPngSha256AfterRestart !== reopenedVisualEvidence.artifactSha256) {
+        fail(`Hash do PNG reaberto diverge do contrato de artefato: ${JSON.stringify({ actualPngSha256: actualPngSha256AfterRestart, pngSha256: reopenedVisualEvidence.pngSha256, artifactSha256: reopenedVisualEvidence.artifactSha256 })}`);
+      }
+      if (reopenedVisualEvidence.pixelsSha256 !== independentPixelEvidenceAfterRestart.pixelsSha256 || actualPngSha256AfterRestart === independentPixelEvidenceAfterRestart.pixelsSha256) {
+        fail(`Hashes PNG/RGBA reabertos não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256AfterRestart, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256 })}`);
+      }
+      console.log(`[inspection-reopen-visual] ${JSON.stringify({ romSha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), sessionId: reopenedState.session.id, identitySha256: reopenedState.session.identitySha256, candidate: reopenedCandidateEvidence, dimensions: [independentPixelEvidenceAfterRestart.width, independentPixelEvidenceAfterRestart.height], pngSha256: actualPngSha256AfterRestart, pixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, previewLayout: reopenedPreviewLayout, reopenDiagnostic })}`);
+      await clickButtonByTestIdNative(sessionId, "inspection-compose-sprite", "composição do frame-1 após reinício");
+      const reopenedSpriteProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, "spr_ryo_100/frame-1", "ROM/manifesto HAMOOPIG após reinício");
+      if (reopenedSpriteProof.visualEvidence.romSha256 !== reopenedState.session.identitySha256 || reopenedSpriteProof.visualEvidence.resourceId !== "spr_ryo_100" || reopenedSpriteProof.visualEvidence.frameId !== "spr_ryo_100/frame-1") {
+        fail(`Frame composto reaberto diverge da identidade persistida: ${JSON.stringify({ sprite: reopenedSpriteProof.visualEvidence, session: reopenedState })}`);
+      }
+      console.log(`[inspection-reopen-sprite-frame] ${JSON.stringify({ romSha256: reopenedSpriteProof.visualEvidence.romSha256, resource: reopenedSpriteProof.visualEvidence.resourceId, frame: reopenedSpriteProof.visualEvidence.frameId, dimensions: [reopenedSpriteProof.visualEvidence.naturalWidth, reopenedSpriteProof.visualEvidence.naturalHeight], pngSha256: reopenedSpriteProof.actualPngSha256, pixelsSha256: reopenedSpriteProof.independentEvidence.pixelsSha256, expectedRgbaSha256: reopenedSpriteProof.independentEvidence.expectedRgbaSha256, layout: reopenedSpriteProof.layout, frameSelection: reopenedFrameSelection })}`);
+      const spriteAfterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-after-restart.png`);
+      const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
+      console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
+      console.log(`ROM BYOR: ${inspectionRom}`);
+      console.log(`Sessão reaberta: ${persistedSessionId}`);
+      console.log(`Prévia após reinício: pixels PNG recalculados (${reopenedVisualEvidence.naturalWidth}x${reopenedVisualEvidence.naturalHeight})`);
+      console.log(`Evidências: ${beforeRestartScreenshot}`);
+      console.log(`Evidências: ${afterRestartScreenshot}`);
+      console.log(`Evidências do frame-0: ${spriteFrame0Screenshot}`);
+      console.log(`Evidências do frame-1: ${spriteFrame1Screenshot}`);
+      console.log(`Evidências do frame composto: ${spriteBeforeRestartScreenshot}`);
+      console.log(`Evidências do frame composto após reinício: ${spriteAfterRestartScreenshot}`);
+      return;
+    }
+
     if (options.scenario === "onboarding-shell") {
       const artifactPrefix = `onboarding-shell-${artifactTimestamp()}`;
       await waitForOnboardingWizard(sessionId);
@@ -3751,6 +7860,17 @@ async function main() {
       console.log(`Evidencias: ${wizardScreenshot}`);
       console.log(`Evidencias: ${editorScreenshot}`);
       console.log(`Evidencias: ${layerScreenshot}`);
+      return;
+    }
+
+    if (options.scenario === "reference-platformer") {
+      await runReferencePlatformerScenario(
+        sessionId,
+        emulatorActivationTimeoutMs,
+        (projectDir) => {
+          temporaryProjectDir = projectDir;
+        }
+      );
       return;
     }
 
@@ -6389,6 +10509,9 @@ async function main() {
           `[cleanup] Nao foi possivel remover o projeto temporario criado pelo onboarding: ${temporaryProjectDir}`
         );
       }
+    }
+    if (temporaryInspectionFixtureDir) {
+      await rm(temporaryInspectionFixtureDir, { recursive: true, force: true });
     }
   }
 }

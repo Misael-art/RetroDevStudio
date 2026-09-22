@@ -1,0 +1,27 @@
+{
+  "schema": "rds-logic-recovery-fixture/v1",
+  "profile_id": "m68k.addq_word_d0_rts.v1",
+  "architecture": "m68000-big-endian",
+  "initial_d0": "0x12340058",
+  "routine_bytes": "52404E75",
+  "routine_instruction_offset": "mode-build-report",
+  "proof_report": "e2e-proof-report.json",
+  "execution": {
+    "startup_warmup_frames": 120,
+    "fixture_prelude_frames": 90,
+    "controlled_frames": 1,
+    "input": "all buttons released",
+    "oracle_word_decode": "region-2 host-order 16-bit words"
+  },
+  "oracle": {
+    "region": 2,
+    "value_offset": "0xFF00",
+    "flags_offset": "0xFF04",
+    "flags_bits": { "N": 1, "Z": 2, "V": 4, "C": 8, "X": 16 }
+  },
+  "limits": [
+    "callers indiretos e PC-relative não são modelados",
+    "retorno/stack/contexto de chamada não são modelados",
+    "instrumentação RAM da fixture não pertence à rotina recuperada"
+  ]
+}

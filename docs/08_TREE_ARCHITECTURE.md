@@ -229,3 +229,9 @@ RetroDevStudio/
 - `docs/13_PLANO_EXECUCAO_PARALELA.md` define tickets, ownership e comparação; não substitui a maturidade do roadmap.
 - `docs/AVALIACAO_DESENVOLVIMENTO_2026_09_06.md` preserva snapshot histórico; novas evidências/deltas vivem no Current Wave.
 - `docs/PROMPT_AGENTE_{INTEGRADOR,A,B,C}.md` são entradas de execução por papel. Apenas o integrador atualiza docs canônicos durante rodadas paralelas.
+
+## Programa de reconstrução e edição de ROMs (planejamento 2026-09-10)
+
+- O plano ampliado permanece no documento canônico `docs/12_DECOMPILACAO_PAREADA_PLANO.md`, seção Programa REX; não constitui implementação ou promoção de suporte.
+- `docs/PROMPT_AGENTE_RECONSTRUCAO_ROM.md` contém o handoff executável do Programa REX.
+- Relatórios gerados usam os diretórios de validação existentes ou diretório BYOR externo; nenhuma ROM ou asset comercial entra no Git.

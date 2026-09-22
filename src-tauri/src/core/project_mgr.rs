@@ -19,7 +19,7 @@ use crate::ugdm::entities::RetroFXRasterLine;
 use crate::ugdm::entities::{
     BackgroundLayer, BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project,
     ProjectSettings, Resolution, RetroFXConfig, RetroFXParallaxLayer, SaveRamConfig, Scene,
-    SceneLayer, ScrollSpeed, TemplateMetadata, CURRENT_SCHEMA_VERSION,
+    SceneLayer, ScrollSpeed, TemplateMetadata, Transform, CURRENT_SCHEMA_VERSION,
 };
 
 pub const UGDM_VERSION: &str = "1.0.0";
@@ -31,6 +31,12 @@ pub const ONBOARDING_SPRITE_SIZE: u32 = 16;
 pub const PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/platformer_player.png";
 pub const PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/platformer_level.png";
 pub const PLATFORMER_JUMP_ASSET: &str = "assets/audio/jump.wav";
+pub const REFERENCE_PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/reference_player.ppm";
+pub const REFERENCE_PLATFORMER_GOAL_ASSET: &str = "assets/sprites/reference_goal.ppm";
+pub const REFERENCE_PLATFORMER_GOAL_SOUND_ASSET: &str = "assets/audio/reference_goal.wav";
+pub const REFERENCE_PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/reference_level.ppm";
+pub const REFERENCE_PLATFORMER_JUMP_ASSET: &str = "assets/audio/reference_jump.wav";
+pub const REFERENCE_PLATFORMER_THEME_ASSET: &str = "assets/audio/reference_theme.vgm";
 const TEMPLATE_REGISTRY_JSON: &str = include_str!("../../../data/template_registry.json");
 const MANUAL_SGDK_DONOR_REQUIRED_MESSAGE: &str =
     "Requer uma pasta doadora SGDK escolhida manualmente neste host.";
@@ -1086,6 +1092,7 @@ pub fn seed_project_template(
     match template_id {
         "empty" => return load_scene(project_dir, DEFAULT_ENTRY_SCENE),
         "starter_guided" => return seed_onboarding_template(project_dir, target),
+        "reference_platformer" => return seed_reference_platformer_template(project_dir, target),
         _ => {}
     }
 
@@ -3403,6 +3410,9 @@ pub fn import_sgdk_project(
     sgdk_path: &Path,
 ) -> Result<SgdkImportReport, LoadError> {
     let resolved_root = resolve_sgdk_import_root(sgdk_path)?;
+    if sgdk_project_is_code_only(&resolved_root.effective_root) {
+        return import_sgdk_code_only_project(project_dir, sgdk_path, &resolved_root);
+    }
     validate_sgdk_project_path(&resolved_root.effective_root)?;
     let resources = load_sgdk_resources(&resolved_root.effective_root)?;
     import_sgdk_resources_into_scene(
@@ -3413,6 +3423,238 @@ pub fn import_sgdk_project(
         SgdkAssetMaterialization::Copy,
         "Imported SGDK Project",
     )
+}
+
+/// Doador code-only: manifests `.res` presentes e fontes C, mas nenhum recurso
+/// importavel (ex.: FORGE_REFERENCE usa apenas a fonte built-in do SGDK). Em vez de
+/// rejeitar, o import cria projeto nativo com cena contendo uma entidade de logica
+/// ponte (`bridge_unconverted_source` nao bloqueante) rastreavel ao `src/` do doador.
+fn sgdk_project_is_code_only(sgdk_path: &Path) -> bool {
+    let Ok(manifests) = find_sgdk_manifest_paths(sgdk_path) else {
+        return false;
+    };
+    if manifests.is_empty() || !sgdk_has_c_sources(sgdk_path) {
+        return false;
+    }
+    // Unsupported or unreadable manifests must retain their normal diagnostic;
+    // only genuinely empty resource declarations qualify as code-only.
+    matches!(load_sgdk_resources(sgdk_path), Ok(resources) if resources.is_empty())
+}
+
+fn sgdk_has_c_sources(sgdk_path: &Path) -> bool {
+    let src = sgdk_path.join("src");
+    let root = if src.is_dir() {
+        src.as_path()
+    } else {
+        sgdk_path
+    };
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                stack.push(path);
+            } else if kind.is_file()
+                && path.extension().and_then(|value| value.to_str()) == Some("c")
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+const SGDK_CODE_ONLY_ENTITY_ID: &str = "code_only_logic";
+const SGDK_CODE_ONLY_GRAPH_REF: &str = "graphs/sgdk_import_code_only.json";
+
+fn sgdk_code_only_bridge_graph_json(source_file: &str) -> String {
+    serde_json::json!({
+        "version": 1,
+        "nodes": [
+            {
+                "id": "code_only_tick",
+                "type": "event_update",
+                "label": "A Cada Frame (ponte code-only)",
+                "x": 120,
+                "y": 120,
+                "inputs": [],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": {}
+            },
+            {
+                "id": "code_only_bridge",
+                "type": "bridge_unconverted_source",
+                "label": "Fonte nao convertida (code-only)",
+                "x": 420,
+                "y": 120,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [],
+                "params": {
+                    "blocking": false,
+                    "gap": "code_only_donor_sem_assets",
+                    "source_file": source_file
+                }
+            }
+        ],
+        "edges": [
+            {
+                "id": "edge_code_only_bridge",
+                "fromNode": "code_only_tick",
+                "fromPort": "exec",
+                "toNode": "code_only_bridge",
+                "toPort": "exec"
+            }
+        ]
+    })
+    .to_string()
+}
+
+fn import_sgdk_code_only_project(
+    project_dir: &Path,
+    requested_sgdk_path: &Path,
+    resolved_root: &SgdkResolvedImportRoot,
+) -> Result<SgdkImportReport, LoadError> {
+    use crate::core::sgdk_corpus_inventory::inspect_sgdk_project_for_nocode_inventory;
+
+    let sgdk_path = resolved_root.effective_root.as_path();
+    let inventory = inspect_sgdk_project_for_nocode_inventory(sgdk_path)
+        .map_err(|error| LoadError(format!("inventario do doador code-only falhou: {error}")))?;
+    let source_file = inventory
+        .source_files
+        .iter()
+        .find(|path| path.ends_with("main.c"))
+        .cloned()
+        .or_else(|| inventory.source_files.first().cloned())
+        .unwrap_or_else(|| "src/main.c".to_string());
+
+    let graph_ref = SGDK_CODE_ONLY_GRAPH_REF.to_string();
+    let graph_path = graph_write_path(project_dir, &graph_ref)?;
+    if let Some(parent) = graph_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            LoadError(format!(
+                "code-only: nao foi possivel criar diretorio para graph_ref '{}': {}",
+                graph_ref, error
+            ))
+        })?;
+    }
+    fs::write(&graph_path, sgdk_code_only_bridge_graph_json(&source_file)).map_err(|error| {
+        LoadError(format!(
+            "code-only: falha ao gravar NodeGraph ponte em '{}': {}",
+            graph_path.display(),
+            error
+        ))
+    })?;
+
+    let logic = LogicComponent {
+        graph_ref: Some(graph_ref),
+        graph_origin: Some("imported_ref".to_string()),
+        external_source_refs: vec![source_file.clone()],
+        imported_semantics: Some(ImportedLogicSemantics {
+            source: "sgdk".to_string(),
+            extraction_kind: "bridge".to_string(),
+            confidence: "low".to_string(),
+            role_reason: "doador code-only: logica rastreada como ponte; cena nativa buildavel"
+                .to_string(),
+            source_paths: vec![source_file.clone()],
+            audit_flags: vec!["code_only_donor".to_string()],
+            bridge_count: 1,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let mut scene = canonical_scene(
+        DEFAULT_SCENE_ID,
+        Some("Imported SGDK Project (code-only)".to_string()),
+    );
+    scene.entities.push(Entity {
+        entity_id: SGDK_CODE_ONLY_ENTITY_ID.to_string(),
+        display_name: Some("Fonte SGDK (code-only)".to_string()),
+        prefab: None,
+        transform: Transform::default(),
+        components: Components {
+            logic: Some(logic),
+            ..Default::default()
+        },
+    });
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+
+    let manifest_paths = find_sgdk_manifest_paths(sgdk_path).unwrap_or_default();
+    let manifests_relative: Vec<String> = manifest_paths
+        .iter()
+        .map(|path| {
+            path.strip_prefix(sgdk_path)
+                .ok()
+                .map(normalize_relative_path)
+                .unwrap_or_else(|| path.display().to_string())
+        })
+        .collect();
+    let fingerprint = compute_sgdk_donor_fingerprint(sgdk_path, &manifest_paths);
+    let mut warnings = resolved_root.warnings.clone();
+    warnings.push(
+        "Doador code-only: nenhum recurso importavel nos manifestos; cena nativa criada com entidade de logica ponte rastreavel a 'src/'."
+            .to_string(),
+    );
+
+    let source_summary = SgdkSourceSummary {
+        donor_root: requested_sgdk_path.to_string_lossy().to_string(),
+        effective_root: sgdk_path.to_string_lossy().to_string(),
+        resolution_kind: resolved_root.resolution_kind.clone(),
+        resolution_warnings: resolved_root.warnings.clone(),
+        resolution_suggestions: resolved_root.suggestions.clone(),
+        manifests: manifests_relative.clone(),
+        resources_total: 0,
+        resources_accepted: 0,
+        resources_skipped: 0,
+        fingerprint: fingerprint.clone(),
+    };
+
+    let ledger_scenes = vec![SgdkImportLedgerScene {
+        scene_id: scene.scene_id.clone(),
+        display_name: scene
+            .display_name
+            .clone()
+            .unwrap_or_else(|| "Imported SGDK Project (code-only)".to_string()),
+        scene_path: DEFAULT_ENTRY_SCENE.to_string(),
+        role: "primary".to_string(),
+        entity_count: scene.entities.len(),
+        tilemap_cells: 0,
+        tilemap_unique_tiles: 0,
+    }];
+    let manifest_path = write_sgdk_import_ledger(
+        project_dir,
+        requested_sgdk_path,
+        sgdk_path,
+        &resolved_root.resolution_kind,
+        &scene.scene_id,
+        &fingerprint,
+        &manifests_relative,
+        &[],
+        &[],
+        &warnings,
+        &[],
+        &ledger_scenes,
+        &SgdkImportLedgerPhaseC::default(),
+        &SgdkImportLedgerPhaseD::default(),
+    )?;
+
+    Ok(SgdkImportReport {
+        primary_scene: scene,
+        imported_scenes: 1,
+        skipped_sources: Vec::new(),
+        warnings,
+        fallbacks: Vec::new(),
+        source_summary,
+        manifest_path: Some(manifest_path),
+        primary_scene_path: DEFAULT_ENTRY_SCENE.to_string(),
+        additional_scenes: Vec::new(),
+    })
 }
 
 pub fn import_legacy_sgdk_project(
@@ -4693,7 +4935,13 @@ fn parse_sgdk_manifest(manifest: &str) -> Vec<SgdkResourceEntry> {
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
+            // rescomp aceita `;` como comentario oficial; projetos reais (ex.: HAMOOPIG)
+            // tambem usam `//`, que sem este guarda vira recurso falso `UnsupportedKind`.
+            if trimmed.is_empty()
+                || trimmed.starts_with('#')
+                || trimmed.starts_with(';')
+                || trimmed.starts_with("//")
+            {
                 return None;
             }
 
@@ -4837,7 +5085,10 @@ fn load_mddev_project_meta(root: &Path) -> Result<Option<MddevProjectMeta>, Load
             error
         ))
     })?;
-    let parsed = serde_json::from_str::<MddevProjectMeta>(&content).map_err(|error| {
+    // Projetos reais (ex.: corpus SGDKForge) sao escritos por ferramentas Windows que
+    // gravam BOM UTF-8; serde_json recusa `\u{feff}` antes do primeiro token.
+    let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
+    let parsed = serde_json::from_str::<MddevProjectMeta>(content).map_err(|error| {
         LoadError(format!(
             "Metadata .mddev invalida em '{}': {}",
             mddev_path.display(),
@@ -14575,6 +14826,563 @@ pub fn seed_onboarding_template(project_dir: &Path, target: &str) -> Result<Scen
     Ok(scene)
 }
 
+/// Cria o projeto de referência do primeiro jogo completo sem depender de
+/// doador externo, ROM, corpus ou artefato de build. Os recursos são pequenos
+/// e gerados aqui para que o fluxo do wizard seja reproduzível em qualquer host
+/// que possua o toolchain oficial do target.
+pub fn seed_reference_platformer_template(
+    project_dir: &Path,
+    target: &str,
+) -> Result<Scene, LoadError> {
+    if target != "megadrive" {
+        return Err(LoadError(
+            "O jogo de referencia desta wave esta delimitado ao perfil Mega Drive.".to_string(),
+        ));
+    }
+
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_PLAYER_ASSET,
+        reference_player_ppm(),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_GOAL_ASSET,
+        reference_goal_ppm(),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_TILESET_ASSET,
+        reference_tileset_ppm(),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_JUMP_ASSET,
+        reference_tone_wav(440, 140),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_GOAL_SOUND_ASSET,
+        reference_tone_wav(880, 240),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_THEME_ASSET,
+        reference_theme_vgm(),
+    )?;
+
+    save_prefab_entity(
+        project_dir,
+        "reference_player.json",
+        &reference_player_prefab(),
+    )?;
+    save_prefab_entity(project_dir, "reference_goal.json", &reference_goal_prefab())?;
+    save_prefab_entity(
+        project_dir,
+        "reference_camera.json",
+        &reference_camera_prefab(),
+    )?;
+    save_prefab_entity(
+        project_dir,
+        "reference_tilemap.json",
+        &reference_tilemap_prefab(),
+    )?;
+    save_graph_asset(
+        project_dir,
+        "graphs/reference_platformer_logic.json",
+        &reference_platformer_logic_graph(),
+    )?;
+
+    let scene = reference_platformer_scene();
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(scene)
+}
+
+fn write_reference_asset(
+    project_dir: &Path,
+    relative_path: &str,
+    bytes: Vec<u8>,
+) -> Result<(), LoadError> {
+    let path = project_dir.join(relative_path);
+    let parent = path.parent().ok_or_else(|| {
+        LoadError(format!(
+            "Asset de referencia '{}' nao possui diretorio pai.",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar o diretorio do asset de referencia '{}': {}",
+            parent.display(),
+            error
+        ))
+    })?;
+    fs::write(&path, bytes).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel escrever o asset de referencia '{}': {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn reference_ppm(width: u32, height: u32, mut pixel: impl FnMut(u32, u32) -> [u8; 3]) -> Vec<u8> {
+    let mut bytes = format!("P6\n{} {}\n255\n", width, height).into_bytes();
+    for y in 0..height {
+        for x in 0..width {
+            bytes.extend_from_slice(&pixel(x, y));
+        }
+    }
+    bytes
+}
+
+fn reference_player_ppm() -> Vec<u8> {
+    reference_ppm(80, 16, |x, y| {
+        let frame = x / 16;
+        let local_x = x % 16;
+        let body = (3..13).contains(&local_x) && (2..15).contains(&y)
+            || (5..11).contains(&local_x) && (0..4).contains(&y);
+        if !body {
+            [12, 20, 32]
+        } else if frame == 4 {
+            [255, 208, 72]
+        } else if frame % 2 == 0 {
+            [42, 180, 232]
+        } else {
+            [36, 132, 214]
+        }
+    })
+}
+
+fn reference_goal_ppm() -> Vec<u8> {
+    reference_ppm(16, 16, |x, y| {
+        if (x == 7 || x == 8) && y > 2 {
+            [240, 240, 240]
+        } else if (4..12).contains(&x) && (2..8).contains(&y) {
+            [248, 190, 48]
+        } else {
+            [20, 28, 44]
+        }
+    })
+}
+
+fn reference_tileset_ppm() -> Vec<u8> {
+    reference_ppm(128, 64, |x, y| {
+        let tile_x = (x / 8) % 2;
+        let tile_y = (y / 8) % 2;
+        if y >= 48 {
+            if (x / 8 + y / 8) % 2 == 0 {
+                [52, 112, 78]
+            } else {
+                [40, 88, 64]
+            }
+        } else if tile_x == tile_y {
+            [30, 56, 92]
+        } else {
+            [24, 44, 72]
+        }
+    })
+}
+
+fn reference_wav_header(sample_rate: u32, data_len: u32) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(44 + data_len as usize);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    bytes
+}
+
+fn reference_tone_wav(frequency_hz: u32, duration_ms: u32) -> Vec<u8> {
+    let sample_rate = 22_050u32;
+    let sample_count = sample_rate.saturating_mul(duration_ms) / 1_000;
+    let data_len = sample_count.saturating_mul(2);
+    let mut bytes = reference_wav_header(sample_rate, data_len);
+    for sample in 0..sample_count {
+        let phase =
+            (sample as f32 * frequency_hz as f32 * std::f32::consts::TAU) / sample_rate as f32;
+        let amplitude = (phase.sin() * 7_000.0) as i16;
+        bytes.extend_from_slice(&amplitude.to_le_bytes());
+    }
+    bytes
+}
+
+fn reference_theme_vgm() -> Vec<u8> {
+    // VGM is the supported source format for SGDK's XGM resource. This tiny
+    // generated track writes one PSG tone, waits half a second and ends; it is
+    // intentionally plain data owned by the template, not a copied song.
+    let mut bytes = vec![0u8; 0x100];
+    bytes[0..4].copy_from_slice(b"Vgm ");
+    bytes[8..12].copy_from_slice(&0x0000_0170u32.to_le_bytes());
+    bytes[0x18..0x1c].copy_from_slice(&22_050u32.to_le_bytes());
+    bytes[0x34..0x38].copy_from_slice(&0x0000_00CCu32.to_le_bytes());
+    bytes.extend_from_slice(&[0x50, 0x90, 0x61, 0x20, 0x03, 0x66]);
+    let eof_offset = (bytes.len() as u32).saturating_sub(4);
+    bytes[0x04..0x08].copy_from_slice(&eof_offset.to_le_bytes());
+    bytes
+}
+
+fn reference_player_prefab() -> Entity {
+    let mut animations = BTreeMap::new();
+    animations.insert(
+        "idle".to_string(),
+        AnimationDef {
+            frames: vec![0, 1],
+            fps: 4,
+            looping: true,
+            frame_durations: None,
+            loop_start: None,
+            mugen_frames: None,
+            onion_skin: None,
+            hitboxes: Vec::new(),
+        },
+    );
+    animations.insert(
+        "run".to_string(),
+        AnimationDef {
+            frames: vec![2, 3],
+            fps: 8,
+            looping: true,
+            frame_durations: None,
+            loop_start: None,
+            mugen_frames: None,
+            onion_skin: None,
+            hitboxes: Vec::new(),
+        },
+    );
+    animations.insert(
+        "jump".to_string(),
+        AnimationDef {
+            frames: vec![4],
+            fps: 1,
+            looping: false,
+            frame_durations: None,
+            loop_start: None,
+            mugen_frames: None,
+            onion_skin: None,
+            hitboxes: Vec::new(),
+        },
+    );
+
+    Entity {
+        entity_id: "reference_player_prefab".to_string(),
+        display_name: Some("Reference Player".to_string()),
+        prefab: None,
+        transform: Transform { x: 32, y: 184 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: REFERENCE_PLATFORMER_PLAYER_ASSET.to_string(),
+                frame_width: 16,
+                frame_height: 16,
+                pivot: None,
+                palette_slot: 1,
+                animations,
+                priority: "foreground".to_string(),
+                meta_sprite: false,
+                commands: Vec::new(),
+            }),
+            collision: Some(CollisionComponent {
+                shape: "aabb".to_string(),
+                width: 14,
+                height: 16,
+                offset: None,
+                solid: true,
+                layer: Some("player".to_string()),
+                collides_with: vec!["ground".to_string(), "goal".to_string()],
+            }),
+            input: Some(InputComponent {
+                device: "joypad1".to_string(),
+                mapping: BTreeMap::from([
+                    ("jump".to_string(), "BUTTON_A".to_string()),
+                    ("move_left".to_string(), "DPAD_LEFT".to_string()),
+                    ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+                ]),
+            }),
+            physics: Some(PhysicsComponent {
+                gravity: true,
+                gravity_strength: 6,
+                max_velocity: Some(Velocity { x: 32, y: 96 }),
+                friction: 1,
+                bounce: 0,
+            }),
+            audio: Some(AudioComponent {
+                sfx: HashMap::from([
+                    (
+                        "jump".to_string(),
+                        REFERENCE_PLATFORMER_JUMP_ASSET.to_string(),
+                    ),
+                    (
+                        "goal_sound".to_string(),
+                        REFERENCE_PLATFORMER_GOAL_SOUND_ASSET.to_string(),
+                    ),
+                ]),
+                bgm: Some(REFERENCE_PLATFORMER_THEME_ASSET.to_string()),
+            }),
+            logic: Some(crate::ugdm::components::LogicComponent {
+                graph: None,
+                graph_ref: Some("graphs/reference_platformer_logic.json".to_string()),
+                graph_origin: Some("builtin_reference_platformer".to_string()),
+                logic_hints: vec![
+                    "right/left input moves the player".to_string(),
+                    "A triggers jump velocity and jump sound".to_string(),
+                    "overlap with goal sets goal_reached and plays goal sound".to_string(),
+                ],
+                external_source_refs: Vec::new(),
+                imported_semantics: None,
+                variables: HashMap::from([(
+                    "goal_reached".to_string(),
+                    crate::ugdm::components::LogicVariable {
+                        var_type: "int".to_string(),
+                        default: serde_json::json!(0),
+                        min: Some(0),
+                        max: Some(1),
+                    },
+                )]),
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_goal_prefab() -> Entity {
+    Entity {
+        entity_id: "reference_goal_prefab".to_string(),
+        display_name: Some("Goal Flag".to_string()),
+        prefab: None,
+        transform: Transform { x: 280, y: 184 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: REFERENCE_PLATFORMER_GOAL_ASSET.to_string(),
+                frame_width: 16,
+                frame_height: 16,
+                pivot: None,
+                palette_slot: 2,
+                animations: BTreeMap::from([(
+                    "idle".to_string(),
+                    AnimationDef {
+                        frames: vec![0],
+                        fps: 1,
+                        looping: true,
+                        frame_durations: None,
+                        loop_start: None,
+                        mugen_frames: None,
+                        onion_skin: None,
+                        hitboxes: Vec::new(),
+                    },
+                )]),
+                priority: "foreground".to_string(),
+                meta_sprite: false,
+                commands: Vec::new(),
+            }),
+            collision: Some(CollisionComponent {
+                shape: "aabb".to_string(),
+                width: 16,
+                height: 16,
+                offset: None,
+                solid: false,
+                layer: Some("goal".to_string()),
+                collides_with: vec!["player".to_string()],
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_camera_prefab() -> Entity {
+    Entity {
+        entity_id: "reference_camera_prefab".to_string(),
+        display_name: Some("Main Camera".to_string()),
+        prefab: None,
+        transform: Transform { x: 0, y: 0 },
+        components: Components {
+            camera: Some(CameraComponent {
+                follow_entity: Some("player".to_string()),
+                offset_x: 0,
+                offset_y: 0,
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_tilemap_prefab() -> Entity {
+    Entity {
+        entity_id: "reference_tilemap_prefab".to_string(),
+        display_name: Some("Reference Tilemap".to_string()),
+        prefab: None,
+        transform: Transform { x: 0, y: 0 },
+        components: Components {
+            tilemap: Some(TilemapComponent {
+                tileset: REFERENCE_PLATFORMER_TILESET_ASSET.to_string(),
+                map_width: 40,
+                map_height: 28,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: Vec::new(),
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_platformer_scene() -> Scene {
+    let mut scene = canonical_scene(
+        DEFAULT_SCENE_ID,
+        Some("Reference Platformer — Goal Run".to_string()),
+    );
+    scene.palettes = vec![
+        PaletteEntry {
+            slot: 0,
+            colors: vec![
+                "#0C1420".to_string(),
+                "#2AB4E8".to_string(),
+                "#F8BE30".to_string(),
+                "#34B85A".to_string(),
+                "#F2F4F8".to_string(),
+            ],
+        },
+        PaletteEntry {
+            slot: 1,
+            colors: vec![
+                "#0C1420".to_string(),
+                "#2AB4E8".to_string(),
+                "#2484D6".to_string(),
+                "#FFD048".to_string(),
+            ],
+        },
+        PaletteEntry {
+            slot: 2,
+            colors: vec![
+                "#141C2C".to_string(),
+                "#F0F0F0".to_string(),
+                "#F8BE30".to_string(),
+            ],
+        },
+    ];
+    scene.layers = Some(vec![
+        SceneLayer {
+            id: "layer_background".to_string(),
+            name: "Background".to_string(),
+            kind: "background".to_string(),
+            visible: true,
+            locked: false,
+            depth: 0,
+            entity_ids: vec!["reference_tilemap".to_string()],
+        },
+        SceneLayer {
+            id: "layer_gameplay".to_string(),
+            name: "Gameplay".to_string(),
+            kind: "sprite".to_string(),
+            visible: true,
+            locked: false,
+            depth: 1,
+            entity_ids: vec!["player".to_string(), "goal".to_string()],
+        },
+        SceneLayer {
+            id: "layer_camera".to_string(),
+            name: "Camera".to_string(),
+            kind: "object".to_string(),
+            visible: true,
+            locked: false,
+            depth: 2,
+            entity_ids: vec!["main_camera".to_string()],
+        },
+    ]);
+    scene.entities = vec![
+        Entity {
+            entity_id: "reference_tilemap".to_string(),
+            display_name: Some("Ground and Tilemap".to_string()),
+            prefab: Some("reference_tilemap.json".to_string()),
+            transform: Transform { x: 0, y: 0 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "player".to_string(),
+            display_name: Some("Player".to_string()),
+            prefab: Some("reference_player.json".to_string()),
+            transform: Transform { x: 32, y: 184 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "goal".to_string(),
+            display_name: Some("Goal Flag".to_string()),
+            prefab: Some("reference_goal.json".to_string()),
+            transform: Transform { x: 280, y: 184 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "main_camera".to_string(),
+            display_name: Some("Main Camera".to_string()),
+            prefab: Some("reference_camera.json".to_string()),
+            transform: Transform { x: 0, y: 0 },
+            components: Components::default(),
+        },
+    ];
+    let width = 40;
+    let height = 28;
+    let mut data = vec![0; (width * height) as usize];
+    for x in 0..width {
+        data[(26 * width + x) as usize] = 1;
+        data[(27 * width + x) as usize] = 1;
+    }
+    for x in 20..28 {
+        data[(21 * width + x) as usize] = 1;
+    }
+    scene.collision_map = Some(CollisionMap {
+        tile_width: 8,
+        tile_height: 8,
+        width,
+        height,
+        data,
+    });
+    scene
+}
+
+fn reference_platformer_logic_graph() -> String {
+    serde_json::json!({
+        "version": 1,
+        "nodes": [
+            { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
+            { "id": "music", "type": "action_music", "label": "Play Theme", "x": 180, "y": 0, "params": { "action": "play", "track": "reference_theme", "fade_ms": 0 } },
+            { "id": "update_right", "type": "event_update", "label": "Update Right", "x": 0, "y": 160, "params": {} },
+            { "id": "right", "type": "input_held", "label": "Hold Right", "x": 180, "y": 140, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+            { "id": "move_right", "type": "sprite_move", "label": "Move Right", "x": 360, "y": 140, "params": { "target": "player", "dx": 2, "dy": 0 } },
+            { "id": "update_left", "type": "event_update", "label": "Update Left", "x": 0, "y": 300, "params": {} },
+            { "id": "left", "type": "input_held", "label": "Hold Left", "x": 180, "y": 280, "params": { "pad": "JOY_1", "button": "BUTTON_LEFT" } },
+            { "id": "move_left", "type": "sprite_move", "label": "Move Left", "x": 360, "y": 280, "params": { "target": "player", "dx": -2, "dy": 0 } },
+            { "id": "update_jump", "type": "event_update", "label": "Update Jump", "x": 0, "y": 440, "params": {} },
+            { "id": "jump", "type": "input_pressed", "label": "Press A", "x": 180, "y": 420, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
+            { "id": "jump_velocity", "type": "set_velocity", "label": "Jump", "x": 360, "y": 400, "params": { "target": "player", "vx": 0, "vy": -48 } },
+            { "id": "jump_sound", "type": "action_sound", "label": "Jump Sound", "x": 540, "y": 400, "params": { "sfx": "jump" } },
+            { "id": "update_goal", "type": "event_update", "label": "Update Goal", "x": 0, "y": 580, "params": {} },
+            { "id": "goal_overlap", "type": "condition_overlap", "label": "Reach Goal", "x": 180, "y": 560, "params": { "a": "player", "b": "goal" } },
+            { "id": "goal_sound", "type": "action_sound", "label": "Goal Sound", "x": 360, "y": 540, "params": { "sfx": "goal_sound" } },
+            { "id": "mark_goal", "type": "var_set", "label": "Goal Reached", "x": 540, "y": 540, "params": { "var_name": "goal_reached", "value": 1 } }
+        ],
+        "edges": [
+            { "id": "start_music", "fromNode": "start", "fromPort": "exec", "toNode": "music", "toPort": "exec" },
+            { "id": "right_input", "fromNode": "update_right", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
+            { "id": "right_move", "fromNode": "right", "fromPort": "exec", "toNode": "move_right", "toPort": "exec" },
+            { "id": "left_input", "fromNode": "update_left", "fromPort": "exec", "toNode": "left", "toPort": "exec" },
+            { "id": "left_move", "fromNode": "left", "fromPort": "exec", "toNode": "move_left", "toPort": "exec" },
+            { "id": "jump_input", "fromNode": "update_jump", "fromPort": "exec", "toNode": "jump", "toPort": "exec" },
+            { "id": "jump_velocity", "fromNode": "jump", "fromPort": "exec", "toNode": "jump_velocity", "toPort": "exec" },
+            { "id": "jump_sound", "fromNode": "jump_velocity", "fromPort": "exec", "toNode": "jump_sound", "toPort": "exec" },
+            { "id": "goal_input", "fromNode": "update_goal", "fromPort": "exec", "toNode": "goal_overlap", "toPort": "exec" },
+            { "id": "goal_sound", "fromNode": "goal_overlap", "fromPort": "true", "toNode": "goal_sound", "toPort": "exec" },
+            { "id": "goal_mark", "fromNode": "goal_sound", "fromPort": "exec", "toNode": "mark_goal", "toPort": "exec" }
+        ]
+    }).to_string()
+}
+
 pub fn set_entry_scene(project_dir: &Path, scene_path: &str) -> Result<Project, LoadError> {
     validate_scene_path(scene_path)?;
     let _scene = load_scene(project_dir, scene_path)?;
@@ -17491,6 +18299,7 @@ void tick_player(void) {\n\
             vec![
                 "empty",
                 "starter_guided",
+                "reference_platformer",
                 "platformer_seed",
                 "rpg_seed",
                 "fighter_seed",
@@ -17513,6 +18322,13 @@ void tick_player(void) {\n\
                 .expect("starter template")
                 .available
         );
+        let reference = templates
+            .iter()
+            .find(|template| template.id == "reference_platformer")
+            .expect("reference platformer template");
+        assert!(reference.available);
+        assert_eq!(reference.source_kind, "builtin");
+        assert!(reference.features.iter().any(|feature| feature == "goal"));
         let platformer = templates
             .iter()
             .find(|template| template.id == "platformer_seed")
@@ -17523,6 +18339,61 @@ void tick_player(void) {\n\
             platformer.availability_reason.as_deref(),
             Some(MANUAL_SGDK_DONOR_REQUIRED_MESSAGE)
         );
+    }
+
+    #[test]
+    fn reference_platformer_template_is_self_contained_and_exercises_the_canonical_components() {
+        let project_dir = temp_dir("reference-platformer-template");
+        create_project_skeleton(&project_dir, "Reference Platformer", "megadrive")
+            .expect("create reference project skeleton");
+
+        let scene = seed_reference_platformer_template(&project_dir, "megadrive")
+            .expect("seed reference platformer");
+        let loaded = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load reference scene");
+        let graph = fs::read_to_string(
+            project_dir
+                .join("graphs")
+                .join("reference_platformer_logic.json"),
+        )
+        .expect("read reference graph");
+
+        assert_eq!(scene.entities.len(), 4);
+        assert_eq!(
+            loaded.collision_map.as_ref().map(|map| map.data.len()),
+            Some(40 * 28)
+        );
+        assert!(project_dir
+            .join(REFERENCE_PLATFORMER_PLAYER_ASSET)
+            .is_file());
+        assert!(project_dir
+            .join(REFERENCE_PLATFORMER_TILESET_ASSET)
+            .is_file());
+        assert!(project_dir.join(REFERENCE_PLATFORMER_JUMP_ASSET).is_file());
+        assert!(project_dir.join(REFERENCE_PLATFORMER_THEME_ASSET).is_file());
+        assert!(graph.contains("input_pressed"));
+        assert!(graph.contains("condition_overlap"));
+        assert!(graph.contains("action_music"));
+        assert!(graph.contains("goal_reached"));
+
+        let player = load_prefab_entity(&project_dir.join("prefabs").join("reference_player.json"))
+            .expect("load reference player prefab");
+        let sprite = player
+            .components
+            .sprite
+            .as_ref()
+            .expect("reference player sprite");
+        assert!(sprite.animations.contains_key("idle"));
+        assert!(sprite.animations.contains_key("run"));
+        assert!(sprite.animations.contains_key("jump"));
+        assert!(player.components.physics.is_some());
+        assert!(player
+            .components
+            .audio
+            .as_ref()
+            .and_then(|audio| audio.bgm.as_ref())
+            .is_some());
+
+        let _ = fs::remove_dir_all(project_dir);
     }
 
     #[test]
@@ -17811,6 +18682,148 @@ void tick_player(void) {\n\
         assert_eq!(resources[1].kind, "IMAGE");
         assert_eq!(resources[2].kind, "WAV");
         assert_eq!(resources[3].kind, "VGM");
+    }
+
+    /// Regressao (2026-09-09, linha 8 do corpus — TaiketsuUltraHeroGenesis): `sprite.res` do
+    /// doador usa comentarios `//` (estilo HAMOOPIG). Sem o guarda, cada comentario virava um
+    /// recurso falso `UnsupportedKind` (ex.: kind `//305`, name `=`) que aparecia como
+    /// "gap bloqueante" no Resumo SGDK Logic da IDE.
+    #[test]
+    fn parse_sgdk_manifest_ignores_slash_and_semicolon_comment_lines() {
+        let manifest = r#"
+            //tipo / nome / localizacao_arquivo / quantidade_tiles / compactacao
+            //ryo
+            //305 = 304
+            ; comentario oficial do rescomp
+            SPRITE hero "images/hero.png" 4 4
+        "#;
+
+        let resources = parse_sgdk_manifest(manifest);
+
+        assert_eq!(
+            resources.len(),
+            1,
+            "comentarios // e ; nao podem virar recursos falsos: {:?}",
+            resources
+        );
+        assert_eq!(resources[0].kind, "SPRITE");
+        assert_eq!(resources[0].name, "hero");
+        assert_eq!(resources[0].asset_path, "images/hero.png");
+    }
+
+    /// Regressao (2026-09-09, corpus SGDKForge — BLUE_CIRCUIT / Celestial Chase benchmark):
+    /// `.mddev/project.json` escrito por ferramentas Windows com BOM UTF-8 (`\u{feff}`)
+    /// derrubava o import inteiro com "expected value at line 1 column 1".
+    #[test]
+    fn load_mddev_project_meta_accepts_utf8_bom() {
+        let root = temp_dir("mddev-bom-regression");
+        let mddev_dir = root.join(".mddev");
+        fs::create_dir_all(&mddev_dir).expect("create .mddev dir");
+        fs::write(
+            mddev_dir.join("project.json"),
+            format!(
+                "\u{feff}{}",
+                r#"{"schema_version":1,"name":"BOM donor","sgdk_root":null}"#
+            ),
+        )
+        .expect("write BOM metadata");
+
+        let meta = load_mddev_project_meta(&root).expect("BOM nao pode derrubar o parse");
+
+        assert!(meta.is_some(), "metadata com BOM deve ser aceita");
+        assert_eq!(meta.unwrap().build_policy, None);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Regressao (2026-09-09, corpus SGDKForge — FORGE_REFERENCE): doador code-only
+    /// (manifests `.res` so com comentarios, fonte usa recursos built-in do SGDK) era
+    /// rejeitado no import; agora gera projeto nativo com cena de logica ponte e
+    /// segue buildavel pelo pipeline canonico.
+    #[test]
+    fn code_only_detection_preserves_unsupported_and_unreadable_manifest_errors() {
+        let donor = temp_dir("code-only-errors");
+        fs::create_dir_all(donor.join("src")).unwrap();
+        fs::create_dir_all(donor.join("res")).unwrap();
+        fs::write(donor.join("src/main.c"), "int main(void) { return 0; }").unwrap();
+        let manifest = donor.join("res/resources.res");
+        fs::write(&manifest, "UNKNOWN unsupported \"asset.bin\"\n").unwrap();
+        assert!(!sgdk_project_is_code_only(&donor));
+        fs::write(&manifest, [0xff, 0xfe]).unwrap();
+        assert!(!sgdk_project_is_code_only(&donor));
+        fs::write(&manifest, "// genuinely empty resources\n").unwrap();
+        assert!(sgdk_project_is_code_only(&donor));
+        fs::remove_dir_all(donor).unwrap();
+    }
+
+    #[test]
+    fn import_sgdk_project_supports_code_only_donor_with_bridge_scene() {
+        let donor_dir = temp_dir("sgdk-code-only-donor");
+        fs::create_dir_all(donor_dir.join("src/boot")).expect("create donor src");
+        fs::create_dir_all(donor_dir.join("res")).expect("create donor res");
+        fs::write(
+            donor_dir.join("src/main.c"),
+            "#include <genesis.h>\nint main(bool hard) { while (TRUE) { SYS_doVBlankProcess(); } return 0; }\n",
+        )
+        .expect("write main.c");
+        fs::write(donor_dir.join("src/boot/rom_head.c"), "/* head */\n").expect("write head");
+        fs::write(
+            donor_dir.join("res/resources.res"),
+            "// No external runtime assets. The fixture uses SGDK built-in font geometry.\n",
+        )
+        .expect("write empty res");
+
+        let project_dir = temp_dir("sgdk-code-only-project");
+        create_project_skeleton(&project_dir, "Code Only Import", "megadrive").expect("skel");
+
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("code-only import");
+        assert_eq!(report.primary_scene_path, DEFAULT_ENTRY_SCENE);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("code-only")),
+            "import code-only deve registrar warning auditavel: {:?}",
+            report.warnings
+        );
+
+        let logic_entity = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == SGDK_CODE_ONLY_ENTITY_ID)
+            .expect("cena code-only deve conter a entidade de logica ponte");
+        let logic = logic_entity.components.logic.as_ref().expect("logic comp");
+        assert_eq!(logic.graph_ref.as_deref(), Some(SGDK_CODE_ONLY_GRAPH_REF));
+        assert_eq!(logic.graph_origin.as_deref(), Some("imported_ref"));
+        let semantics = logic.imported_semantics.as_ref().expect("semantics");
+        assert!(semantics
+            .audit_flags
+            .contains(&"code_only_donor".to_string()));
+        assert_eq!(semantics.bridge_count, 1);
+
+        let graph_json =
+            fs::read_to_string(project_dir.join(SGDK_CODE_ONLY_GRAPH_REF)).expect("graph file");
+        assert!(graph_json.contains("bridge_unconverted_source"));
+        assert!(
+            graph_json.contains("\"blocking\":false"),
+            "bridge nao pode bloquear o build: {graph_json}"
+        );
+        assert!(
+            graph_json.contains("main.c"),
+            "source mapping deve apontar ao main.c do doador: {graph_json}"
+        );
+
+        let manifest_rel = report.manifest_path.as_deref().expect("ledger path");
+        assert!(
+            project_dir.join(manifest_rel).is_file(),
+            "ledger code-only persistido"
+        );
+
+        stamp_imported_sgdk_metadata(&project_dir, &donor_dir).expect("stamp code-only");
+
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
     }
 
     #[test]
@@ -23206,10 +24219,15 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
     }
 
     /// Raiz canonica da matriz de corpus SGDK real no host de referencia (`docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`).
+    /// Override por `RDS_SGDK_MATRIX_CORPUS_ROOT` permite montar/rodar a matriz em outros hosts,
+    /// mesmo contrato do `RDS_SGDK_CORPUS_ROOT` usado por `sgdk_corpus_inventory.rs`.
     const SGDK_MATRIX_CORPUS_ROOT: &str = r"F:\Projects\MegaDrive_DEV\SGDK_Engines";
 
     fn sgdk_matrix_corpus_donor_path(subdir: &str) -> PathBuf {
-        Path::new(SGDK_MATRIX_CORPUS_ROOT).join(subdir)
+        let root = std::env::var("RDS_SGDK_MATRIX_CORPUS_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(SGDK_MATRIX_CORPUS_ROOT));
+        root.join(subdir)
     }
 
     /// Com `--ignored`, retorna `true` para sair do teste apenas se `RDS_SGDK_MATRIX_CORPUS_SKIP=1`.
@@ -23278,17 +24296,19 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
 
     /// Fluxo parcial repetivel: import -> ledger/cenas -> sinais de superficie -> save/reload opcional -> build SGDK real -> ROM `SEGA`.
     /// `matrix_log_tag` identifica a linha no stdout (ex.: `MATRIX_P2`, `MATRIX_NEXZR`).
+    /// Retorna `Some(copia da ROM em tmp)` para a linha chamadora rodar smoke de emulacao opcional;
+    /// `None` somente quando o doador esta ausente e o skip explicito foi autorizado por env.
     fn run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
         test_fn_name: &'static str,
         donor: &Path,
         temp_slug: &'static str,
         skeleton_label: &str,
         matrix_log_tag: &'static str,
-    ) {
+    ) -> Option<PathBuf> {
         use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
 
         if sgdk_matrix_corpus_skip_if_missing_donor(test_fn_name, donor) {
-            return;
+            return None;
         }
 
         let project = temp_dir(temp_slug);
@@ -23357,6 +24377,19 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 .map(|g| !g.trim().is_empty())
                 .unwrap_or(false)
         });
+        let mut converted_nodes_total: u32 = 0;
+        let mut bridge_nodes_total: u32 = 0;
+        for entity in &report.primary_scene.entities {
+            if let Some(semantics) = entity
+                .components
+                .logic
+                .as_ref()
+                .and_then(|logic| logic.imported_semantics.as_ref())
+            {
+                converted_nodes_total += semantics.converted_nodes_count;
+                bridge_nodes_total += semantics.bridge_count;
+            }
+        }
         let md_hw = crate::hardware::md_profile::hw_status_with_source_kind(
             &report.primary_scene,
             Some("imported_sgdk"),
@@ -23389,6 +24422,10 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             crate::hardware::md_profile::MD_MANAGED_SPRITE_CELL_BUDGET,
             md_hw.errors.len(),
             md_hw.warnings.len()
+        );
+        eprintln!(
+            "{matrix_log_tag} logic: converted_nodes={} bridge_nodes={}",
+            converted_nodes_total, bridge_nodes_total
         );
 
         let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).expect("load pos-import");
@@ -23448,7 +24485,21 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             "{matrix_log_tag}: esperado ROM com marca SEGA apos build SGDK real"
         );
 
-        let _ = fs::remove_dir_all(&project);
+        let rom_artifact =
+            std::env::temp_dir().join(format!("retro-dev-studio-{temp_slug}-rom.bin"));
+        fs::copy(&rom_full, &rom_artifact)
+            .expect("copy current matrix ROM; never reuse a stale artifact");
+        if matrix_log_tag == "MATRIX_TUH" {
+            fs::copy(
+                project.join("build/megadrive/out/symbol.txt"),
+                rom_artifact.with_extension("symbols.txt"),
+            )
+            .expect("preserve symbols for runtime execution proof");
+            eprintln!("MATRIX_TUH preserved_project={}", project.display());
+        } else {
+            let _ = fs::remove_dir_all(&project);
+        }
+        Some(rom_artifact)
     }
 
     /// Matriz SGDK corpus real — linha 1 (plataforma / estudo). Ver `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`.
@@ -23782,6 +24833,911 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         .expect("write BLAZE Markdown report");
     }
 
+    /// Linha 8 (2026-09-08) — jogo de luta 1v1 monolitico (`src/main.c` unico, SGDK moderno,
+    /// boot SEGA custom em `src/boot`, FSM numerica de combate). Corpus real fora do host de
+    /// referencia Windows; a raiz SGDK efetiva e o subdiretorio `src/` do repositorio do jogo
+    /// (onde ficam `src/` e `res/*.res`). Alem do fluxo padrao da matriz, roda smoke de
+    /// emulacao visivel da ROM importada via `corpus_libretro_visible_smoke` e persiste
+    /// relatorio em `target-test/validation/sgdk-taiketsu-real/`.
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_taiketsu_ultra_hero_genesis_partial_flow_documents_build_blocker() {
+        let donor = sgdk_matrix_corpus_donor_path("TaiketsuUltraHeroGenesis/src");
+        let rom_artifact = run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "sgdk_matrix_corpus_taiketsu_ultra_hero_genesis_partial_flow_documents_build_blocker",
+            &donor,
+            "sgdk-matrix-tuh",
+            "Matrix TaiketsuUltraHeroGenesis Corpus",
+            "MATRIX_TUH",
+        );
+        let Some(rom_artifact) = rom_artifact else {
+            return; // skip autorizado (doador ausente + RDS_SGDK_MATRIX_CORPUS_SKIP=1)
+        };
+
+        let artifact_root = validation_artifact_dir("sgdk-taiketsu-real");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create Taiketsu validation artifact dir");
+
+        let (non_black_pixels, core_label, frames_run, width, height, rgba) =
+            corpus_libretro_residency_smoke(&rom_artifact, &artifact_root)
+                .expect("MATRIX_TUH: execution and sprite residency proof failed");
+        assert!(
+            non_black_pixels > 0,
+            "MATRIX_TUH: framebuffer da emulacao nao pode ser totalmente preto"
+        );
+        let frame_path = artifact_root.join("taiketsu-frame.ppm");
+        write_rgba_ppm(&frame_path, width, height, &rgba);
+        eprintln!(
+            "MATRIX_TUH emu: core={core_label} frames={frames_run} framebuffer={width}x{height} non_black_pixels={non_black_pixels}"
+        );
+
+        // Export da estrutura logica em nodes (IR semantico -> NodeGraph JSON) + cobertura,
+        // persistidos junto ao smoke para auditoria do que o extrator entrega como grafo.
+        let graph_report = crate::core::sgdk_semantic_reports::write_sgdk_node_graph_report(
+            &donor,
+            &artifact_root,
+        )
+        .expect("MATRIX_TUH: export do grafo semantico em nodes");
+        eprintln!(
+            "MATRIX_TUH graph: nodes={} edges={} bridge_nodes={} types={:?}",
+            graph_report.node_count,
+            graph_report.edge_count,
+            graph_report.bridge_node_count,
+            graph_report.node_type_counts
+        );
+        crate::core::sgdk_semantic_reports::write_sgdk_node_coverage_report(&donor, &artifact_root)
+            .expect("MATRIX_TUH: report de cobertura de nodes");
+
+        let report_json = serde_json::json!({
+            "donor": donor.to_string_lossy(),
+            "rom_artifact": rom_artifact.to_string_lossy(),
+            "framebuffer_ppm": frame_path.to_string_lossy(),
+            "libretro_core": core_label,
+            "frames_run": frames_run,
+            "framebuffer_width": width,
+            "framebuffer_height": height,
+            "non_black_pixels": non_black_pixels,
+            "semantic_node_graph": {
+                "node_count": graph_report.node_count,
+                "edge_count": graph_report.edge_count,
+                "bridge_node_count": graph_report.bridge_node_count,
+                "node_type_counts": graph_report.node_type_counts,
+                "graph_json_report": "sgdk-nodegraph-report.json"
+            },
+            "fake_toolchain_used": false,
+        });
+        fs::write(
+            artifact_root.join("taiketsu-real-report.json"),
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&report_json).expect("serialize Taiketsu report")
+            ),
+        )
+        .expect("write Taiketsu JSON report");
+        fs::write(
+            artifact_root.join("taiketsu-real-report.md"),
+            format!(
+                "# TaiketsuUltraHeroGenesis Import Matrix\n\n- Donor: `{}`\n- ROM artifact: `{}`\n- Core: `{}`\n- Frames run: `{}`\n- Non-black pixels: `{}`\n- Fake toolchain used: `false`\n",
+                donor.display(),
+                rom_artifact.display(),
+                core_label,
+                frames_run,
+                non_black_pixels
+            ),
+        )
+        .expect("write Taiketsu Markdown report");
+    }
+
+    /// Input script determinístico compartilhado pelas provas REX-00: 180
+    /// frames — 60 ociosos, Start por 10, Direita por 60, ocioso final.
+    fn rex_input_script_180f(label: &'static str) -> crate::core::parity_harness::InputScript {
+        use crate::emulator::libretro_ffi::JoypadState;
+        let mut frames = Vec::with_capacity(180);
+        for _ in 0..60 {
+            frames.push(JoypadState::default());
+        }
+        for _ in 0..10 {
+            frames.push(JoypadState {
+                start: true,
+                ..JoypadState::default()
+            });
+        }
+        for _ in 0..60 {
+            frames.push(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            });
+        }
+        while frames.len() < 180 {
+            frames.push(JoypadState::default());
+        }
+        crate::core::parity_harness::InputScript {
+            schema: crate::core::parity_harness::INPUT_SCRIPT_SCHEMA.to_string(),
+            name: Some(label.to_string()),
+            target: Some("megadrive".to_string()),
+            description: Some(
+                "REX-00: 60 idle, Start 10 frames, Right 60 frames, idle final; \
+                 definido antes da execucao e registrado por hash no ledger."
+                    .to_string(),
+            ),
+            frames,
+        }
+    }
+
+    /// Resolve a ROM de referência BYOR: override por env; default é o snapshot
+    /// imutável da investigação (hash verificado), nunca o doador original.
+    /// Retorna `None` apenas para skip explícito (sem arquivo configurado).
+    fn rex_reference_rom(
+        env_key: &str,
+        default_path: &str,
+        expected_sha256: &str,
+        test_name: &str,
+    ) -> Option<(PathBuf, String)> {
+        let configured = std::env::var(env_key).ok();
+        let path = match &configured {
+            Some(value) => PathBuf::from(value),
+            None => PathBuf::from(default_path),
+        };
+        if !path.is_file() {
+            if configured.is_some() {
+                panic!(
+                    "{test_name}: {env_key} aponta para arquivo inexistente em {}",
+                    path.display()
+                );
+            }
+            eprintln!(
+                "SKIP {test_name}: ROM de referencia ausente em {} (configure {env_key}); \
+                 skip explicito, nunca sucesso silencioso",
+                path.display()
+            );
+            return None;
+        }
+        let bytes = fs::read(&path).unwrap_or_else(|error| {
+            panic!("{test_name}: falha ao ler '{}': {error}", path.display())
+        });
+        let sha256 = crate::tools::reverse::decomp::rom_library::sha256_hex(&bytes);
+        assert_eq!(
+            sha256, expected_sha256,
+            "{test_name}: ROM de referencia mudou de revisao; preservar a proveniencia \
+             anterior e registrar revisao nova, nao reusar a captura antiga"
+        );
+        Some((path, sha256))
+    }
+
+    fn rex_register_reference_corpus(
+        sha256: &str,
+        size_bytes: u64,
+        label: &str,
+        source_path: &Path,
+        notes: &str,
+    ) {
+        use crate::tools::reverse::decomp::rom_library::{
+            corpus_identity, decomp_work_dir, register_corpus_entry, CorpusEntry,
+            CORPUS_ROLE_REFERENCE,
+        };
+        let work_dir = decomp_work_dir();
+        let _ = register_corpus_entry(
+            &work_dir,
+            CorpusEntry {
+                id: corpus_identity(sha256),
+                sha256: sha256.to_string(),
+                size_bytes,
+                role: CORPUS_ROLE_REFERENCE.to_string(),
+                label: label.to_string(),
+                source_path: Some(source_path.to_string_lossy().to_string()),
+                provenance: "sgdkforge-homebrew (snapshot imutavel fora do repo)".to_string(),
+                registered_at_unix: crate::tools::reverse::decomp::rom_library::now_unix(),
+                notes: Some(notes.to_string()),
+            },
+        )
+        .unwrap_or_else(|error| panic!("rex: registrar corpus no ledger: {error}"));
+        let inserted = crate::tools::reverse::decomp::rom_library::ensure_capability_records(
+            &work_dir,
+            crate::tools::reverse::equivalence::default_md_capability_records(
+                crate::tools::reverse::decomp::rom_library::now_unix(),
+            ),
+        )
+        .unwrap_or_else(|error| panic!("rex: registrar capacidades default: {error}"));
+        eprintln!("REX capabilities: {inserted} registros default inseridos");
+    }
+
+    fn rex_write_json(path: &Path, value: &serde_json::Value) {
+        fs::write(
+            path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(value).expect("serialize json")
+            ),
+        )
+        .unwrap_or_else(|error| panic!("gravar '{}': {error}", path.display()));
+    }
+
+    /// REX-00: prova mesma-ROM no caminho canônico (parity harness + core real
+    /// Genesis Plus GX) com input definido, dupla execução para determinismo,
+    /// run ocioso para discriminação de input, checkpoints de framebuffer e
+    /// registro completo no ledger v2.
+    #[ignore]
+    #[test]
+    fn rex00_hamoopig_same_rom_equivalence_with_defined_inputs() {
+        use crate::core::parity_harness::{compare_runs, run_parity_capture};
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+        use crate::tools::reverse::decomp::rom_library::{
+            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, ScenarioRunRecord,
+            SCENARIO_VERDICT_PASSED,
+        };
+        use crate::tools::reverse::equivalence::{
+            evaluate_identical_equivalence, scenario_input_discrimination,
+        };
+
+        let test_name = "rex00_hamoopig_same_rom_equivalence_with_defined_inputs";
+        let Some((rom_path, rom_sha)) = rex_reference_rom(
+            "RDS_REX_HAMOOPIG_ROM",
+            "/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/hamoopig/reference.bin",
+            "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+            test_name,
+        ) else {
+            return;
+        };
+
+        let artifact_root = validation_artifact_dir("rex-hamoopig-same-rom");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create rex artifact dir");
+
+        let script = rex_input_script_180f("rex00-hamoopig-180f");
+        let script_path = artifact_root.join("input-script.rds-input.json");
+        rex_write_json(
+            &script_path,
+            &serde_json::to_value(&script).expect("serialize input script"),
+        );
+
+        // Cada captura parte de um core fresco (power-on + load), pois a
+        // restauração de savestate NÃO se mostrou fiel ao power-on neste
+        // core/título: duas execuções restauradas do mesmo snapshot divergem
+        // de forma constante (achado registrado no run do ledger). Reset
+        // fresco é a definição de determinismo do gate REX 5.
+        let run_fresh_capture = |label: &'static str,
+                                 frames: &[crate::emulator::libretro_ffi::JoypadState]|
+         -> (
+            crate::core::parity_harness::ParityReport,
+            String,
+            Option<String>,
+        ) {
+            let mut core = EmulatorCore::new(None);
+            core.load_rom(&rom_path)
+                .unwrap_or_else(|error| panic!("{test_name}: carregar ROM ({label}): {error}"));
+            let initial_state = core
+                .capture_runtime_state_bytes()
+                .unwrap_or_else(|error| panic!("{test_name}: estado inicial ({label}): {error}"));
+            let core_label = core.loaded_core_label().unwrap_or("unknown").to_string();
+            let core_sha = core
+                .loaded_core_file()
+                .and_then(|path| fs::read(path).ok())
+                .map(|bytes| crate::tools::reverse::decomp::rom_library::sha256_hex(&bytes));
+            let report = run_parity_capture(&mut core, &rom_path, &rom_sha, &initial_state, frames)
+                .unwrap_or_else(|error| panic!("{test_name}: captura {label}: {error}"));
+            core.stop()
+                .unwrap_or_else(|error| panic!("{test_name}: parar core ({label}): {error}"));
+            (report, core_label, core_sha)
+        };
+
+        // Capturas A e B: power-on fresco, mesma ROM, mesmo script — determinismo.
+        let (report_a, core_label, core_sha) = run_fresh_capture("A", &script.frames);
+        let (report_b, _, _) = run_fresh_capture("B", &script.frames);
+        let determinism = compare_runs(&report_a, &report_b);
+        assert!(
+            determinism.is_empty(),
+            "{test_name}: mesma ROM em power-on fresco deve ser deterministica: {determinism:?}"
+        );
+
+        // Run ocioso (zero input) para medir discriminação do input definido.
+        let idle_frames = vec![JoypadState::default(); 180];
+        let (report_idle, _, _) = run_fresh_capture("idle", &idle_frames);
+
+        let discrimination = scenario_input_discrimination(&report_a, &report_idle);
+        eprintln!(
+            "REX HAMOOPIG input_discrimination: {} — {}",
+            discrimination.status, discrimination.detail
+        );
+
+        // Identidade mesma-ROM: oráculos sobre A (referência) vs B (reexecução).
+        let equivalence = evaluate_identical_equivalence(&report_a, &report_b);
+        assert_ne!(
+            equivalence.verdict,
+            crate::tools::reverse::equivalence::VERDICT_REJECTED,
+            "{test_name}: mesma ROM não pode ser rejeitada: {:?}",
+            equivalence.oracles
+        );
+        eprintln!(
+            "REX HAMOOPIG equivalence: verdict={} core={core_label} frames={}",
+            equivalence.verdict, report_a.frames_run
+        );
+
+        // Janela dedicada (mesmo script) com hash RGBA de TODOS os frames —
+        // cruzamento completo com a prova de UI desktop, cujo canvas entrega
+        // os mesmos bytes convertidos por framebuffer_to_rgba — e PPM nos
+        // checkpoints.
+        let checkpoint_frames: [u32; 4] = [59, 69, 129, 179];
+        let mut checkpoint_artifacts = Vec::new();
+        let mut checkpoint_rgba_hashes = serde_json::Map::new();
+        let mut all_frames_rgba_hashes = serde_json::Map::new();
+        {
+            let mut core_cp = EmulatorCore::new(None);
+            core_cp.load_rom(&rom_path).unwrap_or_else(|error| {
+                panic!("{test_name}: recarregar ROM p/ checkpoints: {error}")
+            });
+            for (index, joypad) in script.frames.iter().enumerate() {
+                let index = index as u32;
+                core_cp
+                    .set_joypad(joypad.clone())
+                    .unwrap_or_else(|error| panic!("{test_name}: set_joypad: {error}"));
+                core_cp
+                    .run_frame()
+                    .unwrap_or_else(|error| panic!("{test_name}: frame {index}: {error}"));
+                let (buffer, size, format) = core_cp.get_framebuffer().expect("framebuffer");
+                let frame = framebuffer_to_rgba(&buffer, size, format);
+                let rgba_sha = crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba);
+                all_frames_rgba_hashes.insert(
+                    index.to_string(),
+                    serde_json::Value::String(rgba_sha.clone()),
+                );
+                if checkpoint_frames.contains(&index) {
+                    let path = artifact_root.join(format!("checkpoint-{index:03}.ppm"));
+                    write_rgba_ppm(&path, frame.width, frame.height, &frame.rgba);
+                    checkpoint_artifacts.push(path);
+                    checkpoint_rgba_hashes
+                        .insert(index.to_string(), serde_json::Value::String(rgba_sha));
+                }
+            }
+            core_cp.stop().expect("parar core de checkpoints");
+        }
+        let rgba_hashes_path = artifact_root.join("checkpoint-rgba-hashes.json");
+        rex_write_json(
+            &rgba_hashes_path,
+            &serde_json::Value::Object(checkpoint_rgba_hashes),
+        );
+        let all_rgba_path = artifact_root.join("all-frames-rgba-hashes.json");
+        rex_write_json(
+            &all_rgba_path,
+            &serde_json::Value::Object(all_frames_rgba_hashes),
+        );
+
+        // Timeline backend OCIOSA (zero input, power-on fresco): permite ao
+        // harness de UI provar entrega de input — frames em que ocioso diverge
+        // do run com input só podem casar com o run com input se as teclas
+        // chegaram ao core pelo caminho do produto.
+        let idle_path = artifact_root.join("idle-all-frames-rgba-hashes.json");
+        let idle_wram_path = artifact_root.join("idle-final-wram-sha.json");
+        {
+            let idle_frames = vec![JoypadState::default(); 180];
+            let mut core_idle = EmulatorCore::new(None);
+            core_idle.load_rom(&rom_path).unwrap_or_else(|error| {
+                panic!("{test_name}: carregar ROM p/ timeline ociosa: {error}")
+            });
+            let mut idle_hashes = serde_json::Map::new();
+            for (index, joypad) in idle_frames.iter().enumerate() {
+                let index = index as u32;
+                core_idle
+                    .set_joypad(joypad.clone())
+                    .unwrap_or_else(|error| panic!("{test_name}: set_joypad ocioso: {error}"));
+                core_idle
+                    .run_frame()
+                    .unwrap_or_else(|error| panic!("{test_name}: frame ocioso {index}: {error}"));
+                let (buffer, size, format) = core_idle.get_framebuffer().expect("framebuffer");
+                let frame = framebuffer_to_rgba(&buffer, size, format);
+                idle_hashes.insert(
+                    index.to_string(),
+                    serde_json::Value::String(
+                        crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba),
+                    ),
+                );
+            }
+            // Hash final da WRAM ociosa (região 2, 0x10000 bytes): no título
+            // do HAMOOPIG o efeito do input é observável em ESTADO (WRAM),
+            // não no framebuffer — o canvas ocioso e com input são idênticos.
+            let (idle_wram, idle_wram_size) = core_idle
+                .read_memory(2, 0, 0x10000)
+                .expect("ler WRAM ociosa final");
+            core_idle.stop().expect("parar core ocioso");
+            rex_write_json(&idle_path, &serde_json::Value::Object(idle_hashes));
+            rex_write_json(
+                &idle_wram_path,
+                &serde_json::json!({
+                    "final_wram_sha256": crate::tools::reverse::decomp::rom_library::sha256_hex(&idle_wram),
+                    "final_wram_size": idle_wram_size,
+                    "note": "WRAM (região 2, 0x10000 bytes) ao final dos 180 frames ociosos"
+                }),
+            );
+        }
+
+        let report_a_path = artifact_root.join("capture-a.json");
+        rex_write_json(
+            &report_a_path,
+            &serde_json::to_value(&report_a).expect("report a"),
+        );
+        let equivalence_path = artifact_root.join("equivalence-report.json");
+        rex_write_json(
+            &equivalence_path,
+            &serde_json::to_value(&equivalence).expect("serialize equivalence"),
+        );
+
+        rex_register_reference_corpus(
+            &rom_sha,
+            rom_path.metadata().expect("rom metadata").len(),
+            "HAMOOPIG [VER.001] [SGDK 211] referencia padrao",
+            &rom_path,
+            "Referencia padrao escolhida pelo operador (GUARD-SGDK-EQUIVALENCE-01)",
+        );
+
+        let mut artifacts = vec![
+            crate::tools::reverse::equivalence::artifact_ref("input-script", &script_path)
+                .expect("artifact input script"),
+            crate::tools::reverse::equivalence::artifact_ref("capture-a", &report_a_path)
+                .expect("artifact capture a"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "equivalence-report",
+                &equivalence_path,
+            )
+            .expect("artifact equivalence"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "checkpoint-rgba-hashes",
+                &rgba_hashes_path,
+            )
+            .expect("artifact rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "all-frames-rgba-hashes",
+                &all_rgba_path,
+            )
+            .expect("artifact all frames rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "idle-all-frames-rgba-hashes",
+                &idle_path,
+            )
+            .expect("artifact idle frames rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "idle-final-wram-sha",
+                &idle_wram_path,
+            )
+            .expect("artifact idle wram sha"),
+        ];
+        for checkpoint in &checkpoint_artifacts {
+            artifacts.push(
+                crate::tools::reverse::equivalence::artifact_ref(
+                    &checkpoint
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .unwrap_or("checkpoint-frame"),
+                    checkpoint,
+                )
+                .expect("artifact checkpoint"),
+            );
+        }
+
+        let mut gaps = equivalence.gaps.clone();
+        if discrimination.status != "pass" {
+            gaps.push(format!(
+                "input_discrimination={}: {}",
+                discrimination.status, discrimination.detail
+            ));
+        }
+        let run_id = format!("rex00-hamoopig-{}", now_unix());
+        record_scenario_run(
+            &decomp_work_dir(),
+            ScenarioRunRecord {
+                run_id: run_id.clone(),
+                scenario_id: "rex00-hamoopig-same-rom-180f-input-v1".to_string(),
+                kind: "equivalence".to_string(),
+                reference_sha256: rom_sha.clone(),
+                candidate_sha256: Some(rom_sha.clone()),
+                input_script_sha256: Some(crate::tools::reverse::decomp::rom_library::sha256_hex(
+                    &fs::read(&script_path).expect("read script"),
+                )),
+                core_label: core_label.clone(),
+                core_sha256: core_sha.clone(),
+                frames: report_a.frames_run,
+                verdict: if equivalence.verdict == "passed" {
+                    SCENARIO_VERDICT_PASSED.to_string()
+                } else {
+                    equivalence.verdict.clone()
+                },
+                oracle_results: serde_json::to_value(&equivalence).expect("oracles"),
+                gaps,
+                artifacts,
+                executed_at_unix: now_unix(),
+                previous_run_id: None,
+                notes: "Prova mesma-ROM com input definido no caminho canonico; determinismo \
+                     exigido entre power-ons frescos (mesma ROM/core/script). ACHADO MEDIDO: \
+                     re-execucoes restauradas do mesmo savestate divergem de forma constante \
+                     neste core/titulo, entao restore de savestate NAO e gate de equivalencia. \
+                     NAO prova UI, gameplay completo, 60 FPS sustentados, decompilacao ou \
+                     reconstrucao por nos."
+                    .to_string(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: registrar run no ledger: {error}"));
+        eprintln!(
+            "REX HAMOOPIG ledger run: {run_id} (corpus {})",
+            corpus_identity(&rom_sha)
+        );
+    }
+
+    /// REX-00 negativo: a prévia regenerada do Taiketsu (import + build real,
+    /// cópia em tmp — o doador nunca é compilado no lugar) tem imagem não preta
+    /// e heartbeat, e AINDA ASSIM deve ser REJEITADA pelos oráculos contra a
+    /// referência. É a reprodução da perda aceita em GUARD-SGDK-EQUIVALENCE-01.
+    #[ignore]
+    #[test]
+    fn rex00_taiketsu_preview_rejected_by_equivalence_oracles() {
+        use crate::core::parity_harness::run_parity_capture;
+        use crate::emulator::libretro_ffi::EmulatorCore;
+        use crate::tools::reverse::decomp::rom_library::{
+            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, ScenarioRunRecord,
+            SCENARIO_VERDICT_REJECTED,
+        };
+        use crate::tools::reverse::equivalence::{
+            artifact_ref, evaluate_identical_equivalence, VERDICT_REJECTED,
+        };
+
+        let test_name = "rex00_taiketsu_preview_rejected_by_equivalence_oracles";
+        let Some((reference_path, reference_sha)) = rex_reference_rom(
+            "RDS_REX_TAIKETSU_ROM",
+            "/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/taiketsu/reference.bin",
+            "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c",
+            test_name,
+        ) else {
+            return;
+        };
+
+        // Regenera a prévia pelo fluxo existente da matriz (import + build SGDK
+        // real em projeto temporário; doador apenas lido).
+        let donor = sgdk_matrix_corpus_donor_path("TaiketsuUltraHeroGenesis/src");
+        let Some(preview_rom) = run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "rex00_taiketsu_preview_rejected_by_equivalence_oracles",
+            &donor,
+            "rex-taiketsu-preview",
+            "REX Taiketsu Preview",
+            "REX_TUH",
+        ) else {
+            return; // skip autorizado (doador ausente + RDS_SGDK_MATRIX_CORPUS_SKIP=1)
+        };
+        let preview_bytes = fs::read(&preview_rom).expect("read preview rom");
+        let preview_sha = crate::tools::reverse::decomp::rom_library::sha256_hex(&preview_bytes);
+        assert_ne!(
+            preview_sha, reference_sha,
+            "prévia regenerada não pode ser idêntica à referência para este negativo"
+        );
+
+        let artifact_root = validation_artifact_dir("rex-taiketsu-negative");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create rex negative artifact dir");
+
+        let script = rex_input_script_180f("rex00-taiketsu-negative-180f");
+        let script_path = artifact_root.join("input-script.rds-input.json");
+        rex_write_json(
+            &script_path,
+            &serde_json::to_value(&script).expect("serialize input script"),
+        );
+
+        let mut core = EmulatorCore::new(None);
+        core.load_rom(&reference_path)
+            .unwrap_or_else(|error| panic!("{test_name}: carregar referência: {error}"));
+        let initial_reference = core
+            .capture_runtime_state_bytes()
+            .expect("estado inicial ref");
+        let core_label = core.loaded_core_label().unwrap_or("unknown").to_string();
+        let core_sha = core
+            .loaded_core_file()
+            .and_then(|path| fs::read(path).ok())
+            .map(|bytes| crate::tools::reverse::decomp::rom_library::sha256_hex(&bytes));
+        let report_reference = run_parity_capture(
+            &mut core,
+            &reference_path,
+            &reference_sha,
+            &initial_reference,
+            &script.frames,
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: captura referência: {error}"));
+        core.stop().expect("parar core da referência");
+
+        let mut core_candidate = EmulatorCore::new(None);
+        core_candidate
+            .load_rom(&preview_rom)
+            .unwrap_or_else(|error| panic!("{test_name}: carregar prévia: {error}"));
+        let initial_candidate = core_candidate
+            .capture_runtime_state_bytes()
+            .expect("estado inicial prévia");
+        let report_candidate = run_parity_capture(
+            &mut core_candidate,
+            &preview_rom,
+            &preview_sha,
+            &initial_candidate,
+            &script.frames,
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: captura prévia: {error}"));
+        core_candidate.stop().expect("parar core da prévia");
+
+        let equivalence = evaluate_identical_equivalence(&report_reference, &report_candidate);
+        assert_eq!(
+            equivalence.verdict, VERDICT_REJECTED,
+            "prévia regenerada DEVE ser rejeitada pelos oráculos: {:?}",
+            equivalence.oracles
+        );
+        let behavior = equivalence
+            .oracles
+            .iter()
+            .find(|oracle| oracle.name == "behavior_frames")
+            .expect("behavior oracle");
+        assert_eq!(
+            behavior.status,
+            crate::tools::reverse::equivalence::ORACLE_STATUS_FAIL,
+            "comportamento deve divergir frame a frame"
+        );
+        // A superfície "viva" é o ponto do negativo: não-preto + heartbeat
+        // presentes e ainda assim rejeitada.
+        assert!(
+            equivalence.surface_evidence.candidate_max_non_black_pixels > 0,
+            "prévia precisa de framebuffer não preto para o negativo ter valor"
+        );
+        assert!(
+            equivalence.surface_evidence.candidate_distinct_framebuffers > 1,
+            "prévia precisa de heartbeat (frames evoluindo) para o negativo ter valor"
+        );
+        eprintln!(
+            "REX TAIKETSU negative: verdict={} behavior='{}' surface(non_black={}, distinct_frames={})",
+            equivalence.verdict,
+            behavior.detail,
+            equivalence.surface_evidence.candidate_max_non_black_pixels,
+            equivalence.surface_evidence.candidate_distinct_framebuffers
+        );
+
+        let report_reference_path = artifact_root.join("capture-reference.json");
+        rex_write_json(
+            &report_reference_path,
+            &serde_json::to_value(&report_reference).expect("serialize ref"),
+        );
+        let report_candidate_path = artifact_root.join("capture-preview.json");
+        rex_write_json(
+            &report_candidate_path,
+            &serde_json::to_value(&report_candidate).expect("serialize cand"),
+        );
+        let equivalence_path = artifact_root.join("equivalence-report.json");
+        rex_write_json(
+            &equivalence_path,
+            &serde_json::to_value(&equivalence).expect("serialize equivalence"),
+        );
+
+        rex_register_reference_corpus(
+            &reference_sha,
+            reference_path.metadata().expect("ref metadata").len(),
+            "TAIKETSU ULTRA HERO GENESIS [VER.001] [SGDK 211] referencia complementar",
+            &reference_path,
+            "Referencia complementar escolhida pelo operador (GUARD-SGDK-EQUIVALENCE-01)",
+        );
+
+        let run_id = format!("rex00-taiketsu-negative-{}", now_unix());
+        record_scenario_run(
+            &decomp_work_dir(),
+            ScenarioRunRecord {
+                run_id: run_id.clone(),
+                scenario_id: "rex00-taiketsu-preview-negative-180f-input-v1".to_string(),
+                kind: "negative".to_string(),
+                reference_sha256: reference_sha.clone(),
+                candidate_sha256: Some(preview_sha.clone()),
+                input_script_sha256: Some(crate::tools::reverse::decomp::rom_library::sha256_hex(
+                    &fs::read(&script_path).expect("read script"),
+                )),
+                core_label,
+                core_sha256: core_sha,
+                frames: report_reference.frames_run,
+                verdict: SCENARIO_VERDICT_REJECTED.to_string(),
+                oracle_results: serde_json::to_value(&equivalence).expect("oracles"),
+                gaps: equivalence.gaps.clone(),
+                artifacts: vec![
+                    artifact_ref("input-script", &script_path).expect("artifact script"),
+                    artifact_ref("capture-reference", &report_reference_path)
+                        .expect("artifact ref"),
+                    artifact_ref("capture-preview", &report_candidate_path).expect("artifact cand"),
+                    artifact_ref("equivalence-report", &equivalence_path)
+                        .expect("artifact equivalence"),
+                ],
+                executed_at_unix: now_unix(),
+                previous_run_id: None,
+                notes: format!(
+                    "Reproducao da perda da previa importada (GUARD-SGDK-EQUIVALENCE-01): \
+                     previa com non_black={} e heartbeat={} rejeitada pelos oraculos \
+                     independentes; previa sha256 {preview_sha}; corrida anterior: \
+                     target-test/validation/sgdk-taiketsu-real (heartbeat insuficiente).",
+                    equivalence.surface_evidence.candidate_max_non_black_pixels,
+                    equivalence.surface_evidence.candidate_distinct_framebuffers
+                ),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: registrar run no ledger: {error}"));
+        eprintln!(
+            "REX TAIKETSU ledger run: {run_id} (ref {}, previa {})",
+            corpus_identity(&reference_sha),
+            corpus_identity(&preview_sha)
+        );
+    }
+
+    /// REX-02: identificação Mega Drive por conteúdo nas referências reais,
+    /// independência de extensão e round-trip SMD reversível sobre bytes
+    /// reais. Os arquivos originais nunca são modificados (cópias em tmp).
+    #[ignore]
+    #[test]
+    fn rex02_md_references_identified_by_content_with_reversible_normalization() {
+        use crate::tools::reverse::decomp::rom_library::{
+            now_unix, record_scenario_run, ScenarioRunRecord, SCENARIO_VERDICT_PASSED,
+        };
+        use crate::tools::reverse::loader::{rex_identify_bytes, rex_identify_rom};
+
+        let test_name = "rex02_md_references_identified_by_content_with_reversible_normalization";
+        let artifact_root = validation_artifact_dir("rex-md-identification");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create rex02 artifact dir");
+
+        let references = [
+            (
+                "hamoopig",
+                "RDS_REX_HAMOOPIG_ROM",
+                "/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/hamoopig/reference.bin",
+                "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+            ),
+            (
+                "taiketsu",
+                "RDS_REX_TAIKETSU_ROM",
+                "/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/taiketsu/reference.bin",
+                "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c",
+            ),
+        ];
+
+        let mut summary = serde_json::Map::new();
+        for (label, env_key, default_path, expected_sha) in references {
+            let Some((rom_path, rom_sha)) =
+                rex_reference_rom(env_key, default_path, expected_sha, test_name)
+            else {
+                return; // skip explicitamente registrado por rex_reference_rom
+            };
+            rex_register_reference_corpus(
+                &rom_sha,
+                rom_path.metadata().expect("rom metadata").len(),
+                &format!("{label} referencia padrao/complementar"),
+                &rom_path,
+                "Identificacao por conteudo (REX-02); origem preservada",
+            );
+
+            // 1) identificação por conteúdo do arquivo real.
+            let identity = rex_identify_rom(&rom_path)
+                .unwrap_or_else(|error| panic!("{test_name}: identificar {label}: {error}"));
+            assert_eq!(identity.variant, "raw", "{label}: dump esperado raw");
+            assert!(identity.normalization.is_empty());
+            assert_eq!(identity.normalized_sha256, rom_sha);
+            assert!(identity.header_console.contains("SEGA"));
+            eprintln!(
+                "REX02 {label}: console='{}' title='{}' region={:?} version={:?} bytes={}",
+                identity.header_console,
+                identity.header_title,
+                identity.region,
+                identity.version,
+                identity.normalized_size
+            );
+
+            // 2) independência de extensão: cópias com extensões erradas em tmp
+            //    identificam idêntico por conteúdo.
+            let rom_bytes = fs::read(&rom_path).expect("read rom");
+            for wrong_ext in ["smd", "gen", "tmp"] {
+                let wrong = std::env::temp_dir().join(format!(
+                    "rex02-{label}-{}.{}",
+                    now_unix(),
+                    wrong_ext
+                ));
+                fs::write(&wrong, &rom_bytes).expect("write ext probe");
+                let probe = rex_identify_rom(&wrong)
+                    .unwrap_or_else(|error| panic!("{test_name}: extensão .{wrong_ext}: {error}"));
+                fs::remove_file(&wrong).ok();
+                assert_eq!(probe.variant, "raw");
+                assert_eq!(probe.normalized_sha256, rom_sha);
+                assert_eq!(probe.original_sha256, rom_sha);
+            }
+
+            // 3) round-trip SMD sobre bytes reais com construção
+            //    INDEPENDENTE do formato padrão 16 KiB (não usa o encoder do
+            //    produto): primeira metade do frame = bytes ímpares, segunda
+            //    = pares, com header de 512 bytes (REX-REV-01).
+            let mut interleaved = vec![0u8; 512];
+            for block in rom_bytes.chunks_exact(0x4000) {
+                interleaved.extend(block.iter().skip(1).step_by(2));
+                interleaved.extend(block.iter().step_by(2));
+            }
+            let encoded_path = artifact_root.join(format!("{label}-interleaved.smd"));
+            fs::write(&encoded_path, &interleaved).expect("write interleaved probe");
+            let smd_identity = rex_identify_bytes(&interleaved)
+                .unwrap_or_else(|error| panic!("{test_name}: smd probe {label}: {error}"));
+            assert_eq!(smd_identity.variant, "smd_interleaved_512");
+            assert_eq!(
+                smd_identity.normalized_sha256, rom_sha,
+                "normalização do .smd sintético devolve a ROM de referência"
+            );
+            let restored =
+                crate::tools::reverse::loader::rex_undo_normalization(&smd_identity, &rom_bytes)
+                    .unwrap_or_else(|error| panic!("{test_name}: undo {label}: {error}"));
+            assert_eq!(restored, interleaved, "undo byte-exato sobre bytes reais");
+            fs::remove_file(&encoded_path).ok();
+
+            rex_write_json(
+                &artifact_root.join(format!("{label}-identity.json")),
+                &serde_json::json!({
+                    "original_sha256": identity.original_sha256,
+                    "variant": identity.variant,
+                    "normalized_sha256": identity.normalized_sha256,
+                    "normalization_steps": identity.normalization,
+                    "header_console": identity.header_console,
+                    "header_title": identity.header_title,
+                    "region": identity.region,
+                    "version": identity.version,
+                    "smd_round_trip": {
+                        "encoded_variant": smd_identity.variant,
+                        "normalized_matches_reference": true,
+                        "undo_byte_exact": true
+                    }
+                }),
+            );
+            summary.insert(
+                label.to_string(),
+                serde_json::json!({
+                    "variant": identity.variant,
+                    "normalized_sha256": identity.normalized_sha256
+                }),
+            );
+        }
+
+        rex_write_json(
+            &artifact_root.join("rex02-identification-summary.json"),
+            &serde_json::Value::Object(summary),
+        );
+
+        record_scenario_run(
+            &crate::tools::reverse::decomp::rom_library::decomp_work_dir(),
+            ScenarioRunRecord {
+                run_id: format!("rex02-identification-{}", now_unix()),
+                scenario_id: "rex02-md-identification-v1".to_string(),
+                kind: "identification".to_string(),
+                reference_sha256:
+                    "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9".to_string(),
+                candidate_sha256: Some(
+                    "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c".to_string(),
+                ),
+                input_script_sha256: None,
+                core_label: String::new(),
+                core_sha256: None,
+                frames: 0,
+                verdict: SCENARIO_VERDICT_PASSED.to_string(),
+                oracle_results: serde_json::json!({
+                    "content_identification": "pass",
+                    "extension_independence": "pass",
+                    "smd_round_trip_on_real_bytes": "pass",
+                    "containers_zip_7z": "unsupported nesta fatia (erro explicito)"
+                }),
+                gaps: vec![
+                    "contêineres zip/7z/gzip não suportados sem dependência aprovada".to_string(),
+                    "regiões SRAM/EEPROM e variantes de mapeamento não inventariadas".to_string(),
+                ],
+                artifacts: vec![crate::tools::reverse::equivalence::artifact_ref(
+                    "identification-summary",
+                    &artifact_root.join("rex02-identification-summary.json"),
+                )
+                .expect("artifact summary")],
+                executed_at_unix: now_unix(),
+                previous_run_id: None,
+                notes: "REX-02: identificacao por conteudo nas duas referencias + round-trip \
+                        SMD reversivel em bytes reais. Nao cobre extracao, edicao, patch nem \
+                        hardware real."
+                    .to_string(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: registrar run no ledger: {error}"));
+    }
+
     #[derive(Debug, serde::Serialize, Clone)]
     struct SgdkCorpusRealBuildEntry {
         project_name: String,
@@ -23813,6 +25769,108 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         rgba.chunks_exact(4)
             .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
             .count()
+    }
+
+    /// A visible exception screen is not execution evidence. Read generated counters
+    /// from actual emulated RAM and require forward progress without residency errors.
+    fn corpus_libretro_residency_smoke(
+        rom_path: &Path,
+        artifact_root: &Path,
+    ) -> Result<(usize, String, u32, u32, u32, Vec<u8>), String> {
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+        let symbols = fs::read_to_string(rom_path.with_extension("symbols.txt"))
+            .map_err(|e| e.to_string())?;
+        let offset = |name: &str| -> Result<usize, String> {
+            for line in symbols.lines() {
+                let fields: Vec<_> = line.split_whitespace().collect();
+                if fields.last() == Some(&name) {
+                    let address =
+                        usize::from_str_radix(fields[0], 16).map_err(|e| e.to_string())?;
+                    if address & 0xff0000 != 0xff0000 {
+                        return Err(format!("{name} is not in Genesis work RAM"));
+                    }
+                    return Ok(address & 0xffff);
+                }
+            }
+            Err(format!("missing runtime symbol {name}"))
+        };
+        let heartbeat = offset("rds_residency_ticks")?;
+        let error = offset("rds_residency_error")?;
+        let mut emulator = EmulatorCore::new(None);
+        emulator.load_rom(rom_path)?;
+        for _ in 0..90 {
+            emulator.run_frame()?;
+        }
+        let before = emulator.read_memory(2, heartbeat, 2)?.0;
+        emulator.set_joypad(JoypadState {
+            right: true,
+            ..JoypadState::default()
+        })?;
+        for _ in 0..60 {
+            emulator.run_frame()?;
+        }
+        let after = emulator.read_memory(2, heartbeat, 2)?.0;
+        let residency_error = emulator.read_memory(2, error, 2)?.0;
+        let (buffer, size, format) = emulator.get_framebuffer()?;
+        let frame = framebuffer_to_rgba(&buffer, size, format);
+        write_rgba_ppm(
+            &artifact_root.join("taiketsu-frame.ppm"),
+            frame.width,
+            frame.height,
+            &frame.rgba,
+        );
+        fs::write(
+            artifact_root.join("runtime-execution.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "frames": 150, "heartbeat_before": before, "heartbeat_after": after,
+                "residency_error": residency_error, "right_input_frames": 60,
+                "scope": "generated imported resource preview, not original game equivalence"
+            }))
+            .map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let core = emulator
+            .loaded_core_label()
+            .unwrap_or("unknown")
+            .to_string();
+        emulator.stop()?;
+        validate_residency_progress(&before, &after, &residency_error)?;
+        Ok((
+            count_non_black_rgba_pixels(&frame.rgba),
+            core,
+            150,
+            frame.width,
+            frame.height,
+            frame.rgba,
+        ))
+    }
+
+    fn validate_residency_progress(
+        before: &[u8],
+        after: &[u8],
+        error: &[u8],
+    ) -> Result<(), String> {
+        if before.len() != 2 || after.len() != 2 || before == [0, 0] || before == after {
+            return Err(format!(
+                "game loop did not advance: {before:?} -> {after:?}"
+            ));
+        }
+        if error != [0, 0] {
+            return Err(format!("sprite residency failed: {error:?}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_evidence_rejects_frozen_exception_and_allocation_failure() {
+        // A visible exception screen can leave either a zero or an old nonzero
+        // heartbeat. Neither establishes progress, regardless of pixel count.
+        assert!(validate_residency_progress(&[0, 0], &[0, 0], &[0, 0]).is_err());
+        assert!(validate_residency_progress(&[52, 0], &[52, 0], &[0, 0]).is_err());
+        assert!(validate_residency_progress(&[52, 0], &[112, 0], &[1, 0]).is_err());
+        assert!(validate_residency_progress(&[], &[112, 0], &[0, 0]).is_err());
+        assert!(validate_residency_progress(&[52, 0], &[112, 0], &[0, 0]).is_ok());
     }
 
     fn corpus_libretro_visible_smoke(

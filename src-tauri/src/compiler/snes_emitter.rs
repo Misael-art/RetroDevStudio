@@ -399,6 +399,7 @@ fn build_main_c_with_collision(
                 max_velocity_y,
                 friction,
                 bounce,
+                floor_y: _,
             } => render_apply_physics(
                 &mut out,
                 &context,
@@ -410,6 +411,7 @@ fn build_main_c_with_collision(
                     max_velocity_y: *max_velocity_y,
                     friction: *friction,
                     bounce: *bounce,
+                    floor_y: None,
                 },
             ),
             AstNode::DrawText { x, y, text, .. } => {
@@ -1271,6 +1273,11 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     var_name = var_name,
                     value_expr = value_expr
                 ));
+            }
+            LogicOp::RomAddQWord { .. } => {
+                out.push_str(
+                    "#error \"Source Bridge blocks codegen: recovered M68K ROM logic profile is Mega Drive-only.\"\n",
+                );
             }
             LogicOp::WhileLoop {
                 condition,
@@ -2374,6 +2381,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.ppm".to_string(),
                     map_width: 64,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "background_tilemap".to_string(),
@@ -2718,6 +2726,7 @@ mod tests {
                     max_velocity_y: 96,
                     friction: 2,
                     bounce: 35,
+                    floor_y: None,
                 },
                 AstNode::SpriteUpdate,
                 AstNode::VSync,
@@ -2755,6 +2764,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2830,6 +2840,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2843,6 +2854,7 @@ mod tests {
                     asset_path: "assets/tilesets/foreground.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "foreground".to_string(),

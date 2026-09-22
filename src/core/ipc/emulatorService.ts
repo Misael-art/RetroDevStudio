@@ -10,6 +10,22 @@ export interface EmulatorCommandResult {
   diagnostics?: ActionableDiagnostic[];
 }
 
+export interface EmulatorObservationResult {
+  ok: boolean;
+  message: string;
+  rom_path: string;
+  rom_size: number;
+  rom_sha256: string;
+  core_label: string;
+  core_path: string;
+  frames_run: number;
+  framebuffer_width: number;
+  framebuffer_height: number;
+  framebuffer_sha256: string;
+  non_black_pixels: number;
+  framebuffer_rgba: number[];
+}
+
 export interface EmulatorMemoryResult {
   ok: boolean;
   data: number[];
@@ -68,6 +84,14 @@ export function emulatorRunFrame(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_run_frame");
 }
 
+export function emulatorRunFrames(frames: number): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_run_frames", { frames });
+}
+
+export function emulatorObserve(): Promise<EmulatorObservationResult> {
+  return invoke<EmulatorObservationResult>("emulator_observe");
+}
+
 export function emulatorSaveState(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_save_state");
 }
@@ -100,8 +124,18 @@ export function emulatorReadMemory(
   return invoke<EmulatorMemoryResult>("emulator_read_memory", { region, offset, length });
 }
 
-export function emulatorSendInput(joypad: JoypadState): Promise<EmulatorCommandResult> {
-  return invoke<EmulatorCommandResult>("emulator_send_input", { joypad });
+export function emulatorSendInput(
+  joypad: JoypadState,
+  sessionEpoch?: number
+): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_send_input", {
+    joypad,
+    sessionEpoch: sessionEpoch ?? null,
+  });
+}
+
+export function emulatorGetCoreEpoch(): Promise<number> {
+  return invoke<number>("emulator_get_core_epoch");
 }
 
 export function emulatorStop(): Promise<EmulatorCommandResult> {

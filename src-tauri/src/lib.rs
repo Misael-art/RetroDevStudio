@@ -58,7 +58,7 @@ use core::project_mgr::{
     ProjectTemplateSummary, SceneInfo, DEFAULT_ENTRY_SCENE,
 };
 use core::rom_mastering::{
-    inspect_rom_mastering as inspect_rom_mastering_impl, RomMasteringReport,
+    inspect_rom_mastering as inspect_rom_mastering_impl, sha256_hex, RomMasteringReport,
 };
 use core::runtime_contracts::{
     inspect_runtime_contracts as inspect_runtime_contracts_impl, RuntimeContractsReport,
@@ -126,10 +126,103 @@ pub struct GenerateResult {
     pub build_source_map: Option<BuildSourceMap>,
 }
 
+/// Época do core: incrementa a cada `emulator_load_rom`. Um `send_input`
+/// emitido numa época anterior é RECUSADO pelo backend (não é aplicado ao
+/// core novo) — fecha a corrida de um input em voo atravessar uma recarga.
+static CORE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Test-only: canais de sincronização para o gate de época em
+/// `send_input_if_current`. O sender sinaliza "atingiu o gate" via TX e
+/// aguarda a liberação via RX — sem sleep nem timing.
+#[cfg(test)]
+static EPOCH_TEST_GATE_TX: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>> =
+    std::sync::Mutex::new(None);
+#[cfg(test)]
+static EPOCH_TEST_GATE_RX: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>> =
+    std::sync::Mutex::new(None);
+
+impl EmulatorCoreState {
+    /// Aplica o joypad somente se a época do core ainda for `session_epoch`.
+    /// A conferência e a aplicação ocorrem na MESMA seção crítica do mutex do
+    /// core — o mesmo lock usado pela recarga, que incrementa a época. Assim,
+    /// um input antigo que chegue depois de uma recarga é recusado sob o
+    /// lock; a ordem "valida fora do lock" não é expressável neste caminho.
+    fn send_input_if_current(
+        &self,
+        session_epoch: Option<u64>,
+        joypad: JoypadState,
+    ) -> EmulatorCommandResult {
+        // Test-only gate: quando ativado, sinaliza "atingiu o ponto pré-lock"
+        // via canal e aguarda a liberação pelo teste em outro canal — sem
+        // depender de sleep nem de timing. Os canais são instalados pelo
+        // teste antes de spawnar o sender.
+        #[cfg(test)]
+        {
+            let arrived = EPOCH_TEST_GATE_TX.lock().unwrap().take();
+            if let Some(tx) = arrived {
+                let _ = tx.send(());
+                if let Some(rx) = EPOCH_TEST_GATE_RX.lock().unwrap().take() {
+                    let _ = rx.recv().unwrap(); // bloqueia até o teste liberar
+                }
+            }
+        }
+
+        let core = match self.0.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                return EmulatorCommandResult {
+                    ok: false,
+                    message: e.to_string(),
+                }
+            }
+        };
+
+        if let Some(epoch) = session_epoch {
+            let current = CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
+            if epoch != current {
+                return EmulatorCommandResult {
+                    ok: false,
+                    message: format!(
+                        "sessão de input obsoleta: emitida na época {epoch}, corrente é {current}"
+                    ),
+                };
+            }
+        }
+
+        match core.set_joypad(joypad) {
+            Ok(()) => EmulatorCommandResult {
+                ok: true,
+                message: String::new(),
+            },
+            Err(e) => EmulatorCommandResult {
+                ok: false,
+                message: e,
+            },
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct EmulatorCommandResult {
     pub ok: bool,
     pub message: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmulatorObservationResult {
+    pub ok: bool,
+    pub message: String,
+    pub rom_path: String,
+    pub rom_size: usize,
+    pub rom_sha256: String,
+    pub core_label: String,
+    pub core_path: String,
+    pub frames_run: u64,
+    pub framebuffer_width: u32,
+    pub framebuffer_height: u32,
+    pub framebuffer_sha256: String,
+    pub non_black_pixels: usize,
+    pub framebuffer_rgba: Vec<u8>,
 }
 
 #[derive(serde::Serialize)]
@@ -348,6 +441,19 @@ where
         .await
 }
 
+async fn run_heavy_inspection_command<T, F>(
+    command_name: &'static str,
+    task: F,
+) -> Result<T, tools::reverse::decomp::inspection::InspectionError>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    run_heavy_result_command(command_name, task)
+        .await
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
 fn interrupted_build_result() -> BuildResult {
     BuildResult {
         ok: false,
@@ -428,15 +534,25 @@ fn emulator_load_rom(rom_path: String, emu: State<EmulatorCoreState>) -> Emulato
     };
 
     match core.load_rom(Path::new(&rom_path)) {
-        Ok(()) => EmulatorCommandResult {
-            ok: true,
-            message: match core.loaded_core_label() {
-                Some(label) if !label.is_empty() => {
-                    format!("ROM carregada: {} ({})", rom_path, label)
-                }
-                _ => format!("ROM carregada: {}", rom_path),
-            },
-        },
+        Ok(()) => {
+            // Nova época: inputs emitidos antes da recarga passam a ser
+            // recusados pelo send_input (ver CORE_EPOCH).
+            CORE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // Política de carga: controles voltam ao neutro. Um `send_input`
+            // que tenha atravessado a recarga (mutex serializa com o load)
+            // é neutralizado aqui — o core novo nunca herda joypad da
+            // sessão anterior.
+            let _ = core.set_joypad(crate::emulator::libretro_ffi::JoypadState::default());
+            EmulatorCommandResult {
+                ok: true,
+                message: match core.loaded_core_label() {
+                    Some(label) if !label.is_empty() => {
+                        format!("ROM carregada: {} ({})", rom_path, label)
+                    }
+                    _ => format!("ROM carregada: {}", rom_path),
+                },
+            }
+        }
         Err(e) => EmulatorCommandResult {
             ok: false,
             message: e,
@@ -475,6 +591,179 @@ fn emulator_run_frame(app: AppHandle, emu: State<EmulatorCoreState>) -> Emulator
     EmulatorCommandResult {
         ok: true,
         message: String::new(),
+    }
+}
+
+/// Executa vários frames sem atravessar o IPC uma vez por frame. O frontend
+/// ainda observa o framebuffer somente depois do lote terminar; inputs
+/// discretos continuam passando por `emulator_send_input` entre lotes.
+#[tauri::command]
+fn emulator_run_frames(frames: u32, emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
+    };
+
+    let frame_count = frames.min(10_000);
+    if frame_count == 0 {
+        return EmulatorCommandResult {
+            ok: true,
+            message: "Nenhum frame solicitado.".to_string(),
+        };
+    }
+
+    for _ in 0..frame_count {
+        if let Err(error) = core.run_frame() {
+            return EmulatorCommandResult {
+                ok: false,
+                message: error,
+            };
+        }
+    }
+
+    EmulatorCommandResult {
+        ok: true,
+        message: format!("{frame_count} frame(s) executado(s) no core ativo."),
+    }
+}
+
+/// Observa o estado real após a execução: identidade da ROM e do core,
+/// avanço de frames e o framebuffer RGBA produzido pelo core. Esta chamada
+/// não infere sucesso a partir da mensagem de `emulator_run_frame`.
+#[tauri::command]
+fn emulator_observe(emu: State<EmulatorCoreState>) -> EmulatorObservationResult {
+    let core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(error) => {
+            return EmulatorObservationResult {
+                ok: false,
+                message: error.to_string(),
+                rom_path: String::new(),
+                rom_size: 0,
+                rom_sha256: String::new(),
+                core_label: String::new(),
+                core_path: String::new(),
+                frames_run: 0,
+                framebuffer_width: 0,
+                framebuffer_height: 0,
+                framebuffer_sha256: String::new(),
+                non_black_pixels: 0,
+                framebuffer_rgba: Vec::new(),
+            };
+        }
+    };
+
+    let Some(rom_path) = core.loaded_rom_path() else {
+        return EmulatorObservationResult {
+            ok: false,
+            message: "Nenhuma ROM carregada para observação.".to_string(),
+            rom_path: String::new(),
+            rom_size: 0,
+            rom_sha256: String::new(),
+            core_label: String::new(),
+            core_path: String::new(),
+            frames_run: core.frame_index(),
+            framebuffer_width: 0,
+            framebuffer_height: 0,
+            framebuffer_sha256: String::new(),
+            non_black_pixels: 0,
+            framebuffer_rgba: Vec::new(),
+        };
+    };
+
+    let rom_bytes = match fs::read(&rom_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return EmulatorObservationResult {
+                ok: false,
+                message: format!(
+                    "Falha ao reler ROM carregada '{}': {error}",
+                    rom_path.display()
+                ),
+                rom_path: rom_path.display().to_string(),
+                rom_size: 0,
+                rom_sha256: String::new(),
+                core_label: core.loaded_core_label().unwrap_or_default().to_string(),
+                core_path: core
+                    .loaded_core_file()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+                frames_run: core.frame_index(),
+                framebuffer_width: 0,
+                framebuffer_height: 0,
+                framebuffer_sha256: String::new(),
+                non_black_pixels: 0,
+                framebuffer_rgba: Vec::new(),
+            };
+        }
+    };
+
+    let (framebuffer, size, pixel_format) = match core.get_framebuffer() {
+        Ok(value) => value,
+        Err(error) => {
+            return EmulatorObservationResult {
+                ok: false,
+                message: format!("Falha ao observar framebuffer: {error}"),
+                rom_path: rom_path.display().to_string(),
+                rom_size: rom_bytes.len(),
+                rom_sha256: sha256_hex(&rom_bytes),
+                core_label: core.loaded_core_label().unwrap_or_default().to_string(),
+                core_path: core
+                    .loaded_core_file()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+                frames_run: core.frame_index(),
+                framebuffer_width: 0,
+                framebuffer_height: 0,
+                framebuffer_sha256: String::new(),
+                non_black_pixels: 0,
+                framebuffer_rgba: Vec::new(),
+            };
+        }
+    };
+    let frame = framebuffer_to_rgba(&framebuffer, size, pixel_format);
+    let non_black_pixels = frame
+        .rgba
+        .chunks_exact(4)
+        .filter(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
+        .count();
+    let rom_sha256 = sha256_hex(&rom_bytes);
+    let framebuffer_sha256 = sha256_hex(&frame.rgba);
+    let core_label = core.loaded_core_label().unwrap_or_default().to_string();
+    let core_path = core
+        .loaded_core_file()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    let frames_run = core.frame_index();
+
+    EmulatorObservationResult {
+        ok: true,
+        message: format!(
+            "ROM {} carregada no core {}; {} frame(s), framebuffer {}x{}, {} pixel(s) não pretos, RGBA SHA-256 {}.",
+            rom_path.display(),
+            core_label,
+            frames_run,
+            frame.width,
+            frame.height,
+            non_black_pixels,
+            framebuffer_sha256
+        ),
+        rom_path: rom_path.display().to_string(),
+        rom_size: rom_bytes.len(),
+        rom_sha256,
+        core_label,
+        core_path,
+        frames_run,
+        framebuffer_width: frame.width,
+        framebuffer_height: frame.height,
+        framebuffer_sha256,
+        non_black_pixels,
+        framebuffer_rgba: frame.rgba,
     }
 }
 
@@ -1560,28 +1849,31 @@ fn emulator_get_execution_trace(
 #[tauri::command]
 fn emulator_send_input(
     joypad: JoypadState,
+    session_epoch: Option<u64>,
     emu: State<EmulatorCoreState>,
 ) -> EmulatorCommandResult {
-    let core = match emu.0.lock() {
-        Ok(c) => c,
-        Err(e) => {
-            return EmulatorCommandResult {
-                ok: false,
-                message: e.to_string(),
-            }
-        }
-    };
+    emulator_send_input_command(&emu, joypad, session_epoch)
+}
 
-    match core.set_joypad(joypad) {
-        Ok(()) => EmulatorCommandResult {
-            ok: true,
-            message: String::new(),
-        },
-        Err(e) => EmulatorCommandResult {
-            ok: false,
-            message: e,
-        },
-    }
+fn emulator_send_input_command(
+    emu: &EmulatorCoreState,
+    joypad: JoypadState,
+    session_epoch: Option<u64>,
+) -> EmulatorCommandResult {
+    // A conferência de época e a aplicação acontecem DENTRO da mesma seção
+    // crítica do mutex do core (a mesma usada pela recarga, que incrementa a
+    // época). Validar antes do lock permitia: input antigo valida → recarga
+    // troca o core e incrementa a época → input aplica controles antigos ao
+    // core novo (corrida P1 da revisão 1a1fc65). A ordem "valida fora do
+    // lock" deixa de ser expressável: o único caminho de aplicação é este
+    // método, que recebe o guard por dentro.
+    emu.send_input_if_current(session_epoch, joypad)
+}
+
+/// Época corrente do core (incrementa a cada carga de ROM).
+#[tauri::command]
+fn emulator_get_core_epoch() -> u64 {
+    CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Para o emulador e limpa o framebuffer.
@@ -1621,6 +1913,7 @@ use tools::patch_studio::{
     apply_bps_file, apply_ips_file, create_bps_file_compliance, create_ips_file_compliance,
     PatchResult,
 };
+use tools::reverse::decomp::logic_recovery::{LogicPatchResult, LogicRecoveryResult};
 use tools::reverse::{
     AudioCandidate, CallGraphEdge, CodeXref, DisassemblyResult, GraphicsCandidate,
     ReverseAnnotation, RomAnalysisManifest, TextCandidate,
@@ -1868,6 +2161,34 @@ async fn rom_disassemble(
 }
 
 #[tauri::command]
+async fn rom_recover_logic(rom_path: String, offset: usize) -> Result<LogicRecoveryResult, String> {
+    run_heavy_result_command("rom_recover_logic", move || {
+        tools::reverse::decomp::logic_recovery::recover_logic(&rom_path, offset)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rom_patch_recovered_logic(
+    rom_path: String,
+    output_path: String,
+    expected_sha256: String,
+    offset: usize,
+    immediate: u8,
+) -> Result<LogicPatchResult, String> {
+    run_heavy_result_command("rom_patch_recovered_logic", move || {
+        tools::reverse::decomp::logic_recovery::patch_logic(
+            &rom_path,
+            &output_path,
+            &expected_sha256,
+            offset,
+            immediate,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 async fn rom_get_xrefs(rom_path: String) -> Result<Vec<CodeXref>, String> {
     run_heavy_result_command("rom_get_xrefs", move || {
         tools::reverse::get_xrefs(&rom_path)
@@ -1912,6 +2233,186 @@ async fn rom_extract_audio(rom_path: String) -> Result<Vec<AudioCandidate>, Stri
 }
 
 #[tauri::command]
+async fn rex_inspection_open(
+    rom_path: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_open", move || {
+        tools::reverse::decomp::inspection::open(&rom_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_reopen(
+    rom_path: String,
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_reopen", move || {
+        tools::reverse::decomp::inspection::reopen(&rom_path, &session_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_start(
+    app: AppHandle,
+    session_id: String,
+    generation: u64,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionRun,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::start(app, &session_id, generation)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_cancel(
+    session_id: String,
+    run_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionRun,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::cancel(&session_id, &run_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_status(
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionStatus,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::status(&session_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_list_sessions() -> Result<
+    Vec<tools::reverse::decomp::inspection::InspectionSession>,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::list_sessions()
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+async fn rex_inspection_catalog_page(
+    session_id: String,
+    offset: usize,
+    limit: usize,
+    query: String,
+    kind: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionCatalogPage,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_catalog_page", move || {
+        tools::reverse::decomp::inspection::catalog_page(&session_id, offset, limit, &query, &kind)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_preview(
+    session_id: String,
+    candidate_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionPreview,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_preview", move || {
+        tools::reverse::decomp::inspection::preview(&session_id, &candidate_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_inspection_sprite_frame(
+    session_id: String,
+    resource_id: String,
+    frame_id: String,
+    flip_x: bool,
+    flip_y: bool,
+) -> Result<
+    tools::reverse::decomp::sprite_composition::InspectionSpriteFrame,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    run_heavy_inspection_command("rex_inspection_sprite_frame", move || {
+        tools::reverse::decomp::inspection::sprite_frame(
+            &session_id,
+            &resource_id,
+            &frame_id,
+            flip_x,
+            flip_y,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+fn rex_inspection_save_palette_choice(
+    session_id: String,
+    tile_candidate_id: String,
+    palette_candidate_id: String,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionUserChoice,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::save_palette_choice(
+        &session_id,
+        &tile_candidate_id,
+        &palette_candidate_id,
+    )
+    .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_save(
+    session_id: String,
+    sprite_frame_id: Option<String>,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionSession,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::save(&session_id, sprite_frame_id.as_deref())
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_edit_sonic_palette(
+    session_id: String,
+    resource_id: String,
+    frame_id: String,
+    palette_index: u8,
+    red: u8,
+    green: u8,
+    blue: u8,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionEdit,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::edit_sonic_palette(
+        &session_id,
+        &resource_id,
+        &frame_id,
+        palette_index,
+        red,
+        green,
+        blue,
+    )
+    .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
 fn rom_save_annotations(
     rom_path: String,
     annotations: Vec<ReverseAnnotation>,
@@ -1935,6 +2436,64 @@ fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, St
     collect_project_assets(&assets_dir, &assets_dir, &mut entries)?;
     entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     Ok(entries)
+}
+
+fn normalize_project_asset_path(relative_path: &str) -> Result<PathBuf, String> {
+    let trimmed = relative_path.trim();
+    if trimmed.is_empty() {
+        return Err("Caminho de asset vazio.".to_string());
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in Path::new(trimmed).components() {
+        match component {
+            Component::Normal(value) => normalized.push(value),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "Caminho de asset '{}' saiu da raiz autorizada.",
+                    relative_path
+                ));
+            }
+        }
+    }
+
+    let normalized_text = normalized.to_string_lossy().replace('\\', "/");
+    if normalized_text != "assets" && !normalized_text.starts_with("assets/") {
+        return Err(format!(
+            "Asset '{}' deve permanecer dentro de assets/.",
+            relative_path
+        ));
+    }
+    Ok(normalized)
+}
+
+#[tauri::command]
+fn read_project_asset_bytes(project_dir: String, relative_path: String) -> Result<Vec<u8>, String> {
+    let project_root = core::project_asset_scope::resolve_project_asset_root(project_dir.trim())?;
+    let relative_path = normalize_project_asset_path(&relative_path)?;
+    let assets_root = project_root.join("assets");
+    let asset_path = project_root.join(&relative_path);
+    let canonical_asset = fs::canonicalize(&asset_path).map_err(|error| {
+        format!(
+            "Asset '{}' nao encontrado: {}",
+            relative_path.display(),
+            error
+        )
+    })?;
+    if !canonical_asset.starts_with(&assets_root) || !canonical_asset.is_file() {
+        return Err(format!(
+            "Asset '{}' nao pertence ao escopo autorizado.",
+            relative_path.display()
+        ));
+    }
+    fs::read(&canonical_asset).map_err(|error| {
+        format!(
+            "Falha ao ler asset '{}': {}",
+            relative_path.display(),
+            error
+        )
+    })
 }
 
 const LEGACY_TEXT_PREVIEW_LIMIT: usize = 128 * 1024;
@@ -4412,6 +4971,8 @@ pub fn run() {
             // Emulator
             emulator_load_rom,
             emulator_run_frame,
+            emulator_run_frames,
+            emulator_observe,
             emulator_save_state,
             emulator_load_state,
             emulator_rewind_step,
@@ -4423,6 +4984,7 @@ pub fn run() {
             parity_run_reference_candidate,
             parity_run_cycle_report,
             emulator_read_memory,
+            emulator_get_core_epoch,
             emulator_get_execution_trace,
             emulator_send_input,
             emulator_stop,
@@ -4478,13 +5040,28 @@ pub fn run() {
             rom_analyze,
             rom_analyze_with_emulator_trace,
             rom_disassemble,
+            rom_recover_logic,
+            rom_patch_recovered_logic,
             rom_get_xrefs,
             rom_get_call_graph,
             rom_extract_graphics,
             rom_extract_text,
             rom_extract_audio,
             rom_save_annotations,
+            rex_inspection_open,
+            rex_inspection_reopen,
+            rex_inspection_start,
+            rex_inspection_cancel,
+            rex_inspection_status,
+            rex_inspection_list_sessions,
+            rex_inspection_catalog_page,
+            rex_inspection_preview,
+            rex_inspection_sprite_frame,
+            rex_inspection_save_palette_choice,
+            rex_inspection_save,
+            rex_inspection_edit_sonic_palette,
             list_project_assets,
+            read_project_asset_bytes,
             open_project_source_path,
             read_legacy_project_file,
             third_party_get_status,
@@ -7456,15 +8033,16 @@ pub extern "C" fn retro_run() {
     fn list_project_templates_returns_registry_entries() {
         let templates = list_project_templates().expect("list project templates");
 
-        assert_eq!(templates.len(), 8);
+        assert_eq!(templates.len(), 9);
         assert_eq!(templates[0].id, "empty");
         assert_eq!(templates[1].id, "starter_guided");
-        assert_eq!(templates[2].id, "platformer_seed");
-        assert_eq!(templates[3].id, "rpg_seed");
-        assert_eq!(templates[4].id, "fighter_seed");
-        assert_eq!(templates[5].id, "racing_seed");
-        assert_eq!(templates[6].id, "action_seed");
-        assert_eq!(templates[7].id, "platformer_gm");
+        assert_eq!(templates[2].id, "reference_platformer");
+        assert_eq!(templates[3].id, "platformer_seed");
+        assert_eq!(templates[4].id, "rpg_seed");
+        assert_eq!(templates[5].id, "fighter_seed");
+        assert_eq!(templates[6].id, "racing_seed");
+        assert_eq!(templates[7].id, "action_seed");
+        assert_eq!(templates[8].id, "platformer_gm");
     }
 
     #[test]
@@ -8168,6 +8746,102 @@ pub extern "C" fn retro_run() {
         let _ = fs::remove_dir_all(donor_dir);
     }
 
+    /// Prova manual do caminho canônico com o template builtin completo e o
+    /// toolchain SGDK detectado no host. Mantemos `ignored` porque a suíte
+    /// normal não pode depender da instalação local de SGDK.
+    ///
+    /// `cargo test --manifest-path src-tauri/Cargo.toml reference_platformer_real_toolchain_build --lib -- --ignored --nocapture --test-threads=1`
+    #[ignore]
+    #[test]
+    fn reference_platformer_real_toolchain_build() {
+        let project_base_dir = temp_dir("reference-platformer-real-build");
+        let create_result = create_project_from_template(
+            "Reference Platformer".to_string(),
+            "megadrive".to_string(),
+            project_base_dir.to_string_lossy().to_string(),
+            "reference_platformer".to_string(),
+            None,
+        )
+        .expect("create reference platformer project");
+        let project_dir = PathBuf::from(&create_result.path);
+        let environment = BuildEnvironment::detect();
+        assert!(
+            environment
+                .sgdk_root
+                .as_ref()
+                .is_some_and(|root| root.join("makefile.gen").is_file())
+                && environment.sgdk_make_program.is_some(),
+            "official SGDK real nao detectado; esta prova nao aceita fake toolchain"
+        );
+
+        let build_result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(
+            build_result.ok,
+            "reference build failed: {:?}",
+            build_result.log
+        );
+        let rom_path = PathBuf::from(&build_result.rom_path);
+        let rom_path = if rom_path.is_absolute() {
+            rom_path
+        } else {
+            project_dir.join(rom_path)
+        };
+        let rom_bytes = fs::read(&rom_path).expect("read reference ROM");
+        assert!(
+            rom_bytes.windows(4).any(|window| window == b"SEGA"),
+            "reference ROM deve conter assinatura SEGA: {}",
+            rom_path.display()
+        );
+
+        let mut emulator = EmulatorCore::new(None);
+        emulator
+            .load_rom(&rom_path)
+            .expect("load reference ROM in the official Libretro core");
+        emulator.run_frame().expect("run reference idle frame");
+        let (before_input, _, _) = emulator
+            .get_framebuffer()
+            .expect("capture reference idle framebuffer");
+        emulator
+            .set_joypad(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            })
+            .expect("set reference right input");
+        for _ in 0..45 {
+            emulator.run_frame().expect("run reference gameplay frame");
+        }
+        let (after_input, size, pixel_format) = emulator
+            .get_framebuffer()
+            .expect("capture reference gameplay framebuffer");
+        let (audio_sample_rate, audio_samples) = emulator
+            .take_audio_samples()
+            .expect("capture reference audio stream");
+        assert!(
+            audio_sample_rate > 0 && !audio_samples.is_empty(),
+            "reference game should deliver a non-empty audio stream from the authored theme"
+        );
+        let audio_non_zero_samples = audio_samples.iter().filter(|sample| **sample != 0).count();
+        assert!(
+            audio_non_zero_samples > 0,
+            "reference game audio stream must not be silent"
+        );
+        assert_ne!(
+            before_input, after_input,
+            "the reference game framebuffer should respond to right input"
+        );
+        let frame = framebuffer_to_rgba(&after_input, size, pixel_format);
+        assert!(
+            frame
+                .rgba
+                .chunks_exact(4)
+                .any(|pixel| { pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0 }),
+            "reference game framebuffer must not be empty"
+        );
+        emulator.stop().expect("stop reference emulator");
+
+        let _ = fs::remove_dir_all(project_base_dir);
+    }
+
     #[test]
     fn diff_asset_fingerprints_detects_added_changed_and_removed_assets() {
         let previous = HashMap::from([
@@ -8223,5 +8897,172 @@ pub extern "C" fn retro_run() {
 
         assert!(snapshot.is_empty());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    // ── Corrida de época no send_input (re-revisão 1a1fc65, P1) ──────────────
+
+    use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+    use std::sync::atomic::Ordering;
+
+    /// Serializa os testes que tocam CORE_EPOCH (estático de processo): sem
+    /// este guard, o harness paralelo deixa os testes invalidarem a época uns
+    /// dos outros (revisão de e39f2b5: "um teste pode invalidar a época do
+    /// outro").
+    static CORE_EPOCH_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Força as interleavings da corrida de época (revisor 1a1fc65): a época
+    /// muda ENTRE a captura do frontend e a execução sob o lock. Teste único
+    /// porque CORE_EPOCH é estático de processo — os cenários executam em
+    /// sequência fixa.
+    #[test]
+    fn send_input_epoch_race_is_refused_under_lock_without_applying() {
+        let _guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
+        let state = EmulatorCoreState(std::sync::Mutex::new(EmulatorCore::new(None)));
+
+        // Cenário 1: frontend capturou a época 4; a recarga levou o core para
+        // 5 entre a captura e a execução. Conferência sob o lock deve recusar
+        // sem aplicar o input ao core novo.
+        CORE_EPOCH.store(5, Ordering::SeqCst);
+        let stale = state.send_input_if_current(
+            Some(4),
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+        );
+        assert!(!stale.ok, "época obsoleta deve ser recusada");
+        assert!(stale.message.contains("obsoleta"), "{}", stale.message);
+        assert!(
+            !state.0.lock().unwrap().current_joypad().right,
+            "input obsoleto não pode ser aplicado ao core novo"
+        );
+
+        // Cenário 2 (controle): época corrente é aplicada normalmente.
+        let applied = state.send_input_if_current(
+            Some(5),
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+        );
+        assert!(applied.ok);
+        assert!(state.0.lock().unwrap().current_joypad().right);
+
+        // Cenário 3: a conferência acontece DENTRO da seção crítica — um load
+        // que incrementa a época depois do lock do send invalida o send que
+        // ainda vai aplicar.
+        CORE_EPOCH.store(9, Ordering::SeqCst);
+        let captured_current = Some(9u64);
+        CORE_EPOCH.store(10, Ordering::SeqCst);
+        let invalidated = state.send_input_if_current(captured_current, JoypadState::default());
+        assert!(
+            !invalidated.ok,
+            "época capturada antes da recarga deve ser recusada"
+        );
+        assert!(
+            invalidated.message.contains('9') && invalidated.message.contains("10"),
+            "recusa cita as duas épocas: {}",
+            invalidated.message
+        );
+    }
+
+    /// Regressão da ORDEM DEFETUOSA com o comando REAL e sincronização
+    /// determinística via gate de canais instalado antes do spawn: o sender
+    /// pausa no hook pré-lock dentro de `send_input_if_current` (imediatamente
+    /// antes de adquirir o mutex do core), o teste confirma a chegada,
+    /// incrementa a época — SEM segurar o mutex do core: a ordem é controlada
+    /// pelo hook, não pelo lock — e libera o gate. O sender então adquire o
+    /// mutex, valida sob o lock vendo a época já incrementada e recusa. No
+    /// código com validação antes do lock (regressão), a validação roda ANTES
+    /// do hook, com a época ainda 1, e o input é aplicado quando o lock é
+    /// adquirido — o teste FALHA.
+    #[test]
+    fn send_input_command_refuses_epoch_bumped_after_prelock_hook() {
+        use std::sync::mpsc;
+
+        let _epoch_guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
+        let state = std::sync::Arc::new(EmulatorCoreState(std::sync::Mutex::new(
+            EmulatorCore::new(None),
+        )));
+        CORE_EPOCH.store(1, Ordering::SeqCst);
+        let captured_before_reload = Some(1u64);
+
+        // Instala AMBAS as metades do gate ANTES de spawnar o sender:
+        // - chegada: TX vai no gate (o sender sinaliza), RX fica com o teste;
+        // - liberação: RX vai no gate (o sender aguarda), TX fica com o teste.
+        // Se a metade de liberação fosse instalada depois, o sender passaria
+        // direto pelo gate (RX ausente) e o teste não pausaria nada.
+        let (gate_tx, gate_rx) = mpsc::channel::<()>();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        *EPOCH_TEST_GATE_TX.lock().unwrap() = Some(gate_tx);
+        *EPOCH_TEST_GATE_RX.lock().unwrap() = Some(release_rx);
+
+        // Sender: chama o comando REAL. No código corrigido, pausa no gate,
+        // adquire o mutex após a liberação, valida 1 vs 2 → recusa.
+        let state_sender = std::sync::Arc::clone(&state);
+        let sender = std::thread::spawn(move || {
+            emulator_send_input_command(
+                &state_sender,
+                JoypadState {
+                    right: true,
+                    ..JoypadState::default()
+                },
+                captured_before_reload,
+            )
+        });
+
+        // Aguarda confirmação EXPLÍCITA de que o sender atingiu o gate.
+        gate_rx
+            .recv()
+            .expect("sender não sinalizou chegada ao gate");
+
+        // Incrementa a época com o sender pausado no gate (antes do mutex).
+        CORE_EPOCH.store(2, Ordering::SeqCst);
+
+        // Libera o gate: o sender adquire o mutex e valida contra a época 2.
+        release_tx.send(()).expect("gate já encerrado");
+
+        let result = sender.join().unwrap();
+
+        assert!(
+            !result.ok,
+            "VAZAMENTO: send validou com a época antiga (1) e aplicou input depois de o core ter sido incrementado para 2: {}",
+            result.message
+        );
+        assert!(result.message.contains("obsoleta"), "{}", result.message);
+        let joypad = state.0.lock().unwrap().current_joypad();
+        assert!(
+            !joypad.right,
+            "input obsoleto não pode ser aplicado ao core novo"
+        );
+    }
+    /// Sequencial: época capturada antes do incremento → recusa sem aplicar.
+    /// Cobertura do contrato de época.
+    #[test]
+    fn send_input_refuses_epoch_captured_before_increment() {
+        let _guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
+        let state = EmulatorCoreState(std::sync::Mutex::new(EmulatorCore::new(None)));
+
+        CORE_EPOCH.store(1, Ordering::SeqCst);
+        let captured = CORE_EPOCH.load(Ordering::SeqCst);
+        CORE_EPOCH.store(2, Ordering::SeqCst);
+
+        let result = state.send_input_if_current(
+            Some(captured),
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+        );
+        assert!(
+            !result.ok,
+            "época capturada antes do incremento deve ser recusada: {}",
+            result.message
+        );
+        assert!(result.message.contains("obsoleta"), "{}", result.message);
+        assert!(
+            !state.0.lock().unwrap().current_joypad().right,
+            "input obsoleto não pode ser aplicado ao core novo"
+        );
     }
 }

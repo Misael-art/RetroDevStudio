@@ -467,6 +467,9 @@ export default function ViewportPanel({
     hwStatus,
     emulatorLoaded,
     setEmulatorLoaded,
+    emulatorRomIdentity,
+    lastJoypadRequest,
+    lastJoypadAck,
     selectedEntityId,
     setSelectedEntityId,
     updateEntity,
@@ -509,18 +512,24 @@ export default function ViewportPanel({
   const sceneRulerTopRef = useRef<HTMLCanvasElement>(null);
   const sceneRulerLeftRef = useRef<HTMLCanvasElement>(null);
   const [sceneStageSize, setSceneStageSize] = useState({ width: 0, height: 0 });
+  const [renderedFrameCount, setRenderedFrameCount] = useState(0);
   const stopLoopRef = useRef<(() => void) | null>(null);
+  const renderedFrameCounterRef = useRef(0);
   const loopStartingRef = useRef(false);
   const loopTokenRef = useRef(0);
   const activeTabRef = useRef(activeViewportTab);
   const pausedRef = useRef(emulPaused);
   const joypadRef = useRef<JoypadState>(JOYPAD_DEFAULT);
+  const joypadSeqRef = useRef(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioGainRef = useRef<GainNode | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const audioUnlistenRef = useRef<(() => void) | null>(null);
   const audioQueueRef = useRef<QueuedAudioChunk[]>([]);
   const assetCacheRef = useRef<Map<string, ViewportAssetCacheEntry>>(new Map());
+  // Fallback Image() e benigno (assets acabam renderizando); um unico aviso evita
+  // poluir o console com uma linha por asset em cenas importadas densas.
+  const assetFallbackWarnedRef = useRef(false);
   const dragRef = useRef<{
     mode: "move" | "resize";
     entityId: string;
@@ -1372,10 +1381,13 @@ export default function ViewportPanel({
             markFailure("missing", `fetch retornou 404 para ${assetUrl}.`);
             return;
           }
-          logMessage(
-            "warn",
-            `[Viewport] fetch do asset '${relativePath}' falhou (${detail}); tentando fallback Image().`
-          );
+          if (!assetFallbackWarnedRef.current) {
+            assetFallbackWarnedRef.current = true;
+            logMessage(
+              "warn",
+              `[Viewport] fetch de asset falhou (${detail}); usando fallback Image() automaticamente. Primeiro asset: '${relativePath}'. Demais avisos identicos agregados.`
+            );
+          }
           loadImageElement(assetUrl);
         });
       return cacheEntry;
@@ -1562,6 +1574,11 @@ export default function ViewportPanel({
     imageData.data.set(new Uint8Array(payload.rgba));
     context.putImageData(imageData, 0, 0);
 
+    renderedFrameCounterRef.current += 1;
+    if (renderedFrameCounterRef.current % 10 === 0) {
+      setRenderedFrameCount(renderedFrameCounterRef.current);
+    }
+
     const now = performance.now();
     if (frameTimingRef.current.lastFrameAt > 0) {
       const deltaMs = now - frameTimingRef.current.lastFrameAt;
@@ -1572,6 +1589,11 @@ export default function ViewportPanel({
     }
     frameTimingRef.current.lastFrameAt = now;
   }, []);
+
+  useEffect(() => {
+    renderedFrameCounterRef.current = 0;
+    setRenderedFrameCount(0);
+  }, [emulatorRomIdentity?.sha256]);
 
   const clearAudioQueue = useCallback(() => {
     audioQueueRef.current = [];
@@ -1722,6 +1744,10 @@ export default function ViewportPanel({
   const startEmulatorLoop = useCallback(
     (logStartup: boolean) => {
       if (!emulatorLoaded || loopStartingRef.current || stopLoopRef.current) return;
+      // Sessão carregada pausada não inicia o loop livre: o primeiro frame só
+      // executa via controle visível (Step/Retomar). Sem este gate, uma carga
+      // programática pausada teria frames fantasma antes da primeira ação.
+      if (pausedRef.current) return;
 
       const token = loopTokenRef.current + 1;
       loopTokenRef.current = token;
@@ -1986,6 +2012,53 @@ export default function ViewportPanel({
   useEffect(() => {
     if (activeViewportTab !== "game") return;
 
+    // A confirmação só é registrada quando o backend responde `ok: true`.
+    // `emulator_send_input` sinaliza falha por valor resolvido, não por
+    // rejeição, então tratar apenas o catch deixaria recusa passar como
+    // sucesso. A sequência descarta ack atrasado de transição anterior.
+    function sendJoypad(updated: JoypadState) {
+      // A sessão é capturada aqui, no fechamento do envio: se um stop ou uma
+      // recarga de ROM ocorrer antes da resolução, a resposta chega carregando
+      // a época antiga e é descartada pelo store.
+      const inputState = useEditorStore.getState();
+      const sessionId = inputState.joypadSessionId;
+      if (!sessionId || inputState.joypadSessionHold) {
+        // Envio durante carga/stop: bloqueado e contado — nunca registrado
+        // como request nem aceito como ack na janela de transição.
+        inputState.recordJoypadBlocked();
+        return;
+      }
+      const seq = (joypadSeqRef.current += 1);
+      const snapshot: Record<string, boolean> = { ...updated };
+      useEditorStore.getState().recordJoypadRequest(sessionId, seq, snapshot);
+      // A época do core vai junto: se uma recarga acontecer no meio do voo,
+      // o backend RECUSA (ok: false) em vez de aplicar input ao core novo.
+      emulatorSendInput(updated, useEditorStore.getState().coreEpoch ?? undefined).then(
+        (result) => {
+          if (result?.ok) {
+            useEditorStore.getState().recordJoypadAck(sessionId, seq, snapshot);
+          } else {
+            useEditorStore
+              .getState()
+              .recordJoypadSendError(
+                sessionId,
+                seq,
+                result?.message || "emulator_send_input retornou ok: false",
+              );
+          }
+        },
+        (sendError: unknown) => {
+          useEditorStore
+            .getState()
+            .recordJoypadSendError(
+              sessionId,
+              seq,
+              sendError instanceof Error ? sendError.message : String(sendError),
+            );
+        },
+      );
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       if (
         !event.repeat &&
@@ -2006,7 +2079,7 @@ export default function ViewportPanel({
 
       event.preventDefault();
       joypadRef.current = updated;
-      emulatorSendInput(updated).catch(() => {});
+      sendJoypad(updated);
     }
 
     function onKeyUp(event: KeyboardEvent) {
@@ -2014,7 +2087,7 @@ export default function ViewportPanel({
       if (!updated) return;
 
       joypadRef.current = updated;
-      emulatorSendInput(updated).catch(() => {});
+      sendJoypad(updated);
     }
 
     window.addEventListener("keydown", onKeyDown);
@@ -4479,6 +4552,7 @@ export default function ViewportPanel({
                 <button
                   key={tool.id}
                   type="button"
+                  data-testid={`viewport-tool-${tool.id}`}
                   onClick={() => setEditorMode(tool.id)}
                   className={`rounded px-2 py-1 text-[10px] font-semibold transition-all ${
                     editorMode === tool.id
@@ -4871,6 +4945,7 @@ export default function ViewportPanel({
                   {activeProjectDir && activeTilemapEntityForPalette?.components.tilemap ? (
                     <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#0b0f19]">
                       <TilePalette
+                        projectDir={activeProjectDir}
                         tilesetAbsolutePath={resolveProjectAssetPath(
                           activeProjectDir,
                           activeTilemapEntityForPalette.components.tilemap.tileset
@@ -5397,6 +5472,22 @@ export default function ViewportPanel({
                 </span>
               )}
               <span>Z=A | X=B | C=C | Enter=Start | Setas=D-Pad | R=Rewind (pausado)</span>
+            </div>
+            <div
+              data-testid="viewport-emulator-identity"
+              data-rom-path={emulatorRomIdentity?.path ?? ""}
+              data-rom-sha256={emulatorRomIdentity?.sha256 ?? ""}
+              data-rom-size={emulatorRomIdentity?.size ?? 0}
+              data-core-label={emulatorRomIdentity?.coreLabel ?? ""}
+              data-core-path={emulatorRomIdentity?.corePath ?? ""}
+              data-rendered-frames={renderedFrameCount}
+              data-last-input-request-seq={lastJoypadRequest?.seq ?? 0}
+              data-last-input-ack-seq={lastJoypadAck?.seq ?? 0}
+              className="break-all rounded border border-[#313244] bg-[#0b1020] px-2 py-1 font-mono text-[9px] text-[#94a3b8]"
+            >
+              {emulatorRomIdentity
+                ? `${emulatorRomIdentity.sourceLabel} · ROM ${emulatorRomIdentity.sha256} · ${emulatorRomIdentity.size} bytes · ${emulatorRomIdentity.coreLabel} · frames renderizados ${renderedFrameCount} · input ACK ${lastJoypadAck?.seq ?? 0}`
+                : "Identidade da ROM ainda não observada"}
             </div>
           </div>
         )}

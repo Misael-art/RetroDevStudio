@@ -20,6 +20,7 @@ pub enum AstNode {
         asset_path: String,
         map_width: u32,
         map_height: u32,
+        cells: Vec<u32>,
     },
     LoadSpritesheet {
         resource_name: String,
@@ -79,6 +80,7 @@ pub enum AstNode {
         max_velocity_y: i32,
         friction: i32,
         bounce: i32,
+        floor_y: Option<i32>,
     },
     SetAnimation {
         var_name: String,
@@ -144,6 +146,7 @@ pub struct TilemapAsset {
     pub asset_path: String,
     pub map_width: u32,
     pub map_height: u32,
+    pub cells: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +196,7 @@ pub struct PhysicsApplication {
     pub max_velocity_y: i32,
     pub friction: i32,
     pub bounce: i32,
+    pub floor_y: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,6 +285,13 @@ pub enum LogicOp {
     SetVar {
         var_name: String,
         value: LogicMathExpr,
+    },
+    /// Exact 16-bit ADDQ semantics recovered from the bounded M68K profile.
+    /// The generated runtime keeps the upper half of the variable intact and
+    /// exposes the five affected flags as sibling variables.
+    RomAddQWord {
+        var_name: String,
+        immediate: u8,
     },
     WhileLoop {
         condition: LogicBoolExpr,
@@ -570,6 +581,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                     asset_path: tilemap.tileset.clone(),
                     map_width: tilemap.map_width,
                     map_height: tilemap.map_height,
+                    cells: tilemap.cells.clone(),
                 });
                 tilemap_resource_names.insert(tilemap.tileset.clone(), resource_name.clone());
 
@@ -578,6 +590,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                     asset_path: tilemap.tileset.clone(),
                     map_width: tilemap.map_width,
                     map_height: tilemap.map_height,
+                    cells: tilemap.cells.clone(),
                 });
             }
 
@@ -649,7 +662,11 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         }
 
         if let Some(physics) = &entity.components.physics {
-            physics_applications.push(physics_application(&var_name, physics));
+            physics_applications.push(physics_application(
+                &var_name,
+                physics,
+                scene.collision_map.as_ref(),
+            ));
         }
     }
 
@@ -725,6 +742,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                 max_velocity_y: application.max_velocity_y,
                 friction: application.friction,
                 bounce: application.bounce,
+                floor_y: application.floor_y,
             }),
     );
     nodes.extend(logic_output.runtime_nodes.iter().cloned());
@@ -810,12 +828,29 @@ fn animation_frame_time(project_fps: u32, animation_fps: u32) -> u32 {
     ((project_fps + (animation_fps / 2)) / animation_fps).max(1)
 }
 
-fn physics_application(var_name: &str, physics: &PhysicsComponent) -> PhysicsApplication {
+fn physics_application(
+    var_name: &str,
+    physics: &PhysicsComponent,
+    collision_map: Option<&crate::ugdm::entities::CollisionMap>,
+) -> PhysicsApplication {
     let (max_velocity_x, max_velocity_y) = physics
         .max_velocity
         .as_ref()
         .map(|velocity| (velocity.x, velocity.y))
         .unwrap_or((i16::MAX as i32, i16::MAX as i32));
+
+    let floor_y = collision_map.and_then(|map| {
+        let solid_rows = map
+            .data
+            .chunks(map.width as usize)
+            .map(|row| row.iter().any(|cell| *cell != 0))
+            .collect::<Vec<_>>();
+        let mut floor_row = solid_rows.iter().rposition(|solid| *solid)?;
+        while floor_row > 0 && solid_rows[floor_row - 1] {
+            floor_row -= 1;
+        }
+        Some(floor_row as i32 * i32::from(map.tile_height) - 16)
+    });
 
     PhysicsApplication {
         var_name: var_name.to_string(),
@@ -825,6 +860,7 @@ fn physics_application(var_name: &str, physics: &PhysicsComponent) -> PhysicsApp
         max_velocity_y,
         friction: physics.friction,
         bounce: physics.bounce,
+        floor_y,
     }
 }
 
@@ -1501,6 +1537,25 @@ fn compile_logic_node(
                 target_var: var_name.clone(),
                 dx: param_i32(node, "dx", 0),
                 dy: param_i32(node, "dy", 0),
+            }))
+        }
+        "rom_addq_word" => {
+            let register = param_string(node, "register").unwrap_or_default();
+            let width_bits = param_i32(node, "width_bits", 0);
+            let immediate = param_i32(node, "immediate", 0);
+            if register != "D0" || width_bits != 16 || !(1..=8).contains(&immediate) {
+                return Some(CompiledLogicNode::Linear(LogicOp::SourceBridgeError {
+                    gap: "rom_addq_word exige register=D0, width_bits=16 e immediate entre 1 e 8"
+                        .to_string(),
+                    source_file: "ROM recovery profile".to_string(),
+                    source_line: 0,
+                }));
+            }
+            Some(CompiledLogicNode::Linear(LogicOp::RomAddQWord {
+                var_name: sanitize_identifier(
+                    &param_string(node, "var_name").unwrap_or_else(|| "rom_d0".to_string()),
+                ),
+                immediate: immediate as u8,
             }))
         }
         "input_held" | "input_pressed" | "input_command" => {
@@ -2439,6 +2494,7 @@ fn collect_unsupported_from_ops(
                 }
             }
             LogicOp::MoveSprite { .. }
+            | LogicOp::RomAddQWord { .. }
             | LogicOp::SetAnimationState { .. }
             | LogicOp::CameraFollow { .. }
             | LogicOp::HideSprite { .. }
@@ -2576,11 +2632,13 @@ pub fn collect_tilemap_assets(ast: &AstOutput) -> Vec<TilemapAsset> {
                 asset_path,
                 map_width,
                 map_height,
+                cells,
             } => Some(TilemapAsset {
                 resource_name: resource_name.clone(),
                 asset_path: asset_path.clone(),
                 map_width: *map_width,
                 map_height: *map_height,
+                cells: cells.clone(),
             }),
             _ => None,
         })
@@ -2654,6 +2712,7 @@ fn collect_logic_sound_names_from_ops(
                 sound_names.insert(sfx.clone());
             }
             LogicOp::SetVar { .. }
+            | LogicOp::RomAddQWord { .. }
             | LogicOp::SetSpritePosition { .. }
             | LogicOp::SetVelocity { .. }
             | LogicOp::SetAnimationState { .. }
@@ -2735,6 +2794,7 @@ pub fn collect_physics_applications(ast: &AstOutput) -> Vec<PhysicsApplication> 
                 max_velocity_y,
                 friction,
                 bounce,
+                floor_y,
             } => Some(PhysicsApplication {
                 var_name: var_name.clone(),
                 gravity: *gravity,
@@ -2743,6 +2803,7 @@ pub fn collect_physics_applications(ast: &AstOutput) -> Vec<PhysicsApplication> 
                 max_velocity_y: *max_velocity_y,
                 friction: *friction,
                 bounce: *bounce,
+                floor_y: *floor_y,
             }),
             _ => None,
         })
@@ -3307,6 +3368,7 @@ mod tests {
                 max_velocity_y: 96,
                 friction: 2,
                 bounce: 35,
+                floor_y: None,
             }]
         );
         assert!(ast.nodes.iter().any(|node| matches!(
@@ -3319,6 +3381,7 @@ mod tests {
                 max_velocity_y,
                 friction,
                 bounce,
+                ..
             } if var_name == "spr_hero"
                 && *gravity
                 && *gravity_strength == 6

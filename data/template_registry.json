@@ -24,6 +24,17 @@
       "experimental": false
     },
     {
+      "id": "reference_platformer",
+      "name": "Jogo de Referência — Plataforma",
+      "description": "Pequeno jogo autocontido com personagem animado, movimento, salto, colisão, tilemap, câmera, áudio e objetivo por NodeGraph.",
+      "genre": "platformer",
+      "difficulty": "beginner",
+      "features": ["sprite", "animation", "tilemap", "physics", "collision", "input", "audio", "camera", "goal", "logic"],
+      "source_kind": "builtin",
+      "recommended_target": "megadrive",
+      "experimental": true
+    },
+    {
       "id": "platformer_seed",
       "name": "Plataforma",
       "description": "Sprite de personagem, tilemap de cenario e som de pulo importados de template SGDK externo. Mega Drive only.",

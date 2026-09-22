@@ -823,6 +823,7 @@ export default function HierarchyPanel({
                                 </span>
                                 <button
                                   type="button"
+                                  data-testid={`hierarchy-tilemap-edit-${entity.entity_id}`}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     setSelectedEntityId(entity.entity_id);

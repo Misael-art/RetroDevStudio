@@ -1054,6 +1054,16 @@ impl EmulatorCore {
         Ok(())
     }
 
+    /// Estado corrente do joypad (leitura; usado por testes de regressão da
+    /// corrida de época e por observabilidade).
+    #[allow(dead_code)]
+    pub fn current_joypad(&self) -> JoypadState {
+        self.handle
+            .lock()
+            .map(|state| state.joypad.clone())
+            .unwrap_or_default()
+    }
+
     pub fn stop(&mut self) -> Result<(), String> {
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown();
@@ -1107,6 +1117,10 @@ impl EmulatorCore {
             .ok()
             .filter(|state| !state.rom_path.is_empty())
             .map(|state| PathBuf::from(&state.rom_path))
+    }
+
+    pub fn frame_index(&self) -> u64 {
+        self.rewind.frame_index
     }
 
     pub fn execution_trace_capture(&self) -> RuntimeExecutionTraceCapture {
