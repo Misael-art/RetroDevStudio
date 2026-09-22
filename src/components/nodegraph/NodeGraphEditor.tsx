@@ -1589,7 +1589,7 @@ function NodeCard({
                 {node.type === "condition_compare" &&
                 node.params.authoring_origin === "authored_builtin_reference_platformer" &&
                 k === "b"
-                  ? "Limiar de score"
+                  ? "Pontos para abrir passagem"
                   : getNodeParamDisplayName(k)}
               </span>
               {((node.type === "rom_branch_compare_word" && k === "threshold") ||

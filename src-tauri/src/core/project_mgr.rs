@@ -33,6 +33,7 @@ pub const PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/platformer_level.png
 pub const PLATFORMER_JUMP_ASSET: &str = "assets/audio/jump.wav";
 pub const REFERENCE_PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/reference_player.ppm";
 pub const REFERENCE_PLATFORMER_GOAL_ASSET: &str = "assets/sprites/reference_goal.ppm";
+pub const REFERENCE_PLATFORMER_PASSAGE_ASSET: &str = "assets/sprites/reference_passage.ppm";
 pub const REFERENCE_PLATFORMER_GOAL_SOUND_ASSET: &str = "assets/audio/reference_goal.wav";
 pub const REFERENCE_PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/reference_level.ppm";
 pub const REFERENCE_PLATFORMER_JUMP_ASSET: &str = "assets/audio/reference_jump.wav";
@@ -14852,6 +14853,11 @@ pub fn seed_reference_platformer_template(
     )?;
     write_reference_asset(
         project_dir,
+        REFERENCE_PLATFORMER_PASSAGE_ASSET,
+        reference_passage_ppm(),
+    )?;
+    write_reference_asset(
+        project_dir,
         REFERENCE_PLATFORMER_TILESET_ASSET,
         reference_tileset_ppm(),
     )?;
@@ -14877,6 +14883,16 @@ pub fn seed_reference_platformer_template(
         &reference_player_prefab(),
     )?;
     save_prefab_entity(project_dir, "reference_goal.json", &reference_goal_prefab())?;
+    save_prefab_entity(
+        project_dir,
+        "reference_passage.json",
+        &reference_passage_prefab(),
+    )?;
+    save_prefab_entity(
+        project_dir,
+        "reference_goal_sensor.json",
+        &reference_goal_sensor_prefab(),
+    )?;
     save_prefab_entity(
         project_dir,
         "reference_camera.json",
@@ -14962,6 +14978,18 @@ fn reference_goal_ppm() -> Vec<u8> {
             [248, 190, 48]
         } else {
             [20, 28, 44]
+        }
+    })
+}
+
+fn reference_passage_ppm() -> Vec<u8> {
+    reference_ppm(16, 32, |x, y| {
+        if x == 0 || x == 15 || y == 0 || y == 31 {
+            [236, 226, 208]
+        } else if (y / 4 + x / 4) % 2 == 0 {
+            [184, 52, 56]
+        } else {
+            [126, 34, 48]
         }
     })
 }
@@ -15096,7 +15124,11 @@ fn reference_player_prefab() -> Entity {
                 offset: None,
                 solid: true,
                 layer: Some("player".to_string()),
-                collides_with: vec!["ground".to_string(), "goal".to_string()],
+                collides_with: vec![
+                    "ground".to_string(),
+                    "passage".to_string(),
+                    "goal_sensor".to_string(),
+                ],
             }),
             input: Some(InputComponent {
                 device: "joypad1".to_string(),
@@ -15133,8 +15165,8 @@ fn reference_player_prefab() -> Entity {
                 logic_hints: vec![
                     "right/left input moves the player".to_string(),
                     "A triggers jump velocity and jump sound".to_string(),
-                    "overlap with goal sets goal_reached and plays goal sound".to_string(),
-                    "authored score threshold opens the goal passage".to_string(),
+                    "overlap with the separate goal sensor sets goal_reached and plays goal sound".to_string(),
+                    "the closed passage blocker prevents movement until the authored score threshold is reached".to_string(),
                 ],
                 external_source_refs: Vec::new(),
                 imported_semantics: None,
@@ -15178,7 +15210,7 @@ fn reference_goal_prefab() -> Entity {
         entity_id: "reference_goal_prefab".to_string(),
         display_name: Some("Goal Flag".to_string()),
         prefab: None,
-        transform: Transform { x: 232, y: 160 },
+        transform: Transform { x: 144, y: 184 },
         components: Components {
             sprite: Some(SpriteComponent {
                 asset: REFERENCE_PLATFORMER_GOAL_ASSET.to_string(),
@@ -15203,13 +15235,69 @@ fn reference_goal_prefab() -> Entity {
                 meta_sprite: false,
                 commands: Vec::new(),
             }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_passage_prefab() -> Entity {
+    Entity {
+        entity_id: "reference_passage_prefab".to_string(),
+        display_name: Some("Passage Blocker".to_string()),
+        prefab: None,
+        transform: Transform { x: 50, y: 168 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: REFERENCE_PLATFORMER_PASSAGE_ASSET.to_string(),
+                frame_width: 16,
+                frame_height: 32,
+                pivot: None,
+                palette_slot: 3,
+                animations: BTreeMap::from([(
+                    "closed".to_string(),
+                    AnimationDef {
+                        frames: vec![0],
+                        fps: 1,
+                        looping: true,
+                        frame_durations: None,
+                        loop_start: None,
+                        mugen_frames: None,
+                        onion_skin: None,
+                        hitboxes: Vec::new(),
+                    },
+                )]),
+                priority: "foreground".to_string(),
+                meta_sprite: false,
+                commands: Vec::new(),
+            }),
+            collision: Some(CollisionComponent {
+                shape: "aabb".to_string(),
+                width: 16,
+                height: 32,
+                offset: None,
+                solid: true,
+                layer: Some("passage".to_string()),
+                collides_with: vec!["player".to_string()],
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_goal_sensor_prefab() -> Entity {
+    Entity {
+        entity_id: "reference_goal_sensor_prefab".to_string(),
+        display_name: Some("Goal Completion Sensor".to_string()),
+        prefab: None,
+        transform: Transform { x: 144, y: 184 },
+        components: Components {
             collision: Some(CollisionComponent {
                 shape: "aabb".to_string(),
                 width: 16,
                 height: 16,
                 offset: None,
                 solid: false,
-                layer: Some("goal".to_string()),
+                layer: Some("goal_sensor".to_string()),
                 collides_with: vec!["player".to_string()],
             }),
             ..Components::default()
@@ -15287,6 +15375,15 @@ fn reference_platformer_scene() -> Scene {
                 "#F8BE30".to_string(),
             ],
         },
+        PaletteEntry {
+            slot: 3,
+            colors: vec![
+                "#141C2C".to_string(),
+                "#F5E6D4".to_string(),
+                "#B83438".to_string(),
+                "#7E2230".to_string(),
+            ],
+        },
     ];
     scene.layers = Some(vec![
         SceneLayer {
@@ -15305,7 +15402,12 @@ fn reference_platformer_scene() -> Scene {
             visible: true,
             locked: false,
             depth: 1,
-            entity_ids: vec!["player".to_string(), "goal".to_string()],
+            entity_ids: vec![
+                "player".to_string(),
+                "passage_blocker".to_string(),
+                "goal".to_string(),
+                "goal_sensor".to_string(),
+            ],
         },
         SceneLayer {
             id: "layer_camera".to_string(),
@@ -15333,10 +15435,24 @@ fn reference_platformer_scene() -> Scene {
             components: Components::default(),
         },
         Entity {
+            entity_id: "passage_blocker".to_string(),
+            display_name: Some("Closed Passage Blocker".to_string()),
+            prefab: Some("reference_passage.json".to_string()),
+            transform: Transform { x: 50, y: 168 },
+            components: Components::default(),
+        },
+        Entity {
             entity_id: "goal".to_string(),
-            display_name: Some("Goal Flag".to_string()),
+            display_name: Some("Goal Marker".to_string()),
             prefab: Some("reference_goal.json".to_string()),
-            transform: Transform { x: 232, y: 160 },
+            transform: Transform { x: 144, y: 184 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "goal_sensor".to_string(),
+            display_name: Some("Goal Completion Sensor".to_string()),
+            prefab: Some("reference_goal_sensor.json".to_string()),
+            transform: Transform { x: 144, y: 184 },
             components: Components::default(),
         },
         Entity {
@@ -15375,6 +15491,9 @@ fn reference_platformer_logic_graph() -> String {
             { "id": "music", "type": "action_music", "label": "Play Theme", "x": 180, "y": 0, "params": { "action": "play", "track": "reference_theme", "fade_ms": 0 } },
             { "id": "update_right", "type": "event_update", "label": "Update Right", "x": 0, "y": 160, "params": {} },
             { "id": "right", "type": "input_held", "label": "Hold Right", "x": 180, "y": 140, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+            { "id": "passage_collision", "type": "condition_overlap", "label": "Contact Closed Passage", "x": 360, "y": 120, "params": { "a": "player", "b": "passage_blocker" } },
+            { "id": "passage_open_value", "type": "var_get", "label": "Read Passage State", "x": 540, "y": 40, "params": { "var_name": "goal_open" } },
+            { "id": "passage_open", "type": "condition_compare", "label": "Passage Is Open", "x": 720, "y": 80, "params": { "operator": "==", "b": 1 } },
             { "id": "move_right", "type": "sprite_move", "label": "Move Right", "x": 360, "y": 140, "params": { "target": "player", "dx": 2, "dy": 0 } },
             { "id": "update_left", "type": "event_update", "label": "Update Left", "x": 0, "y": 300, "params": {} },
             { "id": "left", "type": "input_held", "label": "Hold Left", "x": 180, "y": 280, "params": { "pad": "JOY_1", "button": "BUTTON_LEFT" } },
@@ -15388,35 +15507,44 @@ fn reference_platformer_logic_graph() -> String {
             { "id": "score_get", "type": "var_get", "label": "Read Reference Score", "x": 360, "y": 820, "params": { "var_name": "reference_score", "semantic": "current score accumulated from real right input" } },
             { "id": "score_add", "type": "logic_math", "label": "Add One Point", "x": 540, "y": 760, "params": { "operator": "+", "b": 1, "semantic": "one point per consumed right-input frame" } },
             { "id": "score_set", "type": "var_set", "label": "Write Reference Score", "x": 720, "y": 700, "params": { "var_name": "reference_score", "value": 0 } },
+            { "id": "score_threshold_get", "type": "var_get", "label": "Read Updated Score", "x": 900, "y": 820, "params": { "var_name": "reference_score", "semantic": "read the stored post-increment value; do not add again" } },
             { "id": "score_threshold", "type": "condition_compare", "label": "Score Opens Passage", "x": 900, "y": 700, "params": { "operator": ">=", "b": 6, "authoring_origin": "authored_builtin_reference_platformer", "semantic": "reference_score >= threshold opens the goal passage", "source_path": "graphs/reference_platformer_logic.json", "source_line": 24 } },
-            { "id": "open_goal", "type": "var_set", "label": "Mark Passage Open", "x": 1100, "y": 650, "params": { "var_name": "goal_open", "value": 1, "semantic": "the real goal sprite is hidden after the threshold branch" } },
-            { "id": "hide_goal", "type": "destroy_entity", "label": "Open Goal Passage", "x": 1300, "y": 650, "params": { "target": "goal", "semantic": "hide the real goal sprite in the running ROM" } },
-            { "id": "close_goal", "type": "var_set", "label": "Keep Passage Closed", "x": 1100, "y": 780, "params": { "var_name": "goal_open", "value": 0, "semantic": "the false branch preserves the visible goal" } },
+            { "id": "open_goal", "type": "var_set", "label": "Mark Passage Open", "x": 1100, "y": 650, "params": { "var_name": "goal_open", "value": 1, "semantic": "the threshold opens the passage blocker and enables movement through its AABB" } },
+            { "id": "hide_goal", "type": "destroy_entity", "label": "Hide Passage Blocker", "x": 1300, "y": 650, "params": { "target": "passage_blocker", "semantic": "hide only the passage blocker after collision gating allows traversal" } },
+            { "id": "close_goal", "type": "var_set", "label": "Keep Passage Closed", "x": 1100, "y": 780, "params": { "var_name": "goal_open", "value": 0, "semantic": "the false branch preserves the visible passage blocker" } },
             { "id": "update_goal", "type": "event_update", "label": "Update Goal", "x": 0, "y": 580, "params": {} },
-            { "id": "goal_overlap", "type": "condition_overlap", "label": "Reach Goal", "x": 180, "y": 560, "params": { "a": "player", "b": "goal" } },
-            { "id": "goal_sound", "type": "action_sound", "label": "Goal Sound", "x": 360, "y": 540, "params": { "sfx": "goal_sound" } },
-            { "id": "mark_goal", "type": "var_set", "label": "Goal Reached", "x": 540, "y": 540, "params": { "var_name": "goal_reached", "value": 1 } }
+            { "id": "goal_overlap", "type": "condition_overlap", "label": "Reach Goal Sensor", "x": 180, "y": 560, "params": { "a": "player", "b": "goal_sensor" } },
+            { "id": "goal_state_get", "type": "var_get", "label": "Read Win State", "x": 360, "y": 650, "params": { "var_name": "goal_reached" } },
+            { "id": "goal_not_reached", "type": "condition_compare", "label": "First Goal Contact", "x": 540, "y": 560, "params": { "operator": "==", "b": 0, "semantic": "play the goal event only before the win state is recorded" } },
+            { "id": "goal_sound", "type": "action_sound", "label": "Goal Sound", "x": 720, "y": 540, "params": { "sfx": "goal_sound" } },
+            { "id": "mark_goal", "type": "var_set", "label": "Record Objective Complete", "x": 900, "y": 540, "params": { "var_name": "goal_reached", "value": 1, "semantic": "persistent win condition set by the separate objective sensor" } }
         ],
         "edges": [
             { "id": "start_music", "fromNode": "start", "fromPort": "exec", "toNode": "music", "toPort": "exec" },
             { "id": "right_input", "fromNode": "update_right", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
-            { "id": "right_move", "fromNode": "right", "fromPort": "exec", "toNode": "move_right", "toPort": "exec" },
+            { "id": "right_contact", "fromNode": "right", "fromPort": "exec", "toNode": "passage_collision", "toPort": "exec" },
+            { "id": "right_clear", "fromNode": "passage_collision", "fromPort": "false", "toNode": "move_right", "toPort": "exec" },
+            { "id": "right_blocked", "fromNode": "passage_collision", "fromPort": "true", "toNode": "passage_open", "toPort": "exec" },
+            { "id": "passage_open_state", "fromNode": "passage_open_value", "fromPort": "value", "toNode": "passage_open", "toPort": "a" },
+            { "id": "right_open", "fromNode": "passage_open", "fromPort": "true", "toNode": "move_right", "toPort": "exec" },
             { "id": "left_input", "fromNode": "update_left", "fromPort": "exec", "toNode": "left", "toPort": "exec" },
             { "id": "left_move", "fromNode": "left", "fromPort": "exec", "toNode": "move_left", "toPort": "exec" },
             { "id": "jump_input", "fromNode": "update_jump", "fromPort": "exec", "toNode": "jump", "toPort": "exec" },
             { "id": "jump_velocity", "fromNode": "jump", "fromPort": "exec", "toNode": "jump_velocity", "toPort": "exec" },
             { "id": "jump_sound", "fromNode": "jump_velocity", "fromPort": "exec", "toNode": "jump_sound", "toPort": "exec" },
             { "id": "score_input", "fromNode": "update_score", "fromPort": "exec", "toNode": "score_input", "toPort": "exec" },
-            { "id": "score_write", "fromNode": "score_input", "fromPort": "true", "toNode": "score_set", "toPort": "exec" },
+            { "id": "score_write", "fromNode": "score_input", "fromPort": "exec", "toNode": "score_set", "toPort": "exec" },
             { "id": "score_read", "fromNode": "score_get", "fromPort": "value", "toNode": "score_add", "toPort": "a" },
             { "id": "score_increment", "fromNode": "score_add", "fromPort": "value", "toNode": "score_set", "toPort": "value" },
-            { "id": "score_compare_value", "fromNode": "score_add", "fromPort": "value", "toNode": "score_threshold", "toPort": "a" },
+            { "id": "score_compare_value", "fromNode": "score_threshold_get", "fromPort": "value", "toNode": "score_threshold", "toPort": "a" },
             { "id": "score_branch", "fromNode": "score_set", "fromPort": "exec", "toNode": "score_threshold", "toPort": "exec" },
             { "id": "score_open", "fromNode": "score_threshold", "fromPort": "true", "toNode": "open_goal", "toPort": "exec" },
             { "id": "goal_hide", "fromNode": "open_goal", "fromPort": "exec", "toNode": "hide_goal", "toPort": "exec" },
             { "id": "score_closed", "fromNode": "score_threshold", "fromPort": "false", "toNode": "close_goal", "toPort": "exec" },
             { "id": "goal_input", "fromNode": "update_goal", "fromPort": "exec", "toNode": "goal_overlap", "toPort": "exec" },
-            { "id": "goal_sound", "fromNode": "goal_overlap", "fromPort": "true", "toNode": "goal_sound", "toPort": "exec" },
+            { "id": "goal_once", "fromNode": "goal_overlap", "fromPort": "true", "toNode": "goal_not_reached", "toPort": "exec" },
+            { "id": "goal_state", "fromNode": "goal_state_get", "fromPort": "value", "toNode": "goal_not_reached", "toPort": "a" },
+            { "id": "goal_sound", "fromNode": "goal_not_reached", "fromPort": "true", "toNode": "goal_sound", "toPort": "exec" },
             { "id": "goal_mark", "fromNode": "goal_sound", "fromPort": "exec", "toNode": "mark_goal", "toPort": "exec" }
         ]
     }).to_string()
@@ -18396,7 +18524,7 @@ void tick_player(void) {\n\
         )
         .expect("read reference graph");
 
-        assert_eq!(scene.entities.len(), 4);
+        assert_eq!(scene.entities.len(), 6);
         assert_eq!(
             loaded.collision_map.as_ref().map(|map| map.data.len()),
             Some(40 * 28)
@@ -18407,10 +18535,19 @@ void tick_player(void) {\n\
         assert!(project_dir
             .join(REFERENCE_PLATFORMER_TILESET_ASSET)
             .is_file());
+        assert!(project_dir
+            .join(REFERENCE_PLATFORMER_PASSAGE_ASSET)
+            .is_file());
         assert!(project_dir.join(REFERENCE_PLATFORMER_JUMP_ASSET).is_file());
         assert!(project_dir.join(REFERENCE_PLATFORMER_THEME_ASSET).is_file());
         assert!(graph.contains("input_pressed"));
         assert!(graph.contains("condition_overlap"));
+        assert!(graph.contains("passage_blocker"));
+        assert!(graph.contains("goal_sensor"));
+        assert!(graph.contains("passage_open_value"));
+        assert!(graph.contains("reference_score >= threshold"));
+        assert!(graph.contains("one point per consumed right-input frame"));
+        assert!(graph.contains("\"fromNode\":\"score_input\",\"fromPort\":\"exec\""));
         assert!(graph.contains("action_music"));
         assert!(graph.contains("goal_reached"));
 
@@ -18424,6 +18561,26 @@ void tick_player(void) {\n\
         assert!(sprite.animations.contains_key("idle"));
         assert!(sprite.animations.contains_key("run"));
         assert!(sprite.animations.contains_key("jump"));
+
+        let passage =
+            load_prefab_entity(&project_dir.join("prefabs").join("reference_passage.json"))
+                .expect("load passage blocker prefab");
+        let passage_collision = passage.components.collision.expect("passage AABB");
+        assert!(passage_collision.solid);
+        assert_eq!(passage_collision.layer.as_deref(), Some("passage"));
+        let goal_sensor = load_prefab_entity(
+            &project_dir
+                .join("prefabs")
+                .join("reference_goal_sensor.json"),
+        )
+        .expect("load goal sensor prefab");
+        assert!(
+            !goal_sensor
+                .components
+                .collision
+                .expect("goal sensor AABB")
+                .solid
+        );
         assert!(player.components.physics.is_some());
         assert!(player
             .components

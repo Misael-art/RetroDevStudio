@@ -30,6 +30,45 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 
+function parseElf32Symbols(elf) {
+  if (elf.length < 52 || elf.subarray(0, 4).toString("ascii") !== "\x7fELF" || elf[4] !== 1) {
+    throw new Error("Expected the SGDK-linked ELF32 image at out/rom.out");
+  }
+  const littleEndian = elf[5] === 1;
+  const read16 = (offset) => littleEndian ? elf.readUInt16LE(offset) : elf.readUInt16BE(offset);
+  const read32 = (offset) => littleEndian ? elf.readUInt32LE(offset) : elf.readUInt32BE(offset);
+  const sectionOffset = read32(32);
+  const sectionEntrySize = read16(46);
+  const sectionCount = read16(48);
+  if (sectionEntrySize < 40 || sectionOffset + sectionEntrySize * sectionCount > elf.length) {
+    throw new Error("Malformed section table in SGDK ELF image");
+  }
+  const symbols = new Map();
+  for (let index = 0; index < sectionCount; index += 1) {
+    const section = sectionOffset + index * sectionEntrySize;
+    const type = read32(section + 4);
+    if (type !== 2 && type !== 11) continue;
+    const tableOffset = read32(section + 16);
+    const tableSize = read32(section + 20);
+    const stringTableIndex = read32(section + 24);
+    const symbolEntrySize = read32(section + 36);
+    const stringSection = sectionOffset + stringTableIndex * sectionEntrySize;
+    if (!symbolEntrySize || symbolEntrySize < 16 || tableOffset + tableSize > elf.length || stringSection + 40 > elf.length) continue;
+    const stringsOffset = read32(stringSection + 16);
+    const stringsSize = read32(stringSection + 20);
+    if (stringsOffset + stringsSize > elf.length) continue;
+    for (let symbolOffset = tableOffset; symbolOffset + 16 <= tableOffset + tableSize; symbolOffset += symbolEntrySize) {
+      const nameOffset = read32(symbolOffset);
+      if (!nameOffset || nameOffset >= stringsSize) continue;
+      const end = elf.indexOf(0, stringsOffset + nameOffset);
+      if (end < 0) continue;
+      const name = elf.toString("utf8", stringsOffset + nameOffset, end);
+      if (name) symbols.set(name, read32(symbolOffset + 4));
+    }
+  }
+  return symbols;
+}
+
 function resolveLedgerMarker(options, projectMetadata) {
   const suffix = projectMetadata.target === "snes" ? "snes" : "md";
   switch (options.scenario ?? "build-run") {
@@ -4336,6 +4375,12 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   const report = {
     generatedAt: null,
     scenario: "reference-platformer",
+    testedApplication: {
+      path: currentE2eRunContext?.appPath ?? null,
+      sha256: currentE2eRunContext?.appPath
+        ? createHash("sha256").update(await readFile(currentE2eRunContext.appPath)).digest("hex")
+        : null,
+    },
     projectName: "",
     projectDir: "",
     templateId: "reference_platformer",
@@ -4375,7 +4420,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       return state?.activeProjectDir &&
         state.activeProjectName === generatedProjectName &&
         state.activeTarget === "megadrive" &&
-        entities.length === 4
+        entities.length === 6
         ? state
         : false;
     },
@@ -4390,7 +4435,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   currentE2eRunContext.projectName = generatedProjectName;
   currentE2eRunContext.projectTarget = "megadrive";
   const entityIds = (createdState.activeScene.entities ?? []).map((entity) => entity.id ?? entity.entity_id);
-  for (const requiredId of ["reference_tilemap", "player", "goal", "main_camera"]) {
+  for (const requiredId of ["reference_tilemap", "player", "passage_blocker", "goal", "goal_sensor", "main_camera"]) {
     if (!entityIds.includes(requiredId)) {
       fail(`Template reference_platformer nao expos a entidade '${requiredId}'.`);
     }
@@ -4507,6 +4552,12 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       addReportArtifact(report, evidencePath, `generated ${generatedDirectory}/${generatedName}`);
     }
   }
+  const initialMainPath = path.join(validationDir, `${artifactPrefix}-main.c`);
+  const initialMainSource = await readFile(initialMainPath, "utf8");
+  const logicVariableLayout = (source) => source
+    .split(/\r?\n/)
+    .filter((line) => /^static s32 logic_var_/.test(line));
+  const initialLogicVariableLayout = logicVariableLayout(initialMainSource);
   addReportStep(report, "build_real_rom_and_start_game_view", "passed", {
     rom: firstBuild.rom_path,
     framebuffer: firstBuild.framebuffer,
@@ -4522,38 +4573,74 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     `,
     [command, args]
   );
+  const elfPath = path.join(createdState.activeProjectDir, "build", "megadrive", "out", "rom.out");
+  let runtimeSymbols = parseElf32Symbols(await readFile(elfPath));
+  const readLogicInt = async (name) => {
+    const address = runtimeSymbols.get(`logic_var_${name}`);
+    const addressPrefix = Number.isInteger(address) ? address >>> 16 : 0;
+    if (!Number.isInteger(address) || ![0x00ff, 0xe0ff].includes(addressPrefix)) {
+      fail(`Símbolo runtime logic_var_${name} ausente ou fora da System RAM: ${address}`);
+    }
+    const memory = await invokeCore("emulator_read_memory", {
+      region: 2,
+      offset: address & 0xffff,
+      length: 4,
+    });
+    if (!memory?.ok || !memory.value?.data || memory.value.data.length < 4) {
+      fail(`Leitura da System RAM para ${name} falhou: ${JSON.stringify(memory)}`);
+    }
+    const data = Buffer.from(memory.value.data);
+    const readWordNative = (position) => (data[position] ?? 0) | ((data[position + 1] ?? 0) << 8);
+    const value = (((readWordNative(0) << 16) >>> 0) | readWordNative(2)) >>> 0;
+    return { value: value > 0x7fffffff ? value - 0x100000000 : value, address, offset: address & 0xffff, rawHex: data.toString("hex") };
+  };
   const neutralGoalInput = {
     b: false, y: false, select: false, start: false,
     up: false, down: false, left: false, right: false,
     a: false, x: false, l: false, r: false,
   };
-  const goalMarkerStats = (observed) => {
+  const framebufferStats = (observed) => {
     const rgba = Buffer.from(observed?.framebuffer_rgba ?? []);
     const width = Number(observed?.framebuffer_width ?? 320);
     const height = Number(observed?.framebuffer_height ?? 224);
     let yellowPixels = 0;
-    const points = [];
+    let barrierPixels = 0;
+    const yellowPoints = [];
+    const playerPoints = [];
     for (let offset = 0; offset + 3 < rgba.length; offset += 4) {
       const r = rgba[offset];
       const g = rgba[offset + 1];
       const b = rgba[offset + 2];
       if (r >= 180 && g >= 120 && b <= 100 && r >= g && r - g <= 100) {
-        const pixel = offset / 4;
-        const x = pixel % width;
-        const y = Math.floor(pixel / width);
         yellowPixels += 1;
-        points.push({ x, y });
+        yellowPoints.push({ x: (offset / 4) % width, y: Math.floor(offset / 4 / width) });
+      }
+      const pixel = offset / 4;
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      if (x >= 48 && x < 68 && y >= 160 && y < 205 && r > 90 && r > g * 1.35 && r > b * 1.2) {
+        barrierPixels += 1;
+      }
+      if (x < 100 && y >= 170 && y < 205 && r < 100 && g > 90 && b > 120 && g > r * 1.5) {
+        playerPoints.push({ x, y });
       }
     }
     return {
       width,
       height,
       yellowPixels,
-      bounds: points.length > 0 ? {
-        x0: Math.min(...points.map((point) => point.x)),
-        y0: Math.min(...points.map((point) => point.y)),
-        x1: Math.max(...points.map((point) => point.x)),
-        y1: Math.max(...points.map((point) => point.y)),
+      yellowBounds: yellowPoints.length > 0 ? {
+        x0: Math.min(...yellowPoints.map((point) => point.x)),
+        y0: Math.min(...yellowPoints.map((point) => point.y)),
+        x1: Math.max(...yellowPoints.map((point) => point.x)),
+        y1: Math.max(...yellowPoints.map((point) => point.y)),
+      } : null,
+      barrierPixels,
+      playerPixelBounds: playerPoints.length > 0 ? {
+        x0: Math.min(...playerPoints.map((point) => point.x)),
+        y0: Math.min(...playerPoints.map((point) => point.y)),
+        x1: Math.max(...playerPoints.map((point) => point.x)),
+        y1: Math.max(...playerPoints.map((point) => point.y)),
       } : null,
       framebufferSha256: observed?.framebuffer_sha256 ?? null,
       romSha256: observed?.rom_sha256 ?? null,
@@ -4636,56 +4723,198 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       );
       return rendered;
     };
-    const beforeVisual = await renderPausedState(`${label} antes da entrada`);
-    const rightInput = { ...neutralGoalInput, right: true };
-    const rightAck = await invokeCore("emulator_send_input", { joypad: rightInput, sessionEpoch: epoch.value });
-    if (!rightAck?.ok || !rightAck.value?.ok) fail(`ArrowRight nao confirmado para ${label}: ${JSON.stringify(rightAck)}`);
-    const ran = await invokeCore("emulator_run_frames", { frames: 8 });
-    const after = await invokeCore("emulator_observe");
-    const releaseAck = await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: epoch.value });
-    if (!ran?.ok || !ran.value?.ok || !after?.ok || !after.value?.ok || !releaseAck?.ok || !releaseAck.value?.ok) {
-      fail(`Execucao controlada da decisao falhou para ${label}: ${JSON.stringify({ ran, after, releaseAck })}`);
+    const runRightFrames = async (frames, context) => {
+      const rightAck = await invokeCore("emulator_send_input", {
+        joypad: { ...neutralGoalInput, right: true },
+        sessionEpoch: epoch.value,
+      });
+      const ran = await invokeCore("emulator_run_frames", { frames });
+      const observed = await invokeCore("emulator_observe");
+      if (!rightAck?.ok || !rightAck.value?.ok || !ran?.ok || !ran.value?.ok || !observed?.ok || !observed.value?.ok) {
+        fail(`Entrada/execucao controlada falhou (${context}, ${label}): ${JSON.stringify({ rightAck, ran, observed })}`);
+      }
+      return { rightAck: rightAck.value, observed: observed.value };
+    };
+    const readState = async (observed, context) => {
+      const score = await readLogicInt("reference_score");
+      const open = await readLogicInt("goal_open");
+      const reached = await readLogicInt("goal_reached");
+      return {
+        context,
+        score: score.value,
+        scoreSymbol: score,
+        passageOpen: open.value,
+        passageOpenSymbol: open,
+        objectiveReached: reached.value,
+        objectiveSymbol: reached,
+        framebuffer: framebufferStats(observed),
+        frame: observed.frames_run,
+      };
+    };
+
+    const baselineState = await readState(before.value, "boot");
+    const expectedStartX = baselineState.framebuffer.playerPixelBounds?.x0;
+    if (baselineState.score !== 0 || baselineState.passageOpen !== 0 || baselineState.objectiveReached !== 0 || !Number.isFinite(expectedStartX)) {
+      fail(`Estado inicial/oráculo RAM inválido para ${label}: ${JSON.stringify(baselineState)}`);
     }
-    const afterVisual = await renderPausedState(`${label} apos a entrada`);
-    const beforeCore = goalMarkerStats(before.value);
-    const afterCore = goalMarkerStats(after.value);
-    const beforeGoal = goalVisualStats(beforeVisual);
-    const afterGoal = goalVisualStats(afterVisual);
-    const expectedScore = 8;
-    const actualOpen = afterCore.yellowPixels === 0 && beforeCore.yellowPixels > 0;
-    const branchExpected = expectedScore >= threshold;
-    if (branchExpected !== expectedOpen || actualOpen !== expectedOpen || beforeCore.yellowPixels === 0) {
-      fail(`Efeito visual da decisao nao corresponde ao oraculo para ${label}: ${JSON.stringify({ threshold, expectedScore, branchExpected, expectedOpen, actualOpen, beforeGoal, afterGoal, beforeCore, afterCore })}`);
+
+    const atEight = await runRightFrames(8, "mesma sequência de referência 8f");
+    const eightState = await readState(atEight.observed, "same-input-8-frames");
+    const expectedEightOpen = 8 >= threshold;
+    if (eightState.score !== 8 || eightState.passageOpen !== Number(expectedEightOpen) ||
+        (eightState.framebuffer.barrierPixels > 0) === expectedEightOpen || !eightState.framebuffer.playerPixelBounds) {
+      fail(`Estado real score/passagem diverge após 8 frames para ${label}: ${JSON.stringify({ threshold, expectedEightOpen, eightState })}`);
     }
+
+    // Fresh reset of this exact ROM: exercise threshold-1, threshold, threshold+1.
+    const reset = await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: true }]);
+    if (reset !== true) fail(`Nao foi possivel reiniciar a mesma ROM para as fronteiras de ${label}.`);
+    await waitFor(async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+    }, 15000, `${label} nao reiniciou pausada para fronteiras`, 100);
+    const boundaryEpoch = await invokeCore("emulator_get_core_epoch");
+    if (!boundaryEpoch?.ok || !Number.isInteger(boundaryEpoch.value)) fail(`Epoch de fronteira ausente para ${label}`);
+    const boundaryWarmup = await invokeCore("emulator_run_frames", { frames: 120 });
+    const boundaryBoot = await invokeCore("emulator_observe");
+    if (!boundaryWarmup?.ok || !boundaryWarmup.value?.ok || !boundaryBoot?.ok || !boundaryBoot.value?.ok) {
+      fail(`Warmup das fronteiras falhou em ${label}`);
+    }
+    const boundaryRun = async (frames, context) => {
+      const ack = await invokeCore("emulator_send_input", {
+        joypad: { ...neutralGoalInput, right: true },
+        sessionEpoch: boundaryEpoch.value,
+      });
+      const run = await invokeCore("emulator_run_frames", { frames });
+      const obs = await invokeCore("emulator_observe");
+      if (!ack?.ok || !ack.value?.ok || !run?.ok || !run.value?.ok || !obs?.ok || !obs.value?.ok) {
+        fail(`Execucao de fronteira ${context} falhou em ${label}`);
+      }
+      return readState(obs.value, context);
+    };
+    const captureBoundaryState = async (artifactName, description) => {
+      const released = await invokeCore("emulator_send_input", {
+        joypad: neutralGoalInput,
+        sessionEpoch: boundaryEpoch.value,
+      });
+      if (!released?.ok || !released.value?.ok) fail(`Input neutro falhou antes da captura ${description}`);
+      const frame = await renderPausedState(description);
+      const artifact = await captureScreenshot(sessionId, `${artifactPrefix}-${artifactName}.png`);
+      addReportArtifact(report, artifact, description);
+      return {
+        path: artifact.path,
+        sha256: artifact.sha256,
+        framebufferSha256: frame?.framebufferSha256 ?? null,
+        romSha256: frame?.romSha256 ?? null,
+      };
+    };
+    const below = await boundaryRun(threshold - 1, "threshold-minus-one");
+    if (below.score !== threshold - 1 || below.passageOpen !== 0 || below.framebuffer.barrierPixels === 0 ||
+        below.framebuffer.playerPixelBounds?.x0 === expectedStartX) {
+      fail(`Fronteira abaixo nao ficou bloqueada no estado real (${label}): ${JSON.stringify({ expectedStartX, below })}`);
+    }
+    const blockedScreenshot = await captureBoundaryState(`${screenshotLabel}-blocked-before-open`, `${label}: personagem bloqueado pela passagem fechada`);
+    const equal = await boundaryRun(1, "threshold-equal");
+    if (equal.score !== threshold || equal.passageOpen !== 1 ||
+        equal.framebuffer.playerPixelBounds?.x0 !== below.framebuffer.playerPixelBounds?.x0) {
+      fail(`Limiar exato nao abriu sem movimento extra no mesmo frame (${label}): ${JSON.stringify({ below, equal })}`);
+    }
+    const above = await boundaryRun(1, "threshold-plus-one");
+    if (above.score !== threshold + 1 || above.passageOpen !== 1 || above.framebuffer.barrierPixels !== 0) {
+      fail(`Fronteira acima divergiu (${label}): ${JSON.stringify({ equal, above })}`);
+    }
+    const openScreenshot = await captureBoundaryState(`${screenshotLabel}-open-at-threshold`, `${label}: passagem aberta no limiar, antes da travessia`);
+    const transit = await boundaryRun(8, "traverse-open-passage");
+    if (transit.score !== threshold + 9 || transit.passageOpen !== 1 ||
+        transit.framebuffer.playerPixelBounds?.x0 <= 50 || transit.framebuffer.barrierPixels !== 0) {
+      fail(`Passagem aberta nao foi atravessada pelo personagem (${label}): ${JSON.stringify(transit)}`);
+    }
+    const traversedScreenshot = await captureBoundaryState(`${screenshotLabel}-traversed`, `${label}: personagem atravessou a passagem`);
+    const objective = await boundaryRun(60, "reach-objective-sensor");
+    if (objective.objectiveReached !== 1) {
+      fail(`Objetivo nao registrou conclusao no estado real (${label}): ${JSON.stringify(objective)}`);
+    }
+    const generatedMainPath = path.join(createdState.activeProjectDir, "build", "megadrive", "src", "main.c");
+    const generatedMain = await readFile(generatedMainPath, "utf8");
+    const soundCallOffset = generatedMain.indexOf("XGM_startPlayPCM(SFX_GOAL_SOUND");
+    const goalSensorOffset = generatedMain.indexOf("if (retro_aabb_intersects(spr_player_x + 0, spr_player_y + 0, 14, 16, 144, 184, 16, 16))");
+    const reachedGuardOffset = generatedMain.indexOf("if ((logic_var_goal_reached == 0))", goalSensorOffset);
+    const reachedWriteOffset = generatedMain.indexOf("logic_var_goal_reached = 1;", reachedGuardOffset);
+    if (goalSensorOffset < 0 || reachedGuardOffset < goalSensorOffset || soundCallOffset < reachedGuardOffset || reachedWriteOffset < soundCallOffset) {
+      fail(`Evento do sensor deve despachar o som antes da escrita one-shot de conclusao (${label}): ${JSON.stringify({ goalSensorOffset, reachedGuardOffset, soundCallOffset, reachedWriteOffset })}.`);
+    }
+    if (!generatedMain.includes("XGM_startPlayPCM(SFX_GOAL_SOUND") ||
+        !generatedMain.includes("logic_var_goal_reached == 0") ||
+        !generatedMain.includes("logic_var_goal_reached = 1;")) {
+      fail(`ROM não contém o evento de som e a condição de vitória conectados ao sensor (${label}).`);
+    }
+    const scoreIncrementOffset = generatedMain.indexOf("logic_var_reference_score = (logic_var_reference_score + 1);");
+    const scoreCompareOffset = generatedMain.indexOf("if ((logic_var_reference_score >=", scoreIncrementOffset);
+    if (scoreIncrementOffset < 0 || scoreCompareOffset < scoreIncrementOffset) {
+      fail(`Comparacao do limiar nao usa o score gravado apos incrementar (${label}).`);
+    }
+    const testedRomSha256 = createHash("sha256").update(await readFile(romPath)).digest("hex");
+    if (objective.framebuffer.romSha256 !== testedRomSha256) {
+      fail(`O core observou outra ROM ao registrar o objetivo (${label}): ${JSON.stringify({ expected: testedRomSha256, observed: objective.framebuffer.romSha256 })}`);
+    }
+    const releaseAck = await invokeCore("emulator_send_input", {
+      joypad: neutralGoalInput,
+      sessionEpoch: boundaryEpoch.value,
+    });
+    if (!releaseAck?.ok || !releaseAck.value?.ok) fail(`Release input falhou para ${label}`);
+    const afterVisual = await renderPausedState(`${label} depois da passagem e objetivo`);
     const beforeFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
-    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${screenshotLabel}.png`), `${label} captura legivel`);
+    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${screenshotLabel}.png`), `${label} passagem atravessada e objetivo alcançado`);
     return {
       label,
       romPath,
-      threshold,
-      inputSequence: [{ right: true, frames: 8 }],
-      expectedScore,
-      expectedBranch: branchExpected ? "true" : "false",
-      expectedGoalOpen: expectedOpen,
-      visualOracle: {
-        beforeGoal,
-        afterGoal,
-        actualGoalOpen: actualOpen,
-        emulatorBefore: beforeCore,
-        emulatorAfter: afterCore,
-        domFrame: beforeFrame ? {
-          renderedFrames: beforeFrame.renderedFrames,
-          framebufferSha256: beforeFrame.framebufferSha256,
-          romSha256: beforeFrame.romSha256,
-        } : null,
+      testedRomSha256,
+      generatedMainSha256: createHash("sha256").update(generatedMain).digest("hex"),
+      generatedMainPath,
+      goalSoundAndWinCode: {
+        soundCall: "XGM_startPlayPCM(SFX_GOAL_SOUND, ...) emitted from goal sensor event chain",
+        persistentWinCondition: "logic_var_goal_reached transitions 0→1 after sensor overlap",
+        eventOrderObservedWithRuntimeWinFlag: true,
       },
-      inputAck: rightAck.value,
-      releaseAck: releaseAck.value,
-      frameDelta: after.value.frames_run - before.value.frames_run,
+      scoreComparison: {
+        incrementSource: "logic_var_reference_score = (logic_var_reference_score + 1);",
+        compareSource: "if ((logic_var_reference_score >= threshold))",
+        comparesStoredPostIncrementValue: true,
+        independentlyObservedScore: eightState.score,
+      },
+      threshold,
+      inputSequences: {
+        sameSequenceAcrossRoms: [{ right: true, frames: 8 }],
+        boundaryAndTraversal: [
+          { right: true, frames: threshold - 1, expectedScore: threshold - 1, expectedOpen: false },
+          { right: true, frames: 1, expectedScore: threshold, expectedOpen: true },
+          { right: true, frames: 1, expectedScore: threshold + 1, expectedOpen: true },
+          { right: true, frames: 8, expectedToPassBarrierX: 50 },
+          { right: true, frames: 60, expectedObjectiveReached: true },
+        ],
+      },
+      sameEightFrameObservation: eightState,
+      boundaries: { below, equal, above },
+      blockedBeforeOpen: below.framebuffer.playerPixelBounds,
+      atThresholdBeforeMove: equal.framebuffer.playerPixelBounds,
+      traversedAfterOpen: transit.framebuffer.playerPixelBounds,
+      reachedObjective: objective,
+      screenshots: { blockedScreenshot, openScreenshot, traversedScreenshot },
+      screenshotFramebuffer: {
+        sha256: afterVisual?.framebufferSha256 ?? null,
+        romSha256: afterVisual?.romSha256 ?? null,
+      },
+      domFrame: beforeFrame ? {
+        renderedFrames: beforeFrame.renderedFrames,
+        framebufferSha256: beforeFrame.framebufferSha256,
+        romSha256: beforeFrame.romSha256,
+      } : null,
+      initialState: baselineState,
     };
   };
   const baselineGoalRomPath = path.join(validationDir, `${artifactPrefix}-goal-original.rom`);
   await cp(firstBuild.rom_path, baselineGoalRomPath);
+  if (report.roms[0]) report.roms[0].rom_path = baselineGoalRomPath;
   addReportArtifact(report, baselineGoalRomPath, "ROM baseline copied for controlled gameplay decision");
   const goalBeforeEdit = await runGoalDecision(baselineGoalRomPath, "ROM gerada antes da edicao", 6, true, "04-goal-open-before-edit");
   report.goalDecision.beforeEdit = goalBeforeEdit;
@@ -4699,9 +4928,10 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     250
   );
   const thresholdInput = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.value ?? null;");
+  const thresholdLabel = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.parentElement?.querySelector('span')?.textContent ?? '';" );
   const sourceMappingVisible = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-card-score_threshold\"]')?.textContent ?? '';" );
-  if (thresholdInput !== "6" || !String(sourceMappingVisible).includes("Source mapped") || !String(sourceMappingVisible).includes("authored_builtin_reference_platformer")) {
-    fail(`Editor nao comprovou limiar/origem/source mapping autorais: ${JSON.stringify({ thresholdInput, sourceMappingVisible })}`);
+  if (thresholdInput !== "6" || thresholdLabel !== "Pontos para abrir passagem" || !String(sourceMappingVisible).includes("Source mapped") || !String(sourceMappingVisible).includes("authored_builtin_reference_platformer")) {
+    fail(`Editor nao comprovou semantica do limiar/origem/source mapping autorais: ${JSON.stringify({ thresholdInput, thresholdLabel, sourceMappingVisible })}`);
   }
   await setInputByTestIdNative(sessionId, "node-param-score_threshold-b", "12");
   const editedThreshold = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.value ?? null;");
@@ -4793,13 +5023,24 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     report,
     artifactPrefix
   );
-  report.roms.push(editedBuild);
+  const editedGoalRomPath = path.join(validationDir, `${artifactPrefix}-goal-edited.rom`);
+  await cp(editedBuild.rom_path, editedGoalRomPath);
+  addReportArtifact(report, editedGoalRomPath, "immutable ROM snapshot compiled from the saved threshold=12 graph");
+  report.roms.push({ ...editedBuild, rom_path: editedGoalRomPath });
   const editedMainPath = path.join(createdState.activeProjectDir, "build", "megadrive", "src", "main.c");
   const editedMain = await readFile(editedMainPath, "utf8");
   const editedMainEvidencePath = path.join(validationDir, `${artifactPrefix}-edited-goal-main.c`);
   await cp(editedMainPath, editedMainEvidencePath);
   addReportArtifact(report, editedMainEvidencePath, "generated main.c with edited goal threshold");
-  const goalAfterEdit = await runGoalDecision(editedBuild.rom_path, "ROM gerada apos edicao", 12, false, "06-goal-closed-after-edit");
+  const editedLogicVariableLayout = logicVariableLayout(editedMain);
+  const editedScoreComparePresent = /logic_var_reference_score\s*>=\s*12/.test(editedMain);
+  if (!editedMain.includes("static s32 logic_var_reference_score = 0;") ||
+      !editedScoreComparePresent ||
+      !editedMain.includes("logic_var_goal_reached = 1;") ||
+      JSON.stringify(editedLogicVariableLayout) !== JSON.stringify(initialLogicVariableLayout)) {
+    fail(`C gerado após salvar/reabrir não preserva os estados e o limiar 12 esperados: ${JSON.stringify({ scoreDeclaration: editedMain.includes("static s32 logic_var_reference_score = 0;"), scoreComparePresent: editedScoreComparePresent, winWrite: editedMain.includes("logic_var_goal_reached = 1;"), initialLogicVariableLayout, editedLogicVariableLayout })}`);
+  }
+  const goalAfterEdit = await runGoalDecision(editedGoalRomPath, "ROM gerada apos edicao", 12, false, "06-goal-closed-after-edit");
   report.goalDecision.afterEdit = goalAfterEdit;
   report.goalDecision.sameSequence = true;
   report.goalDecision.authorship = "score chain and threshold authored in graphs/reference_platformer_logic.json";
@@ -4810,8 +5051,8 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       threshold: 12,
       sourceMapping: "graphs/reference_platformer_logic.json:24",
     },
-    originalRom: { path: firstBuild.rom_path, sha256: goalBeforeEdit.visualOracle.beforeGoal.romSha256 },
-    editedRom: { path: editedBuild.rom_path, sha256: goalAfterEdit.visualOracle.beforeGoal.romSha256 },
+    originalRom: { path: baselineGoalRomPath, sha256: goalBeforeEdit.testedRomSha256 },
+    editedRom: { path: editedGoalRomPath, sha256: goalAfterEdit.testedRomSha256 },
     goalBeforeEdit,
     goalAfterEdit,
     generatedMainSha256: createHash("sha256").update(editedMain).digest("hex"),
@@ -5165,16 +5406,32 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     500
   );
   await clickByTestId(sessionId, "wizard-open-existing-project");
-  const reopenedState = await waitFor(
-    async () => {
-      const state = await readAutomationState(sessionId);
-      const entities = Array.isArray(state?.activeScene?.entities) ? state.activeScene.entities : [];
-      return state?.activeProjectDir === createdState.activeProjectDir && entities.length === 4 ? state : false;
-    },
-    45000,
-    "Projeto de referencia nao reabriu com as quatro entidades.",
-    500
-  );
+  let reopenedSceneDiagnostics = null;
+  let reopenedState;
+  try {
+    reopenedState = await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        const entities = Array.isArray(state?.activeScene?.entities) ? state.activeScene.entities : [];
+        const entityIds = entities.map((entity) => entity.id ?? entity.entity_id ?? null);
+        reopenedSceneDiagnostics = {
+          activeProjectDir: state?.activeProjectDir ?? null,
+          entityCount: entities.length,
+          entityIds,
+        };
+        return state?.activeProjectDir === createdState.activeProjectDir &&
+          entities.length === 6 &&
+          ["passage_blocker", "goal_sensor", "goal"].every((id) => entityIds.includes(id))
+          ? state
+          : false;
+      },
+      45000,
+      "Projeto de referencia nao reabriu com blocker, sensor, visual do objetivo e demais entidades.",
+      500
+    );
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; estado recebido: ${JSON.stringify(reopenedSceneDiagnostics)}`);
+  }
   const reopenedLogicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
   if (!reopenedLogicState?.resolved?.has_graph || reopenedLogicState.resolved.graph_ref !== "graphs/reference_platformer_logic.json") {
     fail(`NodeGraph do template nao persistiu apos reabertura: ${JSON.stringify(reopenedLogicState)}`);
@@ -7027,6 +7284,7 @@ async function main() {
     projectName: projectMetadata.name || null,
     projectTarget: projectMetadata.target || null,
     app: options.app,
+    appPath: options.app,
     externalDriver: options.externalDriver,
     sessionId: null,
   };

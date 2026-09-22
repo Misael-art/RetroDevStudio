@@ -151,6 +151,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Add-Content -Path (Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt') -Value 'smoke_md'
 
+      - name: Run reference gameplay passage E2E
+        id: reference_goal
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
+        run: |
+          npm run test:e2e:desktop:reference-platformer -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path (Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt') -Value 'reference_goal'
+
       - name: Run SNES desktop smoke
         id: smoke_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
@@ -277,6 +285,7 @@ jobs:
         run: |
           Write-Host "Step outcomes (outcome / conclusion):"
           Write-Host "  smoke_md:              ${{ steps.smoke_md.outcome }}"
+          Write-Host "  reference_goal:        ${{ steps.reference_goal.outcome }}"
           Write-Host "  smoke_snes:            ${{ steps.smoke_snes.outcome }}"
           Write-Host "  live_overflow_md:      ${{ steps.live_overflow_md.outcome }}"
           Write-Host "  live_overflow_snes:    ${{ steps.live_overflow_snes.outcome }}"
@@ -299,6 +308,7 @@ jobs:
         run: |
           $scenarioOutcomes = [ordered]@{
             smoke_md = '${{ steps.smoke_md.outcome }}'
+            reference_goal = '${{ steps.reference_goal.outcome }}'
             smoke_snes = '${{ steps.smoke_snes.outcome }}'
             live_overflow_md = '${{ steps.live_overflow_md.outcome }}'
             live_overflow_snes = '${{ steps.live_overflow_snes.outcome }}'
@@ -350,6 +360,7 @@ jobs:
             "- Target: $env:RDS_E2E_TARGET",
             "- Build debug: ${{ steps.build_debug.outcome }}",
             "- Smoke Mega Drive: ${{ steps.smoke_md.outcome }}",
+            "- Reference gameplay passage: ${{ steps.reference_goal.outcome }}",
             "- Smoke SNES: ${{ steps.smoke_snes.outcome }}",
             "- Live overflow MD: ${{ steps.live_overflow_md.outcome }}",
             "- Live overflow SNES: ${{ steps.live_overflow_snes.outcome }}",
