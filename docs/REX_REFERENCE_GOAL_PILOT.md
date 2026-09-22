@@ -67,7 +67,7 @@ não há simulação exclusiva do harness.
 - Não é reconstrução de Sonic nem recuperação da rotina autoral; autoria e recuperação assistida continuam explicitamente separadas.
 - Não há equivalência geral de M68K, callers indiretos/PC-relative, contexto de chamada, outras larguras/operações ou suporte SNES.
 - O marcador amarelo é um oráculo visual independente para este sprite próprio; não constitui um detector visual geral de objetivos.
-- A validação remota do CI ainda precisa ser acompanhada no novo HEAD após o push desta fatia.
+- CI e Desktop E2E do commit `a5604af77cfc6f10521a3a587512d499b7b706ac` terminaram com sucesso: runs [CI #35775883898](https://github.com/Misael-art/RetroDevStudio/actions/runs/35775883898) e [Desktop E2E #35775883908](https://github.com/Misael-art/RetroDevStudio/actions/runs/35775883908). Esta linha documental será publicada em commit dependente próprio; o workflow disparado por esse HEAD também será acompanhado.
 
 ## Regressões preservadas
 
