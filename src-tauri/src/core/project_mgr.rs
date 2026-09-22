@@ -31,6 +31,12 @@ pub const ONBOARDING_SPRITE_SIZE: u32 = 16;
 pub const PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/platformer_player.png";
 pub const PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/platformer_level.png";
 pub const PLATFORMER_JUMP_ASSET: &str = "assets/audio/jump.wav";
+pub const REFERENCE_PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/reference_player.ppm";
+pub const REFERENCE_PLATFORMER_GOAL_ASSET: &str = "assets/sprites/reference_goal.ppm";
+pub const REFERENCE_PLATFORMER_GOAL_SOUND_ASSET: &str = "assets/audio/reference_goal.wav";
+pub const REFERENCE_PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/reference_level.ppm";
+pub const REFERENCE_PLATFORMER_JUMP_ASSET: &str = "assets/audio/reference_jump.wav";
+pub const REFERENCE_PLATFORMER_THEME_ASSET: &str = "assets/audio/reference_theme.vgm";
 const TEMPLATE_REGISTRY_JSON: &str = include_str!("../../../data/template_registry.json");
 const MANUAL_SGDK_DONOR_REQUIRED_MESSAGE: &str =
     "Requer uma pasta doadora SGDK escolhida manualmente neste host.";
@@ -1086,6 +1092,7 @@ pub fn seed_project_template(
     match template_id {
         "empty" => return load_scene(project_dir, DEFAULT_ENTRY_SCENE),
         "starter_guided" => return seed_onboarding_template(project_dir, target),
+        "reference_platformer" => return seed_reference_platformer_template(project_dir, target),
         _ => {}
     }
 
@@ -14819,6 +14826,544 @@ pub fn seed_onboarding_template(project_dir: &Path, target: &str) -> Result<Scen
     Ok(scene)
 }
 
+/// Cria o projeto de referência do primeiro jogo completo sem depender de
+/// doador externo, ROM, corpus ou artefato de build. Os recursos são pequenos
+/// e gerados aqui para que o fluxo do wizard seja reproduzível em qualquer host
+/// que possua o toolchain oficial do target.
+pub fn seed_reference_platformer_template(
+    project_dir: &Path,
+    target: &str,
+) -> Result<Scene, LoadError> {
+    if target != "megadrive" {
+        return Err(LoadError(
+            "O jogo de referencia desta wave esta delimitado ao perfil Mega Drive.".to_string(),
+        ));
+    }
+
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_PLAYER_ASSET,
+        reference_player_ppm(),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_GOAL_ASSET,
+        reference_goal_ppm(),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_TILESET_ASSET,
+        reference_tileset_ppm(),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_JUMP_ASSET,
+        reference_tone_wav(440, 140),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_GOAL_SOUND_ASSET,
+        reference_tone_wav(880, 240),
+    )?;
+    write_reference_asset(
+        project_dir,
+        REFERENCE_PLATFORMER_THEME_ASSET,
+        reference_theme_vgm(),
+    )?;
+
+    save_prefab_entity(
+        project_dir,
+        "reference_player.json",
+        &reference_player_prefab(),
+    )?;
+    save_prefab_entity(project_dir, "reference_goal.json", &reference_goal_prefab())?;
+    save_prefab_entity(
+        project_dir,
+        "reference_camera.json",
+        &reference_camera_prefab(),
+    )?;
+    save_prefab_entity(
+        project_dir,
+        "reference_tilemap.json",
+        &reference_tilemap_prefab(),
+    )?;
+    save_graph_asset(
+        project_dir,
+        "graphs/reference_platformer_logic.json",
+        &reference_platformer_logic_graph(),
+    )?;
+
+    let scene = reference_platformer_scene();
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(scene)
+}
+
+fn write_reference_asset(
+    project_dir: &Path,
+    relative_path: &str,
+    bytes: Vec<u8>,
+) -> Result<(), LoadError> {
+    let path = project_dir.join(relative_path);
+    let parent = path.parent().ok_or_else(|| {
+        LoadError(format!(
+            "Asset de referencia '{}' nao possui diretorio pai.",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar o diretorio do asset de referencia '{}': {}",
+            parent.display(),
+            error
+        ))
+    })?;
+    fs::write(&path, bytes).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel escrever o asset de referencia '{}': {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn reference_ppm(width: u32, height: u32, mut pixel: impl FnMut(u32, u32) -> [u8; 3]) -> Vec<u8> {
+    let mut bytes = format!("P6\n{} {}\n255\n", width, height).into_bytes();
+    for y in 0..height {
+        for x in 0..width {
+            bytes.extend_from_slice(&pixel(x, y));
+        }
+    }
+    bytes
+}
+
+fn reference_player_ppm() -> Vec<u8> {
+    reference_ppm(80, 16, |x, y| {
+        let frame = x / 16;
+        let local_x = x % 16;
+        let body = (3..13).contains(&local_x) && (2..15).contains(&y)
+            || (5..11).contains(&local_x) && (0..4).contains(&y);
+        if !body {
+            [12, 20, 32]
+        } else if frame == 4 {
+            [255, 208, 72]
+        } else if frame % 2 == 0 {
+            [42, 180, 232]
+        } else {
+            [36, 132, 214]
+        }
+    })
+}
+
+fn reference_goal_ppm() -> Vec<u8> {
+    reference_ppm(16, 16, |x, y| {
+        if (x == 7 || x == 8) && y > 2 {
+            [240, 240, 240]
+        } else if (4..12).contains(&x) && (2..8).contains(&y) {
+            [248, 190, 48]
+        } else {
+            [20, 28, 44]
+        }
+    })
+}
+
+fn reference_tileset_ppm() -> Vec<u8> {
+    reference_ppm(128, 64, |x, y| {
+        let tile_x = (x / 8) % 2;
+        let tile_y = (y / 8) % 2;
+        if y >= 48 {
+            if (x / 8 + y / 8) % 2 == 0 {
+                [52, 112, 78]
+            } else {
+                [40, 88, 64]
+            }
+        } else if tile_x == tile_y {
+            [30, 56, 92]
+        } else {
+            [24, 44, 72]
+        }
+    })
+}
+
+fn reference_wav_header(sample_rate: u32, data_len: u32) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(44 + data_len as usize);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    bytes
+}
+
+fn reference_tone_wav(frequency_hz: u32, duration_ms: u32) -> Vec<u8> {
+    let sample_rate = 22_050u32;
+    let sample_count = sample_rate.saturating_mul(duration_ms) / 1_000;
+    let data_len = sample_count.saturating_mul(2);
+    let mut bytes = reference_wav_header(sample_rate, data_len);
+    for sample in 0..sample_count {
+        let phase =
+            (sample as f32 * frequency_hz as f32 * std::f32::consts::TAU) / sample_rate as f32;
+        let amplitude = (phase.sin() * 7_000.0) as i16;
+        bytes.extend_from_slice(&amplitude.to_le_bytes());
+    }
+    bytes
+}
+
+fn reference_theme_vgm() -> Vec<u8> {
+    // VGM is the supported source format for SGDK's XGM resource. This tiny
+    // generated track writes one PSG tone, waits half a second and ends; it is
+    // intentionally plain data owned by the template, not a copied song.
+    let mut bytes = vec![0u8; 0x100];
+    bytes[0..4].copy_from_slice(b"Vgm ");
+    bytes[8..12].copy_from_slice(&0x0000_0170u32.to_le_bytes());
+    bytes[0x18..0x1c].copy_from_slice(&22_050u32.to_le_bytes());
+    bytes[0x34..0x38].copy_from_slice(&0x0000_00CCu32.to_le_bytes());
+    bytes.extend_from_slice(&[0x50, 0x90, 0x61, 0x20, 0x03, 0x66]);
+    let eof_offset = (bytes.len() as u32).saturating_sub(4);
+    bytes[0x04..0x08].copy_from_slice(&eof_offset.to_le_bytes());
+    bytes
+}
+
+fn reference_player_prefab() -> Entity {
+    let mut animations = BTreeMap::new();
+    animations.insert(
+        "idle".to_string(),
+        AnimationDef {
+            frames: vec![0, 1],
+            fps: 4,
+            looping: true,
+            frame_durations: None,
+            loop_start: None,
+            mugen_frames: None,
+            onion_skin: None,
+            hitboxes: Vec::new(),
+        },
+    );
+    animations.insert(
+        "run".to_string(),
+        AnimationDef {
+            frames: vec![2, 3],
+            fps: 8,
+            looping: true,
+            frame_durations: None,
+            loop_start: None,
+            mugen_frames: None,
+            onion_skin: None,
+            hitboxes: Vec::new(),
+        },
+    );
+    animations.insert(
+        "jump".to_string(),
+        AnimationDef {
+            frames: vec![4],
+            fps: 1,
+            looping: false,
+            frame_durations: None,
+            loop_start: None,
+            mugen_frames: None,
+            onion_skin: None,
+            hitboxes: Vec::new(),
+        },
+    );
+
+    Entity {
+        entity_id: "reference_player_prefab".to_string(),
+        display_name: Some("Reference Player".to_string()),
+        prefab: None,
+        transform: Transform { x: 32, y: 184 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: REFERENCE_PLATFORMER_PLAYER_ASSET.to_string(),
+                frame_width: 16,
+                frame_height: 16,
+                pivot: None,
+                palette_slot: 0,
+                animations,
+                priority: "foreground".to_string(),
+                meta_sprite: false,
+                commands: Vec::new(),
+            }),
+            collision: Some(CollisionComponent {
+                shape: "aabb".to_string(),
+                width: 14,
+                height: 16,
+                offset: None,
+                solid: true,
+                layer: Some("player".to_string()),
+                collides_with: vec!["ground".to_string(), "goal".to_string()],
+            }),
+            input: Some(InputComponent {
+                device: "joypad1".to_string(),
+                mapping: BTreeMap::from([
+                    ("jump".to_string(), "BUTTON_A".to_string()),
+                    ("move_left".to_string(), "DPAD_LEFT".to_string()),
+                    ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+                ]),
+            }),
+            physics: Some(PhysicsComponent {
+                gravity: true,
+                gravity_strength: 6,
+                max_velocity: Some(Velocity { x: 32, y: 96 }),
+                friction: 1,
+                bounce: 0,
+            }),
+            audio: Some(AudioComponent {
+                sfx: HashMap::from([
+                    (
+                        "jump".to_string(),
+                        REFERENCE_PLATFORMER_JUMP_ASSET.to_string(),
+                    ),
+                    (
+                        "goal_sound".to_string(),
+                        REFERENCE_PLATFORMER_GOAL_SOUND_ASSET.to_string(),
+                    ),
+                ]),
+                bgm: Some(REFERENCE_PLATFORMER_THEME_ASSET.to_string()),
+            }),
+            logic: Some(crate::ugdm::components::LogicComponent {
+                graph: None,
+                graph_ref: Some("graphs/reference_platformer_logic.json".to_string()),
+                graph_origin: Some("builtin_reference_platformer".to_string()),
+                logic_hints: vec![
+                    "right/left input moves the player".to_string(),
+                    "A triggers jump velocity and jump sound".to_string(),
+                    "overlap with goal sets goal_reached and plays goal sound".to_string(),
+                ],
+                external_source_refs: Vec::new(),
+                imported_semantics: None,
+                variables: HashMap::from([(
+                    "goal_reached".to_string(),
+                    crate::ugdm::components::LogicVariable {
+                        var_type: "int".to_string(),
+                        default: serde_json::json!(0),
+                        min: Some(0),
+                        max: Some(1),
+                    },
+                )]),
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_goal_prefab() -> Entity {
+    Entity {
+        entity_id: "reference_goal_prefab".to_string(),
+        display_name: Some("Goal Flag".to_string()),
+        prefab: None,
+        transform: Transform { x: 280, y: 184 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: REFERENCE_PLATFORMER_GOAL_ASSET.to_string(),
+                frame_width: 16,
+                frame_height: 16,
+                pivot: None,
+                palette_slot: 0,
+                animations: BTreeMap::from([(
+                    "idle".to_string(),
+                    AnimationDef {
+                        frames: vec![0],
+                        fps: 1,
+                        looping: true,
+                        frame_durations: None,
+                        loop_start: None,
+                        mugen_frames: None,
+                        onion_skin: None,
+                        hitboxes: Vec::new(),
+                    },
+                )]),
+                priority: "foreground".to_string(),
+                meta_sprite: false,
+                commands: Vec::new(),
+            }),
+            collision: Some(CollisionComponent {
+                shape: "aabb".to_string(),
+                width: 16,
+                height: 16,
+                offset: None,
+                solid: false,
+                layer: Some("goal".to_string()),
+                collides_with: vec!["player".to_string()],
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_camera_prefab() -> Entity {
+    Entity {
+        entity_id: "reference_camera_prefab".to_string(),
+        display_name: Some("Main Camera".to_string()),
+        prefab: None,
+        transform: Transform { x: 0, y: 0 },
+        components: Components {
+            camera: Some(CameraComponent {
+                follow_entity: Some("player".to_string()),
+                offset_x: 0,
+                offset_y: 0,
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_tilemap_prefab() -> Entity {
+    Entity {
+        entity_id: "reference_tilemap_prefab".to_string(),
+        display_name: Some("Reference Tilemap".to_string()),
+        prefab: None,
+        transform: Transform { x: 0, y: 0 },
+        components: Components {
+            tilemap: Some(TilemapComponent {
+                tileset: REFERENCE_PLATFORMER_TILESET_ASSET.to_string(),
+                map_width: 40,
+                map_height: 28,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: Vec::new(),
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn reference_platformer_scene() -> Scene {
+    let mut scene = canonical_scene(
+        DEFAULT_SCENE_ID,
+        Some("Reference Platformer — Goal Run".to_string()),
+    );
+    scene.palettes = vec![PaletteEntry {
+        slot: 0,
+        colors: vec![
+            "#0C1420".to_string(),
+            "#2AB4E8".to_string(),
+            "#F8BE30".to_string(),
+            "#34B85A".to_string(),
+            "#F2F4F8".to_string(),
+        ],
+    }];
+    scene.layers = Some(vec![
+        SceneLayer {
+            id: "layer_background".to_string(),
+            name: "Background".to_string(),
+            kind: "background".to_string(),
+            visible: true,
+            locked: false,
+            depth: 0,
+            entity_ids: vec!["reference_tilemap".to_string()],
+        },
+        SceneLayer {
+            id: "layer_gameplay".to_string(),
+            name: "Gameplay".to_string(),
+            kind: "sprite".to_string(),
+            visible: true,
+            locked: false,
+            depth: 1,
+            entity_ids: vec!["player".to_string(), "goal".to_string()],
+        },
+        SceneLayer {
+            id: "layer_camera".to_string(),
+            name: "Camera".to_string(),
+            kind: "object".to_string(),
+            visible: true,
+            locked: false,
+            depth: 2,
+            entity_ids: vec!["main_camera".to_string()],
+        },
+    ]);
+    scene.entities = vec![
+        Entity {
+            entity_id: "reference_tilemap".to_string(),
+            display_name: Some("Ground and Tilemap".to_string()),
+            prefab: Some("reference_tilemap.json".to_string()),
+            transform: Transform { x: 0, y: 0 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "player".to_string(),
+            display_name: Some("Player".to_string()),
+            prefab: Some("reference_player.json".to_string()),
+            transform: Transform { x: 32, y: 184 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "goal".to_string(),
+            display_name: Some("Goal Flag".to_string()),
+            prefab: Some("reference_goal.json".to_string()),
+            transform: Transform { x: 280, y: 184 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "main_camera".to_string(),
+            display_name: Some("Main Camera".to_string()),
+            prefab: Some("reference_camera.json".to_string()),
+            transform: Transform { x: 0, y: 0 },
+            components: Components::default(),
+        },
+    ];
+    let width = 40;
+    let height = 28;
+    let mut data = vec![0; (width * height) as usize];
+    for x in 0..width {
+        data[(26 * width + x) as usize] = 1;
+        data[(27 * width + x) as usize] = 1;
+    }
+    for x in 20..28 {
+        data[(21 * width + x) as usize] = 1;
+    }
+    scene.collision_map = Some(CollisionMap {
+        tile_width: 8,
+        tile_height: 8,
+        width,
+        height,
+        data,
+    });
+    scene
+}
+
+fn reference_platformer_logic_graph() -> String {
+    serde_json::json!({
+        "version": 1,
+        "nodes": [
+            { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
+            { "id": "music", "type": "action_music", "label": "Play Theme", "x": 180, "y": 0, "params": { "action": "play", "track": "reference_theme", "fade_ms": 0 } },
+            { "id": "update_right", "type": "event_update", "label": "Update Right", "x": 0, "y": 160, "params": {} },
+            { "id": "right", "type": "input_held", "label": "Hold Right", "x": 180, "y": 140, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+            { "id": "move_right", "type": "sprite_move", "label": "Move Right", "x": 360, "y": 140, "params": { "target": "player", "dx": 2, "dy": 0 } },
+            { "id": "update_left", "type": "event_update", "label": "Update Left", "x": 0, "y": 300, "params": {} },
+            { "id": "left", "type": "input_held", "label": "Hold Left", "x": 180, "y": 280, "params": { "pad": "JOY_1", "button": "BUTTON_LEFT" } },
+            { "id": "move_left", "type": "sprite_move", "label": "Move Left", "x": 360, "y": 280, "params": { "target": "player", "dx": -2, "dy": 0 } },
+            { "id": "update_jump", "type": "event_update", "label": "Update Jump", "x": 0, "y": 440, "params": {} },
+            { "id": "jump", "type": "input_pressed", "label": "Press A", "x": 180, "y": 420, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
+            { "id": "jump_velocity", "type": "set_velocity", "label": "Jump", "x": 360, "y": 400, "params": { "target": "player", "vx": 0, "vy": -48 } },
+            { "id": "jump_sound", "type": "action_sound", "label": "Jump Sound", "x": 540, "y": 400, "params": { "sfx": "jump" } },
+            { "id": "update_goal", "type": "event_update", "label": "Update Goal", "x": 0, "y": 580, "params": {} },
+            { "id": "goal_overlap", "type": "condition_overlap", "label": "Reach Goal", "x": 180, "y": 560, "params": { "a": "player", "b": "goal" } },
+            { "id": "goal_sound", "type": "action_sound", "label": "Goal Sound", "x": 360, "y": 540, "params": { "sfx": "goal_sound" } },
+            { "id": "mark_goal", "type": "var_set", "label": "Goal Reached", "x": 540, "y": 540, "params": { "var_name": "goal_reached", "value": 1 } }
+        ],
+        "edges": [
+            { "id": "start_music", "fromNode": "start", "fromPort": "exec", "toNode": "music", "toPort": "exec" },
+            { "id": "right_input", "fromNode": "update_right", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
+            { "id": "right_move", "fromNode": "right", "fromPort": "exec", "toNode": "move_right", "toPort": "exec" },
+            { "id": "left_input", "fromNode": "update_left", "fromPort": "exec", "toNode": "left", "toPort": "exec" },
+            { "id": "left_move", "fromNode": "left", "fromPort": "exec", "toNode": "move_left", "toPort": "exec" },
+            { "id": "jump_input", "fromNode": "update_jump", "fromPort": "exec", "toNode": "jump", "toPort": "exec" },
+            { "id": "jump_velocity", "fromNode": "jump", "fromPort": "exec", "toNode": "jump_velocity", "toPort": "exec" },
+            { "id": "jump_sound", "fromNode": "jump_velocity", "fromPort": "exec", "toNode": "jump_sound", "toPort": "exec" },
+            { "id": "goal_input", "fromNode": "update_goal", "fromPort": "exec", "toNode": "goal_overlap", "toPort": "exec" },
+            { "id": "goal_sound", "fromNode": "goal_overlap", "fromPort": "true", "toNode": "goal_sound", "toPort": "exec" },
+            { "id": "goal_mark", "fromNode": "goal_sound", "fromPort": "exec", "toNode": "mark_goal", "toPort": "exec" }
+        ]
+    }).to_string()
+}
+
 pub fn set_entry_scene(project_dir: &Path, scene_path: &str) -> Result<Project, LoadError> {
     validate_scene_path(scene_path)?;
     let _scene = load_scene(project_dir, scene_path)?;
@@ -17735,6 +18280,7 @@ void tick_player(void) {\n\
             vec![
                 "empty",
                 "starter_guided",
+                "reference_platformer",
                 "platformer_seed",
                 "rpg_seed",
                 "fighter_seed",
@@ -17757,6 +18303,13 @@ void tick_player(void) {\n\
                 .expect("starter template")
                 .available
         );
+        let reference = templates
+            .iter()
+            .find(|template| template.id == "reference_platformer")
+            .expect("reference platformer template");
+        assert!(reference.available);
+        assert_eq!(reference.source_kind, "builtin");
+        assert!(reference.features.iter().any(|feature| feature == "goal"));
         let platformer = templates
             .iter()
             .find(|template| template.id == "platformer_seed")
@@ -17767,6 +18320,61 @@ void tick_player(void) {\n\
             platformer.availability_reason.as_deref(),
             Some(MANUAL_SGDK_DONOR_REQUIRED_MESSAGE)
         );
+    }
+
+    #[test]
+    fn reference_platformer_template_is_self_contained_and_exercises_the_canonical_components() {
+        let project_dir = temp_dir("reference-platformer-template");
+        create_project_skeleton(&project_dir, "Reference Platformer", "megadrive")
+            .expect("create reference project skeleton");
+
+        let scene = seed_reference_platformer_template(&project_dir, "megadrive")
+            .expect("seed reference platformer");
+        let loaded = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load reference scene");
+        let graph = fs::read_to_string(
+            project_dir
+                .join("graphs")
+                .join("reference_platformer_logic.json"),
+        )
+        .expect("read reference graph");
+
+        assert_eq!(scene.entities.len(), 4);
+        assert_eq!(
+            loaded.collision_map.as_ref().map(|map| map.data.len()),
+            Some(40 * 28)
+        );
+        assert!(project_dir
+            .join(REFERENCE_PLATFORMER_PLAYER_ASSET)
+            .is_file());
+        assert!(project_dir
+            .join(REFERENCE_PLATFORMER_TILESET_ASSET)
+            .is_file());
+        assert!(project_dir.join(REFERENCE_PLATFORMER_JUMP_ASSET).is_file());
+        assert!(project_dir.join(REFERENCE_PLATFORMER_THEME_ASSET).is_file());
+        assert!(graph.contains("input_pressed"));
+        assert!(graph.contains("condition_overlap"));
+        assert!(graph.contains("action_music"));
+        assert!(graph.contains("goal_reached"));
+
+        let player = load_prefab_entity(&project_dir.join("prefabs").join("reference_player.json"))
+            .expect("load reference player prefab");
+        let sprite = player
+            .components
+            .sprite
+            .as_ref()
+            .expect("reference player sprite");
+        assert!(sprite.animations.contains_key("idle"));
+        assert!(sprite.animations.contains_key("run"));
+        assert!(sprite.animations.contains_key("jump"));
+        assert!(player.components.physics.is_some());
+        assert!(player
+            .components
+            .audio
+            .as_ref()
+            .and_then(|audio| audio.bgm.as_ref())
+            .is_some());
+
+        let _ = fs::remove_dir_all(project_dir);
     }
 
     #[test]

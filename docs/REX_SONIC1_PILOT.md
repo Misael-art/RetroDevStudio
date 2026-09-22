@@ -93,3 +93,11 @@ Capturas legíveis principais:
 - modificada após salto/pausa/reabertura: `src-tauri/target-test/validation/inspection-2026-09-21T14-23-44-938Z-sonic-game-modified-after-restart.png`, SHA-256 `8ae8fb27536fa9037a51b0b097c0383e95d273fd5cf01cb742ba8f52ed26dab9`.
 
 Limitações: a prova continua **Experimental** e assistida por metadados para o recurso `sonic1_sonic/stand`. A alteração é de paleta compartilhada; a captura de gameplay demonstra o efeito no personagem sob condições equivalentes, mas não promete isolamento de paleta no jogo inteiro, extração automática geral, reconstrução integral, animação ou lógica/nós recuperados. Antes de declarar a rodada final do PR #74, ainda é necessário publicar os commits, reconstruir/validar o destino final limpo e acompanhar o CI desse SHA.
+
+## Continuação 2026-09-21 — jogo de referência builtin para a próxima frente
+
+Além do piloto Sonic, esta sessão materializou o próximo marco de autoria em `reference_platformer`, template builtin Experimental do registry. Ele cria um pequeno jogo Mega Drive autocontido com player animado (`idle`/`run`/`jump`), movimento, salto, colisão, tilemap, câmera, dois SFX, BGM VGM e objetivo por NodeGraph visível. O template não usa ROM comercial, BYOR ou doador externo.
+
+Prova local: card e criação pelo wizard cobertos em `src/App.test.tsx`; seed e componentes canônicos cobertos em `project_mgr`; build real com SGDK oficial, ROM `SEGA`, carga no núcleo Libretro oficial, 45 frames com `Right` e framebuffer alterado cobertos pelo teste manual ignorado `reference_platformer_real_toolchain_build`. A colisão Assembly encontrada entre sprite e SFX `goal` foi corrigida com o nome de recurso `goal_sound`.
+
+Esta prova não promove o piloto Sonic a reconstrução, não fecha save/restart/reopen desktop para o novo template e não converte importação/Phase D em equivalência ou AST completo. O template permanece Experimental até a prova visual de autoria e persistência ser reexecutada no desktop final.

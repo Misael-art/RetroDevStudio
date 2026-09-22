@@ -1,3 +1,11 @@
+### Checkpoint 2026-09-21 — primeiro jogo de referência builtin (Experimental)
+
+Na branch `codex/rex-sonic1-pilot`, o wizard passou a expor o template builtin `reference_platformer`, autocontido e limitado ao Mega Drive. Ele materializa no projeto assets próprios PPM/WAV/VGM, prefabs editáveis de player/objetivo/câmera/tilemap, mapa de colisão 40×28, animações `idle`/`run`/`jump` e um NodeGraph com movimento horizontal, salto, SFX, música, overlap de objetivo e variável `goal_reached`. A entrada permanece `experimental: true` e não usa ROM comercial, corpus BYOR ou doador externo.
+
+Evidência local reexecutada: teste estrutural do template; build com SGDK oficial detectado pelo host; ROM com assinatura `SEGA`; carregamento e 45 frames no núcleo Libretro oficial; framebuffer diferente após `Right` e não vazio. O primeiro build revelou e corrigiu a colisão de símbolo Assembly entre o sprite `goal` e o SFX homônimo, renomeado para `goal_sound`. Gates anteriores da sessão também estão verdes: `check:tree`, lint, TypeScript, Vitest, Rust, `host:certify` e `cargo fmt`.
+
+Limites: esta fatia prova um jogo pequeno novo, não a reconstrução do Sonic/ROM BYOR, não certifica todos os controles de pausa/save/reopen do fluxo desktop, não promove a importação SGDK nem transforma heurística Phase D em AST/round-trip. Próximo passo operacional: revalidar a superfície visual do wizard/editor e documentar save/restart/reopen com a mesma referência antes de remover o rótulo Experimental.
+
 ### Estado corrente — 2026-09-20: auditoria #66–#69 e proposta de destino #70 + #71
 
 A ancestralidade foi revalidada por SHA, não pelo estado das PRs: #69 é `ee70bc4444830eaaa5914175729e23feca06b94e`; #66, #67 e #68 são, respectivamente, `ba637cf2216e9cc93356f7098ea26a8f529fdd54`, `9f77b40b15841f4cae706cc0f9561558523ca637` e `09e1d1316382a25e3ef226a7bb52ea033d7af0ae`. Nenhum dos três heads REX é ancestral de #69. `10c89d1` também **não** é ancestral de #69; o patch equivalente de renderer chunky em #69 é `e998bbd`. Já no destino atual de trabalho, #70 (`8843018807f9f511976ff08e3602fce09b8a821f`) é ancestral de #71 (`d9fe40d7b5fcf56127889e4e1095413083b8dd63`), e os três heads REX também são ancestrais por meio dos merges de #70. Esta distinção corrige a leitura de que os PRs REX já estariam na base do #69.

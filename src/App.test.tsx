@@ -947,6 +947,32 @@ function defaultProjectTemplates() {
       default_donor_path: null,
     },
     {
+      id: "reference_platformer",
+      name: "Jogo de Referência — Plataforma",
+      description:
+        "Pequeno jogo autocontido com personagem animado, movimento, salto, colisão, tilemap, câmera, áudio e objetivo por NodeGraph.",
+      genre: "platformer",
+      difficulty: "beginner",
+      features: [
+        "sprite",
+        "animation",
+        "tilemap",
+        "physics",
+        "collision",
+        "input",
+        "audio",
+        "camera",
+        "goal",
+        "logic",
+      ],
+      source_kind: "builtin",
+      recommended_target: "megadrive",
+      experimental: true,
+      available: true,
+      availability_reason: null,
+      default_donor_path: null,
+    },
+    {
       id: "platformer_seed",
       name: "Plataforma",
       description: "Sprite de personagem, tilemap de cenario e som de pulo importados de template SGDK externo.",
@@ -3043,6 +3069,44 @@ describe("App build flow", () => {
       "megadrive",
       "F:/Projects/RetroDevStudio/tests/fixtures",
       "starter_guided",
+      undefined
+    );
+  });
+
+  it("exposes the self-contained reference platformer through the real wizard controls", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const referenceCard = container.querySelector(
+      "[data-testid='template-card-reference_platformer']"
+    ) as HTMLButtonElement | null;
+    expect(referenceCard).toBeInstanceOf(HTMLButtonElement);
+    expect(referenceCard?.textContent).toContain("Experimental");
+
+    const createButton = findButton(container, "Criar Projeto");
+    await act(async () => {
+      referenceCard?.click();
+      await flush();
+      createButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.createProjectFromTemplate).toHaveBeenCalledWith(
+      "MeuProjeto",
+      "megadrive",
+      "",
+      "reference_platformer",
       undefined
     );
   });

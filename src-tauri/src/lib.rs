@@ -7943,15 +7943,16 @@ pub extern "C" fn retro_run() {
     fn list_project_templates_returns_registry_entries() {
         let templates = list_project_templates().expect("list project templates");
 
-        assert_eq!(templates.len(), 8);
+        assert_eq!(templates.len(), 9);
         assert_eq!(templates[0].id, "empty");
         assert_eq!(templates[1].id, "starter_guided");
-        assert_eq!(templates[2].id, "platformer_seed");
-        assert_eq!(templates[3].id, "rpg_seed");
-        assert_eq!(templates[4].id, "fighter_seed");
-        assert_eq!(templates[5].id, "racing_seed");
-        assert_eq!(templates[6].id, "action_seed");
-        assert_eq!(templates[7].id, "platformer_gm");
+        assert_eq!(templates[2].id, "reference_platformer");
+        assert_eq!(templates[3].id, "platformer_seed");
+        assert_eq!(templates[4].id, "rpg_seed");
+        assert_eq!(templates[5].id, "fighter_seed");
+        assert_eq!(templates[6].id, "racing_seed");
+        assert_eq!(templates[7].id, "action_seed");
+        assert_eq!(templates[8].id, "platformer_gm");
     }
 
     #[test]
@@ -8653,6 +8654,90 @@ pub extern "C" fn retro_run() {
 
         let _ = fs::remove_dir_all(project_base_dir);
         let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    /// Prova manual do caminho canônico com o template builtin completo e o
+    /// toolchain SGDK detectado no host. Mantemos `ignored` porque a suíte
+    /// normal não pode depender da instalação local de SGDK.
+    ///
+    /// `cargo test --manifest-path src-tauri/Cargo.toml reference_platformer_real_toolchain_build --lib -- --ignored --nocapture --test-threads=1`
+    #[ignore]
+    #[test]
+    fn reference_platformer_real_toolchain_build() {
+        let project_base_dir = temp_dir("reference-platformer-real-build");
+        let create_result = create_project_from_template(
+            "Reference Platformer".to_string(),
+            "megadrive".to_string(),
+            project_base_dir.to_string_lossy().to_string(),
+            "reference_platformer".to_string(),
+            None,
+        )
+        .expect("create reference platformer project");
+        let project_dir = PathBuf::from(&create_result.path);
+        let environment = BuildEnvironment::detect();
+        assert!(
+            environment
+                .sgdk_root
+                .as_ref()
+                .is_some_and(|root| root.join("makefile.gen").is_file())
+                && environment.sgdk_make_program.is_some(),
+            "official SGDK real nao detectado; esta prova nao aceita fake toolchain"
+        );
+
+        let build_result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(
+            build_result.ok,
+            "reference build failed: {:?}",
+            build_result.log
+        );
+        let rom_path = PathBuf::from(&build_result.rom_path);
+        let rom_path = if rom_path.is_absolute() {
+            rom_path
+        } else {
+            project_dir.join(rom_path)
+        };
+        let rom_bytes = fs::read(&rom_path).expect("read reference ROM");
+        assert!(
+            rom_bytes.windows(4).any(|window| window == b"SEGA"),
+            "reference ROM deve conter assinatura SEGA: {}",
+            rom_path.display()
+        );
+
+        let mut emulator = EmulatorCore::new(None);
+        emulator
+            .load_rom(&rom_path)
+            .expect("load reference ROM in the official Libretro core");
+        emulator.run_frame().expect("run reference idle frame");
+        let (before_input, _, _) = emulator
+            .get_framebuffer()
+            .expect("capture reference idle framebuffer");
+        emulator
+            .set_joypad(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            })
+            .expect("set reference right input");
+        for _ in 0..45 {
+            emulator.run_frame().expect("run reference gameplay frame");
+        }
+        let (after_input, size, pixel_format) = emulator
+            .get_framebuffer()
+            .expect("capture reference gameplay framebuffer");
+        assert_ne!(
+            before_input, after_input,
+            "the reference game framebuffer should respond to right input"
+        );
+        let frame = framebuffer_to_rgba(&after_input, size, pixel_format);
+        assert!(
+            frame
+                .rgba
+                .chunks_exact(4)
+                .any(|pixel| { pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0 }),
+            "reference game framebuffer must not be empty"
+        );
+        emulator.stop().expect("stop reference emulator");
+
+        let _ = fs::remove_dir_all(project_base_dir);
     }
 
     #[test]

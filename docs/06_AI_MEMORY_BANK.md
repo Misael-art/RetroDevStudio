@@ -1,5 +1,13 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-21 — template builtin de jogo de referência (Experimental)
+
+Na branch `codex/rex-sonic1-pilot`, foi adicionado o template registry `reference_platformer` e sua materialização nativa no backend. O projeto é autocontido para Mega Drive: player com três animações, colisão/física/input, objetivo com overlap, tilemap/mapa de colisão, câmera, dois SFX, BGM VGM e NodeGraph de movimento/salto/objetivo. Assets são gerados pelo próprio template; não há ROM comercial, BYOR ou dependência de corpus.
+
+Prova local real: build com SGDK oficial detectado no host produziu ROM com assinatura `SEGA`; a ROM carregou no núcleo Libretro oficial, executou 45 frames com `Right`, mudou o framebuffer e manteve pixels não vazios. Um conflito inicial de símbolos (`goal` sprite vs. `goal` SFX) foi corrigido renomeando o SFX para `goal_sound`. O template e o build real têm testes dedicados; o template continua `Experimental`.
+
+Não alterar as decisões arquiteturais consolidadas por causa desta fatia. Ainda faltam a prova desktop completa de wizard/editor e save/restart/reopen para este jogo, além dos marcos de sprites/tilemaps/áudio/logic do programa REX e qualquer afirmação de equivalência com jogos importados.
+
 ### Checkpoint 2026-09-20 — Sprite-Frame-02 multi-recurso (Experimental)
 
 Branch isolada `codex/rex-sprite-frame-02`, commit de implementação `470ae81`, dependente de `codex/rex-sprite-frame-01-integration`, sem merge. A composição assistida foi generalizada para `spr_ryo_100/frame-0..4` (frame 4 deduplicado com frame 2) e para `spr_spark0/frame-0` de Taiketsu. ROMs BYOR: HAMOOPIG `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`; Taiketsu `3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c`. Fontes: Ryo `1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b`; Spark `cafaf180ba006903242aa822fb3c0dceb42424a9e0bd07a5a19b75f33a4bf196`.
