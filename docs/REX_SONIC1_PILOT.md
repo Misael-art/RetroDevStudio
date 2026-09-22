@@ -10,6 +10,26 @@ A continuação implementou um perfil delimitado de Mega Drive para `ADDQ.W #1,D
 
 Matriz desta rodada: **comprovado** — node→C→ROM, Build do grafo reaberto→ROM observada, original #1, patch #2, estado/input/frame comum, oracle independente de WRAM D0/flags, original/original, no-op e reabertura com operação/conexão/source mapping; **pendente** — equivalência geral, callers indiretos/PC-relative, trace dinâmico, contexto de chamada, hardware e qualquer operação além de `ADDQ.W; RTS`. A superfície permanece **Experimental**, sem merge.
 
+### Continuação 2026-09-22 — rotina branch compare delimitada (Experimental; commit `312cee2`)
+
+Esta fatia separada preserva a prova ADDQ como regressão e acrescenta somente o perfil exato `m68k.add_compare_branch_word_d0_wram.v1`. A fixture própria está em `src-tauri/tests/fixtures/logic_recovery_branch_sgdk/`: `ADDI.W #1,D0; CMPI.W #5,D0; BGE.S; MOVE.W #0/#1,$E0FFFF00.L; RTS`, 30 bytes contíguos, sem instruções sem uso. O caminho de nós implementa o mesmo contrato limitado em C; o perfil continua restrito a Mega Drive/M68K, esse formato, `branch_input/branch_result`, bias `0..8` e threshold assinado `0..32767`; não declara suporte geral.
+
+O relatório E2E local desta execução é `src-tauri/target-test/validation/logic-recovery-branch-2026-09-22T16-15-43-099Z-report.json`, vinculado ao código `312cee2` e ao binário realmente exercitado `/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio`, SHA-256 `85fff5739c3c888b00ba519d068c451ef9bfe6426baeb97b3d3832122c25bc2e`. A rotina oficial SGDK fixture tem SHA `467074aa2bbdb5abe84841952435ae7a56b422d44732614117d2f06f7e0e1130`, offset `29486` (`0x732E`), e o fixture Node tem SHA `04510aa8cd2467939eb132a69e57d9b7f7124c2528fde2c69c620acad1cb1c4c`.
+
+Matriz da fatia, separando aceite de pendências:
+
+| critério comprovado | evidência executada no código desta fatia |
+| --- | --- |
+| recuperação exata, source mapping e dois ramos | IPC `rom_recover_logic` contra os 30 bytes; 4 mappings; estados independentes `3→0` (falso), `4→1` (limiar), `5→1` (verdadeiro), `0xFFFF→0` (wrap assinado) e `0x1234→1`; `coverage=falseBranch/trueBranch/thresholdMinusOne/threshold/wordWrap=true` |
+| save/reopen do grafo | UI aplicou `rom_recovered`; reabertura preservou nó `rom_branch_compare_word_00732E`, uma conexão, `rom_start=29486`, `rom_end=29516` e threshold `5` |
+| ROM gerada pelo grafo, identificada sem inferência por hash | ROM gerada pelo Build do grafo reaberto: `/run/user/1000/codex-desktop/tmp/rds-desktop-e2e-project-ybzLHI/megadrive_dummy/build/megadrive/out/rom.bin`, SHA `a542d89c9d760c7cdb7c2e5fd43e136055d6267306d92d250eb79100abb18cc5`; o `main.c` gerado foi lido e contém `rds_branch_arithmetic`/`rds_branch_recovery_result` |
+| observação que comprova a ROM gerada | no core Genesis Plus GX, com estado pausado, 120 frames de warmup e o mesmo vetor de entrada `[3,4,5,0,0xFFFF,0x1234]`, leitura independente da WRAM `region=2`, resultado `0xff00` e entrada `0xff02` observou `0,1,1,0,0,1` na ROM acima; a ROM original, o fixture Node e o no-op produziram a mesma sequência |
+| controles original/original e no-op | duas execuções independentes da ROM original foram byte/estado-equivalentes; patch threshold `5` criou cópia byte a byte idêntica à original, SHA `467074aa…e1130` |
+| edição pelo editor e cópia patchada | editor persistiu threshold `5→6`, save/reopen confirmou `6`; ROM gerada após edição SHA `e329cf88b9c4e127959278ca777eca6bfb11dcb46d10b08fe1d93a86ecae7550`; cópia patchada `/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/logic-recovery-branch-fixture/routine/out/rom.bin.branch6.patched.bin`, SHA `e41c1d917e244feef4202d4aa81b2575e38732be2f9ab1f538b21b165f797482`; ambas observaram `0,0,1,0,0,1`, comprovando `4: 1→0` |
+| regressão ADDQ | cenário `logic-recovery`, fixture e controles original/original/no-op/patch #2 permanecem no harness e não foram removidos ou ampliados |
+
+Pendências explícitas: nenhum suporte geral a M68K, nenhum caller indireto/PC-relative, nenhuma equivalência fora desta fixture, nenhum trace dinâmico de jogo, nenhuma promessa SNES ou de outra largura/operação. O perfil ADDQ permanece **Experimental** e restrito a `ADDQ.W; RTS`; o branch compare é uma segunda fixture Experimental igualmente delimitada, sem promoção de suporte geral e sem merge. A única alteração posterior ao binário acima é documentação/matriz, não uma nova execução atribuída ao binário.
+
 ## Corpus e referência
 
 ROM BYOR preservada localmente:
