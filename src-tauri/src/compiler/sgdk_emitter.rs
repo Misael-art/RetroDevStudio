@@ -60,6 +60,10 @@ fn build_main_c_with_collision(
         .logic_scripts
         .iter()
         .any(|script| ops_contain_rom_addq_word(&script.ops));
+    let has_rom_branch_compare_word = ast
+        .logic_scripts
+        .iter()
+        .any(|script| ops_contain_rom_branch_compare_word(&script.ops));
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let input_commands = collect_input_commands(ast);
     let unsupported_semantics = crate::compiler::ast_generator::collect_unsupported_semantics(ast);
@@ -153,6 +157,8 @@ fn build_main_c_with_collision(
     for var_name in &logic_vars {
         let initial_value = if has_rom_addq_word && var_name == "rom_d0" {
             "0x12340058"
+        } else if has_rom_branch_compare_word && var_name == "branch_input" {
+            "3"
         } else {
             "0"
         };
@@ -171,6 +177,18 @@ fn build_main_c_with_collision(
         out.push_str(
             "static volatile u16 *const rds_logic_recovery_oracle_flags = (volatile u16 *)0xE0FFFF04;\n\n",
         );
+    }
+    if has_rom_branch_compare_word {
+        out.push_str(
+            "static volatile u16 *const rds_branch_recovery_result = (volatile u16 *)0xE0FFFF00;\n",
+        );
+        out.push_str(
+            "static volatile u16 *const rds_branch_recovery_input = (volatile u16 *)0xE0FFFF02;\n",
+        );
+        out.push_str(
+            "static const u16 rds_branch_recovery_inputs[6] = {3, 4, 5, 0, 0xFFFF, 0x1234};\n",
+        );
+        out.push_str("static u16 rds_branch_recovery_index = 0;\n\n");
     }
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
         out.push_str("static s16 retro_hscroll_table[224];\n");
@@ -573,6 +591,13 @@ fn build_main_c_with_collision(
                     ));
                 }
                 render_logic_scripts(&mut out, &ast.logic_scripts, 8);
+                if has_rom_branch_compare_word {
+                    out.push_str(
+                        "        *rds_branch_recovery_input = (u16)logic_var_branch_input;\n",
+                    );
+                    out.push_str("        rds_branch_recovery_index++;\n");
+                    out.push_str("        logic_var_branch_input = rds_branch_recovery_inputs[rds_branch_recovery_index % 6];\n");
+                }
                 if has_rom_addq_word {
                     out.push_str(
                         "        *rds_logic_recovery_oracle_value = (u32)logic_var_rom_d0;\n",
@@ -1489,6 +1514,21 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     immediate = immediate
                 ));
             }
+            LogicOp::RomBranchCompareWord {
+                input_var,
+                bias,
+                threshold,
+                result_var,
+            } => {
+                out.push_str(&format!(
+                    "{indent}{{ u16 rds_branch_arithmetic = (u16)((u16)logic_var_{input_var} + {bias}); logic_var_{result_var} = ((s16)rds_branch_arithmetic >= (s16){threshold}) ? 1 : 0; *rds_branch_recovery_result = (u16)logic_var_{result_var}; }}\n",
+                    indent = indent_str,
+                    input_var = input_var,
+                    bias = bias,
+                    threshold = threshold,
+                    result_var = result_var,
+                ));
+            }
             LogicOp::WhileLoop {
                 condition,
                 body,
@@ -1650,6 +1690,7 @@ fn collect_logic_velocity_targets_from_ops(
             | LogicOp::HideSprite { .. }
             | LogicOp::SetVar { .. }
             | LogicOp::RomAddQWord { .. }
+            | LogicOp::RomBranchCompareWord { .. }
             | LogicOp::PlaySound { .. }
             | LogicOp::PlayMusic { .. }
             | LogicOp::SourceBridgeError { .. } => {}
@@ -1967,6 +2008,45 @@ fn ops_contain_rom_addq_word(ops: &[LogicOp]) -> bool {
     ops.iter().any(op_contains_rom_addq_word)
 }
 
+fn ops_contain_rom_branch_compare_word(ops: &[LogicOp]) -> bool {
+    ops.iter().any(op_contains_rom_branch_compare_word)
+}
+
+fn op_contains_rom_branch_compare_word(op: &LogicOp) -> bool {
+    match op {
+        LogicOp::RomBranchCompareWord { .. } => true,
+        LogicOp::SourceMapped { op, .. } => op_contains_rom_branch_compare_word(op),
+        LogicOp::ConditionOverlap {
+            if_true, if_false, ..
+        }
+        | LogicOp::ConditionBool {
+            if_true, if_false, ..
+        } => {
+            ops_contain_rom_branch_compare_word(if_true)
+                || ops_contain_rom_branch_compare_word(if_false)
+        }
+        LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+            ops_contain_rom_branch_compare_word(body) || ops_contain_rom_branch_compare_word(done)
+        }
+        LogicOp::TimelineSequence { slots, .. } => slots
+            .iter()
+            .any(|slot| ops_contain_rom_branch_compare_word(&slot.actions)),
+        LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+            ops_contain_rom_branch_compare_word(if_ok)
+                || ops_contain_rom_branch_compare_word(if_warn)
+        }
+        LogicOp::HardwareEvent { ops, .. } => ops_contain_rom_branch_compare_word(ops),
+        LogicOp::StateMachine { states, .. } => states.iter().any(|state| {
+            ops_contain_rom_branch_compare_word(&state.body)
+                || state.transitions.iter().any(|transition| {
+                    ops_contain_rom_branch_compare_word(&transition.if_matched)
+                        || ops_contain_rom_branch_compare_word(&transition.if_unmatched)
+                })
+        }),
+        _ => false,
+    }
+}
+
 fn op_contains_rom_addq_word(op: &LogicOp) -> bool {
     match op {
         LogicOp::RomAddQWord { .. } => true,
@@ -2034,6 +2114,14 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             vars.insert(format!("{var_name}_v"));
             vars.insert(format!("{var_name}_c"));
             vars.insert(format!("{var_name}_x"));
+        }
+        LogicOp::RomBranchCompareWord {
+            input_var,
+            result_var,
+            ..
+        } => {
+            vars.insert(input_var.clone());
+            vars.insert(result_var.clone());
         }
         LogicOp::ConditionOverlap {
             if_true, if_false, ..

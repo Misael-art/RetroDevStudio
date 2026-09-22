@@ -361,6 +361,9 @@ export interface IndependentTestState {
   output_z: boolean;
   output_v: boolean;
   output_c: boolean;
+  output_result?: number;
+  branch_taken?: boolean;
+  parameter_value?: number;
 }
 
 export interface LogicRecoveryResult {

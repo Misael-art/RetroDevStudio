@@ -45,6 +45,7 @@ export type NodeType =
   | "timeline_sequence"
   | "hardware_budget_check"
   | "rom_addq_word"
+  | "rom_branch_compare_word"
   | "bridge_unconverted_source"
   | "event_vblank"
   | "event_hblank"
@@ -146,6 +147,7 @@ export function isNodeType(value: unknown): value is NodeType {
     value === "timeline_sequence" ||
     value === "hardware_budget_check" ||
     value === "rom_addq_word" ||
+    value === "rom_branch_compare_word" ||
     value === "bridge_unconverted_source" ||
     value === "event_vblank" ||
     value === "event_hblank" ||

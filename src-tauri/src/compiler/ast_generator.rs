@@ -293,6 +293,14 @@ pub enum LogicOp {
         var_name: String,
         immediate: u8,
     },
+    /// Exact fixture-only branch profile: read low D0 word, add bias, signed
+    /// compare, choose 0/1, and write the result variable.
+    RomBranchCompareWord {
+        input_var: String,
+        bias: u16,
+        threshold: u16,
+        result_var: String,
+    },
     WhileLoop {
         condition: LogicBoolExpr,
         body: Vec<LogicOp>,
@@ -1558,6 +1566,33 @@ fn compile_logic_node(
                 immediate: immediate as u8,
             }))
         }
+        "rom_branch_compare_word" => {
+            let profile_id = param_string(node, "profile_id").unwrap_or_default();
+            let input_var =
+                sanitize_identifier(&param_string(node, "input_var").unwrap_or_default());
+            let result_var =
+                sanitize_identifier(&param_string(node, "result_var").unwrap_or_default());
+            let bias = param_i32(node, "bias", -1);
+            let threshold = param_i32(node, "threshold", -1);
+            if profile_id != "m68k.add_compare_branch_word_d0_wram.v1"
+                || input_var != "branch_input"
+                || result_var != "branch_result"
+                || !(0..=8).contains(&bias)
+                || !(0..=32767).contains(&threshold)
+            {
+                return Some(CompiledLogicNode::Linear(LogicOp::SourceBridgeError {
+                    gap: "rom_branch_compare_word exige o perfil v1, branch_input/branch_result, bias 0..8 e threshold assinado 0..32767".to_string(),
+                    source_file: "ROM recovery profile".to_string(),
+                    source_line: 0,
+                }));
+            }
+            Some(CompiledLogicNode::Linear(LogicOp::RomBranchCompareWord {
+                input_var,
+                bias: bias as u16,
+                threshold: threshold as u16,
+                result_var,
+            }))
+        }
         "input_held" | "input_pressed" | "input_command" => {
             let mut true_visited = visited.clone();
             let mut false_visited = visited.clone();
@@ -2495,6 +2530,7 @@ fn collect_unsupported_from_ops(
             }
             LogicOp::MoveSprite { .. }
             | LogicOp::RomAddQWord { .. }
+            | LogicOp::RomBranchCompareWord { .. }
             | LogicOp::SetAnimationState { .. }
             | LogicOp::CameraFollow { .. }
             | LogicOp::HideSprite { .. }
@@ -2713,6 +2749,7 @@ fn collect_logic_sound_names_from_ops(
             }
             LogicOp::SetVar { .. }
             | LogicOp::RomAddQWord { .. }
+            | LogicOp::RomBranchCompareWord { .. }
             | LogicOp::SetSpritePosition { .. }
             | LogicOp::SetVelocity { .. }
             | LogicOp::SetAnimationState { .. }

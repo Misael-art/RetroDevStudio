@@ -336,6 +336,7 @@ function getNodeVisualCategory(nodeOrType: GraphNode | NodeType): NodeVisualCate
       case "hardware_budget_check":
         return "hardware_budget";
       case "rom_addq_word":
+      case "rom_branch_compare_word":
         return "bridge_source_mapping";
       case "event_vblank":
       case "event_hblank":
@@ -565,6 +566,7 @@ export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
   timeline_sequence: "Sequencia (Timeline)",
   hardware_budget_check: "Checar Budget",
   rom_addq_word: "ADDQ.W recuperado",
+  rom_branch_compare_word: "Branch word recuperado",
   bridge_unconverted_source: "Bridge de Fonte",
   event_vblank: "Evento VBlank",
   event_hblank: "Evento HBlank",
@@ -633,6 +635,12 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   flags: "Flags",
   memory_effects: "Efeito memoria",
   profile_id: "Perfil",
+  input_var: "Variavel de entrada",
+  bias: "Soma word",
+  threshold: "Limiar",
+  result_var: "Variavel de resultado",
+  output_address: "Endereco de escrita",
+  semantic_stages: "Etapas semanticas",
 };
 
 const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
@@ -647,7 +655,7 @@ const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[
   { label: "Estados", icon: "\u2690\ufe0f", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
   { label: "Efeitos", icon: "\u2728", types: ["effect_parallax", "effect_raster"] },
   { label: "Hardware", icon: "!", types: ["hardware_budget_check", "bridge_unconverted_source"] },
-  { label: "ROM recuperada", icon: "R", types: ["rom_addq_word"] },
+  { label: "ROM recuperada", icon: "R", types: ["rom_addq_word", "rom_branch_compare_word"] },
 ];
 
 /** Header background por categoria (Blueprints-style) */
@@ -700,6 +708,7 @@ const AUTO_LAYOUT_TYPE_SEQUENCE: NodeType[] = [
   "effect_raster",
   "bridge_unconverted_source",
   "rom_addq_word",
+  "rom_branch_compare_word",
   "event_vblank",
   "event_hblank",
   "event_dma_done",
@@ -1463,6 +1472,7 @@ interface NodeCardProps {
   onMouseDown: (e: React.MouseEvent) => void;
   onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
   onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
+  onParamChange: (nodeId: string, key: string, value: string | number) => void;
 }
 
 function NodeCard({
@@ -1475,6 +1485,7 @@ function NodeCard({
   onMouseDown,
   onPortMouseDown,
   onPortMouseUp,
+  onParamChange,
 }: NodeCardProps) {
   const group = getGroupForType(node.type);
   const headerBg = GROUP_HEADER_BG[group] ?? "bg-[#4a4a3a]";
@@ -1571,9 +1582,22 @@ function NodeCard({
       {visibleParams.length > 0 && (
         <div className="flex flex-col gap-0.5 border-t border-slate-700/50 px-3 pb-2 pt-1.5">
           {visibleParams.map(([k, v]) => (
-            <div key={k} className="flex justify-between text-[10px]">
+            <div key={k} className="flex items-center justify-between gap-2 text-[10px]">
               <span className="text-[#6c7086]">{getNodeParamDisplayName(k)}</span>
-              <span className="font-mono text-[#cdd6f4]">{String(v)}</span>
+              {node.type === "rom_branch_compare_word" && k === "threshold" ? (
+                <input
+                  data-testid={`node-param-${node.id}-${k}`}
+                  type="number"
+                  min={0}
+                  max={32767}
+                  value={String(v)}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onChange={(event) => onParamChange(node.id, k, Number.parseInt(event.target.value, 10) || 0)}
+                  className="w-14 rounded border border-[#cba6f7]/50 bg-[#11111b] px-1 py-0.5 text-right font-mono text-[#cdd6f4] outline-none focus:border-[#f9e2af]"
+                />
+              ) : (
+                <span className="font-mono text-[#cdd6f4]">{String(v)}</span>
+              )}
             </div>
           ))}
         </div>
@@ -2454,6 +2478,20 @@ export default function NodeGraphEditor() {
     focusNode(firstEntryNode);
   }, [focusNode, graphSummary.entryNodeIds]);
 
+  const onParamChange = useCallback((nodeId: string, key: string, value: string | number) => {
+    if (key !== "threshold") {
+      return;
+    }
+    setGraph((currentGraph) => ({
+      ...currentGraph,
+      nodes: currentGraph.nodes.map((node) =>
+        node.id === nodeId && node.type === "rom_branch_compare_word"
+          ? { ...node, params: { ...node.params, threshold: value } }
+          : node
+      ),
+    }));
+  }, []);
+
   const focusFirstDisconnectedNode = useCallback(() => {
     const firstDisconnectedNode = graphSummary.disconnectedNodeIds[0];
     if (!firstDisconnectedNode) {
@@ -3233,6 +3271,7 @@ export default function NodeGraphEditor() {
             onMouseDown={(e) => onNodeMouseDown(e, node.id)}
             onPortMouseDown={(e, portId, isOutput) => onPortMouseDown(e, node.id, portId, isOutput)}
             onPortMouseUp={(e, portId, isOutput) => onPortMouseUp(e, node.id, portId, isOutput)}
+            onParamChange={onParamChange}
           />
         ))}
 

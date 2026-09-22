@@ -15,12 +15,20 @@ use serde_json::json;
 use crate::core::rom_mastering::sha256_hex;
 
 use super::super::loader::load_rom;
+use super::super::platform::LoadedRom;
 
 const ADDQ_WORD_D0: [u8; 2] = [0x52, 0x40];
 const RTS: [u8; 2] = [0x4e, 0x75];
 const ROUTINE_SIZE: usize = 4;
+const BRANCH_ROUTINE_SIZE: usize = 30;
+const BRANCH_THRESHOLD_OFFSET: usize = 7;
+const BRANCH_ROUTINE_BYTES: [u8; BRANCH_ROUTINE_SIZE] = [
+    0x06, 0x40, 0x00, 0x01, 0x0c, 0x40, 0x00, 0x05, 0x6c, 0x0a, 0x33, 0xfc, 0x00, 0x00, 0xe0, 0xff,
+    0xff, 0x00, 0x4e, 0x75, 0x33, 0xfc, 0x00, 0x01, 0xe0, 0xff, 0xff, 0x00, 0x4e, 0x75,
+];
 
 pub const PROFILE_ID: &str = "m68k.addq_word_d0_rts.v1";
+pub const BRANCH_PROFILE_ID: &str = "m68k.add_compare_branch_word_d0_wram.v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LogicRecoveryResult {
@@ -72,6 +80,12 @@ pub struct IndependentTestState {
     pub output_z: bool,
     pub output_v: bool,
     pub output_c: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_result: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_taken: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_value: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -112,6 +126,12 @@ pub fn recover_logic(rom_path: &str, offset: usize) -> Result<LogicRecoveryResul
             "offset 0x{offset:06X} fora dos limites para uma rotina de {ROUTINE_SIZE} bytes; ROM normalizada tem {} bytes",
             loaded.bytes.len()
         ));
+    }
+
+    if offset + BRANCH_ROUTINE_SIZE <= loaded.bytes.len()
+        && loaded.bytes[offset..offset + BRANCH_ROUTINE_SIZE] == BRANCH_ROUTINE_BYTES
+    {
+        return recover_branch_logic(&loaded, offset);
     }
 
     let observed = &loaded.bytes[offset..offset + ROUTINE_SIZE];
@@ -196,6 +216,56 @@ pub fn recover_logic(rom_path: &str, offset: usize) -> Result<LogicRecoveryResul
     })
 }
 
+fn recover_branch_logic(loaded: &LoadedRom, offset: usize) -> Result<LogicRecoveryResult, String> {
+    let observed = &loaded.bytes[offset..offset + BRANCH_ROUTINE_SIZE];
+    let rom_sha256 = sha256_hex(&loaded.bytes);
+    let node_id = format!("rom_branch_compare_word_{offset:06X}");
+    let threshold = u16::from_be_bytes([observed[6], observed[7]]);
+    let graph_json = branch_graph_json(&node_id, &rom_sha256, offset, threshold);
+    let independent_test_states = branch_independent_test_states(threshold);
+    let call_sites = find_absolute_call_sites(&loaded.bytes, offset);
+
+    Ok(LogicRecoveryResult {
+        ok: true,
+        error: String::new(),
+        profile_id: BRANCH_PROFILE_ID.to_string(),
+        architecture: "m68000-big-endian".to_string(),
+        source_path: loaded.source_path.clone(),
+        rom_sha256,
+        rom_offset: offset,
+        rom_end: offset + BRANCH_ROUTINE_SIZE,
+        bytes: observed.to_vec(),
+        boundary: "exact: ADDI.W #1,D0; CMPI.W #5,D0; BGE.S; two MOVE.W result writes; RTS at both exits".to_string(),
+        call_sites,
+        limitations: vec![
+            "aceita somente os 30 bytes contiguos deste fixture, com ADDI.W #1, limiar 5, BGE.S e escrita WRAM fixa".to_string(),
+            "o unico parametro editavel deste perfil e o limiar CMPI.W; bias, registrador, desvios e endereco permanecem fixos".to_string(),
+            "a prova cobre os callers JSR absolutos detectaveis e nao promete desassemblagem geral de M68K".to_string(),
+        ],
+        operations: vec![
+            RecoveredOperation { rom_offset: offset, bytes: observed[0..4].to_vec(), mnemonic: "ADDI.W #1,D0".to_string(), semantic: "le a palavra baixa de D0 e soma 1 modulo 2^16".to_string() },
+            RecoveredOperation { rom_offset: offset + 4, bytes: observed[4..8].to_vec(), mnemonic: "CMPI.W #5,D0".to_string(), semantic: "compara D0[15:0] com o limiar assinado 5".to_string() },
+            RecoveredOperation { rom_offset: offset + 8, bytes: observed[8..10].to_vec(), mnemonic: "BGE.S .branch_true".to_string(), semantic: "seleciona o ramo verdadeiro quando a comparacao assinada e >=".to_string() },
+            RecoveredOperation { rom_offset: offset + 10, bytes: observed[10..18].to_vec(), mnemonic: "MOVE.W #0,$E0FFFF00.L".to_string(), semantic: "escreve resultado 0 na palavra da oracle WRAM no ramo falso".to_string() },
+            RecoveredOperation { rom_offset: offset + 18, bytes: observed[18..20].to_vec(), mnemonic: "RTS".to_string(), semantic: "retorna no ramo falso sem fall-through".to_string() },
+            RecoveredOperation { rom_offset: offset + 20, bytes: observed[20..28].to_vec(), mnemonic: "MOVE.W #1,$E0FFFF00.L".to_string(), semantic: "escreve resultado 1 na palavra da oracle WRAM no ramo verdadeiro".to_string() },
+            RecoveredOperation { rom_offset: offset + 28, bytes: observed[28..30].to_vec(), mnemonic: "RTS".to_string(), semantic: "retorna no ramo verdadeiro".to_string() },
+        ],
+        inputs: vec!["D0[15:0] como variavel de entrada".to_string(), "D0[31:16] nao participa da comparacao".to_string()],
+        outputs: vec!["palavra 0/1 em $E0FFFF00 (oracle WRAM)".to_string(), "controle de retorno por ambos os RTS".to_string()],
+        memory_effects: vec!["write.w $E0FFFF00.L: 0 no ramo falso ou 1 no ramo verdadeiro".to_string()],
+        flags: vec!["BGE.S consome a comparacao assinada de CMPI.W".to_string()],
+        source_mappings: vec![
+            SourceMapping { rom_start: offset, rom_end: offset + 4, ir_op: "rom.branch_word.read_add(input=D0,bias=1)".to_string(), node_id: node_id.clone() },
+            SourceMapping { rom_start: offset + 4, rom_end: offset + 10, ir_op: "rom.branch_word.compare_gte_signed(threshold=5)".to_string(), node_id: node_id.clone() },
+            SourceMapping { rom_start: offset + 10, rom_end: offset + 20, ir_op: "rom.branch_word.write_result(false=0);control.return".to_string(), node_id: node_id.clone() },
+            SourceMapping { rom_start: offset + 20, rom_end: offset + BRANCH_ROUTINE_SIZE, ir_op: "rom.branch_word.write_result(true=1);control.return".to_string(), node_id: node_id.clone() },
+        ],
+        independent_test_states,
+        graph_json,
+    })
+}
+
 pub fn patch_logic(
     rom_path: &str,
     output_path: &str,
@@ -234,6 +304,27 @@ pub fn patch_logic(
         return Err("offset fora dos limites da ROM".to_string());
     }
     let old_bytes = loaded.bytes[offset..offset + ROUTINE_SIZE].to_vec();
+    if offset + BRANCH_ROUTINE_SIZE <= loaded.bytes.len()
+        && loaded.bytes[offset..offset + BRANCH_ROUTINE_SIZE] == BRANCH_ROUTINE_BYTES
+    {
+        let mut patched = loaded.bytes;
+        patched[offset + BRANCH_THRESHOLD_OFFSET] = immediate;
+        fs::write(output, &patched)
+            .map_err(|error| format!("falha ao gravar copia patchada: {error}"))?;
+        return Ok(LogicPatchResult {
+            ok: true,
+            error: String::new(),
+            profile_id: BRANCH_PROFILE_ID.to_string(),
+            input_path: input.to_string_lossy().to_string(),
+            output_path: output.to_string_lossy().to_string(),
+            input_sha256,
+            output_sha256: sha256_hex(&patched),
+            rom_offset: offset,
+            old_bytes: BRANCH_ROUTINE_BYTES.to_vec(),
+            new_bytes: patched[offset..offset + BRANCH_ROUTINE_SIZE].to_vec(),
+            immediate,
+        });
+    }
     if old_bytes != vec![ADDQ_WORD_D0[0], ADDQ_WORD_D0[1], RTS[0], RTS[1]] {
         return Err(format!(
             "patch recusado: bytes nao sao o perfil exacto: {}",
@@ -316,6 +407,48 @@ fn graph_json(node_id: &str, rom_sha256: &str, offset: usize) -> String {
     .to_string()
 }
 
+fn branch_graph_json(node_id: &str, rom_sha256: &str, offset: usize, threshold: u16) -> String {
+    json!({
+        "version": 1,
+        "nodes": [
+            {
+                "id": format!("{node_id}_entry"),
+                "type": "event_start",
+                "label": "Recovered branch routine entry",
+                "x": 40,
+                "y": 120,
+                "inputs": [],
+                "outputs": [{"id":"exec","label":"▶","kind":"exec"}],
+                "params": {"source":"rom","rom_sha256":rom_sha256,"rom_start":offset as u64}
+            },
+            {
+                "id": node_id,
+                "type": "rom_branch_compare_word",
+                "label": "ADD.W + compare + branch + write (recovered)",
+                "x": 320,
+                "y": 120,
+                "inputs": [{"id":"exec","label":"▶","kind":"exec"}],
+                "outputs": [{"id":"exec","label":"▶","kind":"exec"}],
+                "params": {
+                    "profile_id": BRANCH_PROFILE_ID,
+                    "input_var": "branch_input",
+                    "bias": 1,
+                    "threshold": threshold,
+                    "result_var": "branch_result",
+                    "output_address": "0xE0FFFF00",
+                    "rom_sha256": rom_sha256,
+                    "rom_start": offset as u64,
+                    "rom_end": (offset + BRANCH_ROUTINE_SIZE) as u64,
+                    "instruction_offsets": format!("0x{offset:06X},0x{:06X},0x{:06X},0x{:06X},0x{:06X},0x{:06X},0x{:06X}", offset + 4, offset + 8, offset + 10, offset + 18, offset + 20, offset + 28),
+                    "semantic_stages": "read_variable;add_word;compare_signed;branch_conditional;write_result",
+                    "limitations": "exact-fixture-body-only;threshold-edit-only;fixed-wram-oracle",
+                }
+            }
+        ],
+        "edges": [{"id":format!("{node_id}_entry_exec"),"fromNode":format!("{node_id}_entry"),"fromPort":"exec","toNode":node_id,"toPort":"exec"}]
+    }).to_string()
+}
+
 fn independent_test_states() -> Vec<IndependentTestState> {
     [
         0x0000_0000,
@@ -336,9 +469,35 @@ fn independent_test_states() -> Vec<IndependentTestState> {
             output_z: result.2,
             output_v: result.3,
             output_c: result.4,
+            output_result: None,
+            branch_taken: None,
+            parameter_value: None,
         }
     })
     .collect()
+}
+
+fn branch_independent_test_states(threshold: u16) -> Vec<IndependentTestState> {
+    [3u32, 4, 5, 0, 0xffff, 0x1234]
+        .into_iter()
+        .map(|input_d0| {
+            let arithmetic = (input_d0 as u16).wrapping_add(1);
+            let branch_taken = (arithmetic as i16) >= threshold as i16;
+            IndependentTestState {
+                input_d0,
+                input_x: false,
+                output_d0: (input_d0 & 0xffff_0000) | arithmetic as u32,
+                output_x: false,
+                output_n: false,
+                output_z: false,
+                output_v: false,
+                output_c: false,
+                output_result: Some(if branch_taken { 1 } else { 0 }),
+                branch_taken: Some(branch_taken),
+                parameter_value: Some(threshold),
+            }
+        })
+        .collect()
 }
 
 fn reference_word_add(d0: u32) -> (u32, bool, bool, bool, bool, bool) {
@@ -462,5 +621,35 @@ mod tests {
         let overflow = reference_word_add(0x0000_7fff);
         assert_eq!(overflow.0, 0x0000_8000);
         assert!(overflow.1 && overflow.3 && !overflow.4);
+    }
+
+    #[test]
+    fn recovers_branch_fixture_and_patches_only_threshold() {
+        let path = fixture_path();
+        let output = path.with_file_name(format!("{}.branch6.patched.bin", path.display()));
+        let mut rom = fixture_rom();
+        rom[0x300..0x300 + BRANCH_ROUTINE_SIZE].copy_from_slice(&BRANCH_ROUTINE_BYTES);
+        fs::write(&path, &rom).expect("fixture");
+        let result = recover_logic(path.to_str().expect("path"), 0x300).expect("branch recovery");
+        assert_eq!(result.profile_id, BRANCH_PROFILE_ID);
+        assert_eq!(result.source_mappings.len(), 4);
+        assert_eq!(result.independent_test_states[0].output_result, Some(0));
+        assert_eq!(result.independent_test_states[1].output_result, Some(1));
+        assert_eq!(result.independent_test_states[3].output_result, Some(0));
+        let sha = sha256_hex(&rom);
+        let patched = patch_logic(
+            path.to_str().expect("path"),
+            output.to_str().expect("output"),
+            &sha,
+            0x300,
+            6,
+        )
+        .expect("branch patch");
+        assert_eq!(patched.profile_id, BRANCH_PROFILE_ID);
+        assert_eq!(patched.new_bytes[7], 6);
+        assert_eq!(patched.new_bytes[..7], BRANCH_ROUTINE_BYTES[..7]);
+        assert_eq!(patched.new_bytes[8..], BRANCH_ROUTINE_BYTES[8..]);
+        fs::remove_file(path).expect("cleanup input");
+        fs::remove_file(output).expect("cleanup output");
     }
 }

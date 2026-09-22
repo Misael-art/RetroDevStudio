@@ -236,7 +236,11 @@ export default function ReverseWorkspace() {
       return;
     }
     const recoveredGraph = deserializeNodeGraph(logicRecovery.graph_json);
-    if (recoveredGraph.nodes.length !== 2 || recoveredGraph.edges.length !== 1) {
+    if (
+      recoveredGraph.nodes.length !== 2 ||
+      recoveredGraph.edges.length !== 1 ||
+      !recoveredGraph.nodes.some((node) => node.type === "rom_addq_word" || node.type === "rom_branch_compare_word")
+    ) {
       logMessage("error", "[Reverse] O grafo recuperado nao passou a validacao estrutural minima.");
       return;
     }
@@ -806,10 +810,10 @@ export default function ReverseWorkspace() {
                       Lógica ROM → Nodes (Experimental)
                     </div>
                     <div className="mt-2 text-sm font-semibold text-[#e5e7eb]">
-                      Perfil exato: ADDQ.W #1,D0; RTS
+                      Perfil exato: {logicRecovery?.profile_id === "m68k.add_compare_branch_word_d0_wram.v1" ? "ADDI.W #1,D0; CMPI.W; BGE.S; MOVE.W; RTS" : "ADDQ.W #1,D0; RTS"}
                     </div>
                     <div className="mt-1 max-w-3xl text-[10px] text-[#b7b0cf]">
-                      Só aceita os 4 bytes contíguos, preserva a semântica word/flags e recusa
+                      Só aceita o corpo contíguo do perfil ativo, preserva a semântica delimitada e recusa
                       qualquer aproximação. O patch sempre grava uma cópia nova condicionada ao SHA-256.
                     </div>
                   </div>
@@ -828,6 +832,7 @@ export default function ReverseWorkspace() {
                     <div className="rounded bg-[#11111b] p-2">
                       <div className="font-semibold text-[#a6e3a1]">Equivalência inicial registrada</div>
                       <div className="mt-1 font-mono">{formatHex(logicRecovery.rom_offset, 6)}–{formatHex(logicRecovery.rom_end, 6)}</div>
+                      <div className="mt-1 font-mono text-[#89b4fa]">perfil: {logicRecovery.profile_id}</div>
                       <div className="mt-1">bytes: {logicRecovery.bytes.map((byte) => formatHex(byte)).join(" ")} · chamadas internas: {logicRecovery.call_sites.length}</div>
                       <div className="mt-1">memória: {logicRecovery.memory_effects.join(", ")} · estados: {logicRecovery.independent_test_states.length}</div>
                       <div className="mt-1 text-[#f9e2af]">limites: {logicRecovery.limitations.join(" · ")}</div>
@@ -844,7 +849,7 @@ export default function ReverseWorkspace() {
                           Aplicar ao NodeGraph selecionado
                         </button>
                         <label className="flex items-center gap-1 text-[#94a3b8]">
-                          imediato
+                          parametro
                           <input
                             data-testid="reverse-logic-immediate"
                             value={logicPatchImmediate}

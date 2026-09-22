@@ -431,6 +431,7 @@ function parseArgs(argv) {
           "inspection-sonic",
           "inspection-preview-unavailable",
           "logic-recovery",
+          "logic-recovery-branch",
         ].includes(
           value
         )
@@ -5979,6 +5980,208 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
   console.log("OK: Desktop Tauri logic-recovery E2E passou com recuperação, grafo, patch e efeito observado.");
 }
 
+async function runBranchLogicRecoveryScenario(sessionId, projectDir) {
+  const nodeRomPath = process.env.RDS_LOGIC_BRANCH_NODE_ROM ?? "";
+  const routineRomPath = process.env.RDS_LOGIC_BRANCH_ROUTINE_ROM ?? "";
+  const offset = Number.parseInt(process.env.RDS_LOGIC_BRANCH_OFFSET ?? "", 0);
+  const routineSignature = Buffer.from("064000010C4000056C0A33FC0000E0FFFF004E7533FC0001E0FFFF004E75", "hex");
+  if (!nodeRomPath || !routineRomPath || !Number.isInteger(offset) || !(await pathExists(nodeRomPath)) || !(await pathExists(routineRomPath))) {
+    fail("logic-recovery-branch exige RDS_LOGIC_BRANCH_NODE_ROM, RDS_LOGIC_BRANCH_ROUTINE_ROM e RDS_LOGIC_BRANCH_OFFSET.");
+  }
+  const nodeBytes = await readFile(nodeRomPath);
+  const routineBytes = await readFile(routineRomPath);
+  if (!routineBytes.subarray(offset, offset + routineSignature.length).equals(routineSignature)) {
+    fail(`fixture branch não contém a rotina exata no offset 0x${offset.toString(16)}.`);
+  }
+  const nodeSourcePath = path.join(path.dirname(path.dirname(nodeRomPath)), "src", "main.c");
+  const routineSourcePath = path.join(path.dirname(path.dirname(routineRomPath)), "src", "main.c");
+  const nodeSource = await readFile(nodeSourcePath, "utf8");
+  const routineSource = await readFile(routineSourcePath, "utf8");
+  if (!nodeSource.includes("node_generated_branch_compare_word") || !nodeSource.includes("rds_branch_result")) fail("caminho Node não contém read/add/compare/branch/write da fixture.");
+  if (!routineSource.includes("recovered_branch_logic_bridge")) fail("caminho original não contém a chamada da rotina M68K vinculada.");
+
+  const artifactPrefix = `logic-recovery-branch-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appBytes = await readFile(currentE2eRunContext?.appPath ?? "").catch(() => null);
+  const report = {
+    generatedAt: new Date().toISOString(),
+    scenario: "logic-recovery-branch",
+    application: { path: currentE2eRunContext?.appPath ?? null, sha256: appBytes ? createHash("sha256").update(appBytes).digest("hex") : null },
+    fixture: {
+      nodeRomPath, routineRomPath,
+      nodeRomSha256: createHash("sha256").update(nodeBytes).digest("hex"),
+      routineRomSha256: createHash("sha256").update(routineBytes).digest("hex"),
+      nodeSourcePath, routineSourcePath,
+      nodeSourceSha256: createHash("sha256").update(nodeSource).digest("hex"),
+      routineSourceSha256: createHash("sha256").update(routineSource).digest("hex"),
+    },
+    profileId: "m68k.add_compare_branch_word_d0_wram.v1",
+    offset,
+    steps: [],
+  };
+
+  await setSessionWindowRect(sessionId, 1280, 800);
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  await waitFor(async () => (await readAutomationState(sessionId))?.activeProjectDir === projectDir, 30000, "Fixture branch não abriu", 250);
+  await closeVisibleConsoleDrawer(sessionId);
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace não abriu para branch");
+  await fillInputBySelector(sessionId, 'input[placeholder="/roms/game.md"]', routineRomPath);
+  await clickButtonByTextWithPointerEvents(sessionId, "Analisar ROM");
+  await waitFor(async () => executeScript(sessionId, `return document.body?.textContent?.includes("ROM Map") ? true : false;`), 30000, "Análise branch não concluiu", 250);
+  const openedCode = await executeScript(sessionId, `const button = Array.from(document.querySelectorAll("button")).find((candidate) => ["Code", "Voltar para Code"].includes(candidate.textContent?.replace(/\\s+/g, " ").trim())); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({block:"center"}); button.click(); return true;`);
+  if (!openedCode) fail("A aba Code não abriu a superfície branch.");
+  await waitForBodyText(sessionId, "Lógica ROM → Nodes", 15000, "Code branch não abriu");
+  await fillInputByLabel(sessionId, "Offset", `0x${offset.toString(16)}`);
+  await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-recover-logic"]:not([disabled])'));`), 30000, "Recuperação branch não habilitou", 250);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-recover-logic");
+  await waitFor(async () => executeScript(sessionId, `const card=document.querySelector('[data-testid="reverse-logic-recovery-card"]'); return card?.textContent?.includes("m68k.add_compare_branch_word_d0_wram.v1") ? true : false;`), 30000, "Perfil branch não apareceu na UI", 250);
+
+  const invoke = async (command, args = {}) => executeAsyncScript(sessionId, `const done=arguments[arguments.length-1]; const invoke=window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke; if(typeof invoke!=="function"){done({ok:false,error:"Tauri invoke indisponível"});return;} invoke(arguments[0],arguments[1]??{}).then((value)=>done({ok:true,value})).catch((error)=>done({ok:false,error:String(error)}));`, [command, args]);
+  const recoveryProbe = await invoke("rom_recover_logic", { romPath: routineRomPath, offset });
+  if (!recoveryProbe?.ok || !recoveryProbe.value?.ok || recoveryProbe.value.profile_id !== report.profileId) fail(`probe independente branch falhou: ${JSON.stringify(recoveryProbe)}`);
+  const states = recoveryProbe.value.independent_test_states ?? [];
+  const stateMap = new Map(states.map((state) => [state.input_d0, state]));
+  const expectedStates = [[3, 0, false], [4, 1, true], [5, 1, true], [0xffff, 0, false], [0x1234, 1, true]];
+  for (const [input, result, branchTaken] of expectedStates) {
+    const state = stateMap.get(input);
+    if (!state || state.output_result !== result || state.branch_taken !== branchTaken) fail(`oráculo independente branch incompleto em ${input}: ${JSON.stringify(state)}`);
+  }
+  if ((recoveryProbe.value.source_mappings ?? []).length !== 4 || !String(recoveryProbe.value.graph_json).includes("rom_branch_compare_word")) fail("source mapping/grafo branch não comprovaram as quatro faixas da rotina.");
+  report.steps.push({ step: "recover_exact_branch_profile", status: "passed", profileId: recoveryProbe.value.profile_id, bytes: [...routineSignature], operations: recoveryProbe.value.operations, sourceMappings: recoveryProbe.value.source_mappings, independentStates: states, coverage: { falseBranch: true, trueBranch: true, thresholdMinusOne: true, threshold: true, wordWrap: true } });
+
+  const noOpPath = `${routineRomPath}.branch5.patched.bin`;
+  const patchedPath = `${routineRomPath}.branch6.patched.bin`;
+  await rm(noOpPath, { force: true });
+  await rm(patchedPath, { force: true });
+  const patchNoOp = await invoke("rom_patch_recovered_logic", { romPath: routineRomPath, outputPath: noOpPath, expectedSha256: report.fixture.routineRomSha256, offset, immediate: 5 });
+  if (!patchNoOp?.ok || !patchNoOp.value?.output_path) fail(`patch branch no-op falhou: ${JSON.stringify(patchNoOp)}`);
+  await waitFor(async () => pathExists(noOpPath), 15000, "cópia branch no-op não foi criada", 100);
+  const noOpBytes = await readFile(noOpPath);
+  if (!noOpBytes.equals(routineBytes)) fail("patch branch no-op alterou a ROM.");
+
+  await callAutomationApi(sessionId, "setSelectedEntityId", ["camera_root"]);
+  await clickButtonByTextWithPointerEvents(sessionId, "Aplicar ao NodeGraph selecionado");
+  await waitFor(async () => executeScript(sessionId, `return document.body?.textContent?.includes("aplicado e persistido") ? true : false;`), 15000, "Grafo branch não persistiu", 250);
+  await callAutomationApi(sessionId, "closeProject");
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  const reopenedLogic = await waitFor(async () => { const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]); return state?.source?.graph_origin === "rom_recovered" ? state : false; }, 30000, "Grafo branch não reabriu", 250);
+  const reopenedGraph = JSON.parse(reopenedLogic.source?.graph_json ?? "{}");
+  const reopenedNode = (reopenedGraph.nodes ?? []).find((node) => node.type === "rom_branch_compare_word");
+  if (!reopenedNode || reopenedNode.params?.threshold !== 5 || reopenedNode.params?.rom_start !== offset || reopenedNode.params?.rom_end !== offset + routineSignature.length || reopenedGraph.edges?.length !== 1) fail(`save/reopen branch perdeu mapping/parâmetro: ${JSON.stringify(reopenedLogic)}`);
+  report.steps.push({ step: "save_reopen_branch_graph", status: "passed", graphOrigin: reopenedLogic.source.graph_origin, node: reopenedNode, edge: reopenedGraph.edges[0] });
+
+  const buildProject = async (label) => {
+    const before = await readAutomationState(sessionId);
+    const count = (before?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
+    await clickButtonByTestIdWithPointerEvents(sessionId, "toolbar-build-run");
+    const built = await waitFor(async () => { const state = await readAutomationState(sessionId); const next = (state?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length; return next > count ? state : false; }, 120000, `${label} não concluiu Build & Run`, 500);
+    const romPath = extractLatestRomPath(built);
+    if (!romPath) fail(`${label} não reportou ROM gerada.`);
+    const generatedMainPath = path.join(path.dirname(path.dirname(romPath)), "src", "main.c");
+    const generatedMain = await readFile(generatedMainPath, "utf8");
+    if (!generatedMain.includes("rds_branch_arithmetic") || !generatedMain.includes("rds_branch_recovery_result")) fail(`${label} não contém a rotina gerada pelo grafo: ${generatedMainPath}`);
+    return { romPath, generatedMainPath, generatedMain, romSha256: createHash("sha256").update(await readFile(romPath)).digest("hex") };
+  };
+  const originalBuild = await buildProject("Build branch original");
+  report.steps.push({ step: "build_graph_rom_original_parameter", status: "passed", romOrigin: "generated_from_reopened_nodegraph", ...originalBuild, generatedMainSha256: createHash("sha256").update(originalBuild.generatedMain).digest("hex"), expectedThreshold: 5 });
+
+  const neutralInput = { b:false,y:false,select:false,start:false,up:false,down:false,left:false,right:false,a:false,x:false,l:false,r:false };
+  const readBranchOracle = async (label) => {
+    const memory = await invoke("emulator_read_memory", { region: 2, offset: 0xff00, length: 4 });
+    if (!memory?.ok || !memory.value?.ok || (memory.value.data ?? []).length < 4) fail(`oracle branch indisponível após ${label}: ${JSON.stringify(memory)}`);
+    const bytes = Buffer.from(memory.value.data);
+    const word = (offsetValue) => (bytes[offsetValue] ?? 0) | ((bytes[offsetValue + 1] ?? 0) << 8);
+    return { result: word(0), input: word(2), rawHex: bytes.toString("hex"), region: 2, resultOffset: 0xff00, inputOffset: 0xff02 };
+  };
+  const inputCases = [3, 4, 5, 0, 0xffff, 0x1234];
+  const oracleResult = (input, threshold) => { const word = (input + 1) & 0xffff; const signedWord = word >= 0x8000 ? word - 0x10000 : word; return signedWord >= threshold ? 1 : 0; };
+  const observeBranchRom = async (romPath, label, threshold) => {
+    if (await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: true }]) !== true) fail(`Emulador não carregou ${label}.`);
+    await waitFor(async () => { const state = await readAutomationState(sessionId); return state?.activeViewportTab === "game" && state?.emulatorLoaded === true && state?.emulPaused === true ? state : false; }, 15000, `${label} não ficou pausada`, 100);
+    const epoch = await invoke("emulator_get_core_epoch");
+    const ack = await invoke("emulator_send_input", { joypad: neutralInput, sessionEpoch: epoch.value });
+    if (!ack?.ok || !ack.value?.ok) fail(`input neutro não confirmado para ${label}.`);
+    const warmed = await invoke("emulator_run_frames", { frames: 120 });
+    if (!warmed?.ok || !warmed.value?.ok) fail(`warmup falhou para ${label}.`);
+    const warmupOracle = await readBranchOracle(`${label} warmup`);
+    const samples = [];
+    const beforeFrames = warmed.value.frames_run;
+    let syncFrames = 0;
+    let synchronized = warmupOracle;
+    while (synchronized.input !== inputCases[0] && syncFrames < inputCases.length * 2) {
+      const ran = await invoke("emulator_run_frames", { frames: 1 });
+      if (!ran?.ok || !ran.value?.ok) fail(`sincronização do frame controlado falhou em ${label}.`);
+      syncFrames += 1;
+      synchronized = await readBranchOracle(`${label} sync ${syncFrames}`);
+    }
+    if (synchronized.input !== inputCases[0]) fail(`script de entrada não sincronizou em ${label}: ${JSON.stringify(synchronized)}`);
+    let current = synchronized;
+    for (let index = 0; index < 6; index += 1) {
+      if (index > 0) {
+        let attempts = 0;
+        while (current.input !== inputCases[index] && attempts < inputCases.length * 2) {
+          const ran = await invoke("emulator_run_frames", { frames: 1 });
+          if (!ran?.ok || !ran.value?.ok) fail(`frame controlado ${index} falhou em ${label}.`);
+          attempts += 1;
+          current = await readBranchOracle(`${label} frame ${index} sync ${attempts}`);
+        }
+      }
+      const observed = await invoke("emulator_observe");
+      const expectedInput = inputCases[index];
+      const oracle = current;
+      const expectedResult = oracleResult(oracle.input, threshold);
+      if (!observed?.ok || !observed.value?.ok || oracle.input !== expectedInput || oracle.result !== expectedResult) fail(`oracle independente branch divergiu em ${label}/${index}: ${JSON.stringify({ oracle, expectedInput, expectedResult, observed: observed?.value })}`);
+      samples.push({ frame: index + 1, input: oracle.input, expectedResult, oracle, romSha256: observed.value.rom_sha256, framebufferSha256: observed.value.framebuffer_sha256, framesRun: observed.value.frames_run });
+    }
+    const state = await readAutomationState(sessionId);
+    if (state?.emulPaused !== true || samples.length !== 6 || samples[5].framesRun < beforeFrames) fail(`${label} não preservou execução pausada/lote de 6 estados.`);
+    return { label, threshold, inputScript: samples.map((sample) => sample.input), warmupOracle, syncFrames, samples, romSha256: samples[0].romSha256, framebufferSha256: samples[0].framebufferSha256, inputAck: ack.value, controlledFrames: 6 };
+  };
+
+  const generatedOriginalObservation = await observeBranchRom(originalBuild.romPath, "ROM gerada pelo grafo (threshold 5)", 5);
+  const nodeObservation = await observeBranchRom(nodeRomPath, "ROM Node fixture (threshold 5)", 5);
+  const originalObservationA = await observeBranchRom(routineRomPath, "ROM original A (threshold 5)", 5);
+  const originalObservationB = await observeBranchRom(routineRomPath, "ROM original B (threshold 5)", 5);
+  const noOpObservation = await observeBranchRom(noOpPath, "ROM no-op threshold 5", 5);
+  const commonInputScript = JSON.stringify(originalObservationA.inputScript);
+  for (const observation of [generatedOriginalObservation, nodeObservation, originalObservationB, noOpObservation]) {
+    if (JSON.stringify(observation.inputScript) !== commonInputScript || JSON.stringify(observation.samples.map((sample) => sample.oracle.result)) !== JSON.stringify(originalObservationA.samples.map((sample) => sample.oracle.result))) fail("equivalência original/node/no-op/original não foi comprovada com entrada e estado controlados.");
+  }
+  if (JSON.stringify(originalObservationA.samples.map((sample) => sample.oracle)) !== JSON.stringify(originalObservationB.samples.map((sample) => sample.oracle)) || JSON.stringify(noOpObservation.samples.map((sample) => sample.oracle)) !== JSON.stringify(originalObservationA.samples.map((sample) => sample.oracle))) fail("execuções repetidas da ROM original/no-op não foram determinísticas.");
+  report.steps.push({ step: "common_input_controlled_execution_original_and_graph", status: "passed", expected: [0,1,1,0,0,1], nodeObservation, generatedOriginalObservation, originalObservationA, originalObservationB, noOpObservation, proof: "cada ROM executou o mesmo script [3,4,5,0,0xFFFF,0x1234] após 120 frames de warmup e o oráculo independente leu resultado/input da WRAM" });
+
+  await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
+  await callAutomationApi(sessionId, "setSelectedEntityId", ["camera_root"]);
+  await clickButtonByTextWithPointerEvents(sessionId, "Logic");
+  await waitFor(async () => { const state = await readAutomationState(sessionId); return state?.activeViewportTab === "logic" ? state : false; }, 15000, "NodeGraph branch não abriu após reabrir o projeto", 250);
+  await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid^="node-param-"][data-testid$="-threshold"]'));`), 15000, "editor branch não exibiu o parâmetro threshold", 250);
+  const edited = await executeScript(sessionId, `const input=document.querySelector('[data-testid$="-threshold"]'); if(!(input instanceof HTMLInputElement)) return false; const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set; setter?.call(input,"6"); input.dispatchEvent(new Event("input",{bubbles:true})); input.dispatchEvent(new Event("change",{bubbles:true})); return input.value;`);
+  if (edited !== "6") fail(`editor não alterou threshold: ${edited}`);
+  await waitFor(async () => { const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]); try { const graph = JSON.parse(state?.source?.graph_json ?? "{}"); return graph.nodes?.some((node) => node.type === "rom_branch_compare_word" && node.params?.threshold === 6) ? state : false; } catch { return false; } }, 15000, "alteração do parâmetro não foi autosalva", 250);
+  await callAutomationApi(sessionId, "closeProject");
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  const editedReopened = await waitFor(async () => { const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]); try { const graph = JSON.parse(state?.source?.graph_json ?? "{}"); return graph.nodes?.some((node) => node.type === "rom_branch_compare_word" && node.params?.threshold === 6) ? state : false; } catch { return false; } }, 30000, "threshold editado não foi relido", 250);
+  const editedBuild = await buildProject("Build branch threshold 6");
+  if (!editedBuild.generatedMain.includes("(s16)6") && !editedBuild.generatedMain.includes(">= (s16)6")) fail("C gerado após edição não comprova threshold 6.");
+  report.steps.push({ step: "editor_parameter_edit_and_reopen", status: "passed", parameter: "threshold", before: 5, after: 6, reopenedGraphOrigin: editedReopened.source.graph_origin, generatedMainPath: editedBuild.generatedMainPath, generatedMainSha256: createHash("sha256").update(editedBuild.generatedMain).digest("hex") });
+
+  const patchResult = await invoke("rom_patch_recovered_logic", { romPath: routineRomPath, outputPath: patchedPath, expectedSha256: report.fixture.routineRomSha256, offset, immediate: 6 });
+  if (!patchResult?.ok || !patchResult.value?.output_path) fail(`patch branch #6 falhou: ${JSON.stringify(patchResult)}`);
+  await waitFor(async () => pathExists(patchedPath), 15000, "cópia branch patchada não foi criada", 100);
+  const patchedBytes = await readFile(patchedPath);
+  if (patchedBytes.length !== routineBytes.length || !patchedBytes.subarray(0, offset).equals(routineBytes.subarray(0, offset)) || !patchedBytes.subarray(offset + routineSignature.length).equals(routineBytes.subarray(offset + routineSignature.length)) || patchedBytes[offset + 7] !== 6) fail("patch branch #6 alterou bytes fora do parâmetro threshold.");
+  const generatedEditedObservation = await observeBranchRom(editedBuild.romPath, "ROM gerada pelo grafo (threshold 6)", 6);
+  const patchedObservation = await observeBranchRom(patchedPath, "ROM cópia patchada (threshold 6)", 6);
+  if (JSON.stringify(generatedEditedObservation.samples.map((sample) => sample.oracle)) !== JSON.stringify(patchedObservation.samples.map((sample) => sample.oracle)) || generatedEditedObservation.samples[1].oracle.result !== 0 || patchedObservation.samples[1].oracle.result !== 0 || originalObservationA.samples[1].oracle.result !== 1) fail("efeito do parâmetro 5→6 não foi comprovado nas ROMs gerada e patchada.");
+  report.steps.push({ step: "edited_generated_and_patched_rom_observation", status: "passed", parameter: { original: 5, edited: 6 }, expectedOriginalResults: [0,1,1,0,0,1], expectedEditedResults: [0,0,1,0,0,1], generatedEditedObservation, patchedObservation, roms: { generatedEdited: { path: editedBuild.romPath, origin: "generated_from_edited_reopened_nodegraph", sha256: generatedEditedObservation.romSha256 }, patched: { path: patchedPath, origin: "copy_of_original_with_threshold_byte_edited", sha256: patchedObservation.romSha256 } }, observation: "WRAM result/input pairs for the same six-frame script; threshold boundary input 4 changes 1→0" });
+  report.finishedAt = new Date().toISOString();
+  await ensureValidationDir();
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  console.log(`[logic-recovery-branch] relatório=${reportPath}`);
+  console.log("OK: Desktop Tauri branch logic-recovery E2E passou com mapping, dois ramos, fronteiras, edição, patch e oráculo.");
+}
+
 async function clickButtonByTextWithPointerEvents(sessionId, expectedText) {
   const result = await executeScript(
     sessionId,
@@ -6654,6 +6857,11 @@ async function main() {
     if (options.scenario === "logic-recovery") {
       currentE2eRunContext.appPath = options.app;
       await runLogicRecoveryScenario(sessionId, options.project);
+      return;
+    }
+    if (options.scenario === "logic-recovery-branch") {
+      currentE2eRunContext.appPath = options.app;
+      await runBranchLogicRecoveryScenario(sessionId, options.project);
       return;
     }
 
