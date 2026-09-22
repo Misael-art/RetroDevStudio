@@ -15134,18 +15134,39 @@ fn reference_player_prefab() -> Entity {
                     "right/left input moves the player".to_string(),
                     "A triggers jump velocity and jump sound".to_string(),
                     "overlap with goal sets goal_reached and plays goal sound".to_string(),
+                    "authored score threshold opens the goal passage".to_string(),
                 ],
                 external_source_refs: Vec::new(),
                 imported_semantics: None,
-                variables: HashMap::from([(
-                    "goal_reached".to_string(),
-                    crate::ugdm::components::LogicVariable {
-                        var_type: "int".to_string(),
-                        default: serde_json::json!(0),
-                        min: Some(0),
-                        max: Some(1),
-                    },
-                )]),
+                variables: HashMap::from([
+                    (
+                        "goal_reached".to_string(),
+                        crate::ugdm::components::LogicVariable {
+                            var_type: "int".to_string(),
+                            default: serde_json::json!(0),
+                            min: Some(0),
+                            max: Some(1),
+                        },
+                    ),
+                    (
+                        "reference_score".to_string(),
+                        crate::ugdm::components::LogicVariable {
+                            var_type: "int".to_string(),
+                            default: serde_json::json!(0),
+                            min: Some(0),
+                            max: Some(65535),
+                        },
+                    ),
+                    (
+                        "goal_open".to_string(),
+                        crate::ugdm::components::LogicVariable {
+                            var_type: "int".to_string(),
+                            default: serde_json::json!(0),
+                            min: Some(0),
+                            max: Some(1),
+                        },
+                    ),
+                ]),
             }),
             ..Components::default()
         },
@@ -15157,7 +15178,7 @@ fn reference_goal_prefab() -> Entity {
         entity_id: "reference_goal_prefab".to_string(),
         display_name: Some("Goal Flag".to_string()),
         prefab: None,
-        transform: Transform { x: 280, y: 184 },
+        transform: Transform { x: 232, y: 160 },
         components: Components {
             sprite: Some(SpriteComponent {
                 asset: REFERENCE_PLATFORMER_GOAL_ASSET.to_string(),
@@ -15315,7 +15336,7 @@ fn reference_platformer_scene() -> Scene {
             entity_id: "goal".to_string(),
             display_name: Some("Goal Flag".to_string()),
             prefab: Some("reference_goal.json".to_string()),
-            transform: Transform { x: 280, y: 184 },
+            transform: Transform { x: 232, y: 160 },
             components: Components::default(),
         },
         Entity {
@@ -15362,6 +15383,15 @@ fn reference_platformer_logic_graph() -> String {
             { "id": "jump", "type": "input_pressed", "label": "Press A", "x": 180, "y": 420, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
             { "id": "jump_velocity", "type": "set_velocity", "label": "Jump", "x": 360, "y": 400, "params": { "target": "player", "vx": 0, "vy": -48 } },
             { "id": "jump_sound", "type": "action_sound", "label": "Jump Sound", "x": 540, "y": 400, "params": { "sfx": "jump" } },
+            { "id": "update_score", "type": "event_update", "label": "Update Score", "x": 0, "y": 720, "params": {} },
+            { "id": "score_input", "type": "input_held", "label": "Score Right Input", "x": 180, "y": 700, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+            { "id": "score_get", "type": "var_get", "label": "Read Reference Score", "x": 360, "y": 820, "params": { "var_name": "reference_score", "semantic": "current score accumulated from real right input" } },
+            { "id": "score_add", "type": "logic_math", "label": "Add One Point", "x": 540, "y": 760, "params": { "operator": "+", "b": 1, "semantic": "one point per consumed right-input frame" } },
+            { "id": "score_set", "type": "var_set", "label": "Write Reference Score", "x": 720, "y": 700, "params": { "var_name": "reference_score", "value": 0 } },
+            { "id": "score_threshold", "type": "condition_compare", "label": "Score Opens Passage", "x": 900, "y": 700, "params": { "operator": ">=", "b": 6, "authoring_origin": "authored_builtin_reference_platformer", "semantic": "reference_score >= threshold opens the goal passage", "source_path": "graphs/reference_platformer_logic.json", "source_line": 24 } },
+            { "id": "open_goal", "type": "var_set", "label": "Mark Passage Open", "x": 1100, "y": 650, "params": { "var_name": "goal_open", "value": 1, "semantic": "the real goal sprite is hidden after the threshold branch" } },
+            { "id": "hide_goal", "type": "destroy_entity", "label": "Open Goal Passage", "x": 1300, "y": 650, "params": { "target": "goal", "semantic": "hide the real goal sprite in the running ROM" } },
+            { "id": "close_goal", "type": "var_set", "label": "Keep Passage Closed", "x": 1100, "y": 780, "params": { "var_name": "goal_open", "value": 0, "semantic": "the false branch preserves the visible goal" } },
             { "id": "update_goal", "type": "event_update", "label": "Update Goal", "x": 0, "y": 580, "params": {} },
             { "id": "goal_overlap", "type": "condition_overlap", "label": "Reach Goal", "x": 180, "y": 560, "params": { "a": "player", "b": "goal" } },
             { "id": "goal_sound", "type": "action_sound", "label": "Goal Sound", "x": 360, "y": 540, "params": { "sfx": "goal_sound" } },
@@ -15376,6 +15406,15 @@ fn reference_platformer_logic_graph() -> String {
             { "id": "jump_input", "fromNode": "update_jump", "fromPort": "exec", "toNode": "jump", "toPort": "exec" },
             { "id": "jump_velocity", "fromNode": "jump", "fromPort": "exec", "toNode": "jump_velocity", "toPort": "exec" },
             { "id": "jump_sound", "fromNode": "jump_velocity", "fromPort": "exec", "toNode": "jump_sound", "toPort": "exec" },
+            { "id": "score_input", "fromNode": "update_score", "fromPort": "exec", "toNode": "score_input", "toPort": "exec" },
+            { "id": "score_write", "fromNode": "score_input", "fromPort": "true", "toNode": "score_set", "toPort": "exec" },
+            { "id": "score_read", "fromNode": "score_get", "fromPort": "value", "toNode": "score_add", "toPort": "a" },
+            { "id": "score_increment", "fromNode": "score_add", "fromPort": "value", "toNode": "score_set", "toPort": "value" },
+            { "id": "score_compare_value", "fromNode": "score_add", "fromPort": "value", "toNode": "score_threshold", "toPort": "a" },
+            { "id": "score_branch", "fromNode": "score_set", "fromPort": "exec", "toNode": "score_threshold", "toPort": "exec" },
+            { "id": "score_open", "fromNode": "score_threshold", "fromPort": "true", "toNode": "open_goal", "toPort": "exec" },
+            { "id": "goal_hide", "fromNode": "open_goal", "fromPort": "exec", "toNode": "hide_goal", "toPort": "exec" },
+            { "id": "score_closed", "fromNode": "score_threshold", "fromPort": "false", "toNode": "close_goal", "toPort": "exec" },
             { "id": "goal_input", "fromNode": "update_goal", "fromPort": "exec", "toNode": "goal_overlap", "toPort": "exec" },
             { "id": "goal_sound", "fromNode": "goal_overlap", "fromPort": "true", "toNode": "goal_sound", "toPort": "exec" },
             { "id": "goal_mark", "fromNode": "goal_sound", "fromPort": "exec", "toNode": "mark_goal", "toPort": "exec" }

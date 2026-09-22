@@ -633,6 +633,8 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   rom_end: "Fim ROM",
   instruction_offsets: "Offsets",
   flags: "Flags",
+  semantic: "Semantica",
+  authoring_origin: "Origem",
   memory_effects: "Efeito memoria",
   profile_id: "Perfil",
   input_var: "Variavel de entrada",
@@ -1583,8 +1585,17 @@ function NodeCard({
         <div className="flex flex-col gap-0.5 border-t border-slate-700/50 px-3 pb-2 pt-1.5">
           {visibleParams.map(([k, v]) => (
             <div key={k} className="flex items-center justify-between gap-2 text-[10px]">
-              <span className="text-[#6c7086]">{getNodeParamDisplayName(k)}</span>
-              {node.type === "rom_branch_compare_word" && k === "threshold" ? (
+              <span className="text-[#6c7086]">
+                {node.type === "condition_compare" &&
+                node.params.authoring_origin === "authored_builtin_reference_platformer" &&
+                k === "b"
+                  ? "Limiar de score"
+                  : getNodeParamDisplayName(k)}
+              </span>
+              {((node.type === "rom_branch_compare_word" && k === "threshold") ||
+                (node.type === "condition_compare" &&
+                  node.params.authoring_origin === "authored_builtin_reference_platformer" &&
+                  k === "b")) ? (
                 <input
                   data-testid={`node-param-${node.id}-${k}`}
                   type="number"
@@ -2479,14 +2490,15 @@ export default function NodeGraphEditor() {
   }, [focusNode, graphSummary.entryNodeIds]);
 
   const onParamChange = useCallback((nodeId: string, key: string, value: string | number) => {
-    if (key !== "threshold") {
-      return;
-    }
     setGraph((currentGraph) => ({
       ...currentGraph,
       nodes: currentGraph.nodes.map((node) =>
-        node.id === nodeId && node.type === "rom_branch_compare_word"
-          ? { ...node, params: { ...node.params, threshold: value } }
+        node.id === nodeId &&
+        ((node.type === "rom_branch_compare_word" && key === "threshold") ||
+          (node.type === "condition_compare" &&
+            node.params.authoring_origin === "authored_builtin_reference_platformer" &&
+            key === "b"))
+          ? { ...node, params: { ...node.params, [key]: value } }
           : node
       ),
     }));

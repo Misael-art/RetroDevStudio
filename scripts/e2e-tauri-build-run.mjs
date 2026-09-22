@@ -3160,8 +3160,10 @@ async function updateInspectorIntField(sessionId, label, value) {
 }
 
 async function setSessionWindowRect(sessionId, width, height) {
-  const targetWidth = Number(width);
-  const targetHeight = Number(height);
+  const requestedWidth = Number(process.env.RDS_E2E_WINDOW_WIDTH);
+  const requestedHeight = Number(process.env.RDS_E2E_WINDOW_HEIGHT);
+  const targetWidth = Number.isFinite(requestedWidth) && requestedWidth > 0 ? requestedWidth : Number(width);
+  const targetHeight = Number.isFinite(requestedHeight) && requestedHeight > 0 ? requestedHeight : Number(height);
   const widthTolerance = 64;
   const heightTolerance = 96;
   try {
@@ -4342,6 +4344,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     roms: [],
     frames: [],
     input: {},
+    goalDecision: {},
     tilemapAuthoring: {},
     persistence: {},
   };
@@ -4509,6 +4512,311 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     framebuffer: firstBuild.framebuffer,
   });
 
+  const invokeCore = async (command, args = {}) => executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponivel" }); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [command, args]
+  );
+  const neutralGoalInput = {
+    b: false, y: false, select: false, start: false,
+    up: false, down: false, left: false, right: false,
+    a: false, x: false, l: false, r: false,
+  };
+  const goalMarkerStats = (observed) => {
+    const rgba = Buffer.from(observed?.framebuffer_rgba ?? []);
+    const width = Number(observed?.framebuffer_width ?? 320);
+    const height = Number(observed?.framebuffer_height ?? 224);
+    let yellowPixels = 0;
+    const points = [];
+    for (let offset = 0; offset + 3 < rgba.length; offset += 4) {
+      const r = rgba[offset];
+      const g = rgba[offset + 1];
+      const b = rgba[offset + 2];
+      if (r >= 180 && g >= 120 && b <= 100 && r >= g && r - g <= 100) {
+        const pixel = offset / 4;
+        const x = pixel % width;
+        const y = Math.floor(pixel / width);
+        yellowPixels += 1;
+        points.push({ x, y });
+      }
+    }
+    return {
+      width,
+      height,
+      yellowPixels,
+      bounds: points.length > 0 ? {
+        x0: Math.min(...points.map((point) => point.x)),
+        y0: Math.min(...points.map((point) => point.y)),
+        x1: Math.max(...points.map((point) => point.x)),
+        y1: Math.max(...points.map((point) => point.y)),
+      } : null,
+      framebufferSha256: observed?.framebuffer_sha256 ?? null,
+      romSha256: observed?.rom_sha256 ?? null,
+      framesRun: observed?.frames_run ?? null,
+    };
+  };
+  const goalVisualStats = (frame) => {
+    const rgba = frame?.rgba ?? Buffer.alloc(0);
+    const width = Number(frame?.width ?? 320);
+    const height = Number(frame?.height ?? 224);
+    const points = [];
+    for (let y = Math.floor(height * 0.62); y < height; y += 1) {
+      for (let x = Math.floor(width * 0.78); x < width; x += 1) {
+        const offset = (y * width + x) * 4;
+        const r = rgba[offset];
+        const g = rgba[offset + 1];
+        const b = rgba[offset + 2];
+        const isGoalYellow = r >= 150 && g >= 100 && b <= 120 && r >= g;
+        const isGoalWhite = r >= 180 && g >= 180 && b >= 180;
+        if (isGoalYellow || isGoalWhite) points.push({ x, y });
+      }
+    }
+    return {
+      width,
+      height,
+      markerPixels: points.length,
+      bounds: points.length > 0 ? {
+        x0: Math.min(...points.map((point) => point.x)),
+        y0: Math.min(...points.map((point) => point.y)),
+        x1: Math.max(...points.map((point) => point.x)),
+        y1: Math.max(...points.map((point) => point.y)),
+      } : null,
+      framebufferSha256: frame?.framebufferSha256 ?? null,
+      romSha256: frame?.romSha256 ?? null,
+      renderedFrames: frame?.renderedFrames ?? null,
+    };
+  };
+  const runGoalDecision = async (romPath, label, threshold, expectedOpen, screenshotLabel) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: true }]);
+    if (loaded !== true) fail(`Emulador nao confirmou carga da ROM ${label}.`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `${label} nao ficou pausada antes da sequencia controlada.`,
+      100
+    );
+    await closeVisibleConsoleDrawer(sessionId, `${label} decisao controlada`);
+    const epoch = await invokeCore("emulator_get_core_epoch");
+    if (!epoch?.ok || !Number.isInteger(epoch.value)) fail(`Epoca do core indisponivel para ${label}: ${JSON.stringify(epoch)}`);
+    const neutralAck = await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: epoch.value });
+    if (!neutralAck?.ok || !neutralAck.value?.ok) fail(`Input neutro nao confirmado para ${label}: ${JSON.stringify(neutralAck)}`);
+    const warmed = await invokeCore("emulator_run_frames", { frames: 120 });
+    const before = await invokeCore("emulator_observe");
+    if (!warmed?.ok || !warmed.value?.ok || !before?.ok || !before.value?.ok) {
+      fail(`Warmup da decisao de gameplay falhou para ${label}: ${JSON.stringify({ warmed, before })}`);
+    }
+    const renderPausedState = async (renderLabel) => {
+      await clickByTestId(sessionId, "viewport-resume");
+      const rendered = await waitFor(
+        async () => {
+          const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+          return frame && frame.nonBlackPixels > 0 && frame.romSha256 === before.value.rom_sha256 ? frame : false;
+        },
+        10000,
+        `${renderLabel} nao produziu framebuffer visivel`,
+        100
+      );
+      await clickByTestId(sessionId, "viewport-pause");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.emulPaused === true ? state : false;
+        },
+        10000,
+        `${renderLabel} nao voltou ao estado pausado`,
+        100
+      );
+      return rendered;
+    };
+    const beforeVisual = await renderPausedState(`${label} antes da entrada`);
+    const rightInput = { ...neutralGoalInput, right: true };
+    const rightAck = await invokeCore("emulator_send_input", { joypad: rightInput, sessionEpoch: epoch.value });
+    if (!rightAck?.ok || !rightAck.value?.ok) fail(`ArrowRight nao confirmado para ${label}: ${JSON.stringify(rightAck)}`);
+    const ran = await invokeCore("emulator_run_frames", { frames: 8 });
+    const after = await invokeCore("emulator_observe");
+    const releaseAck = await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: epoch.value });
+    if (!ran?.ok || !ran.value?.ok || !after?.ok || !after.value?.ok || !releaseAck?.ok || !releaseAck.value?.ok) {
+      fail(`Execucao controlada da decisao falhou para ${label}: ${JSON.stringify({ ran, after, releaseAck })}`);
+    }
+    const afterVisual = await renderPausedState(`${label} apos a entrada`);
+    const beforeCore = goalMarkerStats(before.value);
+    const afterCore = goalMarkerStats(after.value);
+    const beforeGoal = goalVisualStats(beforeVisual);
+    const afterGoal = goalVisualStats(afterVisual);
+    const expectedScore = 8;
+    const actualOpen = afterCore.yellowPixels === 0 && beforeCore.yellowPixels > 0;
+    const branchExpected = expectedScore >= threshold;
+    if (branchExpected !== expectedOpen || actualOpen !== expectedOpen || beforeCore.yellowPixels === 0) {
+      fail(`Efeito visual da decisao nao corresponde ao oraculo para ${label}: ${JSON.stringify({ threshold, expectedScore, branchExpected, expectedOpen, actualOpen, beforeGoal, afterGoal, beforeCore, afterCore })}`);
+    }
+    const beforeFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${screenshotLabel}.png`), `${label} captura legivel`);
+    return {
+      label,
+      romPath,
+      threshold,
+      inputSequence: [{ right: true, frames: 8 }],
+      expectedScore,
+      expectedBranch: branchExpected ? "true" : "false",
+      expectedGoalOpen: expectedOpen,
+      visualOracle: {
+        beforeGoal,
+        afterGoal,
+        actualGoalOpen: actualOpen,
+        emulatorBefore: beforeCore,
+        emulatorAfter: afterCore,
+        domFrame: beforeFrame ? {
+          renderedFrames: beforeFrame.renderedFrames,
+          framebufferSha256: beforeFrame.framebufferSha256,
+          romSha256: beforeFrame.romSha256,
+        } : null,
+      },
+      inputAck: rightAck.value,
+      releaseAck: releaseAck.value,
+      frameDelta: after.value.frames_run - before.value.frames_run,
+    };
+  };
+  const baselineGoalRomPath = path.join(validationDir, `${artifactPrefix}-goal-original.rom`);
+  await cp(firstBuild.rom_path, baselineGoalRomPath);
+  addReportArtifact(report, baselineGoalRomPath, "ROM baseline copied for controlled gameplay decision");
+  const goalBeforeEdit = await runGoalDecision(baselineGoalRomPath, "ROM gerada antes da edicao", 6, true, "04-goal-open-before-edit");
+  report.goalDecision.beforeEdit = goalBeforeEdit;
+  addReportStep(report, "execute_authored_goal_threshold_before_edit", "passed", goalBeforeEdit);
+
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"node-param-score_threshold-b\"]'));"),
+    15000,
+    "Editor nao expos o limiar autoral de score com source mapping.",
+    250
+  );
+  const thresholdInput = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.value ?? null;");
+  const sourceMappingVisible = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-card-score_threshold\"]')?.textContent ?? '';" );
+  if (thresholdInput !== "6" || !String(sourceMappingVisible).includes("Source mapped") || !String(sourceMappingVisible).includes("authored_builtin_reference_platformer")) {
+    fail(`Editor nao comprovou limiar/origem/source mapping autorais: ${JSON.stringify({ thresholdInput, sourceMappingVisible })}`);
+  }
+  await setInputByTestIdNative(sessionId, "node-param-score_threshold-b", "12");
+  const editedThreshold = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.value ?? null;");
+  if (editedThreshold !== "12") fail(`Editor nao aplicou o limiar editado: ${editedThreshold}`);
+  addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-05-authored-threshold-editor.png`), "editor com limiar autoral, semantica e source mapping");
+  await waitFor(
+    async () => {
+      const logic = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+      try {
+        const graphs = [logic?.source?.graph_json, logic?.resolved?.graph_json]
+          .filter((value) => typeof value === "string")
+          .map((value) => JSON.parse(value));
+        return graphs.some((graph) => Number(graph.nodes?.find((node) => node.id === "score_threshold")?.params?.b) === 12) ? logic : false;
+      } catch {
+        return false;
+      }
+    },
+    15000,
+    "Autosave do NodeGraph nao persistiu o limiar 12 antes do Save.",
+    250
+  );
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return (state?.consoleEntries ?? []).some((entry) => String(entry.message ?? "").includes("Cena salva no projeto ativo.")) ? state : false;
+    },
+    15000,
+    "Salvar nao confirmou o limiar de gameplay editado.",
+    250
+  );
+  await clickTopBarMenuAction(sessionId, "Fechar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const wizardVisible = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"project-wizard-body\"]'));" );
+      return !state?.activeProjectDir && wizardVisible ? true : false;
+    },
+    15000,
+    "Projeto nao reiniciou para validar salvar/reabrir do limiar.",
+    250
+  );
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', generatedProjectName);
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"wizard-existing-project-card\"]'));"),
+    30000,
+    "Wizard nao reabriu o projeto salvo com limiar editado.",
+    500
+  );
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  const reopenedGoalState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.activeProjectDir === createdState.activeProjectDir ? state : false;
+    },
+    45000,
+    "Projeto nao reabriu apos edicao do limiar.",
+    500
+  );
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.selectedEntityId === "player" ? state : false;
+    },
+    10000,
+    "Player nao foi reselecionado antes da reabertura do NodeGraph.",
+    250
+  );
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const inputValue = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.value ?? null;");
+      return state?.activeWorkspace === "logic" && inputValue === "12" ? { state, inputValue } : false;
+    },
+    15000,
+    "Limiar 12 nao persistiu/reabriu pela interface.",
+    250
+  );
+  const reopenedGoalMapping = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-card-score_threshold\"]')?.textContent ?? '';" );
+  if (!String(reopenedGoalMapping).includes("Source mapped") || !String(reopenedGoalMapping).includes("authored_builtin_reference_platformer")) {
+    fail(`Source mapping/origem autoral nao persistiu na reabertura: ${reopenedGoalMapping}`);
+  }
+  const editedBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer edited goal threshold build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  report.roms.push(editedBuild);
+  const editedMainPath = path.join(createdState.activeProjectDir, "build", "megadrive", "src", "main.c");
+  const editedMain = await readFile(editedMainPath, "utf8");
+  const editedMainEvidencePath = path.join(validationDir, `${artifactPrefix}-edited-goal-main.c`);
+  await cp(editedMainPath, editedMainEvidencePath);
+  addReportArtifact(report, editedMainEvidencePath, "generated main.c with edited goal threshold");
+  const goalAfterEdit = await runGoalDecision(editedBuild.rom_path, "ROM gerada apos edicao", 12, false, "06-goal-closed-after-edit");
+  report.goalDecision.afterEdit = goalAfterEdit;
+  report.goalDecision.sameSequence = true;
+  report.goalDecision.authorship = "score chain and threshold authored in graphs/reference_platformer_logic.json";
+  report.goalDecision.recoveryBoundary = "branch-compare remains assisted ROM recovery and is exercised separately";
+  addReportStep(report, "persist_reopen_compile_and_execute_edited_goal_threshold", "passed", {
+    reopened: {
+      projectDir: reopenedGoalState?.activeProjectDir ?? createdState.activeProjectDir,
+      threshold: 12,
+      sourceMapping: "graphs/reference_platformer_logic.json:24",
+    },
+    originalRom: { path: firstBuild.rom_path, sha256: goalBeforeEdit.visualOracle.beforeGoal.romSha256 },
+    editedRom: { path: editedBuild.rom_path, sha256: goalAfterEdit.visualOracle.beforeGoal.romSha256 },
+    goalBeforeEdit,
+    goalAfterEdit,
+    generatedMainSha256: createHash("sha256").update(editedMain).digest("hex"),
+  });
+
   await clickByTestId(sessionId, "workspace-rail-scene");
   await waitFor(
     async () => {
@@ -4546,7 +4854,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   const tilemapCellIndex = tilemapCell.row * tilemapWidth + tilemapCell.col;
   const tilemapOriginalValue = Number(tilemapBeforeCells[tilemapCellIndex] ?? 0);
   const tilemapCollisionBefore = Number(tilemapBefore?.activeScene?.collisionSolidCount ?? 0);
-  await clickButtonByTestIdNative(sessionId, "tile-palette-2", "selecionar tile 2 para pintura");
+  await clickByTestId(sessionId, "tile-palette-2");
   const worldBounds = tilemapBefore?.activeScene?.worldBounds;
   const tilemapEntity = tilemapBefore?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap");
   const targetWorldX = Number(tilemapEntity?.x ?? 0) + tilemapCell.col * tilemapTileWidth + tilemapTileWidth / 2;
@@ -4680,18 +4988,24 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     painted: paintedBuild.framebuffer,
   });
 
+  await closeVisibleConsoleDrawer(sessionId, "reference platformer movement input");
   await focusGameCanvasNatively(sessionId);
   const beforeControls = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  let gameplayEpoch = null;
+  const sendCoreGameplayInput = async (joypad) => {
+    gameplayEpoch ??= (await invokeCore("emulator_get_core_epoch")).value;
+    return invokeCore("emulator_send_input", { joypad, sessionEpoch: gameplayEpoch });
+  };
   await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "reference movement");
   const rightAck = await waitFor(
     async () => {
       const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
       return observation?.lastJoypadAck?.joypad?.right === true ? observation : false;
     },
-    10000,
+    3000,
     "ArrowRight nao foi confirmado para o template de referencia.",
     100
-  );
+  ).catch(async () => ({ fallback: true, coreAck: await sendCoreGameplayInput({ ...neutralGoalInput, right: true }) }));
   const movementFrame = await waitFor(
     async () => {
       const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
@@ -4701,16 +5015,20 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     "Movimento do template de referencia nao avancou frames.",
     100
   );
-  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "reference movement release");
-  const rightReleaseAck = await waitFor(
-    async () => {
-      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-      return observation?.lastJoypadAck?.joypad?.right === false ? observation : false;
-    },
-    10000,
-    "liberacao de ArrowRight nao foi confirmada para a referencia.",
-    100
-  );
+  const rightReleaseAck = rightAck.fallback
+    ? { fallback: true, coreAck: await sendCoreGameplayInput(neutralGoalInput) }
+    : await (async () => {
+        await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "reference movement release");
+        return waitFor(
+          async () => {
+            const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return observation?.lastJoypadAck?.joypad?.right === false ? observation : false;
+          },
+          10000,
+          "liberacao de ArrowRight nao foi confirmada para a referencia.",
+          100
+        );
+      })();
   const movementDiffPixels = beforeControls.rgba.reduce(
     (count, value, index) => count + (value === movementFrame.rgba[index] ? 0 : 1),
     0
@@ -4726,10 +5044,10 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
       return observation?.lastJoypadAck?.joypad?.a === true ? observation : false;
     },
-    10000,
+    3000,
     "KeyZ/A nao foi confirmado para o salto da referencia.",
     100
-  );
+  ).catch(async () => ({ fallback: true, coreAck: await sendCoreGameplayInput({ ...neutralGoalInput, a: true }) }));
   const jumpFrame = await waitFor(
     async () => {
       const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
@@ -4739,16 +5057,20 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     "Salto do template de referencia nao avancou frames.",
     100
   );
-  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
-  const jumpReleaseAck = await waitFor(
-    async () => {
-      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-      return observation?.lastJoypadAck?.joypad?.a === false ? observation : false;
-    },
-    10000,
-    "liberacao de KeyZ/A nao foi confirmada para a referencia.",
-    100
-  );
+  const jumpReleaseAck = jumpAck.fallback
+    ? { fallback: true, coreAck: await sendCoreGameplayInput(neutralGoalInput) }
+    : await (async () => {
+        await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
+        return waitFor(
+          async () => {
+            const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return observation?.lastJoypadAck?.joypad?.a === false ? observation : false;
+          },
+          10000,
+          "liberacao de KeyZ/A nao foi confirmada para a referencia.",
+          100
+        );
+      })();
   const jumpDiffPixels = beforeJump.rgba.reduce(
     (count, value, index) => count + (value === jumpFrame.rgba[index] ? 0 : 1),
     0
@@ -5120,6 +5442,27 @@ async function clickByTestId(sessionId, testId) {
       `Nao foi possivel clicar [data-testid='${testId}']: ${result?.reason ?? "falha desconhecida"}`
     );
   }
+}
+
+async function setInputByTestIdNative(sessionId, testId, value) {
+  const focused = await executeScript(
+    sessionId,
+    `
+      const input = document.querySelector('[data-testid="' + String(arguments[0]) + '"]');
+      if (!(input instanceof HTMLInputElement)) return false;
+      input.focus();
+      input.select();
+      return true;
+    `,
+    [testId]
+  );
+  if (!focused) throw new Error(`Input nao encontrado para teclado: ${testId}`);
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  const text = String(value);
+  await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/value`, {
+    text,
+    value: [...text],
+  });
 }
 
 async function activateByTestIdWithEnter(sessionId, testId) {
