@@ -107,9 +107,7 @@ pub fn recover_logic(rom_path: &str, offset: usize) -> Result<LogicRecoveryResul
             PROFILE_ID, loaded.target
         ));
     }
-    if offset.checked_add(ROUTINE_SIZE).is_none()
-        || offset + ROUTINE_SIZE > loaded.bytes.len()
-    {
+    if offset.checked_add(ROUTINE_SIZE).is_none() || offset + ROUTINE_SIZE > loaded.bytes.len() {
         return Err(format!(
             "offset 0x{offset:06X} fora dos limites para uma rotina de {ROUTINE_SIZE} bytes; ROM normalizada tem {} bytes",
             loaded.bytes.len()
@@ -162,8 +160,15 @@ pub fn recover_logic(rom_path: &str, offset: usize) -> Result<LogicRecoveryResul
                 semantic: "return to caller; no fall-through".to_string(),
             },
         ],
-        inputs: vec!["D0[31:0]".to_string(), "X flag (only as prior-state documentation)".to_string()],
-        outputs: vec!["D0[31:0]".to_string(), "N,Z,V,C,X flags".to_string(), "return control flow".to_string()],
+        inputs: vec![
+            "D0[31:0]".to_string(),
+            "X flag (only as prior-state documentation)".to_string(),
+        ],
+        outputs: vec![
+            "D0[31:0]".to_string(),
+            "N,Z,V,C,X flags".to_string(),
+            "return control flow".to_string(),
+        ],
         memory_effects: vec!["none".to_string()],
         flags: vec![
             "N = result bit 15".to_string(),
@@ -215,7 +220,9 @@ pub fn patch_logic(
 
     let loaded = load_rom(input)?;
     if loaded.target != "megadrive" || loaded.stripped_header_bytes != 0 {
-        return Err("patch deste perfil aceita somente imagem Mega Drive raw sem copier header".to_string());
+        return Err(
+            "patch deste perfil aceita somente imagem Mega Drive raw sem copier header".to_string(),
+        );
     }
     let input_sha256 = sha256_hex(&loaded.bytes);
     if input_sha256 != expected_sha256 {
@@ -236,7 +243,8 @@ pub fn patch_logic(
     let new_opcode = 0x5000u16 | ((immediate as u16) << 9) | 0x0040;
     let mut patched = loaded.bytes;
     patched[offset..offset + 2].copy_from_slice(&new_opcode.to_be_bytes());
-    fs::write(output, &patched).map_err(|error| format!("falha ao gravar copia patchada: {error}"))?;
+    fs::write(output, &patched)
+        .map_err(|error| format!("falha ao gravar copia patchada: {error}"))?;
     let output_sha256 = sha256_hex(&patched);
 
     Ok(LogicPatchResult {
@@ -309,22 +317,28 @@ fn graph_json(node_id: &str, rom_sha256: &str, offset: usize) -> String {
 }
 
 fn independent_test_states() -> Vec<IndependentTestState> {
-    [0x0000_0000, 0x0000_0001, 0x0000_7fff, 0x0000_8000, 0x1234_ffff]
-        .into_iter()
-        .map(|d0| {
-            let result = reference_word_add(d0);
-            IndependentTestState {
-                input_d0: d0,
-                input_x: true,
-                output_d0: result.0,
-                output_x: result.5,
-                output_n: result.1,
-                output_z: result.2,
-                output_v: result.3,
-                output_c: result.4,
-            }
-        })
-        .collect()
+    [
+        0x0000_0000,
+        0x0000_0001,
+        0x0000_7fff,
+        0x0000_8000,
+        0x1234_ffff,
+    ]
+    .into_iter()
+    .map(|d0| {
+        let result = reference_word_add(d0);
+        IndependentTestState {
+            input_d0: d0,
+            input_x: true,
+            output_d0: result.0,
+            output_x: result.5,
+            output_n: result.1,
+            output_z: result.2,
+            output_v: result.3,
+            output_c: result.4,
+        }
+    })
+    .collect()
 }
 
 fn reference_word_add(d0: u32) -> (u32, bool, bool, bool, bool, bool) {

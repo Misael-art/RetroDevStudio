@@ -5445,19 +5445,57 @@ async function handleProjectWizardVisibly(sessionId, label) {
 }
 
 async function runLogicRecoveryScenario(sessionId, projectDir) {
-  const romPath = process.env.RDS_LOGIC_RECOVERY_ROM ?? "";
+  const nodeRomPath = process.env.RDS_LOGIC_RECOVERY_NODE_ROM ?? "";
+  const routineRomPath = process.env.RDS_LOGIC_RECOVERY_ROUTINE_ROM ?? process.env.RDS_LOGIC_RECOVERY_ROM ?? "";
   const offsetRaw = process.env.RDS_LOGIC_RECOVERY_OFFSET ?? "";
-  const offset = Number.parseInt(offsetRaw, 16);
-  if (!romPath || !Number.isInteger(offset) || offset < 0 || !(await pathExists(romPath))) {
-    fail("logic-recovery exige RDS_LOGIC_RECOVERY_ROM existente e RDS_LOGIC_RECOVERY_OFFSET hexadecimal.");
+  const offset = Number.parseInt(offsetRaw, 0);
+  if (
+    !nodeRomPath ||
+    !routineRomPath ||
+    !Number.isInteger(offset) ||
+    offset < 0 ||
+    !(await pathExists(nodeRomPath)) ||
+    !(await pathExists(routineRomPath))
+  ) {
+    fail("logic-recovery exige RDS_LOGIC_RECOVERY_NODE_ROM, RDS_LOGIC_RECOVERY_ROUTINE_ROM e RDS_LOGIC_RECOVERY_OFFSET.");
+  }
+  const nodeBytes = await readFile(nodeRomPath);
+  const routineBytes = await readFile(routineRomPath);
+  const expectedRoutineBytes = Buffer.from([0x52, 0x40, 0x4e, 0x75]);
+  if (!routineBytes.subarray(offset, offset + expectedRoutineBytes.length).equals(expectedRoutineBytes)) {
+    fail(`fixture routine não contém 52 40 4E 75 no offset 0x${offset.toString(16)}.`);
+  }
+  const nodeSourcePath = path.join(path.dirname(path.dirname(nodeRomPath)), "src", "main.c");
+  const routineSourcePath = path.join(path.dirname(path.dirname(routineRomPath)), "src", "main.c");
+  const nodeSource = await readFile(nodeSourcePath, "utf8");
+  const routineSource = await readFile(routineSourcePath, "utf8");
+  if (!nodeSource.includes("node_generated_rom_addq_word") || !nodeSource.includes("rds_rom_word_result")) {
+    fail(`source do caminho node não contém a semântica C esperada: ${nodeSourcePath}`);
+  }
+  if (!routineSource.includes("recovered_addq_word")) {
+    fail(`source do caminho routine não contém a chamada da rotina vinculada: ${routineSourcePath}`);
   }
 
   const artifactPrefix = `logic-recovery-${artifactTimestamp()}`;
   const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appBytes = await readFile(currentE2eRunContext?.appPath ?? "").catch(() => null);
   const report = {
     generatedAt: new Date().toISOString(),
     scenario: "logic-recovery",
-    romPath,
+    application: {
+      path: currentE2eRunContext?.appPath ?? null,
+      sha256: appBytes ? createHash("sha256").update(appBytes).digest("hex") : null,
+    },
+    fixture: {
+      nodeRomPath,
+      routineRomPath,
+      nodeRomSha256: createHash("sha256").update(nodeBytes).digest("hex"),
+      routineRomSha256: createHash("sha256").update(routineBytes).digest("hex"),
+      nodeSourcePath,
+      nodeSourceSha256: createHash("sha256").update(nodeSource).digest("hex"),
+      routineSourcePath,
+      routineSourceSha256: createHash("sha256").update(routineSource).digest("hex"),
+    },
     offset,
     steps: [],
   };
@@ -5477,7 +5515,7 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
   await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
   await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace não abriu para logic-recovery");
 
-  await fillInputBySelector(sessionId, 'input[placeholder="/roms/game.md"]', romPath);
+  await fillInputBySelector(sessionId, 'input[placeholder="/roms/game.md"]', routineRomPath);
   await clickButtonByTextWithPointerEvents(sessionId, "Analisar ROM");
   await waitFor(
     async () => executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Analisar ROM") && document.body?.textContent?.includes("ROM Map") ? true : false;`),
@@ -5550,34 +5588,85 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
   }
   report.steps.push({ step: "recover_exact_profile", status: "passed", offset, bytes: [0x52, 0x40, 0x4e, 0x75] });
 
-  await fillInputBySelector(sessionId, '[data-testid="reverse-logic-recovery-card"] input', "2");
-  await waitFor(
-    async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-patch-recovered-logic"]:not([disabled])'));`),
-    5000,
-    "Controle de patch recuperado não ficou habilitado",
-    100
+  const invoke = async (command, args = {}) => executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponível" }); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [command, args]
   );
-  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-patch-recovered-logic");
-  const patchedPath = `${romPath}.addq2.patched.bin`;
-  await waitFor(
-    async () => pathExists(patchedPath),
-    15000,
-    "Cópia patchada da fixture não foi criada",
-    100
-  );
-  const patchBytes = await readFile(patchedPath);
-  const originalBytes = await readFile(romPath);
-  if (patchBytes[offset] !== 0x54 || patchBytes[offset + 1] !== 0x40 || patchBytes[offset + 2] !== 0x4e || patchBytes[offset + 3] !== 0x75) {
-    fail(`Patch da fixture não alterou somente o imediato esperado em 0x${offset.toString(16)}.`);
+  const recoveryProbe = await invoke("rom_recover_logic", { romPath: routineRomPath, offset });
+  if (!recoveryProbe?.ok || !recoveryProbe.value?.ok) {
+    fail(`probe independente da recuperação falhou: ${JSON.stringify(recoveryProbe)}`);
+  }
+  const independentStates = recoveryProbe.value.independent_test_states ?? [];
+  const stateFor = (input) => independentStates.find((state) => state.input_d0 === input);
+  const upperWrap = stateFor(0x1234ffff);
+  const signedOverflow = stateFor(0x00007fff);
+  if (
+    !upperWrap ||
+    upperWrap.output_d0 !== 0x12340000 ||
+    !upperWrap.output_z ||
+    !upperWrap.output_c ||
+    !upperWrap.output_x ||
+    (upperWrap.output_d0 >>> 16) !== (upperWrap.input_d0 >>> 16) ||
+    !signedOverflow ||
+    signedOverflow.output_d0 !== 0x00008000 ||
+    !signedOverflow.output_n ||
+    !signedOverflow.output_v
+  ) {
+    fail(`cobertura independente de upper D0/wrap/flags incompleta: ${JSON.stringify(independentStates)}`);
   }
   report.steps.push({
-    step: "patch_distinct_copy",
+    step: "independent_semantic_coverage",
     status: "passed",
-    inputSha256: createHash("sha256").update(originalBytes).digest("hex"),
-    outputSha256: createHash("sha256").update(patchBytes).digest("hex"),
-    outputPath: patchedPath,
-    oldBytes: Array.from(originalBytes.subarray(offset, offset + 4)),
-    newBytes: Array.from(patchBytes.subarray(offset, offset + 4)),
+    profileId: recoveryProbe.value.profile_id,
+    operations: recoveryProbe.value.operations,
+    sourceMappings: recoveryProbe.value.source_mappings,
+    coverage: {
+      upperD0PreservedAndWrap: true,
+      zero: true,
+      negative: true,
+      signedOverflow: true,
+      carryAndExtend: true,
+    },
+    states: independentStates,
+  });
+
+  const noOpPath = `${routineRomPath}.addq1.patched.bin`;
+  const patchedPath = `${routineRomPath}.addq2.patched.bin`;
+  await rm(noOpPath, { force: true });
+  await rm(patchedPath, { force: true });
+  const noOpPatch = await invoke("rom_patch_recovered_logic", {
+    romPath: routineRomPath,
+    outputPath: noOpPath,
+    expectedSha256: report.fixture.routineRomSha256,
+    offset,
+    immediate: 1,
+  });
+  if (!noOpPatch?.ok || !noOpPatch.value?.output_path) {
+    fail(`patch no-op #1 via IPC falhou: ${JSON.stringify(noOpPatch)}`);
+  }
+  await waitFor(
+    async () => pathExists(noOpPath),
+    15000,
+    "cópia no-op da fixture não foi criada",
+    100
+  );
+  const noOpBytes = await readFile(noOpPath);
+  if (!noOpBytes.equals(routineBytes)) {
+    fail("controle negativo no-op (#1) alterou bytes ou tamanho da ROM.");
+  }
+  report.steps.push({
+    step: "negative_noop_patch",
+    status: "passed",
+    inputSha256: createHash("sha256").update(routineBytes).digest("hex"),
+    outputSha256: createHash("sha256").update(noOpBytes).digest("hex"),
+    outputPath: noOpPath,
+    bytesEqual: true,
   });
 
   await callAutomationApi(sessionId, "setSelectedEntityId", ["camera_root"]);
@@ -5601,7 +5690,47 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
     "Grafo recuperado não foi relido após fechar/reabrir o projeto",
     250
   );
-  report.steps.push({ step: "reopen_recovered_graph", status: "passed", graphOrigin: reopenedLogic.source.graph_origin });
+  let reopenedGraph;
+  try {
+    reopenedGraph = JSON.parse(reopenedLogic.source?.graph_json ?? "");
+  } catch {
+    fail("grafo recuperado reaberto não é JSON válido.");
+  }
+  const reopenedOperation = (reopenedGraph.nodes ?? []).find((node) => node.type === "rom_addq_word");
+  const expectedInstructionOffsets = `0x${offset.toString(16).toUpperCase().padStart(6, "0")},0x${(offset + 2).toString(16).toUpperCase().padStart(6, "0")}`;
+  if (
+    reopenedLogic.source.graph_origin !== "rom_recovered" ||
+    !reopenedOperation ||
+    reopenedOperation.params?.register !== "D0" ||
+    reopenedOperation.params?.immediate !== 1 ||
+    reopenedOperation.params?.width_bits !== 16 ||
+    reopenedOperation.params?.rom_start !== offset ||
+    reopenedOperation.params?.rom_end !== offset + 4 ||
+    reopenedOperation.params?.rom_sha256 !== report.fixture.routineRomSha256 ||
+    reopenedOperation.params?.instruction_offsets !== expectedInstructionOffsets ||
+    reopenedGraph.edges?.length !== 1 ||
+    reopenedGraph.edges[0]?.fromNode !== `${reopenedOperation.id}_entry`
+  ) {
+    fail(`grafo recuperado reaberto não preservou operação, conexão e source mapping: ${JSON.stringify(reopenedLogic)}`);
+  }
+  report.steps.push({
+    step: "reopen_recovered_graph",
+    status: "passed",
+    graphOrigin: reopenedLogic.source.graph_origin,
+    operation: {
+      id: reopenedOperation.id,
+      type: reopenedOperation.type,
+      register: reopenedOperation.params.register,
+      immediate: reopenedOperation.params.immediate,
+      width_bits: reopenedOperation.params.width_bits,
+      rom_start: reopenedOperation.params.rom_start,
+      rom_end: reopenedOperation.params.rom_end,
+      rom_sha256: reopenedOperation.params.rom_sha256,
+      instruction_offsets: reopenedOperation.params.instruction_offsets,
+    },
+    edge: reopenedGraph.edges[0],
+    sourceMappingCount: recoveryProbe.value.source_mappings?.length ?? 0,
+  });
 
   const beforeBuild = await readAutomationState(sessionId);
   const beforeBuildCount = (beforeBuild?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
@@ -5617,39 +5746,231 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
     500
   );
   const builtRomPath = extractLatestRomPath(builtState);
-  report.steps.push({ step: "build_reopened_project", status: "passed", romPath: builtRomPath });
-
-  const invoke = async (command, args = {}) => executeAsyncScript(
-    sessionId,
-    `
-      const done = arguments[arguments.length - 1];
-      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
-      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponível" }); return; }
-      invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
-    `,
-    [command, args]
-  );
-  const observeRom = async (pathToRun, label) => {
-    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [pathToRun]);
-    if (loaded !== true) fail(`Emulador não confirmou carga de ${label}.`);
-    const ran = await invoke("emulator_run_frames", { frames: 30 });
-    if (!ran?.ok || !ran.value?.ok) fail(`Execução da ${label} falhou: ${JSON.stringify(ran)}`);
-    const observed = await invoke("emulator_observe");
-    if (!observed?.ok || !observed.value?.ok || observed.value.frames_run < 30 || observed.value.non_black_pixels === 0) {
-      fail(`Observação da ${label} não comprovou core/framebuffer: ${JSON.stringify(observed)}`);
-    }
-    return observed.value;
-  };
-  const originalObservation = await observeRom(romPath, "ROM original");
-  const patchedObservation = await observeRom(patchedPath, "ROM patchada");
-  if (originalObservation.framebuffer_sha256 === patchedObservation.framebuffer_sha256) {
-    fail(`Patch controlado não alterou o efeito observado no jogo: ${JSON.stringify({ originalObservation, patchedObservation })}`);
+  if (!builtRomPath) fail("Build & Run não reportou ROM gerada para o grafo reaberto.");
+  const generatedMainPath = path.join(path.dirname(path.dirname(builtRomPath)), "src", "main.c");
+  const generatedMain = await readFile(generatedMainPath, "utf8").catch(() => "");
+  if (!generatedMain.includes("rds_rom_word_result") || !generatedMain.includes("logic_var_rom_d0")) {
+    fail(`C gerado pelo NodeGraph não contém a operação recuperada: ${generatedMainPath}`);
   }
   report.steps.push({
-    step: "run_original_and_patched",
+    step: "build_reopened_project",
     status: "passed",
-    originalObservation: { rom_sha256: originalObservation.rom_sha256, framebuffer_sha256: originalObservation.framebuffer_sha256, frames_run: originalObservation.frames_run },
-    patchedObservation: { rom_sha256: patchedObservation.rom_sha256, framebuffer_sha256: patchedObservation.framebuffer_sha256, frames_run: patchedObservation.frames_run },
+    romPath: builtRomPath,
+    romOrigin: "generated_from_reopened_nodegraph",
+    generatedMainPath,
+    generatedMainSha256: createHash("sha256").update(generatedMain).digest("hex"),
+    generatedSemantics: "rds_rom_word_result + logic_var_rom_d0",
+  });
+
+  const neutralInput = {
+    b: false, y: false, select: false, start: false,
+    up: false, down: false, left: false, right: false,
+    a: false, x: false, l: false, r: false,
+  };
+  const controlledFrames = 1;
+  const readOracle = async (label) => {
+    const memory = await invoke("emulator_read_memory", { region: 2, offset: 0xff00, length: 6 });
+    const stateProbe = await invoke("emulator_read_memory", { region: 2, offset: 0, length: 8 });
+    if (!memory?.ok || !memory.value?.ok || (memory.value.data ?? []).length < 6) {
+      fail(`oracle de WRAM indisponível após ${label}: ${JSON.stringify(memory)}`);
+    }
+    const bytes = Buffer.from(memory.value.data);
+    const readWordNative = (offset) => (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8);
+    return {
+      // Genesis Plus GX exposes 68000 WRAM as native 16-bit words in host
+      // order; decode each word explicitly, preserving the independent RAM
+      // oracle instead of comparing an opaque byte diff.
+      value: (((readWordNative(0) << 16) >>> 0) | readWordNative(2)) >>> 0,
+      flags: readWordNative(4),
+      region: 2,
+      valueOffset: 0xff00,
+      flagsOffset: 0xff04,
+      rawHex: bytes.toString("hex"),
+      stateProbe: stateProbe?.value?.data ?? null,
+    };
+  };
+  const applyAddQWordOracle = (value, immediate) => {
+    const before = value & 0xffff;
+    const result = (before + immediate) & 0xffff;
+    const flags =
+      (result & 0x8000 ? 1 : 0) |
+      (result === 0 ? 2 : 0) |
+      (before < 0x8000 && result >= 0x8000 ? 4 : 0) |
+      (before + immediate > 0xffff ? 8 | 16 : 0);
+    return { value: (((value & 0xffff0000) >>> 0) | result) >>> 0, flags };
+  };
+  const observeRom = async (pathToRun, label, expectedOracle) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [pathToRun, { startPaused: true }]);
+    if (loaded !== true) fail(`Emulador não confirmou carga de ${label}.`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.activeViewportTab === "game" && state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `${label} não ficou pausada antes da execução controlada`,
+      100
+    );
+    const preWarmup = await invoke("emulator_observe");
+    if (!preWarmup?.ok || !preWarmup.value?.ok) fail(`observação inicial de ${label} falhou: ${JSON.stringify(preWarmup)}`);
+    const epoch = await invoke("emulator_get_core_epoch");
+    if (!epoch?.ok || !Number.isInteger(epoch.value)) fail(`época do core indisponível para ${label}: ${JSON.stringify(epoch)}`);
+    const inputAck = await invoke("emulator_send_input", { joypad: neutralInput, sessionEpoch: epoch.value });
+    if (!inputAck?.ok || !inputAck.value?.ok) fail(`input neutro não confirmado para ${label}: ${JSON.stringify(inputAck)}`);
+    const startupFrames = 120;
+    const warmed = await invoke("emulator_run_frames", { frames: startupFrames });
+    const before = await invoke("emulator_observe");
+    const beforeOracle = await readOracle(`${label} após warmup`);
+    const warmupDelta = before?.value?.frames_run - preWarmup.value.frames_run;
+    if (
+      !warmed?.ok ||
+      !warmed.value?.ok ||
+      !before?.ok ||
+      !before.value?.ok ||
+      warmupDelta !== startupFrames ||
+      (expectedOracle.before && beforeOracle.value !== expectedOracle.before.value) ||
+      (expectedOracle.before && beforeOracle.flags !== expectedOracle.before.flags) ||
+      (beforeOracle.value >>> 16) !== 0x1234 ||
+      beforeOracle.flags !== 0
+    ) {
+      fail(`warmup/oracle inicial de ${label} não foi determinístico: ${JSON.stringify({ warmupDelta, startupFrames, before: { frames_run: before?.value?.frames_run, rom_sha256: before?.value?.rom_sha256, framebuffer_sha256: before?.value?.framebuffer_sha256 }, beforeOracle })}`);
+    }
+    const ran = await invoke("emulator_run_frames", { frames: controlledFrames });
+    if (!ran?.ok || !ran.value?.ok) fail(`Execução da ${label} falhou: ${JSON.stringify(ran)}`);
+    const observed = await invoke("emulator_observe");
+    const frameDelta = observed?.value?.frames_run - before.value.frames_run;
+    const oracle = await readOracle(label);
+    const expectedAfter = applyAddQWordOracle(beforeOracle.value, expectedOracle.immediate);
+    if (
+      !observed?.ok ||
+      !observed.value?.ok ||
+      frameDelta !== controlledFrames ||
+      (observed.value.framebuffer_rgba ?? []).length === 0 ||
+      oracle.value !== expectedAfter.value ||
+      oracle.flags !== expectedAfter.flags
+    ) {
+      fail(`Observação da ${label} não comprovou core/framebuffer/oracle: ${JSON.stringify({ observed: observed?.value ? { ok: observed.ok, rom_sha256: observed.value.rom_sha256, core_label: observed.value.core_label, frames_run: observed.value.frames_run, framebuffer_sha256: observed.value.framebuffer_sha256, framebuffer_rgba_bytes: (observed.value.framebuffer_rgba ?? []).length } : observed, oracle, beforeOracle, frameDelta })}`);
+    }
+    const stateAfter = await readAutomationState(sessionId);
+    if (stateAfter?.emulPaused !== true) fail(`${label} saiu do estado pausado após lote controlado.`);
+    return {
+      rom_sha256: observed.value.rom_sha256,
+      framebuffer_sha256: observed.value.framebuffer_sha256,
+      frames_before: before.value.frames_run,
+      frames_after: observed.value.frames_run,
+      frame_delta: frameDelta,
+      frames_requested: controlledFrames,
+      startup_frames: startupFrames,
+      warmup_delta: warmupDelta,
+      input: neutralInput,
+      input_ack: inputAck.value,
+      oracle_before: beforeOracle,
+      expected_oracle_after: expectedAfter,
+      oracle,
+    };
+  };
+  const expectedOriginalOracle = { immediate: 1, before: { value: 0x12340058, flags: 0 } };
+  const expectedPatchedOracle = { immediate: 2, before: { value: 0x12340058, flags: 0 } };
+  const nodeFixtureObservation = await observeRom(nodeRomPath, "ROM node fixture/code-generation", expectedOriginalOracle);
+  const generatedGraphObservation = await observeRom(
+    builtRomPath,
+    "ROM gerada pelo grafo NodeGraph",
+    expectedOriginalOracle
+  );
+  const originalObservationA = await observeRom(routineRomPath, "ROM original A", expectedOriginalOracle);
+  const originalObservationB = await observeRom(routineRomPath, "ROM original B", expectedOriginalOracle);
+  if (
+    nodeFixtureObservation.oracle_before.value !== expectedOriginalOracle.before.value ||
+    generatedGraphObservation.oracle_before.value !== expectedOriginalOracle.before.value ||
+    generatedGraphObservation.oracle.value !== originalObservationA.oracle.value ||
+    generatedGraphObservation.oracle.flags !== originalObservationA.oracle.flags ||
+    nodeFixtureObservation.oracle.value !== originalObservationA.oracle.value ||
+    nodeFixtureObservation.oracle.flags !== originalObservationA.oracle.flags ||
+    JSON.stringify(generatedGraphObservation.input) !== JSON.stringify(originalObservationA.input) ||
+    JSON.stringify(nodeFixtureObservation.input) !== JSON.stringify(originalObservationA.input) ||
+    originalObservationA.rom_sha256 !== originalObservationB.rom_sha256 ||
+    originalObservationA.framebuffer_sha256 !== originalObservationB.framebuffer_sha256 ||
+    JSON.stringify(originalObservationA.oracle) !== JSON.stringify(originalObservationB.oracle) ||
+    originalObservationA.frame_delta !== controlledFrames ||
+    originalObservationB.frame_delta !== controlledFrames
+  ) {
+    fail(`controle comum entre ROM gerada/original não foi determinístico: ${JSON.stringify({ nodeFixtureObservation, generatedGraphObservation, originalObservationA, originalObservationB })}`);
+  }
+  report.steps.push({
+    step: "generated_graph_rom_observation",
+    status: "passed",
+    romOrigin: "generated_from_reopened_nodegraph",
+    romPath: builtRomPath,
+    romSha256: generatedGraphObservation.rom_sha256,
+    generatedMainPath,
+    generatedMainSha256: createHash("sha256").update(generatedMain).digest("hex"),
+    observation: generatedGraphObservation,
+    expected: {
+      before: expectedOriginalOracle.before,
+      after: generatedGraphObservation.expected_oracle_after,
+    },
+  });
+  const noOpObservation = await observeRom(noOpPath, "patch no-op #1", expectedOriginalOracle);
+  const patchResult = await invoke("rom_patch_recovered_logic", {
+    romPath: routineRomPath,
+    outputPath: patchedPath,
+    expectedSha256: report.fixture.routineRomSha256,
+    offset,
+    immediate: 2,
+  });
+  if (!patchResult?.ok || !patchResult.value?.output_path) {
+    fail(`patch #2 via IPC falhou: ${JSON.stringify(patchResult)}`);
+  }
+  await waitFor(async () => pathExists(patchedPath), 15000, "Cópia patchada da fixture não foi criada", 100);
+  const finalPatchBytes = await readFile(patchedPath);
+  if (
+    finalPatchBytes.length !== routineBytes.length ||
+    !finalPatchBytes.subarray(0, offset).equals(routineBytes.subarray(0, offset)) ||
+    !finalPatchBytes.subarray(offset + 4).equals(routineBytes.subarray(offset + 4)) ||
+    !finalPatchBytes.subarray(offset, offset + 4).equals(Buffer.from([0x54, 0x40, 0x4e, 0x75]))
+  ) {
+    fail(`patch #2 não alterou somente o imediato esperado em 0x${offset.toString(16)}.`);
+  }
+  const patchedObservation = await observeRom(patchedPath, "ROM patchada #2", expectedPatchedOracle);
+  for (const [label, observation] of [
+    ["patch no-op #1", noOpObservation],
+    ["ROM patchada #2", patchedObservation],
+  ]) {
+    if (
+      observation.oracle_before.value !== expectedOriginalOracle.before.value ||
+      observation.oracle_before.flags !== expectedOriginalOracle.before.flags ||
+      JSON.stringify(observation.input) !== JSON.stringify(originalObservationA.input) ||
+      observation.frame_delta !== controlledFrames
+    ) {
+      fail(`estado inicial/input comum não foi preservado em ${label}: ${JSON.stringify({ observation, originalObservationA })}`);
+    }
+  }
+  if (
+    originalObservationA.rom_sha256 === patchedObservation.rom_sha256 ||
+    originalObservationA.oracle.value === patchedObservation.oracle.value
+  ) {
+    fail(`patch controlado não produziu diferença observável/oracular: ${JSON.stringify({ originalObservationA, patchedObservation })}`);
+  }
+  report.steps.push({
+    step: "deterministic_original_node_and_patch_runs",
+    status: "passed",
+    controlledFrames,
+    inputScript: [neutralInput],
+    expectedOriginalOracle,
+    expectedPatchedOracle,
+    nodeFixtureObservation,
+    generatedGraphObservation,
+    originalObservationA,
+    originalObservationB,
+    noOpObservation,
+    patchedObservation,
+    fullHashes: {
+      original: report.fixture.routineRomSha256,
+      noOp: createHash("sha256").update(noOpBytes).digest("hex"),
+      patched: createHash("sha256").update(finalPatchBytes).digest("hex"),
+      node: report.fixture.nodeRomSha256,
+      generatedGraph: generatedGraphObservation.rom_sha256,
+    },
   });
   report.finishedAt = new Date().toISOString();
   await ensureValidationDir();
@@ -6331,6 +6652,7 @@ async function main() {
     }
 
     if (options.scenario === "logic-recovery") {
+      currentE2eRunContext.appPath = options.app;
       await runLogicRecoveryScenario(sessionId, options.project);
       return;
     }

@@ -1545,7 +1545,8 @@ fn compile_logic_node(
             let immediate = param_i32(node, "immediate", 0);
             if register != "D0" || width_bits != 16 || !(1..=8).contains(&immediate) {
                 return Some(CompiledLogicNode::Linear(LogicOp::SourceBridgeError {
-                    gap: "rom_addq_word exige register=D0, width_bits=16 e immediate entre 1 e 8".to_string(),
+                    gap: "rom_addq_word exige register=D0, width_bits=16 e immediate entre 1 e 8"
+                        .to_string(),
                     source_file: "ROM recovery profile".to_string(),
                     source_line: 0,
                 }));

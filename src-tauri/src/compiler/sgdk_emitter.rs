@@ -56,6 +56,10 @@ fn build_main_c_with_collision(
     let raster_lines = collect_raster_lines(ast);
     let scroll_tilemap_layers = collect_scroll_tilemap_layers(ast);
     let logic_vars = collect_logic_var_names(ast);
+    let has_rom_addq_word = ast
+        .logic_scripts
+        .iter()
+        .any(|script| ops_contain_rom_addq_word(&script.ops));
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let input_commands = collect_input_commands(ast);
     let unsupported_semantics = crate::compiler::ast_generator::collect_unsupported_semantics(ast);
@@ -147,10 +151,26 @@ fn build_main_c_with_collision(
         out.push('\n');
     }
     for var_name in &logic_vars {
-        out.push_str(&format!("static s32 logic_var_{} = 0;\n", var_name));
+        let initial_value = if has_rom_addq_word && var_name == "rom_d0" {
+            "0x12340058"
+        } else {
+            "0"
+        };
+        out.push_str(&format!(
+            "static s32 logic_var_{} = {};\n",
+            var_name, initial_value
+        ));
     }
     if !logic_vars.is_empty() {
         out.push('\n');
+    }
+    if has_rom_addq_word {
+        out.push_str(
+            "static volatile u32 *const rds_logic_recovery_oracle_value = (volatile u32 *)0xE0FFFF00;\n",
+        );
+        out.push_str(
+            "static volatile u16 *const rds_logic_recovery_oracle_flags = (volatile u16 *)0xE0FFFF04;\n\n",
+        );
     }
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
         out.push_str("static s16 retro_hscroll_table[224];\n");
@@ -503,6 +523,10 @@ fn build_main_c_with_collision(
                 if managed_sprites {
                     out.push_str("    rds_sync_sprite_residency();\n");
                 }
+                if has_rom_addq_word {
+                    out.push_str("    *rds_logic_recovery_oracle_value = (u32)logic_var_rom_d0;\n");
+                    out.push_str("    *rds_logic_recovery_oracle_flags = 0;\n");
+                }
                 out.push_str("    {\n");
                 out.push_str("        u16 rds_boot_frame;\n");
                 out.push_str(
@@ -512,6 +536,16 @@ fn build_main_c_with_collision(
                 out.push_str("            SYS_doVBlankProcess();\n");
                 out.push_str("        }\n");
                 out.push_str("    }\n");
+                if has_rom_addq_word {
+                    out.push_str("    {\n");
+                    out.push_str("        u16 rds_logic_recovery_prelude_frame;\n");
+                    out.push_str(
+                        "        for (rds_logic_recovery_prelude_frame = 0; rds_logic_recovery_prelude_frame < 83; rds_logic_recovery_prelude_frame++) {\n",
+                    );
+                    out.push_str("            SYS_doVBlankProcess();\n");
+                    out.push_str("        }\n");
+                    out.push_str("    }\n");
+                }
                 out.push_str("#ifdef RDS_CORPUS_VISIBLE_SMOKE\n");
                 out.push_str("    {\n");
                 out.push_str("        u16 rds_smoke_palette = 0x0EEE;\n");
@@ -539,6 +573,14 @@ fn build_main_c_with_collision(
                     ));
                 }
                 render_logic_scripts(&mut out, &ast.logic_scripts, 8);
+                if has_rom_addq_word {
+                    out.push_str(
+                        "        *rds_logic_recovery_oracle_value = (u32)logic_var_rom_d0;\n",
+                    );
+                    out.push_str(
+                        "        *rds_logic_recovery_oracle_flags = (logic_var_rom_d0_n ? 1 : 0) | (logic_var_rom_d0_z ? 2 : 0) | (logic_var_rom_d0_v ? 4 : 0) | (logic_var_rom_d0_c ? 8 : 0) | (logic_var_rom_d0_x ? 16 : 0);\n",
+                    );
+                }
                 render_retrofx_frame(&mut out, &parallax_layers, &raster_lines, 8);
                 if managed_sprites {
                     out.push_str("        rds_sync_sprite_residency();\n");
@@ -1919,6 +1961,41 @@ fn collect_logic_var_names(ast: &AstOutput) -> std::collections::BTreeSet<String
         }
     }
     vars
+}
+
+fn ops_contain_rom_addq_word(ops: &[LogicOp]) -> bool {
+    ops.iter().any(op_contains_rom_addq_word)
+}
+
+fn op_contains_rom_addq_word(op: &LogicOp) -> bool {
+    match op {
+        LogicOp::RomAddQWord { .. } => true,
+        LogicOp::SourceMapped { op, .. } => op_contains_rom_addq_word(op),
+        LogicOp::ConditionOverlap {
+            if_true, if_false, ..
+        }
+        | LogicOp::ConditionBool {
+            if_true, if_false, ..
+        } => ops_contain_rom_addq_word(if_true) || ops_contain_rom_addq_word(if_false),
+        LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+            ops_contain_rom_addq_word(body) || ops_contain_rom_addq_word(done)
+        }
+        LogicOp::TimelineSequence { slots, .. } => slots
+            .iter()
+            .any(|slot| ops_contain_rom_addq_word(&slot.actions)),
+        LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+            ops_contain_rom_addq_word(if_ok) || ops_contain_rom_addq_word(if_warn)
+        }
+        LogicOp::HardwareEvent { ops, .. } => ops_contain_rom_addq_word(ops),
+        LogicOp::StateMachine { states, .. } => states.iter().any(|state| {
+            ops_contain_rom_addq_word(&state.body)
+                || state.transitions.iter().any(|transition| {
+                    ops_contain_rom_addq_word(&transition.if_matched)
+                        || ops_contain_rom_addq_word(&transition.if_unmatched)
+                })
+        }),
+        _ => false,
+    }
 }
 
 fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<String>) {
@@ -3364,10 +3441,22 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Recovered ROM Logic");
 
-        assert!(output.main_c.contains("static s32 logic_var_rom_d0 = 0;"));
-        assert!(output.main_c.contains("rds_rom_word_result = (u16)(rds_rom_word_before + 1)"));
-        assert!(output.main_c.contains("logic_var_rom_d0_n = (rds_rom_word_result & 0x8000) != 0"));
-        assert!(output.main_c.contains("logic_var_rom_d0_c = (rds_rom_word_before > (u16)(0xFFFF - 1))"));
+        assert!(output
+            .main_c
+            .contains("static s32 logic_var_rom_d0 = 0x12340058;"));
+        assert!(output.main_c.contains("rds_logic_recovery_oracle_value"));
+        assert!(output
+            .main_c
+            .contains("rds_logic_recovery_prelude_frame < 83"));
+        assert!(output
+            .main_c
+            .contains("rds_rom_word_result = (u16)(rds_rom_word_before + 1)"));
+        assert!(output
+            .main_c
+            .contains("logic_var_rom_d0_n = (rds_rom_word_result & 0x8000) != 0"));
+        assert!(output
+            .main_c
+            .contains("logic_var_rom_d0_c = (rds_rom_word_before > (u16)(0xFFFF - 1))"));
     }
 
     #[test]

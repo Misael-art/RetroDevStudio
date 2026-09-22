@@ -1505,6 +1505,7 @@ type AutomationApi = {
       graph_ref: string | null;
       graph_origin: string | null;
       has_graph: boolean;
+      graph_json: string | null;
       source_paths: string[];
       external_source_refs: string[];
     } | null;
@@ -1512,6 +1513,7 @@ type AutomationApi = {
       graph_ref: string | null;
       graph_origin: string | null;
       has_graph: boolean;
+      graph_json: string | null;
       source_paths: string[];
       external_source_refs: string[];
     } | null;
@@ -3137,6 +3139,12 @@ export default function App() {
       return;
     }
 
+    // Publish the paused state before exposing the loaded core to the render
+    // loop. This keeps startPaused deterministic: no free frame may execute
+    // between the backend load and the controlled E2E warmup.
+    if (options?.startPaused) {
+      setEmulPaused(true);
+    }
     setEmulatorLoaded(true);
     // Ancora a época do core para os envios de input (o backend recusa época
     // obsoleta — ver CORE_EPOCH em lib.rs).
@@ -3156,7 +3164,9 @@ export default function App() {
     trackProductMetric({ kind: "rom_loaded" });
     logMessage("success", `ROM carregada: ${romPath}${options?.sourceLabel ? ` (${options.sourceLabel})` : ""}`);
     setActiveViewportTab("game");
-    setEmulPaused(Boolean(options?.startPaused));
+    if (!options?.startPaused) {
+      setEmulPaused(false);
+    }
   }
 
   useEffect(() => {
@@ -3873,6 +3883,11 @@ export default function App() {
         romPath: string,
         options?: { startPaused?: boolean }
       ) => {
+        if (options?.startPaused) {
+          // Quiesce the existing render loop before the asynchronous load so
+          // the next core starts paused from its first observable frame.
+          useEditorStore.getState().setEmulPaused(true);
+        }
         await loadRomIntoEmulator(romPath, options);
         return useEditorStore.getState().emulatorLoaded;
       },
@@ -4073,6 +4088,7 @@ export default function App() {
                 graph_ref: sourceEntity.components.logic?.graph_ref ?? null,
                 graph_origin: sourceEntity.components.logic?.graph_origin ?? null,
                 has_graph: Boolean(sourceEntity.components.logic?.graph?.trim()),
+                graph_json: sourceEntity.components.logic?.graph ?? null,
                 source_paths: [...(sourceEntity.components.logic?.imported_semantics?.source_paths ?? [])],
                 external_source_refs: [...(sourceEntity.components.logic?.external_source_refs ?? [])],
               }
@@ -4082,6 +4098,7 @@ export default function App() {
                 graph_ref: resolvedEntity.components.logic?.graph_ref ?? null,
                 graph_origin: resolvedEntity.components.logic?.graph_origin ?? null,
                 has_graph: Boolean(resolvedEntity.components.logic?.graph?.trim()),
+                graph_json: resolvedEntity.components.logic?.graph ?? null,
                 source_paths: [...(resolvedEntity.components.logic?.imported_semantics?.source_paths ?? [])],
                 external_source_refs: [...(resolvedEntity.components.logic?.external_source_refs ?? [])],
               }

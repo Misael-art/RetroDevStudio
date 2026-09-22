@@ -1913,11 +1913,11 @@ use tools::patch_studio::{
     apply_bps_file, apply_ips_file, create_bps_file_compliance, create_ips_file_compliance,
     PatchResult,
 };
+use tools::reverse::decomp::logic_recovery::{LogicPatchResult, LogicRecoveryResult};
 use tools::reverse::{
     AudioCandidate, CallGraphEdge, CodeXref, DisassemblyResult, GraphicsCandidate,
     ReverseAnnotation, RomAnalysisManifest, TextCandidate,
 };
-use tools::reverse::decomp::logic_recovery::{LogicPatchResult, LogicRecoveryResult};
 use tools::reverse_explorer::ReverseExplorerResult;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -2161,10 +2161,7 @@ async fn rom_disassemble(
 }
 
 #[tauri::command]
-async fn rom_recover_logic(
-    rom_path: String,
-    offset: usize,
-) -> Result<LogicRecoveryResult, String> {
+async fn rom_recover_logic(rom_path: String, offset: usize) -> Result<LogicRecoveryResult, String> {
     run_heavy_result_command("rom_recover_logic", move || {
         tools::reverse::decomp::logic_recovery::recover_logic(&rom_path, offset)
     })
