@@ -104,6 +104,24 @@ fn build_main_c_with_collision(
         out.push_str("#include \"resources.h\"\n");
     }
     out.push('\n');
+    for asset in tilemap_assets
+        .iter()
+        .filter(|asset| !asset.cells.is_empty())
+    {
+        let total = (asset.map_width as usize).saturating_mul(asset.map_height as usize);
+        out.push_str(&format!(
+            "static const u16 rds_{}_map[{}] = {{\n",
+            asset.resource_name, total
+        ));
+        for index in 0..total {
+            let value = asset.cells.get(index).copied().unwrap_or(0);
+            out.push_str(&format!("    {},", value));
+            if index % 16 == 15 || index + 1 == total {
+                out.push('\n');
+            }
+        }
+        out.push_str("};\n\n");
+    }
     render_sound_id_macros(&mut out, ast);
     if managed_sprites {
         let count = ast
@@ -340,6 +358,22 @@ fn build_main_c_with_collision(
                     (*x).max(0) / 8,
                     (*y).max(0) / 8
                 ));
+                if let Some(asset) = tilemap_assets
+                    .iter()
+                    .find(|asset| asset.resource_name == *resource_name && !asset.cells.is_empty())
+                {
+                    out.push_str(&format!(
+                        "    VDP_setTileMapDataRectEx({}, rds_{}_map, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {}), {}, {}, {}, {}, {}, CPU);\n",
+                        plane,
+                        asset.resource_name,
+                        base_tile,
+                        (*x).max(0) / 8,
+                        (*y).max(0) / 8,
+                        asset.map_width,
+                        asset.map_height,
+                        asset.map_width,
+                    ));
+                }
                 if *scroll_x != 0 {
                     out.push_str(&format!(
                         "    VDP_setHorizontalScroll({}, {});\n",
@@ -2619,6 +2653,7 @@ mod tests {
                 asset_path: "assets/tilesets/level.ppm".to_string(),
                 map_width: 32,
                 map_height: 32,
+                cells: vec![],
             }],
             sprite_assets: Vec::new(),
             logic_scripts: Vec::new(),
@@ -2837,6 +2872,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.ppm".to_string(),
                     map_width: 64,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "background_tilemap".to_string(),
@@ -3007,6 +3043,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -3091,6 +3128,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -3104,6 +3142,7 @@ mod tests {
                     asset_path: "assets/tilesets/foreground.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "foreground".to_string(),

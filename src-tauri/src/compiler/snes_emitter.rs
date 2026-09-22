@@ -2376,6 +2376,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.ppm".to_string(),
                     map_width: 64,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "background_tilemap".to_string(),
@@ -2758,6 +2759,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2833,6 +2835,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2846,6 +2849,7 @@ mod tests {
                     asset_path: "assets/tilesets/foreground.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "foreground".to_string(),

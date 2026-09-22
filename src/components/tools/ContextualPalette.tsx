@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEditorStore } from "../../core/store/editorStore";
-import { listProjectAssets, type ProjectAssetEntry } from "../../core/ipc/toolsService";
+import {
+  listProjectAssets,
+  readProjectAssetBytes,
+  type ProjectAssetEntry,
+} from "../../core/ipc/toolsService";
 import { resolveProjectAssetPath } from "../../core/pathUtils";
 import type { ActiveBrush, EditorMode, TilePaintTool } from "../../core/store/editorStore";
 
@@ -35,6 +39,105 @@ function displayLabel(relativePath: string): string {
     .replace(/\\/g, "/")
     .replace(/^.*\//, "")
     .replace(/\.[a-z0-9]+$/i, "");
+}
+
+function decodePpmP3(content: string): ImageData | null {
+  const cleaned = content
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/#.*$/, "").trim())
+    .filter((line) => line.length > 0)
+    .join(" ")
+    .trim();
+  if (!cleaned.startsWith("P3 ")) return null;
+
+  const tokens = cleaned.split(/\s+/);
+  if (tokens.length < 4) return null;
+
+  const width = Number(tokens[1]);
+  const height = Number(tokens[2]);
+  const maxValue = Number(tokens[3]);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  if (!Number.isFinite(maxValue) || maxValue <= 0) return null;
+
+  const expectedComponents = width * height * 3;
+  const values = tokens.slice(4, 4 + expectedComponents).map((token) => Number(token));
+  if (values.length !== expectedComponents || values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  for (let index = 0; index < width * height; index += 1) {
+    const sourceOffset = index * 3;
+    const targetOffset = index * 4;
+    pixels[targetOffset] = Math.round((values[sourceOffset] / maxValue) * 255);
+    pixels[targetOffset + 1] = Math.round((values[sourceOffset + 1] / maxValue) * 255);
+    pixels[targetOffset + 2] = Math.round((values[sourceOffset + 2] / maxValue) * 255);
+    pixels[targetOffset + 3] = 255;
+  }
+
+  return new ImageData(pixels, width, height);
+}
+
+function readPpmToken(bytes: Uint8Array, start: number): { token: string; next: number } | null {
+  let cursor = start;
+  while (cursor < bytes.length) {
+    while (cursor < bytes.length && bytes[cursor] <= 32) cursor += 1;
+    if (bytes[cursor] !== 35) break;
+    while (cursor < bytes.length && bytes[cursor] !== 10) cursor += 1;
+  }
+  const tokenStart = cursor;
+  while (cursor < bytes.length && bytes[cursor] > 32) cursor += 1;
+  if (cursor === tokenStart) return null;
+  return { token: new TextDecoder().decode(bytes.slice(tokenStart, cursor)), next: cursor };
+}
+
+function decodePpmP6(bytes: Uint8Array): ImageData | null {
+  let cursor = 0;
+  const magic = readPpmToken(bytes, cursor);
+  if (!magic || magic.token !== "P6") return null;
+  cursor = magic.next;
+  const widthToken = readPpmToken(bytes, cursor);
+  if (!widthToken) return null;
+  cursor = widthToken.next;
+  const heightToken = readPpmToken(bytes, cursor);
+  if (!heightToken) return null;
+  cursor = heightToken.next;
+  const maxValueToken = readPpmToken(bytes, cursor);
+  if (!maxValueToken) return null;
+  cursor = maxValueToken.next;
+
+  const width = Number(widthToken.token);
+  const height = Number(heightToken.token);
+  const maxValue = Number(maxValueToken.token);
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return null;
+  if (!Number.isFinite(maxValue) || maxValue <= 0 || maxValue > 255) return null;
+
+  if (bytes[cursor] === 13 && bytes[cursor + 1] === 10) cursor += 2;
+  else if (bytes[cursor] <= 32) cursor += 1;
+
+  const expectedComponents = width * height * 3;
+  if (bytes.length - cursor < expectedComponents) return null;
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  for (let index = 0; index < width * height; index += 1) {
+    const sourceOffset = cursor + index * 3;
+    const targetOffset = index * 4;
+    pixels[targetOffset] = Math.round((bytes[sourceOffset] / maxValue) * 255);
+    pixels[targetOffset + 1] = Math.round((bytes[sourceOffset + 1] / maxValue) * 255);
+    pixels[targetOffset + 2] = Math.round((bytes[sourceOffset + 2] / maxValue) * 255);
+    pixels[targetOffset + 3] = 255;
+  }
+  return new ImageData(pixels, width, height);
+}
+
+function decodePpm(bytes: ArrayBuffer): ImageData | null {
+  const data = new Uint8Array(bytes);
+  const signature = new TextDecoder().decode(data.slice(0, 2));
+  return signature === "P6"
+    ? decodePpmP6(data)
+    : decodePpmP3(new TextDecoder().decode(data));
 }
 
 const CATEGORY_META: Record<PaletteCategory, { label: string; icon: string }> = {
@@ -121,11 +224,13 @@ const TILE_TOOL_META: Record<TilePaintTool, { label: string; icon: string; hint:
 const TILE_TOOL_ORDER: TilePaintTool[] = ["pencil", "eraser", "picker", "rect", "fill"];
 
 export function TilePalette({
+  projectDir,
   tilesetAbsolutePath,
   tilesetRelativePath,
   tileSize,
   tilemapEntityId,
 }: {
+  projectDir: string;
   tilesetAbsolutePath: string;
   /** Caminho relativo ao projeto (gravado no tilemap) — repassado ao brush para tracabilidade. */
   tilesetRelativePath: string;
@@ -142,14 +247,110 @@ export function TilePalette({
 
   const url = useMemo(() => convertFileSrc(tilesetAbsolutePath), [tilesetAbsolutePath]);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [tileImageUrl, setTileImageUrl] = useState("");
 
   useEffect(() => {
-    if (!url) return;
-    const img = new Image();
-    img.onload = () => setDims({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => setDims(null);
-    img.src = url;
-  }, [url]);
+    if (!url) {
+      setDims(null);
+      setTileImageUrl("");
+      return;
+    }
+
+    let cancelled = false;
+    setDims(null);
+    setTileImageUrl("");
+
+    if (tilesetAbsolutePath.toLowerCase().endsWith(".ppm")) {
+      void readProjectAssetBytes(projectDir, tilesetRelativePath)
+        .then((bytes) => Uint8Array.from(bytes).buffer)
+        .then((content) => {
+          const imageData = decodePpm(content);
+          if (!imageData) throw new Error("PPM P3 invalido");
+
+          const canvas = document.createElement("canvas");
+          canvas.width = imageData.width;
+          canvas.height = imageData.height;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Canvas indisponivel");
+          context.putImageData(imageData, 0, 0);
+
+          if (!cancelled) {
+            setDims({ w: imageData.width, h: imageData.height });
+            setTileImageUrl(canvas.toDataURL("image/png"));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setDims(null);
+            setTileImageUrl("");
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void readProjectAssetBytes(projectDir, tilesetRelativePath)
+      .then((bytes) => new Blob([Uint8Array.from(bytes)]))
+      .then(async (blob) => {
+        if (typeof createImageBitmap === "function") {
+          const bitmap = await createImageBitmap(blob);
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Canvas indisponivel");
+          context.drawImage(bitmap, 0, 0);
+          bitmap.close?.();
+          return {
+            width: canvas.width,
+            height: canvas.height,
+            dataUrl: canvas.toDataURL("image/png"),
+          };
+        }
+
+        if (typeof URL.createObjectURL !== "function") throw new Error("URL indisponivel");
+        const objectUrl = URL.createObjectURL(blob);
+        try {
+          const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const element = new Image();
+            element.onload = () => resolve(element);
+            element.onerror = () => reject(new Error("Decode de imagem falhou"));
+            element.src = objectUrl;
+          });
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Canvas indisponivel");
+          context.drawImage(image, 0, 0);
+          return {
+            width: canvas.width,
+            height: canvas.height,
+            dataUrl: canvas.toDataURL("image/png"),
+          };
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      })
+      .then((image) => {
+        if (!cancelled) {
+          setDims({ w: image.width, h: image.height });
+          setTileImageUrl(image.dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDims(null);
+          setTileImageUrl("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectDir, tilesetAbsolutePath, tilesetRelativePath, url]);
 
   const grid = useMemo(() => {
     if (!dims || tileSize <= 0) return null;
@@ -241,6 +442,7 @@ export function TilePalette({
           {/* Index 0 = vazio */}
           <button
             type="button"
+            data-testid="tile-palette-empty"
             title="Tile vazio (0) — use com borracha"
             onClick={() => handlePickTile(0)}
             className={`aspect-square bg-[#313244]/40 hover:bg-[#f38ba8]/20 transition-colors ${
@@ -258,6 +460,7 @@ export function TilePalette({
               <button
                 key={tileIndex}
                 type="button"
+                data-testid={`tile-palette-${tileIndex}`}
                 title={`Tile #${tileIndex} (col ${col}, row ${row})`}
                 onClick={() => handlePickTile(tileIndex)}
                 className={`aspect-square transition-transform hover:scale-105 ${
@@ -266,7 +469,7 @@ export function TilePalette({
                     : ""
                 }`}
                 style={{
-                  backgroundImage: `url(${url})`,
+                  backgroundImage: `url(${tileImageUrl})`,
                   backgroundSize: `${grid.cols * 100}% ${grid.rows * 100}%`,
                   backgroundPosition: `${(col * 100) / Math.max(1, grid.cols - 1)}% ${
                     (row * 100) / Math.max(1, grid.rows - 1)
@@ -446,6 +649,7 @@ export default function ContextualPalette() {
       {/* ── Tile palette (tilemap selecionado) ─────────────────────── */}
       {selectedTilemap && resolvedTilesetAbsolutePath.length > 0 && (
         <TilePalette
+          projectDir={activeProjectDir}
           tilesetAbsolutePath={resolvedTilesetAbsolutePath}
           tilesetRelativePath={selectedTilemap.tileset}
           tileSize={tilePaintSize > 0 ? tilePaintSize : 8}

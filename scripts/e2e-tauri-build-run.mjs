@@ -2541,6 +2541,41 @@ async function sendNativeGameKey(sessionId, code, action, label) {
   return response;
 }
 
+async function clickCanvasPointNatively(sessionId, selector, normalizedX, normalizedY, label) {
+  const point = await executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector(arguments[0]);
+      if (!(canvas instanceof HTMLElement)) return null;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      return {
+        x: Math.round(rect.left + rect.width * arguments[1]),
+        y: Math.round(rect.top + rect.height * arguments[2]),
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      };
+    `,
+    [selector, normalizedX, normalizedY]
+  );
+  if (!point) fail(`Canvas ausente para clique nativo: ${label}`);
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-scene-painter",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: point.x, y: point.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
+  if (!response.ok || response.payload?.value?.error) {
+    fail(`Clique nativo no canvas recusado (${label}): ${JSON.stringify({ point, response })}`);
+  }
+  return { point, response };
+}
+
 async function focusGameCanvasNatively(sessionId) {
   const canvas = await findElement(sessionId, "[data-testid='viewport-game-canvas']");
   await webdriverRequest("POST", `/session/${sessionId}/element/${canvas}/click`, {});
@@ -3909,15 +3944,32 @@ async function readFramebufferStats(sessionId) {
       if (!context) return null;
       const imageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
       let nonBlackPixels = 0;
+      let framebufferHash = 2166136261;
+      let tilemapCellHash = 2166136261;
       for (let index = 0; index < imageData.length; index += 4) {
+        for (let channel = 0; channel < 4; channel += 1) {
+          framebufferHash ^= imageData[index + channel];
+          framebufferHash = Math.imul(framebufferHash, 16777619);
+        }
         if (imageData[index] !== 0 || imageData[index + 1] !== 0 || imageData[index + 2] !== 0) {
           nonBlackPixels += 1;
+        }
+      }
+      for (let y = 200; y < 208 && y < canvas.height; y += 1) {
+        for (let x = 8; x < 16 && x < canvas.width; x += 1) {
+          const index = (y * canvas.width + x) * 4;
+          for (let channel = 0; channel < 4; channel += 1) {
+            tilemapCellHash ^= imageData[index + channel];
+            tilemapCellHash = Math.imul(tilemapCellHash, 16777619);
+          }
         }
       }
       return {
         width: canvas.width,
         height: canvas.height,
         non_black_pixels: nonBlackPixels,
+        framebuffer_hash: (framebufferHash >>> 0).toString(16).padStart(8, "0"),
+        tilemap_cell_hash: (tilemapCellHash >>> 0).toString(16).padStart(8, "0"),
       };
     `
   );
@@ -4288,6 +4340,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     roms: [],
     frames: [],
     input: {},
+    tilemapAuthoring: {},
     persistence: {},
   };
 
@@ -4452,6 +4505,177 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   addReportStep(report, "build_real_rom_and_start_game_view", "passed", {
     rom: firstBuild.rom_path,
     framebuffer: firstBuild.framebuffer,
+  });
+
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.activeWorkspace === "scene" &&
+        state?.activeViewportTab === "scene" &&
+        Boolean(state?.activeScene?.entities?.some((entity) => entity.id === "reference_tilemap"))
+        ? state
+        : false;
+    },
+    15000,
+    "Scene workspace nao reabriu para a autoria de tilemap da referencia.",
+    250
+  );
+  await closeVisibleConsoleDrawer(sessionId, "antes da autoria de tilemap");
+  await clickButtonByTestIdNative(
+    sessionId,
+    "hierarchy-tilemap-edit-reference_tilemap",
+    "abrir autoria do tilemap da referencia"
+  );
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-tile-paint-flow-strip\"]'));"),
+    15000,
+    "Fluxo de pintura do tilemap nao ficou visivel.",
+    250
+  );
+  const tilemapBefore = await readAutomationState(sessionId);
+  const tilemapBeforeEntity = tilemapBefore?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap");
+  const tilemapBeforeCells = tilemapBeforeEntity?.tilemap?.cells ?? [];
+  const tilemapWidth = Number(tilemapBeforeEntity?.tilemap?.mapWidth ?? 40);
+  const tilemapHeight = Number(tilemapBeforeEntity?.tilemap?.mapHeight ?? 28);
+  const tilemapTileWidth = Number(tilemapBeforeEntity?.tilemap?.tileWidth ?? 8);
+  const tilemapTileHeight = Number(tilemapBeforeEntity?.tilemap?.tileHeight ?? 8);
+  const tilemapCell = { col: 1, row: 25 };
+  const tilemapCellIndex = tilemapCell.row * tilemapWidth + tilemapCell.col;
+  const tilemapOriginalValue = Number(tilemapBeforeCells[tilemapCellIndex] ?? 0);
+  const tilemapCollisionBefore = Number(tilemapBefore?.activeScene?.collisionSolidCount ?? 0);
+  await clickButtonByTestIdNative(sessionId, "tile-palette-2", "selecionar tile 2 para pintura");
+  const worldBounds = tilemapBefore?.activeScene?.worldBounds;
+  const tilemapEntity = tilemapBefore?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap");
+  const targetWorldX = Number(tilemapEntity?.x ?? 0) + tilemapCell.col * tilemapTileWidth + tilemapTileWidth / 2;
+  const targetWorldY = Number(tilemapEntity?.y ?? 0) + tilemapCell.row * tilemapTileHeight + tilemapTileHeight / 2;
+  const normalizedX = (targetWorldX - Number(worldBounds?.minX ?? 0)) /
+    Math.max(1, Number(worldBounds?.maxX ?? 320) - Number(worldBounds?.minX ?? 0));
+  const normalizedY = (targetWorldY - Number(worldBounds?.minY ?? 0)) /
+    Math.max(1, Number(worldBounds?.maxY ?? 224) - Number(worldBounds?.minY ?? 0));
+  await clickCanvasPointNatively(
+    sessionId,
+    "[data-testid='viewport-scene-overlay']",
+    normalizedX,
+    normalizedY,
+    "pintar uma celula do tilemap"
+  );
+  const paintedState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex]) === 2 ? state : false;
+    },
+    10000,
+    "Pintura do tilemap nao persistiu no draft ativo.",
+    100
+  );
+  const paintedCollision = Number(paintedState?.activeScene?.collisionSolidCount ?? 0);
+  if (paintedCollision !== tilemapCollisionBefore) {
+    fail(`Pintura visual alterou indevidamente a colisao separada: ${JSON.stringify({ tilemapCollisionBefore, paintedCollision })}`);
+  }
+  await pressKey(sessionId, "z", { code: "KeyZ", ctrlKey: true });
+  const undoneState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex] ?? 0) === tilemapOriginalValue ? state : false;
+    },
+    10000,
+    "Undo nao restaurou a celula original do tilemap.",
+    100
+  );
+  await pressKey(sessionId, "y", { code: "KeyY", ctrlKey: true });
+  const redoneState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex]) === 2 ? state : false;
+    },
+    10000,
+    "Redo nao reaplicou a celula pintada do tilemap.",
+    100
+  );
+  const savesBeforeTilemapAuthoring = (redoneState?.consoleEntries ?? []).filter((entry) =>
+    String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+  ).length;
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const savesAfterTilemapAuthoring = (state?.consoleEntries ?? []).filter((entry) =>
+        String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+      ).length;
+      return savesAfterTilemapAuthoring > savesBeforeTilemapAuthoring
+        ? state
+        : false;
+    },
+    15000,
+    "Salvar nao confirmou a autoria do tilemap.",
+    250
+  );
+  const savedSceneJson = JSON.parse(
+    await readFile(path.join(createdState.activeProjectDir, "scenes", "main.json"), "utf8")
+  );
+  const savedTilemap = savedSceneJson.entities?.find((entity) => entity.entity_id === "reference_tilemap");
+  const savedTileValue = Number(savedTilemap?.components?.tilemap?.cells?.[tilemapCellIndex] ?? 0);
+  if (savedTileValue !== 2) {
+    fail(`Arquivo de cena nao recebeu a celula pintada: ${JSON.stringify({ cellIndex: tilemapCellIndex, expected: 2, actual: savedTileValue })}`);
+  }
+  addReportStep(report, "paint_tilemap_undo_redo_and_preserve_collision", "passed", {
+    cell: tilemapCell,
+    cellIndex: tilemapCellIndex,
+    originalValue: tilemapOriginalValue,
+    paintedValue: 2,
+    undoValue: undoneState?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells?.[tilemapCellIndex] ?? tilemapOriginalValue,
+    redoValue: redoneState?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells?.[tilemapCellIndex] ?? 2,
+    collisionSolidCount: tilemapCollisionBefore,
+    normalizedPoint: { x: normalizedX, y: normalizedY },
+  });
+  report.tilemapAuthoring = {
+    cell: tilemapCell,
+    cellIndex: tilemapCellIndex,
+    originalValue: tilemapOriginalValue,
+    paintedValue: 2,
+    collisionSolidCount: tilemapCollisionBefore,
+  };
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao voltou apos a autoria do tilemap.",
+    250
+  );
+  const paintedBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer tilemap-authored build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  report.roms.push(paintedBuild);
+  report.frames.push({ label: paintedBuild.label, ...paintedBuild.framebuffer });
+  const paintedMainEvidencePath = path.join(
+    validationDir,
+    `${artifactPrefix}-painted-main.c`
+  );
+  const paintedMainSourcePath = path.join(
+    createdState.activeProjectDir,
+    "build",
+    "megadrive",
+    "src",
+    "main.c"
+  );
+  if (await pathExists(paintedMainSourcePath)) {
+    await cp(paintedMainSourcePath, paintedMainEvidencePath);
+    addReportArtifact(report, paintedMainEvidencePath, "painted generated main.c");
+  }
+  if (paintedBuild.framebuffer.tilemap_cell_hash === firstBuild.framebuffer.tilemap_cell_hash) {
+    fail(`Build apos pintura nao alterou o framebuffer inicial: ${JSON.stringify({ initial: firstBuild.framebuffer, painted: paintedBuild.framebuffer })}`);
+  }
+  addReportStep(report, "build_tilemap_authored_rom_and_observe_change", "passed", {
+    initial: firstBuild.framebuffer,
+    painted: paintedBuild.framebuffer,
   });
 
   await focusGameCanvasNatively(sessionId);
@@ -4631,10 +4855,18 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   if (!reopenedLogicState?.resolved?.has_graph || reopenedLogicState.resolved.graph_ref !== "graphs/reference_platformer_logic.json") {
     fail(`NodeGraph do template nao persistiu apos reabertura: ${JSON.stringify(reopenedLogicState)}`);
   }
+  const reopenedTilemap = reopenedState.activeScene.entities.find((entity) => entity.id === "reference_tilemap");
+  const reopenedTileValue = Number(reopenedTilemap?.tilemap?.cells?.[tilemapCellIndex] ?? 0);
+  if (reopenedTileValue !== 2) {
+    fail(`Tilemap pintado nao persistiu apos reabertura: ${JSON.stringify({ cellIndex: tilemapCellIndex, expected: 2, actual: reopenedTileValue })}`);
+  }
   report.persistence = {
     projectDir: createdState.activeProjectDir,
     entityIds: (reopenedState.activeScene.entities ?? []).map((entity) => entity.id ?? entity.entity_id),
     graphRef: reopenedLogicState.resolved.graph_ref,
+    tilemapCell: tilemapCell,
+    tilemapCellIndex,
+    tilemapValue: reopenedTileValue,
   };
   addReportStep(report, "reopen_project_and_validate_persisted_graph", "passed", report.persistence);
   addReportArtifact(
@@ -4657,6 +4889,16 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     report,
     artifactPrefix
   );
+  const reopenedPaintedFrame = await waitFor(
+    async () => {
+      const frame = await readFramebufferStats(sessionId);
+      return frame?.tilemap_cell_hash === paintedBuild.framebuffer.tilemap_cell_hash ? frame : false;
+    },
+    15000,
+    "ROM reaberta nao refletiu o tilemap persistido no framebuffer.",
+    250
+  );
+  reopenedBuild.framebuffer = reopenedPaintedFrame;
   report.roms.push(reopenedBuild);
   report.frames.push({ label: reopenedBuild.label, ...reopenedBuild.framebuffer });
   addReportStep(report, "rebuild_and_run_after_reopen", "passed", {

@@ -2409,6 +2409,64 @@ fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, St
     Ok(entries)
 }
 
+fn normalize_project_asset_path(relative_path: &str) -> Result<PathBuf, String> {
+    let trimmed = relative_path.trim();
+    if trimmed.is_empty() {
+        return Err("Caminho de asset vazio.".to_string());
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in Path::new(trimmed).components() {
+        match component {
+            Component::Normal(value) => normalized.push(value),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "Caminho de asset '{}' saiu da raiz autorizada.",
+                    relative_path
+                ));
+            }
+        }
+    }
+
+    let normalized_text = normalized.to_string_lossy().replace('\\', "/");
+    if normalized_text != "assets" && !normalized_text.starts_with("assets/") {
+        return Err(format!(
+            "Asset '{}' deve permanecer dentro de assets/.",
+            relative_path
+        ));
+    }
+    Ok(normalized)
+}
+
+#[tauri::command]
+fn read_project_asset_bytes(project_dir: String, relative_path: String) -> Result<Vec<u8>, String> {
+    let project_root = core::project_asset_scope::resolve_project_asset_root(project_dir.trim())?;
+    let relative_path = normalize_project_asset_path(&relative_path)?;
+    let assets_root = project_root.join("assets");
+    let asset_path = project_root.join(&relative_path);
+    let canonical_asset = fs::canonicalize(&asset_path).map_err(|error| {
+        format!(
+            "Asset '{}' nao encontrado: {}",
+            relative_path.display(),
+            error
+        )
+    })?;
+    if !canonical_asset.starts_with(&assets_root) || !canonical_asset.is_file() {
+        return Err(format!(
+            "Asset '{}' nao pertence ao escopo autorizado.",
+            relative_path.display()
+        ));
+    }
+    fs::read(&canonical_asset).map_err(|error| {
+        format!(
+            "Falha ao ler asset '{}': {}",
+            relative_path.display(),
+            error
+        )
+    })
+}
+
 const LEGACY_TEXT_PREVIEW_LIMIT: usize = 128 * 1024;
 
 fn normalize_legacy_relative_path(relative_path: &str) -> Result<PathBuf, String> {
@@ -4972,6 +5030,7 @@ pub fn run() {
             rex_inspection_save,
             rex_inspection_edit_sonic_palette,
             list_project_assets,
+            read_project_asset_bytes,
             open_project_source_path,
             read_legacy_project_file,
             third_party_get_status,

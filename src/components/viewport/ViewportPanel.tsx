@@ -4552,6 +4552,7 @@ export default function ViewportPanel({
                 <button
                   key={tool.id}
                   type="button"
+                  data-testid={`viewport-tool-${tool.id}`}
                   onClick={() => setEditorMode(tool.id)}
                   className={`rounded px-2 py-1 text-[10px] font-semibold transition-all ${
                     editorMode === tool.id
@@ -4944,6 +4945,7 @@ export default function ViewportPanel({
                   {activeProjectDir && activeTilemapEntityForPalette?.components.tilemap ? (
                     <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#0b0f19]">
                       <TilePalette
+                        projectDir={activeProjectDir}
                         tilesetAbsolutePath={resolveProjectAssetPath(
                           activeProjectDir,
                           activeTilemapEntityForPalette.components.tilemap.tileset

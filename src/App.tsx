@@ -4204,6 +4204,15 @@ export default function App() {
                   x: entity.transform.x,
                   y: entity.transform.y,
                   spriteAsset: entity.components.sprite?.asset ?? null,
+                  tilemap: entity.components.tilemap
+                    ? {
+                        mapWidth: entity.components.tilemap.map_width,
+                        mapHeight: entity.components.tilemap.map_height,
+                        tileWidth: 8,
+                        tileHeight: 8,
+                        cells: [...(entity.components.tilemap.cells ?? [])],
+                      }
+                    : null,
                   type: entity.components.camera
                     ? "camera"
                     : entity.components.tilemap

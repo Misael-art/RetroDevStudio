@@ -20,6 +20,7 @@ pub enum AstNode {
         asset_path: String,
         map_width: u32,
         map_height: u32,
+        cells: Vec<u32>,
     },
     LoadSpritesheet {
         resource_name: String,
@@ -145,6 +146,7 @@ pub struct TilemapAsset {
     pub asset_path: String,
     pub map_width: u32,
     pub map_height: u32,
+    pub cells: Vec<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -572,6 +574,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                     asset_path: tilemap.tileset.clone(),
                     map_width: tilemap.map_width,
                     map_height: tilemap.map_height,
+                    cells: tilemap.cells.clone(),
                 });
                 tilemap_resource_names.insert(tilemap.tileset.clone(), resource_name.clone());
 
@@ -580,6 +583,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                     asset_path: tilemap.tileset.clone(),
                     map_width: tilemap.map_width,
                     map_height: tilemap.map_height,
+                    cells: tilemap.cells.clone(),
                 });
             }
 
@@ -2601,11 +2605,13 @@ pub fn collect_tilemap_assets(ast: &AstOutput) -> Vec<TilemapAsset> {
                 asset_path,
                 map_width,
                 map_height,
+                cells,
             } => Some(TilemapAsset {
                 resource_name: resource_name.clone(),
                 asset_path: asset_path.clone(),
                 map_width: *map_width,
                 map_height: *map_height,
+                cells: cells.clone(),
             }),
             _ => None,
         })

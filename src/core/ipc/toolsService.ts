@@ -675,6 +675,10 @@ export function listProjectAssets(projectDir: string): Promise<ProjectAssetEntry
   return invoke<ProjectAssetEntry[]>("list_project_assets", { projectDir });
 }
 
+export function readProjectAssetBytes(projectDir: string, relativePath: string): Promise<number[]> {
+  return invoke<number[]>("read_project_asset_bytes", { projectDir, relativePath });
+}
+
 export function readLegacyProjectFile(
   projectDir: string,
   relativePath: string
