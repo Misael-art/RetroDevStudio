@@ -286,6 +286,13 @@ pub enum LogicOp {
         var_name: String,
         value: LogicMathExpr,
     },
+    /// Exact 16-bit ADDQ semantics recovered from the bounded M68K profile.
+    /// The generated runtime keeps the upper half of the variable intact and
+    /// exposes the five affected flags as sibling variables.
+    RomAddQWord {
+        var_name: String,
+        immediate: u8,
+    },
     WhileLoop {
         condition: LogicBoolExpr,
         body: Vec<LogicOp>,
@@ -1532,6 +1539,24 @@ fn compile_logic_node(
                 dy: param_i32(node, "dy", 0),
             }))
         }
+        "rom_addq_word" => {
+            let register = param_string(node, "register").unwrap_or_default();
+            let width_bits = param_i32(node, "width_bits", 0);
+            let immediate = param_i32(node, "immediate", 0);
+            if register != "D0" || width_bits != 16 || !(1..=8).contains(&immediate) {
+                return Some(CompiledLogicNode::Linear(LogicOp::SourceBridgeError {
+                    gap: "rom_addq_word exige register=D0, width_bits=16 e immediate entre 1 e 8".to_string(),
+                    source_file: "ROM recovery profile".to_string(),
+                    source_line: 0,
+                }));
+            }
+            Some(CompiledLogicNode::Linear(LogicOp::RomAddQWord {
+                var_name: sanitize_identifier(
+                    &param_string(node, "var_name").unwrap_or_else(|| "rom_d0".to_string()),
+                ),
+                immediate: immediate as u8,
+            }))
+        }
         "input_held" | "input_pressed" | "input_command" => {
             let mut true_visited = visited.clone();
             let mut false_visited = visited.clone();
@@ -2468,6 +2493,7 @@ fn collect_unsupported_from_ops(
                 }
             }
             LogicOp::MoveSprite { .. }
+            | LogicOp::RomAddQWord { .. }
             | LogicOp::SetAnimationState { .. }
             | LogicOp::CameraFollow { .. }
             | LogicOp::HideSprite { .. }
@@ -2685,6 +2711,7 @@ fn collect_logic_sound_names_from_ops(
                 sound_names.insert(sfx.clone());
             }
             LogicOp::SetVar { .. }
+            | LogicOp::RomAddQWord { .. }
             | LogicOp::SetSpritePosition { .. }
             | LogicOp::SetVelocity { .. }
             | LogicOp::SetAnimationState { .. }

@@ -44,6 +44,7 @@ export type NodeType =
   | "flow_for"
   | "timeline_sequence"
   | "hardware_budget_check"
+  | "rom_addq_word"
   | "bridge_unconverted_source"
   | "event_vblank"
   | "event_hblank"
@@ -144,6 +145,7 @@ export function isNodeType(value: unknown): value is NodeType {
     value === "flow_for" ||
     value === "timeline_sequence" ||
     value === "hardware_budget_check" ||
+    value === "rom_addq_word" ||
     value === "bridge_unconverted_source" ||
     value === "event_vblank" ||
     value === "event_hblank" ||

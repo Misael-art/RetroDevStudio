@@ -1436,6 +1436,17 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     value_expr = value_expr
                 ));
             }
+            LogicOp::RomAddQWord {
+                var_name,
+                immediate,
+            } => {
+                out.push_str(&format!(
+                    "{indent}{{ u16 rds_rom_word_before = (u16)logic_var_{var_name}; u16 rds_rom_word_result = (u16)(rds_rom_word_before + {immediate}); logic_var_{var_name} = (logic_var_{var_name} & ~0xFFFF) | rds_rom_word_result; logic_var_{var_name}_n = (rds_rom_word_result & 0x8000) != 0; logic_var_{var_name}_z = rds_rom_word_result == 0; logic_var_{var_name}_v = (rds_rom_word_before == 0x7FFF); logic_var_{var_name}_c = (rds_rom_word_before > (u16)(0xFFFF - {immediate})); logic_var_{var_name}_x = logic_var_{var_name}_c; }}\n",
+                    indent = indent_str,
+                    var_name = var_name,
+                    immediate = immediate
+                ));
+            }
             LogicOp::WhileLoop {
                 condition,
                 body,
@@ -1596,6 +1607,7 @@ fn collect_logic_velocity_targets_from_ops(
             | LogicOp::ShowSprite { .. }
             | LogicOp::HideSprite { .. }
             | LogicOp::SetVar { .. }
+            | LogicOp::RomAddQWord { .. }
             | LogicOp::PlaySound { .. }
             | LogicOp::PlayMusic { .. }
             | LogicOp::SourceBridgeError { .. } => {}
@@ -1937,6 +1949,14 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
         LogicOp::SetVar { var_name, value } => {
             vars.insert(var_name.clone());
             extract_vars_from_math(value, vars);
+        }
+        LogicOp::RomAddQWord { var_name, .. } => {
+            vars.insert(var_name.clone());
+            vars.insert(format!("{var_name}_n"));
+            vars.insert(format!("{var_name}_z"));
+            vars.insert(format!("{var_name}_v"));
+            vars.insert(format!("{var_name}_c"));
+            vars.insert(format!("{var_name}_x"));
         }
         LogicOp::ConditionOverlap {
             if_true, if_false, ..
@@ -3322,6 +3342,32 @@ mod tests {
         assert!(output.main_c.contains("static s32 spr_player_vel_y = 0;"));
         assert!(output.main_c.contains("logic_var_player_vx = 2;"));
         assert!(output.main_c.contains("spr_player_vel_y = 0;"));
+    }
+
+    #[test]
+    fn main_c_emits_exact_recovered_addq_word_semantics() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::RomAddQWord {
+                    var_name: "rom_d0".to_string(),
+                    immediate: 1,
+                }],
+            }],
+        };
+
+        let output = emit_sgdk(&ast, "Recovered ROM Logic");
+
+        assert!(output.main_c.contains("static s32 logic_var_rom_d0 = 0;"));
+        assert!(output.main_c.contains("rds_rom_word_result = (u16)(rds_rom_word_before + 1)"));
+        assert!(output.main_c.contains("logic_var_rom_d0_n = (rds_rom_word_result & 0x8000) != 0"));
+        assert!(output.main_c.contains("logic_var_rom_d0_c = (rds_rom_word_before > (u16)(0xFFFF - 1))"));
     }
 
     #[test]

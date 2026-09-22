@@ -1917,6 +1917,7 @@ use tools::reverse::{
     AudioCandidate, CallGraphEdge, CodeXref, DisassemblyResult, GraphicsCandidate,
     ReverseAnnotation, RomAnalysisManifest, TextCandidate,
 };
+use tools::reverse::decomp::logic_recovery::{LogicPatchResult, LogicRecoveryResult};
 use tools::reverse_explorer::ReverseExplorerResult;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -2155,6 +2156,37 @@ async fn rom_disassemble(
 ) -> Result<DisassemblyResult, String> {
     run_heavy_result_command("rom_disassemble", move || {
         tools::reverse::disassemble_rom(&rom_path, offset, length)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rom_recover_logic(
+    rom_path: String,
+    offset: usize,
+) -> Result<LogicRecoveryResult, String> {
+    run_heavy_result_command("rom_recover_logic", move || {
+        tools::reverse::decomp::logic_recovery::recover_logic(&rom_path, offset)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rom_patch_recovered_logic(
+    rom_path: String,
+    output_path: String,
+    expected_sha256: String,
+    offset: usize,
+    immediate: u8,
+) -> Result<LogicPatchResult, String> {
+    run_heavy_result_command("rom_patch_recovered_logic", move || {
+        tools::reverse::decomp::logic_recovery::patch_logic(
+            &rom_path,
+            &output_path,
+            &expected_sha256,
+            offset,
+            immediate,
+        )
     })
     .await
 }
@@ -5011,6 +5043,8 @@ pub fn run() {
             rom_analyze,
             rom_analyze_with_emulator_trace,
             rom_disassemble,
+            rom_recover_logic,
+            rom_patch_recovered_logic,
             rom_get_xrefs,
             rom_get_call_graph,
             rom_extract_graphics,

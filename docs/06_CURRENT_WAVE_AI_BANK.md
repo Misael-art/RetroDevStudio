@@ -1,8 +1,14 @@
+### Fechamento parcial 2026-09-22 — primeiro perfil ROM→Node delimitado (Experimental)
+
+O bloco F agora tem uma implementação mínima e explicitamente limitada para Mega Drive: `rom_recover_logic` reconhece somente os quatro bytes contíguos `ADDQ.W #1,D0; RTS`, registra fronteira, semântica word, flags `N/Z/V/C/X`, ausência de efeitos de memória, estados independentes, hash SHA-256 e source mapping; `rom_patch_recovered_logic` gera uma cópia distinta com imediato `1..8`, protegida pelo hash esperado. O `ReverseWorkspace` expõe a recuperação e o patch como Experimental, e o grafo persistido usa o nó `rom_addq_word` com origem ROM. Callers indiretos/PC-relative, trace dinâmico e bytes fora do corpo exato permanecem limitações declaradas, não são inferidos.
+
+`host:certify` passou nesta continuação com host `READY`, frontend `628 passed / 3 skipped`, Rust `626 passed / 0 failed / 41 ignored` e validação upstream positiva. O Desktop E2E fresco `src-tauri/target-test/validation/reference-platformer-2026-09-22T03-35-21-471Z-report.json` também passou após a integração. A ROM autoral capturada durante o E2E, `/tmp/rds-reference-platformer-proof.bin`, não contém o padrão exato `ADDQ.W #1,D0; RTS`; ocorrências isoladas de `ADDQ` sem a fronteira `RTS` foram corretamente rejeitadas. Em seguida, uma fixture SGDK oficial autocontida (`/tmp/rds-logic-fixture/out/rom.bin`, SHA `a98f061d…a52e0`, rotina `0x1F04`) passou pelo Desktop E2E dedicado `src-tauri/target-test/validation/logic-recovery-2026-09-22T04-15-45-024Z-report.json`: recuperação, aplicação/persistência, reabertura, Build & Run, patch `#1→#2` e framebuffers distintos (`a6884275…`→`c48f96b2…`). F tem aceite inicial restrito a essa fixture/perfil; não é decompilação geral nem prova Sonic.
+
 ### Fechamento local 2026-09-22 — autoria de tilemap e runtime observável
 
 O Desktop E2E canônico `reference-platformer` passou com controles nativos e SGDK/Libretro oficial: paleta PPM `P6` via IPC, pintura de `reference_tilemap[1001]` `0→2`, undo/redo, colisão `88` inalterada, persistência no arquivo/reabertura e ROM autoral observável. A emissão aplica o overlay esparso com `VDP_setTileMapXY` depois de `VDP_drawImageEx`, preservando o mapa-base; relatório fresco: `src-tauri/target-test/validation/reference-platformer-2026-09-22T02-58-57-254Z-report.json`, ROI `92e737c5→26a7da45` e mesmo resultado após rebuild/reopen. Mantido `Experimental`.
 
-Limite de governança: o bloco F continua sem aceite ROM→nodes para uma rotina delimitada; não fabricar source mapping/equivalência a partir do NodeGraph builtin.
+Limite de governança: este checkpoint não aceitava ROM→nodes a partir do NodeGraph builtin; o aceite inicial posterior usa a fixture SGDK independente documentada acima.
 
 ### Checkpoint 2026-09-21 — primeiro jogo de referência builtin (Experimental)
 

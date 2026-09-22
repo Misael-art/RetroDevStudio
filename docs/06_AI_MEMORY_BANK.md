@@ -1,10 +1,16 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-22 — perfil ROM→Node delimitado (Experimental, aceite inicial restrito)
+
+Foi implementado o primeiro perfil de recuperação de lógica ROM com contrato exato: Mega Drive/M68K, `ADDQ.W #1,D0; RTS` em quatro bytes contíguos, source mapping por offset/hash, flags word completas, nenhum efeito de memória, estados independentes e patch somente para cópia distinta com SHA-256 e imediato `1..8`. A UI `ReverseWorkspace` e o NodeGraph carregam o nó `rom_addq_word`, com origem `rom_recovered`, sem sobrescrever lógica existente. O emissor SGDK materializa a semântica preservando `D0[31:16]`; o emissor SNES bloqueia explicitamente esse perfil MD-only.
+
+Limitações são parte do contrato: callers indiretos/PC-relative e trace dinâmico continuam desconhecidos; a varredura estrutural lista apenas `JSR` absoluto; bytes fora do corpo de quatro bytes não são inferidos. `host:certify` passou com frontend `628/3`, Rust `626/0/41` e upstream positivo. A prova de aceite inicial está em `src-tauri/target-test/validation/logic-recovery-2026-09-22T04-15-45-024Z-report.json`: fixture SGDK oficial local, rotina `0x1F04`, recuperação pela UI, `rom_recovered` persistido e relido após reabertura, Build & Run e framebuffers divergentes após patch `#1→#2`. A ROM autoral `/tmp/rds-reference-platformer-proof.bin` continua corretamente rejeitada por não conter a fronteira exata. Não promover esta implementação Experimental para cobertura genérica ou Sonic.
+
 ### Checkpoint 2026-09-22 — autoria persistente de tilemap (Experimental)
 
 O relatório fresco `src-tauri/target-test/validation/reference-platformer-2026-09-22T02-58-57-254Z-report.json` fecha o fluxo desktop nativo do template `reference_platformer`: paleta PPM `P6` carregada por IPC seguro de bytes do projeto, pintura `col=1,row=25` `0→2`, undo/redo `0→2`, colisão separada preservada em `88`, save, leitura do JSON salvo, reabertura com valor `2` e rebuild. A ROM inicial/autoral mudou a ROI do tilemap de `92e737c5` para `26a7da45`; o mesmo hash foi observado após a reabertura. O emissor SGDK agora transporta `cells[]` como overlay esparso via `VDP_setTileMapXY`, preservando o mapa-base carregado por `VDP_drawImageEx`; `cells` vazio mantém o caminho legado. O tileset PPM não depende mais do `asset://` MIME/decoder do WebView na paleta.
 
-O cenário continua `Experimental`: a prova é do jogo builtin autocontido, não de equivalência/reconstrução de ROM comercial. A rotina ROM→nodes do bloco F ainda não tem rotina delimitada, source mapping e equivalência independente, portanto permanece explicitamente não aceita.
+O cenário continua `Experimental`: a prova é do jogo builtin autocontido, não de equivalência/reconstrução de ROM comercial. O checkpoint de tilemap antecede o aceite inicial do bloco F, registrado acima; esse aceite é restrito à fixture SGDK e ao perfil `ADDQ.W #1,D0; RTS`.
 
 ### Checkpoint 2026-09-21 — template builtin de jogo de referência (Experimental)
 

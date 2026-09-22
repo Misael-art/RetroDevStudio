@@ -4,6 +4,10 @@ Estado em 2026-09-21: implementação publicada na branch isolada `codex/rex-son
 
 Nota de rastreabilidade: o parágrafo acima é evidência histórica de `c0ad292`, não resultado da continuação atual. A continuação em 2026-09-21 está registrada ao final deste documento; o salto por teclado foi fechado na superfície canônica por observação da WRAM do core correlacionada com a identidade visual inicial do personagem.
 
+### Continuação 2026-09-22 — perfil ROM→Node delimitado
+
+A continuação implementou e aceitou inicialmente um perfil delimitado de Mega Drive para `ADDQ.W #1,D0; RTS`, com mapping por hash/offset, flags, estados independentes, patch para cópia distinta e nó `rom_addq_word`. O Desktop E2E da fixture SGDK oficial provou ROM→nodes→persistência/reabertura→Build & Run→patch→efeito de framebuffer; relatório `src-tauri/target-test/validation/logic-recovery-2026-09-22T04-15-45-024Z-report.json`. Ele é uma ponte Experimental de calibração do pipeline, não uma recuperação do Sonic 1: a ROM Sonic e a ROM autoral do E2E não foram declaradas como contendo essa rotina exata, e não há equivalência de gameplay Sonic nem trace dinâmico.
+
 ## Corpus e referência
 
 ROM BYOR preservada localmente:

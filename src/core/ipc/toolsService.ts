@@ -338,6 +338,68 @@ export interface DisassemblyResult {
   rows: DisassemblyRow[];
 }
 
+export interface RecoveredOperation {
+  rom_offset: number;
+  bytes: number[];
+  mnemonic: string;
+  semantic: string;
+}
+
+export interface SourceMapping {
+  rom_start: number;
+  rom_end: number;
+  ir_op: string;
+  node_id: string;
+}
+
+export interface IndependentTestState {
+  input_d0: number;
+  input_x: boolean;
+  output_d0: number;
+  output_x: boolean;
+  output_n: boolean;
+  output_z: boolean;
+  output_v: boolean;
+  output_c: boolean;
+}
+
+export interface LogicRecoveryResult {
+  ok: boolean;
+  error: string;
+  profile_id: string;
+  architecture: string;
+  source_path: string;
+  rom_sha256: string;
+  rom_offset: number;
+  rom_end: number;
+  bytes: number[];
+  boundary: string;
+  call_sites: number[];
+  limitations: string[];
+  operations: RecoveredOperation[];
+  inputs: string[];
+  outputs: string[];
+  memory_effects: string[];
+  flags: string[];
+  source_mappings: SourceMapping[];
+  independent_test_states: IndependentTestState[];
+  graph_json: string;
+}
+
+export interface LogicPatchResult {
+  ok: boolean;
+  error: string;
+  profile_id: string;
+  input_path: string;
+  output_path: string;
+  input_sha256: string;
+  output_sha256: string;
+  rom_offset: number;
+  old_bytes: number[];
+  new_bytes: number[];
+  immediate: number;
+}
+
 export interface RomTextExtractionResult {
   text_regions: TextCandidate[];
   pointer_tables: PointerTableCandidate[];
@@ -735,6 +797,26 @@ export function romDisassemble(
   length: number
 ): Promise<DisassemblyResult> {
   return invoke<DisassemblyResult>("rom_disassemble", { romPath, offset, length });
+}
+
+export function romRecoverLogic(romPath: string, offset: number): Promise<LogicRecoveryResult> {
+  return invoke<LogicRecoveryResult>("rom_recover_logic", { romPath, offset });
+}
+
+export function romPatchRecoveredLogic(
+  romPath: string,
+  outputPath: string,
+  expectedSha256: string,
+  offset: number,
+  immediate: number
+): Promise<LogicPatchResult> {
+  return invoke<LogicPatchResult>("rom_patch_recovered_logic", {
+    romPath,
+    outputPath,
+    expectedSha256,
+    offset,
+    immediate,
+  });
 }
 
 export function romGetXrefs(romPath: string): Promise<CodeXref[]> {

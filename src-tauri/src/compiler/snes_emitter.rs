@@ -1274,6 +1274,11 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     value_expr = value_expr
                 ));
             }
+            LogicOp::RomAddQWord { .. } => {
+                out.push_str(
+                    "#error \"Source Bridge blocks codegen: recovered M68K ROM logic profile is Mega Drive-only.\"\n",
+                );
+            }
             LogicOp::WhileLoop {
                 condition,
                 body,

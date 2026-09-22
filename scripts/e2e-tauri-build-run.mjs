@@ -430,6 +430,7 @@ function parseArgs(argv) {
           "inspection-sprite-secondary",
           "inspection-sonic",
           "inspection-preview-unavailable",
+          "logic-recovery",
         ].includes(
           value
         )
@@ -5443,6 +5444,220 @@ async function handleProjectWizardVisibly(sessionId, label) {
   return { label, action: wizardAction === "existing" ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir };
 }
 
+async function runLogicRecoveryScenario(sessionId, projectDir) {
+  const romPath = process.env.RDS_LOGIC_RECOVERY_ROM ?? "";
+  const offsetRaw = process.env.RDS_LOGIC_RECOVERY_OFFSET ?? "";
+  const offset = Number.parseInt(offsetRaw, 16);
+  if (!romPath || !Number.isInteger(offset) || offset < 0 || !(await pathExists(romPath))) {
+    fail("logic-recovery exige RDS_LOGIC_RECOVERY_ROM existente e RDS_LOGIC_RECOVERY_OFFSET hexadecimal.");
+  }
+
+  const artifactPrefix = `logic-recovery-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: new Date().toISOString(),
+    scenario: "logic-recovery",
+    romPath,
+    offset,
+    steps: [],
+  };
+
+  await setSessionWindowRect(sessionId, 1280, 800);
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.activeProjectDir === projectDir ? state : false;
+    },
+    30000,
+    "Fixture do logic-recovery não abriu explicitamente",
+    250
+  );
+  await closeVisibleConsoleDrawer(sessionId);
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace não abriu para logic-recovery");
+
+  await fillInputBySelector(sessionId, 'input[placeholder="/roms/game.md"]', romPath);
+  await clickButtonByTextWithPointerEvents(sessionId, "Analisar ROM");
+  await waitFor(
+    async () => executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Analisar ROM") && document.body?.textContent?.includes("ROM Map") ? true : false;`),
+    30000,
+    "Análise da fixture de lógica não concluiu",
+    250
+  );
+  const openedCode = await executeScript(sessionId, `
+    const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+      const text = candidate.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+      return text === "Code" || text === "Voltar para Code";
+    });
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    button.scrollIntoView({ block: "center", inline: "center" });
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
+    return true;
+  `);
+  if (!openedCode) {
+    const buttons = await executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).map((button) => button.textContent?.replace(/\\s+/g, " ").trim()).filter(Boolean).slice(-40);`);
+    console.error(`[logic-recovery] code-tab buttons=${JSON.stringify(buttons)}`);
+    fail("A aba Code não encontrou um controle visível no Reverse Workspace.");
+  }
+  await waitForBodyText(sessionId, "Lógica ROM → Nodes", 15000, "A aba Code não abriu a superfície de recuperação");
+  await fillInputByLabel(sessionId, "Offset", `0x${offset.toString(16)}`);
+  try {
+    await waitFor(
+      async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-recover-logic"]:not([disabled])'));`),
+      30000,
+      "Controle de recuperação exata não ficou habilitado após a análise",
+      250
+    );
+  } catch (error) {
+    const diagnostics = await executeScript(sessionId, `return {
+      button: (() => { const node = document.querySelector('[data-testid="reverse-recover-logic"]'); return node ? { disabled: node.disabled, text: node.textContent, outer: node.outerHTML } : null; })(),
+      inputs: Array.from(document.querySelectorAll('input')).map((node) => ({ value: node.value, placeholder: node.placeholder, aria: node.getAttribute('aria-label') })),
+      state: window.__RDS_E2E__?.getState?.() ?? null,
+      reverseText: document.body?.textContent?.replace(/\\s+/g, ' ').slice(-2400) ?? '',
+    };`);
+    console.error(`[logic-recovery] habilitação diagnostics=${JSON.stringify(diagnostics)}`);
+    throw error;
+  }
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-recover-logic");
+  let recovered;
+  try {
+    recovered = await waitFor(
+      async () => executeScript(sessionId, `
+        const card = document.querySelector('[data-testid="reverse-logic-recovery-card"]');
+        const button = document.querySelector('[data-testid="reverse-recover-logic"]');
+        const text = card?.textContent ?? "";
+        return card && button?.textContent?.includes("Recuperar rotina exata") && text.toLowerCase().includes("52 40 4e 75") ? text : false;
+      `),
+      30000,
+      "Recuperação exata não produziu o card da UI",
+      250
+    );
+  } catch (error) {
+    const diagnostics = await executeScript(sessionId, `return {
+      card: document.querySelector('[data-testid="reverse-logic-recovery-card"]')?.textContent ?? null,
+      button: document.querySelector('[data-testid="reverse-recover-logic"]')?.textContent ?? null,
+      console: window.__RDS_E2E__?.getState?.()?.consoleEntries?.slice(-12) ?? [],
+    };`);
+    console.error(`[logic-recovery] recovery diagnostics=${JSON.stringify(diagnostics)}`);
+    throw error;
+  }
+  const recoveredText = String(recovered);
+  if (!recoveredText.toLowerCase().includes("52 40 4e 75") || !recoveredText.includes("ADDQ")) {
+    fail(`Recuperação da fixture não confirmou bytes/semântica: ${recovered}`);
+  }
+  report.steps.push({ step: "recover_exact_profile", status: "passed", offset, bytes: [0x52, 0x40, 0x4e, 0x75] });
+
+  await fillInputBySelector(sessionId, '[data-testid="reverse-logic-recovery-card"] input', "2");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-patch-recovered-logic"]:not([disabled])'));`),
+    5000,
+    "Controle de patch recuperado não ficou habilitado",
+    100
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-patch-recovered-logic");
+  const patchedPath = `${romPath}.addq2.patched.bin`;
+  await waitFor(
+    async () => pathExists(patchedPath),
+    15000,
+    "Cópia patchada da fixture não foi criada",
+    100
+  );
+  const patchBytes = await readFile(patchedPath);
+  const originalBytes = await readFile(romPath);
+  if (patchBytes[offset] !== 0x54 || patchBytes[offset + 1] !== 0x40 || patchBytes[offset + 2] !== 0x4e || patchBytes[offset + 3] !== 0x75) {
+    fail(`Patch da fixture não alterou somente o imediato esperado em 0x${offset.toString(16)}.`);
+  }
+  report.steps.push({
+    step: "patch_distinct_copy",
+    status: "passed",
+    inputSha256: createHash("sha256").update(originalBytes).digest("hex"),
+    outputSha256: createHash("sha256").update(patchBytes).digest("hex"),
+    outputPath: patchedPath,
+    oldBytes: Array.from(originalBytes.subarray(offset, offset + 4)),
+    newBytes: Array.from(patchBytes.subarray(offset, offset + 4)),
+  });
+
+  await callAutomationApi(sessionId, "setSelectedEntityId", ["camera_root"]);
+  await clickButtonByTextWithPointerEvents(sessionId, "Aplicar ao NodeGraph selecionado");
+  await waitFor(
+    async () => executeScript(sessionId, `return document.body?.textContent?.includes("aplicado e persistido") ? true : false;`),
+    15000,
+    "Grafo recuperado não foi persistido pela UI",
+    250
+  );
+  report.steps.push({ step: "apply_recovered_graph", status: "passed", entityId: "camera_root" });
+
+  await callAutomationApi(sessionId, "closeProject");
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  const reopenedLogic = await waitFor(
+    async () => {
+      const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]);
+      return state?.source?.graph_origin === "rom_recovered" ? state : false;
+    },
+    30000,
+    "Grafo recuperado não foi relido após fechar/reabrir o projeto",
+    250
+  );
+  report.steps.push({ step: "reopen_recovered_graph", status: "passed", graphOrigin: reopenedLogic.source.graph_origin });
+
+  const beforeBuild = await readAutomationState(sessionId);
+  const beforeBuildCount = (beforeBuild?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
+  await clickButtonByTestIdWithPointerEvents(sessionId, "toolbar-build-run");
+  const builtState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const count = (state?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
+      return count > beforeBuildCount ? state : false;
+    },
+    120000,
+    "Projeto com grafo recuperado não concluiu Build & Run",
+    500
+  );
+  const builtRomPath = extractLatestRomPath(builtState);
+  report.steps.push({ step: "build_reopened_project", status: "passed", romPath: builtRomPath });
+
+  const invoke = async (command, args = {}) => executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponível" }); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [command, args]
+  );
+  const observeRom = async (pathToRun, label) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [pathToRun]);
+    if (loaded !== true) fail(`Emulador não confirmou carga de ${label}.`);
+    const ran = await invoke("emulator_run_frames", { frames: 30 });
+    if (!ran?.ok || !ran.value?.ok) fail(`Execução da ${label} falhou: ${JSON.stringify(ran)}`);
+    const observed = await invoke("emulator_observe");
+    if (!observed?.ok || !observed.value?.ok || observed.value.frames_run < 30 || observed.value.non_black_pixels === 0) {
+      fail(`Observação da ${label} não comprovou core/framebuffer: ${JSON.stringify(observed)}`);
+    }
+    return observed.value;
+  };
+  const originalObservation = await observeRom(romPath, "ROM original");
+  const patchedObservation = await observeRom(patchedPath, "ROM patchada");
+  if (originalObservation.framebuffer_sha256 === patchedObservation.framebuffer_sha256) {
+    fail(`Patch controlado não alterou o efeito observado no jogo: ${JSON.stringify({ originalObservation, patchedObservation })}`);
+  }
+  report.steps.push({
+    step: "run_original_and_patched",
+    status: "passed",
+    originalObservation: { rom_sha256: originalObservation.rom_sha256, framebuffer_sha256: originalObservation.framebuffer_sha256, frames_run: originalObservation.frames_run },
+    patchedObservation: { rom_sha256: patchedObservation.rom_sha256, framebuffer_sha256: patchedObservation.framebuffer_sha256, frames_run: patchedObservation.frames_run },
+  });
+  report.finishedAt = new Date().toISOString();
+  await ensureValidationDir();
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  console.log(`[logic-recovery] relatório=${reportPath}`);
+  console.log("OK: Desktop Tauri logic-recovery E2E passou com recuperação, grafo, patch e efeito observado.");
+}
+
 async function clickButtonByTextWithPointerEvents(sessionId, expectedText) {
   const result = await executeScript(
     sessionId,
@@ -6113,6 +6328,11 @@ async function main() {
       options.project = path.join(temporaryProjectDir, path.basename(sourceProject));
       await cp(sourceProject, options.project, { recursive: true });
       currentE2eRunContext.project = options.project;
+    }
+
+    if (options.scenario === "logic-recovery") {
+      await runLogicRecoveryScenario(sessionId, options.project);
+      return;
     }
 
     if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
