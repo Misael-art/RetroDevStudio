@@ -6010,7 +6010,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
 
   // 3. Second blocker (duplicate + position) and character animation.
   await click("guided-step-personagem", "etapa Personagem");
-  await click("hierarchy-entity-passage_blocker", "selecionar bloqueador");
+  await clickElementWithNativePointer(sessionId, "[data-testid='hierarchy-entity-passage_blocker']", "selecionar bloqueador na hierarquia");
   await waitSelected("passage_blocker");
   await click("inspector-duplicate-entity", "duplicar bloqueador");
   await waitSelected("passage_blocker_2");
