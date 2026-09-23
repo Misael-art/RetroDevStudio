@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type CSSProperties } from "react";
-import { persistActiveScene } from "../../core/scenePersistence";
+import { persistActiveScene, registerPendingEditFlusher } from "../../core/scenePersistence";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
 import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService";
 import { useEditorStore, type HwStatus } from "../../core/store/editorStore";
@@ -2015,6 +2015,15 @@ export default function NodeGraphEditor() {
     startViewY: number;
   } | null>(null);
   const saveTimerRef = useRef<number | null>(null);
+  // Pending (debounced) graph edit: flushed by Save and when the editor unmounts.
+  const pendingCommitRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    const unregister = registerPendingEditFlusher(() => pendingCommitRef.current?.());
+    return () => {
+      unregister();
+      pendingCommitRef.current?.();
+    };
+  }, []);
   const hydratingGraphRef = useRef(true);
   const lastPersistedGraphRef = useRef(serializeNodeGraph(INITIAL_GRAPH));
   const currentGraphRef = useRef(graph);
@@ -2152,12 +2161,17 @@ export default function NodeGraphEditor() {
       window.clearTimeout(saveTimerRef.current);
     }
 
-    saveTimerRef.current = window.setTimeout(() => {
+    const commit = (persist: boolean) => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      pendingCommitRef.current = null;
       const latestState = useEditorStore.getState();
       const entity = latestState.activeScene?.entities.find(
         (item) => item.entity_id === selectedEntity.entity_id
       );
-      if (!entity) {
+      if (!entity || lastPersistedGraphRef.current === serializedGraph) {
         return;
       }
 
@@ -2172,8 +2186,10 @@ export default function NodeGraphEditor() {
         },
       });
       lastPersistedGraphRef.current = serializedGraph;
-      void persistActiveScene(activeProjectDir, "Logic");
-    }, 600);
+      if (persist) void persistActiveScene(activeProjectDir, "Logic");
+    };
+    pendingCommitRef.current = () => commit(false);
+    saveTimerRef.current = window.setTimeout(() => commit(true), 600);
 
     return () => {
       if (saveTimerRef.current !== null) {

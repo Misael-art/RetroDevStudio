@@ -13,7 +13,7 @@ vi.mock("./ipc/sceneService", async (importOriginal) => ({
   resolveScenePrefabs: mocks.resolveScenePrefabs,
 }));
 
-import { persistActiveScene, sceneDraftStorageKey } from "./scenePersistence";
+import { persistActiveScene, registerPendingEditFlusher, sceneDraftStorageKey } from "./scenePersistence";
 import { useEditorStore } from "./store/editorStore";
 import type { Scene } from "./ipc/sceneService";
 
@@ -63,5 +63,16 @@ describe("persistActiveScene", () => {
     mocks.saveSceneData.mockResolvedValue({ ok: true, message: "" });
     expect(await persistActiveScene("/tmp/project", "Teste")).toBe(true);
     expect(useEditorStore.getState().sceneSaveState).toMatchObject({ status: "saved", revision: 5 });
+  });
+
+  it("flushes debounced editor edits before writing, so Save never misses the last edit", async () => {
+    mocks.saveSceneData.mockResolvedValue({ ok: true, message: "" });
+    const unregister = registerPendingEditFlusher(() => {
+      useEditorStore.setState({ activeSceneSource: scene(99), activeScene: scene(99), sceneRevision: 6 });
+    });
+    await persistActiveScene("/tmp/project", "Teste");
+    unregister();
+    expect(mocks.saveSceneData.mock.calls[0][1]).toContain('"x": 99');
+    expect(useEditorStore.getState().sceneSaveState).toMatchObject({ status: "saved", revision: 6 });
   });
 });

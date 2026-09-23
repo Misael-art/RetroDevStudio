@@ -89,11 +89,29 @@ export async function reloadSceneFromDisk(projectDir: string, scope: string): Pr
   }
 }
 
+/**
+ * Debounced editors (e.g. the NodeGraph) register how to commit their pending edit to the
+ * store. Saving flushes them first so a save never misses the edit made just before it.
+ */
+const pendingEditFlushers = new Set<() => void>();
+
+export function registerPendingEditFlusher(flush: () => void): () => void {
+  pendingEditFlushers.add(flush);
+  return () => {
+    pendingEditFlushers.delete(flush);
+  };
+}
+
+export function flushPendingEdits(): void {
+  for (const flush of [...pendingEditFlushers]) flush();
+}
+
 export async function persistActiveScene(
   projectDir: string,
   scope: string,
   successMessage?: string
 ): Promise<boolean> {
+  flushPendingEdits();
   const { activeScene, activeScenePath, activeSceneSource, logMessage, sceneRevision, setSceneSaveState } =
     useEditorStore.getState();
   if (!activeSceneSource || !activeScene) {

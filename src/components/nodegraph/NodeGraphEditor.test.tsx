@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../core/scenePersistence", () => ({
   persistActiveScene: mocks.persistActiveScene,
+  registerPendingEditFlusher: () => () => undefined,
 }));
 
 vi.mock("../../core/ipc/projectService", () => ({
