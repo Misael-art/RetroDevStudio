@@ -5868,6 +5868,8 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
     testedApplication: { path: appPath, sha256: createHash("sha256").update(await readFile(appPath)).digest("hex") },
     artifacts: [],
     steps: [],
+    frames: [],
+    roms: [],
   };
   const shot = async (name, label) => addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
   const state = () => readAutomationState(sessionId);
