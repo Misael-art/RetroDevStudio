@@ -3422,7 +3422,19 @@ export default function App() {
         setRomMasteringStatus("inspect_failed");
         logMessage("error", `[ROM Mastering] ${error instanceof Error ? error.message : String(error)}`);
       }
-      const loadResult = await emulatorLoadRom(result.rom_path);
+      // Same epoch contract as loadRomIntoEmulator: the backend bumps the core epoch on
+      // every load and refuses input carrying an older one, so the store must hold the
+      // new epoch or every keyboard input after a rebuild is silently rejected.
+      useEditorStore.getState().beginJoypadSessionHold();
+      let loadResult: Awaited<ReturnType<typeof emulatorLoadRom>>;
+      try {
+        loadResult = await emulatorLoadRom(result.rom_path);
+        if (loadResult.ok) {
+          useEditorStore.getState().setCoreEpoch(await emulatorGetCoreEpoch().catch(() => null));
+        }
+      } finally {
+        useEditorStore.getState().releaseJoypadSessionHold();
+      }
       if (!loadResult.ok) {
         setEmulatorLoaded(false);
         const failureMessage = formatEmulatorFailureMessage(loadResult.message);

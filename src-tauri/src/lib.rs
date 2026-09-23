@@ -9211,6 +9211,166 @@ pub extern "C" fn retro_run() {
         let _ = fs::remove_dir_all(project_base_dir);
     }
 
+    /// Creates the builtin reference project under `base_dir/name`, lets `mutate` edit the
+    /// saved project (as the editor would), builds it with the official SGDK and returns the
+    /// ROM path plus the ELF symbols of that exact build.
+    fn build_reference_variant(
+        base_dir: &Path,
+        name: &str,
+        mutate: impl FnOnce(&Path),
+    ) -> (PathBuf, HashMap<String, u32>) {
+        let create_result = create_project_from_template(
+            name.to_string(),
+            "megadrive".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "reference_platformer".to_string(),
+            None,
+        )
+        .expect("create reference platformer project");
+        let project_dir = PathBuf::from(&create_result.path);
+        mutate(&project_dir);
+        let environment = BuildEnvironment::detect();
+        assert!(
+            environment
+                .sgdk_root
+                .as_ref()
+                .is_some_and(|root| root.join("makefile.gen").is_file())
+                && environment.sgdk_make_program.is_some(),
+            "official SGDK real nao detectado; esta prova nao aceita fake toolchain"
+        );
+        let build = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(build.ok, "{name} build failed: {:?}", build.log);
+        let rom = PathBuf::from(&build.rom_path);
+        let rom = if rom.is_absolute() {
+            rom
+        } else {
+            project_dir.join(rom)
+        };
+        let elf = fs::read(project_dir.join("build/megadrive/out/rom.out")).expect("read ELF");
+        (rom, reference_elf32_symbols(&elf))
+    }
+
+    fn set_reference_entity_x(project_dir: &Path, entity_id: &str, x: i32) {
+        let mut scene = crate::core::project_mgr::load_scene(
+            project_dir,
+            crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+        )
+        .expect("load scene");
+        scene
+            .entities
+            .iter_mut()
+            .find(|entity| entity.entity_id == entity_id)
+            .unwrap_or_else(|| panic!("entidade {entity_id} ausente"))
+            .transform
+            .x = x;
+        crate::core::project_mgr::save_scene(
+            project_dir,
+            crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+            &scene,
+        )
+        .expect("save scene");
+    }
+
+    /// Runs `frames` frames holding `joypad` from a fresh boot and returns the player x per
+    /// frame and the final `goal_open`.
+    fn run_reference_input(
+        emulator: &mut EmulatorCore,
+        rom: &Path,
+        symbols: &HashMap<String, u32>,
+        joypad: JoypadState,
+        frames: usize,
+    ) -> (Vec<i64>, i64) {
+        emulator.load_rom(rom).expect("load ROM");
+        emulator
+            .set_joypad(JoypadState::default())
+            .expect("neutral");
+        for _ in 0..120 {
+            emulator.run_frame().expect("warmup");
+        }
+        emulator.set_joypad(joypad).expect("input");
+        let mut xs = Vec::new();
+        for _ in 0..frames {
+            emulator.run_frame().expect("frame");
+            xs.push(reference_read_ram(emulator, symbols, "spr_player_x", 2));
+        }
+        let open = reference_read_ram(emulator, symbols, "logic_var_goal_open", 4);
+        (xs, open)
+    }
+
+    /// Passage gating from both sides and from an overlapping start, on real SGDK ROMs.
+    /// Blocker AABB is x=50..66, player AABB is 14 px wide, moves 2 px/frame.
+    ///
+    /// `cargo test --manifest-path src-tauri/Cargo.toml reference_platformer_real_passage_gating_contract --lib -- --ignored --nocapture --test-threads=1`
+    #[ignore]
+    #[test]
+    fn reference_platformer_real_passage_gating_contract() {
+        let base = temp_dir("reference-platformer-passage-gating");
+        let mut emulator = EmulatorCore::new(None);
+        let right = JoypadState {
+            right: true,
+            ..JoypadState::default()
+        };
+        let left = JoypadState {
+            left: true,
+            ..JoypadState::default()
+        };
+
+        // (a) Approach from the left while closed: stops before entering (x=36), opens at
+        // score 6 and then crosses.
+        let (rom, symbols) = build_reference_variant(&base, "gate-left-side", |_| {});
+        let (xs, open) = run_reference_input(&mut emulator, &rom, &symbols, right.clone(), 5);
+        println!("right-approach closed xs={xs:?} open={open}");
+        assert_eq!(
+            (*xs.last().unwrap(), open),
+            (36, 0),
+            "fechada deve parar antes de entrar"
+        );
+        assert!(
+            xs.iter().all(|x| x + 14 <= 50),
+            "player nunca entra na AABB fechada"
+        );
+        let (xs, open) = run_reference_input(&mut emulator, &rom, &symbols, right.clone(), 30);
+        println!("right-approach open xs={xs:?} open={open}");
+        assert_eq!(open, 1);
+        assert!(
+            *xs.last().unwrap() > 66,
+            "aberta deve permitir atravessar: {xs:?}"
+        );
+
+        // (b) Approach from the right while closed (Left never scores): stops at x=66.
+        let (rom, symbols) = build_reference_variant(&base, "gate-right-side", |dir| {
+            set_reference_entity_x(dir, "player", 80)
+        });
+        let (xs, open) = run_reference_input(&mut emulator, &rom, &symbols, left.clone(), 30);
+        println!("left-approach closed xs={xs:?} open={open}");
+        assert_eq!(open, 0);
+        assert_eq!(
+            *xs.last().unwrap(),
+            66,
+            "pela direita, fechada deve parar na borda x=66"
+        );
+        assert!(
+            xs.iter().all(|x| *x >= 66),
+            "player nunca entra pela direita"
+        );
+
+        // (c) Starting inside the closed blocker: free to walk out (no soft-lock).
+        let (rom, symbols) = build_reference_variant(&base, "gate-overlapping", |dir| {
+            set_reference_entity_x(dir, "player", 44)
+        });
+        let (xs, open) = run_reference_input(&mut emulator, &rom, &symbols, left, 12);
+        println!("overlap exit xs={xs:?} open={open}");
+        assert_eq!(open, 0);
+        assert_eq!(
+            *xs.last().unwrap(),
+            44 - 24,
+            "sobreposto deve conseguir sair"
+        );
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(base);
+    }
+
     #[test]
     fn diff_asset_fingerprints_detects_added_changed_and_removed_assets() {
         let previous = HashMap::from([

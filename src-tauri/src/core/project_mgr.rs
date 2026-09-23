@@ -15484,20 +15484,23 @@ fn reference_platformer_scene() -> Scene {
 }
 
 fn reference_platformer_logic_graph() -> String {
-    serde_json::json!({
+    let graph = serde_json::json!({
         "version": 1,
         "nodes": [
             { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
             { "id": "music", "type": "action_music", "label": "Play Theme", "x": 180, "y": 0, "params": { "action": "play", "track": "reference_theme", "fade_ms": 0 } },
             { "id": "update_right", "type": "event_update", "label": "Update Right", "x": 0, "y": 160, "params": {} },
             { "id": "right", "type": "input_held", "label": "Hold Right", "x": 180, "y": 140, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
-            { "id": "passage_collision", "type": "condition_overlap", "label": "Contact Closed Passage", "x": 360, "y": 120, "params": { "a": "player", "b": "passage_blocker" } },
+            { "id": "passage_collision", "type": "condition_overlap", "label": "Would Enter Passage (Right)", "x": 360, "y": 120, "params": { "a": "player", "b": "passage_blocker", "probe_dx": 2, "probe_dy": 0, "semantic": "moving right would enter the passage blocker AABB; an already-overlapping player may move out" } },
             { "id": "passage_open_value", "type": "var_get", "label": "Read Passage State", "x": 540, "y": 40, "params": { "var_name": "goal_open" } },
             { "id": "passage_open", "type": "condition_compare", "label": "Passage Is Open", "x": 720, "y": 80, "params": { "operator": "==", "b": 1 } },
             { "id": "move_right", "type": "sprite_move", "label": "Move Right", "x": 360, "y": 140, "params": { "target": "player", "dx": 2, "dy": 0 } },
             { "id": "update_left", "type": "event_update", "label": "Update Left", "x": 0, "y": 300, "params": {} },
             { "id": "left", "type": "input_held", "label": "Hold Left", "x": 180, "y": 280, "params": { "pad": "JOY_1", "button": "BUTTON_LEFT" } },
-            { "id": "move_left", "type": "sprite_move", "label": "Move Left", "x": 360, "y": 280, "params": { "target": "player", "dx": -2, "dy": 0 } },
+            { "id": "passage_collision_left", "type": "condition_overlap", "label": "Would Enter Passage (Left)", "x": 360, "y": 260, "params": { "a": "player", "b": "passage_blocker", "probe_dx": -2, "probe_dy": 0, "semantic": "moving left would enter the passage blocker AABB" } },
+            { "id": "passage_open_left_value", "type": "var_get", "label": "Read Passage State (Left)", "x": 540, "y": 340, "params": { "var_name": "goal_open" } },
+            { "id": "passage_open_left", "type": "condition_compare", "label": "Passage Is Open (Left)", "x": 540, "y": 260, "params": { "operator": "==", "b": 1 } },
+            { "id": "move_left", "type": "sprite_move", "label": "Move Left", "x": 720, "y": 280, "params": { "target": "player", "dx": -2, "dy": 0 } },
             { "id": "update_jump", "type": "event_update", "label": "Update Jump", "x": 0, "y": 440, "params": {} },
             { "id": "jump", "type": "input_pressed", "label": "Press A", "x": 180, "y": 420, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
             { "id": "jump_velocity", "type": "set_velocity", "label": "Jump", "x": 360, "y": 400, "params": { "target": "player", "vx": 0, "vy": -48 } },
@@ -15528,7 +15531,11 @@ fn reference_platformer_logic_graph() -> String {
             { "id": "passage_open_state", "fromNode": "passage_open_value", "fromPort": "value", "toNode": "passage_open", "toPort": "a" },
             { "id": "right_open", "fromNode": "passage_open", "fromPort": "true", "toNode": "move_right", "toPort": "exec" },
             { "id": "left_input", "fromNode": "update_left", "fromPort": "exec", "toNode": "left", "toPort": "exec" },
-            { "id": "left_move", "fromNode": "left", "fromPort": "exec", "toNode": "move_left", "toPort": "exec" },
+            { "id": "left_contact", "fromNode": "left", "fromPort": "exec", "toNode": "passage_collision_left", "toPort": "exec" },
+            { "id": "left_clear", "fromNode": "passage_collision_left", "fromPort": "false", "toNode": "move_left", "toPort": "exec" },
+            { "id": "left_blocked", "fromNode": "passage_collision_left", "fromPort": "true", "toNode": "passage_open_left", "toPort": "exec" },
+            { "id": "passage_open_left_state", "fromNode": "passage_open_left_value", "fromPort": "value", "toNode": "passage_open_left", "toPort": "a" },
+            { "id": "left_open", "fromNode": "passage_open_left", "fromPort": "true", "toNode": "move_left", "toPort": "exec" },
             { "id": "jump_input", "fromNode": "update_jump", "fromPort": "exec", "toNode": "jump", "toPort": "exec" },
             { "id": "jump_velocity", "fromNode": "jump", "fromPort": "exec", "toNode": "jump_velocity", "toPort": "exec" },
             { "id": "jump_sound", "fromNode": "jump_velocity", "fromPort": "exec", "toNode": "jump_sound", "toPort": "exec" },
@@ -15547,7 +15554,73 @@ fn reference_platformer_logic_graph() -> String {
             { "id": "goal_sound", "fromNode": "goal_not_reached", "fromPort": "true", "toNode": "goal_sound", "toPort": "exec" },
             { "id": "goal_mark", "fromNode": "goal_sound", "fromPort": "exec", "toNode": "mark_goal", "toPort": "exec" }
         ]
-    }).to_string()
+    });
+    render_line_mapped_graph(graph)
+}
+
+/// Serializes a graph with one node/edge per line so `source_path:source_line`
+/// params point at the real line of the node in the saved file. Nodes that carry
+/// a `source_line` param get it recomputed from their position; other top-level
+/// keys are preserved. Non-object input is returned unchanged.
+pub(crate) fn render_line_mapped_graph(mut graph: serde_json::Value) -> String {
+    let Some(object) = graph.as_object_mut() else {
+        return graph.to_string();
+    };
+    // Emit "version", "nodes", "edges" first (serde_json sorts keys); everything
+    // before "nodes" is then a single-line scalar, so node lines are exact.
+    let mut keys: Vec<String> = ["version", "nodes", "edges"]
+        .iter()
+        .filter(|key| object.contains_key(**key))
+        .map(|key| key.to_string())
+        .collect();
+    keys.extend(
+        object
+            .keys()
+            .filter(|key| !["version", "nodes", "edges"].contains(&key.as_str()))
+            .cloned(),
+    );
+    // Line 1 is "{"; every key before "nodes" takes one line, then "nodes": [.
+    let nodes_key_line = 2 + keys
+        .iter()
+        .take_while(|key| key.as_str() != "nodes")
+        .count();
+    if let Some(nodes) = object
+        .get_mut("nodes")
+        .and_then(|nodes| nodes.as_array_mut())
+    {
+        for (index, node) in nodes.iter_mut().enumerate() {
+            if let Some(params) = node.get_mut("params").and_then(|p| p.as_object_mut()) {
+                if params.contains_key("source_line") {
+                    params.insert(
+                        "source_line".to_string(),
+                        serde_json::json!(nodes_key_line + 1 + index),
+                    );
+                }
+            }
+        }
+    }
+    let mut lines = vec!["{".to_string()];
+    let last = keys.len().saturating_sub(1);
+    for (position, key) in keys.iter().enumerate() {
+        let comma = if position == last { "" } else { "," };
+        let value = &object[key];
+        match value.as_array() {
+            Some(items) if key == "nodes" || key == "edges" => {
+                lines.push(format!("  {}: [", serde_json::Value::String(key.clone())));
+                for (index, item) in items.iter().enumerate() {
+                    let item_comma = if index + 1 == items.len() { "" } else { "," };
+                    lines.push(format!("    {item}{item_comma}"));
+                }
+                lines.push(format!("  ]{comma}"));
+            }
+            _ => lines.push(format!(
+                "  {}: {value}{comma}",
+                serde_json::Value::String(key.clone())
+            )),
+        }
+    }
+    lines.push("}".to_string());
+    lines.join("\n") + "\n"
 }
 
 pub fn set_entry_scene(project_dir: &Path, scene_path: &str) -> Result<Project, LoadError> {
@@ -15865,6 +15938,10 @@ pub fn sync_external_graph_refs(
                 ))
             })?;
         }
+        // Keep one node per line so node source mappings stay line-accurate after edits.
+        let graph_json = serde_json::from_str::<serde_json::Value>(graph_json)
+            .map(render_line_mapped_graph)
+            .unwrap_or_else(|_| graph_json.to_string());
         fs::write(&full_path, graph_json).map_err(|error| {
             LoadError(format!(
                 "Nao foi possivel escrever graph_ref '{}' para entidade '{}': {}",
@@ -18550,6 +18627,30 @@ void tick_player(void) {\n\
         assert!(graph.contains("\"fromNode\":\"score_input\",\"fromPort\":\"exec\""));
         assert!(graph.contains("action_music"));
         assert!(graph.contains("goal_reached"));
+
+        // One node per line: the threshold's declared source_line is its real line.
+        let threshold_line = graph
+            .lines()
+            .position(|line| line.contains("\"id\":\"score_threshold\""))
+            .expect("threshold node line")
+            + 1;
+        let threshold_node: serde_json::Value = serde_json::from_str(
+            graph
+                .lines()
+                .nth(threshold_line - 1)
+                .unwrap()
+                .trim()
+                .trim_end_matches(','),
+        )
+        .expect("threshold node json");
+        assert_eq!(threshold_node["params"]["source_line"], threshold_line);
+        assert!(graph.contains("\"probe_dx\":2") && graph.contains("\"probe_dx\":-2"));
+        // Saving through the editor path (compact JSON) keeps the mapping exact.
+        let compact = serde_json::from_str::<serde_json::Value>(&graph)
+            .unwrap()
+            .to_string();
+        let resaved = render_line_mapped_graph(serde_json::from_str(&compact).unwrap());
+        assert_eq!(resaved, graph);
 
         let player = load_prefab_entity(&project_dir.join("prefabs").join("reference_player.json"))
             .expect("load reference player prefab");

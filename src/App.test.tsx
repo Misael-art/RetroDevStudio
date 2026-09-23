@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   validateProject: vi.fn(),
   generateCCode: vi.fn(),
   emulatorLoadRom: vi.fn(),
+  emulatorGetCoreEpoch: vi.fn(async () => 7),
   emulatorSaveState: vi.fn(),
   emulatorLoadState: vi.fn(),
   emulatorRewindStep: vi.fn(),
@@ -567,6 +568,7 @@ vi.mock("./core/ipc/emulatorService", () => ({
     r: false,
   },
   emulatorLoadRom: mocks.emulatorLoadRom,
+  emulatorGetCoreEpoch: mocks.emulatorGetCoreEpoch,
   emulatorSaveState: mocks.emulatorSaveState,
   emulatorLoadState: mocks.emulatorLoadState,
   emulatorRewindStep: mocks.emulatorRewindStep,
@@ -2052,6 +2054,11 @@ describe("App build flow", () => {
     expect(useEditorStore.getState().activeWorkspace).toBe("game");
     expect(useEditorStore.getState().activeViewportTab).toBe("game");
     expect(useEditorStore.getState().emulatorLoaded).toBe(true);
+    // Build & Run must anchor the epoch of the freshly loaded core; a stale epoch
+    // makes the backend reject every keyboard input after a rebuild.
+    expect(useEditorStore.getState().coreEpoch).toBe(7);
+    expect(useEditorStore.getState().joypadSessionHold).toBe(false);
+    expect(useEditorStore.getState().joypadSessionId).not.toBeNull();
     expect(container.textContent).toContain("Emulador ativo");
     expect(putImageDataSpy).toHaveBeenCalled();
   });

@@ -5049,7 +5049,16 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     reopened: {
       projectDir: reopenedGoalState?.activeProjectDir ?? createdState.activeProjectDir,
       threshold: 12,
-      sourceMapping: "graphs/reference_platformer_logic.json:24",
+      sourceMapping: await (async () => {
+        // The graph is saved one node per line; the mapping must name the real line.
+        const graphLines = (await readFile(path.join(createdState.activeProjectDir, "graphs", "reference_platformer_logic.json"), "utf8")).split(/\r?\n/);
+        const lineIndex = graphLines.findIndex((line) => line.includes('"id":"score_threshold"'));
+        const declared = lineIndex >= 0 ? JSON.parse(graphLines[lineIndex].trim().replace(/,$/, "")).params?.source_line : null;
+        if (lineIndex < 0 || declared !== lineIndex + 1) {
+          fail(`source_line do limiar nao aponta para a linha real do grafo: ${JSON.stringify({ lineIndex, declared })}`);
+        }
+        return `graphs/reference_platformer_logic.json:${declared}`;
+      })(),
     },
     originalRom: { path: baselineGoalRomPath, sha256: goalBeforeEdit.testedRomSha256 },
     editedRom: { path: editedGoalRomPath, sha256: goalAfterEdit.testedRomSha256 },
@@ -5246,15 +5255,22 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     const word = memory.value.data[0] | (memory.value.data[1] << 8);
     return word > 0x7fff ? word - 0x10000 : word;
   };
-  const waitNativeAck = (button, expected, context) => waitFor(
-    async () => {
-      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-      return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation : false;
-    },
-    3000,
-    `${context}: ACK nativo (${button}=${expected}) nao observado; falha do caminho de input, sem fallback no core.`,
-    50
-  );
+  const waitNativeAck = async (button, expected, context) => {
+    let lastObservation = null;
+    try {
+      return await waitFor(
+        async () => {
+          lastObservation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+          return lastObservation?.lastJoypadAck?.joypad?.[button] === expected ? lastObservation : false;
+        },
+        3000,
+        `${context}: ACK nativo (${button}=${expected}) nao observado`,
+        50
+      );
+    } catch (error) {
+      fail(`${context}: ACK nativo (${button}=${expected}) nao observado; falha do caminho de input, sem fallback no core. Observacao: ${JSON.stringify(lastObservation)}`);
+    }
+  };
   const movementStartX = await readPlayerS16("spr_player_x");
   await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "reference movement");
   const rightAck = await waitNativeAck("right", true, "movimento");

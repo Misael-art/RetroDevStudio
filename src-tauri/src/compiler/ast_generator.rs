@@ -1813,10 +1813,8 @@ fn compile_logic_node(
                 parallax_layers,
                 raster_lines,
             );
-            let overlap_expr = LogicBoolExpr::Overlap {
-                left: left.clone(),
-                right: right.clone(),
-            };
+            let has_probe = overlap_probe(node) != (0, 0);
+            let overlap_expr = overlap_expr_for_node(node, left.clone(), right.clone());
             let guard_expr = resolve_bool_expr_from_ports(
                 graph,
                 node,
@@ -1832,6 +1830,11 @@ fn compile_logic_node(
                         left: Box::new(guard),
                         right: Box::new(overlap_expr),
                     },
+                    if_true,
+                    if_false,
+                })),
+                None if has_probe => Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                    condition: overlap_expr,
                     if_true,
                     if_false,
                 })),
@@ -2307,7 +2310,7 @@ fn build_bool_expr_from_node(
                 .get(&param_string(node, "b")?)?
                 .collision_target
                 .clone();
-            let overlap = LogicBoolExpr::Overlap { left, right };
+            let overlap = overlap_expr_for_node(node, left, right);
             if from_port == "false" {
                 Some(LogicBoolExpr::Not(Box::new(overlap)))
             } else {
@@ -2621,6 +2624,42 @@ fn normalize_scroll_layer(layer: &str) -> String {
         "bg3" | "window" => "WINDOW".to_string(),
         other if !other.is_empty() => other.to_uppercase(),
         _ => "BG_A".to_string(),
+    }
+}
+
+/// Optional "movement probe" of `condition_overlap`: `probe_dx`/`probe_dy` shift the
+/// left entity's AABB. With a probe the condition means "this move would ENTER the other
+/// AABB": overlap at the probed position and no overlap now. An entity already overlapping
+/// is therefore free to move out in any direction instead of getting stuck.
+fn overlap_probe(node: &StoredNodeGraphNode) -> (i32, i32) {
+    (
+        param_i32(node, "probe_dx", 0),
+        param_i32(node, "probe_dy", 0),
+    )
+}
+
+fn overlap_expr_for_node(
+    node: &StoredNodeGraphNode,
+    left: LogicCollisionTarget,
+    right: LogicCollisionTarget,
+) -> LogicBoolExpr {
+    let (dx, dy) = overlap_probe(node);
+    if (dx, dy) == (0, 0) {
+        return LogicBoolExpr::Overlap { left, right };
+    }
+    let mut probed = left.clone();
+    probed.offset_x += dx;
+    probed.offset_y += dy;
+    LogicBoolExpr::And {
+        result_name: format!("_enter_{}", sanitize_identifier(&node.id)),
+        left: Box::new(LogicBoolExpr::Overlap {
+            left: probed,
+            right: right.clone(),
+        }),
+        right: Box::new(LogicBoolExpr::Not(Box::new(LogicBoolExpr::Overlap {
+            left,
+            right,
+        }))),
     }
 }
 
