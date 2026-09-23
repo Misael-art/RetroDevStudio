@@ -8024,6 +8024,7 @@ async function main() {
             { label: "tiles compartilhados sem confirmacao", rect: { x: 10, y: 25, w: 4, h: 2, index: 14 }, expect: "frames DPLC [5]" },
           ]) {
             const before = (await tileEditErrors()).length;
+            await closeVisibleConsoleDrawer(sessionId, `antes do negativo ${negative.label}`);
             await setTileRect(negative.rect);
             await clickButtonByTestIdNative(sessionId, "inspection-sonic-tile-edit-apply", `negativo: ${negative.label}`);
             const errors = await waitFor(async () => { const list = await tileEditErrors(); return list.length > before ? list : false; }, 10000, `Negativo nao foi recusado: ${negative.label}`, 100).catch(async (error) => {
@@ -8042,6 +8043,7 @@ async function main() {
             if (!message.includes(negative.expect) || resultText) fail(`Negativo ${negative.label} nao produziu recusa esperada sem edicao: ${JSON.stringify({ message, resultText })}`);
             tileNegatives.push({ label: negative.label, message });
           }
+          await closeVisibleConsoleDrawer(sessionId, "antes da reinsercao");
           await setTileRect(tileRect);
           await clickButtonByTestIdNative(sessionId, "inspection-sonic-tile-edit-apply", "reinserir tiles do Sonic pela interface");
         } else {
