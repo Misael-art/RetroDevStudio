@@ -24586,7 +24586,11 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
 
     /// Pure decision (the env flag is an argument) so the unit tests do not mutate the
     /// process environment, which raced between tests running in parallel.
-    fn sgdk_matrix_corpus_skip_decision(test_fn_name: &str, donor: &Path, skip_allowed: bool) -> bool {
+    fn sgdk_matrix_corpus_skip_decision(
+        test_fn_name: &str,
+        donor: &Path,
+        skip_allowed: bool,
+    ) -> bool {
         if donor.is_dir() {
             return false;
         }
