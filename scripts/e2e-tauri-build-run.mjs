@@ -2907,7 +2907,7 @@ async function runCanonicalSonicTrajectory(sessionId, options) {
   await sendNativeGameKey(sessionId, "KeyZ", "keyDown", `salto A ${label}`);
   jumpInput = await waitFor(async () => {
     const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-    return current?.lastJoypadAck?.joypad?.a === true ? current : false;
+    return current?.lastJoypadAck?.joypad?.y === true ? current : false;
   }, 10000, `KeyZ/A não chegou ao core para ${label}`, 100);
   const jumpHoldProgress = await waitFor(async () => {
     const progress = await readCanonicalGameProgress(sessionId);
@@ -2917,7 +2917,7 @@ async function runCanonicalSonicTrajectory(sessionId, options) {
   await sendNativeGameKey(sessionId, "KeyZ", "keyUp", `liberação do salto ${label}`);
   jumpReleasedInput = await waitFor(async () => {
     const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-    return current?.lastJoypadAck?.joypad?.a === false ? current : false;
+    return current?.lastJoypadAck?.joypad?.y === false ? current : false;
   }, 10000, `liberação de KeyZ/A não chegou para ${label}`, 100);
   const jumpReleased = await capture("jump-released", { a: false }, jumpHeld.sonic, jumpHeld.raw.renderedFrames);
   let lastJumpSample = jumpReleased;
@@ -8459,7 +8459,7 @@ async function main() {
         const jumpInputA = await waitFor(
           async () => {
             const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-            return current?.lastJoypadAck?.joypad?.a === true ? current : false;
+            return current?.lastJoypadAck?.joypad?.y === true ? current : false;
           },
           10000,
           "KeyZ/A nativa não chegou ao core pelo handler do produto",
@@ -8479,7 +8479,7 @@ async function main() {
         await waitFor(
           async () => {
             const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-            return current?.lastJoypadAck?.joypad?.a === false ? current : false;
+            return current?.lastJoypadAck?.joypad?.y === false ? current : false;
           },
           10000,
           "liberação de KeyZ/A não chegou ao core",
