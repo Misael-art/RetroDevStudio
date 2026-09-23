@@ -1252,7 +1252,7 @@ describe("NodeGraphEditor", () => {
   });
 
   it("does not let a graph_ref re-hydration overwrite unsaved local edits", async () => {
-    const heroSource = {
+    const heroSource: Entity = {
       entity_id: "hero",
       display_name: "Hero",
       prefab: null,
