@@ -99,3 +99,22 @@ E2E desktop `src-tauri/target-test/validation/reference-platformer-2026-09-23T02
 - O salto no E2E avança frames pelo core com o jogo pausado; o loop de frames do WebView é lento sob WebDriver. O estado da tecla segue o caminho real (evento nativo → frontend → ACK).
 - `sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing` falhou uma vez na suíte paralela e passa isolado (corrida de variável de ambiente preexistente).
 - Tudo segue **Experimental**, restrito ao template SGDK/Mega Drive.
+
+## Checkpoint 2026-09-23 (b) — cenário, colisão e animação pela UI até a ROM
+
+E2E `reference-platformer-2026-09-23T03-06-00-927Z-report.json`, binário SHA `d2ec495b4fc281d06d111031fa74e0d0b0f64ce351c38cd7d44f24137678b9e8`, commit `af11d4e`: 16/16 passos.
+
+Na mesma sessão de autoria (antes de salvar/fechar/reabrir): 4 células do tilemap (cols 10–11, linhas 26–27) repintadas com o tile 1; colisão das mesmas células apagada no modo colisão (botão direito), `collisionSolidCount 88→84`; FPS da animação `idle` 4→12 no Inspector; segunda passagem adicionada. Após reabrir, a cena salva mantém as 4 células livres e a célula não editada (26,20) sólida; FPS e passagens persistem.
+
+ROM `5084e8ff…` (duas passagens + fosso + animação):
+- Física: ao passar sobre o fosso o personagem desce (x=74..86, y 193→205); antes dele y=192 constante.
+- Visual: hash da região do fosso ≠ hash da região de piso não editada no mesmo frame.
+- Animação: troca do frame idle nos frames 1,6,11,…,36 (período 5 = 60/12); o original (4 fps) troca a cada 15 (teste técnico `reference_platformer_real_animation_timing_contract`).
+- Passagens: principal abre no score 12 com a segunda fechada; segura em x=106 por 13 frames; segunda abre no score 60.
+
+Defeitos adicionais corrigidos nesta etapa:
+- Reidratação assíncrona do NodeGraph (`graph_ref`) sobrescrevia edições locais ainda não autosalvas quando outro painel alterava a cena (teste de regressão com mutação verificada).
+- Edição de sprite em instância de prefab gerava override parcial sem `asset`; o backend rejeitava a cena inteira, o salvar falhava e a cena era recarregada do disco, descartando outras edições. A edição de FPS agora grava o componente completo. **Outras edições aninhadas do Inspector em instâncias de prefab podem ter o mesmo defeito** — não auditadas.
+- NodeGraph passa a acusar referência de entidade inexistente, parâmetro não inteiro/fora de faixa, operador inválido e nome de variável inválido (erros com nó e parâmetro).
+
+Limites: célula de tilemap 0 significa "sem sobreposição" no emissor (pintar "vazio" não altera a ROM); sem paredes de tile horizontais; reordenar frames de uma animação não é representável no recurso SPRITE do rescomp (só duração); medições de passagem/fosso usam `emulator_send_input` controlado (teclado nativo coberto nos passos de movimento/salto).
