@@ -2098,6 +2098,9 @@ function assertSonicStandOracles(romBytes, actual, context) {
     // Mutação determinística exercitada pela UI: palette[1] = RGB333(7,0,7).
     d381b1eed8f47dcd08890007b58b90cd5e3cabdaed96deac9b1e7336b1558e4d:
       "91ee4ab0c08987597918a4951020cac81c6d3903b415c32d0c1dd8d783850588",
+    // Mutação de tiles exercitada pela UI: retângulo (10,14) 12x8 do stand -> índice 14.
+    "5e44f9d2581735350f53d5ff1904ccc2e64b4655362a673fe6066d61137b8cb3":
+      "c41fcd503ae7fcd81b4aab308ab399d3415cc82ac089c299a8122daf74d478b2",
   };
   const expectedPixelsSha256 = expectedPixelsByRomSha256[romSha256];
   console.log(`[inspection-sonic-oracle] ${JSON.stringify({ context, romSha256, romLength: romBytes.length, mappingSha256: createHash("sha256").update(romBytes.subarray(0x21293, 0x21293 + 21)).digest("hex"), independentPngPixelsSha256 })}`);
