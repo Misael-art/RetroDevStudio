@@ -5601,7 +5601,8 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   );
   // Etapa 3 in the same authoring session: erase the floor collision of a 2x2 region
   // (cols 10-11, rows 26-27), repaint its visual tiles as empty and set idle to 12 fps.
-  const pitCells = [[10, 26], [11, 26], [10, 27], [11, 27]];
+  // One-cell hole: with side walls a wider/deeper pit is a trap for the template jump.
+  const pitCells = [[10, 26]];
   const sceneStateForPit = await readAutomationState(sessionId);
   const pitBounds = sceneStateForPit?.activeScene?.worldBounds;
   const cellPoint = (col, row) => ({
@@ -5611,9 +5612,8 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   const solidBeforePit = Number(sceneStateForPit?.activeScene?.collisionSolidCount ?? 0);
   await clickButtonByTestIdNative(sessionId, "hierarchy-tilemap-edit-reference_tilemap", "abrir tilemap para o fosso");
   await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-tile-paint-flow-strip\"]'));"), 15000, "Pintura de tilemap indisponivel para o fosso.", 250);
-  // Cell value 0 means "no overlay" in the SGDK emitter (the base map shows through), so the
-  // pit visual is painted with tile 1 instead of the "empty" tile.
-  await clickByTestId(sessionId, "tile-palette-1");
+  // Explicitly empty cell (distinct from 0 = base map).
+  await clickByTestId(sessionId, "tile-palette-empty");
   for (const [col, row] of pitCells) {
     const point = cellPoint(col, row);
     await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", point.x, point.y, `apagar visual ${col},${row}`);
@@ -5622,7 +5622,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     async () => {
       const state = await readAutomationState(sessionId);
       const cells = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap")?.tilemap?.cells ?? [];
-      return pitCells.every(([col, row]) => Number(cells[row * 40 + col]) === 1) ? true : false;
+      return pitCells.every(([col, row]) => Number(cells[row * 40 + col]) === 4294967295) ? true : false;
     },
     10000, "Visual do fosso nao foi pintado no tilemap.", 150
   );
@@ -5793,7 +5793,10 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   report.pitVisual = { ...pitVisual, reopenedFramebuffer: reopenedObserved?.framebuffer_sha256 ?? null };
   await invokeCore("emulator_send_input", { joypad: { ...neutralGoalInput, right: true }, sessionEpoch: twoEpoch.value });
   const timeline = [];
-  for (let frame = 1; frame <= 110; frame += 1) {
+  for (let frame = 1; frame <= 130; frame += 1) {
+    // Controlled measurement: pulse jump (RetroPad Y = MD A) when the player is in the hole.
+    const inHole = timeline.length > 0 && timeline[timeline.length - 1].y >= 196;
+    await invokeCore("emulator_send_input", { joypad: { ...neutralGoalInput, right: true, y: inHole }, sessionEpoch: twoEpoch.value });
     await invokeCore("emulator_run_frames", { frames: 1 });
     timeline.push({
       frame,
@@ -5818,7 +5821,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       maxXWhileSecondClosed > 106 || heldAtSecond.length < 5 || crossTalk.length > 0 || timeline.at(-1).x <= 136) {
     fail(`Duas passagens nao se comportaram de forma independente: ${JSON.stringify({ mainOpened, secondOpened, maxXWhileSecondClosed, heldAtSecond: heldAtSecond.length, crossTalk: crossTalk.length, last: timeline.at(-1) })}`);
   }
-  const pitDip = timeline.filter((t) => t.x >= 72 && t.x < 88 && t.y > 192);
+  const pitDip = timeline.filter((t) => t.x >= 72 && t.x < 88 && t.y >= 196);
   const floorHeld = timeline.filter((t) => t.x < 72).every((t) => t.y === 192);
   if (pitDip.length === 0 || !floorHeld) {
     fail(`Colisao apagada pela UI nao virou fosso fisico na ROM: ${JSON.stringify({ pitDip, floorHeld })}`);
