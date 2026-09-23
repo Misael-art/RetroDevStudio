@@ -1455,6 +1455,8 @@ type AutomationApi = {
   pauseEmulator: () => boolean;
   /** Áudio core → WebAudio: recebido do core vs. entregue ao AudioContext. E2E / QA. */
   getAudioOutputTelemetry: () => AudioOutputTelemetry;
+  /** Last scene revision bumps with the caller stack (QA diagnostics). */
+  getSceneRevisionLog: () => { revision: number; at: number; stack: string[] }[];
   /** Core samples received by the app (ring buffer, absolute indices). E2E / QA. */
   readReceivedAudioSamples: (from: number, count: number) => ReturnType<typeof readReceivedAudioSamples>;
   /** Observação do caminho de input do produto. `lastJoypadRequest` é apenas
@@ -3916,6 +3918,7 @@ export default function App() {
         return useEditorStore.getState().emulPaused;
       },
       getAudioOutputTelemetry: () => getAudioOutputTelemetry(),
+      getSceneRevisionLog: () => [...sceneRevisionLog],
       readReceivedAudioSamples: (from: number, count: number) => readReceivedAudioSamples(from, count),
       getLastInputObservation: () => {
         const state = useEditorStore.getState();
@@ -5581,6 +5584,18 @@ export default function App() {
 }
 
 /** Truthful save indicator: reflects persistActiveScene outcomes and unsaved revisions. */
+const sceneRevisionLog: { revision: number; at: number; stack: string[] }[] = [];
+useEditorStore.subscribe((state, previous) => {
+  if (state.sceneRevision !== previous.sceneRevision) {
+    sceneRevisionLog.push({
+      revision: state.sceneRevision,
+      at: Date.now(),
+      stack: (new Error().stack ?? "").split("\n").slice(2, 12),
+    });
+    if (sceneRevisionLog.length > 20) sceneRevisionLog.shift();
+  }
+});
+
 function SceneSaveStatusChip() {
   const saveState = useEditorStore((state) => state.sceneSaveState);
   const sceneRevision = useEditorStore((state) => state.sceneRevision);

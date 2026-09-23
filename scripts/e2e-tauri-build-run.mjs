@@ -6056,7 +6056,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   await waitFor(async () => {
     lastSaveStatus = await js(`const el = document.querySelector('[data-testid="scene-save-status"]'); return el ? { ...el.dataset, text: el.textContent } : null;`);
     return lastSaveStatus?.status === "saved";
-  }, 20000, "Indicador nao chegou a 'Salvo'.", 200).catch(() => fail(`Indicador de salvamento nao chegou a 'Salvo': ${JSON.stringify(lastSaveStatus)}`));
+  }, 20000, "Indicador nao chegou a 'Salvo'.", 200).catch(async () => fail(`Indicador de salvamento nao chegou a 'Salvo': ${JSON.stringify(lastSaveStatus)} mutacoes=${JSON.stringify((await js("return window.__RDS_E2E__.getSceneRevisionLog();")).slice(-3))}`));
   const graphOnDisk = await readFile(path.join(projectDir, "graphs", "reference_platformer_logic.json"), "utf8");
   const sceneOnDisk = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
   if (!graphOnDisk.includes('"sfx":"victory"') || !graphOnDisk.includes("passage_blocker_2")) fail("Grafo salvo nao contem som/passagem.");
