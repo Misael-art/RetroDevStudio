@@ -12,6 +12,7 @@ tsconfig.tsbuildinfo
 # --- Rust / Backend ---
 target/
 src-tauri/target-test/
+src-tauri/src-tauri/target-test/
 src-tauri/target-sprint*/
 whitelist_target/
 *.pdb
@@ -42,6 +43,7 @@ toolchains/libretro/.retrodev-install-*.json
 
 # --- Build artifacts ---
 build/
+data/reference_platformer_art/out/
 *.rom
 *.md.bin
 *.sfc

@@ -699,11 +699,17 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         }
 
         if let Some(physics) = &entity.components.physics {
+            let body_size = entity
+                .components
+                .collision
+                .as_ref()
+                .map(|collision| (collision.width, collision.height))
+                .unwrap_or((sprite.frame_width, sprite.frame_height));
             physics_applications.push(physics_application(
                 &var_name,
                 physics,
                 scene.collision_map.as_ref(),
-                (sprite.frame_width, sprite.frame_height),
+                body_size,
             ));
         }
     }
@@ -3509,6 +3515,44 @@ mod tests {
                 && *friction == 2
                 && *bounce == 35
         )));
+
+        // A larger painted sprite must not silently widen its physical body.
+        let mut scene = scene;
+        scene.entities[0]
+            .components
+            .sprite
+            .as_mut()
+            .unwrap()
+            .frame_width = 32;
+        scene.entities[0]
+            .components
+            .sprite
+            .as_mut()
+            .unwrap()
+            .frame_height = 32;
+        scene.entities[0].components.collision =
+            Some(crate::ugdm::components::CollisionComponent {
+                shape: "rectangle".to_string(),
+                width: 14,
+                height: 32,
+                offset: None,
+                solid: true,
+                layer: None,
+                collides_with: Vec::new(),
+            });
+        scene.collision_map = Some(crate::ugdm::entities::CollisionMap {
+            tile_width: 8,
+            tile_height: 8,
+            width: 2,
+            height: 2,
+            data: vec![0, 0, 1, 1],
+        });
+        let changed = generate_ast(&project, &scene);
+        let body = collect_physics_applications(&changed)[0]
+            .ground
+            .clone()
+            .expect("ground probe for collision map");
+        assert_eq!((body.body_width, body.body_height), (14, 32));
     }
 
     #[test]

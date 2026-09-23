@@ -2,7 +2,6 @@ import { isPpmPath, loadProjectPpmImageData } from "../../core/ppmImage";
 import { loadShellPersona } from "../../core/surfaceRegistry";
 import { isExplicitEmptyCell, tilesetAtlasIndex } from "../../core/tilemapCells";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import Tabs from "../common/Tabs";
 import { useEditorStore } from "../../core/store/editorStore";
 import {
@@ -49,6 +48,7 @@ import {
 } from "../../core/creatorWorkflow";
 import { applyKeyColorTransparency } from "../../core/keyColorTransparency";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
+import { readProjectAssetBytes } from "../../core/ipc/toolsService";
 import {
   clampViewportPan,
   getSceneEntityBounds,
@@ -497,7 +497,6 @@ export default function ViewportPanel({
   const assetCacheRef = useRef<Map<string, ViewportAssetCacheEntry>>(new Map());
   // Fallback Image() e benigno (assets acabam renderizando); um unico aviso evita
   // poluir o console com uma linha por asset em cenas importadas densas.
-  const assetFallbackWarnedRef = useRef(false);
   const dragRef = useRef<{
     mode: "move" | "resize";
     entityId: string;
@@ -1223,7 +1222,6 @@ export default function ViewportPanel({
 
       const cacheEntry: ViewportAssetCacheEntry = { status: "loading" };
       assetCacheRef.current.set(absolutePath, cacheEntry);
-      const assetUrl = convertFileSrc(absolutePath);
       const markLoaded = (source: CanvasImageSource, width: number, height: number) => {
         assetCacheRef.current.set(absolutePath, {
           status: "loaded",
@@ -1247,7 +1245,7 @@ export default function ViewportPanel({
         assetCacheRef.current.set(absolutePath, { status, errorMessage: fullMessage });
         setAssetCacheVersion((current) => current + 1);
       };
-      const loadImageElement = (imageSrc: string, options?: { revokeOnLoad?: boolean; fallbackToAssetUrl?: boolean }) => {
+      const loadImageElement = (imageSrc: string, options?: { revokeOnLoad?: boolean }) => {
         const image = new Image();
         image.onload = () => {
           if (options?.revokeOnLoad && typeof URL.revokeObjectURL === "function") {
@@ -1258,10 +1256,6 @@ export default function ViewportPanel({
         image.onerror = () => {
           if (options?.revokeOnLoad && typeof URL.revokeObjectURL === "function") {
             URL.revokeObjectURL(imageSrc);
-          }
-          if (options?.fallbackToAssetUrl && imageSrc !== assetUrl) {
-            loadImageElement(assetUrl);
-            return;
           }
           markFailure("error", "Decode/draw Image falhou no WebView.");
         };
@@ -1293,14 +1287,20 @@ export default function ViewportPanel({
         return cacheEntry;
       }
 
-      void fetch(assetUrl)
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          return response.blob();
-        })
+      // Use the same project-byte IPC boundary as PPM. An Image loaded through
+      // asset:// can paint successfully but taint the scene canvas in WebKit.
+      void readProjectAssetBytes(activeProjectDir, relativePath)
+        .then((bytes) => new Blob([Uint8Array.from(bytes)]))
         .then((blob) => {
+          const loadBlobImage = () => {
+            if (typeof URL.createObjectURL === "function") {
+              loadImageElement(URL.createObjectURL(blob), {
+                revokeOnLoad: true,
+              });
+              return;
+            }
+            markFailure("error", "WebView nao oferece createImageBitmap nem URL.createObjectURL.");
+          };
           if (typeof createImageBitmap === "function") {
             return createImageBitmap(blob).then((bitmap) => {
               const canvas = document.createElement("canvas");
@@ -1321,33 +1321,20 @@ export default function ViewportPanel({
               context.putImageData(processed.imageData, 0, 0);
               bitmap.close?.();
               markLoaded(canvas, canvas.width, canvas.height);
+            }).catch(() => {
+              // WebKit may reject otherwise valid PNG variants in createImageBitmap.
+              // Retain the IPC bytes; asset:// Image() would taint
+              // the viewport canvas and make its pixels unreadable to the editor.
+              loadBlobImage();
             });
           }
 
-          if (typeof URL.createObjectURL === "function") {
-            loadImageElement(URL.createObjectURL(blob), {
-              revokeOnLoad: true,
-              fallbackToAssetUrl: true,
-            });
-            return;
-          }
-
-          loadImageElement(assetUrl);
+          loadBlobImage();
         })
         .catch((err) => {
           const detail = describeError(err);
-          if (detail.includes("HTTP 404")) {
-            markFailure("missing", `fetch retornou 404 para ${assetUrl}.`);
-            return;
-          }
-          if (!assetFallbackWarnedRef.current) {
-            assetFallbackWarnedRef.current = true;
-            logMessage(
-              "warn",
-              `[Viewport] fetch de asset falhou (${detail}); usando fallback Image() automaticamente. Primeiro asset: '${relativePath}'. Demais avisos identicos agregados.`
-            );
-          }
-          loadImageElement(assetUrl);
+          const status = /not found|nao encontrad|No such file|os error 2/i.test(detail) ? "missing" : "error";
+          markFailure(status, `IPC de asset falhou: ${detail}`);
         });
       return cacheEntry;
     },

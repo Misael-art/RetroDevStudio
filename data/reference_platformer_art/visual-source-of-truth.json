@@ -1,0 +1,24 @@
+{
+  "status": "agent_curated_source_candidate",
+  "identity_authority": "fox-concept.png",
+  "identity_sha256": "2b63ed0f0153add769a0cb1177000c04844513177052ab25539975f05a58eef6",
+  "translation_source": "fox-five-frame-source.png",
+  "runtime_candidate": "fox-five-frame-32-runtime.png",
+  "companion_sources": ["gate-source.png", "goal-flag-source.png"],
+  "companion_runtime_candidates": ["gate-24x32-runtime.png", "goal-flag-16x32-runtime.png"],
+  "stage_concept": "stage-scene-concept.png",
+  "stage_backdrop_source": "stage-backdrop-source.png",
+  "stage_backdrop_runtime_candidate": "stage-backdrop-320x224-10-candidate.png",
+  "stage_foreground": "legacy procedural grass, earth and brick tiles aligned to collision map; candidate for later visual replacement",
+  "must_preserve": [
+    "orelhas triangulares grandes com interior creme",
+    "olhos escuros amistosos",
+    "focinho e peito creme",
+    "cachecol vermelho em movimento",
+    "cauda fofa com ponta creme",
+    "espada curta de madeira separada da silhueta"
+  ],
+  "can_simplify": ["sombras secundárias", "microdetalhes da pelagem", "brilho dos olhos"],
+  "forbidden": ["retângulo opaco ao redor", "sword merged into fur", "background baked into sprite"],
+  "human_approval": "pending"
+}

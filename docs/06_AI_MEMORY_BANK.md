@@ -1,5 +1,9 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-23 (d) — arte da raposinha e paisagem no template (Experimental; sem merge)
+
+Branch isolada `codex/reference-platformer-fox-art`. Os placeholders do template `reference_platformer` foram substituídos por candidatos técnicos criados a partir de fontes originais: raposinha kawaii de cachecol vermelho e espada de madeira (cinco quadros 32×32), portão 24×32, bandeira 16×32 e fundo de montanhas/floresta 320×224. Conversão e workset validados com o SGDK Forge; primeiro plano de grama/terra/tijolo continua provisório. A arte é `technical_candidate`, com aprovação estética humana pendente. Build desktop SHA `f87636051d8866464bf34dcb241f39fde5ea67124f9efc0b3d7c5db2ce9619b9`; autoria guiada 10/10 e reference-platformer 16/16 passaram no binário, incluindo salvamento/reinício/reabertura e vitória por teclado. Evidências versionadas e hashes em `data/reference_platformer_art/README.md` e `data/reference_platformer_art/doc/evidence/`. Não confundir este checkpoint com o aceite de arte final.
+
 ### Checkpoint 2026-09-23 (c) — autoria guiada ponta a ponta (Experimental; sem merge)
 
 Aceite `authoring-acceptance` passou 10/10 no binário `6cebe930…` (commit `a6c02af`): criar fase, ver recursos, editar cenário/colisão/animação, duas passagens, associar som, salvar, reiniciar, reabrir, compilar e vencer jogando pelo teclado, com o som `victory` observado nas amostras recebidas do core. Corrigidas perdas silenciosas de trabalho (recarga do disco na hierarquia e no salvar com falha, debounce do NodeGraph), PPM no WebView, overrides de prefab, semântica de tile vazio, paredes laterais e identidade da ROM no Build & Run. Regressões reexecutadas: reference-platformer, ADDQ, branch-compare, reinserção Sonic. Matriz: `docs/REX_AUTHORING_ACCEPTANCE.md`.

@@ -14959,165 +14959,34 @@ fn reference_ppm(width: u32, height: u32, mut pixel: impl FnMut(u32, u32) -> [u8
     bytes
 }
 
-fn reference_sprite_png(
-    width: u32,
-    height: u32,
-    transparent_key: [u8; 3],
-    mut pixel: impl FnMut(u32, u32) -> [u8; 3],
-) -> Vec<u8> {
-    let rgba = image::RgbaImage::from_fn(width, height, |x, y| {
-        let rgb = pixel(x, y);
-        let alpha = if rgb == transparent_key { 0 } else { 255 };
-        image::Rgba([rgb[0], rgb[1], rgb[2], alpha])
-    });
-    let mut bytes = Vec::new();
-    image::DynamicImage::ImageRgba8(rgba)
-        .write_to(
-            &mut std::io::Cursor::new(&mut bytes),
-            image::ImageFormat::Png,
-        )
-        .expect("encoding a generated in-memory PNG cannot fail");
-    bytes
-}
-
 fn reference_player_png() -> Vec<u8> {
-    // Five 16x16 poses share one silhouette, designed from the original fox
-    // concept art in data/reference_platformer_art. PNG alpha becomes SGDK
-    // palette index 0; the outline, ears, scarf and toy sword stay legible at
-    // the native sprite size rather than relying on a high-resolution mockup.
-    const FOX: [&str; 16] = [
-        "....K....K......",
-        "...KOK..KOK.....",
-        "...KCOOKCOK.....",
-        "...KOOOoOOK.....",
-        "..KOOOoOOOOK....",
-        "..KOOEOOEOOK....",
-        "..KOOOCCCOOK....",
-        "...KOOCCOOK.....",
-        ".CC.KOORROK.....",
-        "CCOCKRRRRKWW....",
-        "CCOCKRROOKWWW...",
-        ".CCKKOOOOKWWw...",
-        "..KKKOOOOKWW....",
-        "....KOOOOK......",
-        "....KBBBK.......",
-        "....KBBBK.......",
-    ];
-    reference_sprite_png(80, 16, [12, 20, 32], |x, y| {
-        let frame = x / 16;
-        let local_x = x % 16;
-        let source_y = if frame == 4 { y + 1 } else { y };
-        let mut glyph = if source_y < 16 {
-            FOX[source_y as usize].as_bytes()[local_x as usize] as char
-        } else {
-            '.'
-        };
-        if frame == 1 && y == 5 && (local_x == 5 || local_x == 8) {
-            glyph = 'K'; // blink
-        }
-        if frame == 2 && y >= 14 {
-            glyph = if (3..=5).contains(&local_x) || (8..=10).contains(&local_x) {
-                'B'
-            } else {
-                '.'
-            };
-        }
-        if frame == 3 && y >= 14 {
-            glyph = if (5..=7).contains(&local_x) || (10..=12).contains(&local_x) {
-                'B'
-            } else {
-                '.'
-            };
-        }
-        if frame == 4 {
-            if (11..=14).contains(&local_x) && (3..=11).contains(&y) {
-                glyph = '.';
-            }
-            if local_x == 13 && (2..=8).contains(&y) {
-                glyph = 'W'; // raised wooden sword
-            }
-            if local_x == 13 && y == 2 {
-                glyph = 'w';
-            }
-            if (11..=14).contains(&local_x) && y == 9 {
-                glyph = 'K'; // crossguard
-            }
-        }
-        match glyph {
-            'K' => [52, 37, 43],    // warm outline
-            'O' => [228, 109, 43],  // fox coat
-            'o' => [248, 165, 73],  // fur highlight
-            'C' => [255, 225, 180], // muzzle and tail tip
-            'E' => [25, 27, 36],    // eyes
-            'R' => [205, 48, 58],   // scarf
-            'B' => [91, 52, 43],    // boots
-            'W' => [171, 107, 55],  // toy sword
-            'w' => [225, 165, 94],  // sword edge
-            _ => [12, 20, 32],      // transparent key
-        }
-    })
+    // SGDK Forge indexed technical candidate, derived from the five-pose fox
+    // concept. The visual approval gate is still pending; keep its provenance
+    // beside the source PNG instead of inventing sprite pixels in Rust.
+    include_bytes!("../../../data/reference_platformer_art/fox-five-frame-32-runtime.png").to_vec()
 }
 
 fn reference_goal_png() -> Vec<u8> {
-    reference_sprite_png(16, 16, [20, 28, 44], |x, y| {
-        if (2..=3).contains(&x) && (2..=15).contains(&y) {
-            if y % 4 == 0 {
-                [229, 177, 101]
-            } else {
-                [127, 75, 48]
-            }
-        } else if (x as i32 - 3).abs() + (y as i32 - 2).abs() <= 2 {
-            [255, 214, 94] // gold star finial
-        } else if (4..=13).contains(&x) && (4..=10).contains(&y) && x <= 17 - y {
-            if (7..=9).contains(&x) && (6..=8).contains(&y) {
-                [255, 225, 180] // cream fox insignia
-            } else if y == 4 || x == 4 {
-                [108, 34, 49]
-            } else {
-                [205, 48, 58] // scarf-red banner
-            }
-        } else {
-            [20, 28, 44]
-        }
-    })
+    // SGDK Forge technical candidate: star-topped finish flag, 16x32 RGBA.
+    include_bytes!("../../../data/reference_platformer_art/goal-flag-16x32-runtime.png").to_vec()
 }
 
 fn reference_passage_png() -> Vec<u8> {
-    reference_sprite_png(16, 32, [20, 28, 44], |x, y| {
-        let post = (1..=3).contains(&x) || (12..=14).contains(&x);
-        let beam = (2..=5).contains(&y) && (1..=14).contains(&x);
-        let bars = (8..=28).contains(&y)
-            && (4..=11).contains(&x)
-            && ((x + y / 3).is_multiple_of(4) || (x + 16 - y / 3).is_multiple_of(5));
-        if (post || beam || bars) && ((x == 1 || x == 14) || y == 2 || y == 31) {
-            [61, 41, 43] // carved silhouette
-        } else if post || beam || bars {
-            if (x + y / 4).is_multiple_of(3) {
-                [225, 161, 87]
-            } else {
-                [154, 91, 54]
-            }
-        } else if (5..=10).contains(&x) && (5..=8).contains(&y) {
-            if x == 6 || x == 9 {
-                [255, 225, 180]
-            } else {
-                [205, 48, 58]
-            }
-        } else if (y == 30 || y == 31) && (2..=13).contains(&x) {
-            [68, 111, 59] // moss at base
-        } else {
-            [20, 28, 44]
-        }
-    })
+    // SGDK Forge technical candidate: single wooden fox gate, 24x32 RGBA.
+    include_bytes!("../../../data/reference_platformer_art/gate-24x32-runtime.png").to_vec()
 }
 
-/// Full 320x224 stage picture that matches the template's collision map: sky, a grass
-/// floor on tile rows 26..27 and a platform on row 21, columns 20..27. The first tiles of
-/// row 0 are a small strip of sample tiles (grass, brick, cloud, dirt) so the tile palette
-/// (which slices this same image) offers distinct materials.
+/// Full 320x224 stage picture: the Forge-converted backdrop is visual-only, while
+/// foreground tiles remain aligned to the collision map (floor rows 26..27 and
+/// floating platform row 21, columns 20..27). The first row keeps sample tiles
+/// for the editor palette (grass, brick, cloud, dirt).
 fn reference_tileset_ppm() -> Vec<u8> {
-    const SKY: [u8; 3] = [102, 185, 226];
-    const SKY_LIGHT: [u8; 3] = [136, 206, 234];
+    let backdrop = image::load_from_memory(include_bytes!(
+        "../../../data/reference_platformer_art/stage-backdrop-320x224-10-candidate.png"
+    ))
+    .expect("built-in backdrop PNG must decode")
+    .to_rgb8();
+    assert_eq!(backdrop.dimensions(), (320, 224));
     let grass = |x: u32, y: u32| match y % 8 {
         0 => [183, 221, 93],
         1 | 2 if (x % 8).is_multiple_of(3) => [183, 221, 93],
@@ -15135,19 +15004,6 @@ fn reference_tileset_ppm() -> Vec<u8> {
             [142, 88, 62]
         }
     };
-    let cloud = |x: u32, y: u32| {
-        let dx = x as i32 % 8 - 4;
-        let dy = y as i32 % 8 - 4;
-        if dx * dx + dy * dy <= 12 {
-            if dy > 1 {
-                [213, 234, 231]
-            } else {
-                [255, 244, 217]
-            }
-        } else {
-            SKY
-        }
-    };
     let dirt = |x: u32, y: u32| {
         if y.is_multiple_of(8) {
             [90, 171, 70]
@@ -15161,40 +15017,15 @@ fn reference_tileset_ppm() -> Vec<u8> {
     };
     reference_ppm(320, 224, move |x, y| {
         let (tile_x, tile_y) = (x / 8, y / 8);
-        let (px, py) = (x as i32, y as i32);
-        let ellipse = |cx: i32, cy: i32, rx: i32, ry: i32| {
-            (px - cx) * (px - cx) * ry * ry + (py - cy) * (py - cy) * rx * rx <= rx * rx * ry * ry
-        };
-        let scene_cloud = [(58, 38), (173, 53), (283, 33)].iter().any(|&(cx, cy)| {
-            ellipse(cx, cy, 23, 7)
-                || ellipse(cx - 11, cy - 5, 11, 9)
-                || ellipse(cx + 10, cy - 4, 13, 9)
-        });
-        let hill_top = 164 + ((x + 48) % 128).abs_diff(64) / 3;
         match (tile_x, tile_y) {
             (1, 0) => grass(x, y),
             (2, 0) => brick(x, y),
-            (3, 0) => cloud(x, y),
+            (3, 0) => backdrop.get_pixel(x + 16, y + 55).0,
             (4, 0) => dirt(x, y),
             (_, 26) => grass(x, y),
             (_, 27) => dirt(x, y),
             (20..=27, 21) => grass(x, y),
-            _ if scene_cloud => {
-                if y.is_multiple_of(3) || y < 35 {
-                    [255, 244, 217]
-                } else {
-                    [213, 234, 231]
-                }
-            }
-            _ if y >= hill_top => {
-                if y <= hill_top + 2 || (x / 7 + y / 11).is_multiple_of(13) {
-                    [90, 171, 70]
-                } else {
-                    [68, 120, 62]
-                }
-            }
-            _ if y < 100 => SKY_LIGHT,
-            _ => SKY,
+            _ => backdrop.get_pixel(x, y).0,
         }
     })
 }
@@ -15291,12 +15122,12 @@ fn reference_player_prefab() -> Entity {
         entity_id: "reference_player_prefab".to_string(),
         display_name: Some("Reference Player".to_string()),
         prefab: None,
-        transform: Transform { x: 32, y: 184 },
+        transform: Transform { x: 32, y: 176 },
         components: Components {
             sprite: Some(SpriteComponent {
                 asset: REFERENCE_PLATFORMER_PLAYER_ASSET.to_string(),
-                frame_width: 16,
-                frame_height: 16,
+                frame_width: 32,
+                frame_height: 32,
                 pivot: None,
                 palette_slot: 1,
                 animations,
@@ -15307,7 +15138,7 @@ fn reference_player_prefab() -> Entity {
             collision: Some(CollisionComponent {
                 shape: "aabb".to_string(),
                 width: 14,
-                height: 16,
+                height: 32,
                 offset: None,
                 solid: true,
                 layer: Some("player".to_string()),
@@ -15401,12 +15232,12 @@ fn reference_goal_prefab() -> Entity {
         entity_id: "reference_goal_prefab".to_string(),
         display_name: Some("Goal Flag".to_string()),
         prefab: None,
-        transform: Transform { x: 144, y: 184 },
+        transform: Transform { x: 144, y: 176 },
         components: Components {
             sprite: Some(SpriteComponent {
                 asset: REFERENCE_PLATFORMER_GOAL_ASSET.to_string(),
                 frame_width: 16,
-                frame_height: 16,
+                frame_height: 32,
                 pivot: None,
                 palette_slot: 2,
                 animations: BTreeMap::from([(
@@ -15440,7 +15271,7 @@ fn reference_passage_prefab() -> Entity {
         components: Components {
             sprite: Some(SpriteComponent {
                 asset: REFERENCE_PLATFORMER_PASSAGE_ASSET.to_string(),
-                frame_width: 16,
+                frame_width: 24,
                 frame_height: 32,
                 pivot: None,
                 palette_slot: 3,
@@ -15463,7 +15294,7 @@ fn reference_passage_prefab() -> Entity {
             }),
             collision: Some(CollisionComponent {
                 shape: "aabb".to_string(),
-                width: 16,
+                width: 24,
                 height: 32,
                 offset: None,
                 solid: true,
@@ -15542,55 +15373,82 @@ fn reference_platformer_scene() -> Scene {
         PaletteEntry {
             slot: 0,
             colors: vec![
-                "#66B9E2".to_string(),
-                "#88CEEA".to_string(),
+                "#002244".to_string(),
+                "#004444".to_string(),
+                "#004466".to_string(),
+                "#006644".to_string(),
+                "#0066AA".to_string(),
+                "#2288CC".to_string(),
+                "#22AAEE".to_string(),
+                "#44AA22".to_string(),
+                "#AACCEE".to_string(),
+                "#EEEEEE".to_string(),
                 "#B7DD5D".to_string(),
                 "#5AAB46".to_string(),
                 "#44783E".to_string(),
                 "#4B3837".to_string(),
                 "#BA7E52".to_string(),
                 "#8E583E".to_string(),
-                "#D5EAE7".to_string(),
-                "#FFF4D9".to_string(),
             ],
         },
         PaletteEntry {
             slot: 1,
             colors: vec![
-                "#0C1420".to_string(),
-                "#34252B".to_string(),
-                "#E46D2B".to_string(),
-                "#F8A549".to_string(),
-                "#FFE1B4".to_string(),
-                "#191B24".to_string(),
-                "#CD303A".to_string(),
-                "#5B342B".to_string(),
-                "#AB6B37".to_string(),
-                "#E1A55E".to_string(),
+                "#000000".to_string(),
+                "#220000".to_string(),
+                "#440000".to_string(),
+                "#442200".to_string(),
+                "#880000".to_string(),
+                "#882200".to_string(),
+                "#AA0000".to_string(),
+                "#AA2200".to_string(),
+                "#AA4400".to_string(),
+                "#CC4400".to_string(),
+                "#CC8844".to_string(),
+                "#EE6600".to_string(),
+                "#EECC88".to_string(),
+                "#EEEEAA".to_string(),
+                "#EEEECC".to_string(),
             ],
         },
         PaletteEntry {
             slot: 2,
             colors: vec![
-                "#141C2C".to_string(),
-                "#E5B165".to_string(),
-                "#7F4B30".to_string(),
-                "#FFD65E".to_string(),
-                "#FFE1B4".to_string(),
-                "#6C2231".to_string(),
-                "#CD303A".to_string(),
+                "#000000".to_string(),
+                "#000022".to_string(),
+                "#002222".to_string(),
+                "#220000".to_string(),
+                "#222222".to_string(),
+                "#228800".to_string(),
+                "#440000".to_string(),
+                "#884422".to_string(),
+                "#AA0022".to_string(),
+                "#CC0000".to_string(),
+                "#CC6622".to_string(),
+                "#EE0000".to_string(),
+                "#EE2222".to_string(),
+                "#EECC00".to_string(),
+                "#EEEEAA".to_string(),
             ],
         },
         PaletteEntry {
             slot: 3,
             colors: vec![
-                "#141C2C".to_string(),
-                "#3D292B".to_string(),
-                "#E1A157".to_string(),
-                "#9A5B36".to_string(),
-                "#FFE1B4".to_string(),
-                "#CD303A".to_string(),
-                "#446F3B".to_string(),
+                "#000000".to_string(),
+                "#004422".to_string(),
+                "#442200".to_string(),
+                "#44AA00".to_string(),
+                "#662200".to_string(),
+                "#880000".to_string(),
+                "#880022".to_string(),
+                "#884422".to_string(),
+                "#AA0000".to_string(),
+                "#AA4422".to_string(),
+                "#AA6622".to_string(),
+                "#CC0000".to_string(),
+                "#CC6622".to_string(),
+                "#EE0000".to_string(),
+                "#EEAA88".to_string(),
             ],
         },
     ];
@@ -15640,7 +15498,7 @@ fn reference_platformer_scene() -> Scene {
             entity_id: "player".to_string(),
             display_name: Some("Player".to_string()),
             prefab: Some("reference_player.json".to_string()),
-            transform: Transform { x: 32, y: 184 },
+            transform: Transform { x: 32, y: 176 },
             components: Components::default(),
         },
         Entity {
@@ -15654,7 +15512,7 @@ fn reference_platformer_scene() -> Scene {
             entity_id: "goal".to_string(),
             display_name: Some("Goal Marker".to_string()),
             prefab: Some("reference_goal.json".to_string()),
-            transform: Transform { x: 144, y: 184 },
+            transform: Transform { x: 144, y: 176 },
             components: Components::default(),
         },
         Entity {
@@ -18942,35 +18800,36 @@ void tick_player(void) {\n\
             );
             rgba.into_raw()
         };
-        let fox = check(reference_player_png(), 80, 16, 1, true);
-        check(reference_goal_png(), 16, 16, 2, true);
-        check(reference_passage_png(), 16, 32, 3, true);
+        let fox = check(reference_player_png(), 160, 32, 1, true);
+        check(reference_goal_png(), 16, 32, 2, true);
+        check(reference_passage_png(), 24, 32, 3, true);
         check(reference_tileset_ppm(), 320, 224, 0, false);
 
         let count_color = |frame: usize, color: [u8; 3]| {
-            (0..16)
-                .flat_map(|y| (0..16).map(move |x| (y, x)))
+            (0..32)
+                .flat_map(|y| (0..32).map(move |x| (y, x)))
                 .filter(|&(y, x)| {
-                    let offset = (y * 80 + frame * 16 + x) * 4;
+                    let offset = (y * 160 + frame * 32 + x) * 4;
                     fox[offset..offset + 3] == color && fox[offset + 3] == 255
                 })
                 .count()
         };
         for frame in 0..5 {
             assert!(
-                count_color(frame, [228, 109, 43]) >= 15,
+                count_color(frame, [238, 102, 0]) >= 15,
                 "frame {frame}: fox fur"
             );
+            assert!(count_color(frame, [170, 0, 0]) >= 4, "frame {frame}: scarf");
             assert!(
-                count_color(frame, [205, 48, 58]) >= 4,
-                "frame {frame}: scarf"
-            );
-            assert!(
-                count_color(frame, [171, 107, 55]) >= 3,
+                count_color(frame, [204, 136, 68]) >= 3,
                 "frame {frame}: sword"
             );
         }
-        assert_ne!(&fox[0..16 * 4], &fox[4 * 16 * 4..5 * 16 * 4]);
+        assert!((0..32).any(|y| {
+            let first = y * 160 * 4;
+            let last = (y * 160 + 4 * 32) * 4;
+            fox[first..first + 32 * 4] != fox[last..last + 32 * 4]
+        }));
     }
 
     #[test]

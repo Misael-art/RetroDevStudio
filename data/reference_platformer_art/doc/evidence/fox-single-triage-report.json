@@ -1,0 +1,70 @@
+{
+  "schema_version": "source_triage_report.v1",
+  "tool": "forge_art.source_route_triage",
+  "tool_version": "1.1.0",
+  "source": {
+    "path": "data/reference_platformer_art/fox-single-source.png",
+    "sha256": "b7a3100f939a6a3f49d3a5e45b88bc53c0809983cc6ec3d24cc77680f803714f"
+  },
+  "source_class": "high_res_full_body_character",
+  "intended_role": "translation_source",
+  "reviewer": "agent_visual_triage",
+  "identity_binding": {
+    "identity_authority_path": "data/reference_platformer_art/fox-concept.png",
+    "identity_authority_sha256": "2b63ed0f0153add769a0cb1177000c04844513177052ab25539975f05a58eef6",
+    "identity_authority_observed_sha256": "2b63ed0f0153add769a0cb1177000c04844513177052ab25539975f05a58eef6",
+    "visual_source_of_truth_contract": "data/reference_platformer_art/visual-source-of-truth.json",
+    "derivation": "Gerado a partir do conceito de cinco poses para obter uma pose isolada com personagem inteiro, cachecol e espada visíveis; ainda não aprovado como arte nativa."
+  },
+  "human_review_binding": null,
+  "matte_policy": "existing_alpha",
+  "observations": {
+    "baked_checkerboard": false,
+    "ground_shadow": "absent",
+    "dust_or_particles": "absent",
+    "smoke_or_clouds": "absent",
+    "floor_line": "absent",
+    "text_or_annotation": "absent",
+    "multiple_overlapping_poses": false,
+    "cropped_extremities": false,
+    "occluded_identity_features": false,
+    "motion_blur": false,
+    "background_color_collision": false,
+    "notes": "Uma pose inteira com alfa real. O espaço transparente é amplo e será reduzido por crop derivado; verificar halos de alfa parcial no gate visual."
+  },
+  "automatic_measurements": {
+    "width": 1374,
+    "height": 1145,
+    "source_mode": "RGBA",
+    "has_alpha_channel": true,
+    "alpha_extrema": [
+      0,
+      255
+    ],
+    "visible_pixels": 596558,
+    "partial_alpha_pixels": 593470,
+    "opaque_pixels": 3088,
+    "alpha_bbox": [
+      72,
+      9,
+      1336,
+      1105
+    ]
+  },
+  "border_signal": {
+    "sampled_pixels": 5034,
+    "quantized_border_buckets": 1,
+    "dominant_bucket_ratio": 1.0,
+    "interpretation": "diagnostic_only_not_a_visual_contaminant_detector"
+  },
+  "status": "accepted_translation_source",
+  "route_exploration_allowed": true,
+  "blocking": false,
+  "blockers": [],
+  "warnings": [
+    "partial_alpha_requires_premultiplied_filtering_and_halo_review"
+  ],
+  "safe_reference_roles": [],
+  "next_action": "run route-shootout; outputs remain mechanical guides",
+  "claim_ceiling": "source_triage_only"
+}

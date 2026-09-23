@@ -1195,11 +1195,16 @@ async function deleteSession(sessionId) {
 }
 
 async function executeScript(sessionId, script, args = []) {
-  const response = await webdriverRequest("POST", `/session/${sessionId}/execute/sync`, {
-    script,
-    args,
-  });
-  return response.value;
+  try {
+    const response = await webdriverRequest("POST", `/session/${sessionId}/execute/sync`, {
+      script,
+      args,
+    });
+    return response.value;
+  } catch (error) {
+    const snippet = script.replace(/\s+/g, " ").slice(0, 180);
+    throw new Error(`${error instanceof Error ? error.message : String(error)} [script: ${snippet}]`);
+  }
 }
 
 async function executeAsyncScript(sessionId, script, args = []) {
@@ -4623,10 +4628,13 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       const pixel = offset / 4;
       const x = pixel % width;
       const y = Math.floor(pixel / width);
-      if (x >= 48 && x < 68 && y >= 160 && y < 205 && r > 90 && r > g * 1.35 && r > b * 1.2) {
+      // The gate candidate uses a bright #CC0000 bar in its own 24x32 bounds.
+      // Fox scarf (#AA0000) and fur must not count as a closed barrier.
+      if (x >= 50 && x < 74 && y >= 168 && y < 200 && r >= 190 && g <= 20 && b <= 20) {
         barrierPixels += 1;
       }
-      if (x < 100 && y >= 170 && y < 205 && r < 100 && g > 90 && b > 120 && g > r * 1.5) {
+      // Follow the fox's own #EE6600 coat, not arbitrary blue background pixels.
+      if (x < 100 && y >= 140 && y < 210 && r >= 225 && g >= 80 && g <= 140 && b <= 40) {
         playerPoints.push({ x, y });
       }
     }
@@ -4842,7 +4850,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     const generatedMainPath = path.join(createdState.activeProjectDir, "build", "megadrive", "src", "main.c");
     const generatedMain = await readFile(generatedMainPath, "utf8");
     const soundCallOffset = generatedMain.indexOf("XGM_startPlayPCM(SFX_GOAL_SOUND");
-    const goalSensorOffset = generatedMain.indexOf("if (retro_aabb_intersects(spr_player_x + 0, spr_player_y + 0, 14, 16, 144, 184, 16, 16))");
+    const goalSensorOffset = generatedMain.indexOf("if (retro_aabb_intersects(spr_player_x + 0, spr_player_y + 0, 14, 32, 144, 184, 16, 16))");
     const reachedGuardOffset = generatedMain.indexOf("if ((logic_var_goal_reached == 0))", goalSensorOffset);
     const reachedWriteOffset = generatedMain.indexOf("logic_var_goal_reached = 1;", reachedGuardOffset);
     if (goalSensorOffset < 0 || reachedGuardOffset < goalSensorOffset || soundCallOffset < reachedGuardOffset || reachedWriteOffset < soundCallOffset) {
@@ -5793,9 +5801,11 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   report.pitVisual = { ...pitVisual, reopenedFramebuffer: reopenedObserved?.framebuffer_sha256 ?? null };
   await invokeCore("emulator_send_input", { joypad: { ...neutralGoalInput, right: true }, sessionEpoch: twoEpoch.value });
   const timeline = [];
+  // Native 32 px fox stands at y=176 on the y=208 floor; the erased 8 px
+  // tile exposes a real dip to y=184 before the scripted jump pulse.
   for (let frame = 1; frame <= 130; frame += 1) {
     // Controlled measurement: pulse jump (RetroPad Y = MD A) when the player is in the hole.
-    const inHole = timeline.length > 0 && timeline[timeline.length - 1].y >= 196;
+    const inHole = timeline.length > 0 && timeline[timeline.length - 1].y >= 184;
     await invokeCore("emulator_send_input", { joypad: { ...neutralGoalInput, right: true, y: inHole }, sessionEpoch: twoEpoch.value });
     await invokeCore("emulator_run_frames", { frames: 1 });
     timeline.push({
@@ -5821,8 +5831,8 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       maxXWhileSecondClosed > 106 || heldAtSecond.length < 5 || crossTalk.length > 0 || timeline.at(-1).x <= 136) {
     fail(`Duas passagens nao se comportaram de forma independente: ${JSON.stringify({ mainOpened, secondOpened, maxXWhileSecondClosed, heldAtSecond: heldAtSecond.length, crossTalk: crossTalk.length, last: timeline.at(-1) })}`);
   }
-  const pitDip = timeline.filter((t) => t.x >= 72 && t.x < 88 && t.y >= 196);
-  const floorHeld = timeline.filter((t) => t.x < 72).every((t) => t.y === 192);
+  const pitDip = timeline.filter((t) => t.x >= 72 && t.x < 88 && t.y >= 184);
+  const floorHeld = timeline.filter((t) => t.x < 72).every((t) => t.y === 176);
   if (pitDip.length === 0 || !floorHeld) {
     fail(`Colisao apagada pela UI nao virou fosso fisico na ROM: ${JSON.stringify({ pitDip, floorHeld })}`);
   }
@@ -5885,7 +5895,8 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   };
   const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
 
-  // Resources must really load: fox fur, red scarf/gate, wooden sword and grass
+  // Resources must really load: fox fur, red scarf/gate, wooden sword, grass
+  // and the Forge-converted backdrop are checked as rendered viewport pixels.
   // are checked in the rendered viewport, not just in the asset manifest.
   const assertResourcesVisible = async (label) => {
     const summary = await waitFor(async () => {
@@ -5897,16 +5908,18 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
       if (!(canvas instanceof HTMLCanvasElement)) return null;
       const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
       const near = (i, r, g, b) => Math.abs(data[i] - r) < 16 && Math.abs(data[i + 1] - g) < 16 && Math.abs(data[i + 2] - b) < 16;
-      let foxFur = 0, redDetails = 0, woodenSword = 0, grass = 0;
+      let foxFur = 0, redDetails = 0, woodenSword = 0, grass = 0, sky = 0, mountains = 0;
       for (let i = 0; i < data.length; i += 4) {
-        if (near(i, 228, 109, 43)) foxFur += 1;
-        if (near(i, 205, 48, 58)) redDetails += 1;
-        if (near(i, 171, 107, 55)) woodenSword += 1;
+        if (near(i, 238, 102, 0)) foxFur += 1;
+        if (near(i, 170, 0, 0) || near(i, 205, 48, 58)) redDetails += 1;
+        if (near(i, 204, 136, 68)) woodenSword += 1;
         if (near(i, 183, 221, 93) || near(i, 90, 171, 70)) grass += 1;
+        if (near(i, 34, 170, 238)) sky += 1;
+        if (near(i, 0, 102, 170) || near(i, 0, 68, 102)) mountains += 1;
       }
-      return { foxFur, redDetails, woodenSword, grass, width: canvas.width, height: canvas.height };
+      return { foxFur, redDetails, woodenSword, grass, sky, mountains, width: canvas.width, height: canvas.height };
     `);
-    if (!colors || colors.foxFur < 20 || colors.redDetails < 20 || colors.woodenSword < 3 || colors.grass < 200) {
+    if (!colors || colors.foxFur < 20 || colors.redDetails < 20 || colors.woodenSword < 3 || colors.grass < 200 || colors.sky < 1000 || colors.mountains < 200) {
       fail(`${label}: raposa/itens/cenario nao aparecem com seus pixels reais no viewport: ${JSON.stringify(colors)}`);
     }
     return { summary, colors };
@@ -5916,7 +5929,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
       const value = await js(`const img = document.querySelector('[data-testid="inspector-asset-preview"]'); return img instanceof HTMLImageElement && img.complete ? { w: img.naturalWidth, h: img.naturalHeight, src: img.src.slice(0, 22) } : null;`);
       return value && value.w > 0 ? value : false;
     }, 15000, `${label}: preview do Inspector nao carregou.`, 200);
-    if (preview.w !== 80 || preview.h !== 16) fail(`${label}: preview do personagem com tamanho inesperado: ${JSON.stringify(preview)}`);
+    if (preview.w !== 160 || preview.h !== 32) fail(`${label}: preview do personagem com tamanho inesperado: ${JSON.stringify(preview)}`);
     return preview;
   };
   // Controls must be on screen and not covered (native hit test at their center).
@@ -6157,6 +6170,9 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   await focusGameCanvasNatively(sessionId);
   const timeline = [];
   const acks = [];
+  // The pit is one 8 px tile below the floor at y=208. Its observation
+  // threshold follows the actual visual/body height of this template frame.
+  const fullHoleY = 208 - reopenedPreview.h + 8;
   await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "andar para a direita");
   acks.push(await waitAck("right", true, "segurar direita"));
   let jumps = 0;
@@ -6165,7 +6181,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   let current = await observe();
   while (current.goal !== 1 && Date.now() < deadline) {
     timeline.push(current);
-    if (current.y >= 196 && Date.now() - lastJumpAt > 1500) {
+    if (current.y >= fullHoleY && Date.now() - lastJumpAt > 1500) {
       await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "pular para sair do buraco");
       acks.push(await waitAck("y", true, "pulo"));
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -6193,7 +6209,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
 
   const mainOpenedAt = timeline.find((t) => t.mainOpen === 1);
   const secondOpenedAt = timeline.find((t) => t.secondOpen === 1);
-  const hole = timeline.filter((t) => t.y >= 196);
+  const hole = timeline.filter((t) => t.y >= fullHoleY);
   const crossedSecondClosed = timeline.filter((t) => t.secondOpen === 0 && t.x > 106);
   if (victory.goal !== 1) fail(`Vitoria nao alcancada pelo teclado: ${JSON.stringify(victory)}`);
   if (!mainOpenedAt || mainOpenedAt.score < 12 || !secondOpenedAt || secondOpenedAt.score < 60 || crossedSecondClosed.length) {
@@ -6205,7 +6221,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   const foxFurPixels = (() => {
     const rgba = frameAfter.rgba;
     let count = 0;
-    for (let i = 0; i < rgba.length; i += 4) if (Math.abs(rgba[i] - 228) < 24 && Math.abs(rgba[i + 1] - 109) < 24 && Math.abs(rgba[i + 2] - 43) < 24) count += 1;
+    for (let i = 0; i < rgba.length; i += 4) if (Math.abs(rgba[i] - 238) < 24 && Math.abs(rgba[i + 1] - 102) < 24 && rgba[i + 2] < 24) count += 1;
     return count;
   })();
   if (foxFurPixels < 20) fail(`Raposa nao aparece no framebuffer apos a vitoria: ${foxFurPixels}`);

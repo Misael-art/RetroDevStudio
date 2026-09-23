@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0.0",
+  "source_path": "data/reference_platformer_art/fox-single-source.png",
+  "source_class": "high_res_full_body_character",
+  "intended_role": "translation_source",
+  "matte_policy": "existing_alpha",
+  "reviewer": "agent_visual_triage",
+  "identity_authority_path": "data/reference_platformer_art/fox-concept.png",
+  "identity_authority_sha256": "2b63ed0f0153add769a0cb1177000c04844513177052ab25539975f05a58eef6",
+  "visual_source_of_truth_contract": "data/reference_platformer_art/visual-source-of-truth.json",
+  "derivation": "Gerado a partir do conceito de cinco poses para obter uma pose isolada com personagem inteiro, cachecol e espada visíveis; ainda não aprovado como arte nativa.",
+  "observations": {
+    "baked_checkerboard": false,
+    "ground_shadow": "absent",
+    "dust_or_particles": "absent",
+    "smoke_or_clouds": "absent",
+    "floor_line": "absent",
+    "text_or_annotation": "absent",
+    "multiple_overlapping_poses": false,
+    "cropped_extremities": false,
+    "occluded_identity_features": false,
+    "motion_blur": false,
+    "background_color_collision": false,
+    "notes": "Uma pose inteira com alfa real. O espaço transparente é amplo e será reduzido por crop derivado; verificar halos de alfa parcial no gate visual."
+  }
+}

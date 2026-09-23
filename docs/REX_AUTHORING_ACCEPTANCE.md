@@ -37,3 +37,11 @@ Limites: rodar a Game View sob WebDriver neste host dá ~3–7 FPS (o jogo é jo
 é somente leitura e marca regras com ramo "senão" como avançadas; reordenação de frames de animação não é suportada pelo emissor
 (apenas FPS); a paleta guiada fica no painel lateral; o buraco de 2 linhas é uma armadilha com o salto atual (~15 px).
 Tudo segue Experimental, sem merge.
+
+## Revisão de arte no template (branch `codex/reference-platformer-fox-art`)
+
+A matriz acima é histórica do commit `a6c02af` e de seus placeholders; não representa a arte atualmente testada. A revisão de 2026-09-23 integra, como **candidatos técnicos**, cinco quadros 32×32 da raposinha, portão 24×32, bandeira 16×32 e paisagem Forge 320×224. O primeiro plano de grama/terra/tijolo ainda é provisório. Proveniência, jobs imutáveis, hashes e limitações: [`data/reference_platformer_art/README.md`](../data/reference_platformer_art/README.md).
+
+O build testado tem SHA-256 `f87636051d8866464bf34dcb241f39fde5ea67124f9efc0b3d7c5db2ce9619b9`. O E2E de autoria guiada passou 10/10, agora com preview 160×32 e pixels reais de pelagem, cachecol, espada, grama, céu e montanhas no canvas antes e depois de reiniciar. O E2E de referência passou 16/16, incluindo input nativo, salto, pausas e passagem persistida. Relatórios e capturas versionados em [`data/reference_platformer_art/doc/evidence`](../data/reference_platformer_art/doc/evidence). A ROM final jogada nessa execução tem SHA-256 `d300878b3f41edf870c4506386ad5f7fb87c5d44e610e6258b3c4c0936eeb6ec`.
+
+Isso comprova a integração funcional da arte na fase de referência, não uma aprovação estética final ou generalização de assets. Sem merge.

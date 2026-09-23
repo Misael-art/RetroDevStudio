@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0.0",
+  "project_id": "retrodev_reference_fox",
+  "active_epoch": "fox_visual_20260923",
+  "state": "active_production",
+  "production_sources": [
+    {
+      "asset_id": "fox_identity",
+      "path": "fox-concept.png",
+      "sha256": "2b63ed0f0153add769a0cb1177000c04844513177052ab25539975f05a58eef6",
+      "role": "identity_authority",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "fox_stand_trimmed",
+      "path": "fox-single-trimmed.png",
+      "sha256": "f5b10cde8808b0defb79098b34abe04d95e552eadaacdbeade3a77df4d74d8fd",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "fox_frame_0_source",
+      "path": "fox-frame-0-source.png",
+      "sha256": "cd55e9b2eae9e5bf1cd1c72fbd12d2a99e15b07f2aef7c1586d04f45f384f1e3",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "fox_frame_1_source",
+      "path": "fox-frame-1-source.png",
+      "sha256": "e71c11f1adedbd27c28f4bcd9687e50fd79fadde5799427650622eeffb7ea1bd",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "fox_frame_2_source",
+      "path": "fox-frame-2-source.png",
+      "sha256": "54f603f10f68ed7664904202291a09ac9d2d62f1f8d2d00149ad4445bcd75607",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "fox_frame_3_source",
+      "path": "fox-frame-3-source.png",
+      "sha256": "6415c6365e79b591c96aba9caf398701c66fa4dcb4415d058d944ef90958aa67",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "fox_frame_4_source",
+      "path": "fox-frame-4-source.png",
+      "sha256": "68e14b1c7bc56bcae5f355c484185b299967f47f522d1ed44e3d760e21931ded",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "fox_five_frame_source",
+      "path": "fox-five-frame-source.png",
+      "sha256": "611f67473478ada64ab7f243c18b0150e347ddb0f68d72511ace30e256506f06",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "gate_source",
+      "path": "gate-source.png",
+      "sha256": "ca084abc4f6c6b8dd9726b1862e969bed7e24394d6b682f6fbba908c0894292f",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "goal_flag_source",
+      "path": "goal-flag-source.png",
+      "sha256": "461570b973b0a5a46dd5ef6cc1d510e764593bb22771a9da6e3d3538c4798d95",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "stage_backdrop_source",
+      "path": "stage-backdrop-source.png",
+      "sha256": "09af122a587acf5efb96ed3624ff7fa92a82ac846d777553bc7e4e690d9eb007",
+      "role": "translation_source",
+      "status": "eligible"
+    },
+    {
+      "asset_id": "stage_scene_concept",
+      "path": "stage-scene-concept.png",
+      "sha256": "217a9fbc0b5832feedd6d04c3005b987ebfea7e84ded6c580c739f1114723c48",
+      "role": "identity_authority",
+      "status": "eligible"
+    }
+  ],
+  "reference_only_sources": [],
+  "forbidden_source_roots": ["out", "doc/evidence"],
+  "forbidden_source_roles": ["technical_temporal_probe", "procedural_code_probe", "historical_superseded", "runtime_evidence_only"],
+  "allowed_operations": ["read_only_audit", "pixel_validate", "route_verify", "source_audit", "technical_conversion", "mechanical_route_shootout"]
+}

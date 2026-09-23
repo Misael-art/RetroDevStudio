@@ -1,0 +1,66 @@
+{
+  "schema_version": "source_triage_report.v1",
+  "tool": "forge_art.source_route_triage",
+  "tool_version": "1.1.0",
+  "source": {
+    "path": "data/reference_platformer_art/fox-concept.png",
+    "sha256": "2b63ed0f0153add769a0cb1177000c04844513177052ab25539975f05a58eef6"
+  },
+  "source_class": "high_res_full_body_character",
+  "intended_role": "identity_authority",
+  "reviewer": "agent_visual_triage",
+  "identity_binding": null,
+  "human_review_binding": null,
+  "matte_policy": "existing_alpha",
+  "observations": {
+    "baked_checkerboard": false,
+    "ground_shadow": "absent",
+    "dust_or_particles": "absent",
+    "smoke_or_clouds": "absent",
+    "floor_line": "absent",
+    "text_or_annotation": "absent",
+    "multiple_overlapping_poses": false,
+    "cropped_extremities": false,
+    "occluded_identity_features": false,
+    "motion_blur": false,
+    "background_color_collision": false,
+    "notes": "Prancha de cinco poses separadas, transparência alfa real. Fonte de identidade e gesto, não sprite nativo nem strip pronto. Recortar e avaliar uma pose por vez."
+  },
+  "automatic_measurements": {
+    "width": 2172,
+    "height": 724,
+    "source_mode": "RGBA",
+    "has_alpha_channel": true,
+    "alpha_extrema": [
+      0,
+      255
+    ],
+    "visible_pixels": 461061,
+    "partial_alpha_pixels": 460144,
+    "opaque_pixels": 917,
+    "alpha_bbox": [
+      32,
+      15,
+      2156,
+      708
+    ]
+  },
+  "border_signal": {
+    "sampled_pixels": 5788,
+    "quantized_border_buckets": 1,
+    "dominant_bucket_ratio": 1.0,
+    "interpretation": "diagnostic_only_not_a_visual_contaminant_detector"
+  },
+  "status": "accepted_identity_reference_only",
+  "route_exploration_allowed": false,
+  "blocking": false,
+  "blockers": [],
+  "warnings": [
+    "partial_alpha_requires_premultiplied_filtering_and_halo_review"
+  ],
+  "safe_reference_roles": [
+    "identity_authority"
+  ],
+  "next_action": "retain this file only in its safe reference role and obtain a clean single-pose source without shadow, dust, smoke, floor, checkerboard, labels or occlusion",
+  "claim_ceiling": "source_triage_only"
+}
