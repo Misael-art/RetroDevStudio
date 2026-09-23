@@ -5885,8 +5885,8 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   };
   const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
 
-  // Resources must really load: viewport counts, canvas pixels of the real sprite colors,
-  // and the Inspector preview image decoded to its real size.
+  // Resources must really load: fox fur, red scarf/gate, wooden sword and grass
+  // are checked in the rendered viewport, not just in the asset manifest.
   const assertResourcesVisible = async (label) => {
     const summary = await waitFor(async () => {
       const value = await js(`const el = document.querySelector('[data-testid="viewport-asset-health-summary"]'); return el ? { ...el.dataset } : null;`);
@@ -5897,16 +5897,17 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
       if (!(canvas instanceof HTMLCanvasElement)) return null;
       const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
       const near = (i, r, g, b) => Math.abs(data[i] - r) < 16 && Math.abs(data[i + 1] - g) < 16 && Math.abs(data[i + 2] - b) < 16;
-      let player = 0, blocker = 0, grass = 0;
+      let foxFur = 0, redDetails = 0, woodenSword = 0, grass = 0;
       for (let i = 0; i < data.length; i += 4) {
-        if (near(i, 42, 180, 232)) player += 1;
-        if (near(i, 184, 52, 56)) blocker += 1;
-        if (near(i, 96, 196, 88) || near(i, 52, 112, 78)) grass += 1;
+        if (near(i, 228, 109, 43)) foxFur += 1;
+        if (near(i, 205, 48, 58)) redDetails += 1;
+        if (near(i, 171, 107, 55)) woodenSword += 1;
+        if (near(i, 183, 221, 93) || near(i, 90, 171, 70)) grass += 1;
       }
-      return { player, blocker, grass, width: canvas.width, height: canvas.height };
+      return { foxFur, redDetails, woodenSword, grass, width: canvas.width, height: canvas.height };
     `);
-    if (!colors || colors.player < 20 || colors.blocker < 20 || colors.grass < 200) {
-      fail(`${label}: personagem/bloqueador/cenario nao aparecem com seus pixels reais no viewport: ${JSON.stringify(colors)}`);
+    if (!colors || colors.foxFur < 20 || colors.redDetails < 20 || colors.woodenSword < 3 || colors.grass < 200) {
+      fail(`${label}: raposa/itens/cenario nao aparecem com seus pixels reais no viewport: ${JSON.stringify(colors)}`);
     }
     return { summary, colors };
   };

@@ -14960,29 +14960,101 @@ fn reference_ppm(width: u32, height: u32, mut pixel: impl FnMut(u32, u32) -> [u8
 }
 
 fn reference_player_ppm() -> Vec<u8> {
+    // Five 16x16 poses share one silhouette, designed from the original fox
+    // concept art in data/reference_platformer_art. PPM pixel 0 is the SGDK
+    // transparency key; the outline, ears, scarf and toy sword stay legible at
+    // the native sprite size rather than relying on a high-resolution mockup.
+    const FOX: [&str; 16] = [
+        "....K....K......",
+        "...KOK..KOK.....",
+        "...KCOOKCOK.....",
+        "...KOOOoOOK.....",
+        "..KOOOoOOOOK....",
+        "..KOOEOOEOOK....",
+        "..KOOOCCCOOK....",
+        "...KOOCCOOK.....",
+        ".CC.KOORROK.....",
+        "CCOCKRRRRKWW....",
+        "CCOCKRROOKWWW...",
+        ".CCKKOOOOKWWw...",
+        "..KKKOOOOKWW....",
+        "....KOOOOK......",
+        "....KBBBK.......",
+        "....KBBBK.......",
+    ];
     reference_ppm(80, 16, |x, y| {
         let frame = x / 16;
         let local_x = x % 16;
-        let body = (3..13).contains(&local_x) && (2..15).contains(&y)
-            || (5..11).contains(&local_x) && (0..4).contains(&y);
-        if !body {
-            [12, 20, 32]
-        } else if frame == 4 {
-            [255, 208, 72]
-        } else if frame % 2 == 0 {
-            [42, 180, 232]
+        let source_y = if frame == 4 { y + 1 } else { y };
+        let mut glyph = if source_y < 16 {
+            FOX[source_y as usize].as_bytes()[local_x as usize] as char
         } else {
-            [36, 132, 214]
+            '.'
+        };
+        if frame == 1 && y == 5 && (local_x == 5 || local_x == 8) {
+            glyph = 'K'; // blink
+        }
+        if frame == 2 && y >= 14 {
+            glyph = if (3..=5).contains(&local_x) || (8..=10).contains(&local_x) {
+                'B'
+            } else {
+                '.'
+            };
+        }
+        if frame == 3 && y >= 14 {
+            glyph = if (5..=7).contains(&local_x) || (10..=12).contains(&local_x) {
+                'B'
+            } else {
+                '.'
+            };
+        }
+        if frame == 4 {
+            if (11..=14).contains(&local_x) && (3..=11).contains(&y) {
+                glyph = '.';
+            }
+            if local_x == 13 && (2..=8).contains(&y) {
+                glyph = 'W'; // raised wooden sword
+            }
+            if local_x == 13 && y == 2 {
+                glyph = 'w';
+            }
+            if (11..=14).contains(&local_x) && y == 9 {
+                glyph = 'K'; // crossguard
+            }
+        }
+        match glyph {
+            'K' => [52, 37, 43],    // warm outline
+            'O' => [228, 109, 43],  // fox coat
+            'o' => [248, 165, 73],  // fur highlight
+            'C' => [255, 225, 180], // muzzle and tail tip
+            'E' => [25, 27, 36],    // eyes
+            'R' => [205, 48, 58],   // scarf
+            'B' => [91, 52, 43],    // boots
+            'W' => [171, 107, 55],  // toy sword
+            'w' => [225, 165, 94],  // sword edge
+            _ => [12, 20, 32],      // transparent key
         }
     })
 }
 
 fn reference_goal_ppm() -> Vec<u8> {
     reference_ppm(16, 16, |x, y| {
-        if (x == 7 || x == 8) && y > 2 {
-            [240, 240, 240]
-        } else if (4..12).contains(&x) && (2..8).contains(&y) {
-            [248, 190, 48]
+        if (2..=3).contains(&x) && (2..=15).contains(&y) {
+            if y % 4 == 0 {
+                [229, 177, 101]
+            } else {
+                [127, 75, 48]
+            }
+        } else if (x as i32 - 3).abs() + (y as i32 - 2).abs() <= 2 {
+            [255, 214, 94] // gold star finial
+        } else if (4..=13).contains(&x) && (4..=10).contains(&y) && x <= 17 - y {
+            if (7..=9).contains(&x) && (6..=8).contains(&y) {
+                [255, 225, 180] // cream fox insignia
+            } else if y == 4 || x == 4 {
+                [108, 34, 49]
+            } else {
+                [205, 48, 58] // scarf-red banner
+            }
         } else {
             [20, 28, 44]
         }
@@ -14991,12 +15063,29 @@ fn reference_goal_ppm() -> Vec<u8> {
 
 fn reference_passage_ppm() -> Vec<u8> {
     reference_ppm(16, 32, |x, y| {
-        if x == 0 || x == 15 || y == 0 || y == 31 {
-            [236, 226, 208]
-        } else if (y / 4 + x / 4) % 2 == 0 {
-            [184, 52, 56]
+        let post = (1..=3).contains(&x) || (12..=14).contains(&x);
+        let beam = (2..=5).contains(&y) && (1..=14).contains(&x);
+        let bars = (8..=28).contains(&y)
+            && (4..=11).contains(&x)
+            && ((x + y / 3).is_multiple_of(4) || (x + 16 - y / 3).is_multiple_of(5));
+        if (post || beam || bars) && ((x == 1 || x == 14) || y == 2 || y == 31) {
+            [61, 41, 43] // carved silhouette
+        } else if post || beam || bars {
+            if (x + y / 4).is_multiple_of(3) {
+                [225, 161, 87]
+            } else {
+                [154, 91, 54]
+            }
+        } else if (5..=10).contains(&x) && (5..=8).contains(&y) {
+            if x == 6 || x == 9 {
+                [255, 225, 180]
+            } else {
+                [205, 48, 58]
+            }
+        } else if (y == 30 || y == 31) && (2..=13).contains(&x) {
+            [68, 111, 59] // moss at base
         } else {
-            [126, 34, 48]
+            [20, 28, 44]
         }
     })
 }
@@ -15006,39 +15095,47 @@ fn reference_passage_ppm() -> Vec<u8> {
 /// row 0 are a small strip of sample tiles (grass, brick, cloud, dirt) so the tile palette
 /// (which slices this same image) offers distinct materials.
 fn reference_tileset_ppm() -> Vec<u8> {
-    const SKY_A: [u8; 3] = [30, 56, 92];
-    const SKY_B: [u8; 3] = [24, 44, 72];
-    let grass = |x: u32, y: u32| {
-        if y % 8 < 2 {
-            [96, 196, 88]
-        } else if (x / 4 + y / 4).is_multiple_of(2) {
-            [52, 112, 78]
-        } else {
-            [40, 88, 64]
-        }
+    const SKY: [u8; 3] = [102, 185, 226];
+    const SKY_LIGHT: [u8; 3] = [136, 206, 234];
+    let grass = |x: u32, y: u32| match y % 8 {
+        0 => [183, 221, 93],
+        1 | 2 if (x % 8).is_multiple_of(3) => [183, 221, 93],
+        1..=3 => [90, 171, 70],
+        _ if (x + y).is_multiple_of(5) => [68, 120, 62],
+        _ => [90, 171, 70],
     };
     let brick = |x: u32, y: u32| {
         let offset = if (y / 4).is_multiple_of(2) { 0 } else { 4 };
         if y % 4 == 3 || (x + offset) % 8 == 7 {
-            [96, 40, 32]
+            [75, 56, 55]
+        } else if y.is_multiple_of(4) {
+            [186, 126, 82]
         } else {
-            [176, 84, 56]
+            [142, 88, 62]
         }
     };
     let cloud = |x: u32, y: u32| {
         let dx = x as i32 % 8 - 4;
         let dy = y as i32 % 8 - 4;
         if dx * dx + dy * dy <= 12 {
-            [236, 240, 248]
+            if dy > 1 {
+                [213, 234, 231]
+            } else {
+                [255, 244, 217]
+            }
         } else {
-            SKY_A
+            SKY
         }
     };
     let dirt = |x: u32, y: u32| {
-        if (x * 7 + y * 3).is_multiple_of(5) {
-            [92, 60, 36]
+        if y.is_multiple_of(8) {
+            [90, 171, 70]
+        } else if (x * 7 + y * 3).is_multiple_of(5) {
+            [186, 126, 82]
+        } else if (x + y).is_multiple_of(3) {
+            [75, 56, 55]
         } else {
-            [128, 86, 52]
+            [142, 88, 62]
         }
     };
     reference_ppm(320, 224, move |x, y| {
@@ -15048,10 +15145,13 @@ fn reference_tileset_ppm() -> Vec<u8> {
             (2, 0) => brick(x, y),
             (3, 0) => cloud(x, y),
             (4, 0) => dirt(x, y),
-            (_, 26) | (_, 27) => grass(x, y),
+            (_, 26) => grass(x, y),
+            (_, 27) => dirt(x, y),
             (20..=27, 21) => grass(x, y),
-            _ if (tile_x + tile_y) % 2 == 0 => SKY_A,
-            _ => SKY_B,
+            _ if y < 70 && (x / 43 + y / 19).is_multiple_of(9) => cloud(x, y),
+            _ if (17..=20).contains(&tile_y) && (x / 17 + y / 9).is_multiple_of(7) => [68, 120, 62],
+            _ if (tile_x + tile_y) % 2 == 0 => SKY_LIGHT,
+            _ => SKY,
         }
     })
 }
@@ -15399,37 +15499,55 @@ fn reference_platformer_scene() -> Scene {
         PaletteEntry {
             slot: 0,
             colors: vec![
-                "#0C1420".to_string(),
-                "#2AB4E8".to_string(),
-                "#F8BE30".to_string(),
-                "#34B85A".to_string(),
-                "#F2F4F8".to_string(),
+                "#66B9E2".to_string(),
+                "#88CEEA".to_string(),
+                "#B7DD5D".to_string(),
+                "#5AAB46".to_string(),
+                "#44783E".to_string(),
+                "#4B3837".to_string(),
+                "#BA7E52".to_string(),
+                "#8E583E".to_string(),
+                "#D5EAE7".to_string(),
+                "#FFF4D9".to_string(),
             ],
         },
         PaletteEntry {
             slot: 1,
             colors: vec![
                 "#0C1420".to_string(),
-                "#2AB4E8".to_string(),
-                "#2484D6".to_string(),
-                "#FFD048".to_string(),
+                "#34252B".to_string(),
+                "#E46D2B".to_string(),
+                "#F8A549".to_string(),
+                "#FFE1B4".to_string(),
+                "#191B24".to_string(),
+                "#CD303A".to_string(),
+                "#5B342B".to_string(),
+                "#AB6B37".to_string(),
+                "#E1A55E".to_string(),
             ],
         },
         PaletteEntry {
             slot: 2,
             colors: vec![
                 "#141C2C".to_string(),
-                "#F0F0F0".to_string(),
-                "#F8BE30".to_string(),
+                "#E5B165".to_string(),
+                "#7F4B30".to_string(),
+                "#FFD65E".to_string(),
+                "#FFE1B4".to_string(),
+                "#6C2231".to_string(),
+                "#CD303A".to_string(),
             ],
         },
         PaletteEntry {
             slot: 3,
             colors: vec![
                 "#141C2C".to_string(),
-                "#F5E6D4".to_string(),
-                "#B83438".to_string(),
-                "#7E2230".to_string(),
+                "#3D292B".to_string(),
+                "#E1A157".to_string(),
+                "#9A5B36".to_string(),
+                "#FFE1B4".to_string(),
+                "#CD303A".to_string(),
+                "#446F3B".to_string(),
             ],
         },
     ];
@@ -18739,6 +18857,63 @@ void tick_player(void) {\n\
             .is_some());
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn reference_platformer_art_fits_native_sizes_and_md_palette_slots() {
+        let scene = reference_platformer_scene();
+        let check = |bytes: Vec<u8>, width: usize, height: usize, slot: u8| {
+            let header = format!("P6\n{width} {height}\n255\n");
+            let pixels = bytes
+                .strip_prefix(header.as_bytes())
+                .expect("PPM dimensions and format");
+            assert_eq!(pixels.len(), width * height * 3);
+            let colors = pixels
+                .chunks_exact(3)
+                .map(|pixel| format!("#{:02X}{:02X}{:02X}", pixel[0], pixel[1], pixel[2]))
+                .collect::<std::collections::HashSet<_>>();
+            let palette = &scene
+                .palettes
+                .iter()
+                .find(|entry| entry.slot == slot)
+                .expect("assigned scene palette")
+                .colors;
+            assert!(colors.len() <= 16, "slot {slot}: too many distinct colors");
+            assert!(
+                colors.iter().all(|color| palette.contains(color)),
+                "slot {slot}: image colors missing from scene palette: {colors:?}"
+            );
+            pixels.to_vec()
+        };
+        let fox = check(reference_player_ppm(), 80, 16, 1);
+        check(reference_goal_ppm(), 16, 16, 2);
+        check(reference_passage_ppm(), 16, 32, 3);
+        check(reference_tileset_ppm(), 320, 224, 0);
+
+        let count_color = |frame: usize, color: [u8; 3]| {
+            (0..16)
+                .flat_map(|y| (0..16).map(move |x| (y, x)))
+                .filter(|&(y, x)| {
+                    let offset = (y * 80 + frame * 16 + x) * 3;
+                    fox[offset..offset + 3] == color
+                })
+                .count()
+        };
+        for frame in 0..5 {
+            assert!(
+                count_color(frame, [228, 109, 43]) >= 15,
+                "frame {frame}: fox fur"
+            );
+            assert!(
+                count_color(frame, [205, 48, 58]) >= 4,
+                "frame {frame}: scarf"
+            );
+            assert!(
+                count_color(frame, [171, 107, 55]) >= 3,
+                "frame {frame}: sword"
+            );
+        }
+        assert_ne!(&fox[0..16 * 3], &fox[4 * 16 * 3..5 * 16 * 3]);
     }
 
     #[test]
