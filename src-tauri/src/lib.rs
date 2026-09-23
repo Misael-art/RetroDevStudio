@@ -9492,6 +9492,62 @@ pub extern "C" fn retro_run() {
         let _ = fs::remove_dir_all(base);
     }
 
+    /// Frame-to-frame changes of the idle player's screen region over `frames` frames.
+    fn reference_idle_player_changes(emulator: &mut EmulatorCore, rom: &Path, frames: usize) -> Vec<usize> {
+        emulator.load_rom(rom).expect("load ROM");
+        emulator.set_joypad(JoypadState::default()).expect("neutral");
+        for _ in 0..120 {
+            emulator.run_frame().expect("warmup");
+        }
+        let mut previous: Option<Vec<u8>> = None;
+        let mut changes = Vec::new();
+        for frame in 0..frames {
+            emulator.run_frame().expect("frame");
+            let (raw, size, format) = emulator.get_framebuffer().expect("framebuffer");
+            let rgba = framebuffer_to_rgba(&raw, size, format);
+            let width = rgba.width as usize;
+            let mut region = Vec::new();
+            for y in 192..208usize {
+                let start = (y * width + 32) * 4;
+                region.extend_from_slice(&rgba.rgba[start..start + 16 * 4]);
+            }
+            if previous.as_ref().is_some_and(|last| *last != region) {
+                changes.push(frame);
+            }
+            previous = Some(region);
+        }
+        changes
+    }
+
+    /// Animation duration edited in the player prefab reaches the ROM: the idle cycle
+    /// (frames 0,1) swaps every 15 frames at 4 fps and every 5 frames at 12 fps.
+    ///
+    /// `cargo test --manifest-path src-tauri/Cargo.toml reference_platformer_real_animation_timing_contract --lib -- --ignored --nocapture --test-threads=1`
+    #[ignore]
+    #[test]
+    fn reference_platformer_real_animation_timing_contract() {
+        let base = temp_dir("reference-platformer-animation");
+        let mut emulator = EmulatorCore::new(None);
+        let (original, _) = build_reference_variant(&base, "anim-original", |_| {});
+        let (edited, _) = build_reference_variant(&base, "anim-edited", |dir| {
+            let prefab = dir.join("prefabs").join("reference_player.json");
+            let mut json: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&prefab).unwrap()).unwrap();
+            let idle = &mut json["components"]["sprite"]["animations"]["idle"];
+            assert_eq!(idle["fps"], 4, "template idle esperado a 4 fps");
+            idle["fps"] = serde_json::json!(12);
+            fs::write(&prefab, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+        });
+        let before = reference_idle_player_changes(&mut emulator, &original, 60);
+        let after = reference_idle_player_changes(&mut emulator, &edited, 60);
+        println!("idle changes 4fps={before:?} 12fps={after:?}");
+        let gaps = |changes: &[usize]| changes.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>();
+        assert!(!before.is_empty() && gaps(&before).iter().all(|gap| *gap == 15), "4 fps troca a cada 15 frames");
+        assert!(after.len() >= 10 && gaps(&after).iter().all(|gap| *gap == 5), "12 fps troca a cada 5 frames");
+        emulator.stop().expect("stop");
+        let _ = fs::remove_dir_all(base);
+    }
+
     #[test]
     fn diff_asset_fingerprints_detects_added_changed_and_removed_assets() {
         let previous = HashMap::from([

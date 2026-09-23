@@ -908,6 +908,17 @@ export default function InspectorPanel() {
     scheduleAutoSave();
   }
 
+  function handleAnimationFpsChange(animationName: string, raw: string) {
+    if (!entity || !selectedEntityId || !entity.components.sprite) return;
+    const fps = Number.parseInt(raw, 10);
+    if (!Number.isInteger(fps) || fps < 1 || fps > 60) return;
+    updateEntity(
+      selectedEntityId,
+      buildEntityPatch(entity, ["components", "sprite", "animations", animationName, "fps"], fps)
+    );
+    scheduleAutoSave();
+  }
+
   /** Clones the source entity (prefab reference + overrides) under a fresh id, offset to the right. */
   function handleDuplicateEntity() {
     const scene = useEditorStore.getState().activeScene;
@@ -1222,6 +1233,30 @@ export default function InspectorPanel() {
                 Duplicar
               </button>
             </div>
+            {entity.components.sprite && Object.keys(entity.components.sprite.animations ?? {}).length > 0 ? (
+              <div
+                data-testid="inspector-animations"
+                className="flex flex-wrap items-center gap-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]"
+              >
+                <span className="text-[9px] uppercase tracking-[0.14em]">Animacoes (FPS)</span>
+                {Object.entries(entity.components.sprite.animations ?? {})
+                  .sort(([left], [right]) => left.localeCompare(right))
+                  .map(([name, animation]) => (
+                    <label key={name} className="flex items-center gap-1" title={`frames ${animation.frames.join(",")}`}>
+                      {name}
+                      <input
+                        data-testid={`inspector-anim-${name}-fps`}
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={animation.fps}
+                        onChange={(event) => handleAnimationFpsChange(name, event.target.value)}
+                        className="w-12 rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4]"
+                      />
+                    </label>
+                  ))}
+              </div>
+            ) : null}
             <div className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2">
               <RuntimeContractsPanel compact />
             </div>

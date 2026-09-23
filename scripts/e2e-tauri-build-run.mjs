@@ -2582,7 +2582,7 @@ async function sendNativeGameKey(sessionId, code, action, label) {
   return response;
 }
 
-async function clickCanvasPointNatively(sessionId, selector, normalizedX, normalizedY, label) {
+async function clickCanvasPointNatively(sessionId, selector, normalizedX, normalizedY, label, button = 0) {
   const point = await executeScript(
     sessionId,
     `
@@ -2606,8 +2606,8 @@ async function clickCanvasPointNatively(sessionId, selector, normalizedX, normal
       parameters: { pointerType: "mouse" },
       actions: [
         { type: "pointerMove", origin: "viewport", x: point.x, y: point.y },
-        { type: "pointerDown", button: 0 },
-        { type: "pointerUp", button: 0 },
+        { type: "pointerDown", button },
+        { type: "pointerUp", button },
       ],
     }],
   });
@@ -5594,6 +5594,62 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     "Inspector nao posicionou o segundo bloqueador em x=120.",
     200
   );
+  // Etapa 3 in the same authoring session: erase the floor collision of a 2x2 region
+  // (cols 10-11, rows 26-27), repaint its visual tiles as empty and set idle to 12 fps.
+  const pitCells = [[10, 26], [11, 26], [10, 27], [11, 27]];
+  const sceneStateForPit = await readAutomationState(sessionId);
+  const pitBounds = sceneStateForPit?.activeScene?.worldBounds;
+  const cellPoint = (col, row) => ({
+    x: ((col * 8 + 4) - Number(pitBounds?.minX ?? 0)) / Math.max(1, Number(pitBounds?.maxX ?? 320) - Number(pitBounds?.minX ?? 0)),
+    y: ((row * 8 + 4) - Number(pitBounds?.minY ?? 0)) / Math.max(1, Number(pitBounds?.maxY ?? 224) - Number(pitBounds?.minY ?? 0)),
+  });
+  const solidBeforePit = Number(sceneStateForPit?.activeScene?.collisionSolidCount ?? 0);
+  await clickButtonByTestIdNative(sessionId, "hierarchy-tilemap-edit-reference_tilemap", "abrir tilemap para o fosso");
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-tile-paint-flow-strip\"]'));"), 15000, "Pintura de tilemap indisponivel para o fosso.", 250);
+  await clickByTestId(sessionId, "tile-palette-0");
+  for (const [col, row] of pitCells) {
+    const point = cellPoint(col, row);
+    await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", point.x, point.y, `apagar visual ${col},${row}`);
+  }
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const cells = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap")?.tilemap?.cells ?? [];
+      return pitCells.every(([col, row]) => Number(cells[row * 40 + col]) === 0) ? true : false;
+    },
+    10000, "Visual do fosso nao foi pintado no tilemap.", 150
+  );
+  const collisionModeClicked = await executeScript(sessionId, "const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent?.trim() === 'Modo colisao'); if (b) { b.click(); return true; } return false;");
+  if (!collisionModeClicked) {
+    await focusGameCanvasNatively(sessionId).catch(() => {});
+    await executeScript(sessionId, "document.querySelector('[data-testid=\"viewport-scene-overlay\"]')?.focus?.();");
+    await sendNativeGameKey(sessionId, "KeyC", "keyDown", "modo colisao").catch(() => {});
+  }
+  for (const [col, row] of pitCells) {
+    const point = cellPoint(col, row);
+    await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", point.x, point.y, `apagar colisao ${col},${row}`, 2);
+  }
+  const solidAfterPit = await waitFor(
+    async () => {
+      const count = Number((await readAutomationState(sessionId))?.activeScene?.collisionSolidCount ?? 0);
+      return count === solidBeforePit - pitCells.length ? count : false;
+    },
+    10000, `Colisao do fosso nao foi apagada pela UI (antes ${solidBeforePit}).`, 150
+  );
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "player", 10000, "player nao selecionado para animacao.", 200);
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"inspector-anim-idle-fps\"]'));"), 10000, "Inspector nao expos FPS das animacoes.", 200);
+  await setInputByTestIdNative(sessionId, "inspector-anim-idle-fps", "12");
+  await waitFor(
+    async () => {
+      const logic = await readAutomationState(sessionId);
+      return (await executeScript(sessionId, "return document.querySelector('[data-testid=\"inspector-anim-idle-fps\"]')?.value;")) === "12" ? logic : false;
+    },
+    10000, "FPS do idle nao aplicado.", 200
+  );
+  addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-07-pit-and-animation-edit.png`), "fosso e animacao editados");
+  report.sceneAuthoring = { pitCells, solidBeforePit, solidAfterPit, idleFps: 12 };
+
   await clickByTestId(sessionId, "hierarchy-entity-player");
   await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "player", 10000, "player nao selecionado.", 200);
   await clickByTestId(sessionId, "workspace-rail-logic");
@@ -5649,6 +5705,15 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       reopenedPassage.main.blocker !== "passage_blocker" || reopenedPassage.main.threshold !== "12" || reopenedPassage.main.openVar !== "goal_open") {
     fail(`Referencias das passagens nao persistiram apos reabrir: ${JSON.stringify(reopenedPassage)}`);
   }
+  const savedScene = JSON.parse(await readFile(path.join(createdState.activeProjectDir, "scenes", "main.json"), "utf8"));
+  const savedCollision = savedScene?.collision_map?.data ?? [];
+  if (!pitCells.every(([col, row]) => Number(savedCollision[row * 40 + col]) === 0) || Number(savedCollision[26 * 40 + 20]) !== 1) {
+    fail("Colisao do fosso nao persistiu no arquivo da cena (ou apagou celulas nao editadas).");
+  }
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  const reopenedIdleFps = await waitFor(async () => executeScript(sessionId, "return document.querySelector('[data-testid=\"inspector-anim-idle-fps\"]')?.value ?? false;"), 10000, "FPS do idle ausente apos reabrir.", 200);
+  if (reopenedIdleFps !== "12") fail(`FPS do idle nao persistiu: ${reopenedIdleFps}`);
   addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-08-second-passage-reopened.png`), "passagens reabertas");
   await clickByTestId(sessionId, "workspace-rail-game");
   const twoPassageBuild = await runBuildRunAndCollect(sessionId, "reference platformer two passages build", timeoutMs, report, artifactPrefix);
@@ -5673,6 +5738,34 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   const twoEpoch = await invokeCore("emulator_get_core_epoch");
   await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: twoEpoch.value });
   await invokeCore("emulator_run_frames", { frames: 120 });
+  const regionHash = (observed, x0, y0, w, h) => {
+    const rgba = Buffer.from(observed?.framebuffer_rgba ?? []);
+    const width = Number(observed?.framebuffer_width ?? 320);
+    const hash = createHash("sha256");
+    for (let y = y0; y < y0 + h; y += 1) hash.update(rgba.subarray((y * width + x0) * 4, (y * width + x0 + w) * 4));
+    return hash.digest("hex");
+  };
+  const idleChanges = [];
+  let lastIdle = null;
+  let firstObserved = null;
+  for (let frame = 0; frame < 40; frame += 1) {
+    await invokeCore("emulator_run_frames", { frames: 1 });
+    const observed = (await invokeCore("emulator_observe")).value;
+    firstObserved ??= observed;
+    const idleHash = regionHash(observed, 32, 192, 16, 16);
+    if (lastIdle !== null && idleHash !== lastIdle) idleChanges.push(frame);
+    lastIdle = idleHash;
+  }
+  const idleGaps = idleChanges.slice(1).map((frame, index) => frame - idleChanges[index]);
+  if (idleChanges.length < 6 || !idleGaps.every((gap) => gap === 5)) {
+    fail(`Animacao idle editada (12 fps) nao trocou a cada 5 frames na ROM: ${JSON.stringify(idleChanges)}`);
+  }
+  const reopenedObserved = reopenedBuild.framebuffer;
+  const pitVisual = { edited: regionHash(firstObserved, 80, 208, 16, 16), control: regionHash(firstObserved, 160, 208, 16, 16) };
+  if (pitVisual.edited === pitVisual.control) {
+    fail(`Regiao do fosso nao mudou visualmente em relacao ao piso nao editado: ${JSON.stringify(pitVisual)}`);
+  }
+  report.pitVisual = { ...pitVisual, reopenedFramebuffer: reopenedObserved?.framebuffer_sha256 ?? null };
   await invokeCore("emulator_send_input", { joypad: { ...neutralGoalInput, right: true }, sessionEpoch: twoEpoch.value });
   const timeline = [];
   for (let frame = 1; frame <= 110; frame += 1) {
@@ -5680,6 +5773,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     timeline.push({
       frame,
       x: await readS16("spr_player_x"),
+      y: await readS16("spr_player_y"),
       score: (await readLogicInt("reference_score")).value,
       mainOpen: (await readLogicInt("goal_open")).value,
       secondOpen: (await readLogicInt("passage_2_open")).value,
@@ -5699,6 +5793,21 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       maxXWhileSecondClosed > 106 || heldAtSecond.length < 5 || crossTalk.length > 0 || timeline.at(-1).x <= 136) {
     fail(`Duas passagens nao se comportaram de forma independente: ${JSON.stringify({ mainOpened, secondOpened, maxXWhileSecondClosed, heldAtSecond: heldAtSecond.length, crossTalk: crossTalk.length, last: timeline.at(-1) })}`);
   }
+  const pitDip = timeline.filter((t) => t.x >= 72 && t.x < 88 && t.y > 192);
+  const floorHeld = timeline.filter((t) => t.x < 72).every((t) => t.y === 192);
+  if (pitDip.length === 0 || !floorHeld) {
+    fail(`Colisao apagada pela UI nao virou fosso fisico na ROM: ${JSON.stringify({ pitDip, floorHeld })}`);
+  }
+  addReportStep(report, "scene_collision_and_animation_authored_in_ui", "passed", {
+    pitCells,
+    collisionSolid: { before: solidBeforePit, after: solidAfterPit },
+    physicalPitDip: pitDip,
+    idleFps: 12,
+    idleChangeFrames: idleChanges,
+    idleGaps,
+    pitVisualRegionSha256: pitVisual,
+    limits: "sem paredes de tile horizontais: andando, o personagem sobe a borda do fosso raso",
+  });
   addReportStep(report, "second_passage_authored_in_ui", "passed", {
     reopened: reopenedPassage,
     rom: { path: twoPassageRomPath, sha256: createHash("sha256").update(await readFile(twoPassageRomPath)).digest("hex") },
