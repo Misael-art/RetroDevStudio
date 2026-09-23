@@ -8020,7 +8020,7 @@ async function main() {
         let sonicTileEvidence = null;
         if (sonicTilesMode) {
           for (const negative of [
-            { label: "pixel fora do mapping", rect: { x: 0, y: 0, w: 2, h: 2, index: 14 }, expect: "nao pertence a nenhuma peca" },
+            { label: "pixel fora do mapping", rect: { x: 28, y: 2, w: 2, h: 2, index: 14 }, expect: "nao pertence a nenhuma peca" },
             { label: "tiles compartilhados sem confirmacao", rect: { x: 10, y: 25, w: 4, h: 2, index: 14 }, expect: "frames DPLC [5]" },
           ]) {
             const before = (await tileEditErrors()).length;
