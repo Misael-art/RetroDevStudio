@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { serializeNodeGraph, type GraphNode, type NodeGraph } from "./nodeTypes";
-import { deserializeNodeGraph } from "./nodeDefinitions";
+import { NODE_DEFS, clonePorts, deserializeNodeGraph } from "./nodeDefinitions";
 import {
   LOCAL_TRACE_EVIDENCE_LABEL,
   isRuntimeEvidence,
   resolveRuntimeEvidenceForGraph,
   runNodeGraphLocally,
+  validateNodeGraph,
   validateNodeGraphForExecution,
   type NodeExecutionEvidence,
 } from "./nodeEngine";
@@ -298,5 +299,51 @@ describe("nodeEngine: serializacao estavel", () => {
       "set_score",
     ]);
     expect(roundTripped.edges).toHaveLength(1);
+  });
+});
+
+describe("validateNodeGraph param and reference checks", () => {
+  const def = (type: keyof typeof NODE_DEFS, id: string, params: Record<string, string | number>) => ({
+    ...NODE_DEFS[type],
+    id,
+    label: id,
+    x: 0,
+    y: 0,
+    inputs: clonePorts(NODE_DEFS[type].inputs),
+    outputs: clonePorts(NODE_DEFS[type].outputs),
+    params: { ...NODE_DEFS[type].params, ...params },
+  });
+  const entity = (entity_id: string) => ({ entity_id, display_name: null, prefab: null, transform: { x: 0, y: 0 }, components: {} });
+
+  it("flags broken entity refs, non-integer params, bad operators and bad var names with the node and param", () => {
+    const graph = {
+      nodes: [
+        def("condition_overlap", "gate", { a: "player", b: "ghost_blocker", probe_dx: "2.5" }),
+        def("condition_compare", "rule", { operator: "=>", b: "abc" }),
+        def("var_set", "open", { var_name: "2open", value: 1 }),
+      ],
+      edges: [],
+    };
+    const result = validateNodeGraph(graph, { sceneEntities: [entity("player")] as never });
+    const messages = result.errors.map((issue) => `${issue.code}:${issue.nodeId}:${issue.message}`);
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^broken_entity_ref:gate:.*'ghost_blocker'.*param 'b'/),
+      expect.stringMatching(/^invalid_param:gate:.*'probe_dx'.*'2.5'/),
+      expect.stringMatching(/^invalid_param:rule:.*'b'/),
+      expect.stringMatching(/^invalid_param:rule:.*operador '=>'/),
+      expect.stringMatching(/^invalid_param:open:.*'2open'/),
+    ]));
+  });
+
+  it("accepts valid references and params", () => {
+    const graph = {
+      nodes: [
+        def("condition_overlap", "gate", { a: "player", b: "wall", probe_dx: -2 }),
+        def("condition_compare", "rule", { operator: ">=", b: 12 }),
+      ],
+      edges: [],
+    };
+    const result = validateNodeGraph(graph, { sceneEntities: [entity("player"), entity("wall")] as never });
+    expect(result.errors.filter((issue) => ["broken_entity_ref", "invalid_param"].includes(issue.code))).toEqual([]);
   });
 });

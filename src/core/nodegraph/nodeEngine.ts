@@ -41,7 +41,9 @@ export type NodeGraphValidationIssue = {
     | "branch_without_output"
     | "blocking_bridge"
     | "input_command_unbound"
-    | "missing_animation";
+    | "missing_animation"
+    | "broken_entity_ref"
+    | "invalid_param";
   message: string;
   nodeId?: string;
   edgeId?: string;
@@ -381,6 +383,78 @@ function isBlockingBridgeNode(node: GraphNode): boolean {
   );
 }
 
+/** Params that name a scene entity, per node type. */
+const ENTITY_REF_PARAMS: Partial<Record<string, string[]>> = {
+  condition_overlap: ["a", "b"],
+  sprite_move: ["target"],
+  destroy_entity: ["target"],
+  set_velocity: ["target"],
+  set_position: ["target"],
+  sprite_anim: ["target"],
+  set_animation_state: ["target"],
+  camera_follow: ["target"],
+};
+/** Params that must be integers, per node type. */
+const INT_PARAMS: Partial<Record<string, string[]>> = {
+  condition_compare: ["b"],
+  condition_overlap: ["probe_dx", "probe_dy"],
+  sprite_move: ["dx", "dy"],
+  set_velocity: ["vx", "vy"],
+  var_set: ["value"],
+};
+const COMPARE_OPERATORS = new Set(["==", "!=", "<", "<=", ">", ">="]);
+const VAR_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ENTITY_REF_WILDCARDS = new Set(["self", ""]);
+
+function nodeParamIssues(node: GraphNode, context?: NodeGraphValidationContext): NodeGraphValidationIssue[] {
+  const issues: NodeGraphValidationIssue[] = [];
+  const entities = context?.sceneEntities ?? [];
+  if (entities.length > 0) {
+    const ids = new Set(entities.map((entity) => entity.entity_id));
+    for (const key of ENTITY_REF_PARAMS[node.type] ?? []) {
+      const value = String(node.params[key] ?? "").trim();
+      if (!ENTITY_REF_WILDCARDS.has(value) && !ids.has(value)) {
+        issues.push({
+          severity: "error",
+          code: "broken_entity_ref",
+          nodeId: node.id,
+          message: `No '${node.label}' referencia a entidade '${value}' (param '${key}'), que nao existe na cena.`,
+        });
+      }
+    }
+  }
+  for (const key of INT_PARAMS[node.type] ?? []) {
+    if (!(key in node.params)) continue;
+    const value = node.params[key];
+    const numeric = typeof value === "number" ? value : Number(String(value).trim());
+    if (String(value).trim() === "" || !Number.isInteger(numeric) || numeric < -32768 || numeric > 32767) {
+      issues.push({
+        severity: "error",
+        code: "invalid_param",
+        nodeId: node.id,
+        message: `No '${node.label}': param '${key}' deve ser inteiro entre -32768 e 32767 (recebido '${String(value)}').`,
+      });
+    }
+  }
+  if (node.type === "condition_compare" && "operator" in node.params && !COMPARE_OPERATORS.has(String(node.params.operator))) {
+    issues.push({
+      severity: "error",
+      code: "invalid_param",
+      nodeId: node.id,
+      message: `No '${node.label}': operador '${String(node.params.operator)}' invalido (use ==, !=, <, <=, >, >=).`,
+    });
+  }
+  if ((node.type === "var_get" || node.type === "var_set") && !VAR_IDENTIFIER.test(String(node.params.var_name ?? ""))) {
+    issues.push({
+      severity: "error",
+      code: "invalid_param",
+      nodeId: node.id,
+      message: `No '${node.label}': nome de variavel '${String(node.params.var_name ?? "")}' invalido (letras, digitos e _).`,
+    });
+  }
+  return issues;
+}
+
 export function validateNodeGraph(
   graph: NodeGraph,
   context?: NodeGraphValidationContext,
@@ -519,6 +593,10 @@ export function validateNodeGraph(
           node.params.command_id ?? node.label,
         )}' nao tem binding em SpriteComponent.commands.`,
       });
+    }
+
+    for (const issue of nodeParamIssues(node, context)) {
+      issues.push(issue);
     }
 
     if (nodeReferencesMissingAnimation(node, context)) {
