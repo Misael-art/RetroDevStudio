@@ -14994,20 +14994,57 @@ fn reference_passage_ppm() -> Vec<u8> {
     })
 }
 
+/// Full 320x224 stage picture that matches the template's collision map: sky, a grass
+/// floor on tile rows 26..27 and a platform on row 21, columns 20..27. The first tiles of
+/// row 0 are a small strip of sample tiles (grass, brick, cloud, dirt) so the tile palette
+/// (which slices this same image) offers distinct materials.
 fn reference_tileset_ppm() -> Vec<u8> {
-    reference_ppm(128, 64, |x, y| {
-        let tile_x = (x / 8) % 2;
-        let tile_y = (y / 8) % 2;
-        if y >= 48 {
-            if (x / 8 + y / 8) % 2 == 0 {
-                [52, 112, 78]
-            } else {
-                [40, 88, 64]
-            }
-        } else if tile_x == tile_y {
-            [30, 56, 92]
+    const SKY_A: [u8; 3] = [30, 56, 92];
+    const SKY_B: [u8; 3] = [24, 44, 72];
+    let grass = |x: u32, y: u32| {
+        if y % 8 < 2 {
+            [96, 196, 88]
+        } else if (x / 4 + y / 4).is_multiple_of(2) {
+            [52, 112, 78]
         } else {
-            [24, 44, 72]
+            [40, 88, 64]
+        }
+    };
+    let brick = |x: u32, y: u32| {
+        let offset = if (y / 4).is_multiple_of(2) { 0 } else { 4 };
+        if y % 4 == 3 || (x + offset) % 8 == 7 {
+            [96, 40, 32]
+        } else {
+            [176, 84, 56]
+        }
+    };
+    let cloud = |x: u32, y: u32| {
+        let dx = x as i32 % 8 - 4;
+        let dy = y as i32 % 8 - 4;
+        if dx * dx + dy * dy <= 12 {
+            [236, 240, 248]
+        } else {
+            SKY_A
+        }
+    };
+    let dirt = |x: u32, y: u32| {
+        if (x * 7 + y * 3).is_multiple_of(5) {
+            [92, 60, 36]
+        } else {
+            [128, 86, 52]
+        }
+    };
+    reference_ppm(320, 224, move |x, y| {
+        let (tile_x, tile_y) = (x / 8, y / 8);
+        match (tile_x, tile_y) {
+            (1, 0) => grass(x, y),
+            (2, 0) => brick(x, y),
+            (3, 0) => cloud(x, y),
+            (4, 0) => dirt(x, y),
+            (_, 26) | (_, 27) => grass(x, y),
+            (20..=27, 21) => grass(x, y),
+            _ if (tile_x + tile_y) % 2 == 0 => SKY_A,
+            _ => SKY_B,
         }
     })
 }
@@ -15503,7 +15540,7 @@ fn reference_platformer_logic_graph() -> String {
             { "id": "move_left", "type": "sprite_move", "label": "Move Left", "x": 720, "y": 280, "params": { "target": "player", "dx": -2, "dy": 0 } },
             { "id": "update_jump", "type": "event_update", "label": "Update Jump", "x": 0, "y": 440, "params": {} },
             { "id": "jump", "type": "input_pressed", "label": "Press A", "x": 180, "y": 420, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
-            { "id": "jump_velocity", "type": "set_velocity", "label": "Jump", "x": 360, "y": 400, "params": { "target": "player", "vx": 0, "vy": -48 } },
+            { "id": "jump_velocity", "type": "set_velocity", "label": "Jump", "x": 360, "y": 400, "params": { "target": "player", "vx": 0, "vy": -64 } },
             { "id": "jump_sound", "type": "action_sound", "label": "Jump Sound", "x": 540, "y": 400, "params": { "sfx": "jump" } },
             { "id": "update_score", "type": "event_update", "label": "Update Score", "x": 0, "y": 720, "params": {} },
             { "id": "score_input", "type": "input_held", "label": "Score Right Input", "x": 180, "y": 700, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },

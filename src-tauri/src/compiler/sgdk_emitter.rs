@@ -48,6 +48,32 @@ fn build_main_c_with_collision(
     project_name: &str,
     collision_map_data: Option<&[u8]>,
 ) -> String {
+    // Tile ground/walls need rds_solid_at, which exists only with collision map data.
+    let tile_helpers = collision_map_data.is_some_and(|data| !data.is_empty());
+    let bodies: std::collections::HashMap<String, (u32, u32)> = if tile_helpers {
+        collect_physics_applications(ast)
+            .into_iter()
+            .filter(|physics| physics.gravity)
+            .filter_map(|physics| {
+                physics
+                    .ground
+                    .map(|g| (physics.var_name, (g.body_width, g.body_height)))
+            })
+            .collect()
+    } else {
+        Default::default()
+    };
+    WALL_BODIES.with(|cell| *cell.borrow_mut() = bodies);
+    let main_c = build_main_c_inner(ast, project_name, collision_map_data);
+    WALL_BODIES.with(|cell| cell.borrow_mut().clear());
+    main_c
+}
+
+fn build_main_c_inner(
+    ast: &AstOutput,
+    project_name: &str,
+    collision_map_data: Option<&[u8]>,
+) -> String {
     let mut out = String::new();
     let collision_checks = collect_collision_checks(ast);
     let physics_applications = collect_physics_applications(ast);
@@ -270,7 +296,11 @@ fn build_main_c_with_collision(
                 .find_map(|physics| physics.ground)
             {
                 out.push_str(&format!(
-                    "static u8 rds_solid_at(s16 x, s16 y)\n{{\n    if (x < 0 || y < 0) return 0;\n    u16 tx = (u16)x / {tw};\n    u16 ty = (u16)y / {th};\n    if (tx >= {mw} || ty >= {mh}) return 0;\n    return rds_collision_map[ty * {mw} + tx] != 0;\n}}\n\n",
+                    "static u8 rds_solid_at(s16 x, s16 y)\n{{\n    if (x < 0 || y < 0) return 0;\n    u16 tx = (u16)x / {tw};\n    u16 ty = (u16)y / {th};\n    if (tx >= {mw} || ty >= {mh}) return 0;\n    return rds_collision_map[ty * {mw} + tx] != 0;\n}}\n\n\
+// Side walls: moving by dx, the body's leading edge (right if dx>0, left if dx<0) must not\n\
+// enter a solid tile, sampled just below its top and just above its feet (the floor under\n\
+// the feet and the trailing edge never block).\n\
+static u8 rds_hits_wall(s16 x, s16 y, u16 w, u16 h, s16 dx)\n{{\n    s16 edge = dx > 0 ? x + (s16)w - 1 : x;\n    return rds_solid_at(edge, y + 1) || rds_solid_at(edge, y + (s16)h - 2);\n}}\n\n",
                     tw = ground.tile_width,
                     th = ground.tile_height,
                     mw = ground.map_width,
@@ -402,17 +432,39 @@ fn build_main_c_with_collision(
                     .iter()
                     .find(|asset| asset.resource_name == *resource_name && !asset.cells.is_empty())
                 {
+                    // Painted cells override the base picture. Tile N>0 is tile N-1 of the
+                    // tileset image in row-major order (TILESET ... NONE NONE, no dedup), so
+                    // the ROM shows exactly what the editor palette shows; only the tiles used
+                    // are uploaded after the image tiles. TILEMAP_CELL_EMPTY is a blank tile.
+                    let used = tilemap_overlay_tiles(asset);
+                    let slot_base = format!("{} + {}.tileset->numTile", base_tile, resource_name);
+                    for (slot, value) in used.iter().enumerate() {
+                        out.push_str(&format!(
+                            "    if ({index} < {res}_cells.numTile) VDP_loadTileData({res}_cells.tiles + {offset}, {slot_base} + {slot}, 1, DMA);\n",
+                            index = value - 1,
+                            res = resource_name,
+                            offset = (value - 1) * 8,
+                        ));
+                    }
+                    let origin_x = (*x).max(0) / 8;
+                    let origin_y = (*y).max(0) / 8;
                     let total =
                         (asset.map_width as usize).saturating_mul(asset.map_height as usize);
                     for (index, value) in asset.cells.iter().copied().enumerate().take(total) {
-                        if value == 0 {
+                        if value == TILEMAP_CELL_BASE {
                             continue;
                         }
-                        let cell_x = index % asset.map_width as usize;
-                        let cell_y = index / asset.map_width as usize;
+                        let cell_x = origin_x as usize + index % asset.map_width as usize;
+                        let cell_y = origin_y as usize + index / asset.map_width as usize;
+                        let tile = if value == TILEMAP_CELL_EMPTY {
+                            "0".to_string()
+                        } else {
+                            let slot = used.iter().position(|used| *used == value).unwrap_or(0);
+                            format!("{slot_base} + {slot}")
+                        };
                         out.push_str(&format!(
-                            "    VDP_setTileMapXY({}, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {} + {}), {}, {});\n",
-                            plane, base_tile, value, cell_x, cell_y
+                            "    VDP_setTileMapXY({}, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {}), {}, {});\n",
+                            plane, tile, cell_x, cell_y
                         ));
                     }
                 }
@@ -648,6 +700,13 @@ fn build_main_c_with_collision(
     resolve_runtime_state_markers(out)
 }
 
+thread_local! {
+    /// Sprite vars whose moves are blocked by solid collision-map tiles (body w/h), set
+    /// for the duration of one emission.
+    static WALL_BODIES: std::cell::RefCell<std::collections::HashMap<String, (u32, u32)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 const RUNTIME_STATE_DECL_MARKER: &str = "/*RDS_RUNTIME_STATE_DECL*/\n";
 const JOY_PREV_UPDATE_MARKER: &str = "/*RDS_JOY_PREV_UPDATE*/\n";
 const SGDK_JOY_PORTS: [&str; 4] = ["JOY_1", "JOY_2", "JOY_3", "JOY_4"];
@@ -693,6 +752,14 @@ fn build_resources_res(ast: &AstOutput) -> String {
             asset.resource_name,
             tilemap_resource_path(&asset.asset_path),
         ));
+        if !tilemap_overlay_tiles(&asset).is_empty() {
+            // Unoptimized, image-ordered tiles for painted cells (see DrawTilemap).
+            out.push_str(&format!(
+                "TILESET {}_cells \"{}\" NONE NONE\n",
+                asset.resource_name,
+                tilemap_resource_path(&asset.asset_path),
+            ));
+        }
     }
 
     for asset in &ast.sprite_assets {
@@ -966,7 +1033,12 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
         var_name = physics.var_name
     ));
 
-    if let Some(ground) = physics.ground.as_ref().filter(|_| physics.gravity) {
+    let tile_helpers = WALL_BODIES.with(|bodies| bodies.borrow().contains_key(&physics.var_name));
+    if let Some(ground) = physics
+        .ground
+        .as_ref()
+        .filter(|_| physics.gravity && tile_helpers)
+    {
         // Land on the top of the solid collision cell under the body's centre, only while
         // falling (one-way). Erased cells are pits; the map bottom is the last safety floor.
         let var_name = &physics.var_name;
@@ -980,6 +1052,9 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
         ));
         out.push_str(&format!(
             "        if ({next_y_var} > {bottom}) {{ {next_y_var} = {bottom}; {var_name}_vel_y = 0; }}\n"
+        ));
+        out.push_str(&format!(
+            "        if ({next_x_var} != {var_name}_x && rds_hits_wall({next_x_var}, {var_name}_y, {body_w}, {body_h}, {next_x_var} - {var_name}_x)) {{ {next_x_var} = {var_name}_x; {var_name}_vel_x = 0; }}\n"
         ));
     } else if let Some(floor_y) = physics.floor_y {
         out.push_str(&format!(
@@ -1369,13 +1444,21 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 ));
             }
             LogicOp::MoveSprite { target_var, dx, dy } => {
-                out.push_str(&format!(
-                    "{indent}{target}_x += {dx}; {target}_y += {dy};\n",
-                    indent = indent_str,
-                    target = target_var,
-                    dx = dx,
-                    dy = dy
-                ));
+                let wall_body = WALL_BODIES.with(|bodies| bodies.borrow().get(target_var).copied());
+                match wall_body {
+                    Some((width, height)) if *dx != 0 => out.push_str(&format!(
+                        "{indent}if (!rds_hits_wall({target}_x + {dx}, {target}_y, {width}, {height}, {dx})) {target}_x += {dx}; {target}_y += {dy};\n",
+                        indent = indent_str,
+                        target = target_var,
+                    )),
+                    _ => out.push_str(&format!(
+                        "{indent}{target}_x += {dx}; {target}_y += {dy};\n",
+                        indent = indent_str,
+                        target = target_var,
+                        dx = dx,
+                        dy = dy
+                    )),
+                }
                 out.push_str(&format!(
                     "{indent}SPR_setPosition({target}, {target}_x, {target}_y);\n",
                     indent = indent_str,
@@ -2672,8 +2755,29 @@ fn tilemap_base_expression(resource_name: &str, tilemap_assets: &[TilemapAsset])
             break;
         }
         terms.push(format!("{}.tileset->numTile", asset.resource_name));
+        let overlay = tilemap_overlay_tiles(asset).len();
+        if overlay > 0 {
+            terms.push(overlay.to_string());
+        }
     }
     terms.join(" + ")
+}
+
+/// Cell value meaning "no change over the base map".
+const TILEMAP_CELL_BASE: u32 = 0;
+/// Cell value meaning "explicitly empty" (blank tile), distinct from the base map.
+pub(crate) const TILEMAP_CELL_EMPTY: u32 = u32::MAX;
+
+/// Distinct painted tileset tiles (value N = image tile N-1), in first-use order.
+fn tilemap_overlay_tiles(asset: &TilemapAsset) -> Vec<u32> {
+    let total = (asset.map_width as usize).saturating_mul(asset.map_height as usize);
+    let mut used = Vec::new();
+    for value in asset.cells.iter().copied().take(total) {
+        if value != TILEMAP_CELL_BASE && value != TILEMAP_CELL_EMPTY && !used.contains(&value) {
+            used.push(value);
+        }
+    }
+    used
 }
 
 fn tilemap_resource_path(asset_path: &str) -> String {
@@ -3170,7 +3274,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.ppm".to_string(),
                     map_width: 2,
                     map_height: 2,
-                    cells: vec![0, 2, 0, 1],
+                    cells: vec![0, 2, u32::MAX, 1],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "background_tilemap".to_string(),
@@ -3186,12 +3290,32 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Tilemap Overlay Demo");
 
+        // Value N is image tile N-1 from the unoptimized TILESET, uploaded after the image
+        // tiles in first-use order (2 -> slot 0, 1 -> slot 1); 0 keeps the base map and
+        // u32::MAX writes the blank tile.
+        let base = "TILE_USER_INDEX + background_tilemap.tileset->numTile";
+        assert!(output.main_c.contains(&format!(
+            "if (1 < background_tilemap_cells.numTile) VDP_loadTileData(background_tilemap_cells.tiles + 8, {base} + 0, 1, DMA);"
+        )));
+        assert!(output.main_c.contains(&format!(
+            "if (0 < background_tilemap_cells.numTile) VDP_loadTileData(background_tilemap_cells.tiles + 0, {base} + 1, 1, DMA);"
+        )));
+        assert!(output.main_c.contains(&format!(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {base} + 0), 1, 0);"
+        )));
         assert!(output.main_c.contains(
-            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, TILE_USER_INDEX + 2), 1, 0);"
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, 0), 0, 1);"
         ));
-        assert!(output.main_c.contains(
-            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, TILE_USER_INDEX + 1), 1, 1);"
-        ));
+        assert!(output.main_c.contains(&format!(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {base} + 1), 1, 1);"
+        )));
+        assert!(
+            !output.main_c.contains(", 0, 0);\n"),
+            "value 0 keeps the base map"
+        );
+        assert!(output
+            .resources_res
+            .contains("TILESET background_tilemap_cells \"assets/tilesets/level.bmp\" NONE NONE"));
         assert!(!output.main_c.contains("VDP_setTileMapDataRectEx"));
     }
 

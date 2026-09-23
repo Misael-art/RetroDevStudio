@@ -1,4 +1,5 @@
 import { isPpmPath, loadProjectPpmImageData } from "../../core/ppmImage";
+import { isExplicitEmptyCell, tilesetAtlasIndex } from "../../core/tilemapCells";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Tabs from "../common/Tabs";
@@ -344,17 +345,23 @@ function drawTilemapCells(
   const totalCells = mapWidth * mapHeight;
   context.save();
   for (let i = 0; i < Math.min(cells.length, totalCells); i++) {
-    const value = cells[i] | 0;
-    if (value <= 0) continue;
-    const atlasIdx = value - 1;
-    const ax = (atlasIdx % cols) * tileSize;
-    const ay = Math.floor(atlasIdx / cols) * tileSize;
-    if (asset.width && ax + tileSize > asset.width) continue;
-    if (asset.height && ay + tileSize > asset.height) continue;
+    const value = cells[i];
     const col = i % mapWidth;
     const row = (i - col) / mapWidth;
     const dx = originX + col * tileSize - scrollX;
     const dy = originY + row * tileSize - scrollY;
+    if (isExplicitEmptyCell(value)) {
+      // Explicit empty cell: punch the base map out, like the ROM's blank tile.
+      context.clearRect(dx, dy, tileSize, tileSize);
+      continue;
+    }
+    const atlasIdx = tilesetAtlasIndex(value);
+    if (atlasIdx === null) continue;
+    const ax = (atlasIdx % cols) * tileSize;
+    const ay = Math.floor(atlasIdx / cols) * tileSize;
+    if (asset.width && ax + tileSize > asset.width) continue;
+    if (asset.height && ay + tileSize > asset.height) continue;
+    context.clearRect(dx, dy, tileSize, tileSize);
     context.drawImage(
       asset.source,
       ax,
@@ -2606,13 +2613,13 @@ export default function ViewportPanel({
           const hasCells =
             Array.isArray(cells) &&
             cells.length === expectedCells &&
-            cells.some((v) => (v | 0) > 0);
+            cells.some((v) => v > 0);
           context.save();
           context.globalAlpha = 0.82;
           if (hasCells) {
-            // WYSIWYG: renderiza célula-a-célula usando slices reais do tileset.
-            context.fillStyle = "rgba(148,226,213,0.05)";
-            context.fillRect(x, y, mapWidth, mapHeight);
+            // Same as the ROM: base map first, then the edited cells on top
+            // (value 0 = base shows through; explicit empty = blank cell).
+            context.drawImage(tilemapAsset.source, x, y, mapWidth, mapHeight);
             drawTilemapCells(
               context,
               tilemapAsset,

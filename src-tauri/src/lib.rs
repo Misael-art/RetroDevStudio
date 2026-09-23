@@ -9413,6 +9413,81 @@ pub extern "C" fn retro_run() {
             )
             .expect("save scene");
         });
+        // (f) Side walls: solid cells at column 12 (x=96..103), rows 22..25, stop the
+        // player walking right at x=80 (right edge 95); without them it walks past.
+        let (rom, wall_symbols) = build_reference_variant(&base, "side-wall", |dir| {
+            let mut scene = crate::core::project_mgr::load_scene(
+                dir,
+                crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+            )
+            .expect("load scene");
+            let map = scene.collision_map.as_mut().expect("collision map");
+            for row in 22..26usize {
+                map.data[row * map.width as usize + 12] = 1;
+            }
+            crate::core::project_mgr::save_scene(
+                dir,
+                crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+                &scene,
+            )
+            .expect("save scene");
+        });
+        let (xs, _) = run_reference_input(&mut emulator, &rom, &wall_symbols, right.clone(), 70);
+        println!("side wall xs={xs:?}");
+        assert_eq!(
+            *xs.last().unwrap(),
+            80,
+            "parede lateral deve parar o personagem"
+        );
+        assert!(
+            xs.iter().all(|x| *x <= 80),
+            "personagem nunca entra na parede"
+        );
+
+        // (g) One erased floor cell (col 10, row 26): the player drops into it (y=200),
+        // the hole's walls hold it, and a jump while holding right gets it out.
+        let (rom, hole_symbols) = build_reference_variant(&base, "one-cell-hole", |dir| {
+            let mut scene = crate::core::project_mgr::load_scene(
+                dir,
+                crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+            )
+            .expect("load scene");
+            let map = scene.collision_map.as_mut().expect("collision map");
+            map.data[26 * map.width as usize + 10] = 0;
+            crate::core::project_mgr::save_scene(
+                dir,
+                crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+                &scene,
+            )
+            .expect("save scene");
+        });
+        let read_xy = |emulator: &EmulatorCore| {
+            (
+                reference_read_ram(emulator, &hole_symbols, "spr_player_x", 2),
+                reference_read_ram(emulator, &hole_symbols, "spr_player_y", 2),
+            )
+        };
+        let (_, _) = run_reference_input(&mut emulator, &rom, &hole_symbols, right.clone(), 60);
+        let trapped = read_xy(&emulator);
+        println!("hole trapped={trapped:?}");
+        assert_eq!(trapped.1, 200, "personagem cai no buraco de uma celula");
+        for frame in 0..40 {
+            emulator
+                .set_joypad(JoypadState {
+                    right: true,
+                    y: frame < 2,
+                    ..JoypadState::default()
+                })
+                .unwrap();
+            emulator.run_frame().unwrap();
+        }
+        let escaped = read_xy(&emulator);
+        println!("hole escaped={escaped:?}");
+        assert!(
+            escaped.0 > trapped.0 + 16 && escaped.1 == 192,
+            "salto deve tirar o personagem do buraco"
+        );
+
         let mut blocker_symbols: Vec<_> = symbols
             .keys()
             .filter(|name| name.contains("passage_blocker"))
@@ -9478,8 +9553,11 @@ pub extern "C" fn retro_run() {
             emulator.run_frame().expect("warmup");
         }
         emulator.set_joypad(right.clone()).expect("right");
+        let mut guard = 0;
         while reference_read_ram(&emulator, &pit_symbols, "spr_player_x", 2) < 80 {
             emulator.run_frame().expect("frame");
+            guard += 1;
+            assert!(guard < 300, "player nao chegou ao fosso");
         }
         emulator
             .set_joypad(JoypadState::default())
@@ -9732,6 +9810,83 @@ pub extern "C" fn retro_run() {
             "diferenca deve ficar restrita ao sprite do Sonic"
         );
         let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Tile cell semantics reach the ROM: value N renders image tile N-1 (the same 8x8
+    /// block the base map shows at that atlas position), the explicit-empty value renders a
+    /// blank cell, and value 0 leaves the base map untouched.
+    ///
+    /// `cargo test --manifest-path src-tauri/Cargo.toml reference_platformer_real_tile_cells_contract --lib -- --ignored --nocapture`
+    #[ignore]
+    #[test]
+    fn reference_platformer_real_tile_cells_contract() {
+        let base_dir = temp_dir("reference-platformer-tile-cells");
+        let block = |rgba: &[u8], width: usize, col: usize, row: usize| -> Vec<u8> {
+            let mut out = Vec::new();
+            for y in row * 8..row * 8 + 8 {
+                let start = (y * width + col * 8) * 4;
+                out.extend_from_slice(&rgba[start..start + 32]);
+            }
+            out
+        };
+        let frame = |rom: &Path| -> (Vec<u8>, usize) {
+            let mut emulator = EmulatorCore::new(None);
+            emulator.load_rom(rom).expect("load ROM");
+            for _ in 0..180 {
+                emulator.run_frame().expect("frame");
+            }
+            let (raw, size, format) = emulator.get_framebuffer().expect("framebuffer");
+            let rgba = framebuffer_to_rgba(&raw, size, format);
+            emulator.stop().expect("stop");
+            (rgba.rgba, rgba.width as usize)
+        };
+        let (base_rom, _) = build_reference_variant(&base_dir, "cells-base", |_| {});
+        // The template picture is 320x224 (40x28 tiles); image tile (2,0) is the brick sample.
+        let painted_value = 2u32 + 1;
+        let (painted_rom, _) = build_reference_variant(&base_dir, "cells-painted", |dir| {
+            let prefab = dir.join("prefabs").join("reference_tilemap.json");
+            let mut json: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&prefab).unwrap()).unwrap();
+            let tilemap = &mut json["components"]["tilemap"];
+            let width = tilemap["map_width"].as_u64().unwrap() as usize;
+            let height = tilemap["map_height"].as_u64().unwrap() as usize;
+            let mut cells = vec![0u32; width * height];
+            cells[20 * width + 5] = painted_value;
+            cells[26 * width + 10] = u32::MAX;
+            cells[26 * width + 11] = u32::MAX;
+            tilemap["cells"] = serde_json::json!(cells);
+            fs::write(&prefab, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+        });
+        let (base, width) = frame(&base_rom);
+        let (painted, _) = frame(&painted_rom);
+        assert_ne!(
+            block(&base, width, 5, 20),
+            block(&base, width, 2, 0),
+            "controle: celulas distintas no mapa-base"
+        );
+        assert_eq!(
+            block(&painted, width, 5, 20),
+            block(&base, width, 2, 0),
+            "valor N deve renderizar o tile N-1 da imagem"
+        );
+        for col in [10usize, 11] {
+            let empty = block(&painted, width, col, 26);
+            assert_ne!(
+                empty,
+                block(&base, width, col, 26),
+                "celula vazia deve apagar o mapa-base"
+            );
+            assert!(
+                empty.chunks_exact(4).all(|px| px == &empty[0..4]),
+                "celula vazia deve ser uniforme (tile em branco)"
+            );
+        }
+        assert_eq!(
+            block(&painted, width, 20, 26),
+            block(&base, width, 20, 26),
+            "valor 0 preserva o mapa-base"
+        );
+        let _ = fs::remove_dir_all(base_dir);
     }
 
     #[test]

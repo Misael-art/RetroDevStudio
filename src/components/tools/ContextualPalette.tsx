@@ -1,4 +1,5 @@
 import { decodePpm } from "../../core/ppmImage";
+import { TILEMAP_CELL_EMPTY } from "../../core/tilemapCells";
 import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEditorStore } from "../../core/store/editorStore";
@@ -116,7 +117,7 @@ function PaletteItem({
 
 const TILE_TOOL_META: Record<TilePaintTool, { label: string; icon: string; hint: string }> = {
   pencil: { label: "Lápis", icon: "\u270f", hint: "Pintar célula (P)" },
-  eraser: { label: "Borracha", icon: "\u232b", hint: "Apagar célula (X)" },
+  eraser: { label: "Restaurar base", icon: "\u232b", hint: "Desfaz a edição da célula e mostra o mapa-base (X)" },
   picker: { label: "Conta-gotas", icon: "\ud83d\udd0d", hint: "Capturar tile (I)" },
   rect: { label: "Retângulo", icon: "\u25a2", hint: "Preencher retângulo (R)" },
   fill: { label: "Balde", icon: "\u25b2", hint: "Flood fill (G)" },
@@ -341,19 +342,20 @@ export function TilePalette({
           className="mt-2 grid gap-[1px] overflow-hidden rounded border border-[#313244] bg-[#11111b]"
           style={{ gridTemplateColumns: `repeat(${grid.cols}, 1fr)` }}
         >
-          {/* Index 0 = vazio */}
+          {/* Célula explicitamente vazia (diferente de "Restaurar base") */}
           <button
             type="button"
             data-testid="tile-palette-empty"
-            title="Tile vazio (0) — use com borracha"
-            onClick={() => handlePickTile(0)}
+            aria-label="Célula vazia"
+            title="Célula vazia: apaga o tile nesta posição (na ROM vira tile em branco). Para voltar ao mapa-base use Restaurar base."
+            onClick={() => handlePickTile(TILEMAP_CELL_EMPTY)}
             className={`aspect-square bg-[#313244]/40 hover:bg-[#f38ba8]/20 transition-colors ${
-              activeTileIndex === 0 ? "ring-2 ring-inset ring-[#f38ba8]" : ""
+              activeTileIndex === TILEMAP_CELL_EMPTY ? "ring-2 ring-inset ring-[#f38ba8]" : ""
             }`}
           >
             <span className="text-[7px] text-[#45475a]">×</span>
           </button>
-          {Array.from({ length: grid.cols * grid.rows - 1 }, (_, i) => {
+          {Array.from({ length: grid.cols * grid.rows }, (_, i) => {
             const tileIndex = i + 1;
             const atlasIdx = tileIndex - 1;
             const col = atlasIdx % grid.cols;
