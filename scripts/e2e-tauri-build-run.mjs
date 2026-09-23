@@ -463,6 +463,7 @@ function parseArgs(argv) {
           "qa-rc",
           "create-game-from-zero",
           "reference-platformer",
+          "authoring-acceptance",
           "inspection",
           "inspection-cancel",
           "inspection-complete",
@@ -5853,6 +5854,381 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   console.log(`Relatorio: ${savedReport}`);
 }
 
+// ── Authoring acceptance (guided UI, restart, keyboard play to victory) ──────────
+// Everything is done through the normal UI with native WebDriver input. The game is
+// played with the real keyboard in the running Game View: no emulator_send_input, no
+// manual frame stepping. RAM, framebuffer and received audio are only *observed*.
+async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBootstrapTimeoutMs, onProjectCreated) {
+  let sessionId = initialSessionId;
+  const artifactPrefix = `authoring-acceptance-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: null,
+    scenario: "authoring-acceptance",
+    testedApplication: { path: appPath, sha256: createHash("sha256").update(await readFile(appPath)).digest("hex") },
+    artifacts: [],
+    steps: [],
+  };
+  const shot = async (name, label) => addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const state = () => readAutomationState(sessionId);
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const click = (testId, label = testId) => clickButtonByTestIdNative(sessionId, testId, label);
+  const selectOption = async (testId, value) => {
+    const elementId = await findElement(sessionId, `[data-testid="${testId}"] option[value="${value}"]`);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+    await waitFor(async () => (await js(`return document.querySelector('[data-testid="${testId}"]')?.value ?? null;`)) === value, 5000, `Selecao ${testId}=${value} nao aplicada.`, 100);
+  };
+  const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
+
+  // Resources must really load: viewport counts, canvas pixels of the real sprite colors,
+  // and the Inspector preview image decoded to its real size.
+  const assertResourcesVisible = async (label) => {
+    const summary = await waitFor(async () => {
+      const value = await js(`const el = document.querySelector('[data-testid="viewport-asset-health-summary"]'); return el ? { ...el.dataset } : null;`);
+      return value && Number(value.referenced) > 0 && Number(value.loading) === 0 && Number(value.ready) === Number(value.referenced) && Number(value.failed) === 0 && Number(value.missing) === 0 ? value : false;
+    }, 20000, `${label}: recursos do viewport nao carregaram (falha real de carregamento).`, 250);
+    const colors = await js(`
+      const canvas = document.querySelector('[data-testid="viewport-scene-canvas"]');
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+      const near = (i, r, g, b) => Math.abs(data[i] - r) < 16 && Math.abs(data[i + 1] - g) < 16 && Math.abs(data[i + 2] - b) < 16;
+      let player = 0, blocker = 0, grass = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (near(i, 42, 180, 232)) player += 1;
+        if (near(i, 184, 52, 56)) blocker += 1;
+        if (near(i, 96, 196, 88) || near(i, 52, 112, 78)) grass += 1;
+      }
+      return { player, blocker, grass, width: canvas.width, height: canvas.height };
+    `);
+    if (!colors || colors.player < 20 || colors.blocker < 20 || colors.grass < 200) {
+      fail(`${label}: personagem/bloqueador/cenario nao aparecem com seus pixels reais no viewport: ${JSON.stringify(colors)}`);
+    }
+    return { summary, colors };
+  };
+  const assertInspectorPreview = async (label) => {
+    const preview = await waitFor(async () => {
+      const value = await js(`const img = document.querySelector('[data-testid="inspector-asset-preview"]'); return img instanceof HTMLImageElement && img.complete ? { w: img.naturalWidth, h: img.naturalHeight, src: img.src.slice(0, 22) } : null;`);
+      return value && value.w > 0 ? value : false;
+    }, 15000, `${label}: preview do Inspector nao carregou.`, 200);
+    if (preview.w !== 80 || preview.h !== 16) fail(`${label}: preview do personagem com tamanho inesperado: ${JSON.stringify(preview)}`);
+    return preview;
+  };
+  // Controls must be on screen and not covered (native hit test at their center).
+  const assertReachable = async (testIds, label) => {
+    const result = await js(`
+      return arguments[0].map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        if (!el) return { id, ok: false, reason: "ausente" };
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
+        const r = el.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const inside = r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1;
+        const hit = document.elementFromPoint(cx, cy);
+        const clipped = el.scrollWidth > el.clientWidth + 2 && getComputedStyle(el).overflow === "hidden";
+        return { id, ok: inside && Boolean(hit && (hit === el || el.contains(hit))) && !clipped, inside, clipped, hit: hit?.getAttribute?.("data-testid") ?? hit?.tagName };
+      });
+    `, [testIds]);
+    const bad = result.filter((entry) => !entry.ok);
+    if (bad.length) fail(`${label}: controles inacessiveis/cortados/cobertos: ${JSON.stringify(bad)}`);
+    return result;
+  };
+
+  // 1. Create the stage from the wizard and switch to the guided mode.
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await click("template-card-reference_platformer", "modelo de fase de referencia");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const projectName = `Acceptance_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+  const created = await waitFor(async () => {
+    const value = await state();
+    return value?.activeProjectDir && value.activeProjectName === projectName ? value : false;
+  }, 60000, "Wizard nao criou o projeto.", 500);
+  const projectDir = created.activeProjectDir;
+  onProjectCreated(projectDir);
+  currentE2eRunContext.project = projectDir;
+  await click("shell-persona-guiado", "modo guiado");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`), 10000, "Barra de etapas guiadas ausente.", 200);
+  await click("guided-step-personagem", "etapa Personagem");
+  await waitSelected("player");
+  const initialResources = await assertResourcesVisible("editor inicial");
+  const initialPreview = await assertInspectorPreview("editor inicial");
+  await shot("01-guided-editor-loaded", "editor guiado com recursos carregados");
+  addReportStep(report, "create_and_see_resources", "passed", { projectDir, initialResources, initialPreview });
+
+  // Layout: 1920x1080, 1366x768 and an enlarged interface scale.
+  const layoutControls = ["guided-step-cenario", "guided-step-personagem", "guided-step-regras", "guided-step-sons", "guided-step-testar", "scene-save-status", "inspector-transform-x", "inspector-anim-idle-fps"];
+  const layout = {};
+  layout["1920x1080"] = await assertReachable(layoutControls, "1920x1080");
+  await setSessionWindowRect(sessionId, 1366, 768);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  layout["1366x768"] = await assertReachable(layoutControls, "1366x768");
+  await shot("02-layout-1366x768", "editor guiado em 1366x768");
+  await js(`document.documentElement.style.zoom = "1.25";`);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  layout["1366x768@125%"] = await assertReachable(layoutControls.filter((id) => id.startsWith("guided-step") || id === "scene-save-status"), "1366x768 com escala 125%");
+  await shot("03-layout-scaled", "editor guiado com escala 125%");
+  await js(`document.documentElement.style.zoom = "";`);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  // Keyboard reachability of the guided steps.
+  await js(`document.querySelector('[data-testid="guided-step-cenario"]').focus();`);
+  const focused = await js(`return document.activeElement?.getAttribute('data-testid');`);
+  if (focused !== "guided-step-cenario") fail(`Etapa guiada nao recebe foco pelo teclado: ${focused}`);
+  addReportStep(report, "layout_and_keyboard_reachability", "passed", { layout, focused });
+
+  // 2. Scene: paint a brick, erase one floor cell (visual) and its collision.
+  await click("guided-step-cenario", "etapa Cenario");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="tile-palette-3"]'));`), 15000, "Paleta de tiles ausente.", 200);
+  const worldBounds = (await state())?.activeScene?.worldBounds;
+  const cellPoint = (col, row) => ({
+    x: ((col * 8 + 4) - Number(worldBounds?.minX ?? 0)) / Math.max(1, Number(worldBounds?.maxX ?? 320) - Number(worldBounds?.minX ?? 0)),
+    y: ((row * 8 + 4) - Number(worldBounds?.minY ?? 0)) / Math.max(1, Number(worldBounds?.maxY ?? 224) - Number(worldBounds?.minY ?? 0)),
+  });
+  const paintCell = async (paletteTestId, col, row, label) => {
+    await click(paletteTestId, `paleta ${label}`);
+    const point = cellPoint(col, row);
+    await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", point.x, point.y, label);
+  };
+  const solidBefore = Number((await state())?.activeScene?.collisionSolidCount ?? 0);
+  await paintCell("tile-palette-3", 6, 20, "tijolo em (6,20)");
+  await paintCell("tile-palette-empty", 10, 26, "celula vazia em (10,26)");
+  const cells = await waitFor(async () => {
+    const tilemap = (await state())?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap;
+    const values = tilemap?.cells ?? [];
+    return Number(values[20 * 40 + 6]) === 3 && Number(values[26 * 40 + 10]) === 4294967295 ? values : false;
+  }, 10000, "Pintura/celula vazia nao aplicadas ao tilemap.", 150);
+  await closeVisibleConsoleDrawer(sessionId, "antes do modo colisao");
+  const collisionButton = await js(`const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent?.trim() === 'Modo colisao'); if (b) { b.click(); return true; } return false;`);
+  if (!collisionButton) fail("Botao 'Modo colisao' indisponivel.");
+  const holePoint = cellPoint(10, 26);
+  await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", holePoint.x, holePoint.y, "apagar colisao (10,26)", 2);
+  await waitFor(async () => Number((await state())?.activeScene?.collisionSolidCount ?? 0) === solidBefore - 1, 10000, "Colisao da celula nao foi apagada.", 150);
+  await shot("04-scene-edited", "cenario editado: tijolo e celula vazia sem colisao");
+  addReportStep(report, "scene_edit", "passed", { brick: cells[20 * 40 + 6], empty: cells[26 * 40 + 10], collisionSolid: { before: solidBefore, after: solidBefore - 1 } });
+
+  // 3. Second blocker (duplicate + position) and character animation.
+  await click("guided-step-personagem", "etapa Personagem");
+  await click("hierarchy-entity-passage_blocker", "selecionar bloqueador");
+  await waitSelected("passage_blocker");
+  await click("inspector-duplicate-entity", "duplicar bloqueador");
+  await waitSelected("passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "inspector-transform-x", "120");
+  await waitFor(async () => (await state())?.activeScene?.entities?.find((entity) => entity.id === "passage_blocker_2")?.x === 120, 10000, "Segundo bloqueador nao foi para x=120.", 150);
+  await click("guided-step-personagem", "etapa Personagem");
+  await waitSelected("player");
+  await setInputByTestIdNative(sessionId, "inspector-anim-idle-fps", "12");
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="inspector-anim-idle-fps"]')?.value;`)) === "12", 10000, "FPS do idle nao aplicado.", 150);
+  addReportStep(report, "blocker_and_animation", "passed", { blocker2X: 120, idleFps: 12 });
+
+  // 4. Rules: two independent passages.
+  await click("guided-step-regras", "etapa Regras");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-passages"]')) && Boolean(document.querySelector('[data-testid="nodegraph-rules"]'));`), 15000, "Regras/passagens ausentes.", 200);
+  await setInputByTestIdNative(sessionId, "passage-passage_main-threshold", "12");
+  await selectOption("passage-add-blocker", "passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "passage-add-threshold", "60");
+  await click("passage-add", "adicionar segunda passagem");
+  await waitFor(async () => js(`return document.querySelector('[data-testid="passage-passage_2-openvar"]')?.value === 'passage_2_open' && !document.querySelector('[data-testid="passage-issues"]');`), 10000, "Segunda passagem nao foi criada sem problemas.", 200);
+  const rulesText = await js(`return document.querySelector('[data-testid="nodegraph-rules"]')?.textContent ?? '';`);
+  await shot("05-rules", "regras Quando/Se/Fazer e passagens");
+  addReportStep(report, "passages", "passed", { rulesExcerpt: rulesText.slice(0, 600) });
+
+  // 5. Sounds: bind the completion event to "victory" and preview it.
+  await click("guided-step-sons", "etapa Sons");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="sound-goal_sound-select"]'));`), 10000, "Painel de sons ausente.", 200);
+  await selectOption("sound-goal_sound-select", "victory");
+  await click("sound-goal_sound-preview", "ouvir som associado");
+  const previewState = await waitFor(async () => {
+    const text = await js(`return document.querySelector('[data-testid="sound-goal_sound-preview-state"]')?.textContent ?? '';`);
+    return /Prévia: |Prévia falhou/.test(text) ? text : false;
+  }, 10000, "Previa do som nao respondeu.", 200);
+  if (!/^Prévia: 0\.4/.test(previewState)) fail(`Previa do som associado falhou: ${previewState}`);
+  const soundIssue = await js(`return document.querySelector('[data-testid="sound-goal_sound-issue"]')?.textContent ?? '';`);
+  if (soundIssue) fail(`Som associado reportou problema: ${soundIssue}`);
+  await shot("06-sounds", "som de conclusao associado a victory");
+  addReportStep(report, "sound_binding", "passed", { previewState });
+
+  // 6. Save with a truthful status, check the files, restart the app and reopen.
+  await click("guided-step-personagem", "etapa Personagem");
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="scene-save-status"]')?.dataset.status;`)) === "saved", 20000, "Indicador nao chegou a 'Salvo'.", 200);
+  const graphOnDisk = await readFile(path.join(projectDir, "graphs", "reference_platformer_logic.json"), "utf8");
+  const sceneOnDisk = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  if (!graphOnDisk.includes('"sfx":"victory"') || !graphOnDisk.includes("passage_blocker_2")) fail("Grafo salvo nao contem som/passagem.");
+  if (Number(sceneOnDisk.collision_map.data[26 * 40 + 10]) !== 0) fail("Colisao apagada nao foi salva.");
+  addReportStep(report, "saved", "passed", { saveStatus: "saved" });
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto salvo.", 300);
+  await click("wizard-open-existing-project", "reabrir projeto");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto nao reabriu.", 300);
+  if (!(await js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`))) await click("shell-persona-guiado", "modo guiado apos reinicio");
+  await click("guided-step-personagem", "etapa Personagem apos reinicio");
+  await waitSelected("player");
+  const reopenedResources = await assertResourcesVisible("apos reabrir");
+  const reopenedPreview = await assertInspectorPreview("apos reabrir");
+  const reopenedFps = await js(`return document.querySelector('[data-testid="inspector-anim-idle-fps"]')?.value;`);
+  const reopenedCells = (await state())?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells ?? [];
+  await click("guided-step-regras", "etapa Regras apos reinicio");
+  const reopenedPassages = await waitFor(async () => js(`
+    const v = (id) => document.querySelector('[data-testid="' + id + '"]')?.value ?? null;
+    return v("passage-passage_2-blocker") ? { mainThreshold: v("passage-passage_main-threshold"), second: [v("passage-passage_2-blocker"), v("passage-passage_2-threshold"), v("passage-passage_2-openvar")], sound: v("sound-goal_sound-select") } : false;
+  `), 15000, "Passagens nao reapareceram apos reabrir.", 200);
+  if (reopenedFps !== "12" || Number(reopenedCells[20 * 40 + 6]) !== 3 || Number(reopenedCells[26 * 40 + 10]) !== 4294967295 ||
+      reopenedPassages.mainThreshold !== "12" || reopenedPassages.second.join() !== "passage_blocker_2,60,passage_2_open" || reopenedPassages.sound !== "victory") {
+    fail(`Trabalho nao preservado apos reinicio/reabertura: ${JSON.stringify({ reopenedFps, brick: reopenedCells[20 * 40 + 6], empty: reopenedCells[26 * 40 + 10], reopenedPassages })}`);
+  }
+  await shot("07-reopened", "projeto reaberto com recursos e edicoes");
+  addReportStep(report, "restart_reopen_preserved", "passed", { reopenedResources, reopenedPreview, reopenedFps, reopenedPassages });
+
+  // 7. Build and play with the keyboard until victory.
+  await click("guided-step-testar", "etapa Testar (compilar e jogar)");
+  const running = await waitFor(async () => {
+    const value = await state();
+    const frame = await readCanonicalGameFrame(sessionId);
+    return value?.emulatorLoaded && frame?.renderedFrames > 5 && frame.romSha256 ? { frame } : false;
+  }, 300000, "Build & Run nao iniciou o jogo.", 500);
+  const romPath = path.join(projectDir, "build", "megadrive", "out", "rom.bin");
+  const romCopy = path.join(validationDir, `${artifactPrefix}-played.rom`);
+  await cp(romPath, romCopy);
+  const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
+  if (running.frame.romSha256 !== romSha256) fail(`Game View executa outra ROM: ${JSON.stringify({ running: running.frame.romSha256, romSha256 })}`);
+  const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
+  const invoke = async (command, args = {}) => executeAsyncScript(sessionId, `
+    const done = arguments[arguments.length - 1];
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+  `, [command, args]);
+  // Observation only: WRAM reads never drive the game.
+  const readWord = async (name, width) => {
+    const address = symbols.get(name);
+    if (!Number.isInteger(address)) fail(`Simbolo ${name} ausente.`);
+    const memory = await invoke("emulator_read_memory", { region: 2, offset: address & 0xffff, length: width });
+    const d = memory.value.data;
+    const word = (i) => d[i] | (d[i + 1] << 8);
+    if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
+    const v = ((word(0) << 16) >>> 0) | word(2);
+    return v > 0x7fffffff ? v - 0x100000000 : v;
+  };
+  const observe = async () => ({
+    x: await readWord("spr_player_x", 2),
+    y: await readWord("spr_player_y", 2),
+    score: await readWord("logic_var_reference_score", 4),
+    mainOpen: await readWord("logic_var_goal_open", 4),
+    secondOpen: await readWord("logic_var_passage_2_open", 4),
+    goal: await readWord("logic_var_goal_reached", 4),
+    frames: (await readCanonicalGameProgress(sessionId))?.renderedFrames ?? null,
+    audioTotal: (await js("return window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total;")),
+    t: Date.now(),
+  });
+  const waitAck = (button, expected, context) => waitFor(async () => {
+    const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
+  }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
+  await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
+  await focusGameCanvasNatively(sessionId);
+  const timeline = [];
+  const acks = [];
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "andar para a direita");
+  acks.push(await waitAck("right", true, "segurar direita"));
+  let jumps = 0;
+  let lastJumpAt = 0;
+  const deadline = Date.now() + 240000;
+  let current = await observe();
+  while (current.goal !== 1 && Date.now() < deadline) {
+    timeline.push(current);
+    if (current.y >= 196 && Date.now() - lastJumpAt > 1500) {
+      await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "pular para sair do buraco");
+      acks.push(await waitAck("y", true, "pulo"));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "soltar pulo");
+      acks.push(await waitAck("y", false, "soltar pulo"));
+      jumps += 1;
+      lastJumpAt = Date.now();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    current = await observe();
+  }
+  timeline.push(current);
+  const victory = current;
+  // Let the completion sound play in emulated time, still holding right.
+  const rate = 44100;
+  await waitFor(async () => (await js("return window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total;")) > victory.audioTotal + rate * 2 * 0.8, 60000, "Audio pos-vitoria nao chegou.", 200);
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "soltar direita");
+  acks.push(await waitAck("right", false, "soltar direita"));
+  const timelinePath = path.join(validationDir, `${artifactPrefix}-play-timeline.json`);
+  await writeFile(timelinePath, JSON.stringify(timeline, null, 2));
+  addReportArtifact(report, timelinePath, "linha do tempo do jogo por teclado");
+  await shot("08-victory", "jogo apos vencer pelo teclado");
+  const frameAfter = await readCanonicalGameFrame(sessionId, { includePixels: true });
+
+  const mainOpenedAt = timeline.find((t) => t.mainOpen === 1);
+  const secondOpenedAt = timeline.find((t) => t.secondOpen === 1);
+  const hole = timeline.filter((t) => t.y >= 196);
+  const crossedSecondClosed = timeline.filter((t) => t.secondOpen === 0 && t.x > 106);
+  if (victory.goal !== 1) fail(`Vitoria nao alcancada pelo teclado: ${JSON.stringify(victory)}`);
+  if (!mainOpenedAt || mainOpenedAt.score < 12 || !secondOpenedAt || secondOpenedAt.score < 60 || crossedSecondClosed.length) {
+    fail(`Passagens nao se comportaram durante o jogo: ${JSON.stringify({ mainOpenedAt, secondOpenedAt, crossedSecondClosed: crossedSecondClosed.length })}`);
+  }
+  if (hole.length === 0 || jumps === 0) fail(`Buraco na colisao nao foi observado/atravessado com pulo: ${JSON.stringify({ hole: hole.length, jumps })}`);
+  // Image: the player sprite is on screen at its final position (not just "pixels changed").
+  const playerPixels = (() => {
+    const rgba = frameAfter.rgba;
+    let count = 0;
+    for (let i = 0; i < rgba.length; i += 4) if (Math.abs(rgba[i] - 42) < 20 && Math.abs(rgba[i + 1] - 180) < 20 && Math.abs(rgba[i + 2] - 232) < 20) count += 1;
+    return count;
+  })();
+  if (playerPixels < 20) fail(`Personagem nao aparece no frame apos a vitoria: ${playerPixels}`);
+
+  // Sound at the right event: 1320 Hz (victory) after the win, absent before; 880 Hz
+  // (the unbound default) must not dominate.
+  const window = Math.floor(rate * 2 * 0.6);
+  const after = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [Math.max(0, victory.audioTotal - Math.floor(rate * 2 * 0.3)), window + Math.floor(rate * 2 * 0.3)]);
+  const before = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [Math.max(0, victory.audioTotal - Math.floor(rate * 2 * 1.6)), window]);
+  const power = (samples, sampleRate, frequency) => {
+    const omega = (2 * Math.PI * frequency) / sampleRate;
+    const coeff = 2 * Math.cos(omega);
+    let s1 = 0, s2 = 0, n = 0;
+    for (let i = 0; i < samples.length; i += 2) { const s0 = samples[i] + coeff * s1 - s2; s2 = s1; s1 = s0; n += 1; }
+    return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / Math.max(1, n * n);
+  };
+  const sampleRate = after.sampleRate || rate;
+  const audio = {
+    sampleRate,
+    before: { p1320: power(before.samples, sampleRate, 1320), p880: power(before.samples, sampleRate, 880), n: before.samples.length },
+    after: { p1320: power(after.samples, sampleRate, 1320), p880: power(after.samples, sampleRate, 880), n: after.samples.length },
+    telemetry: await js("return window.__RDS_E2E__.getAudioOutputTelemetry();"),
+  };
+  if (!(audio.after.p1320 > 20 * Math.max(1, audio.before.p1320) && audio.after.p1320 > 5 * Math.max(1, audio.after.p880))) {
+    fail(`Som associado (victory, 1320 Hz) nao foi produzido no evento de vitoria: ${JSON.stringify(audio)}`);
+  }
+  addReportStep(report, "keyboard_play_to_victory", "passed", {
+    rom: { path: romCopy, sha256: romSha256 },
+    acks: acks.length,
+    jumps,
+    mainOpenedAt,
+    secondOpenedAt,
+    holeSamples: hole.length,
+    victory,
+    playerPixels,
+    audio,
+    layers: {
+      generatedByCore: "amostras recebidas pelo app a partir do core (ring buffer), analisadas por Goertzel",
+      forwardedToWebAudio: audio.telemetry,
+      acousticLoopback: "nao medido neste cenario",
+    },
+  });
+  const saved = await writeCreateGameReport(report, reportPath);
+  console.log(`Relatorio: ${saved}`);
+  console.log("OK: Desktop Tauri authoring acceptance (UI guiada, reinicio, teclado ate a vitoria, som associado) passou.");
+}
+
 async function cleanupTemporaryProject(projectDir) {
   if (!projectDir) {
     return true;
@@ -7593,7 +7969,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -7605,7 +7981,8 @@ async function main() {
     options.scenario !== "onboarding-shell" &&
     options.scenario !== "qa-rc" &&
     options.scenario !== "create-game-from-zero" &&
-    options.scenario !== "reference-platformer";
+    options.scenario !== "reference-platformer" &&
+    options.scenario !== "authoring-acceptance";
   let temporaryProjectDir = "";
   let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
@@ -9120,6 +9497,13 @@ async function main() {
       console.log(`Evidencias: ${wizardScreenshot}`);
       console.log(`Evidencias: ${editorScreenshot}`);
       console.log(`Evidencias: ${layerScreenshot}`);
+      return;
+    }
+
+    if (options.scenario === "authoring-acceptance") {
+      await runAuthoringAcceptanceScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
+        temporaryProjectDir = projectDir;
+      });
       return;
     }
 
