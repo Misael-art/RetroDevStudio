@@ -581,6 +581,8 @@ vi.mock("./core/ipc/emulatorService", () => ({
   listenToAudioStream: mocks.listenToAudioStream,
   keyToJoypad: vi.fn(() => null),
   recordAudioOutput: vi.fn(),
+  recordReceivedAudioSamples: vi.fn(),
+  readReceivedAudioSamples: vi.fn(() => ({ total: 0, sampleRate: 0, from: 0, samples: [] })),
   getAudioOutputTelemetry: vi.fn(() => null),
 }));
 

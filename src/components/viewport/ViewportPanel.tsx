@@ -17,6 +17,7 @@ import {
   keyToJoypad,
   listenToAudioStream,
   recordAudioOutput,
+  recordReceivedAudioSamples,
   startFrameLoop,
   type AudioPayload,
   type FramePayload,
@@ -1670,6 +1671,7 @@ export default function ViewportPanel({
       if (left[index] !== 0 || right[index] !== 0) nonZero += 1;
     }
     recordAudioOutput({ addReceived: { frames: frameCount, nonZero } });
+    recordReceivedAudioSamples(payload.samples, payload.sample_rate);
 
     audioQueueRef.current.push({ left, right, offset: 0 });
     const maxQueuedFrames = Math.max(
@@ -5266,7 +5268,25 @@ export default function ViewportPanel({
                   </p>
                 </div>
               )}
-            {activeScene && sceneAssetHealth.referenced > 0 && <SceneAssetHealthBadge health={sceneAssetHealth} />}
+            {activeScene && sceneAssetHealth.referenced > 0 && (
+              <span
+                data-testid="viewport-asset-health-summary"
+                data-ready={sceneAssetHealth.ready}
+                data-referenced={sceneAssetHealth.referenced}
+                data-failed={sceneAssetHealth.failed}
+                data-missing={sceneAssetHealth.missing}
+                data-loading={sceneAssetHealth.loading}
+                className="sr-only"
+              >
+                {sceneAssetHealth.compactSummary}
+              </span>
+            )}
+            {/* Shown only when something needs attention, so it never covers a healthy scene. */}
+            {activeScene &&
+              sceneAssetHealth.referenced > 0 &&
+              (sceneAssetHealth.failed > 0 || sceneAssetHealth.missing > 0 || sceneAssetHealth.legacyFallback > 0) && (
+                <SceneAssetHealthBadge health={sceneAssetHealth} />
+              )}
             <div className="absolute bottom-0 left-0 right-0 shrink-0 border-t border-[#313244] bg-[#181825]/90 px-2 py-1">
             <span className="select-none text-[10px] text-[#6c7086]">
               {activeScene

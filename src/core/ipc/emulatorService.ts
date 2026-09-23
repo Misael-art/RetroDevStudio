@@ -240,6 +240,29 @@ export function recordAudioOutput(update: Partial<AudioOutputTelemetry> & {
   }
 }
 
+/** Last seconds of stereo samples received from the core, addressed by absolute index. */
+const AUDIO_RING_CAPACITY = 44100 * 2 * 10;
+const audioRing = new Int16Array(AUDIO_RING_CAPACITY);
+let audioRingTotal = 0;
+let audioRingSampleRate = 0;
+
+export function recordReceivedAudioSamples(samples: ArrayLike<number>, sampleRate: number): void {
+  audioRingSampleRate = sampleRate;
+  for (let index = 0; index < samples.length; index += 1) {
+    audioRing[(audioRingTotal + index) % AUDIO_RING_CAPACITY] = samples[index];
+  }
+  audioRingTotal += samples.length;
+}
+
+/** Samples [from, from+count) if still in the ring; `total` is the running sample count. */
+export function readReceivedAudioSamples(from: number, count: number): { total: number; sampleRate: number; from: number; samples: number[] } {
+  const start = Math.max(from, audioRingTotal - AUDIO_RING_CAPACITY, 0);
+  const end = Math.min(start + count, audioRingTotal);
+  const samples: number[] = [];
+  for (let index = start; index < end; index += 1) samples.push(audioRing[index % AUDIO_RING_CAPACITY]);
+  return { total: audioRingTotal, sampleRate: audioRingSampleRate, from: start, samples };
+}
+
 export function getAudioOutputTelemetry(): AudioOutputTelemetry {
   return { ...audioOutputTelemetry };
 }

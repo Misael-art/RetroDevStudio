@@ -21,6 +21,7 @@ import {
   emulatorObserve,
   emulatorStop,
   getAudioOutputTelemetry,
+  readReceivedAudioSamples,
   type AudioOutputTelemetry,
 } from "./core/ipc/emulatorService";
 import { inspectRomMastering } from "./core/ipc/projectCapabilityService";
@@ -1453,6 +1454,8 @@ type AutomationApi = {
   pauseEmulator: () => boolean;
   /** Áudio core → WebAudio: recebido do core vs. entregue ao AudioContext. E2E / QA. */
   getAudioOutputTelemetry: () => AudioOutputTelemetry;
+  /** Core samples received by the app (ring buffer, absolute indices). E2E / QA. */
+  readReceivedAudioSamples: (from: number, count: number) => ReturnType<typeof readReceivedAudioSamples>;
   /** Observação do caminho de input do produto. `lastJoypadRequest` é apenas
    * intenção registrada antes do IPC; a prova de entrega é `lastJoypadAck`,
    * gravado somente quando o backend responde `ok: true` para aquela mesma
@@ -3912,6 +3915,7 @@ export default function App() {
         return useEditorStore.getState().emulPaused;
       },
       getAudioOutputTelemetry: () => getAudioOutputTelemetry(),
+      readReceivedAudioSamples: (from: number, count: number) => readReceivedAudioSamples(from, count),
       getLastInputObservation: () => {
         const state = useEditorStore.getState();
         return {
