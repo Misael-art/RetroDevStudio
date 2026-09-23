@@ -143,6 +143,7 @@ export function TilePalette({
   const activeBrush = useEditorStore((s) => s.activeBrush);
   const setActiveBrush = useEditorStore((s) => s.setActiveBrush);
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const editorMode = useEditorStore((s) => s.editorMode);
   const tilePaintTool = useEditorStore((s) => s.tilePaintTool);
   const setTilePaintTool = useEditorStore((s) => s.setTilePaintTool);
   const setActiveTilemapId = useEditorStore((s) => s.setActiveTilemapId);
@@ -293,8 +294,8 @@ export function TilePalette({
         )}
       </div>
 
-      {/* Tool toolbar */}
-      <div className="mt-2 flex gap-1">
+      {/* Tool toolbar (full labels) */}
+      <div className="mt-2 flex flex-wrap gap-1">
         {TILE_TOOL_ORDER.map((tool) => {
           const meta = TILE_TOOL_META[tool];
           const isActive = tilePaintTool === tool;
@@ -302,23 +303,47 @@ export function TilePalette({
             <button
               key={tool}
               type="button"
+              data-testid={`tile-tool-${tool}`}
+              aria-pressed={isActive && editorMode === "paint"}
               title={meta.hint}
               onClick={() => {
                 setTilePaintTool(tool);
                 setEditorMode("paint");
                 setActiveTilemapId(tilemapEntityId);
               }}
-              className={`flex-1 rounded border px-1 py-1 text-[10px] transition-colors ${
-                isActive
+              className={`flex-1 whitespace-nowrap rounded border px-1.5 py-1 text-[10px] transition-colors ${
+                isActive && editorMode === "paint"
                   ? "bg-[#89b4fa]/20 border-[#89b4fa] text-[#89b4fa]"
                   : "border-[#313244] bg-[#181825] text-[#a6adc8] hover:border-[#45475a]"
               }`}
             >
-              {meta.icon}
+              {meta.icon} {meta.label}
             </button>
           );
         })}
+        <button
+          type="button"
+          data-testid="tile-tool-collision"
+          aria-pressed={editorMode === "collision"}
+          title="Colisão: clique esquerdo marca a célula como sólida, clique direito libera. Tecla C."
+          onClick={() => {
+            setActiveTilemapId(tilemapEntityId);
+            setEditorMode("collision");
+          }}
+          className={`flex-1 whitespace-nowrap rounded border px-1.5 py-1 text-[10px] transition-colors ${
+            editorMode === "collision"
+              ? "bg-[#f38ba8]/20 border-[#f38ba8] text-[#f38ba8]"
+              : "border-[#313244] bg-[#181825] text-[#a6adc8] hover:border-[#45475a]"
+          }`}
+        >
+          ▦ Colisão
+        </button>
       </div>
+      {editorMode === "collision" && (
+        <p data-testid="tile-collision-hint" className="mt-1 text-[10px] text-[#f38ba8]">
+          Colisão: esquerdo = sólido · direito = livre (o personagem para nas laterais e pousa em cima).
+        </p>
+      )}
 
       {/* Status readout */}
       <div className="mt-2 flex items-center justify-between text-[9px] text-[#7f849c]">

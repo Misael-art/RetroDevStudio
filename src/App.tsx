@@ -12,6 +12,7 @@ import UnifiedTopBar, {
   type UnifiedTopBarSection,
 } from "./components/common/UnifiedTopBar";
 import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
+import { buildTilemapAuthoringBrush } from "./core/entityAuthoring";
 import LayerPanel from "./components/hierarchy/LayerPanel";
 import type { ToolTab, ToolWorkspace } from "./components/tools/ToolsPanel";
 import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
@@ -5354,6 +5355,8 @@ export default function App() {
         <GuidedStepBar
           activeWorkspace={activeWorkspace}
           onOpenWorkspace={(workspace) => handleWorkspaceSelect(workspace)}
+          onOpenPalette={() => openToolsWorkspace("palette", "editing")}
+          onOpenInspector={() => setRightPanelMode("inspector")}
           onTest={() => void handleBuildAndRun()}
         />
       ) : null}
@@ -5628,10 +5631,14 @@ type GuidedStepId = "cenario" | "personagem" | "regras" | "sons" | "testar";
 function GuidedStepBar({
   activeWorkspace,
   onOpenWorkspace,
+  onOpenPalette,
+  onOpenInspector,
   onTest,
 }: {
   activeWorkspace: string;
   onOpenWorkspace: (workspace: "scene" | "logic") => void;
+  onOpenPalette: () => void;
+  onOpenInspector: () => void;
   onTest: () => void;
 }) {
   const scene = useEditorStore((state) => state.activeScene);
@@ -5655,8 +5662,14 @@ function GuidedStepBar({
         onOpenWorkspace("scene");
         select(tilemapId);
         if (tilemapId) {
-          useEditorStore.getState().setActiveTilemapId(tilemapId);
-          useEditorStore.getState().setEditorMode("paint");
+          // Same path as the Hierarchy "Editar" action on a tilemap.
+          const store = useEditorStore.getState();
+          store.setActiveViewportTab("scene");
+          store.setActiveTilemapId(tilemapId);
+          store.setEditorMode("paint");
+          const brush = buildTilemapAuthoringBrush(entities.find((entity) => entity.entity_id === tilemapId) ?? null);
+          if (brush) store.setActiveBrush(brush);
+          onOpenPalette();
         }
       },
     },
@@ -5668,6 +5681,7 @@ function GuidedStepBar({
         onOpenWorkspace("scene");
         useEditorStore.getState().setEditorMode("select");
         select(playerId);
+        onOpenInspector();
       },
     },
     {

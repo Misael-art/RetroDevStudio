@@ -4869,7 +4869,8 @@ export default function ViewportPanel({
                 }}
                 title="Clique para selecionar. Arraste para mover. Espaço+arraste ou botão do meio: pan. Ctrl+Scroll: zoom."
               />
-              {editorMode === "paint" && activeBrush?.kind === "tile" && activeScene ? (
+              {/* Guided mode docks the palette in the side panel instead of over the scene. */}
+              {editorMode === "paint" && activeBrush?.kind === "tile" && activeScene && loadShellPersona() !== "guiado" ? (
                 <div
                   data-testid="viewport-tile-paint-flow-strip"
                   className="absolute z-[6] flex max-h-[min(42vh,340px)] w-full max-w-full flex-col overflow-hidden rounded border border-[#313244] bg-[#11111b]/96 shadow-lg"

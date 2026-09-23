@@ -6000,8 +6000,8 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
     return Number(values[20 * 40 + 6]) === 3 && Number(values[26 * 40 + 10]) === 4294967295 ? values : false;
   }, 10000, "Pintura/celula vazia nao aplicadas ao tilemap.", 150);
   await closeVisibleConsoleDrawer(sessionId, "antes do modo colisao");
-  const collisionButton = await js(`const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent?.trim() === 'Modo colisao'); if (b) { b.click(); return true; } return false;`);
-  if (!collisionButton) fail("Botao 'Modo colisao' indisponivel.");
+  await click("tile-tool-collision", "ferramenta Colisao da paleta");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="tile-collision-hint"]'));`), 5000, "Modo colisao nao ativou.", 100);
   const holePoint = cellPoint(10, 26);
   await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", holePoint.x, holePoint.y, "apagar colisao (10,26)", 2);
   await waitFor(async () => Number((await state())?.activeScene?.collisionSolidCount ?? 0) === solidBefore - 1, 10000, "Colisao da celula nao foi apagada.", 150);
