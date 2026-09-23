@@ -5232,21 +5232,32 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   await closeVisibleConsoleDrawer(sessionId, "reference platformer movement input");
   await focusGameCanvasNatively(sessionId);
   const beforeControls = await readCanonicalGameFrame(sessionId, { includePixels: true });
-  let gameplayEpoch = null;
-  const sendCoreGameplayInput = async (joypad) => {
-    gameplayEpoch ??= (await invokeCore("emulator_get_core_epoch")).value;
-    return invokeCore("emulator_send_input", { joypad, sessionEpoch: gameplayEpoch });
+  // Symbols of the ROM currently running (the tilemap-authored rebuild overwrote rom.out).
+  const jumpSymbols = parseElf32Symbols(await readFile(elfPath));
+  const readPlayerS16 = async (name) => {
+    const address = jumpSymbols.get(name);
+    if (!Number.isInteger(address) || ![0x00ff, 0xe0ff].includes(address >>> 16)) {
+      fail(`Simbolo ${name} ausente ou fora da System RAM: ${address}`);
+    }
+    const memory = await invokeCore("emulator_read_memory", { region: 2, offset: address & 0xffff, length: 2 });
+    if (!memory?.ok || !memory.value?.data || memory.value.data.length < 2) {
+      fail(`Leitura da System RAM para ${name} falhou: ${JSON.stringify(memory)}`);
+    }
+    const word = memory.value.data[0] | (memory.value.data[1] << 8);
+    return word > 0x7fff ? word - 0x10000 : word;
   };
-  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "reference movement");
-  const rightAck = await waitFor(
+  const waitNativeAck = (button, expected, context) => waitFor(
     async () => {
       const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-      return observation?.lastJoypadAck?.joypad?.right === true ? observation : false;
+      return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation : false;
     },
     3000,
-    "ArrowRight nao foi confirmado para o template de referencia.",
-    100
-  ).catch(async () => ({ fallback: true, coreAck: await sendCoreGameplayInput({ ...neutralGoalInput, right: true }) }));
+    `${context}: ACK nativo (${button}=${expected}) nao observado; falha do caminho de input, sem fallback no core.`,
+    50
+  );
+  const movementStartX = await readPlayerS16("spr_player_x");
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "reference movement");
+  const rightAck = await waitNativeAck("right", true, "movimento");
   const movementFrame = await waitFor(
     async () => {
       const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
@@ -5256,108 +5267,84 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     "Movimento do template de referencia nao avancou frames.",
     100
   );
-  const rightReleaseAck = rightAck.fallback
-    ? { fallback: true, coreAck: await sendCoreGameplayInput(neutralGoalInput) }
-    : await (async () => {
-        await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "reference movement release");
-        return waitFor(
-          async () => {
-            const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-            return observation?.lastJoypadAck?.joypad?.right === false ? observation : false;
-          },
-          10000,
-          "liberacao de ArrowRight nao foi confirmada para a referencia.",
-          100
-        );
-      })();
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "reference movement release");
+  const rightReleaseAck = await waitNativeAck("right", false, "liberacao do movimento");
+  const movementEndX = await readPlayerS16("spr_player_x");
   const movementDiffPixels = beforeControls.rgba.reduce(
     (count, value, index) => count + (value === movementFrame.rgba[index] ? 0 : 1),
     0
   );
-  if (movementDiffPixels === 0) {
-    fail("Movimento confirmado pelo ACK nao alterou o framebuffer da referencia.");
+  if (movementEndX <= movementStartX || movementDiffPixels === 0) {
+    fail(`ArrowRight nativo nao moveu o personagem na RAM/tela: ${JSON.stringify({ movementStartX, movementEndX, movementDiffPixels })}`);
   }
+  addReportStep(report, "movement_native_input_ram", "passed", {
+    startX: movementStartX,
+    endX: movementEndX,
+    diffPixels: movementDiffPixels,
+    ack: rightAck?.lastJoypadAck ?? null,
+    releaseAck: rightReleaseAck?.lastJoypadAck ?? null,
+  });
 
-  const beforeJump = movementFrame;
-  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump");
-  const jumpAck = await waitFor(
-    async () => {
-      const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-      return observation?.lastJoypadAck?.joypad?.a === true ? observation : false;
-    },
-    3000,
-    "KeyZ/A nao foi confirmado para o salto da referencia.",
-    100
-  ).catch(async () => ({ fallback: true, coreAck: await sendCoreGameplayInput({ ...neutralGoalInput, a: true }) }));
-  const jumpFrame = await waitFor(
-    async () => {
-      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
-      return frame && frame.renderedFrames > beforeJump.renderedFrames + 12 ? frame : false;
-    },
-    20000,
-    "Salto do template de referencia nao avancou frames.",
-    100
-  );
-  const jumpReleaseAck = jumpAck.fallback
-    ? { fallback: true, coreAck: await sendCoreGameplayInput(neutralGoalInput) }
-    : await (async () => {
-        await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
-        return waitFor(
-          async () => {
-            const observation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
-            return observation?.lastJoypadAck?.joypad?.a === false ? observation : false;
-          },
-          10000,
-          "liberacao de KeyZ/A nao foi confirmada para a referencia.",
-          100
-        );
-      })();
-  const jumpDiffPixels = beforeJump.rgba.reduce(
-    (count, value, index) => count + (value === jumpFrame.rgba[index] ? 0 : 1),
-    0
-  );
-  if (jumpDiffPixels === 0) {
-    const jumpDiagnostic = {
-      before: {
-        width: beforeJump.width,
-        height: beforeJump.height,
-        rgbaBytes: beforeJump.rgbaBytes,
-        renderedFrames: beforeJump.renderedFrames,
-        framebufferSha256: beforeJump.framebufferSha256,
-        magentaLikeBounds: beforeJump.magentaLikeBounds,
-        sonicRoiMagentaLikeBounds: beforeJump.sonicRoiMagentaLikeBounds,
-      },
-      after: {
-        width: jumpFrame.width,
-        height: jumpFrame.height,
-        rgbaBytes: jumpFrame.rgbaBytes,
-        renderedFrames: jumpFrame.renderedFrames,
-        framebufferSha256: jumpFrame.framebufferSha256,
-        magentaLikeBounds: jumpFrame.magentaLikeBounds,
-        sonicRoiMagentaLikeBounds: jumpFrame.sonicRoiMagentaLikeBounds,
-      },
-      jumpDiffPixels,
-      jumpAck: jumpAck?.lastJoypadAck ?? null,
-      jumpReleaseAck: jumpReleaseAck?.lastJoypadAck ?? null,
-      generatedMain: report.artifacts.find((artifact) => artifact.label === "generated main.c")?.path ?? null,
-    };
-    const jumpDiagnosticPath = path.join(validationDir, `${artifactPrefix}-jump-diagnostic.json`);
-    await writeFile(jumpDiagnosticPath, JSON.stringify(jumpDiagnostic, null, 2));
-    await captureScreenshot(sessionId, `${artifactPrefix}-04-jump-before.png`);
-    await captureScreenshot(sessionId, `${artifactPrefix}-05-jump-after.png`);
-    addReportStep(report, "optional_jump_visual_smoke", "inconclusive", {
-      reason: jumpAck?.fallback === true
-        ? "O ACK nativo de A nao foi observado e o fallback nao produziu diferenca visual; este check generico nao faz parte da aceitacao da passagem."
-        : "O ACK nativo de A foi recebido, mas a observacao posterior nao diferenciou os frames; este check generico nao faz parte da aceitacao da passagem.",
-      diagnostic: jumpDiagnosticPath,
-    });
-  } else {
-    addReportStep(report, "optional_jump_visual_smoke", "passed", {
-      jumpDiffPixels,
-      jumpAck: jumpAck?.lastJoypadAck ?? jumpAck?.coreAck ?? null,
-      fallback: jumpAck?.fallback === true,
-    });
+  // Mandatory jump contract: native KeyZ through the real keyboard path (no core fallback),
+  // with the player's Y read from its ELF symbol in System RAM: rise, apex, fall, landing.
+  // Genesis Plus GX binds RetroPad Y to Mega Drive A, so the ACK must carry joypad.y.
+  const sampleJump = async (label, durationMs, onSample) => {
+    const samples = [];
+    const deadline = Date.now() + durationMs;
+    while (Date.now() < deadline) {
+      const progress = await readCanonicalGameProgress(sessionId);
+      const y = await readPlayerS16("spr_player_y");
+      samples.push({ label, y, renderedFrames: progress?.renderedFrames ?? null, t: Date.now() });
+      if (onSample) await onSample(samples);
+    }
+    return samples;
+  };
+  const waitJoypadY = (expected, context) => waitNativeAck("y", expected, `${context} (KeyZ = RetroPad Y = Mega Drive A)`);
+  const groundSamples = await sampleJump("ground", 400);
+  const groundY = groundSamples[groundSamples.length - 1].y;
+  if (!groundSamples.every((sample) => sample.y === groundY)) {
+    fail(`Personagem nao estava parado no chao antes do salto: ${JSON.stringify(groundSamples)}`);
   }
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump");
+  const jumpAck = await waitJoypadY(true, "salto");
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
+  const jumpReleaseAck = await waitJoypadY(false, "liberacao do salto");
+  const jumpSamples = await sampleJump("jump", 1500);
+  const apexIndex = jumpSamples.reduce((best, sample, index) => (sample.y < jumpSamples[best].y ? index : best), 0);
+  const apexY = jumpSamples[apexIndex].y;
+  const fellAfterApex = jumpSamples.slice(apexIndex).some((sample) => sample.y > apexY);
+  const landedY = jumpSamples[jumpSamples.length - 1].y;
+  const jumpTrajectory = { groundY, apexY, lift: groundY - apexY, fellAfterApex, landedY, samples: jumpSamples };
+  if (groundY - apexY < 4 || !fellAfterApex || landedY !== groundY) {
+    await writeFile(path.join(validationDir, `${artifactPrefix}-jump-trajectory.json`), JSON.stringify(jumpTrajectory, null, 2));
+    fail(`Salto por KeyZ nativo nao comprovou subida, queda e retorno ao chao: ${JSON.stringify({ groundY, apexY, fellAfterApex, landedY })}`);
+  }
+  // Negative: holding the key must not keep the player airborne (edge-triggered input_pressed).
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump hold");
+  await waitJoypadY(true, "salto segurado");
+  const heldSamples = await sampleJump("held", 1500);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump hold release");
+  await waitJoypadY(false, "liberacao do salto segurado");
+  const heldLanded = heldSamples[heldSamples.length - 1].y;
+  const heldLifted = heldSamples.some((sample) => sample.y < groundY);
+  if (heldLanded !== groundY || !heldLifted) {
+    fail(`Segurar KeyZ deveria saltar uma vez e pousar ainda segurado: ${JSON.stringify({ groundY, heldLanded, heldLifted, heldSamples })}`);
+  }
+  const jumpTrajectoryPath = path.join(validationDir, `${artifactPrefix}-jump-trajectory.json`);
+  await writeFile(jumpTrajectoryPath, JSON.stringify({ ...jumpTrajectory, held: { landedY: heldLanded, lifted: heldLifted, samples: heldSamples } }, null, 2));
+  addReportArtifact(report, jumpTrajectoryPath, "native KeyZ jump trajectory from RAM");
+  addReportStep(report, "jump_native_input_ram_trajectory", "passed", {
+    groundY,
+    apexY,
+    lift: groundY - apexY,
+    fellAfterApex,
+    landedY,
+    heldLandedWhileHeld: heldLanded,
+    ack: jumpAck?.lastJoypadAck ?? null,
+    releaseAck: jumpReleaseAck?.lastJoypadAck ?? null,
+    trajectory: jumpTrajectoryPath,
+  });
+  const jumpFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
 
   await closeVisibleConsoleDrawer(sessionId, "reference platformer gameplay");
   await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar reference platformer");
@@ -5380,8 +5367,8 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   );
   report.input = {
     before: { frame: beforeControls.renderedFrames, sha256: beforeControls.framebufferSha256 },
-    movement: { frame: movementFrame.renderedFrames, sha256: movementFrame.framebufferSha256, diffBytes: movementDiffPixels, ack: rightAck?.lastJoypadAck ?? null, releaseAck: rightReleaseAck?.lastJoypadAck ?? null },
-    jump: { frame: jumpFrame.renderedFrames, sha256: jumpFrame.framebufferSha256, diffBytes: jumpDiffPixels, ack: jumpAck?.lastJoypadAck ?? jumpAck?.coreAck ?? null, fallback: jumpAck?.fallback === true, releaseAck: jumpReleaseAck?.lastJoypadAck ?? jumpReleaseAck?.coreAck ?? null },
+    movement: { frame: movementFrame.renderedFrames, sha256: movementFrame.framebufferSha256, diffBytes: movementDiffPixels, startX: movementStartX, endX: movementEndX, ack: rightAck?.lastJoypadAck ?? null, releaseAck: rightReleaseAck?.lastJoypadAck ?? null },
+    jump: { frame: jumpFrame.renderedFrames, sha256: jumpFrame.framebufferSha256, ack: jumpAck?.lastJoypadAck ?? null, releaseAck: jumpReleaseAck?.lastJoypadAck ?? null, groundY, apexY, landedY },
     pause: { paused, resumed },
   };
   report.frames.push({ label: "movement", width: movementFrame.width, height: movementFrame.height, non_black_pixels: movementFrame.nonBlackPixels, sha256: movementFrame.framebufferSha256 });
@@ -5389,7 +5376,6 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   addReportStep(report, "movement_pause_resume", "passed", {
     movement: report.input.movement,
     pause: report.input.pause,
-    jumpVisualSmoke: jumpDiffPixels > 0 ? "passed" : "inconclusive",
   });
   addReportArtifact(
     report,

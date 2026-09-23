@@ -520,6 +520,8 @@ export default function ViewportPanel({
   const activeTabRef = useRef(activeViewportTab);
   const pausedRef = useRef(emulPaused);
   const joypadRef = useRef<JoypadState>(JOYPAD_DEFAULT);
+  const joypadPlatformRef = useRef<"megadrive" | "snes">("megadrive");
+  joypadPlatformRef.current = activeTarget === "snes" ? "snes" : "megadrive";
   const joypadSeqRef = useRef(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioGainRef = useRef<GainNode | null>(null);
@@ -2074,7 +2076,7 @@ export default function ViewportPanel({
         return;
       }
 
-      const updated = keyToJoypad(joypadRef.current, event.code, true);
+      const updated = keyToJoypad(joypadRef.current, event.code, true, joypadPlatformRef.current);
       if (!updated) return;
 
       event.preventDefault();
@@ -2083,7 +2085,7 @@ export default function ViewportPanel({
     }
 
     function onKeyUp(event: KeyboardEvent) {
-      const updated = keyToJoypad(joypadRef.current, event.code, false);
+      const updated = keyToJoypad(joypadRef.current, event.code, false, joypadPlatformRef.current);
       if (!updated) return;
 
       joypadRef.current = updated;

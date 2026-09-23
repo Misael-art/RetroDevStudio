@@ -4983,9 +4983,15 @@ mod tests {
         assert!(emitted
             .main_c
             .contains("if ((JOY_readJoypad(JOY_1) & BUTTON_RIGHT)) {"));
+        // input_pressed is a rising edge, not a held state.
+        assert!(emitted.main_c.contains(
+            "if (((JOY_readJoypad(JOY_1) & BUTTON_A) && !(rds_joy_prev_1 & BUTTON_A))) {"
+        ));
+        assert!(emitted.main_c.contains("static u16 rds_joy_prev_1 = 0;"));
         assert!(emitted
             .main_c
-            .contains("if ((JOY_readJoypad(JOY_1) & BUTTON_A)) {"));
+            .contains("rds_joy_prev_1 = JOY_readJoypad(JOY_1);\n        SYS_doVBlankProcess();"));
+        assert!(emitted.main_c.contains("static s16 spr_player_x = "));
         assert!(emitted.main_c.contains("logic_var_player_vx = 2;"));
         assert!(emitted.main_c.contains("logic_var_player_vy = 0;"));
         assert!(emitted.main_c.contains("spr_player_x = 72;"));
@@ -5011,10 +5017,10 @@ mod tests {
             .contains("SPR_setVisibility(spr_enemy, VISIBLE);"));
         assert!(emitted
             .main_c
-            .contains("XGM_startPlayPCM(SFX_STEP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_STEP, 1, SOUND_PCM_CH2);"));
         assert!(emitted
             .main_c
-            .contains("XGM_startPlayPCM(SFX_FIRE, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_FIRE, 1, SOUND_PCM_CH2);"));
         assert!(emitted
             .main_c
             .contains("SPR_setVisibility(spr_enemy, HIDDEN);"));

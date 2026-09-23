@@ -206,15 +206,35 @@ export async function listenToAudioStream(
 
 // ── Keyboard → JoypadState mapping ───────────────────────────────────────────
 
-/** Mapeia teclas do teclado para botões do Mega Drive */
-const KEY_MAP: Record<string, keyof JoypadState> = {
+export type JoypadPlatform = "megadrive" | "snes";
+
+/**
+ * Teclado → RetroPad. Os campos de `JoypadState` sao ids do RetroPad Libretro,
+ * nao botoes do console. O Genesis Plus GX liga RetroPad Y→A, B→B e A→C do
+ * Mega Drive (verificado com ROM SGDK real: so `y` aciona `BUTTON_A`), entao
+ * Z/X/C precisam mirar Y/B/A para chegarem como A/B/C no jogo.
+ */
+const MEGADRIVE_KEY_MAP: Record<string, keyof JoypadState> = {
   ArrowUp:    "up",
   ArrowDown:  "down",
   ArrowLeft:  "left",
   ArrowRight: "right",
-  KeyZ:       "a",    // A (Mega Drive)
-  KeyX:       "b",    // B
-  KeyC:       "y",    // C → Y (superset)
+  KeyZ:       "y",    // Mega Drive A
+  KeyX:       "b",    // Mega Drive B
+  KeyC:       "a",    // Mega Drive C
+  Enter:      "start",
+  ShiftRight: "select",
+};
+
+/** SNES: RetroPad segue o layout nativo do controle. */
+const SNES_KEY_MAP: Record<string, keyof JoypadState> = {
+  ArrowUp:    "up",
+  ArrowDown:  "down",
+  ArrowLeft:  "left",
+  ArrowRight: "right",
+  KeyZ:       "a",
+  KeyX:       "b",
+  KeyC:       "y",
   Enter:      "start",
   ShiftRight: "select",
 };
@@ -222,9 +242,10 @@ const KEY_MAP: Record<string, keyof JoypadState> = {
 export function keyToJoypad(
   current: JoypadState,
   key: string,
-  pressed: boolean
+  pressed: boolean,
+  platform: JoypadPlatform = "megadrive"
 ): JoypadState | null {
-  const button = KEY_MAP[key];
+  const button = (platform === "snes" ? SNES_KEY_MAP : MEGADRIVE_KEY_MAP)[key];
   if (!button) return null;
   return { ...current, [button]: pressed };
 }

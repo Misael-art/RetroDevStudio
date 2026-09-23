@@ -170,6 +170,18 @@ fn build_main_c_with_collision(
     if !logic_vars.is_empty() {
         out.push('\n');
     }
+    // Sprite positions live at file scope so the runtime state is addressable by ELF symbol
+    // (observable in System RAM) instead of being register/stack-only locals of main().
+    let sprite_positions = collect_sprite_position_vars(ast);
+    for (var_name, x, y) in &sprite_positions {
+        out.push_str(&format!("static s16 {var_name}_x = {x};\n"));
+        out.push_str(&format!("static s16 {var_name}_y = {y};\n"));
+    }
+    if !sprite_positions.is_empty() {
+        out.push('\n');
+    }
+    // Resolved after the body is rendered: only declared when edge input / music guards are used.
+    out.push_str(RUNTIME_STATE_DECL_MARKER);
     if has_rom_addq_word {
         out.push_str(
             "static volatile u32 *const rds_logic_recovery_oracle_value = (volatile u32 *)0xE0FFFF00;\n",
@@ -248,22 +260,6 @@ fn build_main_c_with_collision(
     if runtime_probe_enabled {
         out.push_str("    rds_probe_last_tick = getTick();\n");
         out.push_str("    rds_probe_emulation_status = 1;\n");
-    }
-    let sprite_positions = collect_sprite_position_vars(ast);
-    for (var_name, x, y) in &sprite_positions {
-        out.push_str(&format!(
-            "    s16 {var_name}_x = {x};\n",
-            var_name = var_name,
-            x = x
-        ));
-        out.push_str(&format!(
-            "    s16 {var_name}_y = {y};\n",
-            var_name = var_name,
-            y = y
-        ));
-    }
-    if !sprite_positions.is_empty() {
-        out.push('\n');
     }
     if let Some((plane_width, plane_height)) = plane_size_for_tilemaps(&tilemap_assets) {
         out.push_str(&format!(
@@ -613,6 +609,7 @@ fn build_main_c_with_collision(
                 out.push_str("        SPR_update();\n");
             }
             AstNode::VSync => {
+                out.push_str(JOY_PREV_UPDATE_MARKER);
                 out.push_str("        SYS_doVBlankProcess();\n");
             }
             AstNode::GameLoopEnd => {
@@ -622,7 +619,42 @@ fn build_main_c_with_collision(
     }
 
     out.push_str("\n    return 0;\n}\n");
-    out
+    resolve_runtime_state_markers(out)
+}
+
+const RUNTIME_STATE_DECL_MARKER: &str = "/*RDS_RUNTIME_STATE_DECL*/\n";
+const JOY_PREV_UPDATE_MARKER: &str = "/*RDS_JOY_PREV_UPDATE*/\n";
+const SGDK_JOY_PORTS: [&str; 4] = ["JOY_1", "JOY_2", "JOY_3", "JOY_4"];
+
+fn pad_suffix(port: &str) -> &str {
+    port.strip_prefix("JOY_").unwrap_or("1")
+}
+
+/// Declares `rds_joy_prev_N` (edge detection for `input_pressed`) and `rds_music_current`
+/// (idempotent `play_music`) only when the rendered body references them.
+fn resolve_runtime_state_markers(out: String) -> String {
+    let used_ports: Vec<&str> = SGDK_JOY_PORTS
+        .iter()
+        .copied()
+        .filter(|port| out.contains(&format!("!(rds_joy_prev_{} &", pad_suffix(port))))
+        .collect();
+    let mut decls = String::new();
+    let mut updates = String::new();
+    for port in &used_ports {
+        let suffix = pad_suffix(port);
+        decls.push_str(&format!("static u16 rds_joy_prev_{suffix} = 0;\n"));
+        updates.push_str(&format!(
+            "        rds_joy_prev_{suffix} = JOY_readJoypad({port});\n"
+        ));
+    }
+    if out.contains("rds_music_current != ") {
+        decls.push_str("static const u8* rds_music_current = NULL;\n");
+    }
+    if !decls.is_empty() {
+        decls.push('\n');
+    }
+    out.replacen(RUNTIME_STATE_DECL_MARKER, &decls, 1)
+        .replace(JOY_PREV_UPDATE_MARKER, &updates)
 }
 
 fn build_resources_res(ast: &AstOutput) -> String {
@@ -1468,7 +1500,9 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
             }
             LogicOp::PlaySound { sfx } => {
                 out.push_str(&format!(
-                    "{indent}XGM_startPlayPCM(SFX_{sfx}, 1, SOUND_PCM_CH_AUTO);\n",
+                    // XGM (v1) only accepts SOUND_PCM_CH1..CH4; CH_AUTO is an XGM2/DPCM2 value and
+                    // makes the call a silent no-op. CH1 is left to the music.
+                    "{indent}XGM_startPlayPCM(SFX_{sfx}, 1, SOUND_PCM_CH2);\n",
                     indent = indent_str,
                     sfx = sfx.to_uppercase()
                 ));
@@ -1486,12 +1520,13 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     ));
                 }
                 _ => {
+                    // Idempotent: a play node reached every frame must not restart the track.
                     out.push_str(&format!(
-                            "{indent}XGM_startPlay({track}); /* fade_ms: {fade_ms} - suporte futuro */\n",
-                            indent = indent_str,
-                            track = track,
-                            fade_ms = fade_ms,
-                        ));
+                        "{indent}if (rds_music_current != {track} || !XGM_isPlaying()) {{ XGM_startPlay({track}); rds_music_current = {track}; }} /* fade_ms: {fade_ms} - suporte futuro */\n",
+                        indent = indent_str,
+                        track = track,
+                        fade_ms = fade_ms,
+                    ));
                 }
             },
             LogicOp::SetVar { var_name, value } => {
@@ -1793,9 +1828,22 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
         LogicBoolExpr::Literal(value) => {
             if *value { "TRUE".to_string() } else { "FALSE".to_string() }
         }
-        LogicBoolExpr::Input { pad, button, .. } => {
+        LogicBoolExpr::Input {
+            pad,
+            button,
+            pressed,
+        } => {
             let button_mask = sgdk_button_mask(button).unwrap_or("BUTTON_A");
-            format!("(JOY_readJoypad({}) & {})", sgdk_joypad_port(pad), button_mask)
+            let port = sgdk_joypad_port(pad);
+            if *pressed {
+                // Rising edge: held now, released on the previous frame.
+                format!(
+                    "((JOY_readJoypad({port}) & {button_mask}) && !(rds_joy_prev_{suffix} & {button_mask}))",
+                    suffix = pad_suffix(port)
+                )
+            } else {
+                format!("(JOY_readJoypad({}) & {})", port, button_mask)
+            }
         }
         LogicBoolExpr::InputCommand {
             command_id,
@@ -2901,7 +2949,10 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("XGM_startPlay(stage_theme); /* fade_ms: 500 - suporte futuro */"));
+            .contains("if (rds_music_current != stage_theme || !XGM_isPlaying()) { XGM_startPlay(stage_theme); rds_music_current = stage_theme; } /* fade_ms: 500 - suporte futuro */"));
+        assert!(output
+            .main_c
+            .contains("static const u8* rds_music_current = NULL;"));
         assert!(output
             .main_c
             .contains("XGM_stopPlay(); /* fade_ms: 0 - suporte futuro */"));
@@ -3408,7 +3459,7 @@ mod tests {
         ));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH2);"));
     }
 
     #[test]
@@ -3465,11 +3516,11 @@ mod tests {
         assert!(output.main_c.contains("if ((logic_var_score >= 10)) {"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_WIN, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_WIN, 1, SOUND_PCM_CH2);"));
         assert!(output.main_c.contains("} else {"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_LOSE, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_LOSE, 1, SOUND_PCM_CH2);"));
     }
 
     #[test]
@@ -3647,7 +3698,7 @@ mod tests {
             .contains("for (s16 idx = 0; idx < 3; idx++) {"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH2);"));
     }
 
     #[test]
@@ -3696,7 +3747,7 @@ mod tests {
         assert!(output.main_c.contains("case 30:"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH2);"));
     }
 
     #[test]
@@ -3747,6 +3798,6 @@ mod tests {
             .contains("SYS_setHIntCallback(retro_on_hblank);"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH2);"));
     }
 }

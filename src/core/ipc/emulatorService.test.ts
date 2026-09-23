@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import {
+  keyToJoypad,
   emulatorPlayReplay,
   emulatorReadMemory,
   emulatorStartRecording,
@@ -88,5 +89,28 @@ describe("replay commands", () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(3, "emulator_play_replay", {
       replayPath: "F:/Projects/Test/replay.rds-replay",
     });
+  });
+});
+
+describe("keyToJoypad", () => {
+  const idle = {
+    b: false, y: false, select: false, start: false, up: false, down: false,
+    left: false, right: false, a: false, x: false, l: false, r: false,
+  };
+
+  it("routes Z/X/C to the RetroPad ids Genesis Plus GX binds to Mega Drive A/B/C", () => {
+    expect(keyToJoypad(idle, "KeyZ", true)).toEqual({ ...idle, y: true });
+    expect(keyToJoypad(idle, "KeyX", true, "megadrive")).toEqual({ ...idle, b: true });
+    expect(keyToJoypad(idle, "KeyC", true, "megadrive")).toEqual({ ...idle, a: true });
+    expect(keyToJoypad({ ...idle, y: true }, "KeyZ", false)).toEqual(idle);
+  });
+
+  it("keeps the native RetroPad layout for SNES", () => {
+    expect(keyToJoypad(idle, "KeyZ", true, "snes")).toEqual({ ...idle, a: true });
+    expect(keyToJoypad(idle, "KeyC", true, "snes")).toEqual({ ...idle, y: true });
+  });
+
+  it("ignores unmapped keys", () => {
+    expect(keyToJoypad(idle, "KeyQ", true)).toBeNull();
   });
 });

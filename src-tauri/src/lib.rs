@@ -8842,6 +8842,375 @@ pub extern "C" fn retro_run() {
         let _ = fs::remove_dir_all(project_base_dir);
     }
 
+    /// Minimal ELF32 symbol reader for the SGDK-linked `out/rom.out` (mirrors the E2E harness).
+    fn reference_elf32_symbols(elf: &[u8]) -> HashMap<String, u32> {
+        assert!(
+            elf.len() >= 52 && &elf[0..4] == b"\x7fELF" && elf[4] == 1,
+            "ELF32 esperado"
+        );
+        let le = elf[5] == 1;
+        let r16 = |o: usize| {
+            let b = [elf[o], elf[o + 1]];
+            if le {
+                u16::from_le_bytes(b)
+            } else {
+                u16::from_be_bytes(b)
+            }
+        };
+        let r32 = |o: usize| {
+            let b = [elf[o], elf[o + 1], elf[o + 2], elf[o + 3]];
+            if le {
+                u32::from_le_bytes(b)
+            } else {
+                u32::from_be_bytes(b)
+            }
+        };
+        let sh_off = r32(32) as usize;
+        let sh_size = r16(46) as usize;
+        let sh_count = r16(48) as usize;
+        let mut symbols = HashMap::new();
+        for index in 0..sh_count {
+            let section = sh_off + index * sh_size;
+            let kind = r32(section + 4);
+            if kind != 2 && kind != 11 {
+                continue;
+            }
+            let table = r32(section + 16) as usize;
+            let table_size = r32(section + 20) as usize;
+            let strtab = sh_off + r32(section + 24) as usize * sh_size;
+            let entry = r32(section + 36) as usize;
+            let strings = r32(strtab + 16) as usize;
+            let mut cursor = table;
+            while entry >= 16 && cursor + 16 <= table + table_size {
+                let name_offset = r32(cursor) as usize;
+                if name_offset > 0 {
+                    let start = strings + name_offset;
+                    if let Some(len) = elf[start..].iter().position(|b| *b == 0) {
+                        let name = String::from_utf8_lossy(&elf[start..start + len]).to_string();
+                        symbols.insert(name, r32(cursor + 4));
+                    }
+                }
+                cursor += entry;
+            }
+        }
+        symbols
+    }
+
+    /// Reads a big-endian 68K value of `width` bytes from System RAM (region 2). The core
+    /// exposes WRAM as native-endian 16-bit words, so each word is byte-swapped back.
+    fn reference_read_ram(
+        emulator: &EmulatorCore,
+        symbols: &HashMap<String, u32>,
+        name: &str,
+        width: usize,
+    ) -> i64 {
+        let address = *symbols
+            .get(name)
+            .unwrap_or_else(|| panic!("simbolo {name} ausente no ELF"));
+        assert!(
+            matches!(address >> 16, 0x00ff | 0xe0ff),
+            "{name} fora da System RAM: {address:#x}"
+        );
+        let (data, _) = emulator
+            .read_memory(2, (address & 0xffff) as usize, width)
+            .expect("read System RAM");
+        assert_eq!(data.len(), width, "leitura curta de {name}");
+        let mut value: u32 = 0;
+        for word in data.chunks_exact(2) {
+            value = (value << 16) | u32::from(u16::from_le_bytes([word[0], word[1]]));
+        }
+        match width {
+            2 => i64::from(value as u16 as i16),
+            _ => i64::from(value as i32),
+        }
+    }
+
+    /// Real SGDK + official Libretro core contract for the reference template:
+    /// (1) jump: one A press at the real joypad produces rise, apex, fall and return to the
+    /// ground, read from the player's position symbol in RAM; holding A must not keep lifting
+    /// (edge-triggered `input_pressed`). (2) goal SFX: the core's sample stream diverges from a
+    /// no-event control only at/after the frame the sensor event fires, while the BGM alone
+    /// is deterministic (control vs. control identical, and non-silent).
+    ///
+    /// `cargo test --manifest-path src-tauri/Cargo.toml reference_platformer_real_jump_and_goal_audio_contract --lib -- --ignored --nocapture --test-threads=1`
+    #[ignore]
+    #[test]
+    fn reference_platformer_real_jump_and_goal_audio_contract() {
+        let project_base_dir = temp_dir("reference-platformer-jump-audio");
+        let create_result = create_project_from_template(
+            "Reference Platformer".to_string(),
+            "megadrive".to_string(),
+            project_base_dir.to_string_lossy().to_string(),
+            "reference_platformer".to_string(),
+            None,
+        )
+        .expect("create reference platformer project");
+        let project_dir = PathBuf::from(&create_result.path);
+        let environment = BuildEnvironment::detect();
+        assert!(
+            environment
+                .sgdk_root
+                .as_ref()
+                .is_some_and(|root| root.join("makefile.gen").is_file())
+                && environment.sgdk_make_program.is_some(),
+            "official SGDK real nao detectado; esta prova nao aceita fake toolchain"
+        );
+        let build_result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(
+            build_result.ok,
+            "reference build failed: {:?}",
+            build_result.log
+        );
+        let rom_path = PathBuf::from(&build_result.rom_path);
+        let rom_path = if rom_path.is_absolute() {
+            rom_path
+        } else {
+            project_dir.join(rom_path)
+        };
+        let elf = fs::read(project_dir.join("build/megadrive/out/rom.out")).expect("read ELF");
+        let symbols = reference_elf32_symbols(&elf);
+        let neutral = JoypadState::default();
+
+        let boot = |emulator: &mut EmulatorCore| {
+            emulator.load_rom(&rom_path).expect("load reference ROM");
+            emulator.set_joypad(neutral.clone()).expect("neutral input");
+            for _ in 0..120 {
+                emulator.run_frame().expect("warmup frame");
+            }
+            let _ = emulator.take_audio_samples();
+        };
+
+        // ── (1) Jump contract ────────────────────────────────────────────────
+        let mut emulator = EmulatorCore::new(None);
+
+        boot(&mut emulator);
+        let ground_y = reference_read_ram(&emulator, &symbols, "spr_player_y", 2);
+        let ground_vy = reference_read_ram(&emulator, &symbols, "spr_player_vel_y", 4);
+        let start_x = reference_read_ram(&emulator, &symbols, "spr_player_x", 2);
+        // Gravity accumulates sub-pixel velocity (/16) until the floor clamp resets it, so
+        // "resting" means |vel_y| < 16 (less than one pixel per frame) on the floor.
+        assert!(
+            ground_vy.abs() < 16,
+            "player deve estar em repouso no chao antes do salto: vy={ground_vy}"
+        );
+        let mut trajectory = Vec::new();
+        for frame in 0..90 {
+            // Genesis Plus GX binds RetroPad Y to Mega Drive A (B->B, A->C).
+            let md_a = frame < 3; // short press, then release
+            emulator
+                .set_joypad(JoypadState {
+                    y: md_a,
+                    ..JoypadState::default()
+                })
+                .expect("jump input");
+            emulator.run_frame().expect("jump frame");
+            trajectory.push((
+                reference_read_ram(&emulator, &symbols, "spr_player_y", 2),
+                reference_read_ram(&emulator, &symbols, "spr_player_vel_y", 4),
+            ));
+        }
+        println!("jump ground_y={ground_y} start_x={start_x} trajectory={trajectory:?}");
+        let apex_index = (0..trajectory.len())
+            .min_by_key(|i| trajectory[*i].0)
+            .unwrap();
+        let apex_y = trajectory[apex_index].0;
+        assert!(
+            ground_y - apex_y >= 4,
+            "salto deve subir pelo menos 4px: ground={ground_y} apex={apex_y}"
+        );
+        assert!(
+            trajectory[..apex_index]
+                .windows(2)
+                .all(|w| w[1].0 <= w[0].0),
+            "subida deve ser monotonica ate o apice"
+        );
+        assert!(
+            trajectory[apex_index..].windows(2).any(|w| w[1].0 > w[0].0),
+            "depois do apice deve haver queda"
+        );
+        let landed = trajectory.last().copied().unwrap();
+        assert!(
+            landed.0 == ground_y && landed.1.abs() < 16,
+            "player deve retornar ao chao e parar: {landed:?}"
+        );
+        assert_eq!(
+            reference_read_ram(&emulator, &symbols, "spr_player_x", 2),
+            start_x,
+            "salto vertical nao deve deslocar x"
+        );
+
+        // Negative: holding A continuously must not keep the player airborne.
+        boot(&mut emulator);
+        emulator
+            .set_joypad(JoypadState {
+                y: true,
+                ..JoypadState::default()
+            })
+            .expect("hold A");
+        let mut held = Vec::new();
+        for _ in 0..90 {
+            emulator.run_frame().expect("held frame");
+            held.push(reference_read_ram(&emulator, &symbols, "spr_player_y", 2));
+        }
+        println!("jump held-A trajectory={held:?}");
+        assert_eq!(
+            *held.last().unwrap(),
+            ground_y,
+            "segurar A nao pode manter o personagem voando (input_pressed com borda)"
+        );
+
+        // ── (2) Goal SFX observed in the core sample stream ─────────────────
+        // Control = same project/code/input, with only the goal SFX payload silenced (same
+        // length). Moving sprites perturb Z80/XGM timing, so a different-input control would
+        // diverge for reasons unrelated to the event; this control isolates the sample data.
+        fn copy_tree(from: &Path, to: &Path) {
+            fs::create_dir_all(to).expect("mkdir control copy");
+            for entry in fs::read_dir(from).expect("read project dir") {
+                let entry = entry.expect("dir entry");
+                let target = to.join(entry.file_name());
+                if entry.file_type().expect("file type").is_dir() {
+                    if entry.file_name() != "build" {
+                        copy_tree(&entry.path(), &target);
+                    }
+                } else {
+                    fs::copy(entry.path(), &target).expect("copy project file");
+                }
+            }
+        }
+        let control_dir = project_base_dir.join("control-silenced-goal-sfx");
+        copy_tree(&project_dir, &control_dir);
+        let control_wav =
+            control_dir.join(crate::core::project_mgr::REFERENCE_PLATFORMER_GOAL_SOUND_ASSET);
+        let mut wav = fs::read(&control_wav).expect("read goal wav");
+        assert!(
+            wav.len() > 44 && wav[44..].iter().any(|b| *b != 0),
+            "goal wav deve ter payload audivel"
+        );
+        for byte in &mut wav[44..] {
+            *byte = 0;
+        }
+        fs::write(&control_wav, &wav).expect("write silenced goal wav");
+        let control_build = run_build_with_environment(&control_dir, &environment, |_| {});
+        assert!(
+            control_build.ok,
+            "control build failed: {:?}",
+            control_build.log
+        );
+        let control_rom = PathBuf::from(&control_build.rom_path);
+        let control_rom = if control_rom.is_absolute() {
+            control_rom
+        } else {
+            control_dir.join(control_rom)
+        };
+        let control_elf =
+            fs::read(control_dir.join("build/megadrive/out/rom.out")).expect("control ELF");
+        assert_eq!(
+            reference_elf32_symbols(&control_elf).get("main"),
+            symbols.get("main"),
+            "controle deve ter o mesmo layout de codigo"
+        );
+
+        let run_audio = |emulator: &mut EmulatorCore, rom: &Path, frames: usize| {
+            emulator.load_rom(rom).expect("load audio ROM");
+            emulator.set_joypad(neutral.clone()).expect("neutral input");
+            for _ in 0..120 {
+                emulator.run_frame().expect("warmup frame");
+            }
+            let _ = emulator.take_audio_samples();
+            emulator
+                .set_joypad(JoypadState {
+                    right: true,
+                    ..JoypadState::default()
+                })
+                .expect("right input");
+            let mut samples: Vec<i16> = Vec::new();
+            let mut frame_offsets = Vec::new();
+            let mut goal_frame = None;
+            let mut rate = 0;
+            for frame in 0..frames {
+                frame_offsets.push(samples.len());
+                emulator.run_frame().expect("audio frame");
+                let (r, chunk) = emulator.take_audio_samples().expect("audio samples");
+                rate = r;
+                samples.extend(chunk);
+                if goal_frame.is_none()
+                    && reference_read_ram(emulator, &symbols, "logic_var_goal_reached", 4) == 1
+                {
+                    goal_frame = Some(frame);
+                }
+            }
+            (rate, samples, frame_offsets, goal_frame)
+        };
+        let frames = 160;
+        let (rate, event_samples, event_offsets, goal_frame) =
+            run_audio(&mut emulator, &rom_path, frames);
+        let (_, event_repeat, _, _) = run_audio(&mut emulator, &rom_path, frames);
+        let (_, control_samples, _, control_goal) = run_audio(&mut emulator, &control_rom, frames);
+        let goal_frame = goal_frame.expect("sensor de objetivo deve disparar com Right");
+        assert_eq!(
+            control_goal,
+            Some(goal_frame),
+            "controle deve disparar o mesmo evento no mesmo frame"
+        );
+        assert!(rate > 0, "core deve reportar sample rate");
+        assert_eq!(
+            event_samples, event_repeat,
+            "stream deve ser deterministico para a mesma ROM/input"
+        );
+        assert!(
+            control_samples.iter().any(|s| *s != 0),
+            "BGM do controle deve produzir amostras nao silenciosas"
+        );
+        let common = event_samples.len().min(control_samples.len());
+        let first_divergence = (0..common).find(|i| event_samples[*i] != control_samples[*i]);
+        let event_offset = event_offsets[goal_frame];
+        let frame_energy = |f: usize| -> i64 {
+            let a = event_offsets[f];
+            let b = event_offsets
+                .get(f + 1)
+                .copied()
+                .unwrap_or(common)
+                .min(common);
+            (a..b)
+                .map(|i| (i64::from(event_samples[i]) - i64::from(control_samples[i])).abs())
+                .sum()
+        };
+        let profile: Vec<i64> = (0..event_offsets.len()).map(frame_energy).collect();
+        println!(
+            "goal audio rate={rate} goal_frame={goal_frame} event_offset={event_offset} first_divergence={first_divergence:?} samples={common} diff_profile={profile:?}"
+        );
+        let first_divergence =
+            first_divergence.expect("SFX de objetivo deve alterar o stream do core");
+        assert!(
+            first_divergence >= event_offset,
+            "stream divergiu antes do evento: divergence={first_divergence} event_offset={event_offset}"
+        );
+        let divergence_frame = event_offsets
+            .iter()
+            .rposition(|o| *o <= first_divergence)
+            .unwrap();
+        assert!(
+            // XGM queues the PCM command for the Z80; a few frames of driver latency are expected.
+            divergence_frame <= goal_frame + 6,
+            "SFX deve surgir logo apos o evento: frame {divergence_frame} vs evento {goal_frame}"
+        );
+        let window: i64 = profile[goal_frame..(goal_frame + 30).min(frames)]
+            .iter()
+            .sum();
+        assert!(
+            window > 100_000,
+            "janela do evento sem energia do SFX: {window}"
+        );
+        // The one-shot effect ends: the tail of the run is identical to the control again.
+        assert!(
+            profile[frames - 20..].iter().all(|e| *e == 0),
+            "SFX nao deveria persistir/repetir depois da janela do evento"
+        );
+
+        emulator.stop().expect("stop reference emulator");
+        let _ = fs::remove_dir_all(project_base_dir);
+    }
+
     #[test]
     fn diff_asset_fingerprints_detects_added_changed_and_removed_assets() {
         let previous = HashMap::from([
