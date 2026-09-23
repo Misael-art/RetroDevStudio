@@ -2499,9 +2499,19 @@ export default function ViewportPanel({
           const hasCells =
             Array.isArray(cellsArr) &&
             cellsArr.length === expectedCells &&
-            cellsArr.some((v) => (v | 0) > 0);
+            cellsArr.some((v) => v > 0);
           if (hasCells) {
-            // WYSIWYG: desenha cada célula pintada com slice real do tileset.
+            // Same as the ROM: the base map, then the edited cells on top.
+            drawRepeatedAsset(
+              context,
+              tilemapAsset,
+              bounds.x,
+              bounds.y,
+              bounds.width,
+              bounds.height,
+              tilemap.scroll_x ?? 0,
+              tilemap.scroll_y ?? 0
+            );
             drawTilemapCells(
               context,
               tilemapAsset,
