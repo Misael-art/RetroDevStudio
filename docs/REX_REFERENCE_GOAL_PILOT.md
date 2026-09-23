@@ -58,3 +58,44 @@ Após a sequência longa até o sensor, `goal_reached=1` foi lido na RAM nas dua
 - O perfil e a funcionalidade permanecem **Experimental**, sem promoção ou merge.
 
 As regressões ADDQ e branch-compare usam as fixtures duráveis em `src-tauri/tests/fixtures/logic_recovery_sgdk/` e `src-tauri/tests/fixtures/logic_recovery_branch_sgdk/`. Corpus BYOR local, ROM comercial e arquivos de terceiros não fazem parte desta entrega.
+
+## Checkpoint 2026-09-23 — fluxo autoral reutilizável (Experimental)
+
+E2E desktop `src-tauri/target-test/validation/reference-platformer-2026-09-23T02-17-00-937Z-report.json`, binário `src-tauri/target-test/debug/retro-dev-studio` SHA `95095d3daa0b57cfdfbfcf429e803328c15f085e80b9130ce67e48c0ee7adec3`, commit `c3f6de4`. Todos os 15 passos passaram.
+
+### Defeitos de produto encontrados e corrigidos
+
+| Defeito | Efeito observado | Correção |
+| --- | --- | --- |
+| `KeyZ → RetroPad A` no Mega Drive | No Genesis Plus GX RetroPad Y/B/A = MD A/B/C; Z chegava como C, o salto nativo nunca ocorria (era a causa do "inconclusivo") | Mapa por plataforma: Z→Y (MD A), X→B, C→A; SNES inalterado |
+| Build & Run não atualizava `coreEpoch` | Após qualquer recarga, o backend recusava todo input de teclado (`ACK=0`); o fallback direto no core do harness antigo mascarava isso | Build & Run ancora a época nova com o mesmo hold de sessão |
+| `input_pressed` emitido como "segurado" | Segurar A mantinha o personagem voando | Borda de subida (`rds_joy_prev_N`) |
+| `XGM_startPlayPCM(..., SOUND_PCM_CH_AUTO)` | Valor só válido em XGM2/DPCM2; no XGM v1 a chamada é no-op — **nenhum SFX tocava** (a prova anterior de "chamada PCM no C" não implicava som) | `SOUND_PCM_CH2` |
+| `play_music` a cada frame | BGM reiniciada todo frame | Idempotente (`rds_music_current`/`XGM_isPlaying`) |
+| Passagem só bloqueava ao mover para a direita | Pela esquerda atravessava fechada; sobreposto ficava preso | `condition_overlap` com `probe_dx` ("entraria no AABB"); gate nos dois sentidos |
+| Entidades com mesmo asset colapsavam num sprite | Bloqueador duplicado não existia na ROM | Uma instância runtime por entidade |
+| `rds_collision_map` não usado | Pintar colisão não tinha efeito físico | Chão por coluna a partir do mapa (pouso ao cair; células apagadas = fosso) |
+| `source_line` fixo (24) com grafo em linha única | Source mapping não apontava a linha real | Grafo gravado um nó por linha; `source_line` recalculado ao salvar |
+
+### Matriz
+
+| Capacidade | Classificação | Evidência |
+| --- | --- | --- |
+| Movimento por teclado nativo | Funcional pela interface | ACK `right=true`, `spr_player_x` 32→58 na RAM, sem fallback no core |
+| Salto por teclado nativo | Funcional pela interface (tempo avançado pelo core, input pelo caminho real) | y 192→185→192; segurado pousa em 192 |
+| Salto/ápice/queda/pouso, segurar A | Comprovado por teste técnico | `reference_platformer_real_jump_and_goal_audio_contract` (SGDK+core oficiais) |
+| SFX de vitória gerado pelo core | Comprovado por teste técnico | Controle com o mesmo código/input e WAV silenciado: stream idêntico até o evento (frame 52), rajada nos frames 56–70, volta a idêntico; BGM determinística e não silenciosa |
+| Áudio encaminhado ao dispositivo | Funcional (camada WebAudio) | `receivedNonZeroFrames=7358`, `renderedNonZeroFrames=6624`, `AudioContext=running`, 44100 Hz |
+| Captura acústica/loopback | Inconclusivo | `parec @DEFAULT_MONITOR@` não retornou amostras neste host |
+| Passagem pelos dois lados / sobreposto | Comprovado por teste técnico | `reference_platformer_real_passage_gating_contract`: para em x=36 (esq.), x=66 (dir.), sai quando começa dentro |
+| Segunda passagem configurada pela UI | Funcional pela interface | Inspector "Duplicar" + X=120; painel "Passagens" limiar 60; salvar/fechar/reabrir preserva refs; ROM `5d624f9f…`: principal abre no score 12 com a 2ª fechada, jogador segura em x=106 por 13 frames, 2ª abre no 60, x final 206 |
+| Colisão pintada na física da ROM | Comprovado por teste técnico | Fosso x=80..95: parado sobre ele cai a y=208; piso não editado mantém 192 |
+| Colisão/cenário pela UI até a ROM | Parcial | Tilemap visual pela UI já comprovado; colisão pela UI + física ainda sem E2E |
+| Animação, regra com validação pela UI, autoria sem preparação, reinserção gráfica | Não implementado nesta fatia | — |
+
+### Limites
+
+- Sem paredes de tile horizontais: andando, o jogador sobe a borda de um fosso raso.
+- O salto no E2E avança frames pelo core com o jogo pausado; o loop de frames do WebView é lento sob WebDriver. O estado da tecla segue o caminho real (evento nativo → frontend → ACK).
+- `sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing` falhou uma vez na suíte paralela e passa isolado (corrida de variável de ambiente preexistente).
+- Tudo segue **Experimental**, restrito ao template SGDK/Mega Drive.
