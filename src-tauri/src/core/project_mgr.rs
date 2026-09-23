@@ -31,9 +31,9 @@ pub const ONBOARDING_SPRITE_SIZE: u32 = 16;
 pub const PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/platformer_player.png";
 pub const PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/platformer_level.png";
 pub const PLATFORMER_JUMP_ASSET: &str = "assets/audio/jump.wav";
-pub const REFERENCE_PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/reference_player.ppm";
-pub const REFERENCE_PLATFORMER_GOAL_ASSET: &str = "assets/sprites/reference_goal.ppm";
-pub const REFERENCE_PLATFORMER_PASSAGE_ASSET: &str = "assets/sprites/reference_passage.ppm";
+pub const REFERENCE_PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/reference_player.png";
+pub const REFERENCE_PLATFORMER_GOAL_ASSET: &str = "assets/sprites/reference_goal.png";
+pub const REFERENCE_PLATFORMER_PASSAGE_ASSET: &str = "assets/sprites/reference_passage.png";
 pub const REFERENCE_PLATFORMER_GOAL_SOUND_ASSET: &str = "assets/audio/reference_goal.wav";
 /// Alternative completion sound offered by the template (declared, unused by default).
 pub const REFERENCE_PLATFORMER_VICTORY_SOUND_ASSET: &str = "assets/audio/reference_victory.wav";
@@ -14846,17 +14846,17 @@ pub fn seed_reference_platformer_template(
     write_reference_asset(
         project_dir,
         REFERENCE_PLATFORMER_PLAYER_ASSET,
-        reference_player_ppm(),
+        reference_player_png(),
     )?;
     write_reference_asset(
         project_dir,
         REFERENCE_PLATFORMER_GOAL_ASSET,
-        reference_goal_ppm(),
+        reference_goal_png(),
     )?;
     write_reference_asset(
         project_dir,
         REFERENCE_PLATFORMER_PASSAGE_ASSET,
-        reference_passage_ppm(),
+        reference_passage_png(),
     )?;
     write_reference_asset(
         project_dir,
@@ -14959,10 +14959,31 @@ fn reference_ppm(width: u32, height: u32, mut pixel: impl FnMut(u32, u32) -> [u8
     bytes
 }
 
-fn reference_player_ppm() -> Vec<u8> {
+fn reference_sprite_png(
+    width: u32,
+    height: u32,
+    transparent_key: [u8; 3],
+    mut pixel: impl FnMut(u32, u32) -> [u8; 3],
+) -> Vec<u8> {
+    let rgba = image::RgbaImage::from_fn(width, height, |x, y| {
+        let rgb = pixel(x, y);
+        let alpha = if rgb == transparent_key { 0 } else { 255 };
+        image::Rgba([rgb[0], rgb[1], rgb[2], alpha])
+    });
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(rgba)
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("encoding a generated in-memory PNG cannot fail");
+    bytes
+}
+
+fn reference_player_png() -> Vec<u8> {
     // Five 16x16 poses share one silhouette, designed from the original fox
-    // concept art in data/reference_platformer_art. PPM pixel 0 is the SGDK
-    // transparency key; the outline, ears, scarf and toy sword stay legible at
+    // concept art in data/reference_platformer_art. PNG alpha becomes SGDK
+    // palette index 0; the outline, ears, scarf and toy sword stay legible at
     // the native sprite size rather than relying on a high-resolution mockup.
     const FOX: [&str; 16] = [
         "....K....K......",
@@ -14982,7 +15003,7 @@ fn reference_player_ppm() -> Vec<u8> {
         "....KBBBK.......",
         "....KBBBK.......",
     ];
-    reference_ppm(80, 16, |x, y| {
+    reference_sprite_png(80, 16, [12, 20, 32], |x, y| {
         let frame = x / 16;
         let local_x = x % 16;
         let source_y = if frame == 4 { y + 1 } else { y };
@@ -15037,8 +15058,8 @@ fn reference_player_ppm() -> Vec<u8> {
     })
 }
 
-fn reference_goal_ppm() -> Vec<u8> {
-    reference_ppm(16, 16, |x, y| {
+fn reference_goal_png() -> Vec<u8> {
+    reference_sprite_png(16, 16, [20, 28, 44], |x, y| {
         if (2..=3).contains(&x) && (2..=15).contains(&y) {
             if y % 4 == 0 {
                 [229, 177, 101]
@@ -15061,8 +15082,8 @@ fn reference_goal_ppm() -> Vec<u8> {
     })
 }
 
-fn reference_passage_ppm() -> Vec<u8> {
-    reference_ppm(16, 32, |x, y| {
+fn reference_passage_png() -> Vec<u8> {
+    reference_sprite_png(16, 32, [20, 28, 44], |x, y| {
         let post = (1..=3).contains(&x) || (12..=14).contains(&x);
         let beam = (2..=5).contains(&y) && (1..=14).contains(&x);
         let bars = (8..=28).contains(&y)
@@ -18884,14 +18905,28 @@ void tick_player(void) {\n\
     #[test]
     fn reference_platformer_art_fits_native_sizes_and_md_palette_slots() {
         let scene = reference_platformer_scene();
-        let check = |bytes: Vec<u8>, width: usize, height: usize, slot: u8| {
-            let header = format!("P6\n{width} {height}\n255\n");
-            let pixels = bytes
-                .strip_prefix(header.as_bytes())
-                .expect("PPM dimensions and format");
-            assert_eq!(pixels.len(), width * height * 3);
+        let check = |bytes: Vec<u8>, width: usize, height: usize, slot: u8, needs_alpha: bool| {
+            let rgba = image::load_from_memory(&bytes)
+                .expect("generated image decodes")
+                .to_rgba8();
+            assert_eq!(rgba.dimensions(), (width as u32, height as u32));
+            let pixels = rgba.as_raw();
+            let transparent = pixels.chunks_exact(4).filter(|pixel| pixel[3] == 0).count();
+            if needs_alpha {
+                assert!(
+                    transparent > width,
+                    "sprite must contain transparent pixels"
+                );
+                assert_eq!(
+                    pixels[3], 0,
+                    "upper-left pixel must map to SGDK palette index 0"
+                );
+            } else {
+                assert_eq!(transparent, 0, "tilemap must remain opaque");
+            }
             let colors = pixels
-                .chunks_exact(3)
+                .chunks_exact(4)
+                .filter(|pixel| pixel[3] != 0)
                 .map(|pixel| format!("#{:02X}{:02X}{:02X}", pixel[0], pixel[1], pixel[2]))
                 .collect::<std::collections::HashSet<_>>();
             let palette = &scene
@@ -18905,19 +18940,19 @@ void tick_player(void) {\n\
                 colors.iter().all(|color| palette.contains(color)),
                 "slot {slot}: image colors missing from scene palette: {colors:?}"
             );
-            pixels.to_vec()
+            rgba.into_raw()
         };
-        let fox = check(reference_player_ppm(), 80, 16, 1);
-        check(reference_goal_ppm(), 16, 16, 2);
-        check(reference_passage_ppm(), 16, 32, 3);
-        check(reference_tileset_ppm(), 320, 224, 0);
+        let fox = check(reference_player_png(), 80, 16, 1, true);
+        check(reference_goal_png(), 16, 16, 2, true);
+        check(reference_passage_png(), 16, 32, 3, true);
+        check(reference_tileset_ppm(), 320, 224, 0, false);
 
         let count_color = |frame: usize, color: [u8; 3]| {
             (0..16)
                 .flat_map(|y| (0..16).map(move |x| (y, x)))
                 .filter(|&(y, x)| {
-                    let offset = (y * 80 + frame * 16 + x) * 3;
-                    fox[offset..offset + 3] == color
+                    let offset = (y * 80 + frame * 16 + x) * 4;
+                    fox[offset..offset + 3] == color && fox[offset + 3] == 255
                 })
                 .count()
         };
@@ -18935,7 +18970,7 @@ void tick_player(void) {\n\
                 "frame {frame}: sword"
             );
         }
-        assert_ne!(&fox[0..16 * 3], &fox[4 * 16 * 3..5 * 16 * 3]);
+        assert_ne!(&fox[0..16 * 4], &fox[4 * 16 * 4..5 * 16 * 4]);
     }
 
     #[test]

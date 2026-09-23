@@ -6241,7 +6241,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
     secondOpenedAt,
     holeSamples: hole.length,
     victory,
-    playerPixels,
+    foxFurPixels,
     audio,
     layers: {
       generatedByCore: "amostras recebidas pelo app a partir do core (ring buffer), analisadas por Goertzel",
