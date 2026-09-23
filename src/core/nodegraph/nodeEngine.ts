@@ -43,7 +43,8 @@ export type NodeGraphValidationIssue = {
     | "input_command_unbound"
     | "missing_animation"
     | "broken_entity_ref"
-    | "invalid_param";
+    | "invalid_param"
+    | "missing_sfx";
   message: string;
   nodeId?: string;
   edgeId?: string;
@@ -443,6 +444,30 @@ function nodeParamIssues(node: GraphNode, context?: NodeGraphValidationContext):
       nodeId: node.id,
       message: `No '${node.label}': operador '${String(node.params.operator)}' invalido (use ==, !=, <, <=, >, >=).`,
     });
+  }
+  if (node.type === "action_sound" && (context?.selectedEntity || context?.sceneEntities?.length)) {
+    // The compiler declares SFX from every entity's AudioComponent.
+    const sfx: Record<string, string> = {};
+    for (const entity of [...(context?.sceneEntities ?? []), ...(context?.selectedEntity ? [context.selectedEntity] : [])]) {
+      Object.assign(sfx, entity.components.audio?.sfx ?? {});
+    }
+    const name = String(node.params.sfx ?? "");
+    const asset = sfx[name];
+    if (!asset) {
+      issues.push({
+        severity: "error",
+        code: "missing_sfx",
+        nodeId: node.id,
+        message: `No '${node.label}': som '${name}' nao existe nos efeitos da cena (${Object.keys(sfx).join(", ") || "nenhum"}).`,
+      });
+    } else if (!/\.wav$/i.test(asset)) {
+      issues.push({
+        severity: "error",
+        code: "missing_sfx",
+        nodeId: node.id,
+        message: `No '${node.label}': som '${name}' usa '${asset}'; o driver XGM do Mega Drive so aceita WAV.`,
+      });
+    }
   }
   if ((node.type === "var_get" || node.type === "var_set") && !VAR_IDENTIFIER.test(String(node.params.var_name ?? ""))) {
     issues.push({

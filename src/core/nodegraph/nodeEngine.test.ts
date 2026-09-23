@@ -347,3 +347,31 @@ describe("validateNodeGraph param and reference checks", () => {
     expect(result.errors.filter((issue) => ["broken_entity_ref", "invalid_param"].includes(issue.code))).toEqual([]);
   });
 });
+
+describe("validateNodeGraph sound references", () => {
+  const soundNode = (sfx: string) => ({
+    ...NODE_DEFS.action_sound,
+    id: "goal_sound",
+    label: "Goal Sound",
+    x: 0,
+    y: 0,
+    inputs: clonePorts(NODE_DEFS.action_sound.inputs),
+    outputs: clonePorts(NODE_DEFS.action_sound.outputs),
+    params: { sfx },
+  });
+  const player = {
+    entity_id: "player",
+    prefab: null,
+    transform: { x: 0, y: 0 },
+    components: { audio: { sfx: { jump: "assets/audio/jump.wav", voice: "assets/audio/voice.mp3" } } },
+  };
+
+  it("flags a sound that the entity does not declare and a non-WAV resource", () => {
+    const missing = validateNodeGraph({ nodes: [soundNode("goal_sound")], edges: [] }, { selectedEntity: player as never });
+    expect(missing.errors.find((issue) => issue.code === "missing_sfx")?.message).toContain("'goal_sound' nao existe nos efeitos da cena");
+    const mp3 = validateNodeGraph({ nodes: [soundNode("voice")], edges: [] }, { selectedEntity: player as never });
+    expect(mp3.errors.find((issue) => issue.code === "missing_sfx")?.message).toContain("so aceita WAV");
+    const ok = validateNodeGraph({ nodes: [soundNode("jump")], edges: [] }, { selectedEntity: player as never });
+    expect(ok.errors.filter((issue) => issue.code === "missing_sfx")).toEqual([]);
+  });
+});

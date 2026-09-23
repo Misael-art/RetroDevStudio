@@ -239,6 +239,8 @@ const VALID_EXEC_ENTITY = buildLogicSpriteEntity("hero", "Hero", VALID_EXEC_GRAP
     },
   ],
 });
+// The valid graph plays the "miss" sound, so its entity declares that SFX resource.
+VALID_EXEC_ENTITY.components.audio = { sfx: { miss: "assets/audio/miss.wav" } };
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;

@@ -29,6 +29,7 @@ import {
 // local) vive em src/core/nodegraph/nodeEngine.ts; este arquivo re-exporta a
 // superficie publica para preservar os consumidores existentes.
 export { EVENT_NODE_TYPES, validateNodeGraph } from "../../core/nodegraph/nodeEngine";
+import { readProjectAssetBytes } from "../../core/ipc/toolsService";
 import {
   addPassage,
   listPassages,
@@ -1759,6 +1760,97 @@ function PassagePanel({
   );
 }
 
+/**
+ * Sound bindings: every action_sound node of the graph, with a picker over the SFX the
+ * entity declares (name -> WAV), a real preview of that WAV and validation of missing or
+ * incompatible resources. Changing the picker edits the node's `sfx` param only.
+ */
+function SoundPanel({
+  graph,
+  sfx,
+  projectDir,
+  onGraphChange,
+}: {
+  graph: NodeGraph;
+  sfx: Record<string, string>;
+  projectDir: string | null;
+  onGraphChange: (graph: NodeGraph) => void;
+}) {
+  const soundNodes = graph.nodes.filter((node) => node.type === "action_sound");
+  const [previewState, setPreviewState] = useState<Record<string, string>>({});
+  if (soundNodes.length === 0) return null;
+  const names = Object.keys(sfx).sort();
+  const issueFor = (name: string): string | null => {
+    const asset = sfx[name];
+    if (!asset) return `Som '${name}' não existe nos efeitos da cena.`;
+    if (!/\.wav$/i.test(asset)) return `Som '${name}' usa '${asset}', mas o Mega Drive (XGM) só aceita WAV.`;
+    return null;
+  };
+  async function preview(nodeId: string, name: string) {
+    const asset = sfx[name];
+    if (!asset || !projectDir) return;
+    setPreviewState((current) => ({ ...current, [nodeId]: "Tocando…" }));
+    try {
+      const bytes = await readProjectAssetBytes(projectDir, asset);
+      const AudioContextCtor = window.AudioContext
+        ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error("Áudio indisponível neste ambiente");
+      const context = new AudioContextCtor();
+      const buffer = await context.decodeAudioData(Uint8Array.from(bytes).buffer);
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.onended = () => void context.close();
+      source.start();
+      setPreviewState((current) => ({ ...current, [nodeId]: `Prévia: ${buffer.duration.toFixed(2)} s` }));
+    } catch (error) {
+      setPreviewState((current) => ({ ...current, [nodeId]: `Prévia falhou: ${error instanceof Error ? error.message : String(error)}` }));
+    }
+  }
+  return (
+    <div data-testid="nodegraph-sounds" className="rounded border border-[#f9e2af]/35 bg-[#f9e2af]/5 px-2 py-1.5 text-[10px] text-[#cdd6f4]">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">Sons</p>
+      {soundNodes.map((node) => {
+        const current = String(node.params.sfx ?? "");
+        const issue = issueFor(current);
+        return (
+          <div key={node.id} data-testid={`sound-${node.id}`} className="mt-1 flex flex-wrap items-center gap-1">
+            <span className="min-w-0 flex-1 truncate" title={node.id}>{node.label}</span>
+            <select
+              data-testid={`sound-${node.id}-select`}
+              aria-label={`Som de ${node.label}`}
+              value={current}
+              onChange={(event) =>
+                onGraphChange({
+                  ...graph,
+                  nodes: graph.nodes.map((candidate) =>
+                    candidate.id === node.id ? { ...candidate, params: { ...candidate.params, sfx: event.target.value } } : candidate
+                  ),
+                })
+              }
+              className="rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 font-mono text-[10px]"
+            >
+              {!names.includes(current) && <option value={current}>{current || "(nenhum)"} (ausente)</option>}
+              {names.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <button
+              type="button"
+              data-testid={`sound-${node.id}-preview`}
+              disabled={Boolean(issue)}
+              onClick={() => void preview(node.id, current)}
+              className="rounded border border-[#f9e2af]/50 px-2 py-0.5 text-[#f9e2af] disabled:opacity-40"
+            >
+              Ouvir
+            </button>
+            {previewState[node.id] && <span data-testid={`sound-${node.id}-preview-state`} className="w-full text-[#a6adc8]">{previewState[node.id]}</span>}
+            {issue && <span data-testid={`sound-${node.id}-issue`} className="w-full text-[#f38ba8]">{issue}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function importBadgeClass(tone: CapabilityTone): string {
   switch (tone) {
     case "supported":
@@ -3025,6 +3117,12 @@ export default function NodeGraphEditor() {
             <PassagePanel
               graph={graph}
               entityIds={(activeScene?.entities ?? []).map((entity) => entity.entity_id)}
+              onGraphChange={setGraph}
+            />
+            <SoundPanel
+              graph={graph}
+              sfx={Object.assign({}, ...(activeScene?.entities ?? []).map((entity) => entity.components.audio?.sfx ?? {}))}
+              projectDir={activeProjectDir ?? null}
               onGraphChange={setGraph}
             />
             {hardwareFeedback.length > 0 ? (

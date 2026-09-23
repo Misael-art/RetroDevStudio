@@ -9889,6 +9889,108 @@ pub extern "C" fn retro_run() {
         let _ = fs::remove_dir_all(base_dir);
     }
 
+    /// Goertzel power of `frequency` over interleaved stereo i16 samples (left channel).
+    fn reference_tone_power(samples: &[i16], rate: u32, frequency: f64) -> f64 {
+        let omega = 2.0 * std::f64::consts::PI * frequency / f64::from(rate);
+        let coeff = 2.0 * omega.cos();
+        let (mut s1, mut s2) = (0.0f64, 0.0f64);
+        let mut n: f64 = 0.0;
+        for frame in samples.chunks_exact(2) {
+            let s0 = f64::from(frame[0]) + coeff * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+            n += 1.0;
+        }
+        (s1 * s1 + s2 * s2 - coeff * s1 * s2) / f64::max(n * n, 1.0)
+    }
+
+    /// The completion sound associated in the graph is the one the core produces at the
+    /// goal event: default `goal_sound` (880 Hz) vs. `victory` (1320 Hz). Neither tone is
+    /// present before the event, so background music cannot make this pass.
+    ///
+    /// `cargo test --manifest-path src-tauri/Cargo.toml reference_platformer_real_goal_sound_association_contract --lib -- --ignored --nocapture`
+    #[ignore]
+    #[test]
+    fn reference_platformer_real_goal_sound_association_contract() {
+        let base = temp_dir("reference-platformer-sound-association");
+        let mut emulator = EmulatorCore::new(None);
+        let measure = |emulator: &mut EmulatorCore, rom: &Path, symbols: &HashMap<String, u32>| {
+            emulator.load_rom(rom).expect("load");
+            for _ in 0..120 {
+                emulator.run_frame().unwrap();
+            }
+            let _ = emulator.take_audio_samples();
+            emulator
+                .set_joypad(JoypadState {
+                    right: true,
+                    ..JoypadState::default()
+                })
+                .unwrap();
+            let mut samples = Vec::new();
+            let mut offsets = Vec::new();
+            let mut goal = None;
+            let mut rate = 0;
+            for frame in 0..160 {
+                offsets.push(samples.len());
+                emulator.run_frame().unwrap();
+                let (r, chunk) = emulator.take_audio_samples().unwrap();
+                rate = r;
+                samples.extend(chunk);
+                if goal.is_none()
+                    && reference_read_ram(emulator, symbols, "logic_var_goal_reached", 4) == 1
+                {
+                    goal = Some(frame);
+                }
+            }
+            let goal = goal.expect("objetivo alcancado");
+            let window = (rate as usize / 4) * 2; // 0.25 s stereo
+            let after_start = offsets[goal + 4];
+            let after = &samples[after_start..(after_start + window).min(samples.len())];
+            let before_end = offsets[goal];
+            let before = &samples[before_end.saturating_sub(window)..before_end];
+            let p = |s: &[i16], f: f64| reference_tone_power(s, rate, f);
+            (
+                p(before, 880.0),
+                p(before, 1320.0),
+                p(after, 880.0),
+                p(after, 1320.0),
+            )
+        };
+        let (default_rom, default_symbols) =
+            build_reference_variant(&base, "sound-default", |_| {});
+        let (victory_rom, victory_symbols) =
+            build_reference_variant(&base, "sound-victory", |dir| {
+                let path = dir.join("graphs/reference_platformer_logic.json");
+                let mut graph: serde_json::Value =
+                    serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+                for node in graph["nodes"].as_array_mut().unwrap() {
+                    if node["id"] == "goal_sound" {
+                        node["params"]["sfx"] = serde_json::json!("victory");
+                    }
+                }
+                fs::write(
+                    &path,
+                    crate::core::project_mgr::render_line_mapped_graph(graph),
+                )
+                .unwrap();
+            });
+        let d = measure(&mut emulator, &default_rom, &default_symbols);
+        let v = measure(&mut emulator, &victory_rom, &victory_symbols);
+        println!(
+            "tone power (before880, before1320, after880, after1320): default={d:?} victory={v:?}"
+        );
+        assert!(
+            d.2 > 20.0 * d.0.max(1.0) && d.2 > 20.0 * d.3.max(1.0),
+            "padrao: 880 Hz so depois do evento"
+        );
+        assert!(
+            v.3 > 20.0 * v.1.max(1.0) && v.3 > 20.0 * v.2.max(1.0),
+            "victory: 1320 Hz so depois do evento"
+        );
+        emulator.stop().unwrap();
+        let _ = fs::remove_dir_all(base);
+    }
+
     #[test]
     fn diff_asset_fingerprints_detects_added_changed_and_removed_assets() {
         let previous = HashMap::from([

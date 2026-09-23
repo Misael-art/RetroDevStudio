@@ -35,6 +35,8 @@ pub const REFERENCE_PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/reference_pl
 pub const REFERENCE_PLATFORMER_GOAL_ASSET: &str = "assets/sprites/reference_goal.ppm";
 pub const REFERENCE_PLATFORMER_PASSAGE_ASSET: &str = "assets/sprites/reference_passage.ppm";
 pub const REFERENCE_PLATFORMER_GOAL_SOUND_ASSET: &str = "assets/audio/reference_goal.wav";
+/// Alternative completion sound offered by the template (declared, unused by default).
+pub const REFERENCE_PLATFORMER_VICTORY_SOUND_ASSET: &str = "assets/audio/reference_victory.wav";
 pub const REFERENCE_PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/reference_level.ppm";
 pub const REFERENCE_PLATFORMER_JUMP_ASSET: &str = "assets/audio/reference_jump.wav";
 pub const REFERENCE_PLATFORMER_THEME_ASSET: &str = "assets/audio/reference_theme.vgm";
@@ -14873,6 +14875,11 @@ pub fn seed_reference_platformer_template(
     )?;
     write_reference_asset(
         project_dir,
+        REFERENCE_PLATFORMER_VICTORY_SOUND_ASSET,
+        reference_tone_wav(1320, 400),
+    )?;
+    write_reference_asset(
+        project_dir,
         REFERENCE_PLATFORMER_THEME_ASSET,
         reference_theme_vgm(),
     )?;
@@ -15191,6 +15198,10 @@ fn reference_player_prefab() -> Entity {
                     (
                         "goal_sound".to_string(),
                         REFERENCE_PLATFORMER_GOAL_SOUND_ASSET.to_string(),
+                    ),
+                    (
+                        "victory".to_string(),
+                        REFERENCE_PLATFORMER_VICTORY_SOUND_ASSET.to_string(),
                     ),
                 ]),
                 bgm: Some(REFERENCE_PLATFORMER_THEME_ASSET.to_string()),
