@@ -5304,34 +5304,33 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   // Mandatory jump contract: native KeyZ through the real keyboard path (no core fallback),
   // with the player's Y read from its ELF symbol in System RAM: rise, apex, fall, landing.
   // Genesis Plus GX binds RetroPad Y to Mega Drive A, so the ACK must carry joypad.y.
-  const sampleJump = async (label, durationMs, onSample) => {
+  // The WebView frame loop is too slow under WebDriver for real-time sampling, so the game
+  // is paused and advanced with emulator_run_frames. The key state still travels the real
+  // keyboard path (native key → frontend → ACK'd emulator_send_input → core joypad).
+  await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar para salto deterministico");
+  await waitFor(async () => (await readAutomationState(sessionId))?.emulPaused === true, 10000, "Jogo nao pausou para o salto.", 100);
+  const stepFrames = async (label, frames) => {
     const samples = [];
-    const deadline = Date.now() + durationMs;
-    while (Date.now() < deadline) {
-      const progress = await readCanonicalGameProgress(sessionId);
-      const y = await readPlayerS16("spr_player_y");
-      samples.push({ label, y, renderedFrames: progress?.renderedFrames ?? null, t: Date.now() });
-      if (onSample) await onSample(samples);
-      // Back-to-back WebDriver scripts starve the WebView main thread (rAF frame loop).
-      await new Promise((resolve) => setTimeout(resolve, 60));
+    for (let frame = 0; frame < frames; frame += 1) {
+      const ran = await invokeCore("emulator_run_frames", { frames: 1 });
+      if (!ran?.ok || !ran.value?.ok) fail(`emulator_run_frames falhou no salto: ${JSON.stringify(ran)}`);
+      samples.push({ label, frame, y: await readPlayerS16("spr_player_y") });
     }
     return samples;
   };
   const waitJoypadY = (expected, context) => waitNativeAck("y", expected, `${context} (KeyZ = RetroPad Y = Mega Drive A)`);
-  const groundSamples = await sampleJump("ground", 400);
+  const groundSamples = await stepFrames("ground", 20);
   const groundY = groundSamples[groundSamples.length - 1].y;
   if (!groundSamples.every((sample) => sample.y === groundY)) {
     fail(`Personagem nao estava parado no chao antes do salto: ${JSON.stringify(groundSamples)}`);
   }
+  await focusGameCanvasNatively(sessionId);
   await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump");
   const jumpAck = await waitJoypadY(true, "salto");
+  const pressSamples = await stepFrames("pressed", 3);
   await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
   const jumpReleaseAck = await waitJoypadY(false, "liberacao do salto");
-  const jumpSamples = await sampleJump("jump", 1500);
-  const jumpFrameSpan = (jumpSamples.at(-1)?.renderedFrames ?? 0) - (jumpSamples[0]?.renderedFrames ?? 0);
-  if (jumpFrameSpan < 30) {
-    fail(`Harness: o jogo nao avancou frames durante a amostragem do salto (${jumpFrameSpan}); resultado inconclusivo, nao falha de produto.`);
-  }
+  const jumpSamples = [...pressSamples, ...(await stepFrames("released", 60))];
   const apexIndex = jumpSamples.reduce((best, sample, index) => (sample.y < jumpSamples[best].y ? index : best), 0);
   const apexY = jumpSamples[apexIndex].y;
   const fellAfterApex = jumpSamples.slice(apexIndex).some((sample) => sample.y > apexY);
@@ -5344,7 +5343,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   // Negative: holding the key must not keep the player airborne (edge-triggered input_pressed).
   await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump hold");
   await waitJoypadY(true, "salto segurado");
-  const heldSamples = await sampleJump("held", 1500);
+  const heldSamples = await stepFrames("held", 60);
   await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump hold release");
   await waitJoypadY(false, "liberacao do salto segurado");
   const heldLanded = heldSamples[heldSamples.length - 1].y;
@@ -5352,6 +5351,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   if (heldLanded !== groundY || !heldLifted) {
     fail(`Segurar KeyZ deveria saltar uma vez e pousar ainda segurado: ${JSON.stringify({ groundY, heldLanded, heldLifted, heldSamples })}`);
   }
+  await clickButtonByTestIdNative(sessionId, "viewport-resume", "retomar apos salto");
   const jumpTrajectoryPath = path.join(validationDir, `${artifactPrefix}-jump-trajectory.json`);
   await writeFile(jumpTrajectoryPath, JSON.stringify({ ...jumpTrajectory, held: { landedY: heldLanded, lifted: heldLifted, samples: heldSamples } }, null, 2));
   addReportArtifact(report, jumpTrajectoryPath, "native KeyZ jump trajectory from RAM");

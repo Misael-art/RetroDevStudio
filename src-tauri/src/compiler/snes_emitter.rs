@@ -400,6 +400,7 @@ fn build_main_c_with_collision(
                 friction,
                 bounce,
                 floor_y: _,
+                ground: _,
             } => render_apply_physics(
                 &mut out,
                 &context,
@@ -412,6 +413,7 @@ fn build_main_c_with_collision(
                     friction: *friction,
                     bounce: *bounce,
                     floor_y: None,
+                    ground: None,
                 },
             ),
             AstNode::DrawText { x, y, text, .. } => {
@@ -2727,6 +2729,7 @@ mod tests {
                     friction: 2,
                     bounce: 35,
                     floor_y: None,
+                    ground: None,
                 },
                 AstNode::SpriteUpdate,
                 AstNode::VSync,

@@ -265,6 +265,18 @@ fn build_main_c_with_collision(
             let entries: Vec<String> = data.iter().map(|b| b.to_string()).collect();
             out.push_str(&entries.join(", "));
             out.push_str("\n};\n\n");
+            if let Some(ground) = collect_physics_applications(ast)
+                .into_iter()
+                .find_map(|physics| physics.ground)
+            {
+                out.push_str(&format!(
+                    "static u8 rds_solid_at(s16 x, s16 y)\n{{\n    if (x < 0 || y < 0) return 0;\n    u16 tx = (u16)x / {tw};\n    u16 ty = (u16)y / {th};\n    if (tx >= {mw} || ty >= {mh}) return 0;\n    return rds_collision_map[ty * {mw} + tx] != 0;\n}}\n\n",
+                    tw = ground.tile_width,
+                    th = ground.tile_height,
+                    mw = ground.map_width,
+                    mh = ground.map_height,
+                ));
+            }
         }
     }
 
@@ -499,6 +511,7 @@ fn build_main_c_with_collision(
                 friction,
                 bounce,
                 floor_y,
+                ground,
             } => render_apply_physics(
                 &mut out,
                 &PhysicsApplication {
@@ -510,6 +523,7 @@ fn build_main_c_with_collision(
                     friction: *friction,
                     bounce: *bounce,
                     floor_y: *floor_y,
+                    ground: ground.clone(),
                 },
             ),
             AstNode::SetAnimation {
@@ -952,7 +966,22 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
         var_name = physics.var_name
     ));
 
-    if let Some(floor_y) = physics.floor_y {
+    if let Some(ground) = physics.ground.as_ref().filter(|_| physics.gravity) {
+        // Land on the top of the solid collision cell under the body's centre, only while
+        // falling (one-way). Erased cells are pits; the map bottom is the last safety floor.
+        let var_name = &physics.var_name;
+        let body_w = ground.body_width;
+        let body_h = ground.body_height;
+        let tile_h = ground.tile_height;
+        let bottom = (ground.map_height * tile_h) as i64 - i64::from(body_h);
+        out.push_str(&format!(
+            "        if ({var_name}_vel_y >= 0) {{ s16 rds_foot = {next_y_var} + {body_h} - 1; if (rds_solid_at({next_x_var} + {half_w}, rds_foot)) {{ {next_y_var} = (rds_foot / {tile_h}) * {tile_h} - {body_h}; {var_name}_vel_y = 0; }} }}\n",
+            half_w = body_w / 2,
+        ));
+        out.push_str(&format!(
+            "        if ({next_y_var} > {bottom}) {{ {next_y_var} = {bottom}; {var_name}_vel_y = 0; }}\n"
+        ));
+    } else if let Some(floor_y) = physics.floor_y {
         out.push_str(&format!(
             "        if ({next_y_var} > {floor_y}) {{ {next_y_var} = {floor_y}; {var_name}_vel_y = 0; }}\n",
             next_y_var = next_y_var,
@@ -3272,6 +3301,7 @@ mod tests {
                     friction: 2,
                     bounce: 35,
                     floor_y: None,
+                    ground: None,
                 },
                 AstNode::SpriteUpdate,
                 AstNode::VSync,

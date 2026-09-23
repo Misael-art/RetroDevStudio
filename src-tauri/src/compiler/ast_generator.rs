@@ -81,6 +81,7 @@ pub enum AstNode {
         friction: i32,
         bounce: i32,
         floor_y: Option<i32>,
+        ground: Option<GroundProbe>,
     },
     SetAnimation {
         var_name: String,
@@ -197,6 +198,22 @@ pub struct PhysicsApplication {
     pub friction: i32,
     pub bounce: i32,
     pub floor_y: Option<i32>,
+    /// Per-column ground from the scene collision map (landing only while falling).
+    pub ground: Option<GroundProbe>,
+}
+
+/// Tile ground probe for gravity bodies: the body lands on the top of a solid
+/// collision-map cell under its horizontal centre, so painted collision changes the
+/// ROM's physics (platforms to land on, erased cells become pits). Horizontal walls are
+/// not modelled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroundProbe {
+    pub body_width: u32,
+    pub body_height: u32,
+    pub map_width: u32,
+    pub map_height: u32,
+    pub tile_width: u32,
+    pub tile_height: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -686,6 +703,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                 &var_name,
                 physics,
                 scene.collision_map.as_ref(),
+                (sprite.frame_width, sprite.frame_height),
             ));
         }
     }
@@ -763,6 +781,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                 friction: application.friction,
                 bounce: application.bounce,
                 floor_y: application.floor_y,
+                ground: application.ground.clone(),
             }),
     );
     nodes.extend(logic_output.runtime_nodes.iter().cloned());
@@ -852,6 +871,7 @@ fn physics_application(
     var_name: &str,
     physics: &PhysicsComponent,
     collision_map: Option<&crate::ugdm::entities::CollisionMap>,
+    body_size: (u32, u32),
 ) -> PhysicsApplication {
     let (max_velocity_x, max_velocity_y) = physics
         .max_velocity
@@ -881,6 +901,14 @@ fn physics_application(
         friction: physics.friction,
         bounce: physics.bounce,
         floor_y,
+        ground: collision_map.map(|map| GroundProbe {
+            body_width: body_size.0,
+            body_height: body_size.1,
+            map_width: map.width,
+            map_height: map.height,
+            tile_width: u32::from(map.tile_width),
+            tile_height: u32::from(map.tile_height),
+        }),
     }
 }
 
@@ -2883,6 +2911,7 @@ pub fn collect_physics_applications(ast: &AstOutput) -> Vec<PhysicsApplication> 
                 friction,
                 bounce,
                 floor_y,
+                ground,
             } => Some(PhysicsApplication {
                 var_name: var_name.clone(),
                 gravity: *gravity,
@@ -2892,6 +2921,7 @@ pub fn collect_physics_applications(ast: &AstOutput) -> Vec<PhysicsApplication> 
                 friction: *friction,
                 bounce: *bounce,
                 floor_y: *floor_y,
+                ground: ground.clone(),
             }),
             _ => None,
         })
@@ -3457,6 +3487,7 @@ mod tests {
                 friction: 2,
                 bounce: 35,
                 floor_y: None,
+                ground: None,
             }]
         );
         assert!(ast.nodes.iter().any(|node| matches!(

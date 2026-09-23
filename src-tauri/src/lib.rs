@@ -9397,6 +9397,84 @@ pub extern "C" fn retro_run() {
             .cloned()
             .collect();
         blocker_symbols.sort();
+        // (e) Collision painting reaches ROM physics: erasing the floor cells at x=80..95
+        // (columns 10..11, rows 26..27) makes a pit; walking right the player falls to the map
+        // bottom (y=208) there, while the unedited floor still holds it at y=192.
+        let (rom, pit_symbols) = build_reference_variant(&base, "ground-pit", |dir| {
+            let mut scene = crate::core::project_mgr::load_scene(
+                dir,
+                crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+            )
+            .expect("load scene");
+            let map = scene.collision_map.as_mut().expect("collision map");
+            for row in 26..28usize {
+                for col in 10..12usize {
+                    map.data[row * map.width as usize + col] = 0;
+                }
+            }
+            crate::core::project_mgr::save_scene(
+                dir,
+                crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+                &scene,
+            )
+            .expect("save scene");
+        });
+        emulator.load_rom(&rom).expect("load pit ROM");
+        emulator
+            .set_joypad(JoypadState::default())
+            .expect("neutral");
+        for _ in 0..120 {
+            emulator.run_frame().expect("warmup");
+        }
+        emulator.set_joypad(right.clone()).expect("right");
+        let mut path = Vec::new();
+        for _ in 0..40 {
+            emulator.run_frame().expect("frame");
+            path.push((
+                reference_read_ram(&emulator, &pit_symbols, "spr_player_x", 2),
+                reference_read_ram(&emulator, &pit_symbols, "spr_player_y", 2),
+            ));
+        }
+        println!("pit path={path:?}");
+        assert!(
+            path.iter()
+                .filter(|(x, _)| *x + 8 < 80)
+                .all(|(_, y)| *y == 192),
+            "piso nao editado deve continuar sustentando o player"
+        );
+        assert!(
+            path.iter().any(|(x, y)| (72..88).contains(x) && *y > 192),
+            "celulas apagadas devem virar fosso fisico"
+        );
+        // Without horizontal tile walls, walking on steps back up out of a 2-row pit (known
+        // limit). Stopping over it, the player falls to the map bottom.
+        emulator.load_rom(&rom).expect("reload pit ROM");
+        emulator
+            .set_joypad(JoypadState::default())
+            .expect("neutral");
+        for _ in 0..120 {
+            emulator.run_frame().expect("warmup");
+        }
+        emulator.set_joypad(right.clone()).expect("right");
+        while reference_read_ram(&emulator, &pit_symbols, "spr_player_x", 2) < 80 {
+            emulator.run_frame().expect("frame");
+        }
+        emulator
+            .set_joypad(JoypadState::default())
+            .expect("stop over pit");
+        for _ in 0..40 {
+            emulator.run_frame().expect("frame");
+        }
+        let settled = (
+            reference_read_ram(&emulator, &pit_symbols, "spr_player_x", 2),
+            reference_read_ram(&emulator, &pit_symbols, "spr_player_y", 2),
+        );
+        println!("pit settled={settled:?}");
+        assert_eq!(
+            settled.1, 208,
+            "parado sobre o fosso, cai ate o fundo do mapa"
+        );
+
         println!("duplicated blocker symbols: {blocker_symbols:?}");
         for name in [
             "spr_passage_blocker",
