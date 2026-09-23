@@ -8026,7 +8026,17 @@ async function main() {
             const before = (await tileEditErrors()).length;
             await setTileRect(negative.rect);
             await clickButtonByTestIdNative(sessionId, "inspection-sonic-tile-edit-apply", `negativo: ${negative.label}`);
-            const errors = await waitFor(async () => { const list = await tileEditErrors(); return list.length > before ? list : false; }, 10000, `Negativo nao foi recusado: ${negative.label}`, 100);
+            const errors = await waitFor(async () => { const list = await tileEditErrors(); return list.length > before ? list : false; }, 10000, `Negativo nao foi recusado: ${negative.label}`, 100).catch(async (error) => {
+              const ui = await executeScript(sessionId, `
+                const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+                const button = q("inspection-sonic-tile-edit-apply");
+                return { panel: Boolean(q("inspection-sonic-tile-edit")), disabled: button?.disabled ?? null, text: button?.textContent ?? null,
+                  values: ["x","y","w","h","index"].map((k) => q("inspection-sonic-tile-" + k)?.value ?? null) };
+              `);
+              const last = ((await readAutomationState(sessionId))?.consoleEntries ?? []).slice(-5);
+              await captureScreenshot(sessionId, `${artifactPrefix}-sonic-tile-negative-failure.png`).catch(() => null);
+              fail(`${error.message} ui=${JSON.stringify(ui)} console=${JSON.stringify(last)}`);
+            });
             const message = errors.at(-1);
             const resultText = await executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`);
             if (!message.includes(negative.expect) || resultText) fail(`Negativo ${negative.label} nao produziu recusa esperada sem edicao: ${JSON.stringify({ message, resultText })}`);
