@@ -24578,13 +24578,19 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
     /// Com `--ignored`, retorna `true` para sair do teste apenas se `RDS_SGDK_MATRIX_CORPUS_SKIP=1`.
     /// Caso contrario, **panic** se o doador nao existir (evita sucesso silencioso).
     fn sgdk_matrix_corpus_skip_if_missing_donor(test_fn_name: &str, donor: &Path) -> bool {
+        let skip_allowed = std::env::var("RDS_SGDK_MATRIX_CORPUS_SKIP")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        sgdk_matrix_corpus_skip_decision(test_fn_name, donor, skip_allowed)
+    }
+
+    /// Pure decision (the env flag is an argument) so the unit tests do not mutate the
+    /// process environment, which raced between tests running in parallel.
+    fn sgdk_matrix_corpus_skip_decision(test_fn_name: &str, donor: &Path, skip_allowed: bool) -> bool {
         if donor.is_dir() {
             return false;
         }
-        if std::env::var("RDS_SGDK_MATRIX_CORPUS_SKIP")
-            .map(|v| v == "1")
-            .unwrap_or(false)
-        {
+        if skip_allowed {
             eprintln!(
                 "SKIP (RDS_SGDK_MATRIX_CORPUS_SKIP=1): donor ausente para {test_fn_name} em {}",
                 donor.display()
@@ -24603,14 +24609,11 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
     fn sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing() {
         let donor = temp_dir("sgdk-matrix-missing-donor-no-skip");
         let _ = fs::remove_dir_all(&donor);
-        unsafe {
-            std::env::remove_var("RDS_SGDK_MATRIX_CORPUS_SKIP");
-        }
-
         let panic_result = std::panic::catch_unwind(|| {
-            sgdk_matrix_corpus_skip_if_missing_donor(
+            sgdk_matrix_corpus_skip_decision(
                 "sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing",
                 &donor,
+                false,
             )
         });
         assert!(
@@ -24623,16 +24626,11 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
     fn sgdk_matrix_corpus_skip_honors_explicit_env_flag_when_donor_missing() {
         let donor = temp_dir("sgdk-matrix-missing-donor-with-skip");
         let _ = fs::remove_dir_all(&donor);
-        unsafe {
-            std::env::set_var("RDS_SGDK_MATRIX_CORPUS_SKIP", "1");
-        }
-        let skipped = sgdk_matrix_corpus_skip_if_missing_donor(
+        let skipped = sgdk_matrix_corpus_skip_decision(
             "sgdk_matrix_corpus_skip_honors_explicit_env_flag_when_donor_missing",
             &donor,
+            true,
         );
-        unsafe {
-            std::env::remove_var("RDS_SGDK_MATRIX_CORPUS_SKIP");
-        }
         assert!(
             skipped,
             "com env explicito, helper deve diferenciar skip autorizado de sucesso de execucao"

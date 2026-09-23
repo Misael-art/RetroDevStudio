@@ -6252,6 +6252,8 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   console.log("OK: Desktop Tauri authoring acceptance (UI guiada, reinicio, teclado ate a vitoria, som associado) passou.");
 }
 
+const SHELL_PERSONA_STORAGE_KEY = "retrodev-shell-persona";
+
 async function cleanupTemporaryProject(projectDir) {
   if (!projectDir) {
     return true;
@@ -8188,6 +8190,16 @@ async function main() {
     }
 
     await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "Janela do app nao abriu corretamente");
+    // Scenarios expect the default shell; a persona left in localStorage (e.g. by the
+    // guided acceptance run) would hide workspaces. Reset it and reload once.
+    if (options.scenario !== "authoring-acceptance") {
+      const persisted = await executeScript(sessionId, "return localStorage.getItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      if (persisted) {
+        await executeScript(sessionId, "localStorage.removeItem(arguments[0]); location.reload();", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "Janela do app nao voltou apos resetar o modo do shell");
+      }
+    }
 
     await waitFor(
       async () =>
@@ -9524,9 +9536,15 @@ async function main() {
     }
 
     if (options.scenario === "authoring-acceptance") {
-      await runAuthoringAcceptanceScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
-        temporaryProjectDir = projectDir;
-      });
+      try {
+        await runAuthoringAcceptanceScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
+          temporaryProjectDir = projectDir;
+        });
+      } finally {
+        // The guided persona persists in the app's localStorage; restore the default so the
+        // next scenarios see the standard shell.
+        await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      }
       return;
     }
 
