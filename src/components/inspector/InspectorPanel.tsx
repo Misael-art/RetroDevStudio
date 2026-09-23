@@ -912,10 +912,32 @@ export default function InspectorPanel() {
     if (!entity || !selectedEntityId || !entity.components.sprite) return;
     const fps = Number.parseInt(raw, 10);
     if (!Number.isInteger(fps) || fps < 1 || fps > 60) return;
-    updateEntity(
-      selectedEntityId,
-      buildEntityPatch(entity, ["components", "sprite", "animations", animationName, "fps"], fps)
-    );
+    const sprite = entity.components.sprite;
+    const current = sprite.animations?.[animationName];
+    if (!current) return;
+    const nextSprite = {
+      ...structuredClone(sprite),
+      animations: { ...structuredClone(sprite.animations), [animationName]: { ...structuredClone(current), fps } },
+    };
+    const entityId = selectedEntityId;
+    updateEntity(entityId, buildEntityPatch(entity, ["components", "sprite"], nextSprite));
+    // A component override on a prefab instance replaces the whole component in the
+    // backend model (SpriteComponent.asset is required), so the source must carry the
+    // complete sprite, not the pruned partial diff — a partial one made the save fail.
+    useEditorStore.setState((state) => {
+      const source = state.activeSceneSource;
+      if (!source) return {};
+      return {
+        activeSceneSource: {
+          ...source,
+          entities: source.entities.map((candidate) =>
+            candidate.entity_id === entityId
+              ? { ...candidate, components: { ...candidate.components, sprite: structuredClone(nextSprite) } }
+              : candidate
+          ),
+        },
+      };
+    });
     scheduleAutoSave();
   }
 

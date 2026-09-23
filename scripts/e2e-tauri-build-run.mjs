@@ -5673,10 +5673,14 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     "Autosave nao persistiu a segunda passagem no grafo.",
     250
   );
+  const countSaves = async () => ((await readAutomationState(sessionId))?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Cena salva no projeto ativo.")).length;
+  const savesBefore = await countSaves();
   await clickTopBarMenuAction(sessionId, "Salvar");
   await waitFor(
-    async () => ((await readAutomationState(sessionId))?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Cena salva no projeto ativo.")).length > 0,
-    15000, "Salvar nao confirmou a segunda passagem.", 250
+    async () => (await countSaves()) > savesBefore,
+    15000,
+    `Salvar nao confirmou a segunda passagem: ${JSON.stringify(((await readAutomationState(sessionId))?.consoleEntries ?? []).filter((entry) => entry.level === "error").slice(-3))}`,
+    250
   );
   const savedGraphText = await waitFor(
     async () => {
