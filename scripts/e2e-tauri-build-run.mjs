@@ -6108,33 +6108,28 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
   if (running.frame.romSha256 !== romSha256) fail(`Game View executa outra ROM: ${JSON.stringify({ running: running.frame.romSha256, romSha256 })}`);
   const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
-  const invoke = async (command, args = {}) => executeAsyncScript(sessionId, `
-    const done = arguments[arguments.length - 1];
-    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
-    invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
-  `, [command, args]);
-  // Observation only: WRAM reads never drive the game.
-  const readWord = async (name, width) => {
-    const address = symbols.get(name);
-    if (!Number.isInteger(address)) fail(`Simbolo ${name} ausente.`);
-    const memory = await invoke("emulator_read_memory", { region: 2, offset: address & 0xffff, length: width });
-    const d = memory.value.data;
-    const word = (i) => d[i] | (d[i + 1] << 8);
-    if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
-    const v = ((word(0) << 16) >>> 0) | word(2);
-    return v > 0x7fffffff ? v - 0x100000000 : v;
+  // One in-page round trip per observation: all WRAM words read in parallel (read-only).
+  const watch = ["spr_player_x", "spr_player_y", "logic_var_reference_score", "logic_var_goal_open", "logic_var_passage_2_open", "logic_var_goal_reached"]
+    .map((name) => ({ name, address: symbols.get(name), width: name.startsWith("spr_") ? 2 : 4 }));
+  if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch)}`);
+  const observe = async () => {
+    const raw = await executeAsyncScript(sessionId, `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      Promise.all(arguments[0].map((entry) => invoke("emulator_read_memory", { region: 2, offset: entry.address & 0xffff, length: entry.width })))
+        .then((results) => done({ ok: true, data: results.map((r) => Array.from(r.data)), audioTotal: window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `, [watch]);
+    if (!raw?.ok) fail(`Leitura de WRAM falhou: ${JSON.stringify(raw)}`);
+    const decode = (d, width) => {
+      const word = (i) => d[i] | (d[i + 1] << 8);
+      if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
+      const v = ((word(0) << 16) >>> 0) | word(2);
+      return v > 0x7fffffff ? v - 0x100000000 : v;
+    };
+    const values = watch.map((entry, index) => decode(raw.data[index], entry.width));
+    return { x: values[0], y: values[1], score: values[2], mainOpen: values[3], secondOpen: values[4], goal: values[5], audioTotal: raw.audioTotal, t: Date.now() };
   };
-  const observe = async () => ({
-    x: await readWord("spr_player_x", 2),
-    y: await readWord("spr_player_y", 2),
-    score: await readWord("logic_var_reference_score", 4),
-    mainOpen: await readWord("logic_var_goal_open", 4),
-    secondOpen: await readWord("logic_var_passage_2_open", 4),
-    goal: await readWord("logic_var_goal_reached", 4),
-    frames: (await readCanonicalGameProgress(sessionId))?.renderedFrames ?? null,
-    audioTotal: (await js("return window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total;")),
-    t: Date.now(),
-  });
   const waitAck = (button, expected, context) => waitFor(async () => {
     const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
     return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
@@ -6160,7 +6155,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
       jumps += 1;
       lastJumpAt = Date.now();
     }
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await new Promise((resolve) => setTimeout(resolve, 40));
     current = await observe();
   }
   timeline.push(current);
@@ -6175,6 +6170,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   addReportArtifact(report, timelinePath, "linha do tempo do jogo por teclado");
   await shot("08-victory", "jogo apos vencer pelo teclado");
   const frameAfter = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  if (!frameAfter?.rgba) fail(`Framebuffer apos a vitoria indisponivel: ${JSON.stringify({ keys: Object.keys(frameAfter ?? {}) })}`);
 
   const mainOpenedAt = timeline.find((t) => t.mainOpen === 1);
   const secondOpenedAt = timeline.find((t) => t.secondOpen === 1);
@@ -6206,6 +6202,7 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
     for (let i = 0; i < samples.length; i += 2) { const s0 = samples[i] + coeff * s1 - s2; s2 = s1; s1 = s0; n += 1; }
     return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / Math.max(1, n * n);
   };
+  if (!Array.isArray(after?.samples) || !Array.isArray(before?.samples)) fail(`Amostras de audio indisponiveis: ${JSON.stringify({ after: after && Object.keys(after), before: before && Object.keys(before) })}`);
   const sampleRate = after.sampleRate || rate;
   const audio = {
     sampleRate,
