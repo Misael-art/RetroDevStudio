@@ -5563,6 +5563,154 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     "reference reopened build run"
   );
 
+  // ── Second passage authored through the UI (Etapa 2) ──────────────────────────
+  // Duplicate the blocker in the Inspector, place it at x=120, add a passage in the
+  // NodeGraph "Passagens" panel with its own state and threshold 60, save, close, reopen,
+  // build and measure on the core. Threshold 60 because the player only reaches the second
+  // blocker around score ~41: a lower threshold would open before arrival and prove nothing.
+  const selectOptionByTestIdNative = async (testId, value) => {
+    const elementId = await findElement(sessionId, `[data-testid="${testId}"] option[value="${value}"]`);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+    await waitFor(
+      async () => (await executeScript(sessionId, `return document.querySelector('[data-testid="${testId}"]')?.value ?? null;`)) === value,
+      5000,
+      `Selecao ${testId}=${value} nao aplicada.`,
+      100
+    );
+  };
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-passage_blocker");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "passage_blocker", 10000, "passage_blocker nao selecionado.", 200);
+  await clickButtonByTestIdNative(sessionId, "inspector-duplicate-entity", "duplicar bloqueador");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "passage_blocker_2", 10000, "Duplicata do bloqueador nao foi criada/selecionada.", 200);
+  await setInputByTestIdNative(sessionId, "inspector-transform-x", "120");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "passage_blocker_2");
+      return entity?.x === 120 || entity?.transform?.x === 120 ? entity : false;
+    },
+    10000,
+    "Inspector nao posicionou o segundo bloqueador em x=120.",
+    200
+  );
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "player", 10000, "player nao selecionado.", 200);
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"nodegraph-passages\"]'));"), 15000, "Painel de passagens ausente no NodeGraph.", 250);
+  await selectOptionByTestIdNative("passage-add-blocker", "passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "passage-add-threshold", "60");
+  await clickButtonByTestIdNative(sessionId, "passage-add", "adicionar passagem");
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"passage-passage_2\"]'));"), 10000, `Passagem nao adicionada: ${await executeScript(sessionId, "return document.querySelector('[data-testid=\"passage-add-error\"]')?.textContent ?? null;")}`, 200);
+  const passageIssues = await executeScript(sessionId, "return document.querySelector('[data-testid=\"passage-issues\"]')?.textContent ?? '';");
+  if (passageIssues) fail(`Painel de passagens reportou problemas apos adicionar: ${passageIssues}`);
+  addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-07-second-passage-panel.png`), "painel de passagens com segunda passagem");
+  await waitFor(
+    async () => {
+      const logic = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+      const graphs = [logic?.source?.graph_json, logic?.resolved?.graph_json].filter((value) => typeof value === "string");
+      return graphs.some((json) => json.includes("passage_blocker_2") && json.includes("passage_2_open")) ? true : false;
+    },
+    15000,
+    "Autosave nao persistiu a segunda passagem no grafo.",
+    250
+  );
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => ((await readAutomationState(sessionId))?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Cena salva no projeto ativo.")).length > 0,
+    15000, "Salvar nao confirmou a segunda passagem.", 250
+  );
+  await clickTopBarMenuAction(sessionId, "Fechar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const wizardVisible = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"project-wizard-body\"]'));");
+      return !state?.activeProjectDir && wizardVisible ? true : false;
+    },
+    15000, "Projeto nao fechou antes de reabrir a segunda passagem.", 250
+  );
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', generatedProjectName);
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"wizard-existing-project-card\"]'));"), 30000, "Wizard nao listou o projeto para reabrir.", 500);
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  await waitFor(async () => (await readAutomationState(sessionId))?.activeProjectDir === createdState.activeProjectDir, 45000, "Projeto nao reabriu com a segunda passagem.", 500);
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "player", 10000, "player nao selecionado apos reabrir.", 200);
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  const reopenedPassage = await waitFor(
+    async () => executeScript(sessionId, `
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]')?.value ?? null;
+      const main = { blocker: q("passage-passage_main-blocker"), threshold: q("passage-passage_main-threshold"), openVar: q("passage-passage_main-openvar") };
+      const second = { blocker: q("passage-passage_2-blocker"), threshold: q("passage-passage_2-threshold"), openVar: q("passage-passage_2-openvar") };
+      return second.blocker ? { main, second } : false;
+    `),
+    15000, "Segunda passagem ausente apos reabrir.", 250
+  );
+  if (reopenedPassage.second.blocker !== "passage_blocker_2" || reopenedPassage.second.threshold !== "60" || reopenedPassage.second.openVar !== "passage_2_open" ||
+      reopenedPassage.main.blocker !== "passage_blocker" || reopenedPassage.main.threshold !== "12" || reopenedPassage.main.openVar !== "goal_open") {
+    fail(`Referencias das passagens nao persistiram apos reabrir: ${JSON.stringify(reopenedPassage)}`);
+  }
+  addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-08-second-passage-reopened.png`), "passagens reabertas");
+  await clickByTestId(sessionId, "workspace-rail-game");
+  const twoPassageBuild = await runBuildRunAndCollect(sessionId, "reference platformer two passages build", timeoutMs, report, artifactPrefix);
+  const twoPassageRomPath = path.join(validationDir, `${artifactPrefix}-two-passages.rom`);
+  await cp(twoPassageBuild.rom_path, twoPassageRomPath);
+  addReportArtifact(report, twoPassageRomPath, "ROM com duas passagens autorais");
+  const twoPassageMainPath = path.join(validationDir, `${artifactPrefix}-two-passages-main.c`);
+  await cp(path.join(createdState.activeProjectDir, "build", "megadrive", "src", "main.c"), twoPassageMainPath);
+  addReportArtifact(report, twoPassageMainPath, "main.c com duas passagens");
+  runtimeSymbols = parseElf32Symbols(await readFile(elfPath));
+  const twoSymbols = runtimeSymbols;
+  const readS16 = async (name) => {
+    const address = twoSymbols.get(name);
+    if (!Number.isInteger(address)) fail(`Simbolo ${name} ausente na ROM de duas passagens.`);
+    const memory = await invokeCore("emulator_read_memory", { region: 2, offset: address & 0xffff, length: 2 });
+    const word = memory.value.data[0] | (memory.value.data[1] << 8);
+    return word > 0x7fff ? word - 0x10000 : word;
+  };
+  const loadedTwo = await callAutomationApi(sessionId, "loadRomForEmulation", [twoPassageRomPath, { startPaused: true }]);
+  if (loadedTwo !== true) fail("ROM de duas passagens nao carregou pausada.");
+  await waitFor(async () => { const st = await readAutomationState(sessionId); return st?.emulatorLoaded === true && st?.emulPaused === true; }, 15000, "ROM de duas passagens nao ficou pausada.", 100);
+  const twoEpoch = await invokeCore("emulator_get_core_epoch");
+  await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: twoEpoch.value });
+  await invokeCore("emulator_run_frames", { frames: 120 });
+  await invokeCore("emulator_send_input", { joypad: { ...neutralGoalInput, right: true }, sessionEpoch: twoEpoch.value });
+  const timeline = [];
+  for (let frame = 1; frame <= 110; frame += 1) {
+    await invokeCore("emulator_run_frames", { frames: 1 });
+    timeline.push({
+      frame,
+      x: await readS16("spr_player_x"),
+      score: (await readLogicInt("reference_score")).value,
+      mainOpen: (await readLogicInt("goal_open")).value,
+      secondOpen: (await readLogicInt("passage_2_open")).value,
+    });
+  }
+  await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: twoEpoch.value });
+  const timelinePath = path.join(validationDir, `${artifactPrefix}-two-passages-timeline.json`);
+  await writeFile(timelinePath, JSON.stringify(timeline, null, 2));
+  addReportArtifact(report, timelinePath, "linha do tempo RAM das duas passagens");
+  const at = (predicate) => timeline.find(predicate);
+  const mainOpened = at((t) => t.mainOpen === 1);
+  const secondOpened = at((t) => t.secondOpen === 1);
+  const heldAtSecond = timeline.filter((t) => t.secondOpen === 0 && t.x === 106);
+  const crossTalk = timeline.filter((t) => t.mainOpen === 1 && t.secondOpen === 0 && t.score >= 60);
+  const maxXWhileSecondClosed = Math.max(...timeline.filter((t) => t.secondOpen === 0).map((t) => t.x));
+  if (!mainOpened || mainOpened.score !== 12 || !secondOpened || secondOpened.score !== 60 ||
+      maxXWhileSecondClosed > 106 || heldAtSecond.length < 5 || crossTalk.length > 0 || timeline.at(-1).x <= 136) {
+    fail(`Duas passagens nao se comportaram de forma independente: ${JSON.stringify({ mainOpened, secondOpened, maxXWhileSecondClosed, heldAtSecond: heldAtSecond.length, crossTalk: crossTalk.length, last: timeline.at(-1) })}`);
+  }
+  addReportStep(report, "second_passage_authored_in_ui", "passed", {
+    reopened: reopenedPassage,
+    rom: { path: twoPassageRomPath, sha256: createHash("sha256").update(await readFile(twoPassageRomPath)).digest("hex") },
+    mainOpened,
+    secondOpened,
+    heldFramesAtSecondBlocker: heldAtSecond.length,
+    maxXWhileSecondClosed,
+    final: timeline.at(-1),
+    timeline: timelinePath,
+    inputDriver: "core emulator_send_input (controlled measurement; native keyboard is covered by movement/jump steps)",
+  });
+
   const savedReport = await writeCreateGameReport(report, reportPath);
   console.log("OK: Desktop Tauri reference-platformer E2E passou.");
   console.log(`Projeto criado: ${generatedProjectName}`);

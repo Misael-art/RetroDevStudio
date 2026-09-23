@@ -619,7 +619,19 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
             .get(&sprite.asset)
             .cloned()
             .unwrap_or_else(|| sanitize_identifier(&entity.entity_id));
-        let var_name = format!("spr_{}", resource_name);
+        // One runtime sprite per entity: the first entity using an asset keeps the legacy
+        // `spr_<resource>` name; further entities sharing that asset get their own instance.
+        let mut var_name = format!("spr_{}", resource_name);
+        if sprite_var_names
+            .values()
+            .any(|existing| existing == &var_name)
+        {
+            var_name = format!(
+                "spr_{}__{}",
+                resource_name,
+                sanitize_identifier(&entity.entity_id)
+            );
+        }
         sprite_var_names.insert(entity.entity_id.clone(), var_name.clone());
         sprite_resource_names.insert(entity.entity_id.clone(), resource_name.clone());
         let animations = sprite_animations(project.fps, sprite);

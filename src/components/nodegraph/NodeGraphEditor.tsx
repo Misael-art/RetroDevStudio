@@ -29,6 +29,13 @@ import {
 // local) vive em src/core/nodegraph/nodeEngine.ts; este arquivo re-exporta a
 // superficie publica para preservar os consumidores existentes.
 export { EVENT_NODE_TYPES, validateNodeGraph } from "../../core/nodegraph/nodeEngine";
+import {
+  addPassage,
+  listPassages,
+  updatePassage,
+  validatePassages,
+  type PassagePatch,
+} from "../../core/nodegraph/passageAuthoring";
 export type {
   NodeGraphValidation,
   NodeGraphValidationContext,
@@ -1617,6 +1624,141 @@ function NodeCard({
   );
 }
 
+/**
+ * Passage contract editor (Experimental): lists passages found in the graph by their
+ * `passage_id`, edits their references (blocker, open-state variable, threshold) and adds
+ * a new passage wired in front of the player's movement nodes.
+ */
+function PassagePanel({
+  graph,
+  entityIds,
+  onGraphChange,
+}: {
+  graph: NodeGraph;
+  entityIds: string[];
+  onGraphChange: (graph: NodeGraph) => void;
+}) {
+  const passages = useMemo(() => listPassages(graph), [graph]);
+  const issues = useMemo(() => validatePassages(graph, entityIds), [graph, entityIds]);
+  const [draftBlocker, setDraftBlocker] = useState("");
+  const [draftThreshold, setDraftThreshold] = useState("12");
+  const [draftOpenVar, setDraftOpenVar] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+  if (passages.length === 0) return null;
+  const main = passages[0];
+  const player = main.player ?? "player";
+  const scoreVar = main.scoreVar ?? "reference_score";
+  const usedBlockers = new Set(passages.map((passage) => passage.blocker));
+  const candidateBlockers = entityIds.filter((id) => id !== player && !usedBlockers.has(id));
+  const patch = (passageId: string, change: PassagePatch) => onGraphChange(updatePassage(graph, passageId, change));
+  const inputClass = "w-full rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 font-mono text-[10px] text-[#cdd6f4]";
+
+  function handleAdd() {
+    const blocker = draftBlocker || candidateBlockers[0] || "";
+    let index = passages.length + 1;
+    while (passages.some((passage) => passage.passageId === `passage_${index}`)) index += 1;
+    const passageId = `passage_${index}`;
+    try {
+      onGraphChange(addPassage(graph, {
+        passageId,
+        blocker,
+        player,
+        openVar: draftOpenVar.trim() || `${passageId}_open`,
+        scoreVar,
+        threshold: Number(draftThreshold),
+      }));
+      setAddError(null);
+      setDraftOpenVar("");
+    } catch (error) {
+      setAddError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  return (
+    <div data-testid="nodegraph-passages" className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/5 px-2 py-1.5 text-[10px] text-[#cdd6f4]">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">Passagens (Experimental)</p>
+      {passages.map((passage) => (
+        <div key={passage.passageId} data-testid={`passage-${passage.passageId}`} className="mt-1 grid grid-cols-3 gap-1">
+          <span className="col-span-3 font-mono text-[#a6adc8]">{passage.passageId}</span>
+          <label className="flex flex-col gap-0.5">
+            Bloqueador
+            <select
+              data-testid={`passage-${passage.passageId}-blocker`}
+              value={passage.blocker ?? ""}
+              onChange={(event) => patch(passage.passageId, { blocker: event.target.value })}
+              className={inputClass}
+            >
+              {[...new Set([passage.blocker ?? "", ...entityIds])].filter(Boolean).map((id) => (
+                <option key={id} value={id}>{id}{entityIds.includes(id) ? "" : " (ausente)"}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-0.5">
+            Limiar
+            <input
+              data-testid={`passage-${passage.passageId}-threshold`}
+              type="number"
+              min={0}
+              max={32767}
+              value={passage.threshold ?? ""}
+              onChange={(event) => patch(passage.passageId, { threshold: Number(event.target.value) })}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            Estado
+            <input
+              data-testid={`passage-${passage.passageId}-openvar`}
+              value={passage.openVar ?? ""}
+              onChange={(event) => patch(passage.passageId, { openVar: event.target.value })}
+              className={inputClass}
+            />
+          </label>
+        </div>
+      ))}
+      <div className="mt-2 grid grid-cols-3 gap-1 border-t border-[#313244] pt-1">
+        <select
+          data-testid="passage-add-blocker"
+          value={draftBlocker || candidateBlockers[0] || ""}
+          onChange={(event) => setDraftBlocker(event.target.value)}
+          className={inputClass}
+        >
+          {candidateBlockers.length === 0 && <option value="">(sem entidade livre)</option>}
+          {candidateBlockers.map((id) => <option key={id} value={id}>{id}</option>)}
+        </select>
+        <input
+          data-testid="passage-add-threshold"
+          type="number"
+          value={draftThreshold}
+          onChange={(event) => setDraftThreshold(event.target.value)}
+          className={inputClass}
+        />
+        <input
+          data-testid="passage-add-openvar"
+          placeholder="estado (auto)"
+          value={draftOpenVar}
+          onChange={(event) => setDraftOpenVar(event.target.value)}
+          className={inputClass}
+        />
+        <button
+          type="button"
+          data-testid="passage-add"
+          onClick={handleAdd}
+          className="col-span-3 rounded border border-[#89b4fa]/50 px-2 py-0.5 text-[#89b4fa] hover:bg-[#89b4fa]/10"
+        >
+          Adicionar passagem
+        </button>
+      </div>
+      {addError && <p data-testid="passage-add-error" className="mt-1 text-[#f38ba8]">{addError}</p>}
+      {issues.length > 0 && (
+        <ul data-testid="passage-issues" className="mt-1 space-y-0.5 text-[#f38ba8]">
+          {issues.map((issue) => <li key={`${issue.passageId}-${issue.code}`}>{issue.message}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function importBadgeClass(tone: CapabilityTone): string {
   switch (tone) {
     case "supported":
@@ -2867,6 +3009,11 @@ export default function NodeGraphEditor() {
                 </ul>
               </div>
             )}
+            <PassagePanel
+              graph={graph}
+              entityIds={(activeScene?.entities ?? []).map((entity) => entity.entity_id)}
+              onGraphChange={setGraph}
+            />
             {hardwareFeedback.length > 0 ? (
               <div
                 data-testid="nodegraph-hardware-feedback"

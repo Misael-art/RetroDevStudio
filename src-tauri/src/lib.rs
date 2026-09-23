@@ -9367,6 +9367,49 @@ pub extern "C" fn retro_run() {
             "sobreposto deve conseguir sair"
         );
 
+        // (d) A duplicated blocker entity (what the Inspector "Duplicar" produces) builds
+        // as its own runtime sprite/position, independent from the original.
+        let (_, symbols) = build_reference_variant(&base, "gate-duplicated-blocker", |dir| {
+            let mut scene = crate::core::project_mgr::load_scene(
+                dir,
+                crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+            )
+            .expect("load scene");
+            let mut second = scene
+                .entities
+                .iter()
+                .find(|entity| entity.entity_id == "passage_blocker")
+                .cloned()
+                .expect("blocker");
+            second.entity_id = "passage_blocker_2".to_string();
+            second.transform.x = 120;
+            scene.entities.push(second);
+            crate::core::project_mgr::save_scene(
+                dir,
+                crate::core::project_mgr::DEFAULT_ENTRY_SCENE,
+                &scene,
+            )
+            .expect("save scene");
+        });
+        let mut blocker_symbols: Vec<_> = symbols
+            .keys()
+            .filter(|name| name.contains("passage_blocker"))
+            .cloned()
+            .collect();
+        blocker_symbols.sort();
+        println!("duplicated blocker symbols: {blocker_symbols:?}");
+        for name in [
+            "spr_passage_blocker",
+            "spr_passage_blocker_x",
+            // Its position static is dropped by GCC until some logic reads it.
+            "spr_passage_blocker__passage_blocker_2",
+        ] {
+            assert!(
+                symbols.contains_key(name),
+                "instancia runtime ausente: {name}"
+            );
+        }
+
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(base);
     }

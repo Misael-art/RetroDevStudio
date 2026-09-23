@@ -747,6 +747,7 @@ export default function InspectorPanel() {
     setSelectedEntityId,
     updateBackgroundLayer,
     updateEntity,
+    addEntity,
     clearTilemapCells,
     activeBrush,
     setActiveWorkspace,
@@ -897,6 +898,34 @@ export default function InspectorPanel() {
         setSaveStatus("idle");
       }
     }
+  }
+
+  function handleTransformChange(axis: "x" | "y", raw: string) {
+    if (!entity || !selectedEntityId) return;
+    const value = Number.parseInt(raw, 10);
+    if (!Number.isFinite(value)) return;
+    updateEntity(selectedEntityId, { transform: { ...entity.transform, [axis]: value } });
+    scheduleAutoSave();
+  }
+
+  /** Clones the source entity (prefab reference + overrides) under a fresh id, offset to the right. */
+  function handleDuplicateEntity() {
+    const scene = useEditorStore.getState().activeScene;
+    const original = sourceEntity ?? entity;
+    if (!original || !scene) return;
+    const existing = new Set(scene.entities.map((candidate) => candidate.entity_id));
+    let suffix = 2;
+    while (existing.has(`${original.entity_id}_${suffix}`)) suffix += 1;
+    const duplicate: Entity = {
+      ...structuredClone(original),
+      entity_id: `${original.entity_id}_${suffix}`,
+      display_name: `${original.display_name ?? original.entity_id} ${suffix}`,
+      transform: { ...original.transform, x: original.transform.x + 24 },
+    };
+    addEntity(duplicate);
+    setSelectedEntityId(duplicate.entity_id);
+    logMessage("info", `[Inspector] Entidade '${original.entity_id}' duplicada como '${duplicate.entity_id}'.`);
+    scheduleAutoSave();
   }
 
   function scheduleAutoSave() {
@@ -1162,6 +1191,36 @@ export default function InspectorPanel() {
                 <span>{Object.values(entity.components).filter(Boolean).length} comp.</span>
                 <span>({entity.transform.x}, {entity.transform.y})</span>
               </div>
+            </div>
+            <div className="flex items-center gap-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]">
+              <label className="flex items-center gap-1">
+                X
+                <input
+                  data-testid="inspector-transform-x"
+                  type="number"
+                  value={entity.transform.x}
+                  onChange={(event) => handleTransformChange("x", event.target.value)}
+                  className="w-14 rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4]"
+                />
+              </label>
+              <label className="flex items-center gap-1">
+                Y
+                <input
+                  data-testid="inspector-transform-y"
+                  type="number"
+                  value={entity.transform.y}
+                  onChange={(event) => handleTransformChange("y", event.target.value)}
+                  className="w-14 rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4]"
+                />
+              </label>
+              <button
+                type="button"
+                data-testid="inspector-duplicate-entity"
+                onClick={handleDuplicateEntity}
+                className="ml-auto rounded border border-[#45475a] px-2 py-0.5 hover:bg-[#313244]"
+              >
+                Duplicar
+              </button>
             </div>
             <div className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2">
               <RuntimeContractsPanel compact />

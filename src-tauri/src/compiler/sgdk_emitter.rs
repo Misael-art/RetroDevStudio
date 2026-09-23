@@ -122,8 +122,20 @@ fn build_main_c_with_collision(
         render_sprite_residency_runtime(&mut out, count);
     }
 
-    for asset in &ast.sprite_assets {
-        out.push_str(&format!("static Sprite* spr_{};\n", asset.resource_name));
+    let mut sprite_handles: Vec<String> = ast
+        .sprite_assets
+        .iter()
+        .map(|asset| format!("spr_{}", asset.resource_name))
+        .collect();
+    for node in &ast.nodes {
+        if let AstNode::SpawnSprite { var_name, .. } = node {
+            if !sprite_handles.contains(var_name) {
+                sprite_handles.push(var_name.clone());
+            }
+        }
+    }
+    for handle in &sprite_handles {
+        out.push_str(&format!("static Sprite* {handle};\n"));
     }
     if !ast.sprite_assets.is_empty() {
         out.push('\n');
