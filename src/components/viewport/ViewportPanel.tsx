@@ -1,4 +1,5 @@
 import { isPpmPath, loadProjectPpmImageData } from "../../core/ppmImage";
+import { loadShellPersona } from "../../core/surfaceRegistry";
 import { isExplicitEmptyCell, tilesetAtlasIndex } from "../../core/tilemapCells";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -553,7 +554,8 @@ export default function ViewportPanel({
   const [showStagingOverlay, setShowStagingOverlay] = useState(false);
   const [showViewportWarnings, setShowViewportWarnings] = useState(false);
   const [showSceneNavigator, setShowSceneNavigator] = useState(false);
-  const [showCommandDock, setShowCommandDock] = useState(true);
+  // The floating composition card covers the scene; the guided mode starts with it closed.
+  const [showCommandDock, setShowCommandDock] = useState(() => loadShellPersona() !== "guiado");
   const [showKeyColor, setShowKeyColor] = useState(false);
   const [guideSnap, setGuideSnap] = useState(true);
   const [gameViewLight, setGameViewLight] = useState(false);

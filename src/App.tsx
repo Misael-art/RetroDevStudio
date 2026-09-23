@@ -5346,8 +5346,16 @@ export default function App() {
         <SgdkImportSummaryCard summary={lastSgdkImportSummary} />
       ) : null}
 
+      {!showProjectWizard && shellPersona === "guiado" && activeProjectDir ? (
+        <GuidedStepBar
+          activeWorkspace={activeWorkspace}
+          onOpenWorkspace={(workspace) => handleWorkspaceSelect(workspace)}
+          onTest={() => void handleBuildAndRun()}
+        />
+      ) : null}
       {!showProjectWizard &&
         !focusedShell &&
+        shellPersona !== "guiado" &&
         workspaceGuide &&
         activeWorkspace !== "artstudio" &&
         activeWorkspace !== "retrofx" && (
@@ -5604,5 +5612,116 @@ function SceneSaveStatusChip() {
     >
       {label}
     </span>
+  );
+}
+
+type GuidedStepId = "cenario" | "personagem" | "regras" | "sons" | "testar";
+
+/**
+ * Guided path over the existing workspaces (no parallel UI or project model): each step
+ * opens the canonical surface with the relevant entity selected.
+ */
+function GuidedStepBar({
+  activeWorkspace,
+  onOpenWorkspace,
+  onTest,
+}: {
+  activeWorkspace: string;
+  onOpenWorkspace: (workspace: "scene" | "logic") => void;
+  onTest: () => void;
+}) {
+  const scene = useEditorStore((state) => state.activeScene);
+  const selectedEntityId = useEditorStore((state) => state.selectedEntityId);
+  const [lastStep, setLastStep] = useState<GuidedStepId | null>(null);
+  const entities = scene?.entities ?? [];
+  const tilemapId = entities.find((entity) => entity.components.tilemap)?.entity_id ?? null;
+  const playerId =
+    entities.find((entity) => entity.components.input)?.entity_id ??
+    entities.find((entity) => entity.components.physics)?.entity_id ??
+    null;
+  const select = (entityId: string | null) => {
+    if (entityId) useEditorStore.getState().setSelectedEntityId(entityId);
+  };
+  const steps: { id: GuidedStepId; label: string; hint: string; run: () => void }[] = [
+    {
+      id: "cenario",
+      label: "Cenário",
+      hint: "Pintar tiles e ajustar a colisão do mapa",
+      run: () => {
+        onOpenWorkspace("scene");
+        select(tilemapId);
+        if (tilemapId) {
+          useEditorStore.getState().setActiveTilemapId(tilemapId);
+          useEditorStore.getState().setEditorMode("paint");
+        }
+      },
+    },
+    {
+      id: "personagem",
+      label: "Personagem",
+      hint: "Posição, sprite e animações do jogador",
+      run: () => {
+        onOpenWorkspace("scene");
+        useEditorStore.getState().setEditorMode("select");
+        select(playerId);
+      },
+    },
+    {
+      id: "regras",
+      label: "Regras",
+      hint: "Quando → Se → Fazer, passagens e condições de vitória",
+      run: () => {
+        select(playerId);
+        onOpenWorkspace("logic");
+      },
+    },
+    {
+      id: "sons",
+      label: "Sons",
+      hint: "Associar efeitos sonoros aos eventos",
+      run: () => {
+        select(playerId);
+        onOpenWorkspace("logic");
+        window.setTimeout(() => document.querySelector("[data-testid='nodegraph-sounds']")?.scrollIntoView({ block: "center" }), 50);
+      },
+    },
+    { id: "testar", label: "Testar", hint: "Compilar e jogar pelo teclado (setas, Z pula)", run: onTest },
+  ];
+  const current: GuidedStepId | null =
+    lastStep === "sons" && activeWorkspace === "logic"
+      ? "sons"
+      : activeWorkspace === "logic"
+        ? "regras"
+        : activeWorkspace === "game"
+          ? "testar"
+          : activeWorkspace === "scene"
+            ? selectedEntityId && selectedEntityId === playerId
+              ? "personagem"
+              : "cenario"
+            : null;
+  return (
+    <nav aria-label="Etapas do modo guiado" data-testid="guided-steps" className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[#313244] bg-[#0b1020] px-3 py-1.5">
+      {steps.map((step, index) => (
+        <button
+          key={step.id}
+          type="button"
+          data-testid={`guided-step-${step.id}`}
+          aria-current={current === step.id ? "step" : undefined}
+          title={step.hint}
+          onClick={() => {
+            setLastStep(step.id);
+            step.run();
+          }}
+          className={`rounded-md border px-3 py-1 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#89b4fa] ${
+            current === step.id
+              ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#cdd6f4]"
+              : "border-[#313244] text-[#a6adc8] hover:border-[#89b4fa] hover:text-[#cdd6f4]"
+          }`}
+        >
+          {index + 1}. {step.label}
+        </button>
+      ))}
+      <span className="ml-auto text-[11px] text-[#7f849c]">{steps.find((step) => step.id === current)?.hint ?? "Escolha uma etapa"}</span>
+    </nav>
   );
 }

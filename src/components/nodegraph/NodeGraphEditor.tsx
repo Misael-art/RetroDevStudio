@@ -30,6 +30,7 @@ import {
 // superficie publica para preservar os consumidores existentes.
 export { EVENT_NODE_TYPES, validateNodeGraph } from "../../core/nodegraph/nodeEngine";
 import { readProjectAssetBytes } from "../../core/ipc/toolsService";
+import { summarizeRules } from "../../core/nodegraph/ruleSummary";
 import {
   addPassage,
   listPassages,
@@ -1851,6 +1852,35 @@ function SoundPanel({
   );
 }
 
+/** Read-only "Quando → Se → Fazer" list derived from the canonical graph. */
+function RulesPanel({ graph, onFocusNode }: { graph: NodeGraph; onFocusNode: (nodeId: string) => void }) {
+  const rules = useMemo(() => summarizeRules(graph), [graph]);
+  if (rules.length === 0) return null;
+  return (
+    <div data-testid="nodegraph-rules" className="rounded border border-[#a6e3a1]/35 bg-[#a6e3a1]/5 px-2 py-1.5 text-[11px] text-[#cdd6f4]">
+      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">Regras (Quando → Se → Fazer)</p>
+      <ol className="mt-1 space-y-1">
+        {rules.map((rule) => (
+          <li key={rule.id} data-testid={`rule-${rule.id}`} data-advanced={rule.advanced ? "true" : "false"}>
+            <button
+              type="button"
+              onClick={() => onFocusNode(rule.nodeIds[1] ?? rule.id)}
+              className="w-full rounded px-1 py-0.5 text-left hover:bg-[#313244] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#a6e3a1]"
+            >
+              <span className="font-semibold text-[#a6e3a1]">Quando</span> {rule.when}
+              {rule.conditions.length > 0 && <> · <span className="font-semibold text-[#f9e2af]">Se</span> {rule.conditions.join(" e ")}</>}
+              {" "}· <span className="font-semibold text-[#89b4fa]">Fazer</span> {rule.actions.length > 0 ? rule.actions.join(", ") : "nada"}
+            </button>
+            {rule.advanced && (
+              <p className="pl-1 text-[10px] text-[#fab387]">Regra avançada: {rule.advanced}. O texto mostra só o caminho principal; a lógica completa está no grafo.</p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function importBadgeClass(tone: CapabilityTone): string {
   switch (tone) {
     case "supported":
@@ -3114,6 +3144,7 @@ export default function NodeGraphEditor() {
                 </ul>
               </div>
             )}
+            <RulesPanel graph={graph} onFocusNode={(nodeId) => focusNode(nodeId)} />
             <PassagePanel
               graph={graph}
               entityIds={(activeScene?.entities ?? []).map((entity) => entity.entity_id)}
