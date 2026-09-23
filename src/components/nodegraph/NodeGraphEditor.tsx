@@ -1895,13 +1895,26 @@ export default function NodeGraphEditor() {
   const saveTimerRef = useRef<number | null>(null);
   const hydratingGraphRef = useRef(true);
   const lastPersistedGraphRef = useRef(serializeNodeGraph(INITIAL_GRAPH));
+  const currentGraphRef = useRef(graph);
+  currentGraphRef.current = graph;
+  const hydratedEntityIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    const entityId = selectedEntity?.entity_id ?? null;
     const resetFromGraph = (nextGraph: NodeGraph) => {
       if (cancelled) {
         return;
       }
+      // A scene change (e.g. another panel's autosave) re-runs this hydration, possibly
+      // asynchronously. It must not overwrite local edits of the same entity that the
+      // debounced autosave has not persisted yet.
+      const hasUnsavedLocalEdits =
+        serializeNodeGraph(currentGraphRef.current) !== lastPersistedGraphRef.current;
+      if (hydratedEntityIdRef.current === entityId && hasUnsavedLocalEdits) {
+        return;
+      }
+      hydratedEntityIdRef.current = entityId;
       hydratingGraphRef.current = true;
       setGraph(nextGraph);
       setSelectedId(null);

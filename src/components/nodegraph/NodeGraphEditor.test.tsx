@@ -1251,6 +1251,51 @@ describe("NodeGraphEditor", () => {
     expect(container.textContent).toContain("Origem do grafo: importado do graph_ref");
   });
 
+  it("does not let a graph_ref re-hydration overwrite unsaved local edits", async () => {
+    const heroSource = {
+      entity_id: "hero",
+      display_name: "Hero",
+      prefab: null,
+      transform: { x: 16, y: 24 },
+      components: { logic: { graph_ref: "graphs/hero.json", graph_origin: "imported_ref" } },
+    };
+    const sourceScene = buildSceneWithGraph(EMPTY_GRAPH, [heroSource]);
+    const resolvedScene = buildSceneWithGraph(GRAPH_FIXTURE, [
+      {
+        ...heroSource,
+        components: {
+          logic: { graph: serializeNodeGraph(GRAPH_FIXTURE), graph_ref: "graphs/hero.json", graph_origin: "imported_ref" },
+        },
+      },
+    ]);
+    mocks.resolveScenePrefabs.mockResolvedValue({ ok: true, error: "", scene_json: JSON.stringify(resolvedScene) });
+    await act(async () => {
+      useEditorStore.setState({ activeScene: sourceScene, activeSceneSource: sourceScene, selectedEntityId: "hero" });
+      await flush();
+      await flush();
+    });
+    const countCards = () => container.querySelectorAll("[data-testid^='node-card-']").length;
+    const hydratedCount = countCards();
+    expect(hydratedCount).toBeGreaterThan(0);
+
+    // Local edit, then another panel replaces the scene source before the 600ms autosave.
+    const paletteButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => !button.disabled && button.querySelector("span.truncate")?.textContent === "Ao Iniciar"
+    );
+    expect(paletteButton).toBeInstanceOf(HTMLButtonElement);
+    await act(async () => {
+      paletteButton!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      await flush();
+    });
+    expect(countCards()).toBe(hydratedCount + 1);
+    await act(async () => {
+      useEditorStore.setState({ activeSceneSource: structuredClone(sourceScene) });
+      await flush();
+      await flush();
+    });
+    expect(countCards()).toBe(hydratedCount + 1);
+  });
+
   it("adds an entry node from the overview when the graph has no event node yet", async () => {
     await act(async () => {
       useEditorStore.setState({
