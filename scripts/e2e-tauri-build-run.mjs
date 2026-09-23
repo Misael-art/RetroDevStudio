@@ -5678,6 +5678,20 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     async () => ((await readAutomationState(sessionId))?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Cena salva no projeto ativo.")).length > 0,
     15000, "Salvar nao confirmou a segunda passagem.", 250
   );
+  const savedGraphText = await waitFor(
+    async () => {
+      const text = await readFile(path.join(createdState.activeProjectDir, "graphs", "reference_platformer_logic.json"), "utf8").catch(() => "");
+      return text.includes("passage_blocker_2") ? text : false;
+    },
+    10000,
+    "Grafo gravado em disco apos Salvar nao contem a segunda passagem.",
+    250
+  ).catch(async (error) => {
+    const scene = await readFile(path.join(createdState.activeProjectDir, "scenes", "main.json"), "utf8").catch(() => "");
+    const player = JSON.parse(scene || "{}")?.entities?.find?.((entity) => entity.entity_id === "player");
+    fail(`${error.message} player(source)=${JSON.stringify(player)?.slice(0, 1500)}`);
+  });
+  report.secondPassageSavedGraphSha256 = createHash("sha256").update(savedGraphText).digest("hex");
   await clickTopBarMenuAction(sessionId, "Fechar");
   await waitFor(
     async () => {
