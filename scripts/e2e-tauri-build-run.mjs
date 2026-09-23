@@ -6097,7 +6097,11 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
     const value = await state();
     const frame = await readCanonicalGameFrame(sessionId);
     return value?.emulatorLoaded && frame?.renderedFrames > 5 && frame.romSha256 ? { frame } : false;
-  }, 300000, "Build & Run nao iniciou o jogo.", 500);
+  }, 300000, "Build & Run nao iniciou o jogo.", 500).catch(async (error) => {
+    await shot("build-run-failure", "falha do Build & Run");
+    const entries = ((await state())?.consoleEntries ?? []).filter((entry) => entry.level !== "info").slice(-12);
+    fail(`${error.message} console=${JSON.stringify(entries).slice(0, 4000)}`);
+  });
   const romPath = path.join(projectDir, "build", "megadrive", "out", "rom.bin");
   const romCopy = path.join(validationDir, `${artifactPrefix}-played.rom`);
   await cp(romPath, romCopy);
