@@ -7981,6 +7981,7 @@ async function main() {
         // Tile mode: independent oracle of the reinsertion, decoded here from the ROM's
         // stand mapping (0x21293) and raw art (0x21AFE), not from product code.
         const tileRect = { x: 10, y: 14, w: 12, h: 8, index: 14 };
+        const editWord = (7 << 1) | (0 << 5) | (7 << 9);
         const sonicStandByteFor = (x, y) => {
           const mapping = inspectionRomBytes.subarray(0x21293, 0x21293 + 21);
           for (let piece = 0; piece < mapping[0]; piece += 1) {
@@ -8007,7 +8008,6 @@ async function main() {
             }
           }
         } else {
-          const editWord = (7 << 1) | (0 << 5) | (7 << 9);
           modifiedRomBytes.writeUInt16BE(editWord, 0x2388 + 2);
         }
         const modifiedSha256 = createHash("sha256").update(modifiedRomBytes).digest("hex");
