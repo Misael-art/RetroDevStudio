@@ -15140,6 +15140,16 @@ fn reference_tileset_ppm() -> Vec<u8> {
     };
     reference_ppm(320, 224, move |x, y| {
         let (tile_x, tile_y) = (x / 8, y / 8);
+        let (px, py) = (x as i32, y as i32);
+        let ellipse = |cx: i32, cy: i32, rx: i32, ry: i32| {
+            (px - cx) * (px - cx) * ry * ry + (py - cy) * (py - cy) * rx * rx <= rx * rx * ry * ry
+        };
+        let scene_cloud = [(58, 38), (173, 53), (283, 33)].iter().any(|&(cx, cy)| {
+            ellipse(cx, cy, 23, 7)
+                || ellipse(cx - 11, cy - 5, 11, 9)
+                || ellipse(cx + 10, cy - 4, 13, 9)
+        });
+        let hill_top = 164 + ((x + 48) % 128).abs_diff(64) / 3;
         match (tile_x, tile_y) {
             (1, 0) => grass(x, y),
             (2, 0) => brick(x, y),
@@ -15148,9 +15158,21 @@ fn reference_tileset_ppm() -> Vec<u8> {
             (_, 26) => grass(x, y),
             (_, 27) => dirt(x, y),
             (20..=27, 21) => grass(x, y),
-            _ if y < 70 && (x / 43 + y / 19).is_multiple_of(9) => cloud(x, y),
-            _ if (17..=20).contains(&tile_y) && (x / 17 + y / 9).is_multiple_of(7) => [68, 120, 62],
-            _ if (tile_x + tile_y) % 2 == 0 => SKY_LIGHT,
+            _ if scene_cloud => {
+                if y.is_multiple_of(3) || y < 35 {
+                    [255, 244, 217]
+                } else {
+                    [213, 234, 231]
+                }
+            }
+            _ if y >= hill_top => {
+                if y <= hill_top + 2 || (x / 7 + y / 11).is_multiple_of(13) {
+                    [90, 171, 70]
+                } else {
+                    [68, 120, 62]
+                }
+            }
+            _ if y < 100 => SKY_LIGHT,
             _ => SKY,
         }
     })

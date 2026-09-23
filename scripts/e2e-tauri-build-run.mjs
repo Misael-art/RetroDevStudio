@@ -6200,14 +6200,15 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
     fail(`Passagens nao se comportaram durante o jogo: ${JSON.stringify({ mainOpenedAt, secondOpenedAt, crossedSecondClosed: crossedSecondClosed.length })}`);
   }
   if (hole.length === 0 || jumps === 0) fail(`Buraco na colisao nao foi observado/atravessado com pulo: ${JSON.stringify({ hole: hole.length, jumps })}`);
-  // Image: the player sprite is on screen at its final position (not just "pixels changed").
-  const playerPixels = (() => {
+  // Image: the fox's orange coat is visible in the real core framebuffer after
+  // victory, rather than counting arbitrary nonblack pixels or the old blue art.
+  const foxFurPixels = (() => {
     const rgba = frameAfter.rgba;
     let count = 0;
-    for (let i = 0; i < rgba.length; i += 4) if (Math.abs(rgba[i] - 42) < 20 && Math.abs(rgba[i + 1] - 180) < 20 && Math.abs(rgba[i + 2] - 232) < 20) count += 1;
+    for (let i = 0; i < rgba.length; i += 4) if (Math.abs(rgba[i] - 228) < 24 && Math.abs(rgba[i + 1] - 109) < 24 && Math.abs(rgba[i + 2] - 43) < 24) count += 1;
     return count;
   })();
-  if (playerPixels < 20) fail(`Personagem nao aparece no frame apos a vitoria: ${playerPixels}`);
+  if (foxFurPixels < 20) fail(`Raposa nao aparece no framebuffer apos a vitoria: ${foxFurPixels}`);
 
   // Sound at the right event: 1320 Hz (victory) after the win, absent before; 880 Hz
   // (the unbound default) must not dominate.
