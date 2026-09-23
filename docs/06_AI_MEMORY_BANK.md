@@ -1,5 +1,9 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-23 (c) — autoria guiada ponta a ponta (Experimental; sem merge)
+
+Aceite `authoring-acceptance` passou 10/10 no binário `6cebe930…` (commit `a6c02af`): criar fase, ver recursos, editar cenário/colisão/animação, duas passagens, associar som, salvar, reiniciar, reabrir, compilar e vencer jogando pelo teclado, com o som `victory` observado nas amostras recebidas do core. Corrigidas perdas silenciosas de trabalho (recarga do disco na hierarquia e no salvar com falha, debounce do NodeGraph), PPM no WebView, overrides de prefab, semântica de tile vazio, paredes laterais e identidade da ROM no Build & Run. Regressões reexecutadas: reference-platformer, ADDQ, branch-compare, reinserção Sonic. Matriz: `docs/REX_AUTHORING_ACCEPTANCE.md`.
+
 ### Checkpoint 2026-09-23 (b) — cenário/colisão/animação pela UI e reinserção gráfica em ROM (Experimental; sem merge)
 
 E2E `reference-platformer-2026-09-23T03-06-00-927Z-report.json` 16/16: fosso pintado (visual + colisão) e FPS idle 12 editados pela UI chegam à ROM (descida física no fosso, região visual alterada vs. controle, troca de frame a cada 5), junto com a segunda passagem. Corrigidos: reidratação do NodeGraph que apagava edições locais; override parcial de sprite em instância de prefab que invalidava o salvar (outras edições aninhadas do Inspector em prefabs não auditadas); validação do NodeGraph para referência de entidade e parâmetros. Etapa 6: reinserção de tiles 4bpp com tamanho preservado no frame Sonic stand (DPLC `0x217FE`, tiles 11..16 compartilhados com o frame 5), E2E `inspection-sonic-tiles` passou (negativos, BPS, base intacta, 96 pixels no torso em jogo, reabertura). Regressões reexecutadas: Sonic paleta + jogo canônico, ADDQ e branch-compare verdes. Pendentes: associar SFX pela UI, concluir o objetivo por teclado nativo no fluxo autoral, loopback acústico.
