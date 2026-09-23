@@ -5612,6 +5612,8 @@ function SceneSaveStatusChip() {
     <span
       data-testid="scene-save-status"
       data-status={status}
+      data-revision={sceneRevision}
+      data-saved-revision={saveState.revision ?? ""}
       role="status"
       aria-live="polite"
       title={status === "failed" ? `Falha ao salvar: ${saveState.message ?? "erro desconhecido"}. As alterações continuam no editor.` : label}
