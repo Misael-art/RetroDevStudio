@@ -580,6 +580,8 @@ vi.mock("./core/ipc/emulatorService", () => ({
   startFrameLoop: mocks.startFrameLoop,
   listenToAudioStream: mocks.listenToAudioStream,
   keyToJoypad: vi.fn(() => null),
+  recordAudioOutput: vi.fn(),
+  getAudioOutputTelemetry: vi.fn(() => null),
 }));
 
 vi.mock("./core/ipc/hwService", () => ({

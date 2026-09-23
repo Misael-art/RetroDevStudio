@@ -196,6 +196,54 @@ export async function startFrameLoop(
   return stop;
 }
 
+/**
+ * Observabilidade do encaminhamento de audio core → WebAudio. Separa o que o
+ * core gerou (recebido), o que foi entregue ao grafo de saida do AudioContext
+ * (renderizado) e o estado do contexto. Nao prova captura acustica/loopback.
+ */
+export type AudioOutputTelemetry = {
+  receivedFrames: number;
+  receivedNonZeroFrames: number;
+  renderedFrames: number;
+  renderedNonZeroFrames: number;
+  renderedPeak: number;
+  contextState: string | null;
+  contextSampleRate: number | null;
+  muted: boolean;
+};
+
+const audioOutputTelemetry: AudioOutputTelemetry = {
+  receivedFrames: 0,
+  receivedNonZeroFrames: 0,
+  renderedFrames: 0,
+  renderedNonZeroFrames: 0,
+  renderedPeak: 0,
+  contextState: null,
+  contextSampleRate: null,
+  muted: false,
+};
+
+export function recordAudioOutput(update: Partial<AudioOutputTelemetry> & {
+  addReceived?: { frames: number; nonZero: number };
+  addRendered?: { frames: number; nonZero: number; peak: number };
+}): void {
+  const { addReceived, addRendered, ...fields } = update;
+  Object.assign(audioOutputTelemetry, fields);
+  if (addReceived) {
+    audioOutputTelemetry.receivedFrames += addReceived.frames;
+    audioOutputTelemetry.receivedNonZeroFrames += addReceived.nonZero;
+  }
+  if (addRendered) {
+    audioOutputTelemetry.renderedFrames += addRendered.frames;
+    audioOutputTelemetry.renderedNonZeroFrames += addRendered.nonZero;
+    audioOutputTelemetry.renderedPeak = Math.max(audioOutputTelemetry.renderedPeak, addRendered.peak);
+  }
+}
+
+export function getAudioOutputTelemetry(): AudioOutputTelemetry {
+  return { ...audioOutputTelemetry };
+}
+
 export async function listenToAudioStream(
   onAudio: (payload: AudioPayload) => void
 ): Promise<UnlistenFn> {

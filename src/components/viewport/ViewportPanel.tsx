@@ -13,6 +13,7 @@ import {
   emulatorStopRecording,
   keyToJoypad,
   listenToAudioStream,
+  recordAudioOutput,
   startFrameLoop,
   type AudioPayload,
   type FramePayload,
@@ -1619,6 +1620,17 @@ export default function ViewportPanel({
       right[index] = chunk.right[chunk.offset] ?? 0;
       chunk.offset += 1;
     }
+    let nonZero = 0;
+    let peak = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      const magnitude = Math.max(Math.abs(left[index]), Math.abs(right[index]));
+      if (magnitude > 0) nonZero += 1;
+      if (magnitude > peak) peak = magnitude;
+    }
+    recordAudioOutput({
+      addRendered: { frames: left.length, nonZero, peak },
+      contextState: audioContextRef.current?.state ?? null,
+    });
   }, []);
 
   const disposeAudioPlayback = useCallback(() => {
@@ -1673,6 +1685,7 @@ export default function ViewportPanel({
       gainNode.connect(context.destination);
 
       audioContextRef.current = context;
+      recordAudioOutput({ contextSampleRate: context.sampleRate, muted: audioMuted });
       audioGainRef.current = gainNode;
       audioProcessorRef.current = processor;
 
@@ -1695,10 +1708,13 @@ export default function ViewportPanel({
 
     const left = new Float32Array(frameCount);
     const right = new Float32Array(frameCount);
+    let nonZero = 0;
     for (let index = 0; index < frameCount; index += 1) {
       left[index] = (payload.samples[index * 2] ?? 0) / 32768;
       right[index] = (payload.samples[(index * 2) + 1] ?? 0) / 32768;
+      if (left[index] !== 0 || right[index] !== 0) nonZero += 1;
     }
+    recordAudioOutput({ addReceived: { frames: frameCount, nonZero } });
 
     audioQueueRef.current.push({ left, right, offset: 0 });
     const maxQueuedFrames = Math.max(

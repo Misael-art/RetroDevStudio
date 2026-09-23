@@ -5312,6 +5312,8 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
       const y = await readPlayerS16("spr_player_y");
       samples.push({ label, y, renderedFrames: progress?.renderedFrames ?? null, t: Date.now() });
       if (onSample) await onSample(samples);
+      // Back-to-back WebDriver scripts starve the WebView main thread (rAF frame loop).
+      await new Promise((resolve) => setTimeout(resolve, 60));
     }
     return samples;
   };
@@ -5326,6 +5328,10 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
   const jumpReleaseAck = await waitJoypadY(false, "liberacao do salto");
   const jumpSamples = await sampleJump("jump", 1500);
+  const jumpFrameSpan = (jumpSamples.at(-1)?.renderedFrames ?? 0) - (jumpSamples[0]?.renderedFrames ?? 0);
+  if (jumpFrameSpan < 30) {
+    fail(`Harness: o jogo nao avancou frames durante a amostragem do salto (${jumpFrameSpan}); resultado inconclusivo, nao falha de produto.`);
+  }
   const apexIndex = jumpSamples.reduce((best, sample, index) => (sample.y < jumpSamples[best].y ? index : best), 0);
   const apexY = jumpSamples[apexIndex].y;
   const fellAfterApex = jumpSamples.slice(apexIndex).some((sample) => sample.y > apexY);
