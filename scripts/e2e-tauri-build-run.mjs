@@ -5606,7 +5606,9 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   const solidBeforePit = Number(sceneStateForPit?.activeScene?.collisionSolidCount ?? 0);
   await clickButtonByTestIdNative(sessionId, "hierarchy-tilemap-edit-reference_tilemap", "abrir tilemap para o fosso");
   await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-tile-paint-flow-strip\"]'));"), 15000, "Pintura de tilemap indisponivel para o fosso.", 250);
-  await clickByTestId(sessionId, "tile-palette-0");
+  // Cell value 0 means "no overlay" in the SGDK emitter (the base map shows through), so the
+  // pit visual is painted with tile 1 instead of the "empty" tile.
+  await clickByTestId(sessionId, "tile-palette-1");
   for (const [col, row] of pitCells) {
     const point = cellPoint(col, row);
     await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", point.x, point.y, `apagar visual ${col},${row}`);
@@ -5615,7 +5617,7 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     async () => {
       const state = await readAutomationState(sessionId);
       const cells = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap")?.tilemap?.cells ?? [];
-      return pitCells.every(([col, row]) => Number(cells[row * 40 + col]) === 0) ? true : false;
+      return pitCells.every(([col, row]) => Number(cells[row * 40 + col]) === 1) ? true : false;
     },
     10000, "Visual do fosso nao foi pintado no tilemap.", 150
   );
