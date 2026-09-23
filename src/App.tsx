@@ -3464,6 +3464,18 @@ export default function App() {
       }
 
       setEmulatorLoaded(true);
+      // Same identity contract as loadRomIntoEmulator: the Game View shows which ROM runs.
+      const builtIdentity = await emulatorObserve().catch(() => null);
+      if (builtIdentity?.ok) {
+        setEmulatorRomIdentity({
+          path: builtIdentity.rom_path,
+          size: builtIdentity.rom_size,
+          sha256: builtIdentity.rom_sha256,
+          coreLabel: builtIdentity.core_label,
+          corePath: builtIdentity.core_path,
+          sourceLabel: "Build & Run",
+        });
+      }
       trackProductMetric({ kind: "rom_loaded" });
       logMessage("success", "ROM carregada no emulador.");
       setEmulPaused(false);

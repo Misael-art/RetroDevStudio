@@ -1447,7 +1447,7 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 let wall_body = WALL_BODIES.with(|bodies| bodies.borrow().get(target_var).copied());
                 match wall_body {
                     Some((width, height)) if *dx != 0 => out.push_str(&format!(
-                        "{indent}if (!rds_hits_wall({target}_x + {dx}, {target}_y, {width}, {height}, {dx})) {target}_x += {dx}; {target}_y += {dy};\n",
+                        "{indent}if (!rds_hits_wall({target}_x + {dx}, {target}_y, {width}, {height}, {dx})) {{ {target}_x += {dx}; }}\n{indent}{target}_y += {dy};\n",
                         indent = indent_str,
                         target = target_var,
                     )),

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   generateCCode: vi.fn(),
   emulatorLoadRom: vi.fn(),
   emulatorGetCoreEpoch: vi.fn(async () => 7),
+  emulatorObserve: vi.fn(async () => ({ ok: true, rom_path: "F:/Temp/game.md", rom_size: 131072, rom_sha256: "ab".repeat(32), core_label: "Genesis Plus GX", core_path: "core.so" })),
   emulatorSaveState: vi.fn(),
   emulatorLoadState: vi.fn(),
   emulatorRewindStep: vi.fn(),
@@ -569,6 +570,7 @@ vi.mock("./core/ipc/emulatorService", () => ({
   },
   emulatorLoadRom: mocks.emulatorLoadRom,
   emulatorGetCoreEpoch: mocks.emulatorGetCoreEpoch,
+  emulatorObserve: mocks.emulatorObserve,
   emulatorSaveState: mocks.emulatorSaveState,
   emulatorLoadState: mocks.emulatorLoadState,
   emulatorRewindStep: mocks.emulatorRewindStep,
@@ -2061,6 +2063,7 @@ describe("App build flow", () => {
     // Build & Run must anchor the epoch of the freshly loaded core; a stale epoch
     // makes the backend reject every keyboard input after a rebuild.
     expect(useEditorStore.getState().coreEpoch).toBe(7);
+    expect(useEditorStore.getState().emulatorRomIdentity?.sha256).toBe("ab".repeat(32));
     expect(useEditorStore.getState().joypadSessionHold).toBe(false);
     expect(useEditorStore.getState().joypadSessionId).not.toBeNull();
     expect(container.textContent).toContain("Emulador ativo");
