@@ -11,6 +11,8 @@ import {
   inspectionCancel,
   inspectionCatalogPage,
   inspectionEditSonicPalette,
+  inspectionEditSonicTiles,
+  type InspectionPixelEdit,
   inspectionListSessions,
   inspectionOpen,
   inspectionPreview,
@@ -92,6 +94,9 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [identifyInput, setIdentifyInput] = useState("");
   const [identifyError, setIdentifyError] = useState("");
   const [editPaletteIndex, setEditPaletteIndex] = useState(1);
+  const [tileEditRect, setTileEditRect] = useState({ x: 10, y: 14, w: 12, h: 8 });
+  const [tileEditIndex, setTileEditIndex] = useState(14);
+  const [tileEditAllowShared, setTileEditAllowShared] = useState(false);
   const [editRed, setEditRed] = useState(7);
   const [editGreen, setEditGreen] = useState(7);
   const [editBlue, setEditBlue] = useState(7);
@@ -443,6 +448,29 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     }
   }
 
+  async function editSonicTiles() {
+    if (!session || spriteFrameId !== "sonic1_sonic/stand") return;
+    const pixels: InspectionPixelEdit[] = [];
+    for (let y = tileEditRect.y; y < tileEditRect.y + tileEditRect.h; y += 1) {
+      for (let x = tileEditRect.x; x < tileEditRect.x + tileEditRect.w; x += 1) {
+        pixels.push({ x, y, index: tileEditIndex });
+      }
+    }
+    setEditBusy(true);
+    try {
+      const edit = await inspectionEditSonicTiles(session.session_id, "sonic1_sonic", "sonic1_sonic/stand", pixels, tileEditAllowShared);
+      const next = { ...session, edit };
+      sessionRef.current = next;
+      setSession(next);
+      setSpriteFrame(null);
+      logMessage("success", `[Inspeção] Tiles reinseridos em cópia BYOR: ${edit.modified_rom_sha256}.`);
+    } catch (error) {
+      logMessage("error", `[Inspeção] Reinserção recusada: ${describeError(error)}`);
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
   async function exportPilotPatch() {
     if (!session?.edit || !patchPath.trim()) return;
     setPatchBusy(true);
@@ -700,6 +728,19 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                 <label className="flex flex-col gap-1 text-[#7f849c]">B<input data-testid="inspection-sonic-palette-blue" type="number" min={0} max={7} value={editBlue} onChange={(event) => setEditBlue(Number(event.target.value))} className="w-16 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
                 <button type="button" data-testid="inspection-sonic-edit" disabled={editBusy || !session} onClick={() => void editSonicPalette()} className="rounded bg-[#f9e2af] px-3 py-1 font-semibold text-[#1e1e2e]">{editBusy ? "Editando..." : "Editar pela interface"}</button>
               </div>
+              <div data-testid="inspection-sonic-tile-edit" className="mt-3 rounded border border-[#cba6f7]/30 p-2">
+                <div className="font-semibold uppercase tracking-[0.14em] text-[#cba6f7]">Reinserção de tiles · 4bpp não comprimido · tamanho preservado</div>
+                <div className="mt-1 text-[#cdd6f4]">Pinta um retângulo do frame 32×40 com um índice de paleta, direto na arte Art_Sonic da cópia. Pixels fora do mapping, formatos comprimidos, crescimento e tiles compartilhados (DPLC) sem confirmação são recusados.</div>
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  {(["x", "y", "w", "h"] as const).map((key) => (
+                    <label key={key} className="flex flex-col gap-1 text-[#7f849c]">{key.toUpperCase()}<input data-testid={`inspection-sonic-tile-${key}`} type="number" min={key === "w" || key === "h" ? 1 : 0} max={key === "x" || key === "w" ? 32 : 40} value={tileEditRect[key]} onChange={(event) => setTileEditRect((rect) => ({ ...rect, [key]: Number(event.target.value) }))} className="w-14 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                  ))}
+                  <label className="flex flex-col gap-1 text-[#7f849c]">Índice<input data-testid="inspection-sonic-tile-index" type="number" min={0} max={15} value={tileEditIndex} onChange={(event) => setTileEditIndex(Number(event.target.value))} className="w-14 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                  <label className="flex items-center gap-1 text-[#7f849c]"><input data-testid="inspection-sonic-tile-allow-shared" type="checkbox" checked={tileEditAllowShared} onChange={(event) => setTileEditAllowShared(event.target.checked)} />permitir tiles compartilhados</label>
+                  <button type="button" data-testid="inspection-sonic-tile-edit-apply" disabled={editBusy || !session} onClick={() => void editSonicTiles()} className="rounded bg-[#cba6f7] px-3 py-1 font-semibold text-[#1e1e2e]">{editBusy ? "Reinserindo..." : "Reinserir tiles"}</button>
+                </div>
+              </div>
+              {session.edit?.format === "md_4bpp_tile_nibbles" && <div data-testid="inspection-sonic-tile-edit-result" className="mt-2 break-all text-[#a6e3a1]">Tiles de arte {session.edit.art_tiles?.join(", ")} · {session.edit.pixels_changed} pixel(s) · compartilhados com frames DPLC: {session.edit.shared_with_frames?.length ? session.edit.shared_with_frames.join(", ") : "nenhum"} · base após edição {session.edit.base_rom_sha256_after}</div>}
               {session.edit && <div data-testid="inspection-sonic-edit-result" className="mt-2 break-all text-[#a6e3a1]">ROM modificada {session.edit.modified_rom_sha256} · offsets {session.edit.changed_offsets.map((offset) => `0x${hex(offset)}`).join(", ")} · {session.edit.bytes_changed} byte(s)</div>}
               {session.edit && <div className="mt-3 grid gap-2">
                 <ToolPathField label="Exportar patch BPS" value={patchPath} set={setPatchPath} extensions={["bps"]} accentColor="f9e2af" />

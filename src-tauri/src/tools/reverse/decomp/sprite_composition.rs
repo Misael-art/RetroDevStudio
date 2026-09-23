@@ -1019,3 +1019,81 @@ mod tests {
         assert!(!artifact_name_component("spr_ryo_100/frame-1").contains('/'));
     }
 }
+
+/// Raw (uncompressed) 4bpp art range of the Sonic 1 stand profile.
+pub(crate) const SONIC1_ART_OFFSET: usize = 0x21afe;
+pub(crate) const SONIC1_ART_SIZE: usize = 0xa120;
+/// Sonic 1 DPLC table (word offsets, one per frame) located in the profiled ROM by the
+/// stand frame's DPLC entry derived from its mapping (3@0, 8@3, 3@11, 3@14).
+pub(crate) const SONIC1_DPLC_TABLE_OFFSET: usize = 0x217fe;
+pub(crate) const SONIC1_DPLC_FRAME_COUNT: usize = 88;
+pub(crate) const SONIC1_STAND_DPLC_FRAME: usize = 1;
+const SONIC1_STAND_DPLC_ENTRY: [u8; 9] = [0x04, 0x20, 0x00, 0x70, 0x03, 0x20, 0x0b, 0x20, 0x0e];
+
+/// Where one pixel of the composed stand canvas lives in the ROM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SonicPixelLocation {
+    pub art_tile: usize,
+    pub byte_offset: usize,
+    pub high_nibble: bool,
+}
+
+/// Maps a stand canvas pixel (32x40, same geometry as `compose_sonic_rgba`) to its art
+/// byte. `None` when no mapping piece covers the pixel (nothing in the ROM to edit).
+pub(crate) fn sonic_stand_pixel_location(
+    x: u32,
+    y: u32,
+) -> Result<Option<SonicPixelLocation>, String> {
+    let parts = decode_sonic_parts(&SONIC1_STAND_MAPPING)?;
+    let (x, y) = (x as i32, y as i32);
+    for part in parts {
+        let left = 16 + i32::from(part.x);
+        let top = 20 + i32::from(part.y);
+        let (lx, ly) = (x - left, y - top);
+        if lx < 0 || ly < 0 || lx >= part.tile_width as i32 * 8 || ly >= part.tile_height as i32 * 8
+        {
+            continue;
+        }
+        let art_tile = part.tile_start + (ly as usize / 8) * part.tile_width + lx as usize / 8;
+        let (px, py) = (lx as usize % 8, ly as usize % 8);
+        return Ok(Some(SonicPixelLocation {
+            art_tile,
+            byte_offset: SONIC1_ART_OFFSET + art_tile * TILE_BYTES + py * 4 + px / 2,
+            high_nibble: px % 2 == 0,
+        }));
+    }
+    Ok(None)
+}
+
+/// Art tiles referenced by every DPLC frame, read from the ROM. Fails if the table does
+/// not have the verified shape (stand entry at frame 1).
+pub(crate) fn sonic_dplc_art_tiles(rom: &[u8]) -> Result<Vec<Vec<usize>>, String> {
+    let table = SONIC1_DPLC_TABLE_OFFSET;
+    let word = |offset: usize| -> Result<usize, String> {
+        rom.get(offset..offset + 2)
+            .map(|bytes| usize::from(u16::from_be_bytes([bytes[0], bytes[1]])))
+            .ok_or_else(|| "tabela DPLC fora da ROM".to_string())
+    };
+    if word(table)? != SONIC1_DPLC_FRAME_COUNT * 2 {
+        return Err("tabela DPLC Sonic 1 nao tem 88 frames no offset verificado".to_string());
+    }
+    let stand = table + word(table + SONIC1_STAND_DPLC_FRAME * 2)?;
+    if rom.get(stand..stand + SONIC1_STAND_DPLC_ENTRY.len())
+        != Some(SONIC1_STAND_DPLC_ENTRY.as_slice())
+    {
+        return Err("entrada DPLC do frame stand diverge do mapping verificado".to_string());
+    }
+    let mut frames = Vec::with_capacity(SONIC1_DPLC_FRAME_COUNT);
+    for frame in 0..SONIC1_DPLC_FRAME_COUNT {
+        let start = table + word(table + frame * 2)?;
+        let count = usize::from(*rom.get(start).ok_or("entrada DPLC fora da ROM")?);
+        let mut tiles = Vec::new();
+        for entry in 0..count {
+            let value = word(start + 1 + entry * 2)?;
+            let first = value & 0x0fff;
+            tiles.extend(first..first + (value >> 12) + 1);
+        }
+        frames.push(tiles);
+    }
+    Ok(frames)
+}

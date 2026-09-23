@@ -465,6 +465,17 @@ export interface InspectionEdit {
   modified_rom_path: string;
   changed_offsets: number[];
   bytes_changed: number;
+  /** Tile reinsertion only (format `md_4bpp_tile_nibbles`). */
+  art_tiles?: number[];
+  shared_with_frames?: number[];
+  pixels_changed?: number | null;
+  base_rom_sha256_after?: string | null;
+}
+
+export interface InspectionPixelEdit {
+  x: number;
+  y: number;
+  index: number;
 }
 
 export interface InspectionProgress {
@@ -681,6 +692,23 @@ export function inspectionEditSonicPalette(
     red,
     green,
     blue,
+  });
+}
+
+/** Recolors stand-frame pixels in the raw 4bpp art on a copy (size-preserving). */
+export function inspectionEditSonicTiles(
+  sessionId: string,
+  resourceId: string,
+  frameId: string,
+  pixels: InspectionPixelEdit[],
+  allowSharedTiles: boolean
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_edit_sonic_tiles", {
+    sessionId,
+    resourceId,
+    frameId,
+    pixels,
+    allowSharedTiles,
   });
 }
 

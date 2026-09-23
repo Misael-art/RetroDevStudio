@@ -468,6 +468,7 @@ function parseArgs(argv) {
           "inspection-complete",
           "inspection-sprite-secondary",
           "inspection-sonic",
+          "inspection-sonic-tiles",
           "inspection-preview-unavailable",
           "logic-recovery",
           "logic-recovery-branch",
@@ -7814,6 +7815,8 @@ async function main() {
       return;
     }
 
+    const sonicTilesMode = options.scenario === "inspection-sonic-tiles";
+    if (sonicTilesMode) options.scenario = "inspection-sonic";
     if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
       let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
       let inspectionFixture = null;
@@ -7972,15 +7975,72 @@ async function main() {
         const baseScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-base.png`);
 
         const modifiedRomBytes = Buffer.from(inspectionRomBytes);
-        const editWord = (7 << 1) | (0 << 5) | (7 << 9);
-        modifiedRomBytes.writeUInt16BE(editWord, 0x2388 + 2);
+        // Tile mode: independent oracle of the reinsertion, decoded here from the ROM's
+        // stand mapping (0x21293) and raw art (0x21AFE), not from product code.
+        const tileRect = { x: 10, y: 14, w: 12, h: 8, index: 14 };
+        const sonicStandByteFor = (x, y) => {
+          const mapping = inspectionRomBytes.subarray(0x21293, 0x21293 + 21);
+          for (let piece = 0; piece < mapping[0]; piece += 1) {
+            const d = mapping.subarray(1 + piece * 5, 6 + piece * 5);
+            const w = ((d[1] >> 2) & 3) + 1;
+            const h = (d[1] & 3) + 1;
+            const left = 16 + ((d[4] << 24) >> 24);
+            const top = 20 + ((d[0] << 24) >> 24);
+            const lx = x - left;
+            const ly = y - top;
+            if (lx < 0 || ly < 0 || lx >= w * 8 || ly >= h * 8) continue;
+            const tile = d[2] * 256 + d[3] + Math.floor(ly / 8) * w + Math.floor(lx / 8);
+            return { tile, offset: 0x21afe + tile * 32 + (ly % 8) * 4 + Math.floor((lx % 8) / 2), high: (lx % 8) % 2 === 0 };
+          }
+          return null;
+        };
+        if (sonicTilesMode) {
+          for (let y = tileRect.y; y < tileRect.y + tileRect.h; y += 1) {
+            for (let x = tileRect.x; x < tileRect.x + tileRect.w; x += 1) {
+              const at = sonicStandByteFor(x, y);
+              if (!at) fail(`Retangulo de teste fora do mapping: ${x},${y}`);
+              const byte = modifiedRomBytes[at.offset];
+              modifiedRomBytes[at.offset] = at.high ? (byte & 0x0f) | (tileRect.index << 4) : (byte & 0xf0) | tileRect.index;
+            }
+          }
+        } else {
+          const editWord = (7 << 1) | (0 << 5) | (7 << 9);
+          modifiedRomBytes.writeUInt16BE(editWord, 0x2388 + 2);
+        }
         const modifiedSha256 = createHash("sha256").update(modifiedRomBytes).digest("hex");
         await closeVisibleConsoleDrawer(sessionId, "antes da edição Sonic");
-        await fillInputByLabel(sessionId, "Índice", "1");
-        await fillInputByLabel(sessionId, "R", "7");
-        await fillInputByLabel(sessionId, "G", "0");
-        await fillInputByLabel(sessionId, "B", "7");
-        await clickElementWithNativePointer(sessionId, "[data-testid='inspection-sonic-edit']", "editar a paleta Sonic pela interface");
+        const tileEditErrors = async () => ((await readAutomationState(sessionId))?.consoleEntries ?? [])
+          .map((entry) => String(entry?.message ?? ""))
+          .filter((message) => message.includes("Reinserção recusada"));
+        const setTileRect = async (rect) => {
+          for (const key of ["x", "y", "w", "h"]) await setInputByTestIdNative(sessionId, `inspection-sonic-tile-${key}`, String(rect[key]));
+          await setInputByTestIdNative(sessionId, "inspection-sonic-tile-index", String(rect.index));
+        };
+        const tileNegatives = [];
+        let sonicTileEvidence = null;
+        if (sonicTilesMode) {
+          for (const negative of [
+            { label: "pixel fora do mapping", rect: { x: 0, y: 0, w: 2, h: 2, index: 14 }, expect: "nao pertence a nenhuma peca" },
+            { label: "tiles compartilhados sem confirmacao", rect: { x: 10, y: 25, w: 4, h: 2, index: 14 }, expect: "frames DPLC [5]" },
+          ]) {
+            const before = (await tileEditErrors()).length;
+            await setTileRect(negative.rect);
+            await clickButtonByTestIdNative(sessionId, "inspection-sonic-tile-edit-apply", `negativo: ${negative.label}`);
+            const errors = await waitFor(async () => { const list = await tileEditErrors(); return list.length > before ? list : false; }, 10000, `Negativo nao foi recusado: ${negative.label}`, 100);
+            const message = errors.at(-1);
+            const resultText = await executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`);
+            if (!message.includes(negative.expect) || resultText) fail(`Negativo ${negative.label} nao produziu recusa esperada sem edicao: ${JSON.stringify({ message, resultText })}`);
+            tileNegatives.push({ label: negative.label, message });
+          }
+          await setTileRect(tileRect);
+          await clickButtonByTestIdNative(sessionId, "inspection-sonic-tile-edit-apply", "reinserir tiles do Sonic pela interface");
+        } else {
+          await fillInputByLabel(sessionId, "Índice", "1");
+          await fillInputByLabel(sessionId, "R", "7");
+          await fillInputByLabel(sessionId, "G", "0");
+          await fillInputByLabel(sessionId, "B", "7");
+          await clickElementWithNativePointer(sessionId, "[data-testid='inspection-sonic-edit']", "editar a paleta Sonic pela interface");
+        }
         let editEvidence;
         try {
           editEvidence = await waitFor(
@@ -7995,7 +8055,11 @@ async function main() {
           console.log(`[inspection-sonic-edit-failure] ${JSON.stringify({ editButton, ui: await readInspectionUiState(sessionId), console: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
           throw error;
         }
-        if (!String(editEvidence).includes(modifiedSha256) || !String(editEvidence).includes("0x00238A")) {
+        const tileEvidence = sonicTilesMode ? await executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-tile-edit-result"]')?.textContent ?? '';`) : "";
+        if (sonicTilesMode && (!String(editEvidence).includes(modifiedSha256) || !String(tileEvidence).includes("compartilhados com frames DPLC: nenhum") || !String(tileEvidence).includes(baseSha256))) {
+          fail(`Reinsercao de tiles nao corresponde a mutacao independente: ${JSON.stringify({ editEvidence, tileEvidence, modifiedSha256 })}`);
+        }
+        if (!sonicTilesMode && (!String(editEvidence).includes(modifiedSha256) || !String(editEvidence).includes("0x00238A"))) {
           fail(`Resultado da edição Sonic não corresponde à mutação independente: ${JSON.stringify({ editEvidence, modifiedSha256 })}`);
         }
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do Sonic stand após edição");
@@ -8005,8 +8069,8 @@ async function main() {
         await ensureValidationDir();
         const pilotDir = path.join(validationDir, `sonic1-pilot-${artifactTimestamp()}`);
         await mkdir(pilotDir, { recursive: true });
-        const patchPath = path.join(pilotDir, "sonic1-stand-palette.bps");
-        const patchedRomPath = path.join(pilotDir, "sonic1-stand-palette-applied.bin");
+        const patchPath = path.join(pilotDir, sonicTilesMode ? "sonic1-stand-tiles.bps" : "sonic1-stand-palette.bps");
+        const patchedRomPath = path.join(pilotDir, sonicTilesMode ? "sonic1-stand-tiles-applied.bin" : "sonic1-stand-palette-applied.bin");
         await fillInputByLabel(sessionId, "Exportar patch BPS", patchPath);
         await clickButtonByTestIdNative(sessionId, "inspection-sonic-export-patch", "exportar patch Sonic pela interface");
         await waitFor(async () => pathExists(patchPath), 15000, "Patch BPS Sonic não foi criado pela UI", 100);
@@ -8110,10 +8174,27 @@ async function main() {
           fail(`Framebuffer da ROM aplicada não ficou visível/desobstruído para captura: ${JSON.stringify(appliedEmulatorCanvas)}`);
         }
         const emulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator-applied.png`);
-        if (baseEmulatorObservation.magentaLikePixels !== 0 || baseEmulatorObservation.roiMagentaLikePixels !== 0) {
+        if (sonicTilesMode) {
+          const basePixels = Buffer.from(baseEmulatorObservation.canvasRgba);
+          const appliedPixels = Buffer.from(appliedEmulatorObservation.canvasRgba);
+          const width = baseEmulatorObservation.canvasWidth;
+          const diffs = [];
+          for (let offset = 0; offset < basePixels.length; offset += 4) {
+            if (basePixels[offset] !== appliedPixels[offset] || basePixels[offset + 1] !== appliedPixels[offset + 1] || basePixels[offset + 2] !== appliedPixels[offset + 2]) {
+              diffs.push({ x: (offset / 4) % width, y: Math.floor(offset / 4 / width) });
+            }
+          }
+          const box = diffs.length ? { x0: Math.min(...diffs.map((d) => d.x)), x1: Math.max(...diffs.map((d) => d.x)), y0: Math.min(...diffs.map((d) => d.y)), y1: Math.max(...diffs.map((d) => d.y)) } : null;
+          if (diffs.length < 20 || !box || box.x1 - box.x0 >= 32 || box.y1 - box.y0 >= 40) {
+            fail(`Tiles reinseridos nao apareceram no jogo restritos ao sprite: ${JSON.stringify({ count: diffs.length, box })}`);
+          }
+          sonicTileEvidence = { negatives: tileNegatives, inGameDiffPixels: diffs.length, box, baseFramebuffer: baseEmulatorObservation.framebufferSha256, appliedFramebuffer: appliedEmulatorObservation.framebufferSha256, patchSha256, patchedSha256, baseSha256 };
+          console.log(`[inspection-tile-effect] ${JSON.stringify(sonicTileEvidence)}`);
+        }
+        if (!sonicTilesMode && (baseEmulatorObservation.magentaLikePixels !== 0 || baseEmulatorObservation.roiMagentaLikePixels !== 0)) {
           fail(`A ROM base já contém a cor de paleta editada na cena Sonic: ${JSON.stringify({ magentaPixels: baseEmulatorObservation.magentaPixels, magentaLikePixels: baseEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: baseEmulatorObservation.roiMagentaLikePixels, topColors: baseEmulatorObservation.topColors })}`);
         }
-        if (appliedEmulatorObservation.magentaLikePixels < 100 || appliedEmulatorObservation.roiMagentaLikePixels < 50) {
+        if (!sonicTilesMode && (appliedEmulatorObservation.magentaLikePixels < 100 || appliedEmulatorObservation.roiMagentaLikePixels < 50)) {
           fail(`A ROM aplicada não mostrou a alteração de paleta no ROI do Sonic: ${JSON.stringify({ magentaPixels: appliedEmulatorObservation.magentaPixels, magentaLikePixels: appliedEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: appliedEmulatorObservation.roiMagentaLikePixels, topColors: appliedEmulatorObservation.topColors })}`);
         }
         const framebufferDiverged = baseEmulatorObservation.framebufferSha256 !== appliedEmulatorObservation.framebufferSha256;
@@ -8157,6 +8238,13 @@ async function main() {
         await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recompor Sonic após reinício");
         const reopenedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após salvar/reiniciar/reabrir");
         const reopenedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-reopened.png`);
+        if (sonicTilesMode) {
+          const summaryPath = path.join(pilotDir, "sonic1-stand-tiles-summary.json");
+          await writeFile(summaryPath, JSON.stringify({ ...sonicTileEvidence, reopened: { frameId, editRestored: true, composedPixels: reopenedProof }, screenshots: [baseScreenshot, editedScreenshot, baseEmulatorScreenshot, emulatorScreenshot, reopenedScreenshot] }, null, 2));
+          console.log(`Resumo: ${summaryPath}`);
+          console.log("OK: Desktop Tauri Sonic tile reinsertion identify/compose/edit/negatives/patch/apply/observe/restart/reopen E2E passou.");
+          return;
+        }
         const oldGameFrame = await readCanonicalGameFrame(sessionId);
         const baseCanonicalPlayEvidence = await runCanonicalSonicTrajectory(sessionId, {
           buttonTestId: "inspection-sonic-play-base",

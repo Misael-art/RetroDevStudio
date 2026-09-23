@@ -2413,6 +2413,27 @@ fn rex_inspection_edit_sonic_palette(
 }
 
 #[tauri::command]
+fn rex_inspection_edit_sonic_tiles(
+    session_id: String,
+    resource_id: String,
+    frame_id: String,
+    pixels: Vec<tools::reverse::decomp::inspection::InspectionPixelEdit>,
+    allow_shared_tiles: bool,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionEdit,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::edit_sonic_tiles(
+        &session_id,
+        &resource_id,
+        &frame_id,
+        &pixels,
+        allow_shared_tiles,
+    )
+    .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
 fn rom_save_annotations(
     rom_path: String,
     annotations: Vec<ReverseAnnotation>,
@@ -5060,6 +5081,7 @@ pub fn run() {
             rex_inspection_save_palette_choice,
             rex_inspection_save,
             rex_inspection_edit_sonic_palette,
+            rex_inspection_edit_sonic_tiles,
             list_project_assets,
             read_project_asset_bytes,
             open_project_source_path,
@@ -9493,9 +9515,15 @@ pub extern "C" fn retro_run() {
     }
 
     /// Frame-to-frame changes of the idle player's screen region over `frames` frames.
-    fn reference_idle_player_changes(emulator: &mut EmulatorCore, rom: &Path, frames: usize) -> Vec<usize> {
+    fn reference_idle_player_changes(
+        emulator: &mut EmulatorCore,
+        rom: &Path,
+        frames: usize,
+    ) -> Vec<usize> {
         emulator.load_rom(rom).expect("load ROM");
-        emulator.set_joypad(JoypadState::default()).expect("neutral");
+        emulator
+            .set_joypad(JoypadState::default())
+            .expect("neutral");
         for _ in 0..120 {
             emulator.run_frame().expect("warmup");
         }
@@ -9542,10 +9570,168 @@ pub extern "C" fn retro_run() {
         let after = reference_idle_player_changes(&mut emulator, &edited, 60);
         println!("idle changes 4fps={before:?} 12fps={after:?}");
         let gaps = |changes: &[usize]| changes.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>();
-        assert!(!before.is_empty() && gaps(&before).iter().all(|gap| *gap == 15), "4 fps troca a cada 15 frames");
-        assert!(after.len() >= 10 && gaps(&after).iter().all(|gap| *gap == 5), "12 fps troca a cada 5 frames");
+        assert!(
+            !before.is_empty() && gaps(&before).iter().all(|gap| *gap == 15),
+            "4 fps troca a cada 15 frames"
+        );
+        assert!(
+            after.len() >= 10 && gaps(&after).iter().all(|gap| *gap == 5),
+            "12 fps troca a cada 5 frames"
+        );
         emulator.stop().expect("stop");
         let _ = fs::remove_dir_all(base);
+    }
+
+    /// ROM graphic reinsertion (Experimental): recolor the exclusive torso tiles of the
+    /// Sonic 1 stand frame in its raw 4bpp art, size-preserving, on a copy; the base stays
+    /// intact, DPLC sharing is known (tiles 11..16 shared with frame 5) and, after the same
+    /// boot+START sequence, the framebuffer differs from the base only inside a small
+    /// sprite-sized box. Needs the local BYOR ROM (`RDS_SONIC_ROM` or the canonical corpus).
+    ///
+    /// `cargo test --manifest-path src-tauri/Cargo.toml sonic1_stand_tile_reinsertion_observed_in_game --lib -- --ignored --nocapture`
+    #[ignore]
+    #[test]
+    fn sonic1_stand_tile_reinsertion_observed_in_game() {
+        use crate::tools::reverse::decomp::sprite_composition as comp;
+        let base_path = std::env::var("RDS_SONIC_ROM").map(PathBuf::from).unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../data/canonical-local-2026-09-21/corpus/byor/Sonic the Hedgehog (USA, Europe).bin")
+        });
+        let base = fs::read(&base_path).expect("ROM BYOR Sonic local");
+        let base_sha = sha256_hex(&base);
+        assert_eq!(
+            base_sha,
+            comp::SONIC1_REFERENCE_SHA256,
+            "perfil exige a ROM BYOR comprovada"
+        );
+
+        let dplc = comp::sonic_dplc_art_tiles(&base).expect("DPLC verificada");
+        assert_eq!(
+            dplc[comp::SONIC1_STAND_DPLC_FRAME],
+            (0..17).collect::<Vec<_>>()
+        );
+        let sharing: Vec<usize> = (0..dplc.len())
+            .filter(|frame| *frame != 1 && dplc[*frame].iter().any(|tile| *tile < 17))
+            .collect();
+        assert_eq!(
+            sharing,
+            vec![5],
+            "tiles do stand compartilhados so com o frame 5"
+        );
+        assert!(
+            dplc[5].iter().all(|tile| !(0..11).contains(tile)),
+            "tiles 0..10 exclusivos do stand"
+        );
+
+        let mut edited = base.clone();
+        let mut touched_tiles = std::collections::BTreeSet::new();
+        for y in 0..40 {
+            for x in 0..32 {
+                let Some(location) = comp::sonic_stand_pixel_location(x, y).unwrap() else {
+                    continue;
+                };
+                if !(3..11).contains(&location.art_tile) {
+                    continue;
+                }
+                let byte = edited[location.byte_offset];
+                let current = if location.high_nibble {
+                    byte >> 4
+                } else {
+                    byte & 0x0f
+                };
+                if current == 0 {
+                    continue; // keep transparency
+                }
+                edited[location.byte_offset] = if location.high_nibble {
+                    (byte & 0x0f) | 0xe0
+                } else {
+                    (byte & 0xf0) | 0x0e
+                };
+                touched_tiles.insert(location.art_tile);
+            }
+        }
+        assert_eq!(edited.len(), base.len(), "tamanho preservado");
+        let changed: Vec<usize> = (0..base.len()).filter(|i| base[*i] != edited[*i]).collect();
+        assert!(!changed.is_empty());
+        assert!(
+            changed
+                .iter()
+                .all(|i| (comp::SONIC1_ART_OFFSET..comp::SONIC1_ART_OFFSET + 11 * 32).contains(i)),
+            "so tiles exclusivos alterados"
+        );
+        println!(
+            "reinsertion tiles={touched_tiles:?} bytes={} first=0x{:x} last=0x{:x}",
+            changed.len(),
+            changed[0],
+            changed.last().unwrap()
+        );
+
+        let dir = temp_dir("sonic-tile-reinsertion");
+        let edited_path = dir.join("sonic-stand-tiles.bin");
+        fs::write(&edited_path, &edited).unwrap();
+        assert_eq!(
+            sha256_hex(&fs::read(&base_path).unwrap()),
+            base_sha,
+            "base intacta"
+        );
+
+        let observe = |rom: &Path| -> (Vec<u8>, u32) {
+            let mut emulator = EmulatorCore::new(None);
+            emulator.load_rom(rom).expect("load Sonic ROM");
+            // The stand mapping is Sonic's object frame 1, on screen from ~1108 to ~1422
+            // with this boot+START sequence (then frames 3 and 2 of the wait animation).
+            for frame in 0..1300u32 {
+                emulator
+                    .set_joypad(JoypadState {
+                        start: frame == 900,
+                        ..JoypadState::default()
+                    })
+                    .unwrap();
+                emulator.run_frame().unwrap();
+            }
+            let (word, _) = emulator.read_memory(2, 0xd01a, 2).unwrap();
+            assert_eq!(
+                word[1], 1,
+                "Sonic precisa exibir o frame stand (obFrame=1) na observacao"
+            );
+            let (raw, size, format) = emulator.get_framebuffer().unwrap();
+            let rgba = framebuffer_to_rgba(&raw, size, format);
+            emulator.stop().unwrap();
+            (rgba.rgba, rgba.width)
+        };
+        let (base_frame, width) = observe(&base_path);
+        let (base_repeat, _) = observe(&base_path);
+        assert_eq!(
+            base_frame, base_repeat,
+            "base deterministica sob a mesma sequencia"
+        );
+        let (edited_frame, _) = observe(&edited_path);
+        let diffs: Vec<(usize, usize)> = (0..base_frame.len() / 4)
+            .filter(|p| base_frame[p * 4..p * 4 + 3] != edited_frame[p * 4..p * 4 + 3])
+            .map(|p| (p % width as usize, p / width as usize))
+            .collect();
+        assert!(
+            diffs.len() >= 20,
+            "tiles reinseridos devem aparecer no jogo: {} pixels",
+            diffs.len()
+        );
+        let (x0, x1) = (
+            diffs.iter().map(|d| d.0).min().unwrap(),
+            diffs.iter().map(|d| d.0).max().unwrap(),
+        );
+        let (y0, y1) = (
+            diffs.iter().map(|d| d.1).min().unwrap(),
+            diffs.iter().map(|d| d.1).max().unwrap(),
+        );
+        println!(
+            "in-game diff pixels={} bbox=({x0},{y0})-({x1},{y1})",
+            diffs.len()
+        );
+        assert!(
+            x1 - x0 < 32 && y1 - y0 < 40,
+            "diferenca deve ficar restrita ao sprite do Sonic"
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]
