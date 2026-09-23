@@ -8,6 +8,14 @@ import type { Entity, Scene } from "../../core/ipc/sceneService";
 
 const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
+  loadProjectPpmImageData: vi.fn(),
+}));
+
+// PPM previews go through IPC bytes + the shared decoder, never through asset://.
+vi.mock("../../core/ppmImage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../core/ppmImage")>()),
+  loadProjectPpmImageData: mocks.loadProjectPpmImageData,
+  imageDataToPngDataUrl: () => "data:image/png;base64,decoded-ppm",
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -107,6 +115,7 @@ describe("InspectorPanel asset visual state", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mocks.persistActiveScene.mockResolvedValue(true);
+    mocks.loadProjectPpmImageData.mockResolvedValue({ width: 16, height: 16, data: new Uint8ClampedArray(16 * 16 * 4) });
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -125,6 +134,11 @@ describe("InspectorPanel asset visual state", () => {
 
     const image = container.querySelector("[data-testid='inspector-asset-preview']");
     expect(image).toBeInstanceOf(HTMLImageElement);
+    expect(mocks.loadProjectPpmImageData).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/megadrive_dummy",
+      "assets/sprites/hero.ppm"
+    );
+    expect(image?.getAttribute("src")).toBe("data:image/png;base64,decoded-ppm");
 
     await act(async () => {
       image?.dispatchEvent(new Event("load"));
@@ -150,6 +164,15 @@ describe("InspectorPanel asset visual state", () => {
 
     expect(container.querySelector("[data-testid='inspector-asset-preview-fallback']")).toBeTruthy();
     expect(container.textContent).toContain("Erro ao carregar");
+    expect(container.textContent).toContain("(failed)");
+  });
+
+  it("reports a real PPM read/decode failure instead of a placeholder", async () => {
+    mocks.loadProjectPpmImageData.mockRejectedValueOnce(new Error("PPM invalido"));
+    await renderWithEntity(spriteFixtureEntity());
+
+    expect(container.querySelector("[data-testid='inspector-asset-preview']")).toBeNull();
+    expect(container.querySelector("[data-testid='inspector-asset-preview-fallback']")).toBeTruthy();
     expect(container.textContent).toContain("(failed)");
   });
 

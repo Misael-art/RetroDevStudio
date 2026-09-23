@@ -5242,6 +5242,7 @@ export default function App() {
                 limit={hwStatus.palette_banks_limit}
               />
             )}
+            {activeProjectDir ? <SceneSaveStatusChip /> : null}
             {draftSavedAt ? (
               <span
                 data-testid="scene-draft-saved-at"
@@ -5561,5 +5562,47 @@ export default function App() {
       />
       <Console variant="drawer" />
     </div>
+  );
+}
+
+/** Truthful save indicator: reflects persistActiveScene outcomes and unsaved revisions. */
+function SceneSaveStatusChip() {
+  const saveState = useEditorStore((state) => state.sceneSaveState);
+  const sceneRevision = useEditorStore((state) => state.sceneRevision);
+  const status =
+    saveState.status === "saving"
+      ? "saving"
+      : saveState.status === "failed"
+        ? "failed"
+        : saveState.status === "saved" && saveState.revision === sceneRevision
+          ? "saved"
+          : saveState.status === "idle" && sceneRevision === 0
+            ? "idle"
+            : "dirty";
+  const label = {
+    saving: "Salvando…",
+    saved: "Salvo",
+    failed: "Falha ao salvar",
+    dirty: "Alterações não salvas",
+    idle: "Sem alterações",
+  }[status];
+  const tone = {
+    saving: "text-[#89b4fa] border-[#89b4fa]/40",
+    saved: "text-[#a6e3a1] border-[#a6e3a1]/40",
+    failed: "text-[#f38ba8] border-[#f38ba8]/60",
+    dirty: "text-[#f9e2af] border-[#f9e2af]/40",
+    idle: "text-[var(--rds-text-muted)] border-[#313244]",
+  }[status];
+  return (
+    <span
+      data-testid="scene-save-status"
+      data-status={status}
+      role="status"
+      aria-live="polite"
+      title={status === "failed" ? `Falha ao salvar: ${saveState.message ?? "erro desconhecido"}. As alterações continuam no editor.` : label}
+      className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-semibold ${tone}`}
+    >
+      {label}
+    </span>
   );
 }

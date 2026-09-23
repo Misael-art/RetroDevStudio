@@ -91,7 +91,7 @@ function spriteFixtureEntity(
     transform: { x: 16, y: 24 },
     components: {
       sprite: {
-        asset: "assets/sprites/hero.ppm",
+        asset: "assets/sprites/hero.png",
         frame_width: 16,
         frame_height: 16,
         palette_slot: 0,
@@ -425,7 +425,7 @@ describe("InspectorPanel", () => {
 
     expect(preview).toBeInstanceOf(HTMLImageElement);
     expect(preview?.getAttribute("src")).toBe(
-      "asset://F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/megadrive_dummy/assets/sprites/hero.ppm"
+      "asset://F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/megadrive_dummy/assets/sprites/hero.png"
     );
 
     await act(async () => {

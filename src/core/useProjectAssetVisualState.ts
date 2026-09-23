@@ -9,6 +9,7 @@ import {
   resolveAbsoluteAssetPreviewSrc,
   resolveProjectAssetPreviewSrc,
 } from "./pathUtils";
+import { imageDataToPngDataUrl, isPpmPath, loadProjectPpmImageData } from "./ppmImage";
 
 type UseProjectAssetVisualStateOptions = {
   absolutePath?: string | null;
@@ -33,7 +34,32 @@ export function useProjectAssetVisualState(options: UseProjectAssetVisualStateOp
     legacyFallbackDetail = null,
   } = options;
 
-  const src = useMemo(() => {
+  const ppmRequest = useMemo(() => {
+    const projectCandidate = String(projectDir ?? "").trim();
+    const relativeCandidate = String(relativePath ?? "").trim();
+    return !String(absolutePath ?? "").trim() && projectCandidate && isPpmPath(relativeCandidate)
+      ? { projectDir: projectCandidate, relativePath: relativeCandidate }
+      : null;
+  }, [absolutePath, projectDir, relativePath]);
+  // PPM goes through the canonical IPC bytes + decoder path; the WebView cannot decode it.
+  const [ppmSrc, setPpmSrc] = useState<{ key: string; src: string | null } | null>(null);
+  const ppmKey = ppmRequest ? `${ppmRequest.projectDir}::${ppmRequest.relativePath}` : null;
+  useEffect(() => {
+    if (!ppmRequest || !ppmKey) return;
+    let cancelled = false;
+    void loadProjectPpmImageData(ppmRequest.projectDir, ppmRequest.relativePath)
+      .then((imageData) => {
+        if (!cancelled) setPpmSrc({ key: ppmKey, src: imageDataToPngDataUrl(imageData) });
+      })
+      .catch(() => {
+        if (!cancelled) setPpmSrc({ key: ppmKey, src: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ppmKey, ppmRequest]);
+
+  const directSrc = useMemo(() => {
     const absoluteCandidate = String(absolutePath ?? "").trim();
     if (absoluteCandidate) {
       return resolveAbsoluteAssetPreviewSrc(absoluteCandidate);
@@ -47,6 +73,8 @@ export function useProjectAssetVisualState(options: UseProjectAssetVisualStateOp
 
     return null;
   }, [absolutePath, projectDir, relativePath]);
+  const ppmResolved = ppmKey !== null && ppmSrc?.key === ppmKey;
+  const src = ppmKey !== null ? (ppmResolved ? ppmSrc?.src ?? null : null) : directSrc;
 
   const hadPathIntent = useMemo(() => {
     const absoluteCandidate = String(absolutePath ?? "").trim();
@@ -63,12 +91,20 @@ export function useProjectAssetVisualState(options: UseProjectAssetVisualStateOp
   });
 
   useEffect(() => {
+    if (ppmKey !== null && !ppmResolved) {
+      setPreviewStatus("loading");
+      return;
+    }
+    if (ppmKey !== null && !src) {
+      setPreviewStatus("failed");
+      return;
+    }
     if (!src) {
       setPreviewStatus(hadPathIntent ? "missing" : "idle");
       return;
     }
     setPreviewStatus("loading");
-  }, [hadPathIntent, src]);
+  }, [hadPathIntent, ppmKey, ppmResolved, src]);
 
   const visualState = useMemo(
     () =>

@@ -1,3 +1,4 @@
+import { isPpmPath, loadProjectPpmImageData } from "../../core/ppmImage";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Tabs from "../common/Tabs";
@@ -406,51 +407,6 @@ function drawResizeHandle(
   context.strokeRect(x - half, y - half, RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
 }
 
-function decodePpmP3(content: string): ImageData | null {
-  const cleaned = content
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((line) => line.replace(/#.*$/, "").trim())
-    .filter((line) => line.length > 0)
-    .join(" ")
-    .trim();
-  if (!cleaned.startsWith("P3 ")) {
-    return null;
-  }
-
-  const tokens = cleaned.split(/\s+/);
-  if (tokens.length < 4) {
-    return null;
-  }
-
-  const width = Number(tokens[1]);
-  const height = Number(tokens[2]);
-  const maxValue = Number(tokens[3]);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return null;
-  }
-  if (!Number.isFinite(maxValue) || maxValue <= 0) {
-    return null;
-  }
-
-  const expectedComponents = width * height * 3;
-  const values = tokens.slice(4, 4 + expectedComponents).map((token) => Number(token));
-  if (values.length !== expectedComponents || values.some((value) => !Number.isFinite(value))) {
-    return null;
-  }
-
-  const pixels = new Uint8ClampedArray(width * height * 4);
-  for (let index = 0; index < width * height; index += 1) {
-    const sourceOffset = index * 3;
-    const targetOffset = index * 4;
-    pixels[targetOffset] = Math.round((values[sourceOffset] / maxValue) * 255);
-    pixels[targetOffset + 1] = Math.round((values[sourceOffset + 1] / maxValue) * 255);
-    pixels[targetOffset + 2] = Math.round((values[sourceOffset + 2] / maxValue) * 255);
-    pixels[targetOffset + 3] = 255;
-  }
-
-  return new ImageData(pixels, width, height);
-}
 
 export default function ViewportPanel({
   showWorkspaceTabs = true,
@@ -1302,21 +1258,12 @@ export default function ViewportPanel({
         image.src = imageSrc;
       };
 
-      if (relativePath.toLowerCase().endsWith(".ppm")) {
-        void fetch(assetUrl)
-          .then((response) => {
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}`);
-            }
-            return response.text();
-          })
-          .then((content) => {
-            const imageData = decodePpmP3(content);
-            if (!imageData) {
-              throw new Error("PPM P3 invalido");
-            }
+      if (isPpmPath(relativePath)) {
+        // Canonical path: project bytes over IPC + shared P6/P3 decoder (WebKit cannot
+        // decode PPM through asset://).
+        void loadProjectPpmImageData(activeProjectDir, relativePath)
+          .then((imageData) => {
             const processed = applyKeyColorTransparency(imageData, { showKeyColor }).imageData;
-
             const canvas = document.createElement("canvas");
             canvas.width = processed.width;
             canvas.height = processed.height;
@@ -1325,13 +1272,12 @@ export default function ViewportPanel({
               throw new Error("Canvas indisponivel");
             }
             context.putImageData(processed, 0, 0);
-
             markLoaded(canvas, canvas.width, canvas.height);
           })
           .catch((err) => {
             const detail = describeError(err);
-            const status = detail.includes("HTTP 404") ? "missing" : "error";
-            markFailure(status, `PPM fetch falhou: ${detail}`);
+            const status = /not found|nao encontrad|No such file|os error 2/i.test(detail) ? "missing" : "error";
+            markFailure(status, `PPM falhou: ${detail}`);
           });
 
         return cacheEntry;

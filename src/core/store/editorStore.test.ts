@@ -538,8 +538,12 @@ describe("undo/redo", () => {
     );
     expect(state.activeSceneSource?.entities[0]?.prefab).toBe("hero.json");
     expect(state.activeSceneSource?.entities[0]?.components.physics).toEqual({ friction: 1 });
+    // An inherited component becomes a complete local override (the backend rejects a
+    // partial SpriteComponent such as `{ asset }` alone).
     expect(state.activeSceneSource?.entities[0]?.components.sprite).toEqual({
       asset: "assets/sprites/hero_alt.png",
+      frame_width: 16,
+      frame_height: 16,
     });
 
     useEditorStore.getState().undo();
@@ -1217,3 +1221,69 @@ describe("observação de joypad correlacionada por sessão e sequência", () =>
   });
 });
 
+
+describe("updateEntity on prefab instances", () => {
+  const resolvedPlayer: Entity = {
+    entity_id: "player",
+    prefab: "reference_player.json",
+    transform: { x: 32, y: 184 },
+    components: {
+      sprite: {
+        asset: "assets/sprites/reference_player.ppm",
+        frame_width: 16,
+        frame_height: 16,
+        palette_slot: 1,
+        animations: { idle: { frames: [0, 1], fps: 4, loop: true }, run: { frames: [2, 3], fps: 8, loop: true } },
+      },
+      physics: { gravity: true, gravity_strength: 6, friction: 1, bounce: 0 },
+    },
+  } as unknown as Entity;
+  const sourcePlayer: Entity = {
+    entity_id: "player",
+    prefab: "reference_player.json",
+    transform: { x: 32, y: 184 },
+    components: {},
+  } as Entity;
+
+  beforeEach(() => {
+    const scene = (entities: Entity[]) => ({ scene_id: "main", entities, background_layers: [], palettes: [] }) as unknown as Scene;
+    useEditorStore.setState({
+      activeScene: scene([structuredClone(resolvedPlayer)]),
+      activeSceneSource: scene([structuredClone(sourcePlayer)]),
+      undoStack: [],
+      redoStack: [],
+    });
+  });
+
+  it("materializes only the touched inherited component as a complete override", () => {
+    useEditorStore.getState().updateEntity("player", {
+      components: { sprite: { animations: { idle: { fps: 12 } } } },
+    } as unknown as Partial<Entity>);
+    const source = useEditorStore.getState().activeSceneSource!.entities[0];
+    const sprite = source.components.sprite!;
+    expect(sprite.asset).toBe("assets/sprites/reference_player.ppm");
+    expect(sprite.frame_width).toBe(16);
+    expect(sprite.animations!.idle).toEqual({ frames: [0, 1], fps: 12, loop: true });
+    expect(sprite.animations!.run.fps).toBe(8);
+    // Untouched components remain inherited from the prefab.
+    expect(source.components.physics ?? null).toBeNull();
+    expect(useEditorStore.getState().activeScene!.entities[0].components.sprite!.animations!.idle.fps).toBe(12);
+  });
+
+  it("keeps a second edit merging into the existing local override", () => {
+    const update = useEditorStore.getState().updateEntity;
+    update("player", { components: { sprite: { animations: { idle: { fps: 12 } } } } } as unknown as Partial<Entity>);
+    update("player", { components: { sprite: { palette_slot: 2 } } } as unknown as Partial<Entity>);
+    const sprite = useEditorStore.getState().activeSceneSource!.entities[0].components.sprite!;
+    expect(sprite.animations!.idle.fps).toBe(12);
+    expect(sprite.palette_slot).toBe(2);
+    expect(sprite.asset).toBe("assets/sprites/reference_player.ppm");
+  });
+
+  it("undo restores the inherited state", () => {
+    useEditorStore.getState().updateEntity("player", { components: { sprite: { animations: { idle: { fps: 12 } } } } } as unknown as Partial<Entity>);
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().activeSceneSource!.entities[0].components.sprite ?? null).toBeNull();
+    expect(useEditorStore.getState().activeScene!.entities[0].components.sprite!.animations!.idle.fps).toBe(4);
+  });
+});

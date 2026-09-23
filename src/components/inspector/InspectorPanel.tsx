@@ -912,52 +912,48 @@ export default function InspectorPanel() {
     if (!entity || !selectedEntityId || !entity.components.sprite) return;
     const fps = Number.parseInt(raw, 10);
     if (!Number.isInteger(fps) || fps < 1 || fps > 60) return;
-    const sprite = entity.components.sprite;
-    const current = sprite.animations?.[animationName];
-    if (!current) return;
-    const nextSprite = {
-      ...structuredClone(sprite),
-      animations: { ...structuredClone(sprite.animations), [animationName]: { ...structuredClone(current), fps } },
-    };
-    const entityId = selectedEntityId;
-    updateEntity(entityId, buildEntityPatch(entity, ["components", "sprite"], nextSprite));
-    // A component override on a prefab instance replaces the whole component in the
-    // backend model (SpriteComponent.asset is required), so the source must carry the
-    // complete sprite, not the pruned partial diff — a partial one made the save fail.
-    useEditorStore.setState((state) => {
-      const source = state.activeSceneSource;
-      if (!source) return {};
-      return {
-        activeSceneSource: {
-          ...source,
-          entities: source.entities.map((candidate) =>
-            candidate.entity_id === entityId
-              ? { ...candidate, components: { ...candidate.components, sprite: structuredClone(nextSprite) } }
-              : candidate
-          ),
-        },
-      };
-    });
+    updateEntity(
+      selectedEntityId,
+      buildEntityPatch(entity, ["components", "sprite", "animations", animationName, "fps"], fps)
+    );
     scheduleAutoSave();
   }
 
-  /** Clones the source entity (prefab reference + overrides) under a fresh id, offset to the right. */
+  /**
+   * Duplicates the selected entity under a fresh id, offset to the right. The resolved
+   * copy (with inherited prefab components) goes to the active scene so it renders and
+   * compiles like the original; the source copy keeps only the prefab reference and
+   * local overrides, so inheritance is not flattened into local data.
+   */
   function handleDuplicateEntity() {
-    const scene = useEditorStore.getState().activeScene;
-    const original = sourceEntity ?? entity;
-    if (!original || !scene) return;
+    const state = useEditorStore.getState();
+    const scene = state.activeScene;
+    const resolvedOriginal = entity;
+    if (!resolvedOriginal || !scene) return;
+    const sourceOriginal = sourceEntity ?? resolvedOriginal;
     const existing = new Set(scene.entities.map((candidate) => candidate.entity_id));
     let suffix = 2;
-    while (existing.has(`${original.entity_id}_${suffix}`)) suffix += 1;
-    const duplicate: Entity = {
-      ...structuredClone(original),
-      entity_id: `${original.entity_id}_${suffix}`,
-      display_name: `${original.display_name ?? original.entity_id} ${suffix}`,
-      transform: { ...original.transform, x: original.transform.x + 24 },
-    };
-    addEntity(duplicate);
-    setSelectedEntityId(duplicate.entity_id);
-    logMessage("info", `[Inspector] Entidade '${original.entity_id}' duplicada como '${duplicate.entity_id}'.`);
+    while (existing.has(`${resolvedOriginal.entity_id}_${suffix}`)) suffix += 1;
+    const entityId = `${resolvedOriginal.entity_id}_${suffix}`;
+    const displayName = `${resolvedOriginal.display_name ?? resolvedOriginal.entity_id} ${suffix}`;
+    const transform = { ...resolvedOriginal.transform, x: resolvedOriginal.transform.x + 24 };
+    const resolvedDuplicate: Entity = { ...structuredClone(resolvedOriginal), entity_id: entityId, display_name: displayName, transform };
+    const sourceDuplicate: Entity = { ...structuredClone(sourceOriginal), entity_id: entityId, display_name: displayName, transform };
+    addEntity(resolvedDuplicate);
+    useEditorStore.setState((current) =>
+      current.activeSceneSource
+        ? {
+            activeSceneSource: {
+              ...current.activeSceneSource,
+              entities: current.activeSceneSource.entities.map((candidate) =>
+                candidate.entity_id === entityId ? sourceDuplicate : candidate
+              ),
+            },
+          }
+        : {}
+    );
+    setSelectedEntityId(entityId);
+    logMessage("info", `[Inspector] Entidade '${resolvedOriginal.entity_id}' duplicada como '${entityId}'.`);
     scheduleAutoSave();
   }
 

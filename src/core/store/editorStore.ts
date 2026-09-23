@@ -21,6 +21,14 @@ import type {
 
 const UNDO_STACK_LIMIT = 50;
 
+export type SceneSaveState = {
+  status: "idle" | "saving" | "saved" | "failed";
+  message: string | null;
+  at: number | null;
+  /** sceneRevision that the last successful save persisted. */
+  revision: number | null;
+};
+
 export interface HwStatus {
   vram_used: number;
   vram_limit: number;
@@ -156,6 +164,8 @@ export interface StoreState {
   /** Época do core no backend: inputs são enviados com este valor e o
    * backend recusa época obsoleta (recarga aconteceu no meio do voo). */
   coreEpoch: number | null;
+  /** Truthful save status of the active scene: set by persistActiveScene only. */
+  sceneSaveState: SceneSaveState;
   /** Última intenção CONFIRMADA pelo backend (`ok: true`). Este é o único
    * campo que demonstra entrega aceita pelo emulador. Acks cuja sequência não
    * corresponde à solicitação corrente são descartados (ack atrasado). */
@@ -279,6 +289,7 @@ export interface StoreActions {
   releaseJoypadSessionHold: () => void;
   recordJoypadBlocked: () => void;
   setCoreEpoch: (epoch: number | null) => void;
+  setSceneSaveState: (state: SceneSaveState) => void;
   setViewportZoom: (zoom: number) => void;
   resetViewportZoom: () => void;
   setProjectSourceKind: (kind: string) => void;
@@ -371,6 +382,34 @@ function prunePatchAgainstBase(patch: unknown, base: unknown): unknown | undefin
   }
 
   return Object.keys(pruned).length > 0 ? pruned : undefined;
+}
+
+/**
+ * On a prefab instance, a component present in the source replaces the prefab's whole
+ * component (the backend requires complete components, e.g. SpriteComponent.asset).
+ * A pruned partial patch of an inherited component would therefore be invalid, so the
+ * touched component becomes a complete local override (resolved value + patch). Only
+ * touched components are materialized; every other component stays inherited.
+ */
+function completeInheritedComponentOverrides(
+  sourcePatch: unknown,
+  sourceEntity: Entity,
+  resolvedEntity: Entity
+): unknown | undefined {
+  if (!isRecord(sourcePatch) || !isRecord(sourcePatch.components) || !sourceEntity.prefab) {
+    return sourcePatch;
+  }
+  const sourceComponents = (sourceEntity.components ?? {}) as Record<string, unknown>;
+  const resolvedComponents = (resolvedEntity.components ?? {}) as Record<string, unknown>;
+  const components: Record<string, unknown> = { ...sourcePatch.components };
+  for (const [key, value] of Object.entries(components)) {
+    const inherited = sourceComponents[key] === undefined || sourceComponents[key] === null;
+    const resolved = resolvedComponents[key];
+    if (inherited && isRecord(resolved) && isRecord(value) && key !== "logic") {
+      components[key] = mergePatchedValue(structuredClone(resolved), value);
+    }
+  }
+  return { ...sourcePatch, components };
 }
 
 function preserveInheritedGraphRef(
@@ -683,9 +722,13 @@ export const useEditorStore = create<EditorState>((set) => ({
       const sourceEntity =
         sourceScene.entities.find((entity) => entity.entity_id === entityId) ?? resolvedEntity;
 
-      const sourcePatch = preserveInheritedGraphRef(
-        prunePatchAgainstBase(patch, resolvedEntity),
-        patch,
+      const sourcePatch = completeInheritedComponentOverrides(
+        preserveInheritedGraphRef(
+          prunePatchAgainstBase(patch, resolvedEntity),
+          patch,
+          sourceEntity,
+          resolvedEntity
+        ),
         sourceEntity,
         resolvedEntity
       );
@@ -873,6 +916,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   joypadSessionHold: false,
   joypadBlockedCount: 0,
   coreEpoch: null,
+  sceneSaveState: { status: "idle", message: null, at: null, revision: null },
   setEmulPaused: (paused) => set({ emulPaused: paused }),
   beginJoypadSessionHold: () =>
     set({
@@ -888,6 +932,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   recordJoypadBlocked: () =>
     set((state) => ({ joypadBlockedCount: state.joypadBlockedCount + 1 })),
   setCoreEpoch: (epoch) => set({ coreEpoch: epoch }),
+  setSceneSaveState: (sceneSaveState) => set({ sceneSaveState }),
   recordJoypadRequest: (sessionId, seq, joypad) =>
     set((state) =>
       !state.joypadSessionHold && state.joypadSessionId === sessionId
