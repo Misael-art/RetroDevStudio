@@ -5295,7 +5295,7 @@ export default function ViewportPanel({
             {/* Shown only when something needs attention, so it never covers a healthy scene. */}
             {activeScene &&
               sceneAssetHealth.referenced > 0 &&
-              (sceneAssetHealth.failed > 0 || sceneAssetHealth.missing > 0 || sceneAssetHealth.legacyFallback > 0) && (
+              (sceneAssetHealth.failed > 0 || sceneAssetHealth.missing > 0) && (
                 <SceneAssetHealthBadge health={sceneAssetHealth} />
               )}
             <div className="absolute bottom-0 left-0 right-0 shrink-0 border-t border-[#313244] bg-[#181825]/90 px-2 py-1">

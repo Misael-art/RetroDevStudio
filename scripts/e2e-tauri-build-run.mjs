@@ -6001,6 +6001,19 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
     const values = tilemap?.cells ?? [];
     return Number(values[20 * 40 + 6]) === 3 && Number(values[26 * 40 + 10]) === 4294967295 ? values : false;
   }, 10000, "Pintura/celula vazia nao aplicadas ao tilemap.", 150);
+  // Undo/redo with the real keyboard (Ctrl+Z / Ctrl+Y) over the erased cell.
+  const chord = async (key) => webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{ type: "key", id: "rds-chord", actions: [
+      { type: "keyDown", value: "\uE009" }, { type: "keyDown", value: key }, { type: "keyUp", value: key }, { type: "keyUp", value: "\uE009" },
+    ] }],
+  });
+  const cellValue = async (index) => Number((await state())?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells?.[index] ?? 0);
+  await js(`document.activeElement?.blur?.();`);
+  await chord("z");
+  await waitFor(async () => (await cellValue(26 * 40 + 10)) === 0, 10000, "Ctrl+Z nao desfez a celula vazia.", 150);
+  await chord("y");
+  await waitFor(async () => (await cellValue(26 * 40 + 10)) === 4294967295, 10000, "Ctrl+Y nao refez a celula vazia.", 150);
+  addReportStep(report, "undo_redo_keyboard", "passed", { cell: [10, 26] });
   await closeVisibleConsoleDrawer(sessionId, "antes do modo colisao");
   await click("tile-tool-collision", "ferramenta Colisao da paleta");
   await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="tile-collision-hint"]'));`), 5000, "Modo colisao nao ativou.", 100);

@@ -1,3 +1,4 @@
+import { loadShellPersona } from "../../core/surfaceRegistry";
 import { useEffect, useMemo, useRef, useState } from "react";
 import EmptyState from "../common/EmptyState";
 import Panel from "../common/Panel";
@@ -610,7 +611,7 @@ export default function HierarchyPanel({
           <p className="mt-1 truncate text-[10px] text-[#45475a]">
             {activeSceneSelectValue || "Nenhuma cena ativa"}
           </p>
-          {activeProjectDir ? (
+          {activeProjectDir && loadShellPersona() !== "guiado" ? (
             <div className="mt-2">
               <SceneWorkspaceNotice
                 context={sceneContext}

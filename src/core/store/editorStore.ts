@@ -678,6 +678,10 @@ export const useEditorStore = create<EditorState>((set) => ({
         activeSceneSource: sourceScene,
         selectedEntityId: resolveSceneSelection(scene, state.selectedEntityId),
         sceneRevision: nextRevision,
+        // A scene set from outside (disk load/hydration) is the saved baseline.
+        sceneSaveState: scene
+          ? { status: "saved" as const, message: null, at: Date.now(), revision: nextRevision }
+          : { status: "idle" as const, message: null, at: null, revision: null },
         undoStack: [],
         redoStack: [],
         pendingHistorySnapshot: null,
