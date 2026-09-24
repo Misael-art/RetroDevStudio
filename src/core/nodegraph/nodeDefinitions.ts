@@ -10,6 +10,7 @@ import {
   EMPTY_GRAPH,
   cloneGraph,
   isNodeEdge,
+  isBehaviorInstance,
   isNodeGraphGroup,
   isNodePort,
   isNodeType,
@@ -510,10 +511,13 @@ export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
       .map((group) => ({ ...group, nodeIds: group.nodeIds.filter((id) => nodeById.has(id)) }))
       .filter((group) => group.nodeIds.length > 0);
 
+    const behaviors = (Array.isArray(parsed.behaviors) ? parsed.behaviors : []).filter(isBehaviorInstance);
+
     return cloneGraph({
       nodes: hydratedNodes,
       edges: validEdges,
       ...(groups.length > 0 ? { groups } : {}),
+      ...(behaviors.length > 0 ? { behaviors } : {}),
     });
   } catch {
     return cloneGraph(EMPTY_GRAPH);

@@ -90,6 +90,8 @@ import {
   type GraphHistory,
 } from "../../core/nodegraph/graphHistory";
 import Icon from "../common/Icon";
+import BehaviorPanel from "./BehaviorPanel";
+import { buildBehaviorSceneContext } from "../../core/nodegraph/behaviorLibrary";
 import AssetPreview from "../common/AssetPreview";
 
 // Modelo de dados canonico e serializacao v1 vivem em src/core/nodegraph/
@@ -3223,6 +3225,48 @@ export default function NodeGraphEditor() {
     [activeScene?.entities]
   );
 
+  // ── Comportamentos: contexto da cena (todas as entidades e seus grafos) ─────
+  const [resolvedSceneGraphs, setResolvedSceneGraphs] = useState<Record<string, NodeGraph>>({});
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeProjectDir || !activeSceneSource) {
+      setResolvedSceneGraphs({});
+      return () => {
+        cancelled = true;
+      };
+    }
+    void resolveScenePrefabs(activeProjectDir, activeSceneSource)
+      .then((resolved) => {
+        if (cancelled || !resolved.ok) return;
+        const scene = parseSceneJson(resolved.scene_json);
+        const next: Record<string, NodeGraph> = {};
+        for (const entity of scene?.entities ?? []) {
+          const parsed = deserializeNodeGraph(entity.components.logic?.graph);
+          if (parsed.nodes.length) next[entity.entity_id] = parsed;
+        }
+        setResolvedSceneGraphs(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectDir, activeSceneSource]);
+  const behaviorContext = useMemo(() => {
+    const entities = activeScene?.entities ?? [];
+    const graphs = entities.map((entity) => {
+      if (entity.entity_id === selectedEntity?.entity_id) return graph;
+      const inline = deserializeNodeGraph(entity.components.logic?.graph);
+      return inline.nodes.length ? inline : resolvedSceneGraphs[entity.entity_id] ?? inline;
+    });
+    return buildBehaviorSceneContext(entities, graphs);
+  }, [activeScene?.entities, graph, resolvedSceneGraphs, selectedEntity?.entity_id]);
+  const showNodes = useCallback((nodeIds: string[]) => {
+    const current = currentGraphRef.current;
+    setSelectedIds(new Set(nodeIds));
+    setSelectedId(nodeIds[0] ?? null);
+    fitViewTo(current.nodes.filter((node) => nodeIds.includes(node.id) && !hiddenNodeIdsRef.current.has(node.id)));
+  }, [fitViewTo]);
+
   // ── Navegacao por entidade ──────────────────────────────────────────────────
   const sceneEntityIds = useMemo(() => (activeScene?.entities ?? []).map((entity) => entity.entity_id), [activeScene?.entities]);
   const entityIndex = useMemo(() => {
@@ -3592,9 +3636,22 @@ export default function NodeGraphEditor() {
                 <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
                   Logic Context
                 </p>
-                <p className="truncate text-[11px] font-semibold text-[#cdd6f4]">
-                  {getEntityDisplayName(selectedEntity)}
-                </p>
+                <label className="block">
+                  <span className="sr-only">Editar logica de</span>
+                  <select
+                    data-testid="nodegraph-entity-switch"
+                    aria-label="Editar logica de"
+                    value={selectedEntity.entity_id}
+                    onChange={(event) => setSelectedEntityId(event.target.value)}
+                    className="max-w-full truncate rounded border border-[#313244] bg-[#11111b] px-1 py-0.5 text-[11px] font-semibold text-[#cdd6f4]"
+                  >
+                    {(activeScene?.entities ?? []).map((candidate) => (
+                      <option key={candidate.entity_id} value={candidate.entity_id}>
+                        {getEntityDisplayName(candidate)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <p className="truncate text-[#6c7086]">entity_id: {selectedEntity.entity_id}</p>
               </div>
               <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6adc8]">
@@ -3780,6 +3837,16 @@ export default function NodeGraphEditor() {
                 </ul>
               </div>
             )}
+            <BehaviorPanel
+              graph={graph}
+              context={behaviorContext}
+              selectedEntityId={selectedEntity.entity_id}
+              onCommit={(next, label, message) => {
+                setGraph(next, label);
+                logMessage("info", `[Comportamentos] ${message}`);
+              }}
+              onShowInstance={showNodes}
+            />
             {collapsedCoverage.length > 0 && (
               <div data-testid="nodegraph-collapsed-overlap" className="rounded border border-[#fab387]/50 bg-[#fab387]/10 px-2 py-1.5 text-[10px] text-[#fab387]">
                 {collapsedCoverage.slice(0, 4).map((item) => (

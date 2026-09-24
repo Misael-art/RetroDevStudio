@@ -98,6 +98,28 @@ export interface NodeGraph {
   edges: NodeEdge[];
   /** Grupos visuais opcionais (ver `NodeGraphGroup`). */
   groups?: NodeGraphGroup[];
+  /** Instancias de comportamentos parametrizados (ver `behaviorLibrary.ts`). */
+  behaviors?: BehaviorInstance[];
+}
+
+/**
+ * Instancia de um comportamento parametrizado. Seus nos/arestas vivem no proprio grafo
+ * (pipeline canonico); este registro guarda identidade, parametros e o que foi gerado,
+ * para editar/remover sem duplicar logica nem apagar edicoes manuais em silencio.
+ */
+export interface BehaviorInstance {
+  id: string;
+  behaviorId: string;
+  label: string;
+  params: Record<string, string | number>;
+  nodeIds: string[];
+  edgeIds: string[];
+  /** Assinatura {type, params} de cada no no momento da geracao. */
+  generated: Record<string, string>;
+  /** Arestas de outra instancia substituidas por esta (restauradas ao remover). */
+  replacedEdges?: NodeEdge[];
+  /** Posicao original de cada aresta substituida (restaurada no mesmo lugar). */
+  replacedEdgeIndexes?: number[];
 }
 
 export const EMPTY_GRAPH: NodeGraph = {
@@ -206,5 +228,19 @@ export function serializeNodeGraph(graph: NodeGraph): string {
     nodes: structuredClone(graph.nodes),
     edges: structuredClone(graph.edges),
     ...(graph.groups && graph.groups.length > 0 ? { groups: structuredClone(graph.groups) } : {}),
+    ...(graph.behaviors && graph.behaviors.length > 0 ? { behaviors: structuredClone(graph.behaviors) } : {}),
   });
+}
+
+export function isBehaviorInstance(value: unknown): value is BehaviorInstance {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.behaviorId === "string" &&
+    typeof value.label === "string" &&
+    isRecord(value.params) &&
+    Array.isArray(value.nodeIds) &&
+    Array.isArray(value.edgeIds) &&
+    isRecord(value.generated)
+  );
 }
