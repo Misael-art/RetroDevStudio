@@ -466,6 +466,7 @@ function parseArgs(argv) {
           "authoring-acceptance",
           "nodegraph-authoring",
           "behaviors-independence",
+          "collect-goal",
           "inspection",
           "inspection-cancel",
           "inspection-complete",
@@ -7240,6 +7241,330 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   console.log("OK: Desktop Tauri behaviors independence (duas entidades, parametros distintos, edicao/undo, copia remapeada, remocao, reinicio, teclado) passou.");
 }
 
+/**
+ * Collect -> counter -> passage -> objective proof (Experimental), all through the UI with
+ * native WebDriver input: two collectibles feed a shared counter, a passage needs both,
+ * an objective needs both; save/restart/reopen, build, play with the real keyboard and
+ * restart the match. RAM, pixels and audio only observe.
+ */
+async function runCollectGoalScenario(initialSessionId, appPath, uiBootstrapTimeoutMs, onProjectCreated) {
+  let sessionId = initialSessionId;
+  const artifactPrefix = `collect-goal-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = { generatedAt: null, scenario: "collect-goal", testedApplication: { path: appPath, sha256: createHash("sha256").update(await readFile(appPath)).digest("hex") }, artifacts: [], steps: [], frames: [], roms: [] };
+  const shot = async (name, label) => addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const state = () => readAutomationState(sessionId);
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const click = (testId, label = testId) => clickButtonByTestIdNative(sessionId, testId, label);
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const value = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value ?? null;`, [testId]);
+  const text = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.textContent ?? null;`, [testId]);
+  const find = (selector) => findElement(sessionId, selector).catch((error) => fail(`Elemento nao encontrado: ${selector} (${error.message})`));
+  const selectOption = async (testId, optionValue) => {
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="' + arguments[0] + '"] option[value="' + arguments[1] + '"]'));`, [testId, optionValue]), 10000, `Opcao ${optionValue} ausente em ${testId}.`, 100);
+    await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center" });`, [testId]);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${await find(`[data-testid="${testId}"] option[value="${optionValue}"]`)}/click`, {});
+    await waitFor(async () => (await value(testId)) === optionValue, 5000, `Selecao ${testId}=${optionValue} nao aplicada.`, 100);
+  };
+  const setField = async (testId, fieldValue) => {
+    await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center" });`, [testId]);
+    await setInputByTestIdNative(sessionId, testId, String(fieldValue));
+    await waitFor(async () => (await value(testId)) === String(fieldValue), 5000, `${testId} nao virou ${fieldValue}.`, 100);
+  };
+  const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
+  const clickHierarchy = async (entityId) => {
+    const selector = `[data-testid='hierarchy-entity-${entityId}']`;
+    await waitFor(async () => js(`return Boolean(document.querySelector(arguments[0]));`, [selector]), 15000, `Hierarquia sem ${entityId}.`, 150);
+    await js(`document.querySelector(arguments[0])?.scrollIntoView({ block: "center" });`, [selector]);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${await find(selector)}/click`, {});
+    await waitSelected(entityId);
+  };
+  const instances = () => js(`return [...document.querySelectorAll('[data-testid^="behavior-instance-"]')].map((el) => ({ id: el.dataset.testid.slice(18), text: el.textContent }));`);
+  const switchLogic = async (entityId) => {
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-entity-switch"] option[value="' + arguments[0] + '"]'));`, [entityId]), 20000, `Seletor de logica sem ${entityId}.`, 150);
+    await selectOption("nodegraph-entity-switch", entityId);
+    await waitSelected(entityId);
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-behaviors"]'));`), 10000, "Painel de comportamentos ausente.", 150);
+  };
+  const applyBehavior = async (behaviorId, fields, label) => {
+    await click(`behavior-add-${behaviorId}`, `adicionar ${label}`);
+    for (const [key, kind, fieldValue] of fields) {
+      if (kind === "select") await selectOption(`behavior-param-${key}`, fieldValue);
+      else await setField(`behavior-param-${key}`, fieldValue);
+    }
+    const summary = await text("behavior-summary");
+    const errors = await text("behavior-errors");
+    if (errors) fail(`${label}: formulario com erros: ${errors}`);
+    const before = (await instances()).length;
+    await click("behavior-apply", `aplicar ${label}`);
+    await waitFor(async () => (await instances()).length === before + 1, 5000, `${label} nao apareceu.`, 100);
+    const list = await instances();
+    return { summary, id: list[list.length - 1].id };
+  };
+  const duplicateOf = async (sourceId, expectedId, x, confirm = false) => {
+    await clickHierarchy(sourceId);
+    await click("inspector-duplicate-entity", `duplicar ${sourceId}`);
+    if (confirm) await click("inspector-duplicate-confirm", "duplicar sem logica manual");
+    await waitSelected(expectedId);
+    await setInputByTestIdNative(sessionId, "inspector-transform-x", String(x));
+    await waitFor(async () => (await state())?.activeScene?.entities?.find((entity) => entity.id === expectedId)?.x === x, 10000, `${expectedId} nao foi para x=${x}.`, 150);
+  };
+
+  // 1. Project and entities (all through the UI).
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await click("template-card-reference_platformer", "modelo de fase de referencia");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const projectName = `Collect_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+  const created = await waitFor(async () => { const current = await state(); return current?.activeProjectDir && current.activeProjectName === projectName ? current : false; }, 60000, "Wizard nao criou o projeto.", 500);
+  const projectDir = created.activeProjectDir;
+  onProjectCreated(projectDir);
+  currentE2eRunContext.project = projectDir;
+  await click("shell-persona-guiado", "modo guiado");
+  await click("guided-step-personagem", "etapa Personagem");
+  await waitSelected("player");
+  const layout = { player2: 150, itemA: 180, itemB: 100, sensor: 205, blocker: 240 };
+  await duplicateOf("player", "player_2", layout.player2, true);
+  await duplicateOf("goal", "goal_2", layout.itemA);
+  await duplicateOf("goal", "goal_3", layout.itemB);
+  await duplicateOf("goal_sensor", "goal_sensor_2", layout.sensor);
+  await duplicateOf("passage_blocker", "passage_blocker_2", layout.blocker);
+  addReportStep(report, "entities", "passed", { layout });
+
+  // 2. Behaviors through the Logic panels.
+  await click("guided-step-regras", "etapa Regras");
+  await closeVisibleConsoleDrawer(sessionId, "antes dos comportamentos");
+  await switchLogic("player_2");
+  const move = await applyBehavior("platform_movement", [["target", "select", "player_2"], ["speed", "input", 2], ["right_button", "select", "BUTTON_RIGHT"], ["left_button", "select", "BUTTON_LEFT"], ["jump_button", "select", "BUTTON_B"]], "Movimento de Player 2");
+  const counter = await applyBehavior("counter", [["name", "input", "Moedas"], ["scope", "select", "shared"], ["start", "input", 0]], "Contador Moedas");
+  await switchLogic("goal_2");
+  // Negative (invalid reference): the item cannot collect itself.
+  await click("behavior-add-collectible", "adicionar item (negativo)");
+  await selectOption("behavior-param-collector", "goal_2");
+  const invalidCollector = await waitFor(async () => text("behavior-errors"), 5000, "Coletor invalido nao recusado.", 100);
+  if (!invalidCollector.includes("si mesmo") || !(await js(`return document.querySelector('[data-testid="behavior-apply"]').disabled;`))) fail(`Coletor invalido nao recusado: ${invalidCollector}`);
+  await click("behavior-cancel", "cancelar");
+  const itemA = await applyBehavior("collectible", [["item", "select", "goal_2"], ["collector", "select", "player_2"], ["counter", "select", counter.id], ["amount", "input", 1], ["sound", "select", "jump"]], "Item A");
+  await switchLogic("goal_3");
+  const itemB = await applyBehavior("collectible", [["item", "select", "goal_3"], ["collector", "select", "player_2"], ["counter", "select", counter.id], ["amount", "input", 1]], "Item B");
+  await switchLogic("player_2");
+  const gate = await applyBehavior("gated_passage", [["movement", "select", move.id], ["blocker", "select", "passage_blocker_2"], ["state_variable", "select", "ctr_moedas"], ["threshold", "input", 2]], "Passagem que exige as duas moedas");
+  const goal = await applyBehavior("objective", [["actor", "select", "player_2"], ["sensor", "select", "goal_sensor_2"], ["counter", "select", counter.id], ["required", "input", 2], ["reveal", "select", "goal"], ["sound", "select", "victory"]], "Objetivo");
+  const links = await text(`behavior-links-${counter.id}`);
+  if (!links?.includes("Item coletavel — Goal Marker 2") || !links.includes("Item coletavel — Goal Marker 3") || !links.includes("Passagem condicionada") || !links.includes("Objetivo")) fail(`Ligacoes do contador incompletas: ${links}`);
+  // Negative: the counter cannot be removed while items/passage/objective use it.
+  await click(`behavior-remove-${counter.id}`, "remover contador (negativo)");
+  const removal = await waitFor(async () => text("behavior-errors"), 5000, "Remocao do contador em uso nao recusada.", 100);
+  if (!removal.includes("Goal Marker 2")) fail(`Mensagem de dependencia incompleta: ${removal}`);
+  await click("behavior-cancel", "cancelar");
+  await shot("01-behaviors", "comportamentos e ligacoes do contador");
+  addReportStep(report, "behaviors", "passed", { move, counter, itemA, itemB, gate, goal, links, invalidCollector, removal });
+
+  // 3. Save, restart the app, reopen, check.
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="scene-save-status"]')?.dataset.status;`)) === "saved", 20000, "Salvar nao concluiu.", 200);
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto salvo.", 300);
+  await click("wizard-open-existing-project", "reabrir projeto");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto nao reabriu.", 300);
+  if (!(await js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`))) await click("shell-persona-guiado", "modo guiado apos reinicio");
+  await click("guided-step-regras", "etapa Regras apos reinicio");
+  await closeVisibleConsoleDrawer(sessionId, "apos reabrir");
+  await switchLogic("player_2");
+  const reopenedPlayer = await instances();
+  const reopenedLinks = await text(`behavior-links-${counter.id}`);
+  await switchLogic("goal_2");
+  const reopenedA = await instances();
+  if (reopenedPlayer.length !== 4 || reopenedA.length !== 1 || reopenedLinks !== links) fail(`Comportamentos nao persistiram: ${JSON.stringify({ reopenedPlayer, reopenedA, reopenedLinks })}`);
+  await shot("02-reopened", "comportamentos apos reiniciar e reabrir");
+  addReportStep(report, "restart_reopen", "passed", { reopenedPlayer: reopenedPlayer.map((entry) => entry.id), reopenedA });
+
+  // 4. Build and play.
+  const startMatch = async (label) => {
+    const previous = (await readCanonicalGameFrame(sessionId))?.romSha256 ?? null;
+    await click("guided-step-testar", label);
+    const running = await waitFor(async () => {
+      const current = await state();
+      const frame = await readCanonicalGameFrame(sessionId);
+      return current?.emulatorLoaded && frame?.renderedFrames > 5 && frame.romSha256 ? { frame } : false;
+    }, 300000, `${label}: jogo nao iniciou.`, 300).catch(async (error) => {
+      await shot("build-run-failure", "falha do Build & Run");
+      const entries = ((await state())?.consoleEntries ?? []).filter((entry) => entry.level !== "info").slice(-12);
+      fail(`${error.message} console=${JSON.stringify(entries).slice(0, 4000)}`);
+    });
+    return { romSha256: running.frame.romSha256, previous };
+  };
+  const first = await startMatch("etapa Testar");
+  const romPath = path.join(projectDir, "build", "megadrive", "out", "rom.bin");
+  const romCopy = path.join(validationDir, `${artifactPrefix}-played.rom`);
+  await cp(romPath, romCopy);
+  const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
+  if (first.romSha256 !== romSha256) fail("Game View executa outra ROM.");
+  const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
+  const spriteSymbol = (id, axis) => (symbols.has(`spr_${id}_${axis}`) ? `spr_${id}_${axis}` : [...symbols.keys()].find((name) => new RegExp(`^spr_.*__${id}_${axis}$`).test(name)) ?? `spr_${id}_${axis}`);
+  const watch = [
+    { key: "p2x", name: spriteSymbol("player_2", "x"), width: 2 },
+    { key: "p1x", name: spriteSymbol("player", "x"), width: 2 },
+    { key: "counter", name: "logic_var_ctr_moedas", width: 4 },
+    { key: "takenA", name: `logic_var_${itemA.id}_taken`, width: 4 },
+    { key: "takenB", name: `logic_var_${itemB.id}_taken`, width: 4 },
+    { key: "open", name: `logic_var_${gate.id}_open`, width: 4 },
+    { key: "done", name: `logic_var_${goal.id}_done`, width: 4 },
+  ].map((entry) => ({ ...entry, address: symbols.get(entry.name) }));
+  if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch.filter((entry) => !Number.isInteger(entry.address)).map((entry) => entry.name))}`);
+  const observe = async () => {
+    const raw = await executeAsyncScript(sessionId, `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      Promise.all(arguments[0].map((entry) => invoke("emulator_read_memory", { region: 2, offset: entry.address & 0xffff, length: entry.width })))
+        .then((results) => done({ ok: true, data: results.map((r) => Array.from(r.data)), audioTotal: window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `, [watch]);
+    if (!raw?.ok) fail(`Leitura de WRAM falhou: ${JSON.stringify(raw)}`);
+    const decode = (d, width) => {
+      const word = (i) => d[i] | (d[i + 1] << 8);
+      if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
+      const v = ((word(0) << 16) >>> 0) | word(2);
+      return v > 0x7fffffff ? v - 0x100000000 : v;
+    };
+    const out = { frame: (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0, audioTotal: raw.audioTotal };
+    watch.forEach((entry, index) => { out[entry.key] = decode(raw.data[index], entry.width); });
+    return out;
+  };
+  const KEY_BUTTON = { ArrowRight: "right", ArrowLeft: "left" };
+  const waitAck = (button, expected, context) => waitFor(async () => {
+    const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
+  }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
+  // Hold a direction until `done(samples)`, then release; every sample is kept.
+  const holdUntil = async (code, done, maxFrames, label) => {
+    const samples = [await observe()];
+    await sendNativeGameKey(sessionId, code, "keyDown", label);
+    await waitAck(KEY_BUTTON[code], true, label);
+    const start = samples[0].frame;
+    while (!done(samples) && samples[samples.length - 1].frame - start < maxFrames) { await pause(20); samples.push(await observe()); }
+    await sendNativeGameKey(sessionId, code, "keyUp", `soltar ${label}`);
+    await waitAck(KEY_BUTTON[code], false, `soltar ${label}`);
+    samples.push(await observe());
+    if (!done(samples)) fail(`${label}: condicao nao ocorreu em ${maxFrames} quadros: ${JSON.stringify(samples.slice(-3))}`);
+    return samples;
+  };
+  const stable = (key) => (samples) => samples.length > 5 && samples.slice(-4).every((s) => s[key] === samples[samples.length - 1][key]);
+  const prefab = async (file) => JSON.parse(await readFile(path.join(projectDir, "prefabs", file), "utf8"));
+  const playerW = (await prefab("reference_player.json")).components.collision.width;
+  const blockerW = (await prefab("reference_passage.json")).components.collision.width;
+  const itemW = (await prefab("reference_goal.json")).components.sprite.frame_width;
+  const sensorW = (await prefab("reference_goal_sensor.json")).components.collision.width;
+  const overlapsX = (x, left, width) => x < left + width && x + playerW > left;
+  // Pixels of an item's screen box (no camera scroll in this template: world = screen).
+  const itemPixels = async (left) => {
+    const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    const width = frame.width ?? 320;
+    let hash = 0;
+    for (let y = 176; y < 208; y += 1) for (let x = left; x < left + itemW; x += 1) {
+      const i = (y * width + x) * 4;
+      hash = (hash * 31 + frame.rgba[i] * 3 + frame.rgba[i + 1] * 5 + frame.rgba[i + 2] * 7) >>> 0;
+    }
+    return hash;
+  };
+  const tonePower = async (fromTotal, frequency) => {
+    const rate = 44100;
+    const now = await js("return window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total;");
+    const audio = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [fromTotal, Math.max(1, now - fromTotal)]);
+    const sampleRate = audio?.sampleRate || rate;
+    const omega = (2 * Math.PI * frequency) / sampleRate;
+    const coeff = 2 * Math.cos(omega);
+    let s1 = 0, s2 = 0, n = 0;
+    for (let i = 0; i < (audio?.samples?.length ?? 0); i += 2) { const s0 = audio.samples[i] + coeff * s1 - s2; s2 = s1; s1 = s0; n += 1; }
+    return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / Math.max(1, n * n);
+  };
+
+  await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
+  await focusGameCanvasNatively(sessionId);
+  const problems = [];
+  const initial = await observe();
+  const pixelsA0 = await itemPixels(layout.itemA);
+  const pixelsB0 = await itemPixels(layout.itemB);
+  if (initial.counter !== 0 || initial.takenA || initial.takenB || initial.open || initial.done) problems.push(`Estado inicial errado: ${JSON.stringify(initial)}`);
+  // R1: right until blocked. Collects A once, crosses the sensor without winning, stops at the blocker.
+  const r1 = await holdUntil("ArrowRight", (samples) => samples.some((s) => s.counter === 1) && stable("p2x")(samples), 600, "direita ate o bloqueio");
+  const r1End = r1[r1.length - 1];
+  const touchedSensorEarly = r1.filter((s) => overlapsX(s.p2x, layout.sensor, sensorW));
+  const proof = {
+    r1: { endX: r1End.p2x, counter: r1End.counter, maxCounter: Math.max(...r1.map((s) => s.counter)), open: r1End.open, sensorSamples: touchedSensorEarly.length, doneDuringR1: r1.some((s) => s.done), maxRight: Math.max(...r1.map((s) => s.p2x)) + playerW, blockerLeft: layout.blocker },
+  };
+  if (proof.r1.maxCounter !== 1 || r1End.takenA !== 1 || r1End.takenB !== 0) problems.push(`Item A nao creditou exatamente uma vez: ${JSON.stringify(proof.r1)}`);
+  if (proof.r1.sensorSamples === 0) problems.push("Player 2 nao passou pelo sensor antes das duas moedas (negativo de vitoria prematura nao exercitado)");
+  if (proof.r1.doneDuringR1) problems.push("Objetivo disparou antes de ter as duas moedas (vitoria prematura)");
+  if (r1End.open !== 0 || proof.r1.maxRight > layout.blocker) problems.push(`Passagem nao estava fechada fisicamente: ${JSON.stringify(proof.r1)}`);
+  // Pixels: A hidden, B untouched (only the collected item changes).
+  const pixelsA1 = await itemPixels(layout.itemA);
+  const pixelsB1 = await itemPixels(layout.itemB);
+  proof.pixels = { aChanged: pixelsA1 !== pixelsA0, bUnchangedAfterA: pixelsB1 === pixelsB0 };
+  // Wrong collector: the template player (same arrows) must not collect B.
+  proof.templatePlayerOverB = r1.some((s) => overlapsX(s.p1x, layout.itemB, itemW));
+  if (proof.templatePlayerOverB && r1.some((s) => s.takenB)) problems.push("Item B foi coletado pelo jogador errado");
+  // L1: back left over A (no second credit) to B: counter 2 exactly, passage opens.
+  const l1 = await holdUntil("ArrowLeft", (samples) => samples.some((s) => s.counter === 2), 900, "esquerda ate o item B");
+  const overAAgain = l1.filter((s) => overlapsX(s.p2x, layout.itemA, itemW)).length;
+  proof.l1 = { overAAgain, counterWhileOverA: [...new Set(l1.filter((s) => overlapsX(s.p2x, layout.itemA, itemW)).map((s) => s.counter))], maxCounter: Math.max(...l1.map((s) => s.counter)), end: l1[l1.length - 1] };
+  if (!overAAgain || proof.l1.counterWhileOverA.some((c) => c !== 1)) problems.push(`Voltar sobre A creditou de novo: ${JSON.stringify(proof.l1)}`);
+  if (proof.l1.maxCounter !== 2 || proof.l1.end.takenB !== 1) problems.push(`Item B nao creditou exatamente uma vez: ${JSON.stringify(proof.l1)}`);
+  const openAt = [...r1, ...l1].find((s) => s.open === 1);
+  if (!openAt || openAt.counter < 2) problems.push(`Passagem abriu antes da condicao: ${JSON.stringify(openAt)}`);
+  // Stay on B's spot: no further credit.
+  const stay = [];
+  const stayStart = (await observe()).frame;
+  while ((await observe()).frame - stayStart < 30) stay.push(await observe());
+  if (stay.some((s) => s.counter !== 2)) problems.push("Permanecer no local creditou de novo");
+  // R2: right through the sensor (objective once) and physically across the blocker.
+  const audioBeforeGoal = (await observe()).audioTotal;
+  const r2 = await holdUntil("ArrowRight", (samples) => samples[samples.length - 1].p2x > layout.blocker + blockerW, 900, "direita ate atravessar");
+  const fired = r2.find((s) => s.done === 1);
+  proof.r2 = { firedAtX: fired?.p2x ?? null, firedCounter: fired?.counter ?? null, endX: r2[r2.length - 1].p2x, crossed: r2[r2.length - 1].p2x > layout.blocker + blockerW };
+  if (!fired || fired.counter < 2 || !overlapsX(fired.p2x, layout.sensor, sensorW)) problems.push(`Objetivo nao disparou no sensor com a condicao: ${JSON.stringify(proof.r2)}`);
+  if (!proof.r2.crossed) problems.push("Player 2 nao atravessou fisicamente");
+  await pause(1500);
+  proof.audio = { victoryAfterGoal: await tonePower(audioBeforeGoal, 1320) };
+  // L2: back over the sensor: the objective does not fire again.
+  const l2 = await holdUntil("ArrowLeft", (samples) => samples.some((s) => overlapsX(s.p2x, layout.sensor, sensorW)) && samples[samples.length - 1].p2x < layout.sensor - playerW, 900, "esquerda de volta sobre o sensor");
+  proof.l2 = { doneValues: [...new Set(l2.map((s) => s.done))], counter: l2[l2.length - 1].counter };
+  if (proof.l2.doneValues.some((d) => d !== 1) || proof.l2.counter !== 2) problems.push(`Objetivo/contador mudaram ao voltar: ${JSON.stringify(proof.l2)}`);
+  if (problems.length) fail(`Prova incompleta: ${problems.join("; ")} ${JSON.stringify(proof)}`);
+  await shot("03-played", "apos coletar, abrir e cumprir o objetivo");
+
+  // 5. Restart the match through the UI (Testar again). Only a real restart can bring back
+  // the full initial state (Player 2 had moved and the counter was 2).
+  await click("guided-step-testar", "Testar de novo (reiniciar a partida)");
+  const isInitial = (s) => s.counter === 0 && !s.takenA && !s.takenB && !s.open && !s.done && s.p2x === layout.player2;
+  const afterRestart = await waitFor(async () => {
+    const current = await observe().catch(() => null);
+    return current && isInitial(current) ? current : false;
+  }, 300000, "Reinicio da partida nao restaurou o estado definido.", 500);
+  const restart = { romSha256: (await readCanonicalGameFrame(sessionId))?.romSha256 };
+  const pixelsA2 = await itemPixels(layout.itemA);
+  proof.restart = { state: afterRestart, itemAVisibleAgain: pixelsA2 === pixelsA0, sameRom: restart.romSha256 === romSha256 };
+  if (afterRestart.counter !== 0 || afterRestart.takenA || afterRestart.takenB || afterRestart.open || afterRestart.done || afterRestart.p2x !== layout.player2) {
+    fail(`Reinicio da partida nao restaurou o estado definido: ${JSON.stringify(proof.restart)}`);
+  }
+  await shot("04-restarted", "partida reiniciada");
+  const proofPath = path.join(validationDir, `${artifactPrefix}-play-proof.json`);
+  await writeFile(proofPath, JSON.stringify({ rom: { path: romCopy, sha256: romSha256 }, layout, proof, r1, l1, r2, l2 }, null, 2));
+  addReportArtifact(report, proofPath, "prova por teclado (RAM, pixels, audio)");
+  addReportStep(report, "keyboard_collect_goal", "passed", { rom: { path: romCopy, sha256: romSha256 }, proof });
+  const saved = await writeCreateGameReport(report, reportPath);
+  console.log(`Relatorio: ${saved}`);
+  console.log("OK: Desktop Tauri collect-goal (dois itens, contador, passagem, objetivo, reinicio da partida) passou.");
+}
+
 const SHELL_PERSONA_STORAGE_KEY = "retrodev-shell-persona";
 
 async function cleanupTemporaryProject(projectDir) {
@@ -8982,7 +9307,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" || options.scenario === "nodegraph-authoring" || options.scenario === "behaviors-independence" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" || options.scenario === "nodegraph-authoring" || options.scenario === "behaviors-independence" || options.scenario === "collect-goal" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -8997,7 +9322,8 @@ async function main() {
     options.scenario !== "reference-platformer" &&
     options.scenario !== "authoring-acceptance" &&
     options.scenario !== "nodegraph-authoring" &&
-    options.scenario !== "behaviors-independence";
+    options.scenario !== "behaviors-independence" &&
+    options.scenario !== "collect-goal";
   let temporaryProjectDir = "";
   let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
@@ -9182,7 +9508,7 @@ async function main() {
     await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "Janela do app nao abriu corretamente");
     // Scenarios expect the default shell; a persona left in localStorage (e.g. by the
     // guided acceptance run) would hide workspaces. Reset it and reload once.
-    if (options.scenario !== "authoring-acceptance" && options.scenario !== "nodegraph-authoring" && options.scenario !== "behaviors-independence") {
+    if (options.scenario !== "authoring-acceptance" && options.scenario !== "nodegraph-authoring" && options.scenario !== "behaviors-independence" && options.scenario !== "collect-goal") {
       const persisted = await executeScript(sessionId, "return localStorage.getItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
       if (persisted) {
         await executeScript(sessionId, "localStorage.removeItem(arguments[0]); location.reload();", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
@@ -10533,6 +10859,17 @@ async function main() {
       } finally {
         // The guided persona persists in the app's localStorage; restore the default so the
         // next scenarios see the standard shell.
+        await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      }
+      return;
+    }
+
+    if (options.scenario === "collect-goal") {
+      try {
+        await runCollectGoalScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
+          temporaryProjectDir = projectDir;
+        });
+      } finally {
         await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
       }
       return;
