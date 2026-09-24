@@ -7205,7 +7205,9 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   const p3Closed = async (label) => {
     const before = await observe();
     await down("KeyZ", label);
-    const samples = await sampleUntil((all) => all.length > 4 && all.slice(-4).every((s) => s.p3[0] === all[all.length - 1].p3[0]) && all[all.length - 1].p3[0] !== before.p3[0], 300, label);
+    // Holding left: stable for >= 20 emulated frames (it may already be touching the face).
+    const samples = await sampleUntil((all) => all.length > 4 && all.slice(-4).every((s) => s.p3[0] === all[all.length - 1].p3[0]) && all[all.length - 1].frame - all[0].frame >= 20, 300, label);
+    void before;
     await up("KeyZ", label);
     return { stopX: samples[samples.length - 1].p3[0], minLeft: Math.min(...samples.map((s) => box(s.p3[0]).left)), overlapped: samples.some((s) => intersects(s.p3[0], C)), score: samples[samples.length - 1].score };
   };
