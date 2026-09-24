@@ -37,7 +37,16 @@ Provas **novas**: tudo acima. Provas **herdadas** e não reexecutadas nesta fati
 
 ## CI e revalidação
 
-O primeiro CI do PR #75 falhou em `reference_goal`: o cartão passou a esconder a origem autoral nos detalhes técnicos, e o cenário (corretamente) exige rastreabilidade visível. Corrigido exibindo `origem:` no cartão, sem afrouxar a asserção. A reexecução local do cenário ficou bloqueada pelo host (janela WebDriver presa em 948×314 sob pressão de memória, antes de qualquer passo); a confirmação depende do CI. O E2E `nodegraph-authoring` acima é anterior a essa mudança de apresentação (linha extra só em nós com `authoring_origin`).
+O primeiro CI do PR #75 falhou em `reference_goal`: o cartão passou a esconder a origem autoral nos detalhes técnicos, e o cenário (corretamente) exige rastreabilidade visível. Corrigido exibindo `origem:` no cartão, sem afrouxar a asserção. A reexecução local do cenário ficou bloqueada antes de qualquer passo (janela WebDriver presa em 948×314). O host estava sob pressão de recursos (~1 GiB livre, 9,1 GiB de swap), mas a causa do problema do WebDriver **não foi estabelecida**. O CI do HEAD `068ace1` passou (validate 2/2, linux-validate 2/2, desktop-smoke 2/2). A prova `nodegraph-authoring` 13/13 pertence ao binário `bcd94007…` (commit `bb0b2d0`), anterior à correção `59d4e71`; o CI verde **não** é uma repetição integral dessa prova.
+
+## Revisão da etapa (sem mudanças de código)
+
+- Preservação da lógica: organizar/arrastar/recolher alteram só `x/y`/`pinned`/`groups`; `organizeGraph` aborta se a assinatura semântica mudar; testes unitários cobrem grafo real, seleção, fixados, ciclos e grafo de 281 nós.
+- Histórico: toda alteração passa por `setGraph`; o eco do salvamento é comparado na forma canônica; mudanças externas viram passo desfazível. Ctrl+Z/Ctrl+Y só agem no grafo enquanto o editor está montado.
+- Conexões: `checkConnection` recusa tipos diferentes, duplicatas, auto-ligação e segunda fonte numa entrada de dado; o ímã só oferece portas aprovadas por ela.
+- Grupos: apagar nós limpa os grupos; o deserializador descarta ids inexistentes.
+- Linha `origem:`: o layout usa a altura medida no DOM, então organizações novas já a consideram. Em posições já salvas ela acrescenta ~13 px, menos que o espaçamento vertical de 28 px, portanto não cria sobreposição — conclusão por análise, **não** medida em desktop.
+- Lacuna encontrada: a caixa de um grupo **recolhido** (240×64 no canto dos membros) não entra na verificação de sobreposição, nem no layout nem no E2E. No grafo de referência o grupo é um comportamento inteiro, então o canto pertence à própria faixa; um grupo arbitrário pode cobrir um cartão. Fica como pendência registrada.
 
 ## Limitações
 
