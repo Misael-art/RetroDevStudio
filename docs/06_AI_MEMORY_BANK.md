@@ -1,5 +1,9 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-24 (b) — comportamentos reutilizáveis (Experimental; sem merge)
+
+Branch `codex/reusable-behaviors`, dependente do PR #75. "Movimento e salto" e "Passagem condicionada" parametrizados, gerando nós canônicos; instâncias com id único na cena, plano com conflitos antes de aplicar/editar/remover, duplicação de entidade remapeando comportamentos. E2E `behaviors-independence` 6/6 no binário `ccd0dab9…` (commit `9fb0c89`): duas cópias do jogador com controles/velocidades próprios, editar/desfazer, cópia remapeada, remoção, reinício e teclado com controles negativos; passagem abre no score 20. Defeitos corrigidos: salto sem efeito em entidades que compartilham sprite (variável de física errada no gerador), cópias de prefab herdando lógica manual/`graph_ref`, edição perdida ao trocar de entidade, commit obsoleto após refazer, grupo recolhido encobrindo nós. `nodegraph-authoring` reexecutado 13/13 no mesmo binário. Matriz: `docs/REX_BEHAVIORS.md`.
+
 ### Checkpoint 2026-09-24 — NodeGraph organizado e editável (Experimental; sem merge)
 
 Branch `codex/nodegraph-organize-authoring` (sobre a arte da raposinha). Organizar pelas conexões reais (só posições, semântica guardada), fixar, organizar seleção, desfazer/refazer com Ctrl+Z/Ctrl+Y, registro visual único, cartões em português com entidade/miniatura, portas tipadas, ímã de conexão com Esc, grupos e navegação por entidade, regras editáveis com "Senão". E2E desktop `nodegraph-authoring` 13/13 no binário `bcd94007…` (commit `bb0b2d0`): pulo trocado de A/Z para B/X comprovado jogando, limiares 12/60 independentes, som `victory`, sobreposições 93→0, reinício/reabertura preservados, grafo de 106 nós em 22 ms. Corrigidos: `BUTTON_START`→`BUTTON_A`, histórico apagado pelo eco do autosave, Backspace apagando nó. Usabilidade humana não validada. Matriz: `docs/REX_NODEGRAPH_AUTHORING.md`.

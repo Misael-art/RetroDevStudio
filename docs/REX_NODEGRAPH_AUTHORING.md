@@ -45,8 +45,8 @@ O primeiro CI do PR #75 falhou em `reference_goal`: o cartão passou a esconder 
 - Histórico: toda alteração passa por `setGraph`; o eco do salvamento é comparado na forma canônica; mudanças externas viram passo desfazível. Ctrl+Z/Ctrl+Y só agem no grafo enquanto o editor está montado.
 - Conexões: `checkConnection` recusa tipos diferentes, duplicatas, auto-ligação e segunda fonte numa entrada de dado; o ímã só oferece portas aprovadas por ela.
 - Grupos: apagar nós limpa os grupos; o deserializador descarta ids inexistentes.
-- Linha `origem:`: o layout usa a altura medida no DOM, então organizações novas já a consideram. Em posições já salvas ela acrescenta ~13 px, menos que o espaçamento vertical de 28 px, portanto não cria sobreposição — conclusão por análise, **não** medida em desktop.
-- Lacuna encontrada: a caixa de um grupo **recolhido** (240×64 no canto dos membros) não entra na verificação de sobreposição, nem no layout nem no E2E. No grafo de referência o grupo é um comportamento inteiro, então o canto pertence à própria faixa; um grupo arbitrário pode cobrir um cartão. Fica como pendência registrada.
+- Linha `origem:`: o layout usa a altura medida no DOM. Medição desktop no binário `ccd0dab9…` (ver `docs/REX_BEHAVIORS.md`): 0 sobreposição após organizar e após reabrir, em todos os tamanhos. Posições salvas **antes** da linha existir continuam só analisadas (~13 px < espaçamento de 28 px), não medidas.
+- Lacuna encontrada: a caixa de um grupo **recolhido** não entrava na verificação de sobreposição. **Corrigida** em `codex/reusable-behaviors` (ver `docs/REX_BEHAVIORS.md`).
 
 ## Limitações
 
