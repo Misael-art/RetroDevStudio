@@ -84,8 +84,8 @@ Rodada 2: check:tree, lint, tsc, Vitest 688/6 skipped, `cargo fmt --check`, clip
 ## Limitações e pendentes
 
 - Sem saltos adicionais (duplo salto) — não exposto; o nó manual do template continua sem checagem de chão (inalterado).
-- `condition_on_ground` só no Mega Drive; no SNES compila como falso explícito.
-- A passagem bloqueia apenas o movimento horizontal gerado pelo comportamento (não a física vertical nem outras lógicas).
+- `condition_on_ground` só no Mega Drive. No SNES (rodada 3): o build é **recusado antes de gerar código**, com diagnóstico estruturado (plataforma, entidade, nó), ROMs antigas de `build/snes/out` são removidas e o emissor SNES emite `#error` (nunca "falso"); o validador do grafo e o formulário do comportamento explicam antes do build. Testes: `snes_build_refuses_unsupported_logic_before_codegen_and_drops_stale_roms` (com o nó: recusado, sem Makefile, sem ROM; sem o nó: compila), unitários TS.
+- A passagem bloqueia apenas o movimento horizontal gerado pelo comportamento (não a física vertical nem outras lógicas) — agora dito na descrição do painel. A política de salto do comportamento é diferente da do grafo manual do modelo; o painel diz isso e nenhum projeto existente é alterado.
 - Biblioteca com 2 comportamentos; coleta, porta e vitória pendentes. Sequência de animação com ordem/duração na ROM pendente.
 - Sem animação de "andar" automática; sem nó "ao soltar".
 - Usabilidade humana não validada (roteiro abaixo).

@@ -374,4 +374,15 @@ describe("validateNodeGraph sound references", () => {
     const ok = validateNodeGraph({ nodes: [soundNode("jump")], edges: [] }, { selectedEntity: player as never });
     expect(ok.errors.filter((issue) => issue.code === "missing_sfx")).toEqual([]);
   });
+
+  it("flags nodes unsupported on the project platform before the build", async () => {
+    const { validateNodeGraph } = await import("./nodeEngine");
+    const graph = {
+      nodes: [{ id: "g", type: "condition_on_ground" as const, label: "Chao", x: 0, y: 0, inputs: [], outputs: [], params: { target: "hero" } }],
+      edges: [],
+    };
+    const codes = (target: string) => validateNodeGraph(graph, { target }).errors.map((issue) => issue.code);
+    expect(codes("snes")).toContain("unsupported_on_platform");
+    expect(codes("megadrive")).not.toContain("unsupported_on_platform");
+  });
 });

@@ -101,6 +101,12 @@ describe("behavior library", () => {
     expect(planApplyBehavior(moved.graph, "gated_passage", { movement: moved.id, blocker: "gate", state_variable: "score", threshold: -1 }, context).errors.join()).toContain("entre 0 e 32767");
   });
 
+  it("refuses the grounded jump on SNES but keeps movement without jump", () => {
+    const snes = { ...context, platform: "snes" };
+    expect(planApplyBehavior(EMPTY, "platform_movement", moveParams("fox"), snes).errors.join()).toContain("SNES");
+    expect(planApplyBehavior(EMPTY, "platform_movement", moveParams("fox", { jump_button: "" }), snes).errors).toEqual([]);
+  });
+
   it("warns before duplicating logic on the same entity", () => {
     const first = apply(EMPTY, "platform_movement", moveParams("fox"));
     const again = planApplyBehavior(first.graph, "platform_movement", moveParams("fox"), context);

@@ -2502,7 +2502,7 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
     }
 }
 
-fn collect_grounded_vars(ast: &AstOutput) -> std::collections::BTreeSet<String> {
+pub(crate) fn collect_grounded_vars(ast: &AstOutput) -> std::collections::BTreeSet<String> {
     fn from_bool(expr: &LogicBoolExpr, out: &mut std::collections::BTreeSet<String>) {
         match expr {
             LogicBoolExpr::Grounded { var_name } => {

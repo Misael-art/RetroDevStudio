@@ -5088,6 +5088,16 @@ mod tests {
         assert!(!c.contains("spr_fox_2_vel_y"), "{c}");
         // A primeira entidade nao e afetada pelo salto da segunda.
         assert!(!c.contains("spr_fox_vel_y = -40;"), "{c}");
+        // SNES: o no nao vira "falso" silencioso; o C gerado bloqueia com #error.
+        let snes = crate::compiler::snes_emitter::emit_snes(
+            &generate_ast(&project, &scene),
+            &project.name,
+        )
+        .main_c;
+        assert!(
+            snes.contains("#error") && snes.contains("condition_on_ground"),
+            "{snes}"
+        );
         // O salto so ocorre com apoio da propria entidade: estado por entidade,
         // zerado a cada quadro pela fisica.
         assert!(c.contains("if ((spr_fox__fox_2_on_ground)) {"), "{c}");

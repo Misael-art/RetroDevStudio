@@ -35,6 +35,8 @@ export type BehaviorSceneContext = {
    * do id e sao globais na ROM, entao o id precisa ser unico na cena inteira.
    */
   instanceIds: string[];
+  /** Plataforma do projeto (ex.: "megadrive", "snes"). */
+  platform?: string | null;
 };
 
 // ── Parametros tipados ────────────────────────────────────────────────────────
@@ -152,7 +154,7 @@ function commonValidation(def: BehaviorDefinition, params: BehaviorParams, conte
 const movement: BehaviorDefinition = {
   id: "platform_movement",
   title: "Movimento e salto",
-  description: "Anda para os lados enquanto o botao estiver segurado e salta ao apertar, somente quando esta apoiado no chao. Usa a fisica (gravidade) da entidade.",
+  description: "Anda para os lados enquanto o botao estiver segurado e salta ao apertar, somente quando esta apoiado no chao (uma pressao no ar ou segurar o botao nao repete o salto). Usa a fisica (gravidade) da entidade. Grafos feitos a mao, como o do jogador do modelo, mantem a propria regra de salto; nada e alterado neles.",
   params: [
     { key: "target", label: "Entidade", kind: "entity", require: "sprite", help: "Quem se move." },
     { key: "speed", label: "Velocidade", kind: "int", min: 1, max: 8, default: 2, unit: "px por quadro" },
@@ -175,6 +177,9 @@ const movement: BehaviorDefinition = {
   validate: (p, context, graph) => {
     const errors = commonValidation(movement, p, context, graph);
     const target = context.entities.find((entity) => entity.id === String(p.target ?? ""));
+    if (p.jump_button && context.platform === "snes") {
+      errors.push('Saltar: no SNES o salto "so do chao" nao e suportado (o estado de apoio existe apenas na fisica do Mega Drive); deixe "Saltar" vazio.');
+    }
     if (target && p.jump_button && !target.hasPhysics) {
       errors.push(`Saltar: "${target.label}" nao tem fisica (gravidade); o salto nao teria efeito. Ative Fisica no Inspector ou deixe "Saltar" vazio.`);
     }
@@ -243,7 +248,7 @@ export function passageOpenVariable(instanceId: string): string {
 const passage: BehaviorDefinition = {
   id: "gated_passage",
   title: "Passagem condicionada",
-  description: "Um bloqueio impede o movimento ate uma variavel atingir o limiar; entao o bloqueio some e a passagem abre.",
+  description: "Um bloqueio impede o movimento horizontal (esquerda/direita) do 'Movimento e salto' escolhido ate uma variavel atingir o limiar; entao o bloqueio some e a passagem abre. Nao bloqueia a queda/salto nem movimentos de outras logicas.",
   params: [
     { key: "movement", label: "Movimento bloqueado", kind: "instance", behaviorId: "platform_movement", help: "Qual 'Movimento e salto' desta entidade o bloqueio segura." },
     { key: "blocker", label: "Bloqueio", kind: "entity", require: "collidable", help: "Entidade que fecha a passagem e some ao abrir." },
@@ -356,7 +361,7 @@ type SceneEntityLike = {
   };
 };
 
-export function buildBehaviorSceneContext(entities: SceneEntityLike[], graphs: NodeGraph[]): BehaviorSceneContext {
+export function buildBehaviorSceneContext(entities: SceneEntityLike[], graphs: NodeGraph[], platform: string | null = null): BehaviorSceneContext {
   const variables = new Set<string>();
   for (const graph of graphs) {
     for (const node of graph.nodes) {
@@ -375,6 +380,7 @@ export function buildBehaviorSceneContext(entities: SceneEntityLike[], graphs: N
     sounds: [...new Set(entities.flatMap((entity) => Object.keys(entity.components.audio?.sfx ?? {})))].sort(),
     variables: [...variables].sort(),
     instanceIds: graphs.flatMap((graph) => (graph.behaviors ?? []).map((instance) => instance.id)),
+    platform,
   };
 }
 

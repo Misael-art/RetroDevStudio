@@ -2114,6 +2114,7 @@ function EmptyStateOverlay({
 export default function NodeGraphEditor() {
   const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
   const activeScene = useEditorStore((state) => state.activeScene);
+  const activeTarget = useEditorStore((state) => state.activeTarget);
   const activeSceneSource = useEditorStore((state) => state.activeSceneSource);
   const selectedEntityId = useEditorStore((state) => state.selectedEntityId);
   const setSelectedEntityId = useEditorStore((state) => state.setSelectedEntityId);
@@ -2990,8 +2991,9 @@ export default function NodeGraphEditor() {
       validateNodeGraph(graph, {
         selectedEntity,
         sceneEntities: activeScene?.entities ?? [],
+        target: activeTarget,
       }),
-    [activeScene?.entities, graph, selectedEntity]
+    [activeScene?.entities, activeTarget, graph, selectedEntity]
   );
   const localRun = useMemo(
     () =>
@@ -3271,8 +3273,8 @@ export default function NodeGraphEditor() {
       const inline = deserializeNodeGraph(entity.components.logic?.graph);
       return inline.nodes.length ? inline : resolvedSceneGraphs[entity.entity_id] ?? inline;
     });
-    return buildBehaviorSceneContext(entities, graphs);
-  }, [activeScene?.entities, graph, resolvedSceneGraphs, selectedEntity?.entity_id]);
+    return buildBehaviorSceneContext(entities, graphs, activeTarget);
+  }, [activeScene?.entities, activeTarget, graph, resolvedSceneGraphs, selectedEntity?.entity_id]);
   const showNodes = useCallback((nodeIds: string[]) => {
     const current = currentGraphRef.current;
     setSelectedIds(new Set(nodeIds));
