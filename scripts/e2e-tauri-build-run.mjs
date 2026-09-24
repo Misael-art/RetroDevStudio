@@ -7114,7 +7114,14 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
     if (!done(samples)) fail(`${label}: condicao nao ocorreu em ${maxFrames} quadros: ${JSON.stringify(samples.slice(-4))}`);
     return samples;
   };
-  const tap = async (code, label) => { await down(code, label); await up(code, label); };
+  // A tap must last a few emulated frames (emulation runs at a few FPS under WebDriver),
+  // otherwise press and release both happen between two frames and the game never sees it.
+  const tap = async (code, label) => {
+    await down(code, label);
+    const pressedAt = (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0;
+    await waitFor(async () => ((await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0) - pressedAt >= 3, 20000, `${label}: quadros nao avancaram.`, 30);
+    await up(code, label);
+  };
   const settled = (key, ground) => (samples) => samples.length > 3 && samples.slice(-3).every((s) => s[key][1] === ground);
   await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
   await focusGameCanvasNatively(sessionId);
@@ -13190,7 +13197,9 @@ async function main() {
         console.warn(`[cleanup] tauri-driver ainda responde em ${driverServerUrl} apos cleanup.`);
       }
     }
-    if (temporaryProjectDir) {
+    if (temporaryProjectDir && process.env.RDS_E2E_KEEP_PROJECT === "1") {
+      console.warn(`[cleanup] RDS_E2E_KEEP_PROJECT=1: projeto temporario preservado para diagnostico: ${temporaryProjectDir}`);
+    } else if (temporaryProjectDir) {
       const cleaned = await cleanupTemporaryProject(temporaryProjectDir);
       if (!cleaned) {
         console.warn(
