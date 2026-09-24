@@ -6681,14 +6681,14 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   // Old binding (Z = button A) must no longer jump.
   await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "Z (antigo pulo)");
   acks.push(await waitAck("y", true, "Z"));
-  const zSamples = await sampleY(700);
+  const zSamples = await sampleY(2500);
   await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "soltar Z");
   acks.push(await waitAck("y", false, "soltar Z"));
   // New binding (X = button B) jumps.
   await pause(300);
   await sendNativeGameKey(sessionId, "KeyX", "keyDown", "X (novo pulo)");
   acks.push(await waitAck("b", true, "X"));
-  const xSamples = await sampleY(700);
+  const xSamples = await sampleY(2500);
   await sendNativeGameKey(sessionId, "KeyX", "keyUp", "soltar X");
   acks.push(await waitAck("b", false, "soltar X"));
   const jumpProof = { groundY, zMinY: Math.min(...zSamples), xMinY: Math.min(...xSamples), zSamples: zSamples.length, xSamples: xSamples.length };
