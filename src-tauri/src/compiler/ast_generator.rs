@@ -256,6 +256,9 @@ pub enum LogicOp {
         target_name: String,
         vx: LogicMathExpr,
         vy: LogicMathExpr,
+        /// Variavel real do sprite do alvo (ex. `spr_player__player_2`), a mesma usada
+        /// pela fisica. `None` cai no nome derivado do id (compatibilidade).
+        runtime_var: Option<String>,
     },
     SetAnimationState {
         target_var: String,
@@ -405,6 +408,10 @@ pub enum LogicMathExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogicBoolExpr {
     Literal(bool),
+    /// Corpo com fisica apoiado (pousou neste quadro). `var_name` = variavel do sprite.
+    Grounded {
+        var_name: String,
+    },
     Input {
         pad: String,
         button: String,
@@ -1724,11 +1731,15 @@ fn compile_logic_node(
             }
         }
         "set_velocity" => {
-            let target_name = sanitize_identifier(
-                &param_string(node, "target").unwrap_or_else(|| "entity".to_string()),
-            );
+            let raw_target = param_string(node, "target").unwrap_or_else(|| "entity".to_string());
+            let runtime_var = runtime_entities
+                .get(&raw_target)
+                .and_then(|runtime| runtime.sprite.as_ref())
+                .map(|sprite| sprite.var_name.clone());
+            let target_name = sanitize_identifier(&raw_target);
             Some(CompiledLogicNode::Linear(LogicOp::SetVelocity {
                 target_name,
+                runtime_var,
                 vx: resolve_math_expr_from_input(graph, &node.id, "vx")
                     .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "vx", 0))),
                 vy: resolve_math_expr_from_input(graph, &node.id, "vy")
@@ -2003,6 +2014,50 @@ fn compile_logic_node(
             Some(CompiledLogicNode::Linear(LogicOp::SetVar {
                 var_name,
                 value: value_expr,
+            }))
+        }
+        "condition_on_ground" => {
+            let target = param_string(node, "target")?;
+            let condition = match runtime_entities
+                .get(&target)
+                .and_then(|runtime| runtime.sprite.as_ref())
+            {
+                Some(sprite) => LogicBoolExpr::Grounded {
+                    var_name: sprite.var_name.clone(),
+                },
+                None => LogicBoolExpr::Unsupported {
+                    node_id: node.id.clone(),
+                    reason: format!("condition_on_ground: '{target}' nao tem sprite com fisica"),
+                },
+            };
+            let mut true_visited = visited.clone();
+            let mut false_visited = visited.clone();
+            let if_true = compile_logic_chain(
+                graph,
+                &node.id,
+                "true",
+                runtime_entities,
+                &mut true_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            let if_false = compile_logic_chain(
+                graph,
+                &node.id,
+                "false",
+                runtime_entities,
+                &mut false_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
             }))
         }
         "condition_compare" => {
@@ -2497,6 +2552,7 @@ fn collect_unsupported_from_bool(
             collect_unsupported_from_bool(right, found);
         }
         LogicBoolExpr::Literal(_)
+        | LogicBoolExpr::Grounded { .. }
         | LogicBoolExpr::Input { .. }
         | LogicBoolExpr::InputCommand { .. }
         | LogicBoolExpr::Overlap { .. } => {}
@@ -4934,6 +4990,158 @@ mod tests {
             LogicOp::PlaySound { sfx } if sfx == "jump"
         ));
         assert!(if_false.is_empty());
+    }
+
+    #[test]
+    fn set_velocity_targets_the_physics_var_of_entities_sharing_a_sprite_asset() {
+        // Duas entidades com o mesmo sprite: a segunda recebe `spr_<recurso>__<id>`.
+        // O salto (set_velocity) precisa escrever na mesma variavel que a fisica le.
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Shared Sprite".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+            settings: Default::default(),
+            template_metadata: None,
+        };
+        let fox = |id: &str, graph: Option<String>| Entity {
+            entity_id: id.to_string(),
+            display_name: None,
+            prefab: None,
+            transform: Transform { x: 40, y: 96 },
+            components: Components {
+                sprite: Some(SpriteComponent {
+                    asset: "assets/sprites/fox.png".to_string(),
+                    frame_width: 16,
+                    frame_height: 16,
+                    pivot: None,
+                    palette_slot: 0,
+                    animations: std::collections::BTreeMap::new(),
+                    priority: "foreground".to_string(),
+                    meta_sprite: false,
+                    commands: Vec::new(),
+                }),
+                physics: Some(crate::ugdm::components::PhysicsComponent {
+                    gravity: true,
+                    gravity_strength: 6,
+                    max_velocity: None,
+                    friction: 1,
+                    bounce: 0,
+                }),
+                logic: graph.map(|graph| crate::ugdm::components::LogicComponent {
+                    graph: Some(graph),
+                    graph_ref: None,
+                    graph_origin: None,
+                    logic_hints: Vec::new(),
+                    external_source_refs: Vec::new(),
+                    imported_semantics: None,
+                    variables: HashMap::new(),
+                }),
+                ..Components::default()
+            },
+        };
+        let jump = |target: &str, vy: i32| {
+            json!({
+                "version": 1,
+                "nodes": [
+                    { "id": "tick", "type": "event_update", "label": "Tick", "x": 0, "y": 0, "params": {} },
+                    { "id": "press", "type": "input_pressed", "label": "Press", "x": 0, "y": 0, "params": { "pad": "JOY_1", "button": "BUTTON_B" } },
+                    { "id": "ground", "type": "condition_on_ground", "label": "Grounded", "x": 0, "y": 0, "params": { "target": target } },
+                    { "id": "jump", "type": "set_velocity", "label": "Jump", "x": 0, "y": 0, "params": { "target": target, "vx": 0, "vy": vy } }
+                ],
+                "edges": [
+                    { "id": "e1", "fromNode": "tick", "fromPort": "exec", "toNode": "press", "toPort": "exec" },
+                    { "id": "e2", "fromNode": "press", "fromPort": "exec", "toNode": "ground", "toPort": "exec" },
+                    { "id": "e3", "fromNode": "ground", "fromPort": "true", "toNode": "jump", "toPort": "exec" }
+                ]
+            })
+            .to_string()
+        };
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![fox("fox", None), fox("fox_2", Some(jump("fox_2", -40)))],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+        let emitted = crate::compiler::sgdk_emitter::emit_sgdk(
+            &generate_ast(&project, &scene),
+            &project.name,
+        );
+        let c = &emitted.main_c;
+        // A fisica da segunda entidade usa a variavel de instancia...
+        assert!(c.contains("spr_fox__fox_2_vel_y += 6;"), "{c}");
+        // ...e o salto escreve nela, nao numa variavel orfa derivada do id.
+        assert!(c.contains("spr_fox__fox_2_vel_y = -40;"), "{c}");
+        assert!(!c.contains("spr_fox_2_vel_y"), "{c}");
+        // A primeira entidade nao e afetada pelo salto da segunda.
+        assert!(!c.contains("spr_fox_vel_y = -40;"), "{c}");
+        // SNES: o no nao vira "falso" silencioso; o C gerado bloqueia com #error.
+        let snes = crate::compiler::snes_emitter::emit_snes(
+            &generate_ast(&project, &scene),
+            &project.name,
+        )
+        .main_c;
+        assert!(
+            snes.contains("#error") && snes.contains("condition_on_ground"),
+            "{snes}"
+        );
+        // O salto so ocorre com apoio da propria entidade: estado por entidade,
+        // zerado a cada quadro pela fisica.
+        assert!(c.contains("if ((spr_fox__fox_2_on_ground)) {"), "{c}");
+        assert!(c.contains("static u8 spr_fox__fox_2_on_ground = 0;"), "{c}");
+        assert!(c.contains("static u8 spr_fox_on_ground = 0;"), "{c}");
+        assert!(c.contains("spr_fox__fox_2_on_ground = 0;\n"), "{c}");
+        assert!(!c.contains("(spr_fox_on_ground)"), "{c}");
+
+        // Com mapa de colisao: apoio = solido logo abaixo dos pes em todo quadro (nao so
+        // no quadro do encaixe), para uma pressao de salto nunca cair num quadro "sem chao".
+        let mut map = crate::ugdm::entities::CollisionMap::empty(8, 8, 40, 28);
+        for col in 0..40 {
+            map.data[26 * 40 + col] = 1;
+        }
+        let map_data = map.data.clone();
+        let emit_with = |scene: &Scene| {
+            crate::compiler::sgdk_emitter::emit_sgdk_with_collision(
+                &generate_ast(&project, scene),
+                &project.name,
+                Some(&map_data),
+            )
+            .main_c
+        };
+        let mut floor_scene = scene.clone();
+        floor_scene.collision_map = Some(map.clone());
+        // Mapa + colisao: apoio = solido logo abaixo dos pes em todo quadro (nao so no
+        // quadro do encaixe), para uma pressao de salto nunca cair num quadro "sem chao".
+        let mut tile_scene = floor_scene.clone();
+        for entity in &mut tile_scene.entities {
+            entity.components.collision = Some(crate::ugdm::components::CollisionComponent {
+                shape: "aabb".to_string(),
+                width: 16,
+                height: 16,
+                offset: None,
+                solid: true,
+                layer: None,
+                collides_with: vec!["ground".to_string()],
+            });
+        }
+        let grounded = emit_with(&tile_scene);
+        assert!(
+            grounded.contains("|| rds_solid_at(spr_fox__fox_2_next_x + 8, spr_fox__fox_2_next_y + 16))) spr_fox__fox_2_on_ground = 1;"),
+            "{grounded}"
+        );
     }
 
     #[test]

@@ -169,9 +169,20 @@ fn build_main_c_inner(
     for physics in &physics_applications {
         out.push_str(&format!("static s32 {}_vel_x = 0;\n", physics.var_name));
         out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
+        // 1 quando o corpo pousou (chao do mapa, fundo do mapa ou piso) neste quadro.
+        out.push_str(&format!("static u8 {}_on_ground = 0;\n", physics.var_name));
     }
-    for target_name in logic_velocity_targets {
-        let runtime_var = sprite_runtime_var(&target_name);
+    for var_name in collect_grounded_vars(ast) {
+        if physics_applications
+            .iter()
+            .any(|physics| physics.var_name == var_name)
+        {
+            continue;
+        }
+        // Sem fisica nunca ha apoio: a condicao compila e fica sempre falsa.
+        out.push_str(&format!("static u8 {}_on_ground = 0;\n", var_name));
+    }
+    for runtime_var in logic_velocity_targets {
         if physics_applications
             .iter()
             .any(|physics| physics.var_name == runtime_var)
@@ -980,6 +991,7 @@ fn render_aabb_helper() -> &'static str {
 fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
     let next_x_var = format!("{}_next_x", physics.var_name);
     let next_y_var = format!("{}_next_y", physics.var_name);
+    out.push_str(&format!("        {}_on_ground = 0;\n", physics.var_name));
 
     if physics.gravity {
         out.push_str(&format!(
@@ -1047,18 +1059,30 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
         let tile_h = ground.tile_height;
         let bottom = (ground.map_height * tile_h) as i64 - i64::from(body_h);
         out.push_str(&format!(
-            "        if ({var_name}_vel_y >= 0) {{ s16 rds_foot = {next_y_var} + {body_h} - 1; if (rds_solid_at({next_x_var} + {half_w}, rds_foot)) {{ {next_y_var} = (rds_foot / {tile_h}) * {tile_h} - {body_h}; {var_name}_vel_y = 0; }} }}\n",
+            "        if ({var_name}_vel_y >= 0) {{ s16 rds_foot = {next_y_var} + {body_h} - 1; if (rds_solid_at({next_x_var} + {half_w}, rds_foot)) {{ {next_y_var} = (rds_foot / {tile_h}) * {tile_h} - {body_h}; {var_name}_vel_y = 0; {var_name}_on_ground = 1; }} }}\n",
             half_w = body_w / 2,
         ));
         out.push_str(&format!(
-            "        if ({next_y_var} > {bottom}) {{ {next_y_var} = {bottom}; {var_name}_vel_y = 0; }}\n"
+            "        if ({next_y_var} > {bottom}) {{ {next_y_var} = {bottom}; {var_name}_vel_y = 0; {var_name}_on_ground = 1; }}\n"
+        ));
+        // Apoio real: parado sobre um solido (ou no fundo do mapa) conta como apoiado em todo
+        // quadro, nao so nos quadros em que a gravidade acumulada provoca o encaixe.
+        out.push_str(&format!(
+            "        if ({var_name}_vel_y >= 0 && ({next_y_var} >= {bottom} || rds_solid_at({next_x_var} + {half_w}, {next_y_var} + {body_h}))) {var_name}_on_ground = 1;\n",
+            half_w = body_w / 2,
         ));
         out.push_str(&format!(
             "        if ({next_x_var} != {var_name}_x && rds_hits_wall({next_x_var}, {var_name}_y, {body_w}, {body_h}, {next_x_var} - {var_name}_x)) {{ {next_x_var} = {var_name}_x; {var_name}_vel_x = 0; }}\n"
         ));
     } else if let Some(floor_y) = physics.floor_y {
         out.push_str(&format!(
-            "        if ({next_y_var} > {floor_y}) {{ {next_y_var} = {floor_y}; {var_name}_vel_y = 0; }}\n",
+            "        if ({next_y_var} > {floor_y}) {{ {next_y_var} = {floor_y}; {var_name}_vel_y = 0; {var_name}_on_ground = 1; }}\n",
+            next_y_var = next_y_var,
+            floor_y = floor_y,
+            var_name = physics.var_name
+        ));
+        out.push_str(&format!(
+            "        if ({var_name}_vel_y >= 0 && {next_y_var} >= {floor_y}) {var_name}_on_ground = 1;\n",
             next_y_var = next_y_var,
             floor_y = floor_y,
             var_name = physics.var_name
@@ -1490,8 +1514,11 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 target_name,
                 vx,
                 vy,
+                runtime_var,
             } => {
-                let runtime_var = sprite_runtime_var(target_name);
+                let runtime_var = runtime_var
+                    .clone()
+                    .unwrap_or_else(|| sprite_runtime_var(target_name));
                 out.push_str(&format!(
                     "{indent}{runtime_var}_vel_x = {vx};\n",
                     indent = indent_str,
@@ -1803,8 +1830,16 @@ fn collect_logic_velocity_targets_from_ops(
             LogicOp::SourceMapped { op, .. } => {
                 collect_logic_velocity_targets_from_ops(std::slice::from_ref(op.as_ref()), targets);
             }
-            LogicOp::SetVelocity { target_name, .. } => {
-                targets.insert(target_name.clone());
+            LogicOp::SetVelocity {
+                target_name,
+                runtime_var,
+                ..
+            } => {
+                targets.insert(
+                    runtime_var
+                        .clone()
+                        .unwrap_or_else(|| sprite_runtime_var(target_name)),
+                );
             }
             LogicOp::ConditionOverlap {
                 if_true, if_false, ..
@@ -1999,6 +2034,7 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
                 )
             }
         }
+        LogicBoolExpr::Grounded { var_name } => format!("({var_name}_on_ground)"),
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
             left_x = logic_x_expr(left),
@@ -2261,6 +2297,7 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             target_name,
             vx,
             vy,
+            ..
         } => {
             vars.insert(format!("{}_vx", target_name));
             vars.insert(format!("{}_vy", target_name));
@@ -2465,9 +2502,55 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
     }
 }
 
+pub(crate) fn collect_grounded_vars(ast: &AstOutput) -> std::collections::BTreeSet<String> {
+    fn from_bool(expr: &LogicBoolExpr, out: &mut std::collections::BTreeSet<String>) {
+        match expr {
+            LogicBoolExpr::Grounded { var_name } => {
+                out.insert(var_name.clone());
+            }
+            LogicBoolExpr::Not(inner) => from_bool(inner, out),
+            LogicBoolExpr::And { left, right, .. } => {
+                from_bool(left, out);
+                from_bool(right, out);
+            }
+            _ => {}
+        }
+    }
+    fn from_ops(ops: &[LogicOp], out: &mut std::collections::BTreeSet<String>) {
+        for op in ops {
+            match op {
+                LogicOp::SourceMapped { op, .. } => {
+                    from_ops(std::slice::from_ref(op.as_ref()), out)
+                }
+                LogicOp::ConditionBool {
+                    condition,
+                    if_true,
+                    if_false,
+                } => {
+                    from_bool(condition, out);
+                    from_ops(if_true, out);
+                    from_ops(if_false, out);
+                }
+                LogicOp::ConditionOverlap {
+                    if_true, if_false, ..
+                } => {
+                    from_ops(if_true, out);
+                    from_ops(if_false, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    for script in &ast.logic_scripts {
+        from_ops(&script.ops, &mut out);
+    }
+    out
+}
+
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
-        LogicBoolExpr::Literal(_) => false,
+        LogicBoolExpr::Literal(_) | LogicBoolExpr::Grounded { .. } => false,
         LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
@@ -3726,6 +3809,7 @@ mod tests {
                         target_name: "player".to_string(),
                         vx: LogicMathExpr::Literal(2),
                         vy: LogicMathExpr::Literal(0),
+                        runtime_var: None,
                     }),
                 }],
             }],

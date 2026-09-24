@@ -5,6 +5,9 @@ import InspectorPanel from "./InspectorPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { Entity, Scene } from "../../core/ipc/sceneService";
 import { sha256Text, type BuildSourceMap } from "../../core/nodegraph/buildProvenance";
+import { buildBehaviorSceneContext, planApplyBehavior } from "../../core/nodegraph/behaviorLibrary";
+import { deserializeNodeGraph } from "../../core/nodegraph/nodeDefinitions";
+import { serializeNodeGraph } from "../../core/nodegraph/nodeTypes";
 
 const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
@@ -176,6 +179,53 @@ describe("InspectorPanel", () => {
       await flush();
     });
     container.remove();
+  });
+
+  it("duplicates a prefab entity without inheriting its manual logic or graph_ref, remapping its behaviors", async () => {
+    const context = buildBehaviorSceneContext([{ entity_id: "player", components: { sprite: { animations: {} }, physics: {} } }], []);
+    const plan = planApplyBehavior(
+      { nodes: [], edges: [] },
+      "platform_movement",
+      { target: "player", speed: 2, right_button: "BUTTON_RIGHT", left_button: "", jump_button: "", jump_strength: 64, jump_animation: "", jump_sound: "" },
+      context
+    );
+    const behaviorGraph = plan.graph!;
+    const manualNode = { ...behaviorGraph.nodes[0], id: "manual_tick", params: { rate: "frame" } };
+    const resolvedPlayer: Entity = {
+      ...physicsFixtureEntity(),
+      entity_id: "player",
+      prefab: "reference_player.json",
+      components: {
+        ...physicsFixtureEntity().components,
+        logic: { graph_ref: "graphs/player.json", graph: serializeNodeGraph({ ...behaviorGraph, nodes: [...behaviorGraph.nodes, manualNode] }) },
+      },
+    };
+    // A cena de origem so aponta o prefab; a logica vem da resolucao do prefab.
+    const sourcePlayer: Entity = { entity_id: "player", prefab: "reference_player.json", transform: { x: 32, y: 176 }, components: {} };
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: { ...EMPTY_SCENE, entities: [resolvedPlayer] },
+        activeSceneSource: { ...EMPTY_SCENE, entities: [sourcePlayer] },
+        selectedEntityId: "player",
+      });
+      await flush();
+    });
+    (container.querySelector("[data-testid='inspector-duplicate-entity']") as HTMLButtonElement).click();
+    await act(async () => flush());
+    expect(container.querySelector("[data-testid='inspector-duplicate-warning']")?.textContent).toContain("nao a logica manual");
+    expect(useEditorStore.getState().activeScene!.entities).toHaveLength(1);
+    await act(async () => {
+      (container.querySelector("[data-testid='inspector-duplicate-confirm']") as HTMLButtonElement).click();
+      await flush();
+    });
+    const copySource = useEditorStore.getState().activeSceneSource!.entities.find((candidate) => candidate.entity_id === "player_2")!;
+    expect(copySource.components.logic?.graph_ref).toBe("");
+    const copyGraph = deserializeNodeGraph(copySource.components.logic?.graph);
+    expect(copyGraph.nodes.some((node) => node.id === "manual_tick")).toBe(false);
+    expect(copyGraph.nodes.filter((node) => node.type === "sprite_move").map((node) => node.params.target)).toEqual(["player_2"]);
+    expect(copyGraph.behaviors![0].id).not.toBe(behaviorGraph.behaviors![0].id);
+    // O original fica intacto.
+    expect(useEditorStore.getState().activeSceneSource!.entities.find((candidate) => candidate.entity_id === "player")).toEqual(sourcePlayer);
   });
 
   it("renders editors for physics, audio, input and a logic graph summary", () => {

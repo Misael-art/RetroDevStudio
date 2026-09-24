@@ -110,6 +110,7 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   destroy_entity: entry("destroy_entity", "sprite", "Movimento", "Destruir Entidade", "eye-off", "Esconde/remove a entidade da fase.", ["target"]),
   sprite_anim: entry("sprite_anim", "animation", "Movimento", "Animar Sprite", "film", "Troca a animacao exibida pela entidade.", ["target", "anim"]),
   set_animation_state: entry("set_animation_state", "animation", "Movimento", "Estado de Animacao", "film", "Muda o estado de animacao da entidade.", ["target", "state"]),
+  condition_on_ground: entry("condition_on_ground", "collision", "Condicoes", "Esta no chao?", "fork", "Pergunta se a entidade (com fisica) esta apoiada no chao neste quadro e segue por Sim ou Nao.", ["target"]),
   condition_overlap: entry("condition_overlap", "collision", "Condicoes", "Colisao (Overlap)", "fork", "Pergunta se duas entidades se encostam (ou encostariam ao se mover) e segue por Sim ou Nao.", ["a", "b", "probe_dx"]),
   camera_follow: entry("camera_follow", "camera", "Camera", "Camera Segue", "camera", "Faz a camera acompanhar a entidade.", ["target"]),
   camera_bounds: entry("camera_bounds", "camera", "Camera", "Limites da Camera", "camera", "Impede a camera de sair da area indicada.", ["min_x", "max_x"]),
@@ -293,6 +294,8 @@ export function describeNodeAction(node: GraphNode): string {
     }
     case "condition_compare":
       return `Se A ${num(p.operator)} ${p.b ?? "B"}`;
+    case "condition_on_ground":
+      return `Se ${num(p.target)} esta apoiado no chao`;
     case "action_sound":
       return `Tocar som "${num(p.sfx)}"`;
     case "action_music":

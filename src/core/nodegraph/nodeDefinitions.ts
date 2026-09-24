@@ -10,6 +10,7 @@ import {
   EMPTY_GRAPH,
   cloneGraph,
   isNodeEdge,
+  isBehaviorInstance,
   isNodeGraphGroup,
   isNodePort,
   isNodeType,
@@ -119,6 +120,16 @@ export const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { target: "player", state: "idle" },
+  },
+  condition_on_ground: {
+    type: "condition_on_ground",
+    label: "On Ground",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [
+      { id: "true", label: "True ▶", kind: "exec" },
+      { id: "false", label: "False ▶", kind: "exec" },
+    ],
+    params: { target: "player" },
   },
   condition_overlap: {
     type: "condition_overlap",
@@ -510,10 +521,13 @@ export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
       .map((group) => ({ ...group, nodeIds: group.nodeIds.filter((id) => nodeById.has(id)) }))
       .filter((group) => group.nodeIds.length > 0);
 
+    const behaviors = (Array.isArray(parsed.behaviors) ? parsed.behaviors : []).filter(isBehaviorInstance);
+
     return cloneGraph({
       nodes: hydratedNodes,
       edges: validEdges,
       ...(groups.length > 0 ? { groups } : {}),
+      ...(behaviors.length > 0 ? { behaviors } : {}),
     });
   } catch {
     return cloneGraph(EMPTY_GRAPH);

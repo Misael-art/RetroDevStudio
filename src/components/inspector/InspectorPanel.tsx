@@ -30,6 +30,8 @@ import {
   type BuildSourceMap,
 } from "../../core/nodegraph/buildProvenance";
 import knowledgeBase from "./knowledgeBase.json";
+import { duplicateBehaviorLogic } from "../../core/nodegraph/behaviorLibrary";
+import type { NodeGraph } from "../../core/nodegraph/nodeTypes";
 
 type KnowledgeSectionId =
   | "transform"
@@ -925,7 +927,37 @@ export default function InspectorPanel() {
    * compiles like the original; the source copy keeps only the prefab reference and
    * local overrides, so inheritance is not flattened into local data.
    */
+  /** Logica manual (fora de comportamentos) que a duplicata NAO herda. */
+  const [pendingDuplicate, setPendingDuplicate] = useState<{ manualNodes: number | null } | null>(null);
+  function manualLogicOf(candidate: Entity | null | undefined): { manualNodes: number | null; graph: NodeGraph } {
+    const logic = candidate?.components.logic;
+    const graph = deserializeNodeGraph(logic?.graph);
+    if (!logic) return { manualNodes: 0, graph };
+    if (!graph.nodes.length && logic.graph_ref) return { manualNodes: null, graph }; // grafo so no arquivo: ha logica manual
+    const owned = new Set((graph.behaviors ?? []).flatMap((instance) => instance.nodeIds));
+    return { manualNodes: graph.nodes.filter((node) => !owned.has(node.id)).length, graph };
+  }
+
+  /** A logica efetiva vem da entidade resolvida (prefab incluso), nao so da cena de origem. */
+  function effectiveLogic() {
+    const resolved = manualLogicOf(entity);
+    const source = manualLogicOf(sourceEntity);
+    const hasLogic = Boolean(entity?.components.logic || sourceEntity?.components.logic);
+    const manualNodes = resolved.manualNodes === null || source.manualNodes === null ? null : Math.max(resolved.manualNodes, source.manualNodes);
+    return { hasLogic, manualNodes, graph: resolved.graph.nodes.length ? resolved.graph : source.graph };
+  }
+
+  function requestDuplicateEntity() {
+    const { manualNodes } = effectiveLogic();
+    if (manualNodes === 0) {
+      handleDuplicateEntity();
+      return;
+    }
+    setPendingDuplicate({ manualNodes });
+  }
+
   function handleDuplicateEntity() {
+    setPendingDuplicate(null);
     const state = useEditorStore.getState();
     const scene = state.activeScene;
     const resolvedOriginal = entity;
@@ -937,8 +969,23 @@ export default function InspectorPanel() {
     const entityId = `${resolvedOriginal.entity_id}_${suffix}`;
     const displayName = `${resolvedOriginal.display_name ?? resolvedOriginal.entity_id} ${suffix}`;
     const transform = { ...resolvedOriginal.transform, x: resolvedOriginal.transform.x + 24 };
-    const resolvedDuplicate: Entity = { ...structuredClone(resolvedOriginal), entity_id: entityId, display_name: displayName, transform };
-    const sourceDuplicate: Entity = { ...structuredClone(sourceOriginal), entity_id: entityId, display_name: displayName, transform };
+    // Logica: so comportamentos, com ids/alvos/estado remapeados; nunca o mesmo graph_ref
+    // (o salvamento escreveria as duas entidades no mesmo arquivo).
+    const sceneInstanceIds = scene.entities.flatMap(
+      (candidate) => deserializeNodeGraph(candidate.components.logic?.graph).behaviors?.map((instance) => instance.id) ?? []
+    );
+    const logic = effectiveLogic();
+    const copy = duplicateBehaviorLogic(logic.graph, resolvedOriginal.entity_id, entityId, sceneInstanceIds);
+    const withLogic = (candidate: Entity): Entity => {
+      const components = { ...structuredClone(candidate.components) };
+      // O merge de prefab e profundo e ignora null: a copia sobrescreve explicitamente a
+      // logica herdada (grafo inline so com comportamentos, graph_ref vazio = sem arquivo).
+      if (logic.hasLogic) components.logic = { graph: serializeNodeGraph(copy.graph), graph_ref: "" };
+      else delete components.logic;
+      return { ...candidate, components, entity_id: entityId, display_name: displayName, transform };
+    };
+    const resolvedDuplicate: Entity = withLogic(resolvedOriginal);
+    const sourceDuplicate: Entity = withLogic(sourceOriginal);
     addEntity(resolvedDuplicate);
     useEditorStore.setState((current) =>
       current.activeSceneSource
@@ -954,6 +1001,15 @@ export default function InspectorPanel() {
     );
     setSelectedEntityId(entityId);
     logMessage("info", `[Inspector] Entidade '${resolvedOriginal.entity_id}' duplicada como '${entityId}'.`);
+    if (copy.remappedInstances.length || copy.droppedManualNodes) {
+      logMessage(
+        "info",
+        `[Inspector] Logica da copia: ${copy.remappedInstances.length} comportamento(s) com ids e alvo remapeados para '${entityId}'` +
+          (copy.preservedExternal.length ? `; referencias externas mantidas: ${copy.preservedExternal.join(", ")}` : "") +
+          (copy.droppedManualNodes ? `; ${copy.droppedManualNodes} no(s) de logica manual nao copiados` : "") +
+          "."
+      );
+    }
     scheduleAutoSave();
   }
 
@@ -1245,12 +1301,24 @@ export default function InspectorPanel() {
               <button
                 type="button"
                 data-testid="inspector-duplicate-entity"
-                onClick={handleDuplicateEntity}
+                onClick={requestDuplicateEntity}
                 className="ml-auto rounded border border-[#45475a] px-2 py-0.5 hover:bg-[#313244]"
               >
                 Duplicar
               </button>
             </div>
+            {pendingDuplicate ? (
+              <div data-testid="inspector-duplicate-warning" className="border-b border-[#313244] bg-[#fab387]/10 px-3 py-1.5 text-[10px] text-[#fab387]">
+                <p>
+                  A copia recebe os comportamentos desta entidade (remapeados para a copia), mas nao a logica manual
+                  {pendingDuplicate.manualNodes ? ` (${pendingDuplicate.manualNodes} no(s))` : " (grafo do projeto)"}: ela continuaria controlando a entidade original.
+                </p>
+                <div className="mt-1 flex gap-1">
+                  <button type="button" data-testid="inspector-duplicate-confirm" onClick={handleDuplicateEntity} className="rounded border border-[#fab387]/60 px-2 py-0.5 font-semibold">Duplicar assim</button>
+                  <button type="button" data-testid="inspector-duplicate-cancel" onClick={() => setPendingDuplicate(null)} className="rounded px-2 py-0.5 text-[#a6adc8]">Cancelar</button>
+                </div>
+              </div>
+            ) : null}
             {entity.components.sprite && Object.keys(entity.components.sprite.animations ?? {}).length > 0 ? (
               <div
                 data-testid="inspector-animations"

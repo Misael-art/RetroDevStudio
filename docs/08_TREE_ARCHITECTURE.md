@@ -86,6 +86,7 @@ RetroDevStudio/
 |   |   |   |-- nodeCatalog.ts (registro unico: categoria, nome, icone, descricao, botao x tecla)
 |   |   |   |-- nodeLayout.ts (Organizar visualmente: so posicoes; assinatura semantica)
 |   |   |   |-- graphHistory.ts (desfazer/refazer do grafo e ponte com Ctrl+Z/Ctrl+Y)
+|   |   |   |-- behaviorLibrary.ts (comportamentos parametrizados: planejar/aplicar/editar/remover/duplicar)
 |   |   |   |-- ruleSummary.ts / passageAuthoring.ts / buildProvenance.ts
 |   |   |   `-- nodeCompiler.ts (legado/experimental; guard de isolamento em teste)
 |   |   `-- store/

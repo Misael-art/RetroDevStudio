@@ -68,6 +68,14 @@ function scene(graph: NodeGraph) {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function storedPositions(ids: string[]) {
+  const graph = storedGraph();
+  return ids.map((id) => {
+    const node = graph.nodes.find((candidate) => candidate.id === id)!;
+    return [id, node.x, node.y];
+  });
+}
+
 function storedGraph(): NodeGraph {
   const player = useEditorStore.getState().activeScene?.entities.find((item) => item.entity_id === "player");
   return deserializeNodeGraph(player?.components.logic?.graph);
@@ -259,6 +267,72 @@ describe("NodeGraphEditor authoring (reference graph)", () => {
     expect(saved.groups).toHaveLength(1);
     expect(saved.groups![0]).toMatchObject({ id: groupId, label: "Pulo da raposa", collapsed: true });
     expect([...saved.groups![0].nodeIds].sort()).toEqual(["jump", "jump_sound", "jump_velocity", "update_jump"]);
+  });
+
+  it("never lets a collapsed group cover another node's controls; organize, expand, undo and reopen", async () => {
+    // Grupo = comportamento do pulo; "music" (externo) posto exatamente sob o canto do grupo.
+    const base = referenceGraph();
+    const jump = base.nodes.find((node) => node.id === "update_jump")!;
+    const graph: NodeGraph = {
+      ...base,
+      nodes: base.nodes.map((node) => (node.id === "music" ? { ...node, x: jump.x, y: jump.y } : node)),
+      groups: [{ id: "g_pulo", label: "Pulo", nodeIds: ["update_jump", "jump", "jump_velocity", "jump_sound"] }],
+    };
+    const initial = scene(graph);
+    await act(async () => {
+      useEditorStore.setState({ activeScene: initial, activeSceneSource: structuredClone(initial), selectedEntityId: "goal_sensor" });
+      await flush();
+    });
+    await act(async () => {
+      useEditorStore.setState({ selectedEntityId: "player" });
+      await flush();
+      await flush();
+    });
+    await click("nodegraph-group-collapse-g_pulo");
+    const box = q<HTMLDivElement>("nodegraph-group-box-g_pulo")!;
+    const card = q<HTMLDivElement>("node-card-music")!;
+    expect(box.dataset.collapsed).toBe("true");
+    // O cartao externo continua desenhado acima da caixa recolhida (z-index maior).
+    expect(Number(box.style.zIndex)).toBeLessThan(2);
+    expect(card.className).toMatch(/z-\[2\]|z-\[3\]/);
+    expect(q("nodegraph-collapsed-overlap")!.textContent).toContain("Pulo");
+
+    const hiddenBefore = storedPositions(["update_jump", "jump", "jump_velocity", "jump_sound"]);
+    await click("nodegraph-organize-all");
+    expect(q("nodegraph-layout-report")!.dataset.overlaps).toBe("0");
+    expect(q("nodegraph-collapsed-overlap")).toBeNull();
+    await act(async () => {
+      await wait(700);
+    });
+    // Os membros ocultos nao foram reorganizados; a logica nao mudou.
+    expect(storedPositions(["update_jump", "jump", "jump_velocity", "jump_sound"])).toEqual(hiddenBefore);
+    expect(graphSemanticSignature(storedGraph())).toBe(graphSemanticSignature(graph));
+
+    await click("nodegraph-group-collapse-g_pulo");
+    expect(q("node-card-jump")).not.toBeNull();
+    await click("nodegraph-undo"); // desfaz expandir
+    expect(q("nodegraph-group-box-g_pulo")!.dataset.collapsed).toBe("true");
+    await click("nodegraph-undo"); // desfaz organizar
+    expect(q("nodegraph-collapsed-overlap")).not.toBeNull();
+    await click("nodegraph-redo");
+    expect(q("nodegraph-collapsed-overlap")).toBeNull();
+
+    // Reabrir: o arquivo salvo recria o grupo recolhido sem sobreposicao.
+    await act(async () => {
+      await wait(700);
+    });
+    const reopened = scene(storedGraph());
+    await act(async () => {
+      useEditorStore.setState({ activeScene: reopened, activeSceneSource: structuredClone(reopened), selectedEntityId: "goal_sensor" });
+      await flush();
+    });
+    await act(async () => {
+      useEditorStore.setState({ selectedEntityId: "player" });
+      await flush();
+      await flush();
+    });
+    expect(q("nodegraph-group-box-g_pulo")!.dataset.collapsed).toBe("true");
+    expect(q("nodegraph-collapsed-overlap")).toBeNull();
   });
 
   it("keeps pinned nodes still when organizing", async () => {

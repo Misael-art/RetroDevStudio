@@ -44,7 +44,8 @@ export type NodeGraphValidationIssue = {
     | "missing_animation"
     | "broken_entity_ref"
     | "invalid_param"
-    | "missing_sfx";
+    | "missing_sfx"
+    | "unsupported_on_platform";
   message: string;
   nodeId?: string;
   edgeId?: string;
@@ -58,6 +59,13 @@ export type NodeGraphValidation = {
 export type NodeGraphValidationContext = {
   selectedEntity?: Entity | null;
   sceneEntities?: Entity[];
+  /** Plataforma do projeto; nos sem traducao nela viram erro antes do build. */
+  target?: string | null;
+};
+
+/** Mesmo contrato do backend (`compiler/platform_support.rs`). */
+export const PLATFORM_UNSUPPORTED_NODES: Record<string, Partial<Record<string, string>>> = {
+  snes: { condition_on_ground: "o estado de apoio no chao so existe na fisica do Mega Drive" },
 };
 
 export type NodeEngineErrorCode = "graph_empty" | NodeGraphValidationIssue["code"];
@@ -387,6 +395,7 @@ function isBlockingBridgeNode(node: GraphNode): boolean {
 /** Params that name a scene entity, per node type. */
 const ENTITY_REF_PARAMS: Partial<Record<string, string[]>> = {
   condition_overlap: ["a", "b"],
+  condition_on_ground: ["target"],
   sprite_move: ["target"],
   destroy_entity: ["target"],
   set_velocity: ["target"],
@@ -487,6 +496,18 @@ export function validateNodeGraph(
   const issues: NodeGraphValidationIssue[] = [];
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const connectedNodeIds = new Set<string>();
+  const unsupportedHere = context?.target ? PLATFORM_UNSUPPORTED_NODES[context.target] ?? {} : {};
+  for (const node of graph.nodes) {
+    const reason = unsupportedHere[node.type];
+    if (reason) {
+      issues.push({
+        severity: "error",
+        code: "unsupported_on_platform",
+        nodeId: node.id,
+        message: `No '${node.label}' (${node.type}) nao e suportado em ${context?.target}: ${reason}. O build sera recusado.`,
+      });
+    }
+  }
   const validIncomingExecNodeIds = new Set<string>();
   const outgoingExecByNodePort = new Map<string, Set<string>>();
 

@@ -109,6 +109,28 @@ struct SgdkCompatibilityProfile {
     culled_sprite_count: usize,
 }
 
+/// Remove ROMs deixadas por builds anteriores em `build/<target>/out`.
+fn remove_stale_rom_artifacts(project_dir: &Path, target: &str) -> usize {
+    let out = project_dir.join("build").join(target).join("out");
+    let Ok(entries) = std::fs::read_dir(&out) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            matches!(
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref(),
+                Some("bin" | "sfc" | "smc" | "md" | "gen")
+            )
+        })
+        .filter(|path| std::fs::remove_file(path).is_ok())
+        .count()
+}
+
 fn failed_build_result(
     target: &str,
     log: Vec<BuildLogLine>,
@@ -693,6 +715,42 @@ where
             return failed_build_result(target.target, log, Some(project_dir));
         }
     };
+
+    // Contrato de suporte por plataforma: recusa antes de gerar codigo, com diagnostico
+    // estruturado, e remove ROMs antigas para nenhum artefato velho parecer o resultado.
+    let support_issues =
+        crate::compiler::platform_support::logic_support_issues(target.target, &resolved_scene);
+    if !support_issues.is_empty() {
+        for issue in &support_issues {
+            emit!(
+                "error",
+                format!(
+                    "[suporte] {}: entidade '{}' no '{}' ({}) nao suportado: {}.",
+                    issue.platform, issue.entity_id, issue.node_id, issue.node_type, issue.reason
+                )
+            );
+        }
+        let removed = remove_stale_rom_artifacts(project_dir, target.target);
+        if removed > 0 {
+            emit!(
+                "warn",
+                format!(
+                    "{removed} ROM(s) de builds anteriores removida(s) da saida (build recusado)."
+                )
+            );
+        }
+        emit!(
+            "error",
+            "Build recusado: logica com nos nao suportados nesta plataforma."
+        );
+        let mut result = failed_build_result(target.target, log, Some(project_dir));
+        result.diagnostics = support_issues
+            .iter()
+            .map(crate::compiler::platform_support::issue_diagnostic)
+            .chain(result.diagnostics)
+            .collect();
+        return result;
+    }
 
     let source_kind = project
         .template_metadata
@@ -4808,6 +4866,84 @@ PY\n"
         assert!(makefile.contains("src/controller_root.pic src/controller_root.pal src/controller_root_data.as: src/controller_root.bmp"));
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn snes_build_refuses_unsupported_logic_before_codegen_and_drops_stale_roms() {
+        let _serial = test_serial_guard();
+        let set_logic = |project_dir: &Path, graph: &str| {
+            let scene_path = project_dir.join("scenes").join("main.json");
+            let mut scene: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&scene_path).expect("read scene"))
+                    .expect("scene json");
+            scene["entities"][0]["components"]["logic"] = serde_json::json!({ "graph": graph });
+            fs::write(&scene_path, serde_json::to_string_pretty(&scene).unwrap())
+                .expect("write scene");
+        };
+        let environment = || {
+            let (pvsneslib_root, make_program) = fake_toolchain("pvsneslib", "sfc");
+            fs::create_dir_all(pvsneslib_root.join("devkitsnes")).expect("create fake devkitsnes");
+            fs::write(
+                pvsneslib_root.join("devkitsnes").join("snes_rules"),
+                "dummy rules",
+            )
+            .expect("write fake snes_rules");
+            BuildEnvironment {
+                pvsneslib_root: Some(pvsneslib_root),
+                pvsneslib_make_program: Some(make_program),
+                pvsneslib_bash_program: Some(fake_bash_program()),
+                disable_auto_detect: true,
+                ..BuildEnvironment::default()
+            }
+        };
+
+        // Com o no: recusado antes de gerar codigo, diagnostico estruturado, ROM velha removida.
+        let project_dir = workspace_copy("snes_dummy");
+        set_logic(
+            &project_dir,
+            r#"{"version":1,"nodes":[{"id":"tick","type":"event_update","params":{}},{"id":"g","type":"condition_on_ground","params":{"target":"controller_root"}}],"edges":[{"id":"e","fromNode":"tick","fromPort":"exec","toNode":"g","toPort":"exec"}]}"#,
+        );
+        let stale = project_dir.join("build").join("snes").join("out");
+        fs::create_dir_all(&stale).expect("create out");
+        fs::write(stale.join("old.sfc"), b"stale").expect("write stale rom");
+        let refused = run_build_with_environment(&project_dir, &environment(), |_| {});
+        assert!(!refused.ok, "log: {:?}", refused.log);
+        assert!(refused.rom_path.is_empty());
+        assert!(
+            !stale.join("old.sfc").exists(),
+            "stale ROM must not survive a refused build"
+        );
+        assert!(
+            !project_dir
+                .join("build")
+                .join("snes")
+                .join("Makefile")
+                .exists(),
+            "no codegen after refusal"
+        );
+        let diagnostic = refused
+            .diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.blocking
+                    && diagnostic.technical_detail.contains(
+                        "platform=snes entity=controller_root node=g type=condition_on_ground",
+                    )
+            })
+            .expect("structured support diagnostic");
+        assert!(diagnostic.user_message.contains("controller_root"));
+        let _ = fs::remove_dir_all(&project_dir);
+
+        // Sem o no: continua compilando.
+        let project_dir = workspace_copy("snes_dummy");
+        set_logic(
+            &project_dir,
+            r#"{"version":1,"nodes":[{"id":"tick","type":"event_update","params":{}},{"id":"m","type":"sprite_move","params":{"target":"controller_root","dx":1,"dy":0}}],"edges":[{"id":"e","fromNode":"tick","fromPort":"exec","toNode":"m","toPort":"exec"}]}"#,
+        );
+        let built = run_build_with_environment(&project_dir, &environment(), |_| {});
+        assert!(built.ok, "log: {:?}", built.log);
+        assert!(built.rom_path.ends_with(".sfc"));
+        let _ = fs::remove_dir_all(&project_dir);
     }
 
     #[test]

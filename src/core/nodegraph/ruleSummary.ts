@@ -75,6 +75,8 @@ function describeCondition(graph: NodeGraph, node: GraphNode): string | null {
         ? `${node.params.a} iria entrar em ${node.params.b}`
         : `${node.params.a} encosta em ${node.params.b}`;
     }
+    case "condition_on_ground":
+      return `${node.params.target} no chão`;
     case "condition_compare": {
       const left = dataSource(graph, node.id, "a") ?? String(node.params.a ?? "?");
       const right = dataSource(graph, node.id, "b") ?? String(node.params.b ?? "?");

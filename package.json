@@ -51,6 +51,7 @@
     "test:e2e:desktop:authoring-acceptance": "node scripts/e2e-tauri-build-run.mjs --scenario authoring-acceptance",
     "test:e2e:desktop:reference-platformer": "node scripts/e2e-tauri-build-run.mjs --scenario reference-platformer",
     "test:e2e:desktop:nodegraph-authoring": "node scripts/e2e-tauri-build-run.mjs --scenario nodegraph-authoring",
+    "test:e2e:desktop:behaviors-independence": "node scripts/e2e-tauri-build-run.mjs --scenario behaviors-independence",
     "test:e2e:desktop:inspection": "node scripts/e2e-tauri-build-run.mjs --scenario inspection-complete",
     "test:e2e:desktop:inspection:sonic-tiles": "node scripts/e2e-tauri-build-run.mjs --scenario inspection-sonic-tiles",
     "test:e2e:desktop:inspection:cancel": "node scripts/e2e-tauri-build-run.mjs --scenario inspection-cancel",
