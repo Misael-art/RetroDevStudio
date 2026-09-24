@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo, type CSSProperties } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, type CSSProperties } from "react";
 import { persistActiveScene, registerPendingEditFlusher } from "../../core/scenePersistence";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
 import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService";
@@ -53,6 +53,43 @@ import {
   type NodeType,
 } from "../../core/nodegraph/nodeTypes";
 import { NODE_DEFS, clonePorts, deserializeNodeGraph } from "../../core/nodegraph/nodeDefinitions";
+import {
+  INPUT_MODE_HELP,
+  MEGADRIVE_INPUT_BUTTONS,
+  NODE_CATALOG,
+  NODE_CATEGORIES,
+  NODE_PALETTE_GROUP_ORDER,
+  PORT_VISUAL_COLORS,
+  describeInputButton,
+  describeNodeAction,
+  getNodeCatalogEntry,
+  getNodeCategory,
+  getNodeEntityRefs,
+  getPortDisplayLabel,
+  getPortVisualKind,
+  checkConnection,
+  type NodeIconName,
+} from "../../core/nodegraph/nodeCatalog";
+import {
+  NODE_CARD_LAYOUT_WIDTH,
+  estimateNodeCardSize,
+  findNodeOverlaps,
+  graphSemanticSignature,
+  layoutNodeGraph,
+  routeEdgePath,
+  type LayoutConflict,
+  type NodeSize,
+} from "../../core/nodegraph/nodeLayout";
+import {
+  emptyGraphHistory,
+  recordGraphHistory,
+  redoGraphHistory,
+  registerGraphHistoryHandler,
+  undoGraphHistory,
+  type GraphHistory,
+} from "../../core/nodegraph/graphHistory";
+import Icon from "../common/Icon";
+import AssetPreview from "../common/AssetPreview";
 
 // Modelo de dados canonico e serializacao v1 vivem em src/core/nodegraph/
 // (nodeTypes.ts + nodeDefinitions.ts); este componente e apresentacao e
@@ -63,6 +100,7 @@ export type {
   GraphNode,
   NodeEdge,
   NodeGraph,
+  NodeGraphGroup,
   NodePort,
   NodeType,
 } from "../../core/nodegraph/nodeTypes";
@@ -84,18 +122,6 @@ type GraphBounds = {
   maxY: number;
 };
 
-const IMPORT_PARAM_KEYS = new Set([
-  "import_status",
-  "converted",
-  "bridge",
-  "gap",
-  "gap_id",
-  "source",
-  "source_file",
-  "source_path",
-  "source_line",
-  "line",
-]);
 
 type NodeGraphSummary = {
   totalNodes: number;
@@ -141,7 +167,7 @@ type QuickActionTemplate = GuidedFlowCommentary & {
   buildGraph: (context: QuickActionContext) => NodeGraph;
 };
 
-const NODE_CARD_WIDTH = 160;
+const NODE_CARD_WIDTH = NODE_CARD_LAYOUT_WIDTH;
 const NODE_CARD_HEIGHT = 56;
 const FOCUS_PADDING = 24;
 const MINIMAP_WIDTH = 176;
@@ -151,40 +177,26 @@ const NODEGRAPH_GRID_SIZE = 24;
 const NODEGRAPH_MIN_ZOOM = 0.35;
 const NODEGRAPH_MAX_ZOOM = 2.4;
 
-export type NodeVisualCategoryId =
-  | "trigger_input"
-  | "state"
-  | "transition"
-  | "action"
-  | "animation"
-  | "sprite"
-  | "tilemap"
-  | "camera"
-  | "audio"
-  | "timer"
-  | "collision"
-  | "hardware_budget"
-  | "vdp_dma_palette"
-  | "bridge_source_mapping"
-  | "error_unsupported";
+export type NodeVisualCategoryId = import("../../core/nodegraph/nodeCatalog").NodeCategoryId;
 
 export type NodeVisualCategory = {
   id: NodeVisualCategoryId;
   label: string;
   color: string;
-  icon: string;
 };
 
+/** Caixa de fundo de um grupo nomeavel (comportamento) criado pelo autor. */
 export type NodeGraphGroupBox = {
-  categoryId: NodeVisualCategoryId;
+  groupId: string;
   label: string;
+  nodeIds: string[];
+  collapsed: boolean;
   x: number;
   y: number;
   width: number;
   height: number;
   color: string;
   zIndex: number;
-  pointerEvents: "none";
 };
 
 export type NodeGraphWheelZoomInput = {
@@ -195,23 +207,8 @@ export type NodeGraphWheelZoomInput = {
   view: NodeGraphView;
 };
 
-export const NODE_VISUAL_CATEGORIES: NodeVisualCategory[] = [
-  { id: "trigger_input", label: "Trigger/Input", color: "#89b4fa", icon: ">" },
-  { id: "state", label: "State", color: "#cba6f7", icon: "S" },
-  { id: "transition", label: "Transition", color: "#f9e2af", icon: "T" },
-  { id: "action", label: "Action", color: "#a6e3a1", icon: "A" },
-  { id: "animation", label: "Animation", color: "#f5c2e7", icon: "F" },
-  { id: "sprite", label: "Sprite", color: "#94e2d5", icon: "P" },
-  { id: "tilemap", label: "Tilemap", color: "#74c7ec", icon: "#" },
-  { id: "camera", label: "Camera", color: "#89dceb", icon: "C" },
-  { id: "audio", label: "Audio", color: "#fab387", icon: "M" },
-  { id: "timer", label: "Timer", color: "#f38ba8", icon: "t" },
-  { id: "collision", label: "Collision", color: "#eba0ac", icon: "X" },
-  { id: "hardware_budget", label: "Hardware Budget", color: "#f9e2af", icon: "!" },
-  { id: "vdp_dma_palette", label: "VDP/DMA/Palette", color: "#b4befe", icon: "V" },
-  { id: "bridge_source_mapping", label: "Bridge/Source Mapping", color: "#f38ba8", icon: "B" },
-  { id: "error_unsupported", label: "Error/Unsupported", color: "#f38ba8", icon: "E" },
-];
+/** Categorias de classificacao/busca; vivem no registro unico `nodeCatalog.ts`. */
+export const NODE_VISUAL_CATEGORIES: NodeVisualCategory[] = NODE_CATEGORIES;
 
 export const REQUIRED_NOCODE_NODE_TYPES: NodeType[] = [
   "event_start",
@@ -301,109 +298,40 @@ export function getNodeGraphDotGridStyle(
   };
 }
 
-function getNodeVisualCategory(nodeOrType: GraphNode | NodeType): NodeVisualCategory {
-  const type = typeof nodeOrType === "string" ? nodeOrType : nodeOrType.type;
-  const id: NodeVisualCategoryId = (() => {
-    switch (type) {
-      case "event_start":
-      case "event_update":
-      case "input_pressed":
-      case "input_held":
-      case "input_command":
-        return "trigger_input";
-      case "fsm_state":
-        return "state";
-      case "fsm_transition":
-        return "transition";
-      case "sprite_anim":
-      case "set_animation_state":
-      case "timeline_sequence":
-        return "animation";
-      case "sprite_move":
-      case "set_velocity":
-      case "set_position":
-      case "spawn_entity":
-      case "destroy_entity":
-        return "sprite";
-      case "set_tile":
-      case "scroll_tilemap":
-      case "load_scene":
-        return "tilemap";
-      case "camera_follow":
-      case "camera_bounds":
-      case "move_camera":
-        return "camera";
-      case "action_sound":
-      case "action_music":
-        return "audio";
-      case "timer":
-        return "timer";
-      case "condition_overlap":
-      case "condition_compare":
-      case "logic_and":
-        return "collision";
-      case "hardware_budget_check":
-        return "hardware_budget";
-      case "rom_addq_word":
-      case "rom_branch_compare_word":
-        return "bridge_source_mapping";
-      case "event_vblank":
-      case "event_hblank":
-      case "event_dma_done":
-      case "effect_raster":
-        return "vdp_dma_palette";
-      case "bridge_unconverted_source":
-        return "bridge_source_mapping";
-      case "effect_parallax":
-      case "var_set":
-      case "var_get":
-      case "logic_math":
-      case "flow_if":
-      case "flow_while":
-      case "flow_for":
-        return "action";
-      default:
-        return "error_unsupported";
-    }
-  })();
+const GROUP_COLORS = ["#89b4fa", "#a6e3a1", "#f9e2af", "#cba6f7", "#94e2d5", "#fab387", "#f5c2e7"];
+const GROUP_PADDING = 28;
+const GROUP_HEADER = 26;
+export const COLLAPSED_GROUP_SIZE = { width: 240, height: 64 };
 
-  return NODE_VISUAL_CATEGORIES.find((category) => category.id === id) ?? NODE_VISUAL_CATEGORIES[0];
-}
-
-export function buildNodeGraphGroupBoxes(graph: NodeGraph): NodeGraphGroupBox[] {
-  const nodesByCategory = new Map<NodeVisualCategoryId, GraphNode[]>();
-  for (const node of graph.nodes) {
-    const category = getNodeVisualCategory(node);
-    const nodes = nodesByCategory.get(category.id) ?? [];
-    nodes.push(node);
-    nodesByCategory.set(category.id, nodes);
-  }
-
-  return NODE_VISUAL_CATEGORIES.flatMap((category) => {
-    const nodes = nodesByCategory.get(category.id) ?? [];
-    if (nodes.length === 0) {
-      return [];
-    }
-
-    const xs = nodes.map((node) => node.x);
-    const ys = nodes.map((node) => node.y);
-    const minX = Math.min(...xs);
-    const minY = Math.min(...ys);
-    const maxX = Math.max(...nodes.map((node) => node.x + NODE_CARD_WIDTH));
-    const maxY = Math.max(...nodes.map((node) => node.y + NODE_CARD_HEIGHT));
-    const padding = 42;
-
+/**
+ * Caixas dos grupos nomeaveis (comportamentos). Categorias nao geram caixas: elas
+ * classificam e alimentam a busca, enquanto o espaco do canvas segue o comportamento.
+ */
+export function buildNodeGraphGroupBoxes(
+  graph: NodeGraph,
+  sizeOf: (node: GraphNode) => NodeSize = (node) => estimateNodeCardSize(node)
+): NodeGraphGroupBox[] {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  return (graph.groups ?? []).flatMap((group, index) => {
+    const nodes = group.nodeIds.map((id) => byId.get(id)).filter((node): node is GraphNode => Boolean(node));
+    if (nodes.length === 0) return [];
+    const minX = Math.min(...nodes.map((node) => node.x));
+    const minY = Math.min(...nodes.map((node) => node.y));
+    const collapsed = Boolean(group.collapsed);
+    const maxX = collapsed ? minX + COLLAPSED_GROUP_SIZE.width : Math.max(...nodes.map((node) => node.x + sizeOf(node).width));
+    const maxY = collapsed ? minY + COLLAPSED_GROUP_SIZE.height : Math.max(...nodes.map((node) => node.y + sizeOf(node).height));
     return [
       {
-        categoryId: category.id,
-        label: category.label,
-        x: minX - padding,
-        y: minY - padding,
-        width: Math.max(NODE_CARD_WIDTH + padding * 2, maxX - minX + padding * 2),
-        height: Math.max(NODE_CARD_HEIGHT + padding * 2, maxY - minY + padding * 2),
-        color: category.color,
-        zIndex: -1,
-        pointerEvents: "none" as const,
+        groupId: group.id,
+        label: group.label,
+        nodeIds: nodes.map((node) => node.id),
+        collapsed,
+        x: minX - GROUP_PADDING,
+        y: minY - GROUP_PADDING - GROUP_HEADER,
+        width: maxX - minX + GROUP_PADDING * 2,
+        height: maxY - minY + GROUP_PADDING * 2 + GROUP_HEADER,
+        color: GROUP_COLORS[index % GROUP_COLORS.length],
+        zIndex: 0,
       },
     ];
   });
@@ -537,50 +465,9 @@ export function buildNodeMiniMap(
   }));
 }
 
-export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
-  event_start: "Ao Iniciar",
-  event_update: "A Cada Frame",
-  input_pressed: "Input Pressionado",
-  input_held: "Input Segurado",
-  input_command: "Comando de Input",
-  sprite_move: "Mover Sprite",
-  set_velocity: "Definir Velocidade",
-  set_position: "Definir Posicao",
-  spawn_entity: "Criar Entidade",
-  destroy_entity: "Destruir Entidade",
-  sprite_anim: "Animar Sprite",
-  set_animation_state: "Estado de Animacao",
-  condition_overlap: "Colisao (Overlap)",
-  camera_follow: "Camera Segue",
-  camera_bounds: "Limites da Camera",
-  timer: "Timer",
-  set_tile: "Definir Tile",
-  effect_parallax: "Parallax",
-  effect_raster: "Efeito Raster",
-  logic_and: "E (And)",
-  action_sound: "Tocar Som",
-  action_music: "Tocar Musica",
-  scroll_tilemap: "Rolar Cenario",
-  load_scene: "Carregar Cena",
-  move_camera: "Mover Camera",
-  var_set: "Definir Variavel",
-  var_get: "Ler Variavel",
-  logic_math: "Conta Matematica",
-  condition_compare: "Comparar",
-  fsm_state: "Estado (FSM)",
-  fsm_transition: "Transicao (FSM)",
-  flow_if: "Se (If)",
-  flow_while: "Enquanto (While)",
-  flow_for: "Repetir (For)",
-  timeline_sequence: "Sequencia (Timeline)",
-  hardware_budget_check: "Checar Budget",
-  rom_addq_word: "ADDQ.W recuperado",
-  rom_branch_compare_word: "Branch word recuperado",
-  bridge_unconverted_source: "Bridge de Fonte",
-  event_vblank: "Evento VBlank",
-  event_hblank: "Evento HBlank",
-  event_dma_done: "Evento DMA",
-};
+export const NODE_DISPLAY_NAMES: Record<NodeType, string> = Object.fromEntries(
+  Object.values(NODE_CATALOG).map((entry) => [entry.type, entry.title])
+) as Record<NodeType, string>;
 
 const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   a: "A",
@@ -654,111 +541,38 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   semantic_stages: "Etapas semanticas",
 };
 
-const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
-  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_update", "input_pressed", "input_held", "input_command", "event_vblank", "event_hblank", "event_dma_done"] },
-  { label: "Movimento", icon: "\ud83c\udfc3", types: ["sprite_move", "set_velocity", "set_position", "spawn_entity", "destroy_entity", "sprite_anim", "set_animation_state", "scroll_tilemap", "move_camera"] },
-  { label: "Condicoes", icon: "?", types: ["condition_overlap", "condition_compare", "logic_and"] },
-  { label: "Camera", icon: "\u25a3", types: ["camera_follow", "camera_bounds"] },
-  { label: "Tilemap", icon: "#", types: ["set_tile", "load_scene"] },
-  { label: "Som", icon: "\ud83d\udd0a", types: ["action_sound", "action_music"] },
-  { label: "Variaveis", icon: "\ud83d\udcca", types: ["var_set", "var_get", "logic_math"] },
-  { label: "Fluxo", icon: "\u2937", types: ["flow_if", "flow_while", "flow_for", "timer"] },
-  { label: "Estados", icon: "\u2690\ufe0f", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
-  { label: "Efeitos", icon: "\u2728", types: ["effect_parallax", "effect_raster"] },
-  { label: "Hardware", icon: "!", types: ["hardware_budget_check", "bridge_unconverted_source"] },
-  { label: "ROM recuperada", icon: "R", types: ["rom_addq_word", "rom_branch_compare_word"] },
-];
-
-/** Header background por categoria (Blueprints-style) */
-const GROUP_HEADER_BG: Record<string, string> = {
-  Eventos: "bg-[#722f37]",
-  Movimento: "bg-[#1e3a5f]",
-  Condicoes: "bg-[#4a4a3a]",
-  Camera: "bg-[#1e4f4f]",
-  Tilemap: "bg-[#284f35]",
-  Som: "bg-[#6b5b2a]",
-  Variaveis: "bg-[#4a4a3a]",
-  Fluxo: "bg-[#6b5b2a]",
-  Estados: "bg-[#5c4a7a]",
-  Efeitos: "bg-[#5c4a7a]",
-  Hardware: "bg-[#5f2f2f]",
-  "ROM recuperada": "bg-[#5f2f2f]",
+const PALETTE_GROUP_ICONS: Record<string, NodeIconName> = {
+  Eventos: "flash",
+  Movimento: "arrows",
+  Condicoes: "fork",
+  Camera: "camera",
+  Tilemap: "grid",
+  Som: "sound",
+  Variaveis: "variable",
+  Fluxo: "clock",
+  Estados: "chip",
+  Efeitos: "layers",
+  Hardware: "warning-triangle",
+  "ROM recuperada": "chip",
 };
 
-function getGroupForType(type: NodeType): string {
-  const group = NODE_PALETTE_GROUPS.find((g) => g.types.includes(type));
-  return group?.label ?? "Outros";
-}
-
-const AUTO_LAYOUT_GROUP_ORDER = [
-  "Eventos",
-  "Movimento",
-  "Condicoes",
-  "Camera",
-  "Tilemap",
-  "Som",
-  "Variaveis",
-  "Fluxo",
-  "Estados",
-  "Efeitos",
-  "Hardware",
-  "ROM recuperada",
-  "Outros",
-];
-
-const AUTO_LAYOUT_TYPE_SEQUENCE: NodeType[] = [
-  ...REQUIRED_NOCODE_NODE_TYPES,
-  "sprite_anim",
-  "move_camera",
-  "logic_math",
-  "logic_and",
-  "flow_while",
-  "flow_for",
-  "timeline_sequence",
-  "effect_parallax",
-  "effect_raster",
-  "bridge_unconverted_source",
-  "rom_addq_word",
-  "rom_branch_compare_word",
-  "event_vblank",
-  "event_hblank",
-  "event_dma_done",
-];
-
-const AUTO_LAYOUT_TYPE_ORDER = new Map<NodeType, number>(
-  AUTO_LAYOUT_TYPE_SEQUENCE.map((type, index) => [type, index])
+/** Paleta lateral derivada do registro unico (`nodeCatalog.ts`). */
+const NODE_PALETTE_GROUPS: Array<{ label: string; icon: NodeIconName; types: NodeType[] }> = NODE_PALETTE_GROUP_ORDER.map(
+  (label) => ({
+    label,
+    icon: PALETTE_GROUP_ICONS[label] ?? "chip",
+    types: Object.values(NODE_CATALOG)
+      .filter((entry) => entry.paletteGroup === label)
+      .map((entry) => entry.type),
+  })
 );
 
+/**
+ * "Organizar visualmente": so reposiciona (ver `layoutNodeGraph`). Nao cria nem remove
+ * conexoes e nao reordena os nos.
+ */
 export function autoLayoutNodeGraph(graph: NodeGraph): NodeGraph {
-  const groupCounts = new Map<string, number>();
-  const orderedNodes = [...graph.nodes].sort((a, b) => {
-    const groupA = AUTO_LAYOUT_GROUP_ORDER.indexOf(getGroupForType(a.type));
-    const groupB = AUTO_LAYOUT_GROUP_ORDER.indexOf(getGroupForType(b.type));
-    const typeA = AUTO_LAYOUT_TYPE_ORDER.get(a.type) ?? Number.MAX_SAFE_INTEGER;
-    const typeB = AUTO_LAYOUT_TYPE_ORDER.get(b.type) ?? Number.MAX_SAFE_INTEGER;
-    return (
-      groupA - groupB ||
-      typeA - typeB ||
-      a.label.localeCompare(b.label) ||
-      a.id.localeCompare(b.id)
-    );
-  });
-
-  return {
-    ...graph,
-    nodes: orderedNodes.map((node, index) => {
-      const group = getGroupForType(node.type);
-      const groupIndex = Math.max(0, AUTO_LAYOUT_GROUP_ORDER.indexOf(group));
-      const countInGroup = groupCounts.get(group) ?? 0;
-      groupCounts.set(group, countInGroup + 1);
-
-      return {
-        ...node,
-        x: 80 + Math.min(index, 4) * 220,
-        y: 80 + groupIndex * 140 + countInGroup * 86,
-      };
-    }),
-  };
+  return layoutNodeGraph(graph).graph;
 }
 
 export function getNodeDisplayName(type: NodeType): string {
@@ -1473,6 +1287,69 @@ const INITIAL_GRAPH: NodeGraph = {
 
 // ── Node component ────────────────────────────────────────────────────────────
 
+/** Medidas reais de um cartao (coordenadas do mundo, sem zoom). */
+export type NodeCardMetrics = {
+  width: number;
+  height: number;
+  /** Centro de cada porta relativo ao canto do cartao; chave `in:<id>` ou `out:<id>`. */
+  ports: Record<string, { x: number; y: number }>;
+};
+
+/** Entidade afetada pelo no, com o recurso visual real quando houver. */
+export type NodeCardEntity = {
+  entityId: string;
+  label: string;
+  spriteAsset: string | null;
+  frameWidth: number;
+  frameHeight: number;
+};
+
+const CARD_HEADER_HEIGHT = 30;
+const CARD_ACTION_HEIGHT = 36;
+const CARD_ENTITY_HEIGHT = 24;
+const CARD_PORT_ROW = 20;
+
+/** Parametros que o cartao edita diretamente (o compilador le exatamente esses campos). */
+function cardEditableParam(node: GraphNode, key: string): "number" | "button" | null {
+  if ((node.type === "input_pressed" || node.type === "input_held") && key === "button") return "button";
+  if (node.type === "set_velocity" && (key === "vx" || key === "vy")) return "number";
+  if (node.type === "sprite_move" && (key === "dx" || key === "dy")) return "number";
+  if (node.type === "rom_branch_compare_word" && key === "threshold") return "number";
+  if (
+    node.type === "condition_compare" &&
+    node.params.authoring_origin === "authored_builtin_reference_platformer" &&
+    key === "b"
+  ) {
+    return "number";
+  }
+  return null;
+}
+
+export function isCardEditableParam(node: GraphNode, key: string): boolean {
+  return cardEditableParam(node, key) !== null;
+}
+
+function estimatedPortAnchor(node: GraphNode, portId: string, output: boolean, width: number): { x: number; y: number } {
+  const ports = output ? node.outputs : node.inputs;
+  const index = Math.max(0, ports.findIndex((port) => port.id === portId));
+  return {
+    x: output ? width : 0,
+    y: CARD_HEADER_HEIGHT + CARD_ACTION_HEIGHT + CARD_ENTITY_HEIGHT + 4 + index * CARD_PORT_ROW + CARD_PORT_ROW / 2,
+  };
+}
+
+/** Ancora de uma porta em coordenadas do mundo: medida no DOM ou estimada pela estrutura. */
+export function getPortAnchor(
+  node: GraphNode,
+  portId: string,
+  output: boolean,
+  metrics?: NodeCardMetrics
+): { x: number; y: number } {
+  const measured = metrics?.ports[`${output ? "out" : "in"}:${portId}`];
+  const local = measured ?? estimatedPortAnchor(node, portId, output, metrics?.width ?? NODE_CARD_WIDTH);
+  return { x: node.x + local.x, y: node.y + local.y };
+}
+
 interface NodeCardProps {
   node: GraphNode;
   screenX: number;
@@ -1480,10 +1357,49 @@ interface NodeCardProps {
   zoom: number;
   selected: boolean;
   executionReachable?: boolean;
+  entity: NodeCardEntity | null;
+  projectDir: string | null;
+  detailsOpen: boolean;
+  /** Porta de entrada destacada pelo ima durante uma conexao (`in:<id>`). */
+  snapPortKey: string | null;
+  /** Portas de entrada compativeis com a conexao em andamento. */
+  compatiblePortIds: Set<string> | null;
   onMouseDown: (e: React.MouseEvent) => void;
   onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
   onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
   onParamChange: (nodeId: string, key: string, value: string | number) => void;
+  onToggleDetails: (nodeId: string) => void;
+  onMeasure: (nodeId: string, metrics: NodeCardMetrics) => void;
+}
+
+function EntityThumbnail({ entity, projectDir }: { entity: NodeCardEntity; projectDir: string | null }) {
+  const box = 22;
+  if (!entity.spriteAsset || !projectDir) {
+    return <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded bg-[#313244] text-[9px] text-[#a6adc8]">{entity.label.slice(0, 1).toUpperCase()}</span>;
+  }
+  // Mostra so o primeiro quadro (canto superior esquerdo da folha), escalado para caber.
+  const scale = box / Math.max(1, entity.frameWidth, entity.frameHeight);
+  return (
+    <span
+      data-testid="node-entity-thumbnail"
+      data-asset={entity.spriteAsset}
+      className="relative block shrink-0 overflow-hidden rounded bg-[#11111b]"
+      style={{ width: Math.round(entity.frameWidth * scale), height: Math.round(entity.frameHeight * scale) }}
+      title={`${entity.label} — ${entity.spriteAsset}`}
+    >
+      <span className="absolute left-0 top-0 block" style={{ transform: `scale(${scale})`, transformOrigin: "0 0" }}>
+        <AssetPreview
+          alt={entity.label}
+          projectDir={projectDir}
+          relativePath={entity.spriteAsset}
+          imageClassName="max-w-none"
+          fallbackClassName="h-4 w-4"
+          fallbackLabel=""
+          pixelated
+        />
+      </span>
+    </span>
+  );
 }
 
 function NodeCard({
@@ -1493,56 +1409,195 @@ function NodeCard({
   zoom,
   selected,
   executionReachable = false,
+  entity,
+  projectDir,
+  detailsOpen,
+  snapPortKey,
+  compatiblePortIds,
   onMouseDown,
   onPortMouseDown,
   onPortMouseUp,
   onParamChange,
+  onToggleDetails,
+  onMeasure,
 }: NodeCardProps) {
-  const group = getGroupForType(node.type);
-  const headerBg = GROUP_HEADER_BG[group] ?? "bg-[#4a4a3a]";
+  const catalog = getNodeCatalogEntry(node.type);
+  const category = getNodeCategory(node.type);
   const importBadges = getGraphNodeImportBadges(node);
-  const visibleParams = Object.entries(node.params).filter(([key]) => !IMPORT_PARAM_KEYS.has(key));
   const editable = canEditGraphNode(node);
+  const essential = (catalog?.essentialParams ?? []).filter((key) => key in node.params);
+  const technical = Object.entries(node.params).filter(([key]) => !essential.includes(key));
+  const cardRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef(onMeasure);
+  measureRef.current = onMeasure;
+
+  // Mede tamanho e centros das portas sem zoom; so notifica quando algo mudou.
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card || card.offsetWidth === 0) return;
+    // Unidades de layout (offset*): independem do zoom do canvas, da escala da pagina e
+    // da rotacao das portas de execucao.
+    const ports: NodeCardMetrics["ports"] = {};
+    card.querySelectorAll<HTMLElement>("[data-port-key]").forEach((element) => {
+      let x = element.offsetWidth / 2 + card.clientLeft;
+      let y = element.offsetHeight / 2 + card.clientTop;
+      let current: HTMLElement | null = element;
+      while (current && current !== card) {
+        x += current.offsetLeft;
+        y += current.offsetTop;
+        current = current.offsetParent as HTMLElement | null;
+      }
+      if (current === card) ports[element.dataset.portKey!] = { x: Math.round(x), y: Math.round(y) };
+    });
+    measureRef.current(node.id, { width: card.offsetWidth, height: card.offsetHeight, ports });
+  });
+
+  const renderPort = (port: GraphNode["inputs"][number], output: boolean) => {
+    const kind = getPortVisualKind(port);
+    const key = `${output ? "out" : "in"}:${port.id}`;
+    const snapped = snapPortKey === key;
+    const compatible = !output && compatiblePortIds?.has(port.id);
+    const label = getPortDisplayLabel(port);
+    return (
+      <div key={key} className={`flex h-5 items-center gap-1.5 ${output ? "justify-end" : ""}`}>
+        {output && label ? <span className="text-[10px]" style={{ color: kind === "exec" ? "#a6adc8" : PORT_VISUAL_COLORS[kind] }}>{label}</span> : null}
+        <div
+          data-testid={`node-port-${node.id}-${key.replace(":", "-")}`}
+          data-port-key={key}
+          data-port-kind={kind}
+          data-snapped={snapped ? "true" : undefined}
+          data-compatible={compatible ? "true" : undefined}
+          title={`${kind === "exec" ? "Execucao" : kind === "data" ? `Dado${port.dataType ? ` (${port.dataType})` : ""}` : kind === "true" ? "Saida Sim" : "Saida Nao"}: ${port.id}`}
+          className={`port-handle shrink-0 cursor-crosshair border-2 ${kind === "data" ? "h-3 w-3 rounded-full" : "h-3 w-3 rotate-45 rounded-[2px]"} ${
+            snapped ? "scale-150 ring-2 ring-[#f9e2af]" : compatible ? "ring-2 ring-[#f9e2af]/50" : ""
+          }`}
+          style={{ borderColor: PORT_VISUAL_COLORS[kind], backgroundColor: `${PORT_VISUAL_COLORS[kind]}${kind === "data" ? "66" : "cc"}` }}
+          onMouseDown={(e) => onPortMouseDown(e, port.id, output)}
+          onMouseUp={(e) => onPortMouseUp(e, port.id, output)}
+        />
+        {!output && label ? <span className="text-[10px]" style={{ color: kind === "exec" ? "#a6adc8" : PORT_VISUAL_COLORS[kind] }}>{label}</span> : null}
+      </div>
+    );
+  };
+
+  const renderParamValue = (key: string, value: string | number) => {
+    const mode = editable ? cardEditableParam(node, key) : null;
+    if (mode === "button") {
+      const current = describeInputButton(String(value));
+      return (
+        <select
+          data-testid={`node-param-${node.id}-${key}`}
+          aria-label={`Botao de ${catalog?.title ?? node.type}`}
+          value={String(value)}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(event) => onParamChange(node.id, key, event.target.value)}
+          className="max-w-[120px] rounded border border-[#89b4fa]/50 bg-[#11111b] px-1 py-0.5 text-[10px] text-[#cdd6f4]"
+        >
+          {!MEGADRIVE_INPUT_BUTTONS.includes(String(value)) && <option value={String(value)}>{current.padLabel}</option>}
+          {MEGADRIVE_INPUT_BUTTONS.map((button) => {
+            const described = describeInputButton(button);
+            return (
+              <option key={button} value={button}>
+                {described.padLabel}{described.keyLabel ? ` · tecla ${described.keyLabel}` : ""}
+              </option>
+            );
+          })}
+        </select>
+      );
+    }
+    if (mode === "number") {
+      return (
+        <input
+          data-testid={`node-param-${node.id}-${key}`}
+          type="number"
+          min={node.type === "set_velocity" || node.type === "sprite_move" ? -32768 : 0}
+          max={32767}
+          value={String(value)}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(event) => onParamChange(node.id, key, Number.parseInt(event.target.value, 10) || 0)}
+          className="w-16 rounded border border-[#cba6f7]/50 bg-[#11111b] px-1 py-0.5 text-right font-mono text-[#cdd6f4] outline-none focus:border-[#f9e2af]"
+        />
+      );
+    }
+    return <span className="truncate font-mono text-[#cdd6f4]">{String(value)}</span>;
+  };
+
+  const paramLabel = (key: string) =>
+    node.type === "condition_compare" && node.params.authoring_origin === "authored_builtin_reference_platformer" && key === "b"
+      ? "Pontos para abrir passagem"
+      : getNodeParamDisplayName(key);
+
+  const button = node.type === "input_pressed" || node.type === "input_held" ? describeInputButton(String(node.params.button ?? "")) : null;
 
   return (
     <div
+      ref={cardRef}
       data-testid={`node-card-${node.id}`}
       data-selected={selected ? "true" : undefined}
       data-editable={editable ? "true" : "false"}
+      data-pinned={node.pinned ? "true" : undefined}
+      data-x={node.x}
+      data-y={node.y}
       data-execution-reachable={executionReachable ? "true" : undefined}
-      className={`absolute select-none min-w-[160px] rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg backdrop-blur-sm ${
-        selected ? "ring-2 ring-blue-500 shadow-2xl" : ""
-      } ${
-        executionReachable
-          ? "ring-2 ring-[#a6e3a1] shadow-[0_0_24px_rgba(166,227,161,0.22)]"
-          : ""
-      } ${
-        editable ? "" : "opacity-80"
-      }`}
+      className={`absolute select-none rounded-xl border bg-slate-900/95 shadow-lg ${
+        selected ? "z-[3] ring-2 ring-blue-500 shadow-2xl" : "z-[2]"
+      } ${executionReachable ? "ring-2 ring-[#a6e3a1] shadow-[0_0_24px_rgba(166,227,161,0.22)]" : ""} ${editable ? "" : "opacity-80"}`}
       style={{
         left: screenX,
         top: screenY,
+        width: NODE_CARD_WIDTH,
+        borderColor: `${category.color}66`,
         transform: `scale(${zoom})`,
         transformOrigin: "top left",
       }}
       onMouseDown={onMouseDown}
     >
-      {/* Header colorido por categoria */}
       <div
-        className={`rounded-t-xl px-3 py-1.5 text-[11px] font-semibold text-white/95 cursor-grab ${headerBg}`}
+        className="flex items-center gap-1.5 rounded-t-xl px-2 text-[11px] font-semibold text-white/95 cursor-grab"
+        style={{ height: CARD_HEADER_HEIGHT, backgroundColor: `${category.color}33`, borderBottom: `1px solid ${category.color}55` }}
+        title={`${category.label} · ${catalog?.description ?? ""}`}
       >
-        {getNodeDisplayName(node.type)}
+        <span style={{ color: category.color }}><Icon name={catalog?.icon ?? "chip"} size={14} /></span>
+        <span className="min-w-0 flex-1 truncate">{catalog?.title ?? node.type}</span>
+        {node.pinned ? <span data-testid={`node-pinned-${node.id}`} title="Posicao fixada: Organizar nao move este no"><Icon name="pin" size={12} /></span> : null}
       </div>
 
+      <p
+        data-testid={`node-action-${node.id}`}
+        className="line-clamp-2 px-2 pt-1 text-[11px] leading-[15px] text-[#cdd6f4]"
+        style={{ height: CARD_ACTION_HEIGHT }}
+      >
+        {describeNodeAction(node)}
+      </p>
+
+      <div className="flex items-center gap-1.5 px-2 text-[10px] text-[#a6adc8]" style={{ height: CARD_ENTITY_HEIGHT }}>
+        {entity ? (
+          <>
+            <EntityThumbnail entity={entity} projectDir={projectDir} />
+            <span data-testid={`node-entity-${node.id}`} className="min-w-0 truncate">Afeta: <span className="font-semibold text-[#94e2d5]">{entity.label}</span></span>
+          </>
+        ) : button ? (
+          <span data-testid={`node-button-${node.id}`} className="flex min-w-0 items-center gap-1 truncate">
+            <span className="rounded bg-[#313244] px-1 font-semibold text-[#cdd6f4]">{button.padLabel}</span>
+            <span className="text-[#6c7086]">teclado</span>
+            <kbd className="rounded border border-[#45475a] px-1 font-mono text-[#f9e2af]">{button.keyLabel ?? "—"}</kbd>
+          </span>
+        ) : (
+          <span className="text-[#6c7086]">{category.label}</span>
+        )}
+      </div>
+
+      {node.params.authoring_origin ? (
+        <p data-testid={`node-origin-${node.id}`} className="truncate px-2 pb-0.5 font-mono text-[9px] text-[#7f849c]" title="Origem autoral (rastreabilidade)">
+          origem: {String(node.params.authoring_origin)}
+        </p>
+      ) : null}
       {importBadges.length > 0 ? (
-        <div className="flex flex-wrap gap-1 border-b border-slate-700/50 px-3 py-1.5">
+        <div className="flex flex-wrap gap-1 px-2 pb-1">
           {importBadges.map((badge) => (
             <span
               key={badge.label}
-              className={[
-                "rounded-full border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em]",
-                importBadgeClass(badge.tone),
-              ].join(" ")}
+              className={["rounded-full border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em]", importBadgeClass(badge.tone)].join(" ")}
             >
               {badge.label}
             </span>
@@ -1550,74 +1605,41 @@ function NodeCard({
         </div>
       ) : null}
 
-      {/* Ports */}
-      <div className="flex gap-2 px-3 py-2">
-        {/* Inputs */}
-        <div className="flex flex-1 flex-col gap-1.5">
-          {node.inputs.map((port) => (
-            <div key={port.id} className="flex items-center gap-2">
-              <div
-                className={`h-3 w-3 shrink-0 cursor-crosshair rounded-full border-2 ${
-                  port.kind === "exec"
-                    ? "border-white bg-white/90"
-                    : "border-[#89b4fa] bg-[#89b4fa]/60"
-                }`}
-                onMouseDown={(e) => onPortMouseDown(e, port.id, false)}
-                onMouseUp={(e) => onPortMouseUp(e, port.id, false)}
-              />
-              <span className="text-[10px] text-[#a6adc8]">{port.label}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Outputs */}
-        <div className="flex flex-col items-end gap-1.5">
-          {node.outputs.map((port) => (
-            <div key={port.id} className="flex items-center gap-2">
-              <span className="text-[10px] text-[#a6adc8]">{port.label}</span>
-              <div
-                className={`h-3 w-3 shrink-0 cursor-crosshair rounded-full border-2 ${
-                  port.kind === "exec"
-                    ? "border-white bg-white/90"
-                    : "border-[#89b4fa] bg-[#89b4fa]/60"
-                }`}
-                onMouseDown={(e) => onPortMouseDown(e, port.id, true)}
-                onMouseUp={(e) => onPortMouseUp(e, port.id, true)}
-              />
-            </div>
-          ))}
-        </div>
+      <div className="flex gap-2 px-2 pb-1 pt-1">
+        <div className="flex flex-1 flex-col">{node.inputs.map((port) => renderPort(port, false))}</div>
+        <div className="flex flex-col items-end">{node.outputs.map((port) => renderPort(port, true))}</div>
       </div>
 
-      {/* Params */}
-      {visibleParams.length > 0 && (
-        <div className="flex flex-col gap-0.5 border-t border-slate-700/50 px-3 pb-2 pt-1.5">
-          {visibleParams.map(([k, v]) => (
-            <div key={k} className="flex items-center justify-between gap-2 text-[10px]">
-              <span className="text-[#6c7086]">
-                {node.type === "condition_compare" &&
-                node.params.authoring_origin === "authored_builtin_reference_platformer" &&
-                k === "b"
-                  ? "Pontos para abrir passagem"
-                  : getNodeParamDisplayName(k)}
-              </span>
-              {((node.type === "rom_branch_compare_word" && k === "threshold") ||
-                (node.type === "condition_compare" &&
-                  node.params.authoring_origin === "authored_builtin_reference_platformer" &&
-                  k === "b")) ? (
-                <input
-                  data-testid={`node-param-${node.id}-${k}`}
-                  type="number"
-                  min={0}
-                  max={32767}
-                  value={String(v)}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onChange={(event) => onParamChange(node.id, k, Number.parseInt(event.target.value, 10) || 0)}
-                  className="w-14 rounded border border-[#cba6f7]/50 bg-[#11111b] px-1 py-0.5 text-right font-mono text-[#cdd6f4] outline-none focus:border-[#f9e2af]"
-                />
-              ) : (
-                <span className="font-mono text-[#cdd6f4]">{String(v)}</span>
-              )}
+      {essential.length > 0 && (
+        <div className="flex flex-col border-t border-slate-700/50 px-2 py-1">
+          {essential.map((key) => (
+            <div key={key} className="flex h-5 items-center justify-between gap-2 text-[10px]">
+              <span className="shrink-0 text-[#7f849c]">{paramLabel(key)}</span>
+              {renderParamValue(key, node.params[key])}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button
+        type="button"
+        data-testid={`node-details-toggle-${node.id}`}
+        aria-expanded={detailsOpen}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={() => onToggleDetails(node.id)}
+        className="w-full rounded-b-xl border-t border-slate-700/50 px-2 py-0.5 text-left text-[9px] uppercase tracking-[0.12em] text-[#6c7086] hover:text-[#cdd6f4]"
+      >
+        {detailsOpen ? "▾" : "▸"} Detalhes tecnicos
+      </button>
+      {detailsOpen && (
+        <div data-testid={`node-details-${node.id}`} className="border-t border-slate-700/50 px-2 pb-2 pt-1 font-mono text-[9px] text-[#a6adc8]">
+          <div>id: {node.id}</div>
+          <div>tipo: {node.type}</div>
+          <div>rotulo: {node.label}</div>
+          {technical.map(([key, value]) => (
+            <div key={key} className="flex justify-between gap-2">
+              <span className="text-[#6c7086]">{key}</span>
+              {cardEditableParam(node, key) && editable ? renderParamValue(key, value) : <span className="truncate text-right text-[#cdd6f4]" title={String(value)}>{String(value)}</span>}
             </div>
           ))}
         </div>
@@ -1852,27 +1874,142 @@ function SoundPanel({
   );
 }
 
-/** Read-only "Quando → Se → Fazer" list derived from the canonical graph. */
-function RulesPanel({ graph, onFocusNode }: { graph: NodeGraph; onFocusNode: (nodeId: string) => void }) {
+/** Campos editaveis de um item de regra; edita o proprio no do grafo (mesma fonte da verdade). */
+function RuleItemEditor({
+  node,
+  sfxNames,
+  onParamChange,
+  onSoundChange,
+}: {
+  node: GraphNode;
+  sfxNames: string[];
+  onParamChange: (nodeId: string, key: string, value: string | number) => void;
+  onSoundChange: (nodeId: string, sfx: string) => void;
+}) {
+  if (!canEditGraphNode(node)) return null;
+  const stop = (event: React.SyntheticEvent) => event.stopPropagation();
+  if (node.type === "action_sound") {
+    const current = String(node.params.sfx ?? "");
+    return (
+      <select
+        data-testid={`rule-edit-${node.id}-sfx`}
+        aria-label={`Som tocado por ${node.label}`}
+        value={current}
+        onClick={stop}
+        onChange={(event) => onSoundChange(node.id, event.target.value)}
+        className="ml-1 rounded border border-[#45475a] bg-[#11111b] px-1 font-mono text-[10px]"
+      >
+        {!sfxNames.includes(current) && <option value={current}>{current || "(nenhum)"}</option>}
+        {sfxNames.map((name) => <option key={name} value={name}>{name}</option>)}
+      </select>
+    );
+  }
+  const keys = Object.keys(node.params).filter((key) => isCardEditableParam(node, key));
+  if (keys.length === 0) return null;
+  return (
+    <span className="ml-1 inline-flex flex-wrap items-center gap-1">
+      {keys.map((key) =>
+        key === "button" ? (
+          <select
+            key={key}
+            data-testid={`rule-edit-${node.id}-${key}`}
+            aria-label={`Botao de ${node.label}`}
+            value={String(node.params[key])}
+            onClick={stop}
+            onChange={(event) => onParamChange(node.id, key, event.target.value)}
+            className="rounded border border-[#89b4fa]/50 bg-[#11111b] px-1 text-[10px]"
+          >
+            {MEGADRIVE_INPUT_BUTTONS.map((button) => {
+              const described = describeInputButton(button);
+              return (
+                <option key={button} value={button}>
+                  {described.padLabel}{described.keyLabel ? ` · tecla ${described.keyLabel}` : ""}
+                </option>
+              );
+            })}
+          </select>
+        ) : (
+          <label key={key} className="inline-flex items-center gap-0.5 text-[10px] text-[#a6adc8]">
+            {getNodeParamDisplayName(key)}
+            <input
+              data-testid={`rule-edit-${node.id}-${key}`}
+              type="number"
+              value={String(node.params[key])}
+              onClick={stop}
+              onChange={(event) => onParamChange(node.id, key, Number.parseInt(event.target.value, 10) || 0)}
+              className="w-14 rounded border border-[#cba6f7]/50 bg-[#11111b] px-1 text-right font-mono text-[10px]"
+            />
+          </label>
+        )
+      )}
+    </span>
+  );
+}
+
+/**
+ * "Quando → Se → Fazer": le o grafo canonico e edita os parametros dos casos suportados
+ * no proprio no. O caminho "senao" aparece; regras com lacos, varios caminhos ou nos sem
+ * forma simples ficam marcadas e devem ser editadas no grafo avancado.
+ */
+function RulesPanel({
+  graph,
+  sfxNames,
+  onFocusNode,
+  onParamChange,
+  onSoundChange,
+}: {
+  graph: NodeGraph;
+  sfxNames: string[];
+  onFocusNode: (nodeId: string) => void;
+  onParamChange: (nodeId: string, key: string, value: string | number) => void;
+  onSoundChange: (nodeId: string, sfx: string) => void;
+}) {
   const rules = useMemo(() => summarizeRules(graph), [graph]);
+  const byId = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
   if (rules.length === 0) return null;
+  const item = (entry: { text: string; nodeId: string }) => {
+    const node = byId.get(entry.nodeId);
+    return (
+      <span key={entry.nodeId} data-testid={`rule-item-${entry.nodeId}`} className="inline-flex flex-wrap items-center">
+        <button
+          type="button"
+          onClick={() => onFocusNode(entry.nodeId)}
+          className="rounded px-0.5 text-left underline decoration-dotted underline-offset-2 hover:bg-[#313244]"
+          title="Mostrar no grafo"
+        >
+          {entry.text}
+        </button>
+        {node ? <RuleItemEditor node={node} sfxNames={sfxNames} onParamChange={onParamChange} onSoundChange={onSoundChange} /> : null}
+      </span>
+    );
+  };
   return (
     <div data-testid="nodegraph-rules" className="rounded border border-[#a6e3a1]/35 bg-[#a6e3a1]/5 px-2 py-1.5 text-[11px] text-[#cdd6f4]">
       <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">Regras (Quando → Se → Fazer)</p>
-      <ol className="mt-1 space-y-1">
+      <ol className="mt-1 space-y-1.5">
         {rules.map((rule) => (
-          <li key={rule.id} data-testid={`rule-${rule.id}`} data-advanced={rule.advanced ? "true" : "false"}>
-            <button
-              type="button"
-              onClick={() => onFocusNode(rule.nodeIds[1] ?? rule.id)}
-              className="w-full rounded px-1 py-0.5 text-left hover:bg-[#313244] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#a6e3a1]"
-            >
+          <li key={rule.id} data-testid={`rule-${rule.id}`} data-advanced={rule.advanced ? "true" : "false"} className="rounded px-1 py-0.5 hover:bg-[#313244]/40">
+            <div>
               <span className="font-semibold text-[#a6e3a1]">Quando</span> {rule.when}
-              {rule.conditions.length > 0 && <> · <span className="font-semibold text-[#f9e2af]">Se</span> {rule.conditions.join(" e ")}</>}
-              {" "}· <span className="font-semibold text-[#89b4fa]">Fazer</span> {rule.actions.length > 0 ? rule.actions.join(", ") : "nada"}
-            </button>
+              {rule.conditionItems.length > 0 && (
+                <>
+                  {" "}· <span className="font-semibold text-[#f9e2af]">Se</span>{" "}
+                  {rule.conditionItems.map((entry, index) => (
+                    <span key={entry.nodeId}>{index > 0 ? " e " : ""}{item(entry)}</span>
+                  ))}
+                </>
+              )}
+              {" "}· <span className="font-semibold text-[#89b4fa]">Fazer</span>{" "}
+              {rule.actionItems.length > 0 ? rule.actionItems.map((entry, index) => <span key={entry.nodeId}>{index > 0 ? ", " : ""}{item(entry)}</span>) : "nada"}
+            </div>
+            {rule.elseBranches.map((branch) => (
+              <div key={branch.conditionNodeId} data-testid={`rule-else-${branch.conditionNodeId}`} className="pl-3 text-[10px]">
+                <span className="font-semibold text-[#f38ba8]">Senão</span> (não {branch.condition}):{" "}
+                {branch.actions.length > 0 ? branch.actions.map((entry, index) => <span key={entry.nodeId}>{index > 0 ? ", " : ""}{item(entry)}</span>) : "nada"}
+              </div>
+            ))}
             {rule.advanced && (
-              <p className="pl-1 text-[10px] text-[#fab387]">Regra avançada: {rule.advanced}. O texto mostra só o caminho principal; a lógica completa está no grafo.</p>
+              <p className="pl-1 text-[10px] text-[#fab387]">Regra avançada: {rule.advanced}. Edite esse trecho no grafo; aqui aparecem os caminhos com forma simples.</p>
             )}
           </li>
         ))}
@@ -1986,10 +2123,60 @@ export default function NodeGraphEditor() {
     selectedEntityId && !selectedEntityId.startsWith("layer::")
       ? activeScene?.entities.find((entity) => entity.entity_id === selectedEntityId) ?? null
       : null;
-  const [graph, setGraph] = useState<NodeGraph>(() => cloneGraph(EMPTY_GRAPH));
+  const [graph, setGraphState] = useState<NodeGraph>(() => cloneGraph(EMPTY_GRAPH));
+  const currentGraphRef = useRef(graph);
+  currentGraphRef.current = graph;
+  const [history, setHistory] = useState<GraphHistory>(emptyGraphHistory);
+  const historyRef = useRef(history);
+  const lastHistoryKeyRef = useRef<{ key: string; at: number } | null>(null);
+  /**
+   * Toda alteracao do autor passa por aqui e entra no desfazer/refazer. `coalesceKey`
+   * agrupa alteracoes seguidas do mesmo campo (digitacao) num unico passo.
+   */
+  const setGraph = useCallback(
+    (updater: NodeGraph | ((current: NodeGraph) => NodeGraph), label = "Editar grafo", coalesceKey?: string) => {
+      const previous = currentGraphRef.current;
+      const next = typeof updater === "function" ? updater(previous) : updater;
+      if (next === previous) return;
+      const now = Date.now();
+      const last = lastHistoryKeyRef.current;
+      if (!(coalesceKey && last?.key === coalesceKey && now - last.at < 1500)) {
+        historyRef.current = recordGraphHistory(historyRef.current, previous, label);
+        setHistory(historyRef.current);
+      }
+      lastHistoryKeyRef.current = coalesceKey ? { key: coalesceKey, at: now } : null;
+      currentGraphRef.current = next;
+      setGraphState(next);
+    },
+    []
+  );
+  /** Alteracao transitoria (arrasto em andamento): o passo de historico e gravado no fim. */
+  const setGraphTransient = useCallback((updater: (current: NodeGraph) => NodeGraph) => {
+    const next = updater(currentGraphRef.current);
+    currentGraphRef.current = next;
+    setGraphState(next);
+  }, []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [dragging, setDragging] = useState<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [dragging, setDragging] = useState<{
+    nodeIds: string[];
+    anchorX: number;
+    anchorY: number;
+    origins: Record<string, { x: number; y: number }>;
+    before: NodeGraph;
+    label: string;
+  } | null>(null);
   const [pendingEdge, setPendingEdge] = useState<{ fromNode: string; fromPort: string; x: number; y: number } | null>(null);
+  const [snapTarget, setSnapTarget] = useState<{ nodeId: string; portId: string } | null>(null);
+  const [cardMetrics, setCardMetrics] = useState<Record<string, NodeCardMetrics>>({});
+  const [openDetails, setOpenDetails] = useState<Set<string>>(() => new Set());
+  const [layoutReport, setLayoutReport] = useState<{
+    scope: "all" | "selection";
+    moved: number;
+    ms: number;
+    overlaps: number;
+    conflicts: LayoutConflict[];
+  } | null>(null);
   const [panning, setPanning] = useState<{
     startX: number;
     startY: number;
@@ -2026,8 +2213,6 @@ export default function NodeGraphEditor() {
   }, []);
   const hydratingGraphRef = useRef(true);
   const lastPersistedGraphRef = useRef(serializeNodeGraph(INITIAL_GRAPH));
-  const currentGraphRef = useRef(graph);
-  currentGraphRef.current = graph;
   const hydratedEntityIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -2045,12 +2230,37 @@ export default function NodeGraphEditor() {
       if (hydratedEntityIdRef.current === entityId && hasUnsavedLocalEdits) {
         return;
       }
+      if (hydratedEntityIdRef.current === entityId) {
+        // Mesma entidade: eco do proprio salvamento (nada a fazer) ou alteracao feita por
+        // outro painel. Nao zera historico, vista nem selecao; a mudanca externa vira um
+        // passo desfazivel.
+        const serialized = serializeNodeGraph(nextGraph);
+        // Compara na forma canonica (deserializada): o eco do salvamento passa pelo
+        // deserializador e nao deve virar um passo falso de historico.
+        const current = serializeNodeGraph(deserializeNodeGraph(serializeNodeGraph(currentGraphRef.current)));
+        if (serializeNodeGraph(deserializeNodeGraph(serialized)) !== current) {
+          historyRef.current = recordGraphHistory(historyRef.current, currentGraphRef.current, "Atualizado por outro painel");
+          setHistory(historyRef.current);
+          hydratingGraphRef.current = true;
+          currentGraphRef.current = nextGraph;
+          setGraphState(nextGraph);
+        }
+        lastPersistedGraphRef.current = serialized;
+        return;
+      }
       hydratedEntityIdRef.current = entityId;
       hydratingGraphRef.current = true;
-      setGraph(nextGraph);
+      currentGraphRef.current = nextGraph;
+      setGraphState(nextGraph);
+      historyRef.current = emptyGraphHistory();
+      setHistory(historyRef.current);
+      lastHistoryKeyRef.current = null;
+      setLayoutReport(null);
       setSelectedId(null);
+      setSelectedIds(new Set());
       setDragging(null);
       setPendingEdge(null);
+      setSnapTarget(null);
       panningRef.current = null;
       setPanning(null);
       setHoveredEdgeId(null);
@@ -2199,6 +2409,40 @@ export default function NodeGraphEditor() {
     };
   }, [activeProjectDir, graph, selectedEntity, updateEntity]);
 
+  // ── Coordenadas ────────────────────────────────────────────────────────────
+  const clientToWorld = useCallback((clientX: number, clientY: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    return {
+      x: (clientX - (rect?.left ?? 0) - view.x) / view.zoom,
+      y: (clientY - (rect?.top ?? 0) - view.y) / view.zoom,
+    };
+  }, [view.x, view.y, view.zoom]);
+
+  const nodeSizeOf = useCallback(
+    (node: GraphNode): NodeSize => {
+      const measured = cardMetrics[node.id];
+      return measured ? { width: measured.width, height: measured.height } : estimateNodeCardSize(node);
+    },
+    [cardMetrics]
+  );
+
+  const onCardMeasure = useCallback((nodeId: string, metrics: NodeCardMetrics) => {
+    setCardMetrics((current) => {
+      const previous = current[nodeId];
+      if (previous && JSON.stringify(previous) === JSON.stringify(metrics)) return current;
+      return { ...current, [nodeId]: metrics };
+    });
+  }, []);
+
+  const startDrag = useCallback((e: React.MouseEvent, nodeIds: string[], label: string) => {
+    const world = clientToWorld(e.clientX, e.clientY);
+    const origins: Record<string, { x: number; y: number }> = {};
+    for (const node of currentGraphRef.current.nodes) {
+      if (nodeIds.includes(node.id)) origins[node.id] = { x: node.x, y: node.y };
+    }
+    setDragging({ nodeIds, anchorX: world.x, anchorY: world.y, origins, before: currentGraphRef.current, label });
+  }, [clientToWorld]);
+
   // ── Drag node ──────────────────────────────────────────────────────────────
   const onNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
     if (spacePressed && e.button === 0) {
@@ -2208,18 +2452,21 @@ export default function NodeGraphEditor() {
     if (e.button !== 0) {
       return;
     }
-    if ((e.target as HTMLElement).classList.contains("cursor-crosshair")) return;
-    setSelectedId(nodeId);
-    const node = graph.nodes.find((n) => n.id === nodeId)!;
-    const rect = canvasRef.current?.getBoundingClientRect();
-    const localX = e.clientX - (rect?.left ?? 0);
-    const localY = e.clientY - (rect?.top ?? 0);
-    setDragging({
-      nodeId,
-      offsetX: (localX - view.x) / view.zoom - node.x,
-      offsetY: (localY - view.y) / view.zoom - node.y,
-    });
-  }, [graph.nodes, spacePressed, view.x, view.y, view.zoom]);
+    const target = e.target as HTMLElement;
+    if (target.classList.contains("cursor-crosshair") || target.closest("input, select, button, textarea")) return;
+    let nextSelection: Set<string>;
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      nextSelection = new Set(selectedIds);
+      if (nextSelection.has(nodeId)) nextSelection.delete(nodeId);
+      else nextSelection.add(nodeId);
+    } else {
+      nextSelection = selectedIds.has(nodeId) ? new Set(selectedIds) : new Set([nodeId]);
+    }
+    setSelectedIds(nextSelection);
+    setSelectedId(nextSelection.has(nodeId) ? nodeId : [...nextSelection][0] ?? null);
+    if (!nextSelection.has(nodeId)) return;
+    startDrag(e, [...nextSelection], nextSelection.size > 1 ? `Mover ${nextSelection.size} nos` : "Mover no");
+  }, [selectedIds, spacePressed, startDrag]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     const activePanning = panningRef.current ?? panning;
@@ -2232,38 +2479,90 @@ export default function NodeGraphEditor() {
       return;
     }
     if (dragging) {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      const localX = e.clientX - (rect?.left ?? 0);
-      const localY = e.clientY - (rect?.top ?? 0);
-      const nextPoint = snapNodeGraphPoint({
-        x: (localX - view.x) / view.zoom - dragging.offsetX,
-        y: (localY - view.y) / view.zoom - dragging.offsetY,
-      });
-      setGraph((g) => ({
+      const world = clientToWorld(e.clientX, e.clientY);
+      const delta = snapNodeGraphPoint({ x: world.x - dragging.anchorX, y: world.y - dragging.anchorY });
+      setGraphTransient((g) => ({
         ...g,
-        nodes: g.nodes.map((n) =>
-          n.id === dragging.nodeId
-            ? {
-                ...n,
-                x: nextPoint.x,
-                y: nextPoint.y,
-              }
-            : n
-        ),
+        nodes: g.nodes.map((n) => {
+          const origin = dragging.origins[n.id];
+          return origin ? { ...n, x: origin.x + delta.x, y: origin.y + delta.y } : n;
+        }),
       }));
     }
     if (pendingEdge) {
       setPendingEdge((p) => p ? { ...p, x: e.clientX, y: e.clientY } : null);
+      // Ima: a entrada compativel mais proxima (ate 40 px na tela) fica destacada.
+      const world = clientToWorld(e.clientX, e.clientY);
+      const current = currentGraphRef.current;
+      let best: { nodeId: string; portId: string; distance: number } | null = null;
+      for (const node of current.nodes) {
+        if (hiddenNodeIdsRef.current.has(node.id)) continue;
+        for (const port of node.inputs) {
+          if (!checkConnection(current, pendingEdge.fromNode, pendingEdge.fromPort, node.id, port.id).ok) continue;
+          const anchor = getPortAnchor(node, port.id, false, cardMetrics[node.id]);
+          const distance = Math.hypot(anchor.x - world.x, anchor.y - world.y) * view.zoom;
+          if (distance <= 40 && (!best || distance < best.distance)) best = { nodeId: node.id, portId: port.id, distance };
+        }
+      }
+      setSnapTarget((previous) =>
+        best
+          ? previous?.nodeId === best.nodeId && previous.portId === best.portId ? previous : { nodeId: best.nodeId, portId: best.portId }
+          : null
+      );
     }
-  }, [dragging, panning, pendingEdge, view.x, view.y, view.zoom]);
+  }, [cardMetrics, clientToWorld, dragging, panning, pendingEdge, setGraphTransient, view.zoom]);
+
+  const connectPorts = useCallback((fromNode: string, fromPort: string, toNode: string, toPort: string) => {
+    const check = checkConnection(currentGraphRef.current, fromNode, fromPort, toNode, toPort);
+    if (!check.ok) {
+      logMessage("warn", `[NodeGraph] Conexao recusada: ${check.reason}.`);
+      return false;
+    }
+    const edge: NodeEdge = { id: newEdgeId(), fromNode, fromPort, toNode, toPort };
+    setGraph((g) => ({ ...g, edges: [...g.edges, edge] }), "Conectar");
+    logMessage("info", `Conexão criada: ${edge.fromNode}:${edge.fromPort} → ${edge.toNode}:${edge.toPort}`);
+    return true;
+  }, [logMessage, setGraph]);
 
   const onMouseUp = useCallback(() => {
+    if (dragging) {
+      const moved = dragging.nodeIds.some((id) => {
+        const node = currentGraphRef.current.nodes.find((candidate) => candidate.id === id);
+        const origin = dragging.origins[id];
+        return node && origin && (node.x !== origin.x || node.y !== origin.y);
+      });
+      if (moved) {
+        // Um unico passo de desfazer por arrasto; so posicoes mudam.
+        historyRef.current = recordGraphHistory(historyRef.current, dragging.before, dragging.label);
+        setHistory(historyRef.current);
+        lastHistoryKeyRef.current = null;
+      }
+    }
+    if (pendingEdge && snapTarget) {
+      // Soltar o botao com uma entrada destacada e a acao explicita que confirma a ligacao.
+      connectPorts(pendingEdge.fromNode, pendingEdge.fromPort, snapTarget.nodeId, snapTarget.portId);
+    }
     setDragging(null);
     setPendingEdge(null);
+    setSnapTarget(null);
     panningRef.current = null;
     setPanning(null);
     setActiveEdgeId(null);
-  }, []);
+  }, [connectPorts, dragging, pendingEdge, snapTarget]);
+
+  useEffect(() => {
+    if (!pendingEdge) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setPendingEdge(null);
+        setSnapTarget(null);
+        logMessage("info", "[NodeGraph] Conexao cancelada (Esc). Nada foi alterado.");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [logMessage, pendingEdge]);
 
   const onCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button === 1 || (spacePressed && e.button === 0)) {
@@ -2283,6 +2582,7 @@ export default function NodeGraphEditor() {
       return;
     }
     setSelectedId(null);
+    setSelectedIds(new Set());
   }, [spacePressed, view.x, view.y]);
 
   const onCanvasWheel = useCallback((e: React.WheelEvent) => {
@@ -2307,24 +2607,17 @@ export default function NodeGraphEditor() {
     e.stopPropagation();
     if (isOutput) {
       setPendingEdge({ fromNode: nodeId, fromPort: portId, x: e.clientX, y: e.clientY });
+      setSnapTarget(null);
     }
   }, []);
 
   const onPortMouseUp = useCallback((e: React.MouseEvent, nodeId: string, portId: string, isOutput: boolean) => {
     e.stopPropagation();
     if (!pendingEdge || isOutput) return;
-    if (pendingEdge.fromNode === nodeId) return; // no self-loop
-    const edge: NodeEdge = {
-      id: newEdgeId(),
-      fromNode: pendingEdge.fromNode,
-      fromPort: pendingEdge.fromPort,
-      toNode: nodeId,
-      toPort: portId,
-    };
-    setGraph((g) => ({ ...g, edges: [...g.edges, edge] }));
+    connectPorts(pendingEdge.fromNode, pendingEdge.fromPort, nodeId, portId);
     setPendingEdge(null);
-    logMessage("info", `Conexão criada: ${edge.fromNode}:${edge.fromPort} → ${edge.toNode}:${edge.toPort}`);
-  }, [pendingEdge, logMessage]);
+    setSnapTarget(null);
+  }, [connectPorts, pendingEdge]);
 
   const selectedNode = graph.nodes.find((node) => node.id === selectedId) ?? null;
   const selectedEntitySourceRefs = useMemo(
@@ -2639,34 +2932,41 @@ export default function NodeGraphEditor() {
         `[NodeGraph] Encadeamento layout: ${added} aresta(s) exec na ordem y→x. Revise fluxos condicionais e nos sem entrada exec.`
       );
       return next;
-    });
-  }, [logMessage]);
+    }, "Criar conexoes pela posicao");
+  }, [logMessage, setGraph]);
 
   // ── Delete selected node ───────────────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
-        setGraph((g) => ({
-          nodes: g.nodes.filter((n) => n.id !== selectedId),
-          edges: g.edges.filter((e) => e.fromNode !== selectedId && e.toNode !== selectedId),
-        }));
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      // Backspace/Delete dentro de um campo edita o texto; nunca apaga o no.
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable)) {
+        return;
+      }
+      const doomed = selectedIds.size > 0 ? selectedIds : selectedId ? new Set([selectedId]) : null;
+      if ((e.key === "Delete" || e.key === "Backspace") && doomed) {
+        setGraph(
+          (g) => ({
+            ...g,
+            nodes: g.nodes.filter((n) => !doomed.has(n.id)),
+            edges: g.edges.filter((edge) => !doomed.has(edge.fromNode) && !doomed.has(edge.toNode)),
+            ...(g.groups
+              ? { groups: g.groups.map((group) => ({ ...group, nodeIds: group.nodeIds.filter((id) => !doomed.has(id)) })).filter((group) => group.nodeIds.length > 0) }
+              : {}),
+          }),
+          doomed.size > 1 ? `Apagar ${doomed.size} nos` : "Apagar no"
+        );
         setSelectedId(null);
+        setSelectedIds(new Set());
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId]);
+  }, [selectedId, selectedIds, setGraph]);
 
   // ── Edge SVG path ─────────────────────────────────────────────────────────
-  // Simplified: bezier between node positions (port positions approximated)
-  function edgePath(fromNode: GraphNode, toNode: GraphNode): string {
-    const x1 = fromNode.x * view.zoom + view.x + NODE_CARD_WIDTH * view.zoom;
-    const y1 = fromNode.y * view.zoom + view.y + 24 * view.zoom;
-    const x2 = toNode.x * view.zoom + view.x;
-    const y2 = toNode.y * view.zoom + view.y + 24 * view.zoom;
-    const cx = (x1 + x2) / 2;
-    return `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
-  }
+  // Ancorado no centro real das portas (medido no DOM, sem zoom) e convertido para a tela.
+  const toScreen = (point: { x: number; y: number }) => ({ x: point.x * view.zoom + view.x, y: point.y * view.zoom + view.y });
 
   const graphSummary = useMemo(() => summarizeNodeGraph(graph), [graph]);
   const graphValidation = useMemo(
@@ -2699,7 +2999,236 @@ export default function NodeGraphEditor() {
     () => buildNodeMiniMap(graph, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING),
     [graph]
   );
-  const groupBoxes = useMemo(() => buildNodeGraphGroupBoxes(graph), [graph]);
+  const groupBoxes = useMemo(() => buildNodeGraphGroupBoxes(graph, nodeSizeOf), [graph, nodeSizeOf]);
+  /** Nos de grupos recolhidos: continuam no grafo (e na ROM), so nao sao desenhados. */
+  const hiddenNodeIds = useMemo(
+    () => new Set(groupBoxes.filter((box) => box.collapsed).flatMap((box) => box.nodeIds)),
+    [groupBoxes]
+  );
+  const hiddenNodeIdsRef = useRef(hiddenNodeIds);
+  hiddenNodeIdsRef.current = hiddenNodeIds;
+
+  // ── Desfazer / refazer ──────────────────────────────────────────────────────
+  const undoGraph = useCallback(() => {
+    const result = undoGraphHistory(historyRef.current, currentGraphRef.current);
+    if (!result) {
+      logMessage("info", "[NodeGraph] Nada para desfazer.");
+      return;
+    }
+    historyRef.current = result.history;
+    setHistory(result.history);
+    lastHistoryKeyRef.current = null;
+    currentGraphRef.current = result.graph;
+    setGraphState(result.graph);
+    logMessage("info", `[NodeGraph] Desfeito: ${result.label}.`);
+  }, [logMessage]);
+  const redoGraph = useCallback(() => {
+    const result = redoGraphHistory(historyRef.current, currentGraphRef.current);
+    if (!result) {
+      logMessage("info", "[NodeGraph] Nada para refazer.");
+      return;
+    }
+    historyRef.current = result.history;
+    setHistory(result.history);
+    lastHistoryKeyRef.current = null;
+    currentGraphRef.current = result.graph;
+    setGraphState(result.graph);
+    logMessage("info", `[NodeGraph] Refeito: ${result.label}.`);
+  }, [logMessage]);
+  useEffect(() => registerGraphHistoryHandler({ undo: undoGraph, redo: redoGraph }), [redoGraph, undoGraph]);
+
+  // ── Organizar visualmente (so posicoes) ─────────────────────────────────────
+  const fitViewTo = useCallback((nodes: GraphNode[]) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const width = rect?.width || canvasSize.width;
+    const height = rect?.height || canvasSize.height;
+    if (!nodes.length || !width || !height) return;
+    const minX = Math.min(...nodes.map((node) => node.x));
+    const minY = Math.min(...nodes.map((node) => node.y));
+    const maxX = Math.max(...nodes.map((node) => node.x + nodeSizeOf(node).width));
+    const maxY = Math.max(...nodes.map((node) => node.y + nodeSizeOf(node).height));
+    const zoom = clampNodeGraphZoom(Math.min(1, (width - 2 * FOCUS_PADDING) / (maxX - minX), (height - 2 * FOCUS_PADDING - 48) / (maxY - minY)));
+    setView({ zoom, x: FOCUS_PADDING - minX * zoom, y: FOCUS_PADDING + 48 - minY * zoom });
+  }, [canvasSize.height, canvasSize.width, nodeSizeOf]);
+
+  const organizeGraph = useCallback((scope: "all" | "selection") => {
+    const current = currentGraphRef.current;
+    const selection = [...selectedIds];
+    if (scope === "selection" && selection.length === 0) {
+      logMessage("warn", "[NodeGraph] Selecione nos (Shift+clique ou 'Selecionar comportamento') para organizar a selecao.");
+      return;
+    }
+    const started = performance.now();
+    const result = layoutNodeGraph(current, { sizeOf: nodeSizeOf, scope: scope === "selection" ? selection : undefined });
+    const ms = Math.round((performance.now() - started) * 10) / 10;
+    if (graphSemanticSignature(result.graph) !== graphSemanticSignature(current)) {
+      // Defesa: organizar nunca pode alterar a logica. Se acontecer, nada e aplicado.
+      logMessage("error", "[NodeGraph] Organizar abortado: o resultado alteraria a logica do grafo.");
+      return;
+    }
+    const overlaps = findNodeOverlaps(result.graph, nodeSizeOf, hiddenNodeIdsRef.current).length;
+    setLayoutReport({ scope, moved: result.movedNodeIds.length, ms, overlaps, conflicts: result.conflicts });
+    if (result.movedNodeIds.length > 0) {
+      setGraph(result.graph, scope === "all" ? "Organizar tudo" : "Organizar selecao");
+    }
+    if (scope === "all") fitViewTo(result.graph.nodes);
+    logMessage(
+      result.conflicts.length ? "warn" : "info",
+      `[NodeGraph] Organizar ${scope === "all" ? "tudo" : "selecao"}: ${result.movedNodeIds.length} no(s) movido(s) em ${ms} ms, ${overlaps} sobreposicao(oes), ${result.conflicts.length} conflito(s). Conexoes e parametros intactos.`
+    );
+  }, [fitViewTo, logMessage, nodeSizeOf, selectedIds, setGraph]);
+
+  const selectionIds = useMemo(
+    () => (selectedIds.size > 0 ? [...selectedIds] : selectedId ? [selectedId] : []),
+    [selectedId, selectedIds]
+  );
+
+  const togglePinSelection = useCallback(() => {
+    if (selectionIds.length === 0) return;
+    const current = currentGraphRef.current;
+    const pin = !selectionIds.every((id) => current.nodes.find((node) => node.id === id)?.pinned);
+    setGraph(
+      (g) => ({
+        ...g,
+        nodes: g.nodes.map((node) => {
+          if (!selectionIds.includes(node.id)) return node;
+          if (pin) return { ...node, pinned: true };
+          const rest = { ...node };
+          delete rest.pinned;
+          return rest;
+        }),
+      }),
+      pin ? "Fixar posicao" : "Soltar posicao"
+    );
+  }, [selectionIds, setGraph]);
+
+  /** Seleciona o comportamento (componente conectado) do no atual. */
+  const selectBehavior = useCallback((seedId?: string) => {
+    const seed = seedId ?? selectedId;
+    if (!seed) return;
+    const current = currentGraphRef.current;
+    const found = new Set([seed]);
+    const queue = [seed];
+    while (queue.length) {
+      const id = queue.shift()!;
+      for (const edge of current.edges) {
+        const other = edge.fromNode === id ? edge.toNode : edge.toNode === id ? edge.fromNode : null;
+        if (other && !found.has(other)) {
+          found.add(other);
+          queue.push(other);
+        }
+      }
+    }
+    setSelectedIds(found);
+    setSelectedId(seed);
+  }, [selectedId]);
+
+  const suggestGroupName = useCallback((ids: string[]) => {
+    const nodes = currentGraphRef.current.nodes.filter((node) => ids.includes(node.id));
+    if (nodes.some((node) => node.type === "set_velocity" && Number(node.params.vy) < 0)) return "Pulo";
+    if (nodes.some((node) => node.params.passage_role === "rule")) return "Abrir passagem";
+    if (nodes.some((node) => node.params.passage_id)) return "Passagem";
+    const held = nodes.find((node) => node.type === "input_held");
+    if (held && String(held.params.button) === "BUTTON_RIGHT") return "Andar para a direita";
+    if (held && String(held.params.button) === "BUTTON_LEFT") return "Andar para a esquerda";
+    if (nodes.some((node) => node.type === "condition_overlap" && String(node.params.b).includes("goal"))) return "Objetivo";
+    if (nodes.some((node) => node.type === "action_music")) return "Musica";
+    return `Comportamento ${(currentGraphRef.current.groups?.length ?? 0) + 1}`;
+  }, []);
+
+  const groupSelection = useCallback(() => {
+    if (selectionIds.length === 0) return;
+    const label = suggestGroupName(selectionIds);
+    const id = `group_${Date.now().toString(36)}`;
+    setGraph(
+      (g) => ({
+        ...g,
+        groups: [
+          // Um no pertence a um unico grupo: sai do grupo anterior.
+          ...(g.groups ?? [])
+            .map((group) => ({ ...group, nodeIds: group.nodeIds.filter((nodeId) => !selectionIds.includes(nodeId)) }))
+            .filter((group) => group.nodeIds.length > 0),
+          { id, label, nodeIds: [...selectionIds] },
+        ],
+      }),
+      `Agrupar "${label}"`
+    );
+    logMessage("info", `[NodeGraph] Grupo "${label}" criado com ${selectionIds.length} no(s). Renomeie no painel Grupos.`);
+  }, [logMessage, selectionIds, setGraph, suggestGroupName]);
+
+  const updateGroup = useCallback((groupId: string, patch: { label?: string; collapsed?: boolean }, label: string, coalesceKey?: string) => {
+    setGraph(
+      (g) => ({
+        ...g,
+        groups: (g.groups ?? []).map((group) => {
+          if (group.id !== groupId) return group;
+          const next = { ...group, ...patch };
+          if (patch.collapsed === false) delete next.collapsed;
+          return next;
+        }),
+      }),
+      label,
+      coalesceKey
+    );
+  }, [setGraph]);
+
+  const removeGroup = useCallback((groupId: string) => {
+    setGraph((g) => {
+      const groups = (g.groups ?? []).filter((group) => group.id !== groupId);
+      const next: NodeGraph = { ...g, groups };
+      if (groups.length === 0) delete next.groups;
+      return next;
+    }, "Desfazer grupo");
+  }, [setGraph]);
+
+  const onGroupHeaderMouseDown = useCallback((e: React.MouseEvent, box: NodeGraphGroupBox) => {
+    if (e.button !== 0 || spacePressed) return;
+    if ((e.target as HTMLElement).closest("button, input")) return;
+    e.stopPropagation();
+    setSelectedIds(new Set(box.nodeIds));
+    setSelectedId(box.nodeIds[0] ?? null);
+    startDrag(e, box.nodeIds, `Mover grupo "${box.label}"`);
+  }, [spacePressed, startDrag]);
+
+  const sceneSfx = useMemo<Record<string, string>>(
+    () => Object.assign({}, ...(activeScene?.entities ?? []).map((entity) => entity.components.audio?.sfx ?? {})),
+    [activeScene?.entities]
+  );
+
+  // ── Navegacao por entidade ──────────────────────────────────────────────────
+  const sceneEntityIds = useMemo(() => (activeScene?.entities ?? []).map((entity) => entity.entity_id), [activeScene?.entities]);
+  const entityIndex = useMemo(() => {
+    const index = new Map<string, string[]>();
+    for (const node of graph.nodes) {
+      for (const ref of getNodeEntityRefs(node, sceneEntityIds.length ? sceneEntityIds : undefined)) {
+        index.set(ref, [...(index.get(ref) ?? []), node.id]);
+      }
+    }
+    return [...index.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [graph.nodes, sceneEntityIds]);
+
+  const nodeCardEntity = useCallback((node: GraphNode): NodeCardEntity | null => {
+    const ref = getNodeEntityRefs(node, sceneEntityIds.length ? sceneEntityIds : undefined)[0];
+    if (!ref) return null;
+    const entity = activeScene?.entities.find((candidate) => candidate.entity_id === ref);
+    const sprite = entity?.components.sprite;
+    return {
+      entityId: ref,
+      label: entity ? getEntityDisplayName(entity) : ref,
+      spriteAsset: sprite?.asset ?? null,
+      frameWidth: sprite?.frame_width ?? 16,
+      frameHeight: sprite?.frame_height ?? 16,
+    };
+  }, [activeScene?.entities, sceneEntityIds]);
+
+  const toggleDetails = useCallback((nodeId: string) => {
+    setOpenDetails((current) => {
+      const next = new Set(current);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  }, []);
   const dotGridStyle = useMemo(() => getNodeGraphDotGridStyle(view), [view]);
   const hardwareFeedback = useMemo(
     () => buildNodeGraphHardwareFeedback(graph, hwStatus),
@@ -2783,19 +3312,23 @@ export default function NodeGraphEditor() {
   }, [focusNode, graphSummary.entryNodeIds]);
 
   const onParamChange = useCallback((nodeId: string, key: string, value: string | number) => {
-    setGraph((currentGraph) => ({
-      ...currentGraph,
-      nodes: currentGraph.nodes.map((node) =>
-        node.id === nodeId &&
-        ((node.type === "rom_branch_compare_word" && key === "threshold") ||
-          (node.type === "condition_compare" &&
-            node.params.authoring_origin === "authored_builtin_reference_platformer" &&
-            key === "b"))
-          ? { ...node, params: { ...node.params, [key]: value } }
-          : node
-      ),
-    }));
-  }, []);
+    setGraph(
+      (currentGraph) => {
+        const target = currentGraph.nodes.find((node) => node.id === nodeId);
+        if (!target || !canEditGraphNode(target) || !isCardEditableParam(target, key) || target.params[key] === value) {
+          return currentGraph;
+        }
+        return {
+          ...currentGraph,
+          nodes: currentGraph.nodes.map((node) =>
+            node.id === nodeId ? { ...node, params: { ...node.params, [key]: value } } : node
+          ),
+        };
+      },
+      `Editar ${getNodeParamDisplayName(key)}`,
+      `param:${nodeId}:${key}`
+    );
+  }, [setGraph]);
 
   const focusFirstDisconnectedNode = useCallback(() => {
     const firstDisconnectedNode = graphSummary.disconnectedNodeIds[0];
@@ -2832,7 +3365,9 @@ export default function NodeGraphEditor() {
         types: g.types.filter(
           (t) =>
             getNodeDisplayName(t).toLowerCase().includes(searchLower) ||
-            t.toLowerCase().includes(searchLower)
+            t.toLowerCase().includes(searchLower) ||
+            getNodeCategory(t).label.toLowerCase().includes(searchLower) ||
+            getNodeCatalogEntry(t).description.toLowerCase().includes(searchLower)
         ),
       })).filter((g) => g.types.length > 0)
     : NODE_PALETTE_GROUPS;
@@ -2880,7 +3415,7 @@ export default function NodeGraphEditor() {
                   className="flex w-full items-center gap-1.5 px-1 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-[#6c7086] transition-colors hover:text-[#a6adc8]"
                 >
                   <span className="text-[9px]">{isCollapsed ? "\u25b8" : "\u25be"}</span>
-                  <span>{group.icon}</span>
+                  <Icon name={group.icon} size={12} />
                   <span>{group.label}</span>
                 </button>
                 {!isCollapsed &&
@@ -2890,9 +3425,10 @@ export default function NodeGraphEditor() {
                       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-[#a6adc8] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:opacity-40"
                       onMouseDown={() => addNode(type)}
                       disabled={!selectedEntity}
+                      title={`${getNodeCategory(type).label}: ${getNodeCatalogEntry(type).description}`}
                     >
-                      <span className="text-[12px] opacity-80">
-                        {NODE_PALETTE_GROUPS.find((g) => g.types.includes(type))?.icon ?? "\u2699\ufe0f"}
+                      <span className="opacity-80" style={{ color: getNodeCategory(type).color }}>
+                        <Icon name={getNodeCatalogEntry(type).icon} size={13} />
                       </span>
                       <span className="min-w-0 truncate">{getNodeDisplayName(type)}</span>
                     </button>
@@ -2948,6 +3484,62 @@ export default function NodeGraphEditor() {
           className="pointer-events-none absolute inset-y-0 left-0 z-0"
           style={{ right: selectedEntity ? 288 : 0 }}
         />
+        {selectedEntity && (
+          <div
+            data-testid="nodegraph-toolbar"
+            role="toolbar"
+            aria-label="Organizacao do grafo"
+            className="absolute left-2 top-2 z-30 flex flex-wrap items-center gap-1 rounded-lg border border-[#313244] bg-[#181825]/95 p-1 text-[11px] shadow-lg"
+            style={{ maxWidth: `calc(100% - ${selectedEntity ? 304 : 16}px)` }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <button type="button" data-testid="nodegraph-undo" onClick={undoGraph} disabled={history.past.length === 0}
+              title={history.past.length ? `Desfazer: ${history.past[history.past.length - 1].label} (Ctrl+Z)` : "Nada para desfazer"}
+              className="flex items-center gap-1 rounded px-2 py-1 text-[#cdd6f4] hover:bg-[#313244] disabled:opacity-40">
+              <Icon name="undo" size={14} /> Desfazer
+            </button>
+            <button type="button" data-testid="nodegraph-redo" onClick={redoGraph} disabled={history.future.length === 0}
+              title={history.future.length ? `Refazer: ${history.future[0].label} (Ctrl+Y)` : "Nada para refazer"}
+              className="flex items-center gap-1 rounded px-2 py-1 text-[#cdd6f4] hover:bg-[#313244] disabled:opacity-40">
+              <Icon name="redo" size={14} /> Refazer
+            </button>
+            <span className="mx-1 h-4 w-px bg-[#313244]" aria-hidden="true" />
+            <button type="button" data-testid="nodegraph-organize-all" onClick={() => organizeGraph("all")} disabled={graph.nodes.length === 0}
+              title="Organizar visualmente: so muda posicoes, segue as conexoes e nunca cria ou remove ligacoes. Nos fixados ficam parados."
+              className="flex items-center gap-1 rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 font-semibold text-[#89b4fa] hover:bg-[#89b4fa]/20 disabled:opacity-40">
+              <Icon name="organize" size={14} /> Organizar tudo
+            </button>
+            <button type="button" data-testid="nodegraph-organize-selection" onClick={() => organizeGraph("selection")} disabled={selectionIds.length === 0}
+              title="Organiza so os nos selecionados; o resto nao se move."
+              className="rounded border border-[#89b4fa]/40 px-2 py-1 text-[#89b4fa] hover:bg-[#89b4fa]/20 disabled:opacity-40">
+              Organizar selecao
+            </button>
+            <button type="button" data-testid="nodegraph-fit-view" onClick={() => fitViewTo(graph.nodes.filter((node) => !hiddenNodeIds.has(node.id)))} disabled={graph.nodes.length === 0}
+              title="Enquadrar: mostra o grafo inteiro (so a vista; nada muda no grafo)."
+              className="rounded px-2 py-1 text-[#cdd6f4] hover:bg-[#313244] disabled:opacity-40">
+              Enquadrar
+            </button>
+            <button type="button" data-testid="nodegraph-select-behavior" onClick={() => selectBehavior()} disabled={!selectedId}
+              title="Seleciona todos os nos ligados ao no atual (um comportamento)."
+              className="rounded px-2 py-1 text-[#cdd6f4] hover:bg-[#313244] disabled:opacity-40">
+              Selecionar comportamento
+            </button>
+            <button type="button" data-testid="nodegraph-pin-selection" onClick={togglePinSelection} disabled={selectionIds.length === 0}
+              title="Fixar: Organizar nao move estes nos."
+              className="flex items-center gap-1 rounded px-2 py-1 text-[#cdd6f4] hover:bg-[#313244] disabled:opacity-40">
+              <Icon name="pin" size={13} />
+              {selectionIds.length > 0 && selectionIds.every((id) => graph.nodes.find((node) => node.id === id)?.pinned) ? "Soltar" : "Fixar"}
+            </button>
+            <button type="button" data-testid="nodegraph-group-selection" onClick={groupSelection} disabled={selectionIds.length === 0}
+              title="Cria um grupo nomeavel com a selecao (so visual)."
+              className="flex items-center gap-1 rounded px-2 py-1 text-[#cdd6f4] hover:bg-[#313244] disabled:opacity-40">
+              <Icon name="group" size={13} /> Agrupar
+            </button>
+            <span data-testid="nodegraph-selection-count" className="px-1 text-[10px] text-[#6c7086]">
+              {selectionIds.length > 0 ? `${selectionIds.length} selecionado(s)` : "Shift+clique seleciona varios"} · {Math.round(view.zoom * 100)}%
+            </span>
+          </div>
+        )}
         {!selectedEntity && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#11111b]/80">
             <p className="max-w-xs text-center text-xs text-[#6c7086]">
@@ -3160,17 +3752,126 @@ export default function NodeGraphEditor() {
                 </ul>
               </div>
             )}
-            <RulesPanel graph={graph} onFocusNode={(nodeId) => focusNode(nodeId)} />
+            {layoutReport && (
+              <div
+                data-testid="nodegraph-layout-report"
+                data-moved={layoutReport.moved}
+                data-overlaps={layoutReport.overlaps}
+                data-conflicts={layoutReport.conflicts.length}
+                data-ms={layoutReport.ms}
+                className={`rounded border px-2 py-1.5 text-[10px] ${layoutReport.conflicts.length || layoutReport.overlaps ? "border-[#fab387]/50 bg-[#fab387]/10" : "border-[#89b4fa]/35 bg-[#89b4fa]/5"}`}
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+                  Organizar {layoutReport.scope === "all" ? "tudo" : "selecao"}
+                </p>
+                <p className="mt-0.5 text-[#cdd6f4]">
+                  {layoutReport.moved} no(s) reposicionado(s) em {layoutReport.ms} ms · {layoutReport.overlaps} sobreposicao(oes) · conexoes e parametros intactos
+                </p>
+                {layoutReport.conflicts.slice(0, 4).map((conflict, index) => (
+                  <p key={index} data-testid="nodegraph-layout-conflict" className="mt-0.5 text-[#fab387]">{conflict.message}</p>
+                ))}
+              </div>
+            )}
+
+            <div data-testid="nodegraph-groups" className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5 text-[10px]">
+              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#cba6f7]">Grupos (comportamentos)</p>
+              {(graph.groups ?? []).length === 0 ? (
+                <p className="mt-1 text-[#6c7086]">Selecione nos (Shift+clique ou "Selecionar comportamento") e use Agrupar. Grupos so organizam a vista.</p>
+              ) : (
+                <ul className="mt-1 space-y-1">
+                  {(graph.groups ?? []).map((group) => (
+                    <li key={group.id} className="flex items-center gap-1">
+                      <input
+                        data-testid={`nodegraph-group-name-${group.id}`}
+                        aria-label="Nome do grupo"
+                        value={group.label}
+                        onChange={(event) => updateGroup(group.id, { label: event.target.value }, "Renomear grupo", `group-name:${group.id}`)}
+                        className="min-w-0 flex-1 rounded border border-[#45475a] bg-[#181825] px-1 py-0.5 text-[#cdd6f4]"
+                      />
+                      <button type="button" data-testid={`nodegraph-group-select-${group.id}`}
+                        onClick={() => { setSelectedIds(new Set(group.nodeIds)); setSelectedId(group.nodeIds[0] ?? null); focusNode(group.nodeIds[0]); }}
+                        className="rounded px-1 text-[#89b4fa] hover:bg-[#313244]" title="Selecionar e mostrar">Ver</button>
+                      <button type="button" data-testid={`nodegraph-group-toggle-${group.id}`}
+                        onClick={() => updateGroup(group.id, { collapsed: !group.collapsed }, group.collapsed ? "Expandir grupo" : "Recolher grupo")}
+                        className="rounded px-1 text-[#a6adc8] hover:bg-[#313244]">{group.collapsed ? "Expandir" : "Recolher"}</button>
+                      <button type="button" data-testid={`nodegraph-group-remove-${group.id}`} onClick={() => removeGroup(group.id)}
+                        className="rounded px-1 text-[#f38ba8] hover:bg-[#313244]" title="Desfaz o grupo (os nos continuam no grafo)">×</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {entityIndex.length > 0 && (
+              <div data-testid="nodegraph-entity-nav" className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5 text-[10px]">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">Entidades no grafo</p>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {entityIndex.map(([entityId, nodeIds]) => (
+                    <button
+                      key={entityId}
+                      type="button"
+                      data-testid={`nodegraph-entity-${entityId}`}
+                      onClick={() => {
+                        setSelectedIds(new Set(nodeIds));
+                        focusNode(nodeIds[0]);
+                        logMessage("info", `[NodeGraph] ${nodeIds.length} no(s) afetam ${entityId}.`);
+                      }}
+                      className="rounded border border-[#94e2d5]/40 px-1.5 py-0.5 text-[#94e2d5] hover:bg-[#94e2d5]/15"
+                    >
+                      {entityId} <span className="text-[#6c7086]">({nodeIds.length})</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <details data-testid="nodegraph-input-help" className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5 text-[10px]">
+              <summary className="cursor-pointer text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">Botoes do Mega Drive × teclado</summary>
+              <table className="mt-1 w-full text-left">
+                <thead><tr className="text-[#6c7086]"><th className="font-normal">Controle</th><th className="font-normal">Tecla no app</th></tr></thead>
+                <tbody>
+                  {MEGADRIVE_INPUT_BUTTONS.map((value) => {
+                    const described = describeInputButton(value);
+                    return (
+                      <tr key={value} data-testid={`nodegraph-input-map-${value}`}>
+                        <td className="text-[#cdd6f4]">{described.padLabel}</td>
+                        <td className="font-mono text-[#f9e2af]">{described.keyLabel ?? "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <ul className="mt-1 space-y-0.5">
+                {INPUT_MODE_HELP.map((mode) => (
+                  <li key={mode.mode} className={mode.supported ? "text-[#a6adc8]" : "text-[#fab387]"}>
+                    <span className="font-semibold">{mode.label}:</span> {mode.text}
+                  </li>
+                ))}
+              </ul>
+            </details>
+
+            <RulesPanel
+              graph={graph}
+              sfxNames={Object.keys(sceneSfx).sort()}
+              onFocusNode={(nodeId) => focusNode(nodeId)}
+              onParamChange={onParamChange}
+              onSoundChange={(nodeId, sfx) =>
+                setGraph(
+                  (g) => ({ ...g, nodes: g.nodes.map((node) => (node.id === nodeId ? { ...node, params: { ...node.params, sfx } } : node)) }),
+                  "Trocar som"
+                )
+              }
+            />
             <PassagePanel
               graph={graph}
               entityIds={(activeScene?.entities ?? []).map((entity) => entity.entity_id)}
-              onGraphChange={setGraph}
+              onGraphChange={(next) => setGraph(next, "Editar passagem", "passage-panel")}
             />
             <SoundPanel
               graph={graph}
-              sfx={Object.assign({}, ...(activeScene?.entities ?? []).map((entity) => entity.components.audio?.sfx ?? {}))}
+              sfx={sceneSfx}
               projectDir={activeProjectDir ?? null}
-              onGraphChange={setGraph}
+              onGraphChange={(next) => setGraph(next, "Trocar som")}
             />
             {hardwareFeedback.length > 0 ? (
               <div
@@ -3449,16 +4150,19 @@ export default function NodeGraphEditor() {
               >
                 Resetar Vista
               </button>
-              <button
-                type="button"
-                data-testid="nodegraph-chain-exec-layout"
-                onClick={applyExecChainFromLayout}
-                disabled={graph.nodes.length < 2}
-                title="Liga saida exec padrao para entrada exec do proximo no na ordem de layout (y, depois x). Atalho de autoracao — revise ramos condicionais."
-                className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Encadear exec (layout)
-              </button>
+              <div className="w-full rounded border border-[#fab387]/40 bg-[#fab387]/5 px-2 py-1.5">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#fab387]">Acao que cria conexoes (altera a logica)</p>
+                <button
+                  type="button"
+                  data-testid="nodegraph-chain-exec-layout"
+                  onClick={applyExecChainFromLayout}
+                  disabled={graph.nodes.length < 2}
+                  title="Liga saida exec padrao para entrada exec do proximo no na ordem de layout (y, depois x). Diferente de Organizar: CRIA conexoes. Revise ramos condicionais; Desfazer reverte."
+                  className="mt-1 rounded border border-[#fab387]/50 bg-[#fab387]/10 px-2 py-1 font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Criar conexoes pela posicao
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={handleFocusSelectedEntityInScene}
@@ -3490,107 +4194,204 @@ export default function NodeGraphEditor() {
           </aside>
         )}
 
-        {/* Background group boxes */}
-        {groupBoxes.map((group) => (
-          <div
-            key={`group-${group.categoryId}`}
-            data-testid={`nodegraph-group-box-${group.categoryId}`}
-            className="absolute rounded-2xl border text-[10px] font-semibold uppercase tracking-[0.14em]"
-            style={{
-              left: group.x * view.zoom + view.x,
-              top: group.y * view.zoom + view.y,
-              width: group.width * view.zoom,
-              height: group.height * view.zoom,
-              borderColor: `${group.color}55`,
-              backgroundColor: `${group.color}12`,
-              color: group.color,
-              zIndex: 0,
-              pointerEvents: group.pointerEvents,
-            }}
-          >
-            <span className="absolute left-3 top-2 rounded bg-[#11111b]/80 px-2 py-0.5">
-              {group.label}
-            </span>
-          </div>
-        ))}
+        {/* Grupos nomeaveis (comportamentos) */}
+        {groupBoxes.map((box) => {
+          const left = box.x * view.zoom + view.x;
+          const top = box.y * view.zoom + view.y;
+          return (
+            <div
+              key={`group-${box.groupId}`}
+              data-testid={`nodegraph-group-box-${box.groupId}`}
+              data-collapsed={box.collapsed ? "true" : "false"}
+              className="absolute rounded-2xl border"
+              style={{
+                left,
+                top,
+                width: box.width * view.zoom,
+                height: box.height * view.zoom,
+                borderColor: `${box.color}66`,
+                backgroundColor: box.collapsed ? "#181825f2" : `${box.color}10`,
+                zIndex: box.collapsed ? 2 : 0,
+                pointerEvents: "none",
+              }}
+            >
+              <div
+                data-testid={`nodegraph-group-header-${box.groupId}`}
+                className="flex cursor-grab items-center gap-1.5 rounded-t-2xl px-2 text-[11px] font-semibold"
+                style={{ height: 26 * view.zoom, color: box.color, pointerEvents: "auto", fontSize: Math.max(9, 11 * view.zoom) }}
+                onMouseDown={(event) => onGroupHeaderMouseDown(event, box)}
+                title="Arraste para mover o grupo inteiro (so posicoes)"
+              >
+                <button
+                  type="button"
+                  data-testid={`nodegraph-group-collapse-${box.groupId}`}
+                  onClick={() => updateGroup(box.groupId, { collapsed: !box.collapsed }, box.collapsed ? `Expandir "${box.label}"` : `Recolher "${box.label}"`)}
+                  className="rounded px-1 hover:bg-[#313244]"
+                  aria-label={box.collapsed ? `Expandir grupo ${box.label}` : `Recolher grupo ${box.label}`}
+                >
+                  {box.collapsed ? "▸" : "▾"}
+                </button>
+                <Icon name="group" size={12} />
+                <span className="truncate">{box.label}</span>
+              </div>
+              {box.collapsed ? (
+                <p className="px-3 text-[10px] text-[#a6adc8]" style={{ fontSize: Math.max(8, 10 * view.zoom) }}>
+                  {box.nodeIds.length} no(s) recolhido(s) · logica intacta
+                </p>
+              ) : null}
+            </div>
+          );
+        })}
 
         {/* SVG edges */}
         <svg
           ref={svgRef}
+          data-testid="nodegraph-edges"
           className="absolute inset-0 z-[1] h-full w-full pointer-events-none"
         >
-          {graph.edges.map((edge) => {
-            const from = graph.nodes.find((n) => n.id === edge.fromNode);
-            const to   = graph.nodes.find((n) => n.id === edge.toNode);
-            if (!from || !to) return null;
-            const hovered = hoveredEdgeId === edge.id;
-            const active = activeEdgeId === edge.id;
-            return (
-              <path
-                key={edge.id}
-                data-testid={`nodegraph-edge-${edge.id}`}
-                data-hovered={hovered ? "true" : undefined}
-                data-active={active ? "true" : undefined}
-                d={edgePath(from, to)}
-                fill="none"
-                stroke={active ? "#f9e2af" : hovered ? "#89b4fa" : "#a6e3a1"}
-                strokeWidth={hovered || active ? 3 : 1.5}
-                strokeOpacity={hovered || active ? 0.95 : 0.7}
-                style={{ pointerEvents: "stroke" }}
-                ref={(element) => {
-                  if (!element) {
-                    return;
-                  }
-                  element.onpointerenter = () => setHoveredEdgeId(edge.id);
-                  element.onmouseenter = () => setHoveredEdgeId(edge.id);
-                }}
-                onPointerEnter={() => setHoveredEdgeId(edge.id)}
-                onPointerOver={() => setHoveredEdgeId(edge.id)}
-                onPointerLeave={() => setHoveredEdgeId((current) => (current === edge.id ? null : current))}
-                onMouseEnter={() => setHoveredEdgeId(edge.id)}
-                onMouseOver={() => setHoveredEdgeId(edge.id)}
-                onMouseLeave={() => setHoveredEdgeId((current) => (current === edge.id ? null : current))}
-                onPointerDown={() => setActiveEdgeId(edge.id)}
-              />
-            );
-          })}
-          {/* Pending edge preview */}
+          {(() => {
+            const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+            const collapsedBoxOf = new Map<string, NodeGraphGroupBox>();
+            for (const box of groupBoxes) if (box.collapsed) for (const id of box.nodeIds) collapsedBoxOf.set(id, box);
+            const anchor = (node: GraphNode, portId: string, output: boolean) => {
+              const box = collapsedBoxOf.get(node.id);
+              if (box) return { x: output ? box.x + box.width : box.x, y: box.y + 13 };
+              return getPortAnchor(node, portId, output, cardMetrics[node.id]);
+            };
+            return graph.edges.map((edge) => {
+              const from = byId.get(edge.fromNode);
+              const to = byId.get(edge.toNode);
+              if (!from || !to) return null;
+              const fromBox = collapsedBoxOf.get(from.id);
+              if (fromBox && fromBox === collapsedBoxOf.get(to.id)) return null; // interna a um grupo recolhido
+              const fromPort = from.outputs.find((port) => port.id === edge.fromPort);
+              const kind = fromPort ? getPortVisualKind(fromPort) : "exec";
+              const a = toScreen(anchor(from, edge.fromPort, true));
+              const b = toScreen(anchor(to, edge.toPort, false));
+              const detour = Math.max(
+                (from.y + nodeSizeOf(from).height) * view.zoom + view.y,
+                (to.y + nodeSizeOf(to).height) * view.zoom + view.y
+              ) + 18 * view.zoom;
+              const hovered = hoveredEdgeId === edge.id;
+              const active = activeEdgeId === edge.id;
+              const color = active ? "#f9e2af" : PORT_VISUAL_COLORS[kind];
+              return (
+                <g key={edge.id}>
+                  <path
+                    data-testid={`nodegraph-edge-${edge.id}`}
+                    data-edge-kind={kind}
+                    data-from-node={edge.fromNode}
+                    data-from-port={edge.fromPort}
+                    data-to-node={edge.toNode}
+                    data-to-port={edge.toPort}
+                    data-collapsed-end={fromBox || collapsedBoxOf.get(to.id) ? "true" : undefined}
+                    data-hovered={hovered ? "true" : undefined}
+                    data-active={active ? "true" : undefined}
+                    data-from-x={a.x.toFixed(1)}
+                    data-from-y={a.y.toFixed(1)}
+                    data-to-x={b.x.toFixed(1)}
+                    data-to-y={b.y.toFixed(1)}
+                    d={routeEdgePath(a, b, detour)}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth={hovered || active ? 3 : kind === "data" ? 1.5 : 2}
+                    strokeDasharray={kind === "data" ? "5 4" : undefined}
+                    strokeOpacity={hovered || active ? 0.95 : 0.8}
+                    style={{ pointerEvents: "stroke" }}
+                    ref={(element) => {
+                      if (!element) {
+                        return;
+                      }
+                      element.onpointerenter = () => setHoveredEdgeId(edge.id);
+                      element.onmouseenter = () => setHoveredEdgeId(edge.id);
+                    }}
+                    onPointerEnter={() => setHoveredEdgeId(edge.id)}
+                    onPointerOver={() => setHoveredEdgeId(edge.id)}
+                    onPointerLeave={() => setHoveredEdgeId((current) => (current === edge.id ? null : current))}
+                    onMouseEnter={() => setHoveredEdgeId(edge.id)}
+                    onMouseOver={() => setHoveredEdgeId(edge.id)}
+                    onMouseLeave={() => setHoveredEdgeId((current) => (current === edge.id ? null : current))}
+                    onPointerDown={() => setActiveEdgeId(edge.id)}
+                  />
+                  {kind === "true" || kind === "false" ? (
+                    <text
+                      x={a.x + 8 * view.zoom}
+                      y={a.y - 5 * view.zoom}
+                      fill={color}
+                      fontSize={Math.max(8, 10 * view.zoom)}
+                      fontWeight={700}
+                    >
+                      {kind === "true" ? "Sim" : "Nao"}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            });
+          })()}
+          {/* Pending edge preview (ima: gruda na entrada compativel mais proxima) */}
           {pendingEdge && (() => {
             const from = graph.nodes.find((n) => n.id === pendingEdge.fromNode);
             if (!from) return null;
             const rect = canvasRef.current?.getBoundingClientRect();
-            const ox = rect ? pendingEdge.x - rect.left : pendingEdge.x;
-            const oy = rect ? pendingEdge.y - rect.top  : pendingEdge.y;
-            const x1 = from.x * view.zoom + view.x + NODE_CARD_WIDTH * view.zoom;
-            const y1 = from.y * view.zoom + view.y + 24 * view.zoom;
+            const a = toScreen(getPortAnchor(from, pendingEdge.fromPort, true, cardMetrics[from.id]));
+            const snapNode = snapTarget ? graph.nodes.find((n) => n.id === snapTarget.nodeId) : null;
+            const b = snapNode && snapTarget
+              ? toScreen(getPortAnchor(snapNode, snapTarget.portId, false, cardMetrics[snapNode.id]))
+              : { x: rect ? pendingEdge.x - rect.left : pendingEdge.x, y: rect ? pendingEdge.y - rect.top : pendingEdge.y };
             return (
               <path
-                d={`M ${x1} ${y1} C ${(x1+ox)/2} ${y1}, ${(x1+ox)/2} ${oy}, ${ox} ${oy}`}
+                data-testid="nodegraph-pending-edge"
+                data-snapped={snapTarget ? "true" : "false"}
+                d={routeEdgePath(a, b)}
                 fill="none"
-                stroke="#cba6f7"
-                strokeWidth={1.5}
-                strokeDasharray="4 3"
+                stroke={snapTarget ? "#f9e2af" : "#cba6f7"}
+                strokeWidth={snapTarget ? 2.5 : 1.5}
+                strokeDasharray={snapTarget ? undefined : "4 3"}
               />
             );
           })()}
         </svg>
 
+        {pendingEdge && (
+          <div
+            data-testid="nodegraph-connect-hint"
+            className="pointer-events-none absolute left-1/2 top-12 z-30 -translate-x-1/2 rounded border border-[#f9e2af]/50 bg-[#11111b]/95 px-3 py-1 text-[11px] text-[#f9e2af]"
+          >
+            {snapTarget
+              ? `Solte para ligar em "${getNodeDisplayName(graph.nodes.find((n) => n.id === snapTarget.nodeId)?.type ?? "event_start")}" · Esc cancela`
+              : "Aproxime de uma entrada compativel (destacada) · Esc cancela"}
+          </div>
+        )}
+
         {/* Nodes */}
-        {graph.nodes.map((node) => (
-          <NodeCard
-            key={node.id}
-            node={node}
-            screenX={node.x * view.zoom + view.x}
-            screenY={node.y * view.zoom + view.y}
-            zoom={view.zoom}
-            selected={node.id === selectedId}
-            executionReachable={reachableExecutionNodeIds.has(node.id)}
-            onMouseDown={(e) => onNodeMouseDown(e, node.id)}
-            onPortMouseDown={(e, portId, isOutput) => onPortMouseDown(e, node.id, portId, isOutput)}
-            onPortMouseUp={(e, portId, isOutput) => onPortMouseUp(e, node.id, portId, isOutput)}
-            onParamChange={onParamChange}
-          />
-        ))}
+        {graph.nodes.map((node) =>
+          hiddenNodeIds.has(node.id) ? null : (
+            <NodeCard
+              key={node.id}
+              node={node}
+              screenX={node.x * view.zoom + view.x}
+              screenY={node.y * view.zoom + view.y}
+              zoom={view.zoom}
+              selected={node.id === selectedId || selectedIds.has(node.id)}
+              executionReachable={reachableExecutionNodeIds.has(node.id)}
+              entity={nodeCardEntity(node)}
+              projectDir={activeProjectDir}
+              detailsOpen={openDetails.has(node.id)}
+              snapPortKey={snapTarget?.nodeId === node.id ? `in:${snapTarget.portId}` : null}
+              compatiblePortIds={
+                pendingEdge
+                  ? new Set(node.inputs.filter((port) => checkConnection(graph, pendingEdge.fromNode, pendingEdge.fromPort, node.id, port.id).ok).map((port) => port.id))
+                  : null
+              }
+              onMouseDown={(e) => onNodeMouseDown(e, node.id)}
+              onPortMouseDown={(e, portId, isOutput) => onPortMouseDown(e, node.id, portId, isOutput)}
+              onPortMouseUp={(e, portId, isOutput) => onPortMouseUp(e, node.id, portId, isOutput)}
+              onParamChange={onParamChange}
+              onToggleDetails={toggleDetails}
+              onMeasure={onCardMeasure}
+            />
+          )
+        )}
 
         {selectedEntity && graph.nodes.length > 0 && (
           <div

@@ -10,6 +10,7 @@ import {
   EMPTY_GRAPH,
   cloneGraph,
   isNodeEdge,
+  isNodeGraphGroup,
   isNodePort,
   isNodeType,
   isRecord,
@@ -457,6 +458,7 @@ function hydrateGraphNode(value: unknown, index: number): GraphNode | null {
     inputs,
     outputs,
     params: coerceNodeParams(value.type, value.params),
+    ...(value.pinned === true ? { pinned: true } : {}),
   };
 }
 
@@ -503,8 +505,16 @@ export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
 
     const nodeById = new Map(hydratedNodes.map((node) => [node.id, node]));
     const validEdges = rawEdges.filter((edge) => edgeConnectsValidPorts(edge, nodeById));
+    const groups = (Array.isArray(parsed.groups) ? parsed.groups : [])
+      .filter(isNodeGraphGroup)
+      .map((group) => ({ ...group, nodeIds: group.nodeIds.filter((id) => nodeById.has(id)) }))
+      .filter((group) => group.nodeIds.length > 0);
 
-    return cloneGraph({ nodes: hydratedNodes, edges: validEdges });
+    return cloneGraph({
+      nodes: hydratedNodes,
+      edges: validEdges,
+      ...(groups.length > 0 ? { groups } : {}),
+    });
   } catch {
     return cloneGraph(EMPTY_GRAPH);
   }

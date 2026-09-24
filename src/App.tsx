@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { dispatchGraphHistory } from "./core/nodegraph/graphHistory";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Group,
@@ -1895,10 +1896,10 @@ export default function App() {
         void handleGenerateC();
         break;
       case "edit.undo":
-        undo();
+        if (!dispatchGraphHistory("undo")) undo();
         break;
       case "edit.redo":
-        redo();
+        if (!dispatchGraphHistory("redo")) redo();
         break;
       case "layout.focus":
         toggleFocusMode();
@@ -5732,7 +5733,7 @@ function GuidedStepBar({
         window.setTimeout(() => document.querySelector("[data-testid='nodegraph-sounds']")?.scrollIntoView({ block: "center" }), 50);
       },
     },
-    { id: "testar", label: "Testar", hint: "Compilar e jogar pelo teclado (setas, Z pula)", run: onTest },
+    { id: "testar", label: "Testar", hint: "Compilar e jogar pelo teclado (setas; botoes e teclas em Regras)", run: onTest },
   ];
   const current: GuidedStepId | null =
     lastStep === "sons" && activeWorkspace === "logic"

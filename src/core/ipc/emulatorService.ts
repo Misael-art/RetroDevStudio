@@ -310,6 +310,31 @@ const SNES_KEY_MAP: Record<string, keyof JoypadState> = {
   ShiftRight: "select",
 };
 
+/** Botao do Mega Drive (como o SGDK o nomeia, sem o prefixo `BUTTON_`). */
+export type MegadriveButton = "A" | "B" | "C" | "START" | "UP" | "DOWN" | "LEFT" | "RIGHT";
+
+/** RetroPad → botao do Mega Drive, conforme o core Genesis Plus GX (ver comentario acima). */
+const MEGADRIVE_RETROPAD_TO_BUTTON: Partial<Record<keyof JoypadState, MegadriveButton>> = {
+  y: "A",
+  b: "B",
+  a: "C",
+  start: "START",
+  up: "UP",
+  down: "DOWN",
+  left: "LEFT",
+  right: "RIGHT",
+};
+
+/**
+ * Teclas do teclado que chegam ao jogo como `button` no Mega Drive. Derivado do mesmo
+ * `MEGADRIVE_KEY_MAP` usado pela Game View, para a UI nunca divergir do core.
+ */
+export function megadriveKeyboardKeysForButton(button: MegadriveButton): string[] {
+  return Object.entries(MEGADRIVE_KEY_MAP)
+    .filter(([, retroPad]) => MEGADRIVE_RETROPAD_TO_BUTTON[retroPad] === button)
+    .map(([key]) => key);
+}
+
 export function keyToJoypad(
   current: JoypadState,
   key: string,

@@ -1,16 +1,30 @@
 import type { GraphNode, NodeGraph } from "./nodeTypes";
 
 /**
- * Read-only "Quando → Se → Fazer" view of the canonical graph. It never edits or rewrites
- * logic: each rule starts at an event node and follows exec edges. Branches whose "senão"
- * side also has actions, loops or unknown node types mark the rule as advanced; the text
- * then shows only the main path and says so, while the graph keeps the full logic.
+ * "Quando → Se → Fazer" view of the canonical graph. The summary itself never rewrites
+ * logic: each rule starts at an event node and follows exec edges. Items carry their
+ * `nodeId` so the UI can edit the node's own params in place. A "senão" side that is a
+ * simple chain of actions is listed in `elseBranches` (never hidden). Loops, fan-out,
+ * conditions nested inside a "senão" and node types without a simple form mark the rule
+ * as advanced; the graph keeps the full logic and stays the place to edit those cases.
  */
+export type RuleItem = { text: string; nodeId: string };
+
+export type RuleElseBranch = {
+  /** Condition whose "Nao" side this is. */
+  condition: string;
+  conditionNodeId: string;
+  actions: RuleItem[];
+};
+
 export type RuleSummary = {
   id: string;
   when: string;
   conditions: string[];
   actions: string[];
+  conditionItems: RuleItem[];
+  actionItems: RuleItem[];
+  elseBranches: RuleElseBranch[];
   advanced: string | null;
   nodeIds: string[];
 };
@@ -83,6 +97,16 @@ function describeAction(graph: NodeGraph, node: GraphNode): string | null {
       return `${node.params.action === "stop" ? "parar" : "tocar"} música ${node.params.track ?? ""}`.trim();
     case "destroy_entity":
       return `esconder ${node.params.target}`;
+    case "set_position":
+      return `colocar ${node.params.target} em (${node.params.x}, ${node.params.y})`;
+    case "spawn_entity":
+      return `criar ${node.params.prefab} em (${node.params.x}, ${node.params.y})`;
+    case "set_animation_state":
+      return `animação de ${node.params.target}: ${node.params.state}`;
+    case "sprite_anim":
+      return `animação de ${node.params.target}: ${node.params.anim}`;
+    case "camera_follow":
+      return `câmera segue ${node.params.target}`;
     case "var_set": {
       const value = dataSource(graph, node.id, "value") ?? String(node.params.value ?? "0");
       return `${node.params.var_name} = ${value}`;
@@ -98,9 +122,53 @@ export function summarizeRules(graph: NodeGraph): RuleSummary[] {
     graph.edges.filter((edge) => edge.fromNode === nodeId && edge.fromPort === port);
   const rules: RuleSummary[] = [];
   for (const event of graph.nodes.filter((node) => node.type in EVENT_LABELS)) {
-    const rule: RuleSummary = { id: event.id, when: EVENT_LABELS[event.type], conditions: [], actions: [], advanced: null, nodeIds: [event.id] };
+    const rule: RuleSummary = {
+      id: event.id,
+      when: EVENT_LABELS[event.type],
+      conditions: [],
+      actions: [],
+      conditionItems: [],
+      actionItems: [],
+      elseBranches: [],
+      advanced: null,
+      nodeIds: [event.id],
+    };
     const visited = new Set<string>([event.id]);
+    const pushAction = (node: GraphNode, into: RuleItem[]) => {
+      const action = describeAction(graph, node);
+      if (action === null) {
+        rule.advanced ??= `nó "${node.label}" não tem forma simples`;
+      }
+      into.push({ text: action ?? node.label, nodeId: node.id });
+    };
+    /** Follows a "senão" side; only a straight chain of actions has a simple form. */
+    const followElse = (start: string, condition: string, conditionNodeId: string) => {
+      const branch: RuleElseBranch = { condition, conditionNodeId, actions: [] };
+      let next = execFrom(start, "false");
+      while (next.length > 0) {
+        if (next.length > 1) rule.advanced ??= "vários caminhos a partir do mesmo ponto";
+        const node = byId.get(next[0].toNode);
+        if (!node) break;
+        if (visited.has(node.id)) {
+          // Joining the main path again (e.g. both sides move the player) is not a loop.
+          if (!rule.nodeIds.includes(node.id)) rule.advanced ??= "laço de execução";
+          if (rule.nodeIds.includes(node.id)) branch.actions.push({ text: `continua em "${describeAction(graph, node) ?? node.label}"`, nodeId: node.id });
+          break;
+        }
+        visited.add(node.id);
+        rule.nodeIds.push(node.id);
+        if (describeCondition(graph, node) !== null) {
+          rule.advanced ??= `o caminho "senão" de "${condition}" tem outra condição`;
+          branch.actions.push({ text: node.label, nodeId: node.id });
+          break;
+        }
+        pushAction(node, branch.actions);
+        next = execFrom(node.id, "exec");
+      }
+      rule.elseBranches.push(branch);
+    };
     let next = execFrom(event.id, "exec");
+    const pendingElse: Array<{ nodeId: string; condition: string }> = [];
     while (next.length > 0) {
       if (next.length > 1) rule.advanced ??= "vários caminhos a partir do mesmo ponto";
       const node = byId.get(next[0].toNode);
@@ -115,27 +183,24 @@ export function summarizeRules(graph: NodeGraph): RuleSummary[] {
       if (condition !== null) {
         const onTrue = execFrom(node.id, "true").concat(execFrom(node.id, "exec"));
         const onFalse = execFrom(node.id, "false");
-        if (onTrue.length > 0 && onFalse.length > 0) {
-          rule.advanced ??= `a condição "${condition}" também tem um caminho "senão"`;
-        }
         if (onTrue.length === 0 && onFalse.length > 0) {
           rule.conditions.push(`não (${condition})`);
+          rule.conditionItems.push({ text: `não (${condition})`, nodeId: node.id });
           next = onFalse;
         } else {
           rule.conditions.push(condition);
+          rule.conditionItems.push({ text: condition, nodeId: node.id });
+          if (onFalse.length > 0) pendingElse.push({ nodeId: node.id, condition });
           next = onTrue;
         }
         continue;
       }
-      const action = describeAction(graph, node);
-      if (action === null) {
-        rule.advanced ??= `nó "${node.label}" não tem forma simples`;
-        rule.actions.push(node.label);
-      } else {
-        rule.actions.push(action);
-      }
+      pushAction(node, rule.actionItems);
       next = execFrom(node.id, "exec");
     }
+    // "Senão" sides are read after the main path so a side that rejoins it is recognized.
+    for (const branch of pendingElse) followElse(branch.nodeId, branch.condition, branch.nodeId);
+    rule.actions = rule.actionItems.map((item) => item.text);
     rules.push(rule);
   }
   return rules;

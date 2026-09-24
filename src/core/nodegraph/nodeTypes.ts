@@ -67,6 +67,22 @@ export interface GraphNode {
   inputs: NodePort[];
   outputs: NodePort[];
   params: Record<string, string | number>;
+  /**
+   * Posicao fixada pelo autor: "Organizar" nunca move este no. Metadado visual,
+   * ignorado pelo compilador (nao altera a logica).
+   */
+  pinned?: boolean;
+}
+
+/**
+ * Grupo nomeavel por comportamento (ex.: "Pulo"). Metadado visual: agrupar,
+ * renomear, recolher ou arrastar o grupo nunca altera nos, portas ou arestas.
+ */
+export interface NodeGraphGroup {
+  id: string;
+  label: string;
+  nodeIds: string[];
+  collapsed?: boolean;
 }
 
 export interface NodeEdge {
@@ -80,6 +96,8 @@ export interface NodeEdge {
 export interface NodeGraph {
   nodes: GraphNode[];
   edges: NodeEdge[];
+  /** Grupos visuais opcionais (ver `NodeGraphGroup`). */
+  groups?: NodeGraphGroup[];
 }
 
 export const EMPTY_GRAPH: NodeGraph = {
@@ -167,11 +185,26 @@ export function isNodeEdge(value: unknown): value is NodeEdge {
 }
 
 
-/** Serializacao v1: formato estavel { version: 1, nodes, edges }. */
+export function isNodeGraphGroup(value: unknown): value is NodeGraphGroup {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.label === "string" &&
+    Array.isArray(value.nodeIds) &&
+    value.nodeIds.every((id) => typeof id === "string") &&
+    (value.collapsed === undefined || typeof value.collapsed === "boolean")
+  );
+}
+
+/**
+ * Serializacao v1: formato estavel { version: 1, nodes, edges }, mais `groups`
+ * somente quando existirem (grafos sem grupos mantem o texto anterior).
+ */
 export function serializeNodeGraph(graph: NodeGraph): string {
   return JSON.stringify({
     version: 1,
     nodes: structuredClone(graph.nodes),
     edges: structuredClone(graph.edges),
+    ...(graph.groups && graph.groups.length > 0 ? { groups: structuredClone(graph.groups) } : {}),
   });
 }
