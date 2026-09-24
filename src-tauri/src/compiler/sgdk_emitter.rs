@@ -1065,12 +1065,24 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
         out.push_str(&format!(
             "        if ({next_y_var} > {bottom}) {{ {next_y_var} = {bottom}; {var_name}_vel_y = 0; {var_name}_on_ground = 1; }}\n"
         ));
+        // Apoio real: parado sobre um solido (ou no fundo do mapa) conta como apoiado em todo
+        // quadro, nao so nos quadros em que a gravidade acumulada provoca o encaixe.
+        out.push_str(&format!(
+            "        if ({var_name}_vel_y >= 0 && ({next_y_var} >= {bottom} || rds_solid_at({next_x_var} + {half_w}, {next_y_var} + {body_h}))) {var_name}_on_ground = 1;\n",
+            half_w = body_w / 2,
+        ));
         out.push_str(&format!(
             "        if ({next_x_var} != {var_name}_x && rds_hits_wall({next_x_var}, {var_name}_y, {body_w}, {body_h}, {next_x_var} - {var_name}_x)) {{ {next_x_var} = {var_name}_x; {var_name}_vel_x = 0; }}\n"
         ));
     } else if let Some(floor_y) = physics.floor_y {
         out.push_str(&format!(
             "        if ({next_y_var} > {floor_y}) {{ {next_y_var} = {floor_y}; {var_name}_vel_y = 0; {var_name}_on_ground = 1; }}\n",
+            next_y_var = next_y_var,
+            floor_y = floor_y,
+            var_name = physics.var_name
+        ));
+        out.push_str(&format!(
+            "        if ({var_name}_vel_y >= 0 && {next_y_var} >= {floor_y}) {var_name}_on_ground = 1;\n",
             next_y_var = next_y_var,
             floor_y = floor_y,
             var_name = physics.var_name

@@ -5095,6 +5095,43 @@ mod tests {
         assert!(c.contains("static u8 spr_fox_on_ground = 0;"), "{c}");
         assert!(c.contains("spr_fox__fox_2_on_ground = 0;\n"), "{c}");
         assert!(!c.contains("(spr_fox_on_ground)"), "{c}");
+
+        // Com mapa de colisao: apoio = solido logo abaixo dos pes em todo quadro (nao so
+        // no quadro do encaixe), para uma pressao de salto nunca cair num quadro "sem chao".
+        let mut map = crate::ugdm::entities::CollisionMap::empty(8, 8, 40, 28);
+        for col in 0..40 {
+            map.data[26 * 40 + col] = 1;
+        }
+        let map_data = map.data.clone();
+        let emit_with = |scene: &Scene| {
+            crate::compiler::sgdk_emitter::emit_sgdk_with_collision(
+                &generate_ast(&project, scene),
+                &project.name,
+                Some(&map_data),
+            )
+            .main_c
+        };
+        let mut floor_scene = scene.clone();
+        floor_scene.collision_map = Some(map.clone());
+        // Mapa + colisao: apoio = solido logo abaixo dos pes em todo quadro (nao so no
+        // quadro do encaixe), para uma pressao de salto nunca cair num quadro "sem chao".
+        let mut tile_scene = floor_scene.clone();
+        for entity in &mut tile_scene.entities {
+            entity.components.collision = Some(crate::ugdm::components::CollisionComponent {
+                shape: "aabb".to_string(),
+                width: 16,
+                height: 16,
+                offset: None,
+                solid: true,
+                layer: None,
+                collides_with: vec!["ground".to_string()],
+            });
+        }
+        let grounded = emit_with(&tile_scene);
+        assert!(
+            grounded.contains("|| rds_solid_at(spr_fox__fox_2_next_x + 8, spr_fox__fox_2_next_y + 16))) spr_fox__fox_2_on_ground = 1;"),
+            "{grounded}"
+        );
     }
 
     #[test]
