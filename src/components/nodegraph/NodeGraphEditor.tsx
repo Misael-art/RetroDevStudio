@@ -1535,8 +1535,8 @@ function NodeCard({
       data-x={node.x}
       data-y={node.y}
       data-execution-reachable={executionReachable ? "true" : undefined}
-      className={`absolute z-[2] select-none rounded-xl border bg-slate-900/95 shadow-lg ${
-        selected ? "ring-2 ring-blue-500 shadow-2xl" : ""
+      className={`absolute select-none rounded-xl border bg-slate-900/95 shadow-lg ${
+        selected ? "z-[3] ring-2 ring-blue-500 shadow-2xl" : "z-[2]"
       } ${executionReachable ? "ring-2 ring-[#a6e3a1] shadow-[0_0_24px_rgba(166,227,161,0.22)]" : ""} ${editable ? "" : "opacity-80"}`}
       style={{
         left: screenX,
