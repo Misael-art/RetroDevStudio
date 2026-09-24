@@ -1435,15 +1435,19 @@ function NodeCard({
   useLayoutEffect(() => {
     const card = cardRef.current;
     if (!card || card.offsetWidth === 0) return;
-    const cardRect = card.getBoundingClientRect();
-    const scale = cardRect.width / card.offsetWidth || 1;
+    // Unidades de layout (offset*): independem do zoom do canvas, da escala da pagina e
+    // da rotacao das portas de execucao.
     const ports: NodeCardMetrics["ports"] = {};
     card.querySelectorAll<HTMLElement>("[data-port-key]").forEach((element) => {
-      const rect = element.getBoundingClientRect();
-      ports[element.dataset.portKey!] = {
-        x: Math.round((rect.left + rect.width / 2 - cardRect.left) / scale),
-        y: Math.round((rect.top + rect.height / 2 - cardRect.top) / scale),
-      };
+      let x = element.offsetWidth / 2 + card.clientLeft;
+      let y = element.offsetHeight / 2 + card.clientTop;
+      let current: HTMLElement | null = element;
+      while (current && current !== card) {
+        x += current.offsetLeft;
+        y += current.offsetTop;
+        current = current.offsetParent as HTMLElement | null;
+      }
+      if (current === card) ports[element.dataset.portKey!] = { x: Math.round(x), y: Math.round(y) };
     });
     measureRef.current(node.id, { width: card.offsetWidth, height: card.offsetHeight, ports });
   });
