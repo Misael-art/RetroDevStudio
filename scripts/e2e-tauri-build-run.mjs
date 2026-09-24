@@ -6523,8 +6523,8 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   await pause(700);
   await js(`
     const shell = document.querySelector('[data-testid="nodegraph-canvas-shell"]');
-    const r = shell.getBoundingClientRect();
-    for (let i = 0; i < 10; i += 1) shell.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 200, deltaY: -160 }));
+    const r = document.querySelector('[data-testid="node-card-score_threshold"]').getBoundingClientRect();
+    for (let i = 0; i < 10; i += 1) shell.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: r.top + r.height / 2, deltaY: -160 }));
   `);
   await pause(500);
   layouts["zoom-in"] = { geometry: await geometry("zoom ampliado") };
