@@ -6326,7 +6326,8 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
         const a = cards[i].r, b = cards[j].r;
         if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) overlaps.push([cards[i].id, cards[j].id]);
       }
-      const inv = svg.getScreenCTM().inverse();
+      const svgRect = svg.getBoundingClientRect();
+      const k = svgRect.width / Math.max(1, svg.clientWidth);
       let checked = 0, skippedOffscreen = 0, maxDeviation = 0, worst = null;
       for (const pathEl of svg.querySelectorAll('path[data-from-node]')) {
         if (pathEl.dataset.collapsedEnd) continue;
@@ -6337,14 +6338,15 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
           const r = portEl.getBoundingClientRect();
           // Only ends the user can see: off-window points are not compared (under page zoom WebKit mixes coordinate spaces there).
           if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) { skippedOffscreen += 1; continue; }
-          const p = new DOMPoint(r.left + r.width / 2, r.top + r.height / 2).matrixTransform(inv);
+          // Port centre mapped back to SVG user units (layout px) using the page scale k.
+          const p = { x: (r.left + r.width / 2 - svgRect.left) / k, y: (r.top + r.height / 2 - svgRect.top) / k };
           const deviation = Math.hypot(p.x - Number(pathEl.dataset[end + "X"]), p.y - Number(pathEl.dataset[end + "Y"]));
           checked += 1;
           if (deviation > maxDeviation) { const card = portEl.closest('[data-testid^="node-card-"]'); maxDeviation = deviation; worst = { edge: pathEl.dataset.testid, end, deviation, port: [p.x, p.y], wire: [Number(pathEl.dataset[end + "X"]), Number(pathEl.dataset[end + "Y"])], card: card ? { x: card.dataset.x, y: card.dataset.y, left: card.style.left, top: card.style.top, h: card.offsetHeight } : null, shellScroll: [document.querySelector('[data-testid="nodegraph-canvas-shell"]').scrollLeft, document.querySelector('[data-testid="nodegraph-canvas-shell"]').scrollTop] }; }
         }
       }
       const shell = document.querySelector('[data-testid="nodegraph-canvas-shell"]');
-      return { cards: cards.length, overlaps, portEndsChecked: checked, skippedOffscreen, maxDeviation, worst, zoom: Number(shell?.dataset.zoom ?? 0), window: [innerWidth, innerHeight] };
+      return { cards: cards.length, overlaps, portEndsChecked: checked, skippedOffscreen, pageScale: k, maxDeviation, worst, zoom: Number(shell?.dataset.zoom ?? 0), window: [innerWidth, innerHeight] };
     `);
     if (!result || result.portEndsChecked === 0) fail(`${label}: geometria do grafo indisponivel: ${JSON.stringify(result)}`);
     return result;
