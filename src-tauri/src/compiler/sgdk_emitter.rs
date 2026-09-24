@@ -2548,7 +2548,7 @@ fn sgdk_button_mask(button: &str) -> Option<&'static str> {
         "_X" | "X" | "BUTTON_X" => Some("BUTTON_X"),
         "_Y" | "Y" | "BUTTON_Y" => Some("BUTTON_Y"),
         "_Z" | "Z" | "BUTTON_Z" => Some("BUTTON_Z"),
-        "START" => Some("BUTTON_START"),
+        "START" | "BUTTON_START" => Some("BUTTON_START"),
         _ => None,
     }
 }
@@ -2811,6 +2811,24 @@ mod tests {
         LogicBoolExpr, LogicCollisionTarget, LogicMathExpr, LogicOp, LogicPositionSource,
         LogicScript, SpriteAnimation,
     };
+
+    #[test]
+    fn button_mask_accepts_every_button_offered_by_the_node_editor() {
+        // O NodeGraph grava `BUTTON_*`; nenhum deles pode cair no fallback BUTTON_A.
+        for (stored, mask) in [
+            ("BUTTON_A", "BUTTON_A"),
+            ("BUTTON_B", "BUTTON_B"),
+            ("BUTTON_C", "BUTTON_C"),
+            ("BUTTON_START", "BUTTON_START"),
+            ("BUTTON_UP", "BUTTON_UP"),
+            ("BUTTON_DOWN", "BUTTON_DOWN"),
+            ("BUTTON_LEFT", "BUTTON_LEFT"),
+            ("BUTTON_RIGHT", "BUTTON_RIGHT"),
+        ] {
+            assert_eq!(sgdk_button_mask(stored), Some(mask), "{stored}");
+        }
+        assert_eq!(sgdk_button_mask("BUTTON_NOPE"), None);
+    }
 
     fn sprite_asset_with_animation(frame_time: u32, looping: bool) -> SpriteAsset {
         let animation = SpriteAnimation {
