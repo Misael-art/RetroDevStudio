@@ -35,6 +35,10 @@ Capturas comparáveis: `…-01-before-organize.png` (antes) e `…-03-after-orga
 
 Provas **novas**: tudo acima. Provas **herdadas** e não reexecutadas nesta fatia: aceite de autoria guiada (`a6c02af`/`9901b5f`), reference-platformer, ADDQ, branch-compare, reinserção Sonic.
 
+## CI e revalidação
+
+O primeiro CI do PR #75 falhou em `reference_goal`: o cartão passou a esconder a origem autoral nos detalhes técnicos, e o cenário (corretamente) exige rastreabilidade visível. Corrigido exibindo `origem:` no cartão, sem afrouxar a asserção. A reexecução local do cenário ficou bloqueada pelo host (janela WebDriver presa em 948×314 sob pressão de memória, antes de qualquer passo); a confirmação depende do CI. O E2E `nodegraph-authoring` acima é anterior a essa mudança de apresentação (linha extra só em nós com `authoring_origin`).
+
 ## Limitações
 
 - Usabilidade humana **não** validada: tudo acima é automação.
