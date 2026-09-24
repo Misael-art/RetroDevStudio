@@ -180,6 +180,18 @@ describe("BehaviorPanel through the NodeGraph editor", () => {
     expect(serializeNodeGraph(graphOf("player"))).toBe(playerBefore);
   });
 
+  it("keeps an edit when the user switches entity before the autosave debounce", async () => {
+    await click("behavior-add-platform_movement");
+    await click("behavior-apply");
+    await select("fox_2"); // imediatamente, sem esperar os 600 ms
+    await act(async () => {
+      await wait(700);
+    });
+    expect(graphOf("player").behaviors).toHaveLength(1);
+    await select("player");
+    expect(container.querySelectorAll("[data-testid^='behavior-instance-']")).toHaveLength(1);
+  });
+
   it("asks for confirmation before adding a second movement to the same entity", async () => {
     await click("behavior-add-platform_movement");
     await click("behavior-apply");

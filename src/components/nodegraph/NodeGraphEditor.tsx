@@ -2221,6 +2221,11 @@ export default function NodeGraphEditor() {
   useEffect(() => {
     let cancelled = false;
     const entityId = selectedEntity?.entity_id ?? null;
+    // Trocar de entidade antes do debounce do autosave nao pode descartar a edicao
+    // pendente da entidade anterior: grava-a antes de hidratar a nova.
+    if (hydratedEntityIdRef.current !== null && hydratedEntityIdRef.current !== entityId) {
+      pendingCommitRef.current?.();
+    }
     const resetFromGraph = (nextGraph: NodeGraph) => {
       if (cancelled) {
         return;
@@ -2367,6 +2372,13 @@ export default function NodeGraphEditor() {
 
     const serializedGraph = serializeNodeGraph(graph);
     if (serializedGraph === lastPersistedGraphRef.current) {
+      // Voltou ao estado persistido (ex.: refazer apos desfazer): nenhuma gravacao
+      // pendente de um estado intermediario pode sobreviver.
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      pendingCommitRef.current = null;
       return;
     }
 
@@ -2384,7 +2396,8 @@ export default function NodeGraphEditor() {
       const entity = latestState.activeScene?.entities.find(
         (item) => item.entity_id === selectedEntity.entity_id
       );
-      if (!entity || lastPersistedGraphRef.current === serializedGraph) {
+      // So grava o grafo que ainda e o atual desta entidade (nunca um estado obsoleto).
+      if (!entity || lastPersistedGraphRef.current === serializedGraph || serializeNodeGraph(currentGraphRef.current) !== serializedGraph) {
         return;
       }
 
