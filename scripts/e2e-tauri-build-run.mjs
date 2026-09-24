@@ -6474,7 +6474,12 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   await shot("03-after-organize", "grafo organizado pelas conexoes (enquadrado)");
   await js(`document.activeElement?.blur?.();`);
   await chord("z");
-  await waitFor(async () => JSON.stringify(await worldPositions()) === JSON.stringify(positionsBeforeOrganize), 10000, "Ctrl+Z nao desfez a organizacao.", 150);
+  await waitFor(async () => JSON.stringify(await worldPositions()) === JSON.stringify(positionsBeforeOrganize), 10000, "Ctrl+Z nao desfez a organizacao.", 150)
+    .catch(async (error) => {
+      const logs = ((await state())?.consoleEntries ?? []).map((entry) => entry.message).filter((m) => /NodeGraph|Atalhos/.test(m)).slice(-8);
+      const undoTitle = await js(`return document.querySelector('[data-testid="nodegraph-undo"]')?.title ?? null;`);
+      fail(`${error.message} ${JSON.stringify({ logs, undoTitle, active: await js("return document.activeElement?.tagName;") })}`);
+    });
   await chord("y");
   await waitFor(async () => JSON.stringify(await worldPositions()) === JSON.stringify(positionsOrganized), 10000, "Ctrl+Y nao refez a organizacao.", 150);
   const stillBound = { button: await value("node-param-jump-button"), threshold: await value("node-param-score_threshold-b"), sound: await value("rule-edit-goal_sound-sfx") };

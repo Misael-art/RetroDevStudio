@@ -2226,7 +2226,10 @@ export default function NodeGraphEditor() {
         // outro painel. Nao zera historico, vista nem selecao; a mudanca externa vira um
         // passo desfazivel.
         const serialized = serializeNodeGraph(nextGraph);
-        if (serialized !== serializeNodeGraph(currentGraphRef.current)) {
+        // Compara na forma canonica (deserializada): o eco do salvamento passa pelo
+        // deserializador e nao deve virar um passo falso de historico.
+        const current = serializeNodeGraph(deserializeNodeGraph(serializeNodeGraph(currentGraphRef.current)));
+        if (serializeNodeGraph(deserializeNodeGraph(serialized)) !== current) {
           historyRef.current = recordGraphHistory(historyRef.current, currentGraphRef.current, "Atualizado por outro painel");
           setHistory(historyRef.current);
           hydratingGraphRef.current = true;
