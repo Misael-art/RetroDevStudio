@@ -6561,13 +6561,26 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   }
   // Untouched behaviors keep their exact logic: every shipped node/edge not edited is identical.
   const edited = new Set(["jump", "score_threshold", "goal_sound"]);
-  const strip = (n) => JSON.stringify({ id: n.id, type: n.type, label: n.label, params: n.params });
-  const changedUntouched = shippedGraph.nodes.filter((n) => !edited.has(n.id) && (!node(saved, n.id) || strip(node(saved, n.id)) !== strip(n))).map((n) => n.id);
+  // Editor defaults materialized on save (not read by the SGDK compiler) are allowed and reported.
+  const knownDefaults = { event_update: { rate: "frame" } };
+  const materializedDefaults = [];
+  const changedUntouched = shippedGraph.nodes.filter((n) => {
+    if (edited.has(n.id)) return false;
+    const s2 = node(saved, n.id);
+    if (!s2 || s2.type !== n.type || s2.label !== n.label) return true;
+    for (const [key, v] of Object.entries(n.params)) if (JSON.stringify(s2.params[key]) !== JSON.stringify(v)) return true;
+    for (const [key, v] of Object.entries(s2.params)) {
+      if (key in n.params) continue;
+      if (knownDefaults[n.type]?.[key] !== v) return true;
+      materializedDefaults.push(`${n.id}.${key}=${v}`);
+    }
+    return false;
+  }).map((n) => n.id);
   const missingEdges = shippedGraph.edges.filter((e) => !saved.edges.some((s) => s.fromNode === e.fromNode && s.fromPort === e.fromPort && s.toNode === e.toNode && s.toPort === e.toPort));
   // The passage editor rewires only the movement gates to add the second passage.
   const allowedRewire = (e) => ["move_right", "move_left"].includes(e.toNode);
   if (changedUntouched.length || missingEdges.some((e) => !allowedRewire(e))) fail(`Comportamentos nao editados mudaram: ${JSON.stringify({ changedUntouched, missingEdges })}`);
-  addReportStep(report, "saved_file", "passed", { savedChecks, untouchedNodes: shippedGraph.nodes.length - edited.size, rewiredForSecondPassage: missingEdges });
+  addReportStep(report, "saved_file", "passed", { savedChecks, materializedDefaults, untouchedNodes: shippedGraph.nodes.length - edited.size, rewiredForSecondPassage: missingEdges });
 
   await deleteSession(sessionId);
   sessionId = await createSession(appPath);
