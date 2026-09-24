@@ -6806,12 +6806,16 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   const state = () => readAutomationState(sessionId);
   const js = (script, args = []) => executeScript(sessionId, script, args);
   const click = (testId, label = testId) => clickButtonByTestIdNative(sessionId, testId, label);
+  const find = (selector) => findElement(sessionId, selector).catch(async (error) => {
+    const visible = await js(`return [...document.querySelectorAll('[data-testid]')].map((el) => el.dataset.testid).filter((id) => /hierarchy-entity|entity-switch|behavior-|inspector-dup/.test(id)).slice(0, 60);`).catch(() => null);
+    fail(`Elemento nao encontrado: ${selector} (${error.message}) presentes=${JSON.stringify(visible)}`);
+  });
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const value = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value ?? null;`, [testId]);
   const text = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.textContent ?? null;`, [testId]);
   const selectOption = async (testId, optionValue) => {
     await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center", inline: "center" });`, [testId]);
-    const elementId = await findElement(sessionId, `[data-testid="${testId}"] option[value="${optionValue}"]`);
+    const elementId = await find(`[data-testid="${testId}"] option[value="${optionValue}"]`);
     await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
     await waitFor(async () => (await value(testId)) === optionValue, 5000, `Selecao ${testId}=${optionValue} nao aplicada.`, 100);
   };
@@ -6830,7 +6834,7 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
     const selector = `[data-testid='hierarchy-entity-${entityId}']`;
     await waitFor(async () => js(`return Boolean(document.querySelector(arguments[0]));`, [selector]), 15000, `Hierarquia sem ${entityId}.`, 150);
     await js(`document.querySelector(arguments[0])?.scrollIntoView({ block: "center" });`, [selector]);
-    await webdriverRequest("POST", `/session/${sessionId}/element/${await findElement(sessionId, selector)}/click`, {});
+    await webdriverRequest("POST", `/session/${sessionId}/element/${await find(selector)}/click`, {});
     await waitSelected(entityId);
   };
   const instances = () => js(`return [...document.querySelectorAll('[data-testid^="behavior-instance-"]')].map((el) => ({ id: el.dataset.testid.slice(18), text: el.textContent }));`);
