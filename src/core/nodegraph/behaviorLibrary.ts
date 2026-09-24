@@ -52,7 +52,7 @@ export type BehaviorParams = Record<string, string | number>;
 
 type BuiltNode = { role: string; type: NodeType; label: string; params: BehaviorParams };
 type BuiltEdge = { from: string; fromPort: string; to: string; toPort: string };
-type Built = { nodes: BuiltNode[]; edges: BuiltEdge[]; replaceEdges?: NodeEdge[]; hookEdges?: Array<{ fromNode: string; fromPort: string; toRole: string; toPort: string } | { fromRole: string; fromPort: string; toNode: string; toPort: string }> };
+type Built = { nodes: BuiltNode[]; edges: BuiltEdge[]; replaceEdges?: NodeEdge[]; replaceGateRoles?: string[]; hookEdges?: Array<{ fromNode: string; fromPort: string; toRole: string; toPort: string } | { fromRole: string; fromPort: string; toNode: string; toPort: string }> };
 
 export type BehaviorDefinition = {
   id: string;
@@ -283,15 +283,18 @@ const passage: BehaviorDefinition = {
       { from: "rule", fromPort: "true", to: "open", toPort: "exec" },
       { from: "open", fromPort: "exec", to: "hide", toPort: "exec" },
     ];
-    // Porta no caminho input -> mover de cada direcao do movimento.
+    // Porta logo apos a entrada de cada direcao: envolve o estagio atual (o movimento ou a
+    // porta de outra passagem), entao varias passagens no mesmo movimento se encadeiam.
     const replaceEdges: NodeEdge[] = [];
+    const replaceGateRoles: string[] = [];
     const hookEdges: NonNullable<Built["hookEdges"]> = [];
     for (const [side, dx] of [["right", speed], ["left", -speed]] as const) {
       const inputId = `${mover.id}__${side}_input`;
-      const moveId = `${mover.id}__${side}_move`;
-      const direct = graph.edges.find((edge) => edge.fromNode === inputId && edge.toNode === moveId && edge.toPort === "exec");
+      const direct = graph.edges.find((edge) => edge.fromNode === inputId && edge.fromPort === "exec" && edge.toPort === "exec");
       if (!direct) continue;
+      const moveId = direct.toNode;
       replaceEdges.push(direct);
+      replaceGateRoles.push(`${side}_gate`);
       nodes.push(
         { role: `${side}_gate`, type: "condition_overlap", label: `Iria entrar no bloqueio (${side === "right" ? "direita" : "esquerda"})`, params: { a: target, b: blocker, probe_dx: dx, probe_dy: 0 } },
         { role: `${side}_open_value`, type: "var_get", label: "Ler passagem aberta", params: { var_name: openVar } },
@@ -307,7 +310,7 @@ const passage: BehaviorDefinition = {
         { fromRole: `${side}_open_check`, fromPort: "true", toNode: moveId, toPort: "exec" }
       );
     }
-    return { nodes, edges, replaceEdges, hookEdges };
+    return { nodes, edges, replaceEdges, replaceGateRoles, hookEdges };
   },
   externalRefs: (p) => [
     { kind: "instance", id: String(p.movement), param: "movement" },
@@ -434,24 +437,51 @@ function manualEdgesTouching(graph: NodeGraph, instance: BehaviorInstance): Node
 function removeInstanceFromGraph(graph: NodeGraph, instance: BehaviorInstance): NodeGraph {
   const nodeIds = new Set(instance.nodeIds);
   const edgeIds = new Set(instance.edgeIds);
-  const edges = graph.edges.filter((edge) => !edgeIds.has(edge.id) && !nodeIds.has(edge.fromNode) && !nodeIds.has(edge.toNode));
-  // Restaura as arestas que esta instancia havia substituido (se as pontas ainda existem).
+  let working = graph.edges;
+  let others = (graph.behaviors ?? []).filter((candidate) => candidate.id !== instance.id);
+  const restores: Array<{ edge: NodeEdge; at: number }> = [];
+  (instance.replacedEdges ?? []).forEach((replaced, index) => {
+    const gate = instance.replacedEdgeGates?.[index];
+    // O estagio que esta porta envolve agora (lido do grafo atual).
+    const next = gate ? working.find((edge) => edge.fromNode === gate && edge.fromPort === "false")?.toNode ?? replaced.toNode : replaced.toNode;
+    const restored = { ...replaced, toNode: next };
+    const ownIncoming = gate ? working.some((edge) => edge.toNode === gate && edgeIds.has(edge.id)) : true;
+    if (ownIncoming) {
+      // Esta porta e a mais externa: a ligacao original volta, apontando para o estagio seguinte.
+      restores.push({ edge: restored, at: instance.replacedEdgeIndexes?.[index] ?? working.length });
+    } else if (gate) {
+      // Outra passagem envolve esta: ela passa a apontar direto para o estagio seguinte e
+      // herda a ligacao original no seu registro (para restaura-la exatamente depois).
+      const hook = working.find((edge) => edge.toNode === gate && !edgeIds.has(edge.id));
+      void hook;
+      const originalIndex = instance.replacedEdgeIndexes?.[index];
+      others = others.map((other) => {
+        if (!other.replacedEdges) return other;
+        const slot = other.replacedEdges.findIndex((edge) => edgeIds.has(edge.id) && edge.toNode === gate);
+        if (slot < 0) return other;
+        return {
+          ...other,
+          replacedEdges: other.replacedEdges.map((edge, i) => (i === slot ? restored : edge)),
+          ...(other.replacedEdgeIndexes && originalIndex !== undefined
+            ? { replacedEdgeIndexes: other.replacedEdgeIndexes.map((at, i) => (i === slot ? originalIndex : at)) }
+            : {}),
+        };
+      });
+    }
+    if (gate) working = working.map((edge) => (edge.toNode === gate && !edgeIds.has(edge.id) ? { ...edge, toNode: next } : edge));
+  });
+  const edges = working.filter((edge) => !edgeIds.has(edge.id) && !nodeIds.has(edge.fromNode) && !nodeIds.has(edge.toNode));
   const alive = new Set(graph.nodes.filter((node) => !nodeIds.has(node.id)).map((node) => node.id));
-  // Ordem crescente de posicao original: cada aresta volta ao lugar de onde saiu.
-  const restore = (instance.replacedEdges ?? [])
-    .map((edge, index) => ({ edge, at: instance.replacedEdgeIndexes?.[index] ?? edges.length }))
-    .sort((a, b) => a.at - b.at);
-  for (const { edge, at } of restore) {
+  for (const { edge, at } of restores.sort((a, b) => a.at - b.at)) {
     if (alive.has(edge.fromNode) && alive.has(edge.toNode) && !edges.some((candidate) => candidate.id === edge.id)) {
       edges.splice(Math.min(Math.max(0, at), edges.length), 0, edge);
     }
   }
   const groups = (graph.groups ?? []).filter((group) => group.id !== instance.id);
-  const behaviors = (graph.behaviors ?? []).filter((candidate) => candidate.id !== instance.id);
   const next: NodeGraph = { ...graph, nodes: graph.nodes.filter((node) => !nodeIds.has(node.id)), edges };
   if (groups.length) next.groups = groups;
   else delete next.groups;
-  if (behaviors.length) next.behaviors = behaviors;
+  if (others.length) next.behaviors = others;
   else delete next.behaviors;
   return next;
 }
@@ -495,7 +525,13 @@ function insertInstance(
     nodeIds: nodes.map((node) => node.id),
     edgeIds: edges.map((edge) => edge.id),
     generated: Object.fromEntries(nodes.map((node) => [node.id, nodeSignature(node)])),
-    ...(built.replaceEdges?.length ? { replacedEdges: built.replaceEdges, replacedEdgeIndexes: replacedIndexes } : {}),
+    ...(built.replaceEdges?.length
+      ? {
+          replacedEdges: built.replaceEdges,
+          replacedEdgeIndexes: replacedIndexes,
+          replacedEdgeGates: (built.replaceGateRoles ?? []).map((role) => `${instanceId}__${role}`),
+        }
+      : {}),
   };
   let next: NodeGraph = {
     ...graph,
@@ -678,6 +714,7 @@ export function duplicateBehaviorLogic(graph: NodeGraph, sourceId: string, newId
     ...(instance.replacedEdges
       ? { replacedEdges: instance.replacedEdges.map((edge) => ({ ...edge, id: String(remapValue(edge.id)), fromNode: String(remapValue(edge.fromNode)), toNode: String(remapValue(edge.toNode)) })) }
       : {}),
+    ...(instance.replacedEdgeGates ? { replacedEdgeGates: instance.replacedEdgeGates.map((id) => String(remapValue(id))) } : {}),
   }));
   const groups = behaviors.map((instance) => ({ id: instance.id, label: instance.label, nodeIds: instance.nodeIds }));
   const next: NodeGraph = { nodes, edges, ...(behaviors.length ? { behaviors, groups } : {}) };

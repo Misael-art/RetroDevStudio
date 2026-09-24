@@ -121,6 +121,8 @@ export interface BehaviorInstance {
   replacedEdges?: NodeEdge[];
   /** Posicao original de cada aresta substituida (restaurada no mesmo lugar). */
   replacedEdgeIndexes?: number[];
+  /** No-porta desta instancia que entrou no lugar de cada aresta substituida. */
+  replacedEdgeGates?: string[];
 }
 
 export const EMPTY_GRAPH: NodeGraph = {

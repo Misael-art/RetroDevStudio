@@ -135,6 +135,48 @@ describe("behavior library", () => {
     expect(removed.nodes.some((node) => String(node.params.var_name ?? "") === open)).toBe(false);
   });
 
+  it("chains several passages on the same movement and removes them in any order without orphans", () => {
+    const ctx = buildBehaviorSceneContext(
+      [...context.entities.map((entity) => ({ entity_id: entity.id, components: { sprite: entity.hasSprite ? sprite(entity.animations) : undefined, physics: entity.hasPhysics ? {} : undefined, collision: entity.hasCollision ? {} : undefined } })),
+        { entity_id: "gate_2", components: { collision: {} } }],
+      [{ nodes: [{ id: "s", type: "var_set", label: "s", x: 0, y: 0, inputs: [], outputs: [], params: { var_name: "score", value: 0 } }], edges: [] }]
+    );
+    const moved = apply(EMPTY, "platform_movement", moveParams("fox"));
+    const inner = planApplyBehavior(moved.graph, "gated_passage", { movement: moved.id, blocker: "gate", state_variable: "score", threshold: 20 }, ctx);
+    const outer = planApplyBehavior(inner.graph!, "gated_passage", { movement: moved.id, blocker: "gate_2", state_variable: "score", threshold: 20 }, ctx);
+    const g = outer.graph!;
+    const to = (from: string, port = "exec") => g.edges.filter((edge) => edge.fromNode === from && edge.fromPort === port).map((edge) => edge.toNode);
+    for (const side of ["right", "left"]) {
+      // entrada -> porta externa -> (livre) porta interna -> (livre) mover; cada porta gate so abre pelo seu estado.
+      expect(to(`${moved.id}__${side}_input`)).toEqual([`${outer.instanceId}__${side}_gate`]);
+      expect(to(`${outer.instanceId}__${side}_gate`, "false")).toEqual([`${inner.instanceId}__${side}_gate`]);
+      expect(to(`${outer.instanceId}__${side}_open_check`, "true")).toEqual([`${inner.instanceId}__${side}_gate`]);
+      expect(to(`${inner.instanceId}__${side}_gate`, "false")).toEqual([`${moved.id}__${side}_move`]);
+    }
+    // Estados privados distintos.
+    expect(new Set(g.nodes.filter((node) => node.type === "var_set").map((node) => node.params.var_name)).size).toBe(2);
+    const noOrphans = (graph: NodeGraph) => {
+      const ids = new Set(graph.nodes.map((node) => node.id));
+      return graph.edges.every((edge) => ids.has(edge.fromNode) && ids.has(edge.toNode));
+    };
+    // Remover a interna primeiro: a externa passa a envolver o mover.
+    const withoutInner = planRemoveBehavior(g, inner.instanceId!).graph!;
+    expect(noOrphans(withoutInner)).toBe(true);
+    const to2 = (graph: NodeGraph, from: string, port = "exec") => graph.edges.filter((edge) => edge.fromNode === from && edge.fromPort === port).map((edge) => edge.toNode);
+    expect(to2(withoutInner, `${outer.instanceId}__right_gate`, "false")).toEqual([`${moved.id}__right_move`]);
+    expect(to2(withoutInner, `${outer.instanceId}__right_open_check`, "true")).toEqual([`${moved.id}__right_move`]);
+    const bothGone = planRemoveBehavior(withoutInner, outer.instanceId!).graph!;
+    expect(graphSemanticSignature(bothGone)).toBe(graphSemanticSignature(moved.graph));
+    // Ordem inversa tambem restaura exatamente o original.
+    const outerFirst = planRemoveBehavior(planRemoveBehavior(g, outer.instanceId!).graph!, inner.instanceId!).graph!;
+    expect(graphSemanticSignature(outerFirst)).toBe(graphSemanticSignature(moved.graph));
+    // Editar o movimento reaplica as duas passagens, mantendo a cadeia.
+    const edited = planEditBehavior(g, moved.id, { ...g.behaviors![0].params, speed: 8 }, ctx).graph!;
+    expect(to2(edited, `${moved.id}__right_input`)).toEqual([`${outer.instanceId}__right_gate`]);
+    expect(edited.nodes.find((node) => node.id === `${inner.instanceId}__right_gate`)!.params.probe_dx).toBe(8);
+    expect(noOrphans(edited)).toBe(true);
+  });
+
   it("detects manual edits before regenerating and keeps manual connections that still fit", () => {
     const moved = apply(EMPTY, "platform_movement", moveParams("fox"));
     const touched: NodeGraph = {
