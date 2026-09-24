@@ -1532,6 +1532,8 @@ function NodeCard({
       data-selected={selected ? "true" : undefined}
       data-editable={editable ? "true" : "false"}
       data-pinned={node.pinned ? "true" : undefined}
+      data-x={node.x}
+      data-y={node.y}
       data-execution-reachable={executionReachable ? "true" : undefined}
       className={`absolute z-[2] select-none rounded-xl border bg-slate-900/95 shadow-lg ${
         selected ? "ring-2 ring-blue-500 shadow-2xl" : ""

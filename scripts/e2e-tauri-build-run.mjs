@@ -464,6 +464,7 @@ function parseArgs(argv) {
           "create-game-from-zero",
           "reference-platformer",
           "authoring-acceptance",
+          "nodegraph-authoring",
           "inspection",
           "inspection-cancel",
           "inspection-complete",
@@ -6270,6 +6271,487 @@ async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBoots
   console.log("OK: Desktop Tauri authoring acceptance (UI guiada, reinicio, teclado ate a vitoria, som associado) passou.");
 }
 
+/**
+ * NodeGraph authoring proof (Experimental): everything through the normal UI with native
+ * WebDriver input — locate the jump, rebind its button, edit one passage threshold without
+ * touching the other, bind a sound from the rules view, organize/undo/redo, group, save,
+ * restart, reopen, build and play with the real keyboard. RAM, framebuffer and audio are
+ * observers only; no emulator_send_input.
+ */
+async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootstrapTimeoutMs, onProjectCreated) {
+  let sessionId = initialSessionId;
+  const artifactPrefix = `nodegraph-authoring-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: null,
+    scenario: "nodegraph-authoring",
+    testedApplication: { path: appPath, sha256: createHash("sha256").update(await readFile(appPath)).digest("hex") },
+    artifacts: [],
+    steps: [],
+    frames: [],
+    roms: [],
+  };
+  const shot = async (name, label) => addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const state = () => readAutomationState(sessionId);
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const click = (testId, label = testId) => clickButtonByTestIdNative(sessionId, testId, label);
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const selectOption = async (testId, value) => {
+    await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center", inline: "center" });`, [testId]);
+    const elementId = await findElement(sessionId, `[data-testid="${testId}"] option[value="${value}"]`);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+    await waitFor(async () => (await js(`return document.querySelector('[data-testid="${testId}"]')?.value ?? null;`)) === value, 5000, `Selecao ${testId}=${value} nao aplicada.`, 100);
+  };
+  const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
+  const text = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.textContent ?? null;`, [testId]);
+  const value = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value ?? null;`, [testId]);
+  const chord = async (key) => webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{ type: "key", id: "rds-chord", actions: [
+      { type: "keyDown", value: "" }, { type: "keyDown", value: key }, { type: "keyUp", value: key }, { type: "keyUp", value: "" },
+    ] }],
+  });
+  const worldPositions = () => js(`
+    const out = {};
+    for (const el of document.querySelectorAll('[data-testid^="node-card-"]')) out[el.dataset.testid.slice(10)] = [Number(el.dataset.x), Number(el.dataset.y)];
+    return out;
+  `);
+  // Geometry of what is really on screen: overlapping cards (visible ones) and the
+  // distance between every wire end and the centre of the port element it belongs to.
+  const geometry = async (label) => {
+    const result = await js(`
+      const svg = document.querySelector('[data-testid="nodegraph-edges"]');
+      const cards = [...document.querySelectorAll('[data-testid^="node-card-"]')].map((el) => ({ id: el.dataset.testid.slice(10), r: el.getBoundingClientRect() }));
+      const overlaps = [];
+      for (let i = 0; i < cards.length; i += 1) for (let j = i + 1; j < cards.length; j += 1) {
+        const a = cards[i].r, b = cards[j].r;
+        if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) overlaps.push([cards[i].id, cards[j].id]);
+      }
+      const inv = svg.getScreenCTM().inverse();
+      let checked = 0, maxDeviation = 0, worst = null;
+      for (const pathEl of svg.querySelectorAll('path[data-from-node]')) {
+        if (pathEl.dataset.collapsedEnd) continue;
+        for (const end of ["from", "to"]) {
+          const node = pathEl.dataset[end + "Node"], port = pathEl.dataset[end + "Port"];
+          const portEl = document.querySelector('[data-testid="node-port-' + node + '-' + (end === "from" ? "out" : "in") + '-' + port + '"]');
+          if (!portEl) continue;
+          const r = portEl.getBoundingClientRect();
+          const p = new DOMPoint(r.left + r.width / 2, r.top + r.height / 2).matrixTransform(inv);
+          const deviation = Math.hypot(p.x - Number(pathEl.dataset[end + "X"]), p.y - Number(pathEl.dataset[end + "Y"]));
+          checked += 1;
+          if (deviation > maxDeviation) { maxDeviation = deviation; worst = { edge: pathEl.dataset.testid, end, deviation }; }
+        }
+      }
+      const shell = document.querySelector('[data-testid="nodegraph-canvas-shell"]');
+      return { cards: cards.length, overlaps, portEndsChecked: checked, maxDeviation, worst, zoom: Number(shell?.dataset.zoom ?? 0), window: [innerWidth, innerHeight] };
+    `);
+    if (!result || result.portEndsChecked === 0) fail(`${label}: geometria do grafo indisponivel: ${JSON.stringify(result)}`);
+    return result;
+  };
+  const assertAligned = (g, label) => {
+    if (g.maxDeviation > 2) fail(`${label}: fio fora da porta (${g.maxDeviation.toFixed(2)} px): ${JSON.stringify(g.worst)}`);
+  };
+  const assertReachable = async (testIds, label) => {
+    const result = await js(`
+      return arguments[0].map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        if (!el) return { id, ok: false, reason: "ausente" };
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
+        const r = el.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const inside = r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1;
+        const hit = document.elementFromPoint(cx, cy);
+        return { id, ok: inside && Boolean(hit && (hit === el || el.contains(hit))), inside, hit: hit?.getAttribute?.("data-testid") ?? hit?.tagName };
+      });
+    `, [testIds]);
+    const bad = result.filter((entry) => !entry.ok);
+    if (bad.length) fail(`${label}: controles inacessiveis/cobertos: ${JSON.stringify(bad)}`);
+    return result;
+  };
+  const toolbar = ["nodegraph-undo", "nodegraph-redo", "nodegraph-organize-all", "nodegraph-organize-selection", "nodegraph-fit-view", "nodegraph-select-behavior", "nodegraph-pin-selection", "nodegraph-group-selection"];
+
+  // 1. Create the reference stage and a second passage blocker through the UI.
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await click("template-card-reference_platformer", "modelo de fase de referencia");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const projectName = `NodeGraph_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+  const created = await waitFor(async () => {
+    const current = await state();
+    return current?.activeProjectDir && current.activeProjectName === projectName ? current : false;
+  }, 60000, "Wizard nao criou o projeto.", 500);
+  const projectDir = created.activeProjectDir;
+  onProjectCreated(projectDir);
+  currentE2eRunContext.project = projectDir;
+  const graphPath = path.join(projectDir, "graphs", "reference_platformer_logic.json");
+  const shippedGraph = JSON.parse(await readFile(graphPath, "utf8"));
+  await click("shell-persona-guiado", "modo guiado");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`), 10000, "Barra de etapas guiadas ausente.", 200);
+  await click("guided-step-personagem", "etapa Personagem");
+  await webdriverRequest("POST", `/session/${sessionId}/element/${await findElement(sessionId, "[data-testid='hierarchy-entity-passage_blocker']")}/click`, {});
+  await waitSelected("passage_blocker");
+  await click("inspector-duplicate-entity", "duplicar bloqueador");
+  await waitSelected("passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "inspector-transform-x", "120");
+  await waitFor(async () => (await state())?.activeScene?.entities?.find((entity) => entity.id === "passage_blocker_2")?.x === 120, 10000, "Segundo bloqueador nao foi para x=120.", 150);
+  addReportStep(report, "create_project", "passed", { projectDir, shippedNodes: shippedGraph.nodes.length, shippedEdges: shippedGraph.edges.length });
+
+  // 2. Open the logic and capture the graph as shipped (fit to view).
+  await click("guided-step-regras", "etapa Regras");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="node-card-jump"]')) && Boolean(document.querySelector('[data-testid="nodegraph-rules"]'));`), 15000, "NodeGraph/Regras ausentes.", 200);
+  await closeVisibleConsoleDrawer(sessionId, "antes do NodeGraph");
+  await click("nodegraph-fit-view", "enquadrar grafo");
+  await pause(400);
+  const before = await geometry("antes de organizar");
+  assertAligned(before, "antes de organizar");
+  const positionsShipped = await worldPositions();
+  await shot("01-before-organize", "grafo como entregue pelo template (enquadrado)");
+  addReportStep(report, "graph_before_organize", "passed", { geometry: before });
+
+  // 3. Locate and understand the jump from the rules view.
+  const jumpRuleText = await text("rule-update_jump");
+  if (!jumpRuleText?.includes("A (Z)")) fail(`Regra do pulo nao descreve o botao: ${jumpRuleText}`);
+  await js(`document.querySelector('[data-testid="rule-item-jump"] button')?.scrollIntoView({ block: "center" });`);
+  const ruleButton = await findElement(sessionId, "[data-testid='rule-item-jump'] button");
+  await clickElement(sessionId, ruleButton);
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="node-card-jump"]')?.dataset.selected ?? null;`)) === "true", 5000, "Regra nao levou ao no do pulo.", 100);
+  await click("node-details-toggle-jump", "detalhes tecnicos do pulo");
+  const jumpUnderstood = {
+    action: await text("node-action-jump"),
+    button: await text("node-button-jump"),
+    velocity: await text("node-action-jump_velocity"),
+    sound: await text("node-action-jump_sound"),
+    details: await text("node-details-jump"),
+  };
+  if (jumpUnderstood.action !== "Ao apertar Botao A (tecla Z)" || !jumpUnderstood.button?.includes("Z") || !jumpUnderstood.velocity?.includes("para cima") || !jumpUnderstood.details?.includes("input_pressed")) {
+    fail(`Pulo nao compreensivel pela interface: ${JSON.stringify(jumpUnderstood)}`);
+  }
+  await shot("02-jump-located", "pulo localizado: botao A = tecla Z, impulso e som");
+  await click("node-details-toggle-jump", "fechar detalhes tecnicos");
+  addReportStep(report, "locate_jump", "passed", { jumpRuleText, jumpUnderstood });
+
+  // 4. Rebind the jump to button B (keyboard X) on the node card.
+  await selectOption("node-param-jump-button", "BUTTON_B");
+  const rebound = { action: await text("node-action-jump"), rule: await value("rule-edit-jump-button") };
+  if (rebound.action !== "Ao apertar Botao B (tecla X)" || rebound.rule !== "BUTTON_B") fail(`Troca de botao nao refletida: ${JSON.stringify(rebound)}`);
+  addReportStep(report, "rebind_jump", "passed", rebound);
+
+  // 5. Two passages; edit only the main threshold on its node card.
+  await selectOption("passage-add-blocker", "passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "passage-add-threshold", "60");
+  await click("passage-add", "adicionar segunda passagem");
+  await waitFor(async () => (await value("passage-passage_2-openvar")) === "passage_2_open", 10000, "Segunda passagem nao foi criada.", 200);
+  await js(`document.querySelector('[data-testid="node-param-score_threshold-b"]')?.scrollIntoView({ block: "center", inline: "center" });`);
+  await setInputByTestIdNative(sessionId, "node-param-score_threshold-b", "12");
+  const thresholds = await waitFor(async () => {
+    const v = { main: await value("passage-passage_main-threshold"), second: await value("passage-passage_2-threshold"), card: await value("node-param-score_threshold-b") };
+    return v.main === "12" && v.card === "12" ? v : false;
+  }, 5000, "Limiar principal nao aplicado.", 150);
+  if (thresholds.second !== "60") fail(`Editar a passagem principal alterou a segunda: ${JSON.stringify(thresholds)}`);
+  addReportStep(report, "edit_one_passage", "passed", thresholds);
+
+  // 6. Bind the completion sound from the rules view.
+  await selectOption("rule-edit-goal_sound-sfx", "victory");
+  const soundBound = { rule: await value("rule-edit-goal_sound-sfx"), panel: await value("sound-goal_sound-select"), issue: await text("sound-goal_sound-issue") };
+  if (soundBound.rule !== "victory" || soundBound.panel !== "victory" || soundBound.issue) fail(`Som nao associado: ${JSON.stringify(soundBound)}`);
+  addReportStep(report, "bind_sound", "passed", soundBound);
+
+  // 7. Organize, check geometry, undo/redo with the real keyboard.
+  const edgesBefore = await js(`return document.querySelectorAll('path[data-from-node]').length;`);
+  const positionsBeforeOrganize = await worldPositions();
+  const organizeStarted = Date.now();
+  await click("nodegraph-organize-all", "organizar tudo");
+  const layoutReport = await waitFor(async () => js(`const el = document.querySelector('[data-testid="nodegraph-layout-report"]'); return el ? { ...el.dataset } : null;`), 5000, "Relatorio de organizacao ausente.", 50);
+  const organizeUiMs = Date.now() - organizeStarted;
+  await pause(500);
+  const organized = await geometry("apos organizar");
+  assertAligned(organized, "apos organizar");
+  if (organized.overlaps.length || layoutReport.overlaps !== "0" || layoutReport.conflicts !== "0") fail(`Organizar deixou sobreposicoes/conflitos: ${JSON.stringify({ organized, layoutReport })}`);
+  const positionsOrganized = await worldPositions();
+  const edgesAfter = await js(`return document.querySelectorAll('path[data-from-node]').length;`);
+  if (edgesAfter !== edgesBefore) fail(`Organizar mudou o numero de conexoes: ${edgesBefore} -> ${edgesAfter}`);
+  await shot("03-after-organize", "grafo organizado pelas conexoes (enquadrado)");
+  await js(`document.activeElement?.blur?.();`);
+  await chord("z");
+  await waitFor(async () => JSON.stringify(await worldPositions()) === JSON.stringify(positionsBeforeOrganize), 10000, "Ctrl+Z nao desfez a organizacao.", 150);
+  await chord("y");
+  await waitFor(async () => JSON.stringify(await worldPositions()) === JSON.stringify(positionsOrganized), 10000, "Ctrl+Y nao refez a organizacao.", 150);
+  const stillBound = { button: await value("node-param-jump-button"), threshold: await value("node-param-score_threshold-b"), sound: await value("rule-edit-goal_sound-sfx") };
+  if (stillBound.button !== "BUTTON_B" || stillBound.threshold !== "12" || stillBound.sound !== "victory") fail(`Desfazer/refazer da organizacao afetou edicoes: ${JSON.stringify(stillBound)}`);
+  addReportStep(report, "organize_undo_redo", "passed", { layoutReport, organizeUiMs, before: { overlaps: before.overlaps.length }, organized, edges: edgesAfter, stillBound });
+
+  // 8. Group the jump behavior, rename and collapse it (visual only).
+  await click("node-action-jump", "selecionar no do pulo");
+  await click("nodegraph-select-behavior", "selecionar comportamento");
+  const selection = await text("nodegraph-selection-count");
+  if (!selection?.startsWith("4 selecionado")) fail(`Comportamento do pulo nao tem 4 nos: ${selection}`);
+  await click("nodegraph-group-selection", "agrupar");
+  const groupId = await waitFor(async () => js(`return document.querySelector('[data-testid^="nodegraph-group-name-"]')?.dataset.testid.replace("nodegraph-group-name-", "") ?? null;`), 5000, "Grupo nao criado.", 100);
+  if ((await value(`nodegraph-group-name-${groupId}`)) !== "Pulo") fail("Nome sugerido do grupo nao e 'Pulo'.");
+  await setInputByTestIdNative(sessionId, `nodegraph-group-name-${groupId}`, "Pulo (botao B)");
+  await waitFor(async () => (await value(`nodegraph-group-name-${groupId}`)) === "Pulo (botao B)", 5000, "Grupo nao renomeado.", 100);
+  await click(`nodegraph-group-collapse-${groupId}`, "recolher grupo");
+  await waitFor(async () => !(await js(`return Boolean(document.querySelector('[data-testid="node-card-jump"]'));`)), 5000, "Grupo nao recolheu.", 100);
+  await shot("04-grouped-collapsed", "comportamento Pulo agrupado e recolhido");
+  addReportStep(report, "group_behavior", "passed", { groupId, selection });
+
+  // 9. Sizes and scales: controls reachable, no overlaps, wires on ports (also zoomed in).
+  const layouts = {};
+  layouts["1920x1080"] = { reach: await assertReachable(toolbar, "1920x1080"), geometry: await geometry("1920x1080") };
+  await setSessionWindowRect(sessionId, 1366, 768);
+  await pause(700);
+  layouts["1366x768"] = { reach: await assertReachable(toolbar, "1366x768"), geometry: await geometry("1366x768") };
+  await shot("05-layout-1366x768", "NodeGraph em 1366x768");
+  await js(`document.documentElement.style.zoom = "1.25";`);
+  await pause(700);
+  layouts["1366x768@125%"] = { reach: await assertReachable(["nodegraph-undo", "nodegraph-organize-all", "nodegraph-fit-view"], "1366x768 com escala 125%"), geometry: await geometry("1366x768@125%") };
+  await shot("06-layout-scaled", "NodeGraph com escala 125%");
+  await js(`document.documentElement.style.zoom = "";`);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await pause(700);
+  await js(`
+    const shell = document.querySelector('[data-testid="nodegraph-canvas-shell"]');
+    const r = shell.getBoundingClientRect();
+    for (let i = 0; i < 4; i += 1) shell.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 200, deltaY: -160 }));
+  `);
+  await pause(500);
+  layouts["zoom-in"] = { geometry: await geometry("zoom ampliado") };
+  for (const [label, entry] of Object.entries(layouts)) {
+    assertAligned(entry.geometry, label);
+    if (entry.geometry.overlaps.length) fail(`${label}: cartoes sobrepostos: ${JSON.stringify(entry.geometry.overlaps)}`);
+  }
+  if (!(layouts["zoom-in"].geometry.zoom > 1)) fail(`Zoom nao ampliou: ${layouts["zoom-in"].geometry.zoom}`);
+  await click("nodegraph-fit-view", "enquadrar apos zoom");
+  addReportStep(report, "layout_sizes_scales", "passed", layouts);
+
+  // 10. Save, check the file, restart, reopen.
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  let lastSaveStatus = null;
+  await waitFor(async () => {
+    lastSaveStatus = await js(`const el = document.querySelector('[data-testid="scene-save-status"]'); return el ? { ...el.dataset, text: el.textContent } : null;`);
+    return lastSaveStatus?.status === "saved";
+  }, 20000, "Indicador nao chegou a 'Salvo'.", 200).catch(() => fail(`Salvar nao concluiu: ${JSON.stringify(lastSaveStatus)}`));
+  const saved = JSON.parse(await readFile(graphPath, "utf8"));
+  const node = (graph, id) => graph.nodes.find((candidate) => candidate.id === id);
+  const passage2Rule = saved.nodes.find((candidate) => candidate.params?.passage_id === "passage_2" && candidate.params?.passage_role === "rule");
+  const savedChecks = {
+    jumpButton: node(saved, "jump")?.params?.button,
+    mainThreshold: node(saved, "score_threshold")?.params?.b,
+    secondThreshold: passage2Rule?.params?.b,
+    goalSfx: node(saved, "goal_sound")?.params?.sfx,
+    groups: saved.groups,
+    jumpPosition: [node(saved, "jump")?.x, node(saved, "jump")?.y],
+  };
+  if (savedChecks.jumpButton !== "BUTTON_B" || savedChecks.mainThreshold !== 12 || savedChecks.secondThreshold !== 60 || savedChecks.goalSfx !== "victory" ||
+      savedChecks.groups?.[0]?.label !== "Pulo (botao B)" || savedChecks.groups?.[0]?.collapsed !== true ||
+      savedChecks.jumpPosition.join() !== positionsOrganized.jump.join()) {
+    fail(`Arquivo salvo nao reflete as edicoes: ${JSON.stringify(savedChecks)}`);
+  }
+  // Untouched behaviors keep their exact logic: every shipped node/edge not edited is identical.
+  const edited = new Set(["jump", "score_threshold", "goal_sound"]);
+  const strip = (n) => JSON.stringify({ id: n.id, type: n.type, label: n.label, params: n.params });
+  const changedUntouched = shippedGraph.nodes.filter((n) => !edited.has(n.id) && (!node(saved, n.id) || strip(node(saved, n.id)) !== strip(n))).map((n) => n.id);
+  const missingEdges = shippedGraph.edges.filter((e) => !saved.edges.some((s) => s.fromNode === e.fromNode && s.fromPort === e.fromPort && s.toNode === e.toNode && s.toPort === e.toPort));
+  // The passage editor rewires only the movement gates to add the second passage.
+  const allowedRewire = (e) => ["move_right", "move_left"].includes(e.toNode);
+  if (changedUntouched.length || missingEdges.some((e) => !allowedRewire(e))) fail(`Comportamentos nao editados mudaram: ${JSON.stringify({ changedUntouched, missingEdges })}`);
+  addReportStep(report, "saved_file", "passed", { savedChecks, untouchedNodes: shippedGraph.nodes.length - edited.size, rewiredForSecondPassage: missingEdges });
+
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto salvo.", 300);
+  await click("wizard-open-existing-project", "reabrir projeto");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto nao reabriu.", 300);
+  if (!(await js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`))) await click("shell-persona-guiado", "modo guiado apos reinicio");
+  await click("guided-step-regras", "etapa Regras apos reinicio");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-rules"]'));`), 15000, "Regras ausentes apos reabrir.", 200);
+  await closeVisibleConsoleDrawer(sessionId, "apos reabrir");
+  const reopened = await waitFor(async () => {
+    const v = {
+      jumpRule: await value("rule-edit-jump-button"),
+      mainThreshold: await value("passage-passage_main-threshold"),
+      secondThreshold: await value("passage-passage_2-threshold"),
+      sound: await value("rule-edit-goal_sound-sfx"),
+      group: await js(`const el = document.querySelector('[data-testid^="nodegraph-group-box-"]'); return el ? { collapsed: el.dataset.collapsed, label: el.textContent } : null;`),
+      positions: await worldPositions(),
+    };
+    return v.jumpRule ? v : false;
+  }, 15000, "Edicoes nao reapareceram.", 200);
+  const visibleMatch = Object.entries(reopened.positions).every(([id, pos]) => positionsOrganized[id] && pos.join() === positionsOrganized[id].join());
+  if (reopened.jumpRule !== "BUTTON_B" || reopened.mainThreshold !== "12" || reopened.secondThreshold !== "60" || reopened.sound !== "victory" ||
+      reopened.group?.collapsed !== "true" || !reopened.group.label.includes("Pulo (botao B)") || !visibleMatch) {
+    fail(`Trabalho nao preservado apos reinicio: ${JSON.stringify(reopened)}`);
+  }
+  await click("nodegraph-fit-view", "enquadrar apos reabrir");
+  await pause(400);
+  const reopenedGeometry = await geometry("apos reabrir");
+  assertAligned(reopenedGeometry, "apos reabrir");
+  if (reopenedGeometry.overlaps.length) fail(`Sobreposicao apos reabrir: ${JSON.stringify(reopenedGeometry.overlaps)}`);
+  await shot("07-reopened", "grafo reaberto: organizado, agrupado e editado");
+  addReportStep(report, "restart_reopen", "passed", { ...reopened, positions: undefined, visibleMatch, geometry: reopenedGeometry });
+
+  // 11. Build and play with the real keyboard.
+  await click("guided-step-testar", "etapa Testar");
+  const running = await waitFor(async () => {
+    const current = await state();
+    const frame = await readCanonicalGameFrame(sessionId);
+    return current?.emulatorLoaded && frame?.renderedFrames > 5 && frame.romSha256 ? { frame } : false;
+  }, 300000, "Build & Run nao iniciou o jogo.", 500).catch(async (error) => {
+    await shot("build-run-failure", "falha do Build & Run");
+    const entries = ((await state())?.consoleEntries ?? []).filter((entry) => entry.level !== "info").slice(-12);
+    fail(`${error.message} console=${JSON.stringify(entries).slice(0, 4000)}`);
+  });
+  const romPath = path.join(projectDir, "build", "megadrive", "out", "rom.bin");
+  const romCopy = path.join(validationDir, `${artifactPrefix}-played.rom`);
+  await cp(romPath, romCopy);
+  const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
+  if (running.frame.romSha256 !== romSha256) fail(`Game View executa outra ROM: ${JSON.stringify({ running: running.frame.romSha256, romSha256 })}`);
+  const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
+  const watch = ["spr_player_x", "spr_player_y", "logic_var_reference_score", "logic_var_goal_open", "logic_var_passage_2_open", "logic_var_goal_reached"]
+    .map((name) => ({ name, address: symbols.get(name), width: name.startsWith("spr_") ? 2 : 4 }));
+  if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch)}`);
+  const observe = async () => {
+    const raw = await executeAsyncScript(sessionId, `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      Promise.all(arguments[0].map((entry) => invoke("emulator_read_memory", { region: 2, offset: entry.address & 0xffff, length: entry.width })))
+        .then((results) => done({ ok: true, data: results.map((r) => Array.from(r.data)), audioTotal: window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `, [watch]);
+    if (!raw?.ok) fail(`Leitura de WRAM falhou: ${JSON.stringify(raw)}`);
+    const decode = (d, width) => {
+      const word = (i) => d[i] | (d[i + 1] << 8);
+      if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
+      const v = ((word(0) << 16) >>> 0) | word(2);
+      return v > 0x7fffffff ? v - 0x100000000 : v;
+    };
+    const values = watch.map((entry, index) => decode(raw.data[index], entry.width));
+    return { x: values[0], y: values[1], score: values[2], mainOpen: values[3], secondOpen: values[4], goal: values[5], audioTotal: raw.audioTotal, t: Date.now() };
+  };
+  const waitAck = (button, expected, context) => waitFor(async () => {
+    const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
+  }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
+  const sampleY = async (ms) => {
+    const samples = [];
+    const end = Date.now() + ms;
+    while (Date.now() < end) { samples.push((await observe()).y); await pause(30); }
+    return samples;
+  };
+  await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
+  await focusGameCanvasNatively(sessionId);
+  const acks = [];
+  // Standing still until the physics settles on the floor.
+  let groundY = null;
+  await waitFor(async () => {
+    const a = (await observe()).y; await pause(250); const b = (await observe()).y;
+    groundY = b;
+    return a === b;
+  }, 20000, "Personagem nao pousou.", 100);
+  // Old binding (Z = button A) must no longer jump.
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "Z (antigo pulo)");
+  acks.push(await waitAck("y", true, "Z"));
+  const zSamples = await sampleY(700);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "soltar Z");
+  acks.push(await waitAck("y", false, "soltar Z"));
+  // New binding (X = button B) jumps.
+  await pause(300);
+  await sendNativeGameKey(sessionId, "KeyX", "keyDown", "X (novo pulo)");
+  acks.push(await waitAck("b", true, "X"));
+  const xSamples = await sampleY(700);
+  await sendNativeGameKey(sessionId, "KeyX", "keyUp", "soltar X");
+  acks.push(await waitAck("b", false, "soltar X"));
+  const jumpProof = { groundY, zMinY: Math.min(...zSamples), xMinY: Math.min(...xSamples), zSamples: zSamples.length, xSamples: xSamples.length };
+  if (jumpProof.zMinY < groundY - 1) fail(`Tecla Z ainda faz pular apos trocar para o botao B: ${JSON.stringify(jumpProof)}`);
+  if (!(jumpProof.xMinY <= groundY - 8)) fail(`Tecla X (botao B) nao fez pular: ${JSON.stringify(jumpProof)}`);
+  await waitFor(async () => (await observe()).y === groundY, 10000, "Personagem nao voltou ao chao.", 100);
+  // Walk right to the goal: untouched walking, score, both passages and goal logic.
+  const timeline = [];
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "andar para a direita");
+  acks.push(await waitAck("right", true, "segurar direita"));
+  const deadline = Date.now() + 240000;
+  let current = await observe();
+  while (current.goal !== 1 && Date.now() < deadline) {
+    timeline.push(current);
+    await pause(40);
+    current = await observe();
+  }
+  timeline.push(current);
+  const victory = current;
+  const rate = 44100;
+  await waitFor(async () => (await js("return window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total;")) > victory.audioTotal + rate * 2 * 0.8, 60000, "Audio pos-vitoria nao chegou.", 200);
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "soltar direita");
+  acks.push(await waitAck("right", false, "soltar direita"));
+  const timelinePath = path.join(validationDir, `${artifactPrefix}-play-timeline.json`);
+  await writeFile(timelinePath, JSON.stringify({ jumpProof, timeline }, null, 2));
+  addReportArtifact(report, timelinePath, "linha do tempo do jogo por teclado");
+  await shot("08-victory", "jogo apos vencer pelo teclado");
+  const mainOpenedAt = timeline.find((t) => t.mainOpen === 1);
+  const secondOpenedAt = timeline.find((t) => t.secondOpen === 1);
+  const crossedSecondClosed = timeline.filter((t) => t.secondOpen === 0 && t.x > 106);
+  if (victory.goal !== 1) fail(`Vitoria nao alcancada pelo teclado: ${JSON.stringify(victory)}`);
+  const openedEarly = timeline.filter((t) => (t.mainOpen === 1 && t.score < 12) || (t.secondOpen === 1 && t.score < 60));
+  // Shipped threshold was 6: a closed main passage observed at score 6..11 shows the edit reached the ROM.
+  const closedAtOldThreshold = timeline.find((t) => t.mainOpen === 0 && t.score >= 6 && t.score < 12) ?? null;
+  if (!mainOpenedAt || !secondOpenedAt || openedEarly.length || crossedSecondClosed.length) {
+    fail(`Passagens nao respeitaram os limiares 12/60: ${JSON.stringify({ mainOpenedAt, secondOpenedAt, openedEarly: openedEarly.slice(0, 3), crossedSecondClosed: crossedSecondClosed.length })}`);
+  }
+  const window = Math.floor(rate * 2 * 0.6);
+  const after = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [Math.max(0, victory.audioTotal - Math.floor(rate * 2 * 0.3)), window + Math.floor(rate * 2 * 0.3)]);
+  const beforeAudio = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [Math.max(0, victory.audioTotal - Math.floor(rate * 2 * 1.6)), window]);
+  const power = (samples, sampleRate, frequency) => {
+    const omega = (2 * Math.PI * frequency) / sampleRate;
+    const coeff = 2 * Math.cos(omega);
+    let s1 = 0, s2 = 0, n = 0;
+    for (let i = 0; i < samples.length; i += 2) { const s0 = samples[i] + coeff * s1 - s2; s2 = s1; s1 = s0; n += 1; }
+    return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / Math.max(1, n * n);
+  };
+  if (!Array.isArray(after?.samples) || !Array.isArray(beforeAudio?.samples)) fail("Amostras de audio indisponiveis.");
+  const sampleRate = after.sampleRate || rate;
+  const audio = {
+    sampleRate,
+    before: { p1320: power(beforeAudio.samples, sampleRate, 1320), p880: power(beforeAudio.samples, sampleRate, 880) },
+    after: { p1320: power(after.samples, sampleRate, 1320), p880: power(after.samples, sampleRate, 880) },
+  };
+  if (!(audio.after.p1320 > 20 * Math.max(1, audio.before.p1320) && audio.after.p1320 > 5 * Math.max(1, audio.after.p880))) {
+    fail(`Som associado (victory, 1320 Hz) nao foi produzido na vitoria: ${JSON.stringify(audio)}`);
+  }
+  addReportStep(report, "keyboard_play", "passed", { rom: { path: romCopy, sha256: romSha256 }, acks: acks.length, jumpProof, mainOpenedAt, secondOpenedAt, closedAtOldThreshold, samples: timeline.length, victory, audio });
+
+  // 12. Larger graph (after the gameplay proof): append guided blocks to the same graph,
+  // organize it and record timings. The temporary project is discarded afterwards.
+  await click("guided-step-regras", "etapa Regras (grafo maior)");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid^="nodegraph-append-template-"]'));`), 15000, "Blocos guiados ausentes.", 200);
+  const perf = { baseNodes: await js(`return document.querySelectorAll('[data-testid^="node-card-"]').length + document.querySelectorAll('[data-testid^="nodegraph-group-box-"][data-collapsed="true"]').length * 4;`) };
+  for (let round = 0; round < 6; round += 1) {
+    const templates = await js(`return [...document.querySelectorAll('[data-testid^="nodegraph-append-template-"]')].map((el) => el.dataset.testid);`);
+    await click(templates[round % templates.length], `bloco guiado ${round + 1}`);
+    await pause(250);
+  }
+  perf.visibleNodes = await js(`return document.querySelectorAll('[data-testid^="node-card-"]').length;`);
+  perf.totalNodes = await js(`return Number(document.querySelector('[data-testid="nodegraph-overview"]')?.textContent.match(/(\\d+) nos/)?.[1] ?? 0);`);
+  const bigStarted = Date.now();
+  await click("nodegraph-organize-all", "organizar grafo maior");
+  perf.report = await waitFor(async () => js(`const el = document.querySelector('[data-testid="nodegraph-layout-report"]'); return el && el.dataset.moved !== undefined ? { ...el.dataset } : null;`), 10000, "Relatorio do grafo maior ausente.", 50);
+  perf.uiMs = Date.now() - bigStarted;
+  await pause(500);
+  perf.geometry = await geometry("grafo maior");
+  assertAligned(perf.geometry, "grafo maior");
+  if (perf.geometry.overlaps.length || perf.report.overlaps !== "0") fail(`Grafo maior com sobreposicao: ${JSON.stringify(perf)}`);
+  await shot("09-larger-graph", "grafo maior organizado");
+  addReportStep(report, "larger_graph_performance", "passed", perf);
+
+  const savedReport = await writeCreateGameReport(report, reportPath);
+  console.log(`Relatorio: ${savedReport}`);
+  console.log("OK: Desktop Tauri NodeGraph authoring (localizar pulo, trocar botao, limiar, som, organizar/desfazer, grupo, reinicio, teclado ate a vitoria) passou.");
+}
+
 const SHELL_PERSONA_STORAGE_KEY = "retrodev-shell-persona";
 
 async function cleanupTemporaryProject(projectDir) {
@@ -8012,7 +8494,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" || options.scenario === "nodegraph-authoring" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -8025,7 +8507,8 @@ async function main() {
     options.scenario !== "qa-rc" &&
     options.scenario !== "create-game-from-zero" &&
     options.scenario !== "reference-platformer" &&
-    options.scenario !== "authoring-acceptance";
+    options.scenario !== "authoring-acceptance" &&
+    options.scenario !== "nodegraph-authoring";
   let temporaryProjectDir = "";
   let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
@@ -8210,7 +8693,7 @@ async function main() {
     await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "Janela do app nao abriu corretamente");
     // Scenarios expect the default shell; a persona left in localStorage (e.g. by the
     // guided acceptance run) would hide workspaces. Reset it and reload once.
-    if (options.scenario !== "authoring-acceptance") {
+    if (options.scenario !== "authoring-acceptance" && options.scenario !== "nodegraph-authoring") {
       const persisted = await executeScript(sessionId, "return localStorage.getItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
       if (persisted) {
         await executeScript(sessionId, "localStorage.removeItem(arguments[0]); location.reload();", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
@@ -9561,6 +10044,17 @@ async function main() {
       } finally {
         // The guided persona persists in the app's localStorage; restore the default so the
         // next scenarios see the standard shell.
+        await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      }
+      return;
+    }
+
+    if (options.scenario === "nodegraph-authoring") {
+      try {
+        await runNodeGraphAuthoringScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
+          temporaryProjectDir = projectDir;
+        });
+      } finally {
         await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
       }
       return;
