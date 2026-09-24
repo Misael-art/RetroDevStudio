@@ -6839,6 +6839,8 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   };
   const instances = () => js(`return [...document.querySelectorAll('[data-testid^="behavior-instance-"]')].map((el) => ({ id: el.dataset.testid.slice(18), text: el.textContent }));`);
   const switchLogic = async (entityId) => {
+    // The Logic view is lazy (Suspense): wait until the switcher offers this entity.
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-entity-switch"] option[value="' + arguments[0] + '"]'));`, [entityId]), 20000, `Seletor de logica sem ${entityId}.`, 150);
     await selectOption("nodegraph-entity-switch", entityId);
     await waitSelected(entityId);
     await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-behaviors"]'));`), 10000, "Painel de comportamentos ausente.", 150);
