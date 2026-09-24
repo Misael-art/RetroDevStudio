@@ -1587,6 +1587,11 @@ function NodeCard({
         )}
       </div>
 
+      {node.params.authoring_origin ? (
+        <p data-testid={`node-origin-${node.id}`} className="truncate px-2 pb-0.5 font-mono text-[9px] text-[#7f849c]" title="Origem autoral (rastreabilidade)">
+          origem: {String(node.params.authoring_origin)}
+        </p>
+      ) : null}
       {importBadges.length > 0 ? (
         <div className="flex flex-wrap gap-1 px-2 pb-1">
           {importBadges.map((badge) => (
