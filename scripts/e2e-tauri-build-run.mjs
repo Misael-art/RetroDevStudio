@@ -6487,7 +6487,9 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   addReportStep(report, "organize_undo_redo", "passed", { layoutReport, organizeUiMs, before: { overlaps: before.overlaps.length }, organized, edges: edgesAfter, stillBound });
 
   // 8. Group the jump behavior, rename and collapse it (visual only).
-  await click("node-action-jump", "selecionar no do pulo");
+  await js(`document.querySelector('[data-testid="rule-item-jump"] button')?.scrollIntoView({ block: "center" });`);
+  await clickElement(sessionId, await findElement(sessionId, "[data-testid='rule-item-jump'] button"));
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="node-card-jump"]')?.dataset.selected ?? null;`)) === "true", 5000, "No do pulo nao selecionado.", 100);
   await click("nodegraph-select-behavior", "selecionar comportamento");
   const selection = await text("nodegraph-selection-count");
   if (!selection?.startsWith("4 selecionado")) fail(`Comportamento do pulo nao tem 4 nos: ${selection}`);
