@@ -4952,7 +4952,10 @@ mod tests {
             schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Shared Sprite".to_string(),
             target: "megadrive".to_string(),
-            resolution: Resolution { width: 320, height: 224 },
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
             fps: 60,
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
@@ -5022,7 +5025,10 @@ mod tests {
             collision_map: None,
             layers: None,
         };
-        let emitted = crate::compiler::sgdk_emitter::emit_sgdk(&generate_ast(&project, &scene), &project.name);
+        let emitted = crate::compiler::sgdk_emitter::emit_sgdk(
+            &generate_ast(&project, &scene),
+            &project.name,
+        );
         let c = &emitted.main_c;
         // A fisica da segunda entidade usa a variavel de instancia...
         assert!(c.contains("spr_fox__fox_2_vel_y += 6;"), "{c}");
