@@ -1129,6 +1129,7 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                 target_name,
                 vx,
                 vy,
+                ..
             } => {
                 out.push_str(&format!(
                     "{indent}logic_var_{target}_vx = {vx};\n",
@@ -1746,6 +1747,7 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             target_name,
             vx,
             vy,
+            ..
         } => {
             vars.insert(format!("{}_vx", target_name));
             vars.insert(format!("{}_vy", target_name));
@@ -3015,6 +3017,7 @@ mod tests {
                         target_name: "player".to_string(),
                         vx: LogicMathExpr::Literal(2),
                         vy: LogicMathExpr::Literal(0),
+                        runtime_var: None,
                     }),
                 }],
             }],

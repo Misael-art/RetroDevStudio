@@ -170,8 +170,7 @@ fn build_main_c_inner(
         out.push_str(&format!("static s32 {}_vel_x = 0;\n", physics.var_name));
         out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
     }
-    for target_name in logic_velocity_targets {
-        let runtime_var = sprite_runtime_var(&target_name);
+    for runtime_var in logic_velocity_targets {
         if physics_applications
             .iter()
             .any(|physics| physics.var_name == runtime_var)
@@ -1490,8 +1489,11 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 target_name,
                 vx,
                 vy,
+                runtime_var,
             } => {
-                let runtime_var = sprite_runtime_var(target_name);
+                let runtime_var = runtime_var
+                    .clone()
+                    .unwrap_or_else(|| sprite_runtime_var(target_name));
                 out.push_str(&format!(
                     "{indent}{runtime_var}_vel_x = {vx};\n",
                     indent = indent_str,
@@ -1803,8 +1805,16 @@ fn collect_logic_velocity_targets_from_ops(
             LogicOp::SourceMapped { op, .. } => {
                 collect_logic_velocity_targets_from_ops(std::slice::from_ref(op.as_ref()), targets);
             }
-            LogicOp::SetVelocity { target_name, .. } => {
-                targets.insert(target_name.clone());
+            LogicOp::SetVelocity {
+                target_name,
+                runtime_var,
+                ..
+            } => {
+                targets.insert(
+                    runtime_var
+                        .clone()
+                        .unwrap_or_else(|| sprite_runtime_var(target_name)),
+                );
             }
             LogicOp::ConditionOverlap {
                 if_true, if_false, ..
@@ -2261,6 +2271,7 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             target_name,
             vx,
             vy,
+            ..
         } => {
             vars.insert(format!("{}_vx", target_name));
             vars.insert(format!("{}_vy", target_name));
@@ -3726,6 +3737,7 @@ mod tests {
                         target_name: "player".to_string(),
                         vx: LogicMathExpr::Literal(2),
                         vy: LogicMathExpr::Literal(0),
+                        runtime_var: None,
                     }),
                 }],
             }],

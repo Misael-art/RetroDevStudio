@@ -256,6 +256,9 @@ pub enum LogicOp {
         target_name: String,
         vx: LogicMathExpr,
         vy: LogicMathExpr,
+        /// Variavel real do sprite do alvo (ex. `spr_player__player_2`), a mesma usada
+        /// pela fisica. `None` cai no nome derivado do id (compatibilidade).
+        runtime_var: Option<String>,
     },
     SetAnimationState {
         target_var: String,
@@ -1724,11 +1727,15 @@ fn compile_logic_node(
             }
         }
         "set_velocity" => {
-            let target_name = sanitize_identifier(
-                &param_string(node, "target").unwrap_or_else(|| "entity".to_string()),
-            );
+            let raw_target = param_string(node, "target").unwrap_or_else(|| "entity".to_string());
+            let runtime_var = runtime_entities
+                .get(&raw_target)
+                .and_then(|runtime| runtime.sprite.as_ref())
+                .map(|sprite| sprite.var_name.clone());
+            let target_name = sanitize_identifier(&raw_target);
             Some(CompiledLogicNode::Linear(LogicOp::SetVelocity {
                 target_name,
+                runtime_var,
                 vx: resolve_math_expr_from_input(graph, &node.id, "vx")
                     .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "vx", 0))),
                 vy: resolve_math_expr_from_input(graph, &node.id, "vy")
@@ -4934,6 +4941,96 @@ mod tests {
             LogicOp::PlaySound { sfx } if sfx == "jump"
         ));
         assert!(if_false.is_empty());
+    }
+
+    #[test]
+    fn set_velocity_targets_the_physics_var_of_entities_sharing_a_sprite_asset() {
+        // Duas entidades com o mesmo sprite: a segunda recebe `spr_<recurso>__<id>`.
+        // O salto (set_velocity) precisa escrever na mesma variavel que a fisica le.
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Shared Sprite".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution { width: 320, height: 224 },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+            settings: Default::default(),
+            template_metadata: None,
+        };
+        let fox = |id: &str, graph: Option<String>| Entity {
+            entity_id: id.to_string(),
+            display_name: None,
+            prefab: None,
+            transform: Transform { x: 40, y: 96 },
+            components: Components {
+                sprite: Some(SpriteComponent {
+                    asset: "assets/sprites/fox.png".to_string(),
+                    frame_width: 16,
+                    frame_height: 16,
+                    pivot: None,
+                    palette_slot: 0,
+                    animations: std::collections::BTreeMap::new(),
+                    priority: "foreground".to_string(),
+                    meta_sprite: false,
+                    commands: Vec::new(),
+                }),
+                physics: Some(crate::ugdm::components::PhysicsComponent {
+                    gravity: true,
+                    gravity_strength: 6,
+                    max_velocity: None,
+                    friction: 1,
+                    bounce: 0,
+                }),
+                logic: graph.map(|graph| crate::ugdm::components::LogicComponent {
+                    graph: Some(graph),
+                    graph_ref: None,
+                    graph_origin: None,
+                    logic_hints: Vec::new(),
+                    external_source_refs: Vec::new(),
+                    imported_semantics: None,
+                    variables: HashMap::new(),
+                }),
+                ..Components::default()
+            },
+        };
+        let jump = |target: &str, vy: i32| {
+            json!({
+                "version": 1,
+                "nodes": [
+                    { "id": "tick", "type": "event_update", "label": "Tick", "x": 0, "y": 0, "params": {} },
+                    { "id": "press", "type": "input_pressed", "label": "Press", "x": 0, "y": 0, "params": { "pad": "JOY_1", "button": "BUTTON_B" } },
+                    { "id": "jump", "type": "set_velocity", "label": "Jump", "x": 0, "y": 0, "params": { "target": target, "vx": 0, "vy": vy } }
+                ],
+                "edges": [
+                    { "id": "e1", "fromNode": "tick", "fromPort": "exec", "toNode": "press", "toPort": "exec" },
+                    { "id": "e2", "fromNode": "press", "fromPort": "exec", "toNode": "jump", "toPort": "exec" }
+                ]
+            })
+            .to_string()
+        };
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![fox("fox", None), fox("fox_2", Some(jump("fox_2", -40)))],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+        let emitted = crate::compiler::sgdk_emitter::emit_sgdk(&generate_ast(&project, &scene), &project.name);
+        let c = &emitted.main_c;
+        // A fisica da segunda entidade usa a variavel de instancia...
+        assert!(c.contains("spr_fox__fox_2_vel_y += 6;"), "{c}");
+        // ...e o salto escreve nela, nao numa variavel orfa derivada do id.
+        assert!(c.contains("spr_fox__fox_2_vel_y = -40;"), "{c}");
+        assert!(!c.contains("spr_fox_2_vel_y"), "{c}");
+        // A primeira entidade nao e afetada pelo salto da segunda.
+        assert!(!c.contains("spr_fox_vel_y = -40;"), "{c}");
     }
 
     #[test]

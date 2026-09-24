@@ -7045,12 +7045,20 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
     const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
     return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
   }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
+  const frames = async () => (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0;
+  // Holds until both the wall-clock window and >= 30 emulated frames passed (emulation
+  // under WebDriver runs at a few FPS), capped at 20 s; frames are recorded per sample.
   const hold = async (code, button, ms, label) => {
-    const samples = [await observe()];
+    const samples = [{ ...(await observe()), frame: await frames() }];
     await sendNativeGameKey(sessionId, code, "keyDown", label);
     await waitAck(button, true, label);
+    const startFrame = await frames();
     const end = Date.now() + ms;
-    while (Date.now() < end) { samples.push(await observe()); await pause(30); }
+    const cap = Date.now() + 20000;
+    while ((Date.now() < end || (await frames()) - startFrame < 30) && Date.now() < cap) {
+      samples.push({ ...(await observe()), frame: await frames() });
+      await pause(30);
+    }
     await sendNativeGameKey(sessionId, code, "keyUp", `soltar ${label}`);
     await waitAck(button, false, `soltar ${label}`);
     await pause(400);
