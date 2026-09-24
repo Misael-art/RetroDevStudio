@@ -6826,6 +6826,13 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
     ] }],
   });
   const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
+  const clickHierarchy = async (entityId) => {
+    const selector = `[data-testid='hierarchy-entity-${entityId}']`;
+    await waitFor(async () => js(`return Boolean(document.querySelector(arguments[0]));`, [selector]), 15000, `Hierarquia sem ${entityId}.`, 150);
+    await js(`document.querySelector(arguments[0])?.scrollIntoView({ block: "center" });`, [selector]);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${await findElement(sessionId, selector)}/click`, {});
+    await waitSelected(entityId);
+  };
   const instances = () => js(`return [...document.querySelectorAll('[data-testid^="behavior-instance-"]')].map((el) => ({ id: el.dataset.testid.slice(18), text: el.textContent }));`);
   const switchLogic = async (entityId) => {
     await selectOption("nodegraph-entity-switch", entityId);
@@ -6865,8 +6872,7 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   await click("guided-step-personagem", "etapa Personagem");
   await waitSelected("player");
   const duplicatePlayer = async (expectedId, x) => {
-    await webdriverRequest("POST", `/session/${sessionId}/element/${await findElement(sessionId, "[data-testid='hierarchy-entity-player']")}/click`, {});
-    await waitSelected("player");
+    await clickHierarchy("player");
     await click("inspector-duplicate-entity", "duplicar jogador");
     const warning = await waitFor(async () => text("inspector-duplicate-warning"), 5000, "Aviso de logica manual nao apareceu antes de duplicar.", 100);
     await click("inspector-duplicate-confirm", "duplicar sem logica manual");
@@ -6929,8 +6935,7 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
 
   // 4. Duplicate an entity that has a behavior: ids/target remapped, no warning (no manual logic).
   await click("guided-step-personagem", "etapa Personagem");
-  await webdriverRequest("POST", `/session/${sessionId}/element/${await findElement(sessionId, "[data-testid='hierarchy-entity-player_2']")}/click`, {});
-  await waitSelected("player_2");
+  await clickHierarchy("player_2");
   await click("inspector-duplicate-entity", "duplicar Player 2 (com comportamento)");
   await waitSelected("player_2_2");
   if (await js(`return Boolean(document.querySelector('[data-testid="inspector-duplicate-warning"]'));`)) fail("Aviso de logica manual indevido ao duplicar entidade so com comportamentos.");
