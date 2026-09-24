@@ -1,0 +1,144 @@
+{
+  "romIdentity": {
+    "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T18-26-00-802Z-played.rom",
+    "sha256": "bdd7749d90512040a7ca279e77e473264a2d2906e967504747d0579a3bb78f38"
+  },
+  "collision": {
+    "player": {
+      "shape": "aabb",
+      "width": 14,
+      "height": 32,
+      "offset": null,
+      "solid": true,
+      "layer": "player",
+      "collides_with": [
+        "ground",
+        "passage",
+        "goal_sensor"
+      ]
+    },
+    "blocker": {
+      "shape": "aabb",
+      "width": 24,
+      "height": 32,
+      "offset": null,
+      "solid": true,
+      "layer": "passage",
+      "collides_with": [
+        "player"
+      ]
+    }
+  },
+  "jump": {
+    "apex1": 15,
+    "p3DuringJ1": true,
+    "airPressAtY": 161,
+    "apex2": 15,
+    "apexHeld": 15,
+    "heldAfterLanding": true,
+    "apex4": 15,
+    "p3Apex": 5,
+    "p2ApexWhileP3Air": 15
+  },
+  "passage": {
+    "A": {
+      "left": 150,
+      "right": 174
+    },
+    "B": {
+      "left": 250,
+      "right": 274
+    },
+    "C": {
+      "left": 90,
+      "right": 114
+    },
+    "fromLeft": {
+      "stopX": 232,
+      "maxRight": 246,
+      "score": 10,
+      "overlapped": false
+    },
+    "fromRight": {
+      "stopX": 176,
+      "minLeft": 176,
+      "overlapped": false
+    },
+    "p3StartedOverlapped": true,
+    "p3Exit": {
+      "from": 100,
+      "to": 130,
+      "gcd": 3,
+      "p2Static": true,
+      "copyStatic": true
+    },
+    "p3BeforeThreshold": {
+      "stopX": 115,
+      "minLeft": 115,
+      "overlapped": false,
+      "score": 12
+    },
+    "cross": {
+      "firstInsideB": {
+        "p1": [
+          32,
+          176
+        ],
+        "p2": [
+          240,
+          176
+        ],
+        "p3": [
+          115,
+          176
+        ],
+        "copy": [
+          224,
+          176
+        ],
+        "score": 21,
+        "openB": 1,
+        "openA": 1,
+        "openC": 0,
+        "frame": 360
+      },
+      "openedAtScore": 21,
+      "beforeOpenInside": 0,
+      "end": {
+        "p1": [
+          42,
+          176
+        ],
+        "p2": [
+          280,
+          176
+        ],
+        "p3": [
+          115,
+          176
+        ],
+        "copy": [
+          224,
+          176
+        ],
+        "score": 26,
+        "openB": 1,
+        "openA": 1,
+        "openC": 0,
+        "frame": 360
+      }
+    },
+    "p3AfterThreshold": {
+      "stopX": 115,
+      "minLeft": 115,
+      "overlapped": false,
+      "score": 28
+    },
+    "openStates": {
+      "A": 1,
+      "B": 1,
+      "C": 0,
+      "score": 28
+    }
+  }
+}

@@ -26,7 +26,33 @@ Branch `codex/reusable-behaviors`, **dependente** de `codex/nodegraph-organize-a
 | ids de instância por grafo | passagens em entidades diferentes compartilhariam a variável de abertura | ids únicos na cena; teste (controle negativo) |
 | grupo recolhido acima dos cartões e fora do layout | podia encobrir controles de outro nó | ver acima; testes de layout e de componente |
 
-## Prova desktop (nova)
+## Rodada 2 — política de salto e prova física da passagem (nova)
+
+Binário `src-tauri/target-test/debug/retro-dev-studio` SHA-256 `12dc97d9b007062dad64a92ac3e2f521ce6f6a50b1b147108818971839183ac0`, construído do commit `dec2f65` (commits seguintes só alteram o script E2E). E2E `behaviors-independence` 6/6, relatório `behaviors-independence-2026-09-24T18-26-00-802Z-report.json` (SHA `70013ac7…`, cópia e `…-play-proof.json` em `data/behaviors/evidence/`), ROM jogada SHA `bdd7749d90512040a7ca279e77e473264a2d2906e967504747d0579a3bb78f38`. Configuração toda pela UI, salvar/reiniciar/reabrir, compilar e jogar com teclado nativo; RAM só observada. Limites de colisão calculados como a ROM calcula (posição + offset da colisão, largura dos prefabs: jogador 14×32, bloqueio 24×32).
+
+Cena: Player 2 (x=200, 8 px/quadro = máximo suportado, ←/→, salto B/X) com duas passagens (bloqueio A em 150–174 e B em 250–274, limiar 20); Player 3 (x=100, sobreposto ao seu bloqueio C em 90–114; 3 px/quadro após edição, C/Z, salto Start) com passagem limiar 60.
+
+| Camada | O que foi provado | Evidência |
+| --- | --- | --- |
+| Identidade/persistência | ids únicos (inclusive passagens copiadas); cópia remapeada; remover o movimento da cópia recusado ("depende"), passagens e movimento removidos em ordem; Player 2 com 3 instâncias e Player 3 com 2 após reiniciar/reabrir | nova |
+| Input | taps de ≥3 quadros emulados; X/B só Player 2, Enter/Start só Player 3, C só Player 3; ACKs nativos | nova |
+| Estado lógico | variáveis de abertura privadas: A e B abrem no limiar 20 (primeira observação no score 21); C permanece 0 com score 28 | nova (observador, não substitui o físico) |
+| Efeito físico — salto | do chão: apex 15 px; pressão no ar (no topo, y=161): apex continua 15 (sem reinício); segurado: apex 15 e nenhum novo salto em 40 quadros após pousar; nova pressão após pousar: 15; com Player 3 no ar (apex 5), Player 2 salta do chão (15) — apoio independente | nova |
+| Efeito físico — passagem | pela esquerda: para em x=232 (borda 246 < 250) sem nunca sobrepor B; pela direita: para com borda esquerda 176 ≥ 174 sem sobrepor A; ambos a 8 px/quadro (sem atravessar num passo); começando sobreposto a C, Player 3 sai livremente (100→130, passos de 3 px) e ao voltar para em 115 (C termina em 114); após o limiar, Player 2 atravessa B no mesmo local (primeira posição dentro de B com score 21; nenhuma amostra dentro de B antes de abrir); Player 3 continua parado em 115 com score 28 (a sua passagem, 60, segue fechada) | nova |
+| Semântica de "começa sobreposto" | definida pelo compilador: a sonda bloqueia só o movimento que *entraria* no bloqueio (`sobrepõe na posição sondada && !sobrepõe agora`); quem já está dentro sai em qualquer direção e não fica preso | nova (desktop) + código existente |
+
+Defeitos reais desta rodada:
+
+| Defeito | Correção / regressão |
+| --- | --- |
+| Salto sem checagem de chão | nó canônico `condition_on_ground` + estado `<sprite>_on_ground` na física; testes Rust/unitários |
+| Apoio só no quadro do encaixe (gravidade subpixel: 1 de ~3 quadros) — a pressão podia cair num quadro "no ar" | apoio medido em todo quadro (sólido sob os pés / piso / fundo); teste Rust no caminho de tiles |
+| Segunda passagem no mesmo movimento não bloqueava nada (e sua variável foi eliminada pelo GCC) | portas encadeáveis; remoção em qualquer ordem restaura o original exato; teste unitário |
+
+Observações honestas: várias execuções intermediárias falharam por limitações do script (taps mais curtos que um quadro emulado, espera por quadros), corrigidas no script. A variável lógica é mostrada como observador; a prova da passagem é a posição física na RAM versus os limites de colisão.
+
+## Prova desktop — rodada 1 (herdada)
+
 
 `npm run test:e2e:desktop:behaviors-independence`, teclado/mouse nativos (WebDriver), SGDK e core oficiais; RAM só observada.
 Binário `src-tauri/target-test/debug/retro-dev-studio` SHA-256 `ccd0dab9e0317138c5f20c7762d3371c50c5cedd11dbf7686952b2596a85aac4`, construído do commit `9fb0c89` (commits seguintes só alteram o script E2E). Relatório `behaviors-independence-2026-09-24T14-36-40-628Z-report.json` (SHA `732e20c9…`, cópia em `data/behaviors/evidence/`), ROM jogada SHA `32525aab5935887de35b73c625d8b37e5239f1f439b6fb81d9e72300605281e5`. 6/6 etapas:
@@ -45,18 +71,21 @@ Controles negativos: outra entidade parada em cada tecla (estado/alvo compartilh
 
 Observação honesta: duas execuções anteriores falharam por espera insuficiente do script (hierarquia/visão de lógica carregando); corrigido no script, não no produto. Uma execução anterior passou sem exercitar a abertura da passagem (score 12 < 20); a asserção passou a ser incondicional.
 
-## Revalidação da etapa anterior no mesmo binário
+## Revalidação da etapa anterior
 
-`nodegraph-authoring` passou 13/13 no binário `ccd0dab9…` (relatório `nodegraph-authoring-2026-09-24T14-39-10-347Z-report.json`, SHA `c4fba34f…`): organizar 45 nós em 12 ms, sobreposições 93 → 0, alinhamento ≤ 0,22 px em 1920×1080, 1366×768, 125% e zoom; Z não pula e X pula (y 176 → 161); limiares 12/60; grafo de 106 nós em 20 ms. Com a linha `origem:` presente, as medições desktop após organizar e após reabrir deram 0 sobreposição. **Ainda não medido**: posições salvas antes da linha existir. A prova 13/13 anterior continua atribuída ao binário `bcd94007…`; esta é uma nova execução.
+Rodada 2: `nodegraph-authoring` 13/13 no binário `12dc97d9…` (relatório `nodegraph-authoring-2026-09-24T18-34-19-963Z-report.json`, cópia em `data/nodegraph_authoring/evidence/`).
+
+Rodada 1: `nodegraph-authoring` passou 13/13 no binário `ccd0dab9…` (relatório `nodegraph-authoring-2026-09-24T14-39-10-347Z-report.json`, SHA `c4fba34f…`): organizar 45 nós em 12 ms, sobreposições 93 → 0, alinhamento ≤ 0,22 px em 1920×1080, 1366×768, 125% e zoom; Z não pula e X pula (y 176 → 161); limiares 12/60; grafo de 106 nós em 20 ms. Com a linha `origem:` presente, as medições desktop após organizar e após reabrir deram 0 sobreposição. **Ainda não medido**: posições salvas antes da linha existir. A prova 13/13 anterior continua atribuída ao binário `bcd94007…`; esta é uma nova execução.
 
 ## Gates
 
-check:tree, lint, tsc, Vitest 687/6 skipped, clippy, cargo test --lib 630/47 ignored.
+Rodada 2: check:tree, lint, tsc, Vitest 688/6 skipped, `cargo fmt --check`, clippy, cargo test --lib 630/47 ignored. CI do HEAD `1341114` (rodada 1) verde: validate, linux-validate, desktop-smoke.
 
 ## Limitações e pendentes
 
-- Salto sem checagem de chão (igual ao template): saltos repetidos no ar.
-- A passagem foi comprovada pela variável de abertura; o bloqueio físico da entidade não foi exercitado (Player 3 não alcança o bloqueio nesta fase).
+- Sem saltos adicionais (duplo salto) — não exposto; o nó manual do template continua sem checagem de chão (inalterado).
+- `condition_on_ground` só no Mega Drive; no SNES compila como falso explícito.
+- A passagem bloqueia apenas o movimento horizontal gerado pelo comportamento (não a física vertical nem outras lógicas).
 - Biblioteca com 2 comportamentos; coleta, porta e vitória pendentes. Sequência de animação com ordem/duração na ROM pendente.
 - Sem animação de "andar" automática; sem nó "ao soltar".
 - Usabilidade humana não validada (roteiro abaixo).
