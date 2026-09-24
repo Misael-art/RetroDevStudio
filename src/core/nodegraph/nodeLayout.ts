@@ -38,7 +38,7 @@ export function estimateNodeCardSize(node: GraphNode, essentialParamCount = 2, h
 }
 
 export type LayoutConflict = {
-  kind: "pinned_overlap" | "moved_around_fixed";
+  kind: "pinned_overlap" | "moved_around_fixed" | "collapsed_overlap";
   nodeIds: string[];
   message: string;
 };
@@ -48,7 +48,15 @@ export type LayoutOptions = {
   sizeOf?: NodeSizeLookup;
   /** Nos a organizar; os demais ficam parados como obstaculos. Padrao: todos. */
   scope?: Iterable<string>;
+  /**
+   * Grupos recolhidos: seus membros ficam ocultos e parados (nao sao reorganizados),
+   * e a caixa recolhida ocupa espaco como obstaculo no lugar dos cartoes.
+   */
+  collapsed?: CollapsedOccupant[];
 };
+
+/** Retangulo ocupado por um grupo recolhido (no lugar dos seus membros ocultos). */
+export type CollapsedOccupant = { id: string; label: string; nodeIds: string[]; rect: NodeRect };
 
 export type LayoutResult = {
   graph: NodeGraph;
@@ -236,13 +244,32 @@ export function layoutNodeGraph(graph: NodeGraph, options: LayoutOptions = {}): 
   const indexOf = new Map(graph.nodes.map((node, index) => [node.id, index]));
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   const size = new Map(graph.nodes.map((node) => [node.id, sizeOf(node)]));
-  const movable = graph.nodes.filter((node) => !node.pinned && (!scope || scope.has(node.id))).map((node) => node.id);
+  const hidden = new Set((options.collapsed ?? []).flatMap((group) => group.nodeIds));
+  const movable = graph.nodes
+    .filter((node) => !node.pinned && !hidden.has(node.id) && (!scope || scope.has(node.id)))
+    .map((node) => node.id);
   const movableSet = new Set(movable);
   const conflicts: LayoutConflict[] = [];
 
-  const fixedRects = graph.nodes
-    .filter((node) => !movableSet.has(node.id))
-    .map((node) => ({ id: node.id, rect: { x: node.x, y: node.y, ...size.get(node.id)! } }));
+  const fixedRects: Array<{ id: string; rect: NodeRect; label?: string }> = [
+    ...graph.nodes
+      .filter((node) => !movableSet.has(node.id) && !hidden.has(node.id))
+      .map((node) => ({ id: node.id, rect: { x: node.x, y: node.y, ...size.get(node.id)! } })),
+    ...(options.collapsed ?? []).map((group) => ({ id: `group:${group.id}`, rect: group.rect, label: group.label })),
+  ];
+  const labelOf = (id: string) =>
+    byId.get(id)?.label ?? fixedRects.find((item) => item.id === id)?.label ?? id;
+  // Caixas recolhidas sobre nos que o layout nao pode mover (fixados/fora do escopo).
+  for (const group of options.collapsed ?? []) {
+    for (const item of fixedRects) {
+      if (item.id.startsWith("group:") || !rectsOverlap(group.rect, item.rect)) continue;
+      conflicts.push({
+        kind: "collapsed_overlap",
+        nodeIds: [`group:${group.id}`, item.id],
+        message: `O grupo recolhido "${group.label}" cobre "${labelOf(item.id)}", que nao pode ser movido (fixado ou fora da selecao).`,
+      });
+    }
+  }
 
   const pinned = graph.nodes.filter((node) => node.pinned);
   for (let i = 0; i < pinned.length; i += 1) {
@@ -330,7 +357,7 @@ export function layoutNodeGraph(graph: NodeGraph, options: LayoutOptions = {}): 
         conflicts.push({
           kind: "moved_around_fixed",
           nodeIds: [id, hit.id],
-          message: `"${byId.get(id)!.label}" foi deslocado para nao cobrir "${byId.get(hit.id)!.label}" (${byId.get(hit.id)!.pinned ? "fixado" : "fora da selecao"}).`,
+          message: `"${byId.get(id)!.label}" foi deslocado para nao cobrir "${labelOf(hit.id)}" (${hit.id.startsWith("group:") ? "grupo recolhido" : byId.get(hit.id)!.pinned ? "fixado" : "fora da selecao"}).`,
         });
       }
       rect.y = hit.rect.y + hit.rect.height + LAYOUT_ROW_GAP;
@@ -370,10 +397,21 @@ export function graphSemanticSignature(graph: NodeGraph): string {
   });
 }
 
-/** Pares de nos (nao ocultos) cujos cartoes se sobrepoem. */
-export function findNodeOverlaps(graph: NodeGraph, sizeOf: NodeSizeLookup = defaultSize, ignore?: Set<string>): Array<[string, string]> {
+/**
+ * Pares de ocupantes sobrepostos: cartoes visiveis (nao em `ignore`) e, quando dadas,
+ * caixas de grupos recolhidos (`group:<id>`).
+ */
+export function findNodeOverlaps(
+  graph: NodeGraph,
+  sizeOf: NodeSizeLookup = defaultSize,
+  ignore?: Set<string>,
+  collapsed: CollapsedOccupant[] = []
+): Array<[string, string]> {
   const nodes = graph.nodes.filter((node) => !ignore?.has(node.id));
-  const rects = nodes.map((node) => ({ id: node.id, rect: { x: node.x, y: node.y, ...sizeOf(node) } }));
+  const rects = [
+    ...nodes.map((node) => ({ id: node.id, rect: { x: node.x, y: node.y, ...sizeOf(node) } })),
+    ...collapsed.map((group) => ({ id: `group:${group.id}`, rect: group.rect })),
+  ];
   const pairs: Array<[string, string]> = [];
   for (let i = 0; i < rects.length; i += 1) {
     for (let j = i + 1; j < rects.length; j += 1) {

@@ -77,6 +77,7 @@ import {
   graphSemanticSignature,
   layoutNodeGraph,
   routeEdgePath,
+  type CollapsedOccupant,
   type LayoutConflict,
   type NodeSize,
 } from "../../core/nodegraph/nodeLayout";
@@ -3007,6 +3008,29 @@ export default function NodeGraphEditor() {
   );
   const hiddenNodeIdsRef = useRef(hiddenNodeIds);
   hiddenNodeIdsRef.current = hiddenNodeIds;
+  /** Caixas recolhidas ocupam espaco no lugar dos membros ocultos. */
+  const collapsedOccupants = useMemo<CollapsedOccupant[]>(
+    () =>
+      groupBoxes
+        .filter((box) => box.collapsed)
+        .map((box) => ({ id: box.groupId, label: box.label, nodeIds: box.nodeIds, rect: { x: box.x, y: box.y, width: box.width, height: box.height } })),
+    [groupBoxes]
+  );
+  const collapsedOccupantsRef = useRef(collapsedOccupants);
+  collapsedOccupantsRef.current = collapsedOccupants;
+  /** Cartoes visiveis cobertos por um grupo recolhido (mostrado como aviso; nada e movido sozinho). */
+  const collapsedCoverage = useMemo(
+    () =>
+      findNodeOverlaps(graph, nodeSizeOf, hiddenNodeIds, collapsedOccupants)
+        .map(([a, b]) => (a.startsWith("group:") ? [a, b] : [b, a]))
+        .filter(([group, other]) => group.startsWith("group:") && !other.startsWith("group:"))
+        .map(([group, other]) => ({
+          group: collapsedOccupants.find((item) => `group:${item.id}` === group)?.label ?? group,
+          node: graph.nodes.find((node) => node.id === other)?.label ?? other,
+          nodeId: other,
+        })),
+    [collapsedOccupants, graph, hiddenNodeIds, nodeSizeOf]
+  );
 
   // ── Desfazer / refazer ──────────────────────────────────────────────────────
   const undoGraph = useCallback(() => {
@@ -3059,14 +3083,18 @@ export default function NodeGraphEditor() {
       return;
     }
     const started = performance.now();
-    const result = layoutNodeGraph(current, { sizeOf: nodeSizeOf, scope: scope === "selection" ? selection : undefined });
+    const result = layoutNodeGraph(current, {
+      sizeOf: nodeSizeOf,
+      scope: scope === "selection" ? selection : undefined,
+      collapsed: collapsedOccupantsRef.current,
+    });
     const ms = Math.round((performance.now() - started) * 10) / 10;
     if (graphSemanticSignature(result.graph) !== graphSemanticSignature(current)) {
       // Defesa: organizar nunca pode alterar a logica. Se acontecer, nada e aplicado.
       logMessage("error", "[NodeGraph] Organizar abortado: o resultado alteraria a logica do grafo.");
       return;
     }
-    const overlaps = findNodeOverlaps(result.graph, nodeSizeOf, hiddenNodeIdsRef.current).length;
+    const overlaps = findNodeOverlaps(result.graph, nodeSizeOf, hiddenNodeIdsRef.current, collapsedOccupantsRef.current).length;
     setLayoutReport({ scope, moved: result.movedNodeIds.length, ms, overlaps, conflicts: result.conflicts });
     if (result.movedNodeIds.length > 0) {
       setGraph(result.graph, scope === "all" ? "Organizar tudo" : "Organizar selecao");
@@ -3752,6 +3780,15 @@ export default function NodeGraphEditor() {
                 </ul>
               </div>
             )}
+            {collapsedCoverage.length > 0 && (
+              <div data-testid="nodegraph-collapsed-overlap" className="rounded border border-[#fab387]/50 bg-[#fab387]/10 px-2 py-1.5 text-[10px] text-[#fab387]">
+                {collapsedCoverage.slice(0, 4).map((item) => (
+                  <p key={`${item.group}-${item.nodeId}`}>
+                    O grupo recolhido "{item.group}" fica sob "{item.node}". Os controles do no continuam acessiveis; use Organizar tudo para afastar (os nos do grupo nao se movem).
+                  </p>
+                ))}
+              </div>
+            )}
             {layoutReport && (
               <div
                 data-testid="nodegraph-layout-report"
@@ -4211,7 +4248,8 @@ export default function NodeGraphEditor() {
                 height: box.height * view.zoom,
                 borderColor: `${box.color}66`,
                 backgroundColor: box.collapsed ? "#181825f2" : `${box.color}10`,
-                zIndex: box.collapsed ? 2 : 0,
+                // Recolhido fica abaixo dos cartoes: nunca encobre controles de outros nos.
+                zIndex: box.collapsed ? 1 : 0,
                 pointerEvents: "none",
               }}
             >

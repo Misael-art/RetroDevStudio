@@ -190,6 +190,41 @@ describe("layoutNodeGraph", () => {
   });
 });
 
+describe("collapsed groups as occupants", () => {
+  it("keeps hidden members still and moves an external node out from under the collapsed box", () => {
+    const graph = layoutNodeGraph(referenceGraph(), { sizeOf: size }).graph;
+    const members = ["update_jump", "jump", "jump_velocity", "jump_sound"];
+    const memberNodes = graph.nodes.filter((node) => members.includes(node.id));
+    const minX = Math.min(...memberNodes.map((node) => node.x));
+    const minY = Math.min(...memberNodes.map((node) => node.y));
+    const rect = { x: minX - 28, y: minY - 54, width: 296, height: 120 };
+    // Nó externo exatamente sob a caixa recolhida (reproduz a lacuna).
+    const covered: NodeGraph = { ...graph, nodes: graph.nodes.map((node) => (node.id === "music" ? { ...node, x: minX, y: minY } : node)) };
+    const collapsed = [{ id: "g", label: "Pulo", nodeIds: members, rect }];
+    const hidden = new Set(members);
+    expect(findNodeOverlaps(covered, size, hidden, collapsed)).toContainEqual(["music", "group:g"]);
+
+    const result = layoutNodeGraph(covered, { sizeOf: size, collapsed });
+    for (const id of members) {
+      const before = covered.nodes.find((node) => node.id === id)!;
+      const after = result.graph.nodes.find((node) => node.id === id)!;
+      expect([after.x, after.y]).toEqual([before.x, before.y]);
+    }
+    expect(findNodeOverlaps(result.graph, size, hidden, collapsed)).toEqual([]);
+    expect(graphSemanticSignature(result.graph)).toBe(graphSemanticSignature(covered));
+  });
+
+  it("reports a collapsed box over a pinned node instead of moving it", () => {
+    const graph = layoutNodeGraph(referenceGraph(), { sizeOf: size }).graph;
+    const music = graph.nodes.find((node) => node.id === "music")!;
+    const pinned: NodeGraph = { ...graph, nodes: graph.nodes.map((node) => (node.id === "music" ? { ...node, pinned: true } : node)) };
+    const collapsed = [{ id: "g", label: "Pulo", nodeIds: ["jump"], rect: { x: music.x, y: music.y, width: 50, height: 50 } }];
+    const result = layoutNodeGraph(pinned, { sizeOf: size, collapsed });
+    expect(result.conflicts).toContainEqual(expect.objectContaining({ kind: "collapsed_overlap", nodeIds: ["group:g", "music"] }));
+    expect(result.graph.nodes.find((node) => node.id === "music")).toMatchObject({ x: music.x, y: music.y });
+  });
+});
+
 describe("edge routing and helpers", () => {
   it("routes forward edges as curves and backward edges around the cards", () => {
     expect(routeEdgePath({ x: 0, y: 10 }, { x: 200, y: 50 })).toMatch(/^M 0 10 C /);

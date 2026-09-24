@@ -6320,7 +6320,11 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   const geometry = async (label) => {
     const result = await js(`
       const svg = document.querySelector('[data-testid="nodegraph-edges"]');
-      const cards = [...document.querySelectorAll('[data-testid^="node-card-"]')].map((el) => ({ id: el.dataset.testid.slice(10), r: el.getBoundingClientRect() }));
+      // Collapsed group boxes occupy space too (their members are hidden).
+      const cards = [
+        ...[...document.querySelectorAll('[data-testid^="node-card-"]')].map((el) => ({ id: el.dataset.testid.slice(10), r: el.getBoundingClientRect() })),
+        ...[...document.querySelectorAll('[data-testid^="nodegraph-group-box-"][data-collapsed="true"]')].map((el) => ({ id: "group:" + el.dataset.testid.slice(20), r: el.getBoundingClientRect() })),
+      ];
       const overlaps = [];
       for (let i = 0; i < cards.length; i += 1) for (let j = i + 1; j < cards.length; j += 1) {
         const a = cards[i].r, b = cards[j].r;
