@@ -6524,7 +6524,7 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   await js(`
     const shell = document.querySelector('[data-testid="nodegraph-canvas-shell"]');
     const r = shell.getBoundingClientRect();
-    for (let i = 0; i < 4; i += 1) shell.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 200, deltaY: -160 }));
+    for (let i = 0; i < 10; i += 1) shell.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: r.left + 200, clientY: r.top + 200, deltaY: -160 }));
   `);
   await pause(500);
   layouts["zoom-in"] = { geometry: await geometry("zoom ampliado") };
