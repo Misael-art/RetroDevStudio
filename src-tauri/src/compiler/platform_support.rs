@@ -71,6 +71,119 @@ pub fn logic_support_issues(target: &str, resolved_scene: &Scene) -> Vec<LogicSu
     issues
 }
 
+#[derive(serde::Deserialize)]
+struct GraphBehaviors {
+    #[serde(default)]
+    nodes: Vec<BehaviorNode>,
+    #[serde(default)]
+    behaviors: Vec<BehaviorRecord>,
+}
+
+#[derive(serde::Deserialize)]
+struct BehaviorNode {
+    id: String,
+    #[serde(default)]
+    params: std::collections::HashMap<String, serde_json::Value>,
+}
+
+#[derive(serde::Deserialize)]
+struct BehaviorRecord {
+    id: String,
+    #[serde(rename = "behaviorId")]
+    behavior_id: String,
+    #[serde(default)]
+    params: std::collections::HashMap<String, serde_json::Value>,
+}
+
+/// Referencias quebradas de comportamentos (grafo importado/editado fora do app):
+/// nos gerados apontando para entidade inexistente, ou item/objetivo/passagem
+/// apontando para contador/movimento que nao existe mais. Recusam o build.
+pub fn behavior_reference_issues(resolved_scene: &Scene) -> Vec<LogicSupportIssue> {
+    let entity_ids: std::collections::HashSet<&str> = resolved_scene
+        .entities
+        .iter()
+        .map(|entity| entity.entity_id.as_str())
+        .collect();
+    let parsed: Vec<(String, GraphBehaviors)> = resolved_scene
+        .entities
+        .iter()
+        .filter_map(|entity| {
+            let graph = entity.components.logic.as_ref()?.graph.as_deref()?;
+            serde_json::from_str::<GraphBehaviors>(graph)
+                .ok()
+                .map(|parsed| (entity.entity_id.clone(), parsed))
+        })
+        .collect();
+    let counters: std::collections::HashSet<&str> = parsed
+        .iter()
+        .flat_map(|(_, graph)| graph.behaviors.iter())
+        .filter(|record| record.behavior_id == "counter")
+        .map(|record| record.id.as_str())
+        .collect();
+    let mut issues = Vec::new();
+    let param = |params: &std::collections::HashMap<String, serde_json::Value>, key: &str| {
+        params
+            .get(key)
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    for (entity_id, graph) in &parsed {
+        for node in &graph.nodes {
+            if param(&node.params, "behavior_instance").is_empty() {
+                continue;
+            }
+            for key in ["target", "a", "b"] {
+                let value = param(&node.params, key);
+                if !value.is_empty() && value != "self" && !entity_ids.contains(value.as_str()) {
+                    issues.push(LogicSupportIssue {
+                        platform: "any".to_string(),
+                        entity_id: entity_id.clone(),
+                        node_id: node.id.clone(),
+                        node_type: "behavior_reference".to_string(),
+                        reason: format!(
+                            "o comportamento aponta para a entidade '{value}', que nao existe"
+                        ),
+                    });
+                }
+            }
+        }
+        let local: std::collections::HashSet<&str> = graph
+            .behaviors
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect();
+        for record in &graph.behaviors {
+            let counter = param(&record.params, "counter");
+            if matches!(record.behavior_id.as_str(), "collectible" | "objective")
+                && !counter.is_empty()
+                && !counters.contains(counter.as_str())
+            {
+                issues.push(LogicSupportIssue {
+                    platform: "any".to_string(),
+                    entity_id: entity_id.clone(),
+                    node_id: record.id.clone(),
+                    node_type: record.behavior_id.clone(),
+                    reason: format!("o contador '{counter}' nao existe mais"),
+                });
+            }
+            let movement = param(&record.params, "movement");
+            if record.behavior_id == "gated_passage" && !local.contains(movement.as_str()) {
+                issues.push(LogicSupportIssue {
+                    platform: "any".to_string(),
+                    entity_id: entity_id.clone(),
+                    node_id: record.id.clone(),
+                    node_type: record.behavior_id.clone(),
+                    reason: format!(
+                        "o movimento '{movement}' bloqueado pela passagem nao existe mais"
+                    ),
+                });
+            }
+        }
+    }
+    issues
+}
+
 pub fn issue_diagnostic(issue: &LogicSupportIssue) -> ActionableDiagnostic {
     let area = if issue.platform == "snes" {
         DiagnosticArea::BuildSnes
@@ -79,10 +192,17 @@ pub fn issue_diagnostic(issue: &LogicSupportIssue) -> ActionableDiagnostic {
     };
     ActionableDiagnostic::blocking_error(
         area,
-        format!(
-            "A entidade '{}' usa o no '{}' ({}), que nao e suportado em {}: {}.",
-            issue.entity_id, issue.node_id, issue.node_type, issue.platform, issue.reason
-        ),
+        if issue.platform == "any" {
+            format!(
+                "A logica da entidade '{}' tem uma referencia quebrada em '{}': {}.",
+                issue.entity_id, issue.node_id, issue.reason
+            )
+        } else {
+            format!(
+                "A entidade '{}' usa o no '{}' ({}), que nao e suportado em {}: {}.",
+                issue.entity_id, issue.node_id, issue.node_type, issue.platform, issue.reason
+            )
+        },
         format!(
             "platform={} entity={} node={} type={}",
             issue.platform, issue.entity_id, issue.node_id, issue.node_type
@@ -151,5 +271,25 @@ mod tests {
         assert!(issue_diagnostic(&issues[0]).blocking);
         assert!(logic_support_issues("megadrive", &with_node).is_empty());
         assert!(logic_support_issues("snes", &without).is_empty());
+    }
+
+    #[test]
+    fn refuses_broken_behavior_references_from_external_edits() {
+        let orphan_entity = scene_with(
+            r#"{"nodes":[{"id":"bh_item_x_1__hide","type":"destroy_entity","params":{"target":"ghost","behavior_instance":"bh_item_x_1"}}],"edges":[]}"#,
+        );
+        let issues = behavior_reference_issues(&orphan_entity);
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].reason.contains("'ghost'"));
+        let orphan_counter = scene_with(
+            r#"{"nodes":[],"edges":[],"behaviors":[{"id":"bh_item_x_1","behaviorId":"collectible","label":"x","params":{"counter":"bh_ctr_gone_1","item":"fox"},"nodeIds":[],"edgeIds":[],"generated":{}}]}"#,
+        );
+        assert!(behavior_reference_issues(&orphan_counter)[0]
+            .reason
+            .contains("bh_ctr_gone_1"));
+        let fine = scene_with(
+            r#"{"nodes":[{"id":"n","type":"destroy_entity","params":{"target":"fox","behavior_instance":"bh"}}],"edges":[]}"#,
+        );
+        assert!(behavior_reference_issues(&fine).is_empty());
     }
 }
