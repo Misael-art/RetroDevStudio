@@ -938,8 +938,17 @@ export default function InspectorPanel() {
     return { manualNodes: graph.nodes.filter((node) => !owned.has(node.id)).length, graph };
   }
 
+  /** A logica efetiva vem da entidade resolvida (prefab incluso), nao so da cena de origem. */
+  function effectiveLogic() {
+    const resolved = manualLogicOf(entity);
+    const source = manualLogicOf(sourceEntity);
+    const hasLogic = Boolean(entity?.components.logic || sourceEntity?.components.logic);
+    const manualNodes = resolved.manualNodes === null || source.manualNodes === null ? null : Math.max(resolved.manualNodes, source.manualNodes);
+    return { hasLogic, manualNodes, graph: resolved.graph.nodes.length ? resolved.graph : source.graph };
+  }
+
   function requestDuplicateEntity() {
-    const { manualNodes } = manualLogicOf(sourceEntity ?? entity);
+    const { manualNodes } = effectiveLogic();
     if (manualNodes === 0) {
       handleDuplicateEntity();
       return;
@@ -965,11 +974,13 @@ export default function InspectorPanel() {
     const sceneInstanceIds = scene.entities.flatMap(
       (candidate) => deserializeNodeGraph(candidate.components.logic?.graph).behaviors?.map((instance) => instance.id) ?? []
     );
-    const { graph: sourceGraph } = manualLogicOf(sourceOriginal);
-    const copy = duplicateBehaviorLogic(sourceGraph, resolvedOriginal.entity_id, entityId, sceneInstanceIds);
+    const logic = effectiveLogic();
+    const copy = duplicateBehaviorLogic(logic.graph, resolvedOriginal.entity_id, entityId, sceneInstanceIds);
     const withLogic = (candidate: Entity): Entity => {
       const components = { ...structuredClone(candidate.components) };
-      if (copy.graph.nodes.length) components.logic = { graph: serializeNodeGraph(copy.graph) };
+      // O merge de prefab e profundo e ignora null: a copia sobrescreve explicitamente a
+      // logica herdada (grafo inline so com comportamentos, graph_ref vazio = sem arquivo).
+      if (logic.hasLogic) components.logic = { graph: serializeNodeGraph(copy.graph), graph_ref: "" };
       else delete components.logic;
       return { ...candidate, components, entity_id: entityId, display_name: displayName, transform };
     };
