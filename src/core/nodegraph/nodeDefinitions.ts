@@ -121,6 +121,16 @@ export const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { target: "player", state: "idle" },
   },
+  condition_on_ground: {
+    type: "condition_on_ground",
+    label: "On Ground",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [
+      { id: "true", label: "True ▶", kind: "exec" },
+      { id: "false", label: "False ▶", kind: "exec" },
+    ],
+    params: { target: "player" },
+  },
   condition_overlap: {
     type: "condition_overlap",
     label: "On Overlap",

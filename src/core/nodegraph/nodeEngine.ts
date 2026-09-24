@@ -387,6 +387,7 @@ function isBlockingBridgeNode(node: GraphNode): boolean {
 /** Params that name a scene entity, per node type. */
 const ENTITY_REF_PARAMS: Partial<Record<string, string[]>> = {
   condition_overlap: ["a", "b"],
+  condition_on_ground: ["target"],
   sprite_move: ["target"],
   destroy_entity: ["target"],
   set_velocity: ["target"],

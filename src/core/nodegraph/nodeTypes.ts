@@ -21,6 +21,7 @@ export type NodeType =
   | "sprite_anim"
   | "set_animation_state"
   | "condition_overlap"
+  | "condition_on_ground"
   | "camera_follow"
   | "camera_bounds"
   | "timer"
@@ -163,6 +164,7 @@ export function isNodeType(value: unknown): value is NodeType {
     value === "sprite_anim" ||
     value === "set_animation_state" ||
     value === "condition_overlap" ||
+    value === "condition_on_ground" ||
     value === "camera_follow" ||
     value === "camera_bounds" ||
     value === "timer" ||

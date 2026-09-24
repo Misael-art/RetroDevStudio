@@ -408,6 +408,10 @@ pub enum LogicMathExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogicBoolExpr {
     Literal(bool),
+    /// Corpo com fisica apoiado (pousou neste quadro). `var_name` = variavel do sprite.
+    Grounded {
+        var_name: String,
+    },
     Input {
         pad: String,
         button: String,
@@ -2012,6 +2016,50 @@ fn compile_logic_node(
                 value: value_expr,
             }))
         }
+        "condition_on_ground" => {
+            let target = param_string(node, "target")?;
+            let condition = match runtime_entities
+                .get(&target)
+                .and_then(|runtime| runtime.sprite.as_ref())
+            {
+                Some(sprite) => LogicBoolExpr::Grounded {
+                    var_name: sprite.var_name.clone(),
+                },
+                None => LogicBoolExpr::Unsupported {
+                    node_id: node.id.clone(),
+                    reason: format!("condition_on_ground: '{target}' nao tem sprite com fisica"),
+                },
+            };
+            let mut true_visited = visited.clone();
+            let mut false_visited = visited.clone();
+            let if_true = compile_logic_chain(
+                graph,
+                &node.id,
+                "true",
+                runtime_entities,
+                &mut true_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            let if_false = compile_logic_chain(
+                graph,
+                &node.id,
+                "false",
+                runtime_entities,
+                &mut false_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
+            }))
+        }
         "condition_compare" => {
             let op_str = param_string(node, "operator").unwrap_or_else(|| "==".to_string());
             let op = parse_compare_op(&op_str);
@@ -2504,6 +2552,7 @@ fn collect_unsupported_from_bool(
             collect_unsupported_from_bool(right, found);
         }
         LogicBoolExpr::Literal(_)
+        | LogicBoolExpr::Grounded { .. }
         | LogicBoolExpr::Input { .. }
         | LogicBoolExpr::InputCommand { .. }
         | LogicBoolExpr::Overlap { .. } => {}
@@ -5005,11 +5054,13 @@ mod tests {
                 "nodes": [
                     { "id": "tick", "type": "event_update", "label": "Tick", "x": 0, "y": 0, "params": {} },
                     { "id": "press", "type": "input_pressed", "label": "Press", "x": 0, "y": 0, "params": { "pad": "JOY_1", "button": "BUTTON_B" } },
+                    { "id": "ground", "type": "condition_on_ground", "label": "Grounded", "x": 0, "y": 0, "params": { "target": target } },
                     { "id": "jump", "type": "set_velocity", "label": "Jump", "x": 0, "y": 0, "params": { "target": target, "vx": 0, "vy": vy } }
                 ],
                 "edges": [
                     { "id": "e1", "fromNode": "tick", "fromPort": "exec", "toNode": "press", "toPort": "exec" },
-                    { "id": "e2", "fromNode": "press", "fromPort": "exec", "toNode": "jump", "toPort": "exec" }
+                    { "id": "e2", "fromNode": "press", "fromPort": "exec", "toNode": "ground", "toPort": "exec" },
+                    { "id": "e3", "fromNode": "ground", "fromPort": "true", "toNode": "jump", "toPort": "exec" }
                 ]
             })
             .to_string()
@@ -5037,6 +5088,13 @@ mod tests {
         assert!(!c.contains("spr_fox_2_vel_y"), "{c}");
         // A primeira entidade nao e afetada pelo salto da segunda.
         assert!(!c.contains("spr_fox_vel_y = -40;"), "{c}");
+        // O salto so ocorre com apoio da propria entidade: estado por entidade,
+        // zerado a cada quadro pela fisica.
+        assert!(c.contains("if ((spr_fox__fox_2_on_ground)) {"), "{c}");
+        assert!(c.contains("static u8 spr_fox__fox_2_on_ground = 0;"), "{c}");
+        assert!(c.contains("static u8 spr_fox_on_ground = 0;"), "{c}");
+        assert!(c.contains("spr_fox__fox_2_on_ground = 0;\n"), "{c}");
+        assert!(!c.contains("(spr_fox_on_ground)"), "{c}");
     }
 
     #[test]

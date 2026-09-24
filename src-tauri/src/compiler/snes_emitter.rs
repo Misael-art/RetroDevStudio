@@ -1499,6 +1499,8 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
                 )
             }
         }
+        // Estado de apoio so existe na fisica do emissor Mega Drive.
+        LogicBoolExpr::Grounded { .. } => "0 /* condition_on_ground: Mega Drive only */".to_string(),
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
             left_x = logic_x_expr(left),
@@ -1979,7 +1981,7 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
 
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
-        LogicBoolExpr::Literal(_) => false,
+        LogicBoolExpr::Literal(_) | LogicBoolExpr::Grounded { .. } => false,
         LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,

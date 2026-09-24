@@ -152,7 +152,7 @@ function commonValidation(def: BehaviorDefinition, params: BehaviorParams, conte
 const movement: BehaviorDefinition = {
   id: "platform_movement",
   title: "Movimento e salto",
-  description: "Anda para os lados enquanto o botao estiver segurado e salta ao apertar. Usa a fisica (gravidade) da entidade.",
+  description: "Anda para os lados enquanto o botao estiver segurado e salta ao apertar, somente quando esta apoiado no chao. Usa a fisica (gravidade) da entidade.",
   params: [
     { key: "target", label: "Entidade", kind: "entity", require: "sprite", help: "Quem se move." },
     { key: "speed", label: "Velocidade", kind: "int", min: 1, max: 8, default: 2, unit: "px por quadro" },
@@ -168,7 +168,7 @@ const movement: BehaviorDefinition = {
     const parts = [`${who} anda ${p.speed} px por quadro para a direita segurando ${buttonText(p.right_button)}`];
     if (p.left_button) parts.push(`para a esquerda com ${buttonText(p.left_button)}`);
     if (p.jump_button) {
-      parts.push(`salta com forca ${p.jump_strength} ao apertar ${buttonText(p.jump_button)}${p.jump_animation ? ` (animacao "${p.jump_animation}")` : ""}${p.jump_sound ? ` tocando "${p.jump_sound}"` : ""}`);
+      parts.push(`salta (so do chao) com forca ${p.jump_strength} ao apertar ${buttonText(p.jump_button)}${p.jump_animation ? ` (animacao "${p.jump_animation}")` : ""}${p.jump_sound ? ` tocando "${p.jump_sound}"` : ""}`);
     }
     return `${parts.join(", ")}.`;
   },
@@ -207,11 +207,15 @@ const movement: BehaviorDefinition = {
       nodes.push(
         { role: "jump_tick", type: "event_update", label: "A cada quadro (salto)", params: {} },
         { role: "jump_input", type: "input_pressed", label: "Apertar salto", params: { pad: "JOY_1", button: String(p.jump_button) } },
+        { role: "jump_ground", type: "condition_on_ground", label: "Esta no chao?", params: { target } },
         { role: "jump_velocity", type: "set_velocity", label: "Impulso do salto", params: { target, vx: 0, vy: -Number(p.jump_strength) } }
       );
+      // Salto so a partir do chao: pressao no ar nao reinicia o impulso; segurar nao voa
+      // (input_pressed dispara so na borda de descida do botao).
       edges.push(
         { from: "jump_tick", fromPort: "exec", to: "jump_input", toPort: "exec" },
-        { from: "jump_input", fromPort: "exec", to: "jump_velocity", toPort: "exec" }
+        { from: "jump_input", fromPort: "exec", to: "jump_ground", toPort: "exec" },
+        { from: "jump_ground", fromPort: "true", to: "jump_velocity", toPort: "exec" }
       );
       let last = "jump_velocity";
       if (p.jump_animation) {

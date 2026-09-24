@@ -49,6 +49,13 @@ describe("behavior library", () => {
     const move = graph.nodes.find((node) => node.id === `${id}__right_move`)!;
     expect(move).toMatchObject({ type: "sprite_move", params: expect.objectContaining({ target: "fox", dx: 3, behavior_instance: id }) });
     expect(graph.nodes.find((node) => node.id === `${id}__jump_velocity`)!.params.vy).toBe(-64);
+    // Salto so do chao: apertar -> esta no chao? (Sim) -> impulso; nenhum caminho direto.
+    expect(graph.nodes.find((node) => node.id === `${id}__jump_ground`)).toMatchObject({ type: "condition_on_ground", params: expect.objectContaining({ target: "fox" }) });
+    expect(graph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fromNode: `${id}__jump_input`, toNode: `${id}__jump_ground` }),
+      expect.objectContaining({ fromNode: `${id}__jump_ground`, fromPort: "true", toNode: `${id}__jump_velocity` }),
+    ]));
+    expect(graph.edges.some((edge) => edge.fromNode === `${id}__jump_input` && edge.toNode === `${id}__jump_velocity`)).toBe(false);
     expect(graph.groups).toEqual([expect.objectContaining({ id, nodeIds: graph.behaviors![0].nodeIds })]);
     expect(findNodeOverlaps(graph)).toEqual([]);
     // Persistencia: a instancia sobrevive a serializar/reabrir.
