@@ -7052,14 +7052,15 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   const frames = async () => (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0;
   // Holds until both the wall-clock window and >= 30 emulated frames passed (emulation
   // under WebDriver runs at a few FPS), capped at 20 s; frames are recorded per sample.
-  const hold = async (code, button, ms, label) => {
+  const hold = async (code, button, ms, label, until = null) => {
     const samples = [{ ...(await observe()), frame: await frames() }];
     await sendNativeGameKey(sessionId, code, "keyDown", label);
     await waitAck(button, true, label);
     const startFrame = await frames();
     const end = Date.now() + ms;
     const cap = Date.now() + 20000;
-    while ((Date.now() < end || (await frames()) - startFrame < 30) && Date.now() < cap) {
+    const limit = until ? Date.now() + 90000 : cap;
+    while ((Date.now() < end || (await frames()) - startFrame < 30 || (until && !until(samples[samples.length - 1]))) && Date.now() < limit) {
       samples.push({ ...(await observe()), frame: await frames() });
       await pause(30);
     }
@@ -7077,7 +7078,8 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   const moved = (samples, key) => samples[samples.length - 1][key][0] - samples[0][key][0];
   const minY = (samples, key) => Math.min(...samples.map((s) => s[key][1]));
 
-  const right = await hold("ArrowRight", "right", 2500, "seta direita");
+  // Holds right until the template score passes Player 3's passage threshold (20).
+  const right = await hold("ArrowRight", "right", 2500, "seta direita", (sample) => sample.score >= 25);
   const cKey = await hold("KeyC", "a", 2500, "tecla C");
   const xKey = await hold("KeyX", "b", 1500, "tecla X");
   const enter = await hold("Enter", "start", 1500, "Enter");
@@ -7088,6 +7090,8 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
     enter: { p2Jump: enter[0].p2[1] - minY(enter, "p2"), p3Jump: enter[0].p3[1] - minY(enter, "p3") },
     score: right[right.length - 1].score,
     passageOpen: [right[0].passageOpen, cKey[cKey.length - 1].passageOpen],
+    passageOpenedEarly: right.filter((sample) => sample.passageOpen === 1 && sample.score < 20).length,
+    passageFirstOpen: right.find((sample) => sample.passageOpen === 1) ?? null,
   };
   // Positive: each entity answers its own controls. Negative controls: nothing else moves.
   const problems = [];
@@ -7099,8 +7103,9 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   if (proof.c.p3Gcd !== 3) problems.push(`Passos de Player 3 nao sao de 3 px (gcd=${proof.c.p3Gcd}): edicao nao chegou a ROM`);
   if (!(proof.x.p2Jump >= 8) || proof.x.p3Jump !== 0) problems.push("X deveria pular so Player 2");
   if (!(proof.enter.p3Jump >= 4) || proof.enter.p2Jump !== 0) problems.push("Enter deveria pular so Player 3");
-  if (!(proof.passageOpen[0] === 0 || proof.score < 20)) problems.push("Passagem de Player 3 ja estava aberta antes do limiar");
-  if (proof.score >= 20 && proof.passageOpen[1] !== 1) problems.push("Passagem de Player 3 nao abriu apos o limiar");
+  if (proof.passageOpen[0] !== 0 || proof.passageOpenedEarly) problems.push("Passagem de Player 3 aberta antes do limiar 20");
+  if (proof.score < 20) problems.push("Score nao alcancou o limiar: a abertura da passagem nao foi exercitada");
+  if (proof.passageOpen[1] !== 1 || !proof.passageFirstOpen || proof.passageFirstOpen.score < 20) problems.push("Passagem de Player 3 nao abriu apos o limiar");
   if (problems.length) fail(`Independencia nao comprovada: ${problems.join("; ")} ${JSON.stringify(proof)}`);
   const timelinePath = path.join(validationDir, `${artifactPrefix}-play-timeline.json`);
   await writeFile(timelinePath, JSON.stringify({ proof, right, cKey, xKey, enter }, null, 2));
