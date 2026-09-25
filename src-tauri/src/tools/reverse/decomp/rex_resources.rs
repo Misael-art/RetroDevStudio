@@ -942,48 +942,42 @@ mod tests {
         );
         let limits = Lz4wLimits::default();
         let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto");
-        // Enumera edições aplicáveis (bit do plano 3 = índice +8, alto
-        // contraste) em recursos do cluster de poses dos lutadores
-        // (streams 0x88660..0x97000), iterando do FIM (menos dependentes).
-        let mut applied_count = 0usize;
-        for resource in set.resources.iter().rev() {
-            let start_off = resource.candidate.stream_offset;
-            if !(0x88660..0x97000).contains(&start_off) {
-                continue;
-            }
-            for plane in 0..4usize {
-                for pixel in 0..8usize {
-                    let mut edited = resource.decoded.clone();
-                    let byte = plane;
-                    let mask = 1u8 << (7 - pixel);
-                    let before = edited[byte];
-                    edited[byte] = before | mask;
-                    if edited[byte] == before {
-                        continue;
-                    }
-                    let outcome = reinsert_transaction(
-                        &ReinsertRequest {
-                            rom: &rom,
-                            expected_rom_sha256: &sha,
-                            resource,
-                            edited_data: &edited,
-                        },
-                        &limits,
-                    );
-                    if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
-                        eprintln!(
-                            "APPLIED_POSE: stream={:#x} tiles={} plane={plane} pixel={pixel} preservados={}",
-                            start_off,
-                            resource.candidate.num_tiles,
-                            applied.verified_preserved
-                        );
-                        applied_count += 1;
-                    }
-                }
-            }
-            if applied_count >= 6 {
-                break;
-            }
-        }
-        eprintln!("applied_count={applied_count}");    }
+        // Para o alvo 0xc8cc8 (frame 24x24, classe faísca): edição do
+        // plano 3 no pixel (0,0) — índice +8, máximo salto de cor — com
+        // impressão do índice atual para reprodução pelo formulário.
+        let Some(target) = set
+            .resources
+            .iter()
+            .find(|r| r.candidate.stream_offset == 0xc8cc8)
+        else {
+            panic!("alvo 0xc8cc8 ausente");
+        };
+        let current_index = (0..4usize)
+            .map(|p| {
+                let bit = (target.decoded[p] >> (7 - 0)) & 1;
+                bit << p
+            })
+            .sum::<u8>();
+        let mut edited = target.decoded.clone();
+        edited[3] |= 0x80; // plano 3, pixel 0
+        let outcome = reinsert_transaction(
+            &ReinsertRequest {
+                rom: &rom,
+                expected_rom_sha256: &sha,
+                resource: target,
+                edited_data: &edited,
+            },
+            &limits,
+        );
+        match outcome {
+            Ok(ReinsertOutcome::Applied(applied)) => eprintln!(
+                "APPLIED_HIGH: stream={:#x} indice_atual={current_index} indice_novo={}=indice|8 preservados={} patch={}",
+                target.candidate.stream_offset,
+                current_index | 8,
+                applied.verified_preserved,
+                applied.patch_bps_sha256
+            ),
+            Ok(ReinsertOutcome::NoOp) => eprintln!("NOOP inesperado"),
+            Err(error) => eprintln!("RECUSADO: {error}"),
+        }    }
 }
