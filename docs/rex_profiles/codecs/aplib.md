@@ -61,7 +61,7 @@ match (`10`/`rep`/`110`).
 ## Vetores fase 2 (construídos e confirmados)
 
 Gerados por `scripts/rex_profiles/codecs/aplib/` (`gen_vectors.py` +
-`build-vectors.sh`), publicados em `data/rex_profiles/codecs/aplib/` com
+`build-vectors.sh`), publicados em `data/rex_profiles/codec/aplib/` com
 `manifest.tsv` (hashes SHA-256 de entrada/saída de cada oráculo).
 
 - 8 plains sintéticos redistribuíveis (ab_repeat, zeros_64k, text_rep,

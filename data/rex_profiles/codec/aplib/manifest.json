@@ -1,0 +1,33 @@
+{
+  "contract_version": 1,
+  "id": "aplib",
+  "kind": "codec",
+  "version": 1,
+  "platform": "mega-drive",
+  "variant": "aPLib stream raw, sem header ('AP\\0' ausente): byte 0 = literal; tags de 8 bits lidas MSB->LSB com busca de nova tag apenas quando a mascara zera (tokens podem atravessar tags); bytes de dados intercalados na ordem de consumo; gamma2 por pares (dado, controle) com valor minimo 2; EOD = token 110 + byte 0x00; ajustes de length +2 (off<128 ou off>=32000) / +1 (1280<=off<32000); rep-match apenas com LWM=3.",
+  "support": "fixture-only",
+  "source": {
+    "name": "apultra (referencia independente do formato; docs/expand.c/compress.c)",
+    "url": "https://github.com/emmanuel-marty/apultra",
+    "commit": "8f340057d7402c10da3d9c76c599f9ab83b8a22d",
+    "license": "Zlib (+CC0 no matchfinder)",
+    "license_url": "https://github.com/emmanuel-marty/apultra/blob/master/LICENSE"
+  },
+  "capabilities": {
+    "variant-fixed": "verified",
+    "vectors-and-holdout": "fixture",
+    "cross-oracle-parity": "verified",
+    "product-decode-vs-reference": "blocked",
+    "product-encode-vs-reference": "blocked",
+    "structured-negatives": "blocked",
+    "resource-identification-in-rom": "blocked",
+    "reinsertion": "blocked"
+  },
+  "limits": [
+    "Suporte a only-fixture: nenhuma ROM real do corpus local foi usada; nenhuma identificacao de stream em ROM foi provada.",
+    "Formato nao representa saida vazia; entrada de 1 byte falha no encoder APJ (stream de 1 byte so e coberto por golden de decodificacao).",
+    "Os oraculos de CLI (apultra, APJ) nao tem limite de trabalho nem cancelamento; limites estruturados do contrato v1 se aplicam somente ao decoder/encoder do produto, ainda nao implementado.",
+    "Implementacao Rust do produto aguarda janela/integracao do integrador (propriedade de src-tauri); nada aqui e implementacao de produto.",
+    "Modo com header 'AP\\0' (genheader) explicitamente fora desta variante."
+  ]
+}

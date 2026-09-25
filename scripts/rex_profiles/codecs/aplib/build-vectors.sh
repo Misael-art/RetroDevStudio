@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Constrói os vetores do perfil aPLib usando SOMENTE os oráculos externos
-# (apultra, APJ v1.32) e valida paridade cruzada. Saída: data/rex_profiles/codecs/aplib/.
+# (apultra, APJ v1.32) e valida paridade cruzada. Saída: data/rex_profiles/codec/aplib/.
 # Nenhum resultado é aceito sem os dois oráculos decodificando exato.
 set -euo pipefail
 
@@ -9,7 +9,7 @@ CACHE="${REX_CODEC_CACHE:-$HOME/.cache/rex-codecs}"
 APULTRA="$CACHE/oracle-tools/apultra"
 APJ="$CACHE/oracle-tools/SGDK211/bin/apj.jar"
 SRC="$REPO/scripts/rex_profiles/codecs/aplib"
-OUT="$REPO/data/rex_profiles/codecs/aplib"
+OUT="$REPO/data/rex_profiles/codec/aplib"
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 

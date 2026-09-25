@@ -1,0 +1,30 @@
+{
+  "claim": "vectors-and-holdout: os 8 plains + 8 goldens de data/rex_profiles/codec/aplib/ tem resultados esperados fixados por DOIS oráculos externos independentes (apultra e APJ/SGDK) antes de qualquer implementação do produto; paridade cruzada byte-exata observada.",
+  "rom": {
+    "sha256": "5db490f412ebc8aea69090a39673e7a6c2188b982c55b598df44dad7afaaab35",
+    "size_bytes": 3392,
+    "format": "fixture",
+    "normalization": [
+      {
+        "step": "hash agregado = sha256(manifest.tsv + sha256sum ordenado de todos os arquivos em plain/ e golden/); regenerável deterministicamente por scripts/rex_profiles/codecs/aplib/build-vectors.sh",
+        "sha256_after": "5db490f412ebc8aea69090a39673e7a6c2188b982c55b598df44dad7afaaab35"
+      }
+    ]
+  },
+  "locator": {
+    "kind": "offset-range",
+    "offset": 0,
+    "length": 0
+  },
+  "bank_state": {},
+  "expected": {
+    "tool": "apultra CLI (decode+encode) e SGDK apj.jar v1.32 (p/u), ambos externos ao produto; cada um decodifica o stream do outro para a entrada exata; goldens montados à mão só são publicados se AMBOS os oráculos os decodificarem para a saída esperada",
+    "version": "apultra commit 8f340057d7402c10da3d9c76c599f9ab83b8a22d; apj.jar SHA-256 2d8cdc63cc800e4b86ff4d9cdfe514001b77f788abcd02d61974dc319d026204 (SGDK v2.11)",
+    "output_sha256": "ddd10a5047bc161b25a1045eb0424b3b2284442b5d01583dc55024540ff1cc76",
+    "output_len": 3392,
+    "pinned_before_implementation": true
+  },
+  "provenance": "authored-fixture",
+  "negatives": [],
+  "timestamp": "2026-09-25: execucao de build-vectors.sh no worktree codex/rex-b-codecs (conjunto deterministico e regeneravel)"
+}

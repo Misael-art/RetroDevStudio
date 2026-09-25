@@ -1,6 +1,7 @@
 # Perfil de codecs REX — agente B
 
-Propriedade: `scripts/rex_profiles/codecs/`, `data/rex_profiles/codecs/`,
+Propriedade: `scripts/rex_profiles/codecs/`, artefatos de perfil em
+`data/rex_profiles/codec/<id>/` (caminho do contrato v1) e
 `docs/rex_profiles/codecs/`. Este diretório registra referências fixadas,
 oráculos verificados e status por capacidade. Não é contrato congelado:
 o contrato de codec vem do integrador; até ele ser publicado, nada aqui
