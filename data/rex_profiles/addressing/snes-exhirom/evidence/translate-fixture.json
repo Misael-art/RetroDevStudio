@@ -1,0 +1,52 @@
+{
+  "claim": "translate/invert/read do perfil snes-exhirom sem estado de mapper: duas areas — bancos 00-3F altos e 40-7D completos dao offset 0x400000+(A mod (rom_size-0x400000)); bancos 80-BF altos e C0-FF completos dao offset A&0x3FFFFF (A22/A23 desconectados); WRAM 7E/7F; SRAM 20-3F/A0-BF $6000-$7FFF (2KB); espelho WRAM/I-O 00-3D/80-BD; invert devolve todos os aliases nos dois sentidos; leitura ROM contigua entre bancos completos, cortada no wrap do espelho half2",
+  "rom": {
+    "sha256": "aba2db79e63369ffaa00af73324f7cefe36dba4a638fa78d9eb2d465bd087989",
+    "size_bytes": 8388608,
+    "format": "fixture",
+    "normalization": []
+  },
+  "locator": {
+    "kind": "cpu-address",
+    "note": "conjunto completo (25 positivos translate, 8 negativos, 13 inversoes, 12 leituras) em expected/translate-cases.json do mesmo diretorio",
+    "offset": 4259832,
+    "length": 16
+  },
+  "bank_state": {
+    "model": "{ rom_size } apenas; chaves extras rejeitadas com unsupported — ExHiROM nao tem registradores de mapper; valido: 5MB, 6MB e 8MB (rom_size-0x400000 potencia de 2)",
+    "initial": "sem estado: traducao depende so de rom_size (base da segunda area + mascara do espelho half2)"
+  },
+  "expected": {
+    "tool": "Derivacao manual da especificacao docs/rex_profiles/addressing/snes-exhirom.md: bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 (boards.bml:706-720 EXHIROM/EXHIROM-RAM; sfc/cartridge/load.cpp:131-139 loadMap size=memory.size(); sfc/memory/memory.cpp:63-65 Bus::map; memory-inline.hpp Bus::mirror/Bus::reduce) + snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a memmap.cpp (Map_ExtendedHiROMMap:3120-3128, map_hirom_offset:2555-2568, map_mirror:2486-2502). Nenhuma linha copiada. As duas fontes foram unificadas analiticamente e CONCORDAM em todos os offsets; copias locais verificadas byte a byte contra os commits fixados.",
+    "version": "bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 + snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a",
+    "output_sha256": "711befaec43bf4efb9595e606c21e885c983068050b46afc3fd64e2e7cbab657",
+    "output_len": 14070,
+    "pinned_before_implementation": true,
+    "pinned_at_commit": "4265c98"
+  },
+  "pinning_history": [
+    "pre-pin (antes de 4265c98): TODAS as literais (translate, invert, read) verificadas por calculadora independente escrita so a partir da FORMULA da spec — invert por forca bruta nos 16M de enderecos do barramento, read por agrupamento byte a byte, sem os cortes analiticos da futura implementacao. A calculadora pegou dois erros proprios do rascunho: (a) o caso io usava 0xBD7FFF, que cai na janela sram A0-BF e nao io, entao foi trocado por 0x007FFF; (b) dois nomes de caso estavam em rascunho/implicitos. Nenhuma literal ja conferida contra as fontes mudou; nada foi ajustado para validar implementacao (ainda nao existia).",
+    "4265c98: expectativas pinadas (spec + JSON no mesmo commit; formulas conferidas contra bsnes load.cpp/memory.cpp/memory-inline.hpp e snes9x memmap.cpp, dumps em /tmp/rex-a-sources)",
+    "RED registrado em 436459d (ERR_MODULE_NOT_FOUND em snes-exhirom.mjs)",
+    "pre-GREEN (revisao propria antes da execucao): windowFor() tratava bancos 7E/7F como area 1 e o invert produziria o alias espurio 0x7FABCD; corrigido com exclusao explicita de 7E/7F no invert. O caso pinado I4 (offset 0x3FFFFF em 8MB → exatamente [0xBFFFFF,0xFFFFFF]) ja pegaria o bug, entao a expectativa permaneceu intacta e a implementacao foi a unica peça alterada.",
+    "a implementacao passou nos 8 testes funcionais na primeira execucao, sem tocar nenhuma expectativa"
+  ],
+  "provenance": "authored-fixture",
+  "negatives": [
+    { "input": "translate(0x3E4800 ou 0xBE4800, ...)", "expected_error": "unsupported (metades baixas 3E/3F/BE/BF: convencao bsnes; extensao 00-3F/80-BF do snes9x map_System documentada como divergencia na spec)" },
+    { "input": "translate(0x1000000, ...)", "expected_error": "out-of-range (barramento 24 bits)" },
+    { "input": "translate(any, mapper_state=null)", "expected_error": "unsupported (estado obrigatorio)" },
+    { "input": "translate(any, rom_size=4194304)", "expected_error": "unsupported (4MB e perfil snes-hirom; half2 seria 0)" },
+    { "input": "translate(any, rom_size=7340032)", "expected_error": "unsupported (7MB: half2=3MB nao e potencia de 2; pad 0xFF a 8MB registrado)" },
+    { "input": "translate(any, rom_size=9437184)", "expected_error": "unsupported (acima das duas areas de 4MB)" },
+    { "input": "translate(any, mapper_state={rom_size, banks})", "expected_error": "unsupported (chave estranha rejeitada; ExHiROM nao tem registradores)" },
+    { "input": "invert(4096.5, ...)", "expected_error": "out-of-range (offset nao inteiro)" },
+    { "input": "invert(0x800000, rom_size=8MB)", "expected_error": "nenhum — lista vazia e resposta valida (offset alem do fim)" },
+    { "input": "read(0x008000, 0, ...)", "expected_error": "out-of-range (length < 1)" },
+    { "input": "read(0xFFFFF8, 16, ...)", "expected_error": "out-of-range top-level antes de alocar" },
+    { "input": "read sobre ROM 8 bytes menor que rom_size a partir de 0x3FFFF0", "expected_error": "8 bytes validos em 0x7FFFF0 + out-of-range no trecho faltante (sem clamp)" }
+  ],
+  "timestamp": "deterministic-event:pre-pin calculadora independente -> pin 4265c98 -> RED 436459d -> implementacao e este registro no commit seguinte",
+  "test_command": "node --test scripts/rex_profiles/addressing/snes-exhirom.test.mjs",
+  "test_result": "9/9 pass (2026-09-25, Node v26.8.1; suíte completa de endereçamento 50/50)"
+}
