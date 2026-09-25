@@ -940,20 +940,40 @@ mod tests {
         let limits = Lz4wLimits::default();
         let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto");
         for resource in &set.resources {
-            let mut edited = resource.decoded.clone();
-            let last = edited.len() - 1;
-            edited[last] ^= 0xF0;
-            let start = resource.candidate.stream_offset;
-            if let Ok(stream) = lz4w_encode_with_dictionary(&edited, Some(&rom[..start])) {
-                if stream.len() <= resource.bytes_consumed {
+            // Edição expressível no formulário: pixel (0,0) com índice 0..15.
+            for index in 0u8..16 {
+                let mut edited = resource.decoded.clone();
+                // byte 0 = plano 0, linha 0: bit 7 = pixel (0,0).
+                let current = (edited[0] >> 7) & 1;
+                let next = (index >> 0) & 1;
+                if current == next {
+                    continue;
+                }
+                if next == 1 {
+                    edited[0] |= 0x80;
+                } else {
+                    edited[0] &= !0x80;
+                }
+                let outcome = reinsert_transaction(
+                    &ReinsertRequest {
+                        rom: &rom,
+                        expected_rom_sha256: &sha,
+                        resource,
+                        edited_data: &edited,
+                    },
+                    &limits,
+                );
+                if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
                     eprintln!(
-                        "FIT: header={:#x} stream={:#x} tiles={} stream_len={} dados={}",
+                        "APPLIED: header={:#x} stream={:#x} tiles={} stream_len={} preservados={} edit_index={}",
                         resource.candidate.header_offset,
-                        start,
+                        resource.candidate.stream_offset,
                         resource.candidate.num_tiles,
                         resource.bytes_consumed,
-                        resource.candidate.expected_len
+                        applied.verified_preserved,
+                        index
                     );
+                    break;
                 }
             }
         }

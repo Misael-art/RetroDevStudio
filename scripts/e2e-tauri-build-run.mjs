@@ -8700,7 +8700,7 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
 async function runRexLz4wEffectScenario(sessionId) {
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const expectedSha = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
-  const targetOffsetHex = "8ff8e";
+  const targetOffsetHex = "c8cc8";
   const romPath = process.env.RDS_REX_RESOURCE_ROM ?? process.env.RDS_INSPECTION_ROM ?? "";
   if (!romPath || !(await pathExists(romPath))) {
     fail("RDS_REX_RESOURCE_ROM deve apontar para a ROM BYOR congelada existente.");
@@ -8780,10 +8780,9 @@ async function runRexLz4wEffectScenario(sessionId) {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;`);
   };
-  await setNumberInput("rex-resource-paint-index", 9);
-  await setNumberInput("rex-resource-edit-tile", 67);
-  await setNumberInput("rex-resource-edit-row", 7);
-  await setNumberInput("rex-resource-edit-col", 7);
+  await setNumberInput("rex-resource-edit-tile", 0);
+  await setNumberInput("rex-resource-edit-row", 0);
+  await setNumberInput("rex-resource-edit-col", 0);
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
   await waitFor(
     async () => ((await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "").includes("1 edição(ões) pendente(s)"),
