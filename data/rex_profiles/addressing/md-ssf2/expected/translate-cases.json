@@ -1,0 +1,287 @@
+{
+  "profile": "md-ssf2",
+  "contract_version": 1,
+  "pinned_before_implementation": true,
+  "derived_from": [
+    "docs/rex_profiles/addressing/md-ssf2.md",
+    "Genesis-Plus-GX@939ce4f045f981f89965f24780cef045cc5e52d7 (md_cart.c mapper_512k_w/mapper_ssf2_w; mem68k.c TIME — especificacao, sem copia)",
+    "Bart Trzynadlowski, emu-docs.org/Genesis/ssf2.txt (via Wayback 20191212014333): janelas 1-7 remapeaveis, registradores impares $A130F3..$A130FF, pagina de 512KB"
+  ],
+  "fixture": {
+    "generator": "scripts/rex_profiles/addressing/build-fixtures.mjs",
+    "rom_size": 4194304,
+    "sha256": "4e18dee7efa2de03d8e7f78a06267a8cd27001463e3226b90d29956c6ca7945e"
+  },
+  "translate_cases": [
+    { "name": "janela 0 fixa, primeira posicao", "cpu_address": "0x000000", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "rom", "offset": "0x000000" } },
+    { "name": "janela 0 ultima posicao", "cpu_address": "0x07FFFF", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "rom", "offset": "0x07FFFF" } },
+    { "name": "estado inicial identidade: janela 1 inicio", "cpu_address": "0x080000", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "rom", "offset": "0x080000" } },
+    { "name": "estado inicial identidade: janela 1 fim", "cpu_address": "0x0FFFFF", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "rom", "offset": "0x0FFFFF" } },
+    { "name": "janela 5 identidade com deslocamento", "cpu_address": "0x281234", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "rom", "offset": "0x281234" } },
+    { "name": "janela 7 identidade, ultima posicao da janela do cartucho", "cpu_address": "0x3FFFFF", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "rom", "offset": "0x3FFFFF" } },
+    { "name": "banks {1:5}: janela 1 aponta pagina 5 (0x0A0000)", "cpu_address": "0x080000", "mapper_state": { "rom_size": 4194304, "banks": { "1": 5 } }, "expect": { "region": "rom", "offset": "0x0A0000" } },
+    { "name": "banks {1:5}: fim da janela 1", "cpu_address": "0x0FFFFF", "mapper_state": { "rom_size": 4194304, "banks": { "1": 5 } }, "expect": { "region": "rom", "offset": "0x11FFFF" } },
+    { "name": "banks {1:9}: pagina 9 = base 0x120000", "cpu_address": "0x080000", "mapper_state": { "rom_size": 4194304, "banks": { "1": 9 } }, "expect": { "region": "rom", "offset": "0x120000" } },
+    { "name": "valor de banco alem da ROM espelha por mascara, nao e erro (66<<19 & mask = 0x100000)", "cpu_address": "0x380000", "mapper_state": { "rom_size": 4194304, "banks": { "7": 66 } }, "expect": { "region": "rom", "offset": "0x100000" } },
+    { "name": "duas janelas no mesmo banco: CPU 0x080000", "cpu_address": "0x080000", "mapper_state": { "rom_size": 4194304, "banks": { "1": 5, "2": 5 } }, "expect": { "region": "rom", "offset": "0x0A0000" } },
+    { "name": "duas janelas no mesmo banco: CPU 0x100000 traduz ao MESMO offset", "cpu_address": "0x100000", "mapper_state": { "rom_size": 4194304, "banks": { "1": 5, "2": 5 } }, "expect": { "region": "rom", "offset": "0x0A0000" } },
+    { "name": "janela 0 imune a banks escritos", "cpu_address": "0x000123", "mapper_state": { "rom_size": 4194304, "banks": { "1": 5, "7": 2 } }, "expect": { "region": "rom", "offset": "0x000123" } },
+    { "name": "ROM minima 512KB: base identidade mascarada a zero em toda janela (w3)", "cpu_address": "0x180000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "rom", "offset": "0x000000" } },
+    { "name": "ROM minima 512KB com banks {3:1}: (1<<19)&0x7FFFF = 0x20000", "cpu_address": "0x180123", "mapper_state": { "rom_size": 524288, "banks": { "3": 1 } }, "expect": { "region": "rom", "offset": "0x020123" } },
+    { "name": "regiao cart-io (pagina TIME) mantida", "cpu_address": "0xA130F3", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "cart-io", "offset": "0x0F3" } },
+    { "name": "regiao io acima do TIME", "cpu_address": "0xA11000", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "io", "offset": "0x1000" } },
+    { "name": "work-ram espelho classico", "cpu_address": "0xFF0000", "mapper_state": { "rom_size": 4194304 }, "expect": { "region": "work-ram", "offset": "0x0000" } }
+  ],
+  "translate_negatives": [
+    { "name": "open bus 0x400000", "cpu_address": "0x400000", "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "unsupported" } },
+    { "name": "fim da area aberta 0x7FFFFF", "cpu_address": "0x7FFFFF", "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "unsupported" } },
+    { "name": "VDP ports fora do escopo", "cpu_address": "0xC00000", "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "unsupported" } },
+    { "name": "acima do barramento 24 bits", "cpu_address": "0x1000000", "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "out-of-range" } },
+    { "name": "estado ausente", "cpu_address": "0x080000", "mapper_state": null, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size abaixo de uma janela de 512KB", "cpu_address": "0x080000", "mapper_state": { "rom_size": 65536 }, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size acima de 8MB", "cpu_address": "0x080000", "mapper_state": { "rom_size": 16777216 }, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size nao potencia de 2 (5MB cru)", "cpu_address": "0x080000", "mapper_state": { "rom_size": 5242880 }, "expect_error": { "code": "unsupported" } },
+    { "name": "banco com valor string ('5' nao e 5)", "cpu_address": "0x080000", "mapper_state": { "rom_size": 4194304, "banks": { "1": "5" } }, "expect_error": { "code": "unsupported" } },
+    { "name": "banco com valor negativo", "cpu_address": "0x080000", "mapper_state": { "rom_size": 4194304, "banks": { "1": -1 } }, "expect_error": { "code": "unsupported" } },
+    { "name": "banco com valor fracionario", "cpu_address": "0x080000", "mapper_state": { "rom_size": 4194304, "banks": { "2": 1.5 } }, "expect_error": { "code": "unsupported" } },
+    { "name": "janela 0 nao e remapeavel no estado", "cpu_address": "0x000000", "mapper_state": { "rom_size": 4194304, "banks": { "0": 3 } }, "expect_error": { "code": "unsupported" } },
+    { "name": "janela de banco desconhecida (8)", "cpu_address": "0x080000", "mapper_state": { "rom_size": 4194304, "banks": { "8": 1 } }, "expect_error": { "code": "unsupported" } }
+  ],
+  "write_register_cases": [
+    {
+      "name": "escrever $A130F3=5 remapeia janela 1; traducao seguinte muda",
+      "writes": [ { "cpu_address": "0xA130F3", "data": 5 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": { "1": 5 },
+      "expect_translate": [ { "cpu_address": "0x080000", "offset": "0x0A0000" } ]
+    },
+    {
+      "name": "$A130F5=6 remapeia janela 2 (pagina 6 = base 0x300000)",
+      "writes": [ { "cpu_address": "0xA130F5", "data": 6 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": { "2": 6 },
+      "expect_translate": [ { "cpu_address": "0x100000", "offset": "0x300000" } ]
+    },
+    {
+      "name": "$A130FF=7 remapeia janela 7 (base 0xE0000)",
+      "writes": [ { "cpu_address": "0xA130FF", "data": 7 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": { "7": 7 },
+      "expect_translate": [ { "cpu_address": "0x380000", "offset": "0x0E0000" } ]
+    },
+    {
+      "name": "escritas em janelas distintas se acumulam",
+      "writes": [ { "cpu_address": "0xA130F3", "data": 5 }, { "cpu_address": "0xA130F5", "data": 6 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": { "1": 5, "2": 6 },
+      "expect_translate": [ { "cpu_address": "0x080000", "offset": "0x0A0000" }, { "cpu_address": "0x100000", "offset": "0x300000" } ]
+    },
+    {
+      "name": "reescrita substitui o valor anterior (nao faz AND/OR)",
+      "writes": [ { "cpu_address": "0xA130F3", "data": 5 }, { "cpu_address": "0xA130F3", "data": 2 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": { "1": 2 },
+      "expect_translate": [ { "cpu_address": "0x080000", "offset": "0x100000" } ]
+    },
+    {
+      "name": "$A130F1 (janela 0) escrita sem efeito; traducoes inalteradas",
+      "writes": [ { "cpu_address": "0xA130F1", "data": 9 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": {},
+      "expect_translate": [ { "cpu_address": "0x080000", "offset": "0x080000" } ]
+    },
+    {
+      "name": "decodificacao espelhada: endereco par $A130F2 tambem seleciona a janela 1",
+      "writes": [ { "cpu_address": "0xA130F2", "data": 4 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": { "1": 4 },
+      "expect_translate": [ { "cpu_address": "0x080000", "offset": "0x100000" } ]
+    },
+    {
+      "name": "decodificacao espelhada em toda a pagina: $A13022 seleciona janela 1",
+      "writes": [ { "cpu_address": "0xA13022", "data": 9 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": { "1": 9 },
+      "expect_translate": [ { "cpu_address": "0x080000", "offset": "0x120000" } ]
+    },
+    {
+      "name": "valor 0xFF mascarado so na traducao (255<<19 & mask = 0x380000)",
+      "writes": [ { "cpu_address": "0xA130F3", "data": 255 } ],
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_banks": { "1": 255 },
+      "expect_translate": [ { "cpu_address": "0x080000", "offset": "0x380000" } ]
+    },
+    {
+      "name": "escrita sobre estado com banks preserva as demais janelas",
+      "writes": [ { "cpu_address": "0xA130F5", "data": 3 } ],
+      "mapper_state": { "rom_size": 4194304, "banks": { "1": 5 } },
+      "expect_banks": { "1": 5, "2": 3 },
+      "expect_translate": [ { "cpu_address": "0x080000", "offset": "0x0A0000" }, { "cpu_address": "0x100000", "offset": "0x180000" } ]
+    }
+  ],
+  "write_register_negatives": [
+    { "name": "fora da pagina TIME abaixo", "cpu_address": "0xA12FF0", "data": 5, "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "unsupported" } },
+    { "name": "fora da pagina TIME acima", "cpu_address": "0xA14000", "data": 5, "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "unsupported" } },
+    { "name": "fora do espaco do cartucho", "cpu_address": "0x080000", "data": 5, "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "unsupported" } },
+    { "name": "data fora de byte", "cpu_address": "0xA130F3", "data": 256, "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "out-of-range" } },
+    { "name": "estado invalido propagado", "cpu_address": "0xA130F3", "data": 5, "mapper_state": { "rom_size": 65536 }, "expect_error": { "code": "unsupported" } }
+  ],
+  "invert_cases": [
+    {
+      "name": "identidade 4MB e bijetiva: offset 0x123 so na janela 0",
+      "rom_offset": "0x000123",
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_aliases": ["0x000123"]
+    },
+    {
+      "name": "banks {1:5,2:5}: offset 0x0A0F00 tem dois aliases, um por janela",
+      "rom_offset": "0x0A0F00",
+      "mapper_state": { "rom_size": 4194304, "banks": { "1": 5, "2": 5 } },
+      "expect_aliases": ["0x080F00", "0x100F00"]
+    },
+    {
+      "name": "banks {1:9}: aliases da pagina 9 (janela 1) E da base identidade da janela 2 (0x100000)",
+      "rom_offset": "0x120000",
+      "mapper_state": { "rom_size": 4194304, "banks": { "1": 9 } },
+      "expect_aliases": ["0x080000", "0x120000"]
+    },
+    {
+      "name": "banks {1:0}: janela 0 e janela 1 espelhando o inicio da ROM",
+      "rom_offset": "0x000000",
+      "mapper_state": { "rom_size": 4194304, "banks": { "1": 0 } },
+      "expect_aliases": ["0x000000", "0x080000"]
+    },
+    {
+      "name": "offset alem do fim da ROM declarada: lista vazia, resposta valida",
+      "rom_offset": "0x400000",
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_aliases": []
+    },
+    {
+      "name": "ROM 512KB identidade: todas as 8 janelas mascararam a base 0 -> 8 aliases",
+      "rom_offset": "0x000123",
+      "mapper_state": { "rom_size": 524288 },
+      "expect_aliases": ["0x000123", "0x080123", "0x100123", "0x180123", "0x200123", "0x280123", "0x300123", "0x380123"]
+    },
+    {
+      "name": "janela 0 so ve offsets ate 0x7FFFF",
+      "rom_offset": "0x080000",
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_aliases": ["0x080000"]
+    },
+    {
+      "name": "offset nao inteiro e erro",
+      "rom_offset_value": 291.5,
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_error": { "code": "out-of-range" }
+    },
+    {
+      "name": "invert exige mapper_state valido",
+      "rom_offset": "0x000123",
+      "mapper_state": { "rom_size": 4194304, "banks": { "3": "x" } },
+      "expect_error": { "code": "unsupported" }
+    }
+  ],
+  "read_cases": [
+    {
+      "name": "leitura simples na janela 0",
+      "cpu_address": "0x000000",
+      "length": 8,
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x000000", "bytes_hex": "a2d17a709a127888" }
+      ]
+    },
+    {
+      "name": "identidade: fronteira janela 0 -> 1 contigua na ROM",
+      "cpu_address": "0x07FFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x07FFF8", "bytes_hex": "ceeca0374a500695" },
+        { "region": "rom", "offset": "0x080000", "bytes_hex": "f4b8fb8371b6131a" }
+      ]
+    },
+    {
+      "name": "banks {1:5}: fronteira 0->1 produz offsets nao contiguos (0x07FFF8 | 0x0A0000)",
+      "cpu_address": "0x07FFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 4194304, "banks": { "1": 5 } },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x07FFF8", "bytes_hex": "ceeca0374a500695" },
+        { "region": "rom", "offset": "0x0A0000", "bytes_hex": "1f7f9e948c416f8e" }
+      ]
+    },
+    {
+      "name": "banks {1:5}: fronteira 1->2 (janela 2 identidade 0x100000)",
+      "cpu_address": "0x0FFFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 4194304, "banks": { "1": 5 } },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x11FFF8", "bytes_hex": "09a7427e51e9a67d" },
+        { "region": "rom", "offset": "0x100000", "bytes_hex": "f0ef215db5091049" }
+      ]
+    },
+    {
+      "name": "banks {1:5,2:5}: mesma pagina em duas janelas -> dois segmentos, offsets saltam",
+      "cpu_address": "0x0FFFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 4194304, "banks": { "1": 5, "2": 5 } },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x11FFF8", "bytes_hex": "09a7427e51e9a67d" },
+        { "region": "rom", "offset": "0x0A0000", "bytes_hex": "1f7f9e948c416f8e" }
+      ]
+    },
+    {
+      "name": "ultima posicao da janela do cartucho cruza para area sem suporte",
+      "cpu_address": "0x3FFFFF",
+      "length": 2,
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x3FFFFF", "bytes_hex": "ae" },
+        { "error": { "code": "unsupported" } }
+      ]
+    },
+    {
+      "name": "work-ram sem backing ROM: segmento classificatorio",
+      "cpu_address": "0xFFF000",
+      "length": 4,
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_segments": [
+        { "region": "work-ram", "offset": "0xF000", "error": { "code": "unsupported", "detail_contains": "backing" } }
+      ]
+    },
+    {
+      "name": "rom menor que rom_size declarado: out-of-range no trecho faltante",
+      "cpu_address": "0x3FFF00",
+      "length": 16,
+      "mapper_state": { "rom_size": 4194304 },
+      "rom_short_by": 8,
+      "expect_segments": [
+        { "region": "rom", "offset": "0x3FFF00", "bytes_hex": "49634aa60cbe1d87" },
+        { "error": { "code": "out-of-range" } }
+      ]
+    },
+    {
+      "name": "leitura alem do barramento 24 bits rejeitada antes de alocar",
+      "cpu_address": "0x1000000",
+      "length": 1,
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_error": { "code": "out-of-range" }
+    },
+    {
+      "name": "length zero rejeitado",
+      "cpu_address": "0x000000",
+      "length": 0,
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_error": { "code": "out-of-range" }
+    },
+    {
+      "name": "estado com banco invalido rejeitado antes de alocar",
+      "cpu_address": "0x080000",
+      "length": 8,
+      "mapper_state": { "rom_size": 4194304, "banks": { "1": "5" } },
+      "expect_error": { "code": "unsupported" }
+    }
+  ]
+}
