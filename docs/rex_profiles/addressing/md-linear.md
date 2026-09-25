@@ -66,7 +66,9 @@ do cartucho (espelho por mascara). `invert` retorna **todos** eles.
 - `rom_size` ausente/nao potencia de 2/fora de [0x10000, 0x400000] ->
   `unsupported` com detalhe exigindo normalizacao ou mapper.
 - Janelas fora da tabela acima (ex.: `0x400000-0x7FFFFF` open bus,
-  `0x800000-0x9FFFFF`, `0xA04000-0xA07FFF`/`0xA0C000-0xA0FFFF` sound bus,
+  `0x800000-0x9FFFFF`, sound bus do Z80 (`0xA04000-0xA05FFF`/`0xA0C000-0xA0DFFF`
+  YM2612 e `0xA06000-0xA07FFF`/`0xA0E000-0xA0FFFF` misc, conforme
+  `switch ((address >> 13) & 3)` em mem68k.c:141-167),
   `0xC00000-0xDFFFFF` VDP) -> `unsupported` com nome da regiao.
 - Erro nunca vira offset 0 e nenhuma funcao entra em panic.
 

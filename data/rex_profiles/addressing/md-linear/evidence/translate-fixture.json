@@ -1,0 +1,46 @@
+{
+  "claim": "translate(cpu_address, mapper_state) -> regiao+offset, invert(rom_offset) -> todos os aliases e read com segmentos cruzando espelhos, para cartucho Mega Drive sem mapper (ROM espelhada por mascara)",
+  "rom": {
+    "sha256": "13b08feab9b43c2ef781468b83192bb0a8c37fa303734219b4f033a040afe24b",
+    "size_bytes": 524288,
+    "format": "fixture",
+    "normalization": []
+  },
+  "locator": {
+    "kind": "cpu-address",
+    "note": "conjunto completo de casos (22 positivos, 11 negativos, 5 inversoes, 7 leituras) em expected/translate-cases.json do mesmo diretorio",
+    "offset": 0,
+    "length": 8
+  },
+  "bank_state": {},
+  "expected": {
+    "tool": "Genesis-Plus-GX (derivacao manual da especificacao por arquivo:linha; sem copia de codigo — licenca da fonte nao autoriza transplantar)",
+    "version": "939ce4f045f981f89965f24780cef045cc5e52d7",
+    "output_sha256": "16c151779cf3b13d7a1b7ecc587c0661fc90638c86db955d475783c9bb0cf3c7",
+    "output_len": 9284,
+    "pinned_before_implementation": true,
+    "pinned_at_commit": "e070d5ad7c8c21377ca79fd72ef28544fed189bf"
+  },
+  "provenance": "authored-fixture",
+  "negatives": [
+    { "input": "translate(0x400000, rom_size=512KB)", "expected_error": "unsupported (open bus)" },
+    { "input": "translate(0x7FFFFF, rom_size=512KB)", "expected_error": "unsupported (open bus)" },
+    { "input": "translate(0xC00000, rom_size=512KB)", "expected_error": "unsupported (VDP fora do escopo)" },
+    { "input": "translate(0xA04000, rom_size=512KB)", "expected_error": "unsupported (sound bus YM2612)" },
+    { "input": "translate(0xA0C000, rom_size=512KB)", "expected_error": "unsupported (sound bus YM2612 espelhado)" },
+    { "input": "translate(0xA0E000, rom_size=512KB)", "expected_error": "unsupported (sound bus misc)" },
+    { "input": "translate(0x1000000, rom_size=512KB)", "expected_error": "out-of-range (barramento 24 bits)" },
+    { "input": "translate(0x000000, mapper_state=null)", "expected_error": "unsupported (estado obrigatorio)" },
+    { "input": "translate(0x000000, rom_size=531577)", "expected_error": "unsupported (nao potencia de 2; caso real do corpus Sonic, exige normalizacao)" },
+    { "input": "translate(0x000000, rom_size=8388608)", "expected_error": "unsupported (exige mapper)" },
+    { "input": "translate(0x000000, rom_size=32768)", "expected_error": "unsupported (abaixo do minimo)" },
+    { "input": "invert(0x000000, mapper_state=null)", "expected_error": "unsupported" },
+    { "input": "read(0x1000000, 1, rom_size=512KB)", "expected_error": "out-of-range" },
+    { "input": "read(0x000000, 0, rom_size=512KB)", "expected_error": "out-of-range" },
+    { "input": "read(0x000000, 1, rom_size=512KB, rom=null)", "expected_error": "unsupported" },
+    { "input": "read sobre ROM 8 bytes menor que rom_size no fim da janela", "expected_error": "out-of-range no trecho faltante (sem clamp)" }
+  ],
+  "timestamp": "deterministic-event:commit e070d5ad7c8c21377ca79fd72ef28544fed189bf (expectativas pinadas antes da implementacao; implementacao e testes em commits seguintes)",
+  "test_command": "node --test scripts/rex_profiles/addressing/md-linear.test.mjs",
+  "test_result": "11/11 pass (2026-09-24, Node v26.8.1)"
+}
