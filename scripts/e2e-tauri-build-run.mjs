@@ -8710,49 +8710,61 @@ async function runRexLz4wEffectScenario(sessionId) {
   if (romSha !== expectedSha) fail(`ROM inesperada: ${romSha}`);
 
   await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
-  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
-  const panel = "[data-testid='rex-resource-panel']";
   await waitFor(
-    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid='rex-resource-rom-input']'));`),
+    async () => executeScript(
+      sessionId,
+      `return Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`
+    ),
+    30000,
+    `aba de recursos não apareceu; DOM: ${(await executeScript(
+      sessionId,
+      `return Array.from(document.querySelectorAll('[data-testid]')).map((e) => e.getAttribute('data-testid')).filter((t) => (t || '').startsWith('reverse-') || (t || '').startsWith('rex-')).slice(0, 30).join(',');`
+    )) || "sem testids reverse/rex"}`,
+    250
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+  const panel = '[data-testid="rex-resource-panel"]';
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`),
     15000,
     "painel de recursos comprimidos não abriu.",
     250
   );
   await executeScript(sessionId, `
-    const input = document.querySelector('${panel} input[type='text']');
+    const input = document.querySelector('${panel} input[type="text"]');
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
     setter.call(input, ${JSON.stringify(romPath)});
     input.dispatchEvent(new Event('input', { bubbles: true }));
     return true;`);
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
   await waitFor(
-    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid='rex-resource-select'] option[value='${targetOffsetHex}']'));`),
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-select"] option[value="${targetOffsetHex}"]'));`),
     30000,
     "recursos verificados não apareceram (verificação estrutural falhou).",
     250
   );
   await executeScript(sessionId, `
-    const select = document.querySelector('${panel} [data-testid='rex-resource-select']');
+    const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
     const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
     setter.call(select, '${targetOffsetHex}');
     select.dispatchEvent(new Event('change', { bubbles: true }));
     return true;`);
   await waitFor(
-    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid='rex-resource-canvas']'));`),
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-canvas"]'));`),
     30000,
     "prévia chunky não apareceu.",
     250
   );
   const previewPixelsSha = await executeScript(
     sessionId,
-    `return document.querySelector('${panel} [data-testid='rex-resource-pixels-sha']').textContent;`
+    `return document.querySelector('${panel} [data-testid="rex-resource-pixels-sha"]').textContent;`
   );
   if (typeof previewPixelsSha !== "string" || previewPixelsSha.length < 8) fail("prévia sem hash de pixels.");
 
   // NO-OP: aplicar com zero edições pela mesma transação.
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
   await waitFor(
-    async () => ((await executeScript(sessionId, `return document.querySelector('${panel} [data-testid='rex-resource-result']')?.textContent ?? ''`)) || "").includes("noop"),
+    async () => ((await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-result"]')?.textContent ?? ''`)) || "").includes("noop"),
     30000,
     "transação não reportou no-op com zero edições.",
     250
@@ -8760,18 +8772,18 @@ async function runRexLz4wEffectScenario(sessionId) {
 
   // EDIÇÃO: clique no canvas pinta um pixel; aplicar pela transação.
   const canvasRect = await executeScript(sessionId, `
-    const canvas = document.querySelector('${panel} [data-testid='rex-resource-canvas']');
+    const canvas = document.querySelector('${panel} [data-testid="rex-resource-canvas"]');
     const rect = canvas.getBoundingClientRect();
     return { x: rect.left + rect.width * 0.25, y: rect.top + rect.height * 0.25, w: rect.width, h: rect.height };`);
   await executeScript(sessionId, `
-    const canvas = document.querySelector('${panel} [data-testid='rex-resource-canvas']');
+    const canvas = document.querySelector('${panel} [data-testid="rex-resource-canvas"]');
     const options = { bubbles: true, clientX: ${canvasRect.x}, clientY: ${canvasRect.y} };
     canvas.dispatchEvent(new MouseEvent('click', options));
     return true;`);
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
   const resultText = await waitFor(
     async () => {
-      const text = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid='rex-resource-result']')?.textContent ?? ''`)) || "";
+      const text = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-result"]')?.textContent ?? ''`)) || "";
       return text.includes("applied") ? text : false;
     },
     30000,
