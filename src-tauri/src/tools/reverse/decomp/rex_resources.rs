@@ -942,43 +942,48 @@ mod tests {
         );
         let limits = Lz4wLimits::default();
         let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto");
-        // Para o alvo 0xc8cc8: encontrar edições de pixel de ALTO contraste
-        // (índice 15) que a transação aceita, em qualquer pixel do tile 0.
-        let Some(target) = set
-            .resources
-            .iter()
-            .find(|r| r.candidate.stream_offset == 0xc8cc8)
-        else {
-            panic!("alvo 0xc8cc8 ausente");
-        };
-        for pixel in 0..8usize {
+        // Enumera edições aplicáveis (bit do plano 3 = índice +8, alto
+        // contraste) em recursos do cluster de poses dos lutadores
+        // (streams 0x88660..0x97000), iterando do FIM (menos dependentes).
+        let mut applied_count = 0usize;
+        for resource in set.resources.iter().rev() {
+            let start_off = resource.candidate.stream_offset;
+            if !(0x88660..0x97000).contains(&start_off) {
+                continue;
+            }
             for plane in 0..4usize {
-                let mut edited = target.decoded.clone();
-                let byte = plane;
-                let mask = 1u8 << (7 - pixel);
-                let before = edited[byte];
-                edited[byte] = before | mask; // liga o bit do plano -> índice sobe
-                if edited[byte] == before {
-                    continue;
-                }
-                let outcome = reinsert_transaction(
-                    &ReinsertRequest {
-                        rom: &rom,
-                        expected_rom_sha256: &sha,
-                        resource: target,
-                        edited_data: &edited,
-                    },
-                    &limits,
-                );
-                if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
-                    eprintln!(
-                        "APPLIED_HIGH: stream={:#x} plane={plane} pixel={pixel} preservados={} patch={}",
-                        target.candidate.stream_offset,
-                        applied.verified_preserved,
-                        applied.patch_bps_sha256
+                for pixel in 0..8usize {
+                    let mut edited = resource.decoded.clone();
+                    let byte = plane;
+                    let mask = 1u8 << (7 - pixel);
+                    let before = edited[byte];
+                    edited[byte] = before | mask;
+                    if edited[byte] == before {
+                        continue;
+                    }
+                    let outcome = reinsert_transaction(
+                        &ReinsertRequest {
+                            rom: &rom,
+                            expected_rom_sha256: &sha,
+                            resource,
+                            edited_data: &edited,
+                        },
+                        &limits,
                     );
+                    if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
+                        eprintln!(
+                            "APPLIED_POSE: stream={:#x} tiles={} plane={plane} pixel={pixel} preservados={}",
+                            start_off,
+                            resource.candidate.num_tiles,
+                            applied.verified_preserved
+                        );
+                        applied_count += 1;
+                    }
                 }
             }
+            if applied_count >= 6 {
+                break;
+            }
         }
-    }
+        eprintln!("applied_count={applied_count}");    }
 }

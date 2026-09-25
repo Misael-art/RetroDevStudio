@@ -8876,10 +8876,15 @@ async function runRexLz4wEffectScenario(sessionId) {
     const snapshot = async () => {
       const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
       if (!frame || !frame.rgba) fail(`framebuffer indisponível (${label}).`);
+      console.log(`[rex-diag] ${label} snapshot: renderedFrames=${frame.renderedFrames} romSha=${frame.romSha256?.slice(0, 8)}`);
       return Buffer.from(frame.rgba);
     };
     const samples = [];
     await runFrames(180);
+    {
+      const state = await readAutomationState(sessionId);
+      console.log(`[rex-diag] ${label} estado: loaded=${state?.emulatorLoaded} paused=${state?.emulPaused} epoch=${state?.coreEpoch}`);
+    }
     samples.push(await snapshot());
     await sendInput({ ...neutralInput, start: true });
     await runFrames(3);
@@ -8912,6 +8917,24 @@ async function runRexLz4wEffectScenario(sessionId) {
   const modifiedFrames = await captureTimeline(patchApplied, "modificado");
   if (originalFrames.length !== modifiedFrames.length || originalFrames.length < 2) {
     fail(`timelines desiguais: ${originalFrames.length} vs ${modifiedFrames.length}`);
+  }
+  // Diagnóstico: o que muda entre snapshots consecutivos do ORIGINAL?
+  for (let i = 1; i < originalFrames.length; i++) {
+    const a = originalFrames[i - 1];
+    const b = originalFrames[i];
+    let count = 0;
+    let minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
+    for (let p = 0; p < a.length; p += 4) {
+      if (a[p] !== b[p] || a[p + 1] !== b[p + 1] || a[p + 2] !== b[p + 2]) {
+        count++;
+        const pixelIndex = p / 4;
+        const x = pixelIndex % 320;
+        const y = Math.floor(pixelIndex / 320);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+    console.log(`[rex-diag] par ${i - 1}->${i}: ${count} px mudaram, caixa ${maxX >= 0 ? `${minX},${minY} ${maxX - minX + 1}x${maxY - minY + 1}` : "nenhuma"}`);
   }
   let diffFrame = -1;
   let diffPixels = 0;
