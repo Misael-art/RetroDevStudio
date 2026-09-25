@@ -8886,19 +8886,23 @@ async function runRexLz4wEffectScenario(sessionId) {
     await sendInput(neutralInput);
     await runFrames(240);
     samples.push(await snapshot());
+    // Aproxima até contato e ataca repetidamente (faíscas de golpe são
+    // candidatas ao recurso de 9 tiles).
     await sendInput({ ...neutralInput, right: true });
-    await runFrames(180);
+    await runFrames(300);
     samples.push(await snapshot());
-    await sendInput({ ...neutralInput, right: true, a: true });
-    await runFrames(30);
-    samples.push(await snapshot());
-    await runFrames(30);
-    samples.push(await snapshot());
-    await sendInput({ ...neutralInput, right: true, b: true });
-    await runFrames(30);
-    samples.push(await snapshot());
-    await runFrames(30);
-    samples.push(await snapshot());
+    for (let round = 0; round < 3; round++) {
+      await sendInput({ ...neutralInput, right: true, a: true });
+      for (let step = 0; step < 4; step++) {
+        await runFrames(15);
+        samples.push(await snapshot());
+      }
+      await sendInput({ ...neutralInput, right: true, b: true });
+      for (let step = 0; step < 4; step++) {
+        await runFrames(15);
+        samples.push(await snapshot());
+      }
+    }
     await sendInput(neutralInput);
     await runFrames(60);
     samples.push(await snapshot());

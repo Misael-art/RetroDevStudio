@@ -942,41 +942,41 @@ mod tests {
         );
         let limits = Lz4wLimits::default();
         let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto");
-        for resource in &set.resources {
-            // Edição expressível no formulário: pixel (0,0) com índice 0..15.
-            for index in 0u8..16 {
-                let mut edited = resource.decoded.clone();
-                // byte 0 = plano 0, linha 0: bit 7 = pixel (0,0).
-                let current = (edited[0] >> 7) & 1;
-                let next = (index >> 0) & 1;
-                if current == next {
+        // Para o alvo 0xc8cc8: encontrar edições de pixel de ALTO contraste
+        // (índice 15) que a transação aceita, em qualquer pixel do tile 0.
+        let Some(target) = set
+            .resources
+            .iter()
+            .find(|r| r.candidate.stream_offset == 0xc8cc8)
+        else {
+            panic!("alvo 0xc8cc8 ausente");
+        };
+        for pixel in 0..8usize {
+            for plane in 0..4usize {
+                let mut edited = target.decoded.clone();
+                let byte = plane;
+                let mask = 1u8 << (7 - pixel);
+                let before = edited[byte];
+                edited[byte] = before | mask; // liga o bit do plano -> índice sobe
+                if edited[byte] == before {
                     continue;
-                }
-                if next == 1 {
-                    edited[0] |= 0x80;
-                } else {
-                    edited[0] &= !0x80;
                 }
                 let outcome = reinsert_transaction(
                     &ReinsertRequest {
                         rom: &rom,
                         expected_rom_sha256: &sha,
-                        resource,
+                        resource: target,
                         edited_data: &edited,
                     },
                     &limits,
                 );
                 if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
                     eprintln!(
-                        "APPLIED: header={:#x} stream={:#x} tiles={} stream_len={} preservados={} edit_index={}",
-                        resource.candidate.header_offset,
-                        resource.candidate.stream_offset,
-                        resource.candidate.num_tiles,
-                        resource.bytes_consumed,
+                        "APPLIED_HIGH: stream={:#x} plane={plane} pixel={pixel} preservados={} patch={}",
+                        target.candidate.stream_offset,
                         applied.verified_preserved,
-                        index
+                        applied.patch_bps_sha256
                     );
-                    break;
                 }
             }
         }
