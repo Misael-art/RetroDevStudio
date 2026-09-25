@@ -622,7 +622,8 @@ pub fn apply_resource_edit(
                 &applied.modified_rom,
                 &applied.modified_rom_sha256,
             )?;
-            let patch_path = edit_dir.join(format!("patch-{}.bps", applied.patch_bps_sha256));
+            let patch_path =
+                edit_dir.join(format!("rex-lz4w-patch-{}.bps", applied.patch_bps_sha256));
             write_file_immutable(&patch_path, &applied.patch_bps, &applied.patch_bps_sha256)?;
             Ok(ResourceEditResult {
                 outcome: "applied".into(),
