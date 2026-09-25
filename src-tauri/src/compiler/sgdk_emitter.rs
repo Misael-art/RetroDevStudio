@@ -212,7 +212,9 @@ fn build_main_c_inner(
             "0"
         };
         out.push_str(&format!(
-            "static s32 logic_var_{} = {};\n",
+            // volatile: o estado logico fica sempre na RAM (observavel e depuravel); sem isso
+            // o GCC pode manter variaveis so de `main` em registradores e eliminar o simbolo.
+            "static volatile s32 logic_var_{} = {};\n",
             var_name, initial_value
         ));
     }
@@ -3776,7 +3778,9 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Logic Vars Demo");
 
-        assert!(output.main_c.contains("static s32 logic_var_score = 0;"));
+        assert!(output
+            .main_c
+            .contains("static volatile s32 logic_var_score = 0;"));
         assert!(output
             .main_c
             .contains("logic_var_score = (((logic_var_score + 2) * (6 - 1)) / 5);"));
@@ -3819,10 +3823,10 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("static s32 logic_var_player_vx = 0;"));
+            .contains("static volatile s32 logic_var_player_vx = 0;"));
         assert!(output
             .main_c
-            .contains("static s32 logic_var_player_vy = 0;"));
+            .contains("static volatile s32 logic_var_player_vy = 0;"));
         assert!(output.main_c.contains("static s32 spr_player_vel_y = 0;"));
         assert!(output.main_c.contains("logic_var_player_vx = 2;"));
         assert!(output.main_c.contains("spr_player_vel_y = 0;"));
@@ -3850,7 +3854,7 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("static s32 logic_var_rom_d0 = 0x12340058;"));
+            .contains("static volatile s32 logic_var_rom_d0 = 0x12340058;"));
         assert!(output.main_c.contains("rds_logic_recovery_oracle_value"));
         assert!(output
             .main_c
@@ -3915,7 +3919,7 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("static s32 logic_var_fsm_state = 0;"));
+            .contains("static volatile s32 logic_var_fsm_state = 0;"));
         assert!(output.main_c.contains("if (logic_var_fsm_state == 0) {"));
         assert!(output.main_c.contains("logic_var_fsm_state = 1;"));
         assert!(output
@@ -4006,7 +4010,7 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("static s32 logic_var_timeline_intro = 0;"));
+            .contains("static volatile s32 logic_var_timeline_intro = 0;"));
         assert!(output.main_c.contains("logic_var_timeline_intro++;"));
         assert!(output
             .main_c

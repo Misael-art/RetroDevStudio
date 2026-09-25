@@ -1247,7 +1247,7 @@ fn collect_logic_output(
         };
         graph.graph_sha256 = graph_revision_hash(serialized_graph);
 
-        let compiled = compile_logic_graph(&graph, runtime_entities);
+        let compiled = compile_logic_graph(&graph, &entity.entity_id, runtime_entities);
         output.setup_nodes.extend(compiled.setup_nodes);
         output.runtime_nodes.extend(compiled.runtime_nodes);
         output.scripts.extend(compiled.scripts);
@@ -1260,6 +1260,7 @@ fn collect_logic_output(
 
 fn compile_logic_graph(
     graph: &StoredNodeGraph,
+    entity_id: &str,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
 ) -> CompiledLogicOutput {
     let mut output = CompiledLogicOutput::default();
@@ -1282,7 +1283,43 @@ fn compile_logic_graph(
                     &mut output.parallax_layers,
                     &mut output.raster_lines,
                 );
-                (!ops.is_empty()).then_some(LogicScript { ops })
+                if ops.is_empty() {
+                    return None;
+                }
+                if start_node.node_type != "event_start" {
+                    return Some(LogicScript { ops });
+                }
+                // "Ao iniciar" roda uma unica vez por partida (carga da ROM zera a guarda),
+                // e nao a cada quadro como "A cada quadro".
+                // IDs codificados em hexadecimal preservam a identidade de cada instancia
+                // sem colisoes introduzidas pela sanitizacao ou por hash truncado.
+                let identity_hex = |id: &str| {
+                    id.as_bytes()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                };
+                let guard = format!(
+                    "rds_started_{}_{}",
+                    identity_hex(entity_id),
+                    identity_hex(&start_node.id)
+                );
+                let mut once = vec![LogicOp::SetVar {
+                    var_name: guard.clone(),
+                    value: LogicMathExpr::Literal(1),
+                }];
+                once.extend(ops);
+                Some(LogicScript {
+                    ops: vec![LogicOp::ConditionBool {
+                        condition: LogicBoolExpr::Compare {
+                            op: CompareOp::Eq,
+                            left: Box::new(LogicMathExpr::Var(guard)),
+                            right: Box::new(LogicMathExpr::Literal(0)),
+                        },
+                        if_true: once,
+                        if_false: Vec::new(),
+                    }],
+                })
             }),
     );
 
@@ -3030,6 +3067,50 @@ pub fn collect_input_actions(ast: &AstOutput) -> Vec<InputActionBinding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mesmo `generate_ast`, com os scripts de "Ao iniciar" desembrulhados da guarda de
+    /// execucao unica (validada em `start_ops`), para os testes inspecionarem as ops.
+    fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
+        let mut ast = super::generate_ast(project, scene);
+        for script in &mut ast.logic_scripts {
+            script.ops = start_ops(&script.ops);
+        }
+        ast
+    }
+
+    /// Scripts de "Ao iniciar" vem dentro de uma guarda de execucao unica; devolve as ops
+    /// internas (verificando a guarda) ou as ops como estao para os demais scripts.
+    fn start_ops(ops: &[LogicOp]) -> Vec<LogicOp> {
+        if let [LogicOp::ConditionBool {
+            condition:
+                LogicBoolExpr::Compare {
+                    op: CompareOp::Eq,
+                    left,
+                    right,
+                },
+            if_true,
+            if_false,
+        }] = ops
+        {
+            if let (LogicMathExpr::Var(guard), LogicMathExpr::Literal(0)) =
+                (left.as_ref(), right.as_ref())
+            {
+                if guard.starts_with("rds_started_") {
+                    assert!(if_false.is_empty());
+                    assert_eq!(
+                        if_true.first(),
+                        Some(&LogicOp::SetVar {
+                            var_name: guard.clone(),
+                            value: LogicMathExpr::Literal(1)
+                        })
+                    );
+                    return if_true[1..].to_vec();
+                }
+            }
+        }
+        ops.to_vec()
+    }
+
     use crate::core::project_mgr::{load_project, load_scene};
     use crate::ugdm::components::Components;
     use crate::ugdm::entities::{Entity, Resolution, Transform};
@@ -4954,7 +5035,7 @@ mod tests {
 
         assert_eq!(ast.logic_scripts.len(), 1);
         assert_eq!(
-            *semantic_op(&ast.logic_scripts[0].ops[0]),
+            *semantic_op(&start_ops(&ast.logic_scripts[0].ops)[0]),
             LogicOp::MoveSprite {
                 target_var: "spr_player".to_string(),
                 dx: 2,
@@ -4962,12 +5043,13 @@ mod tests {
             }
         );
 
+        let start_script = start_ops(&ast.logic_scripts[0].ops);
         let LogicOp::ConditionOverlap {
             left,
             right,
             if_true,
             if_false,
-        } = semantic_op(&ast.logic_scripts[0].ops[1])
+        } = semantic_op(&start_script[1])
         else {
             panic!("expected overlap condition");
         };
@@ -4990,6 +5072,103 @@ mod tests {
             LogicOp::PlaySound { sfx } if sfx == "jump"
         ));
         assert!(if_false.is_empty());
+    }
+
+    #[test]
+    fn event_start_runs_once_per_match_not_every_frame() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Start Once".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+            settings: Default::default(),
+            template_metadata: None,
+        };
+        let graph = json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
+                { "id": "reset", "type": "var_set", "label": "Reset", "x": 0, "y": 0, "params": { "var_name": "coins", "value": 0 } },
+                { "id": "tick", "type": "event_update", "label": "Tick", "x": 0, "y": 0, "params": {} },
+                { "id": "add", "type": "var_set", "label": "Add", "x": 0, "y": 0, "params": { "var_name": "frames", "value": 1 } }
+            ],
+            "edges": [
+                { "id": "e1", "fromNode": "start", "fromPort": "exec", "toNode": "reset", "toPort": "exec" },
+                { "id": "e2", "fromNode": "tick", "fromPort": "exec", "toNode": "add", "toPort": "exec" }
+            ]
+        })
+        .to_string();
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: None,
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "host".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform { x: 0, y: 0 },
+                components: Components {
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(graph),
+                        graph_ref: None,
+                        graph_origin: None,
+                        logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
+                        imported_semantics: None,
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+        // AST real (sem o desembrulho dos testes): o script de inicio esta guardado.
+        let ast = super::generate_ast(&project, &scene);
+        let c = crate::compiler::sgdk_emitter::emit_sgdk(&ast, &project.name).main_c;
+        let guard = c
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("if ((logic_var_rds_started_")
+                    .map(|rest| rest.to_string())
+            })
+            .expect("start guard in the main loop");
+        assert!(guard.ends_with("== 0)) {"), "{c}");
+        let guard_at = c.find("if ((logic_var_rds_started_").unwrap();
+        let block = &c[guard_at..];
+        let block = &block[..block.find("\n        }").expect("end of guard block")];
+        assert!(block.contains("logic_var_coins = 0;"), "{c}");
+        assert!(!block.contains("logic_var_frames = 1;"), "{c}");
+        // O tick continua sem guarda (roda a cada quadro).
+        assert!(c.contains("logic_var_frames = 1;"), "{c}");
+        assert_eq!(c.matches("logic_var_rds_started_").count(), 3, "{c}"); // declaracao, teste e marca
+
+        // Grafos byte a byte iguais em entidades diferentes precisam de guardas distintas.
+        // O AST real e o C emitido devem executar o inicio uma vez por instancia.
+        let mut two_entities = scene.clone();
+        let mut other = two_entities.entities[0].clone();
+        other.entity_id = "other_host".to_string();
+        two_entities.entities.push(other);
+        let two_ast = super::generate_ast(&project, &two_entities);
+        let two_c = crate::compiler::sgdk_emitter::emit_sgdk(&two_ast, &project.name).main_c;
+        let guards: Vec<&str> = two_c
+            .lines()
+            .filter(|line| line.starts_with("static volatile s32 logic_var_rds_started_"))
+            .collect();
+        assert_eq!(guards.len(), 2, "{two_c}");
+        assert_ne!(guards[0], guards[1], "guardas compartilhadas: {two_c}");
     }
 
     #[test]
@@ -5659,7 +5838,7 @@ mod tests {
         };
 
         let ast = generate_ast(&project, &scene);
-        let ops = &ast.logic_scripts[0].ops;
+        let ops = &start_ops(&ast.logic_scripts[0].ops);
 
         assert!(matches!(
             semantic_op(&ops[0]),

@@ -14,6 +14,7 @@ import {
   type BehaviorSceneContext,
 } from "../../core/nodegraph/behaviorLibrary";
 import { MEGADRIVE_INPUT_BUTTONS, describeInputButton } from "../../core/nodegraph/nodeCatalog";
+import AssetPreview from "../common/AssetPreview";
 import type { NodeGraph } from "../../core/nodegraph/nodeTypes";
 
 type Mode =
@@ -26,36 +27,93 @@ type Props = {
   graph: NodeGraph;
   context: BehaviorSceneContext;
   selectedEntityId: string;
+  projectDir?: string | null;
   onCommit: (graph: NodeGraph, label: string, message: string) => void;
   onShowInstance: (nodeIds: string[]) => void;
 };
 
 const fieldClass = "w-full rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 text-[10px] text-[#cdd6f4]";
 
+/** Miniatura do primeiro quadro do sprite real da entidade escolhida. */
+function EntityThumb({ context, entityId, projectDir }: { context: BehaviorSceneContext; entityId: string; projectDir?: string | null }) {
+  const entity = context.entities.find((candidate) => candidate.id === entityId);
+  if (!entity?.spriteAsset || !projectDir) return null;
+  const width = entity.frameWidth ?? 16;
+  const height = entity.frameHeight ?? 16;
+  const scale = 20 / Math.max(1, width, height);
+  return (
+    <span
+      data-testid={`behavior-thumb-${entityId}`}
+      className="relative inline-block shrink-0 overflow-hidden rounded bg-[#11111b]"
+      style={{ width: Math.round(width * scale), height: Math.round(height * scale) }}
+      title={entity.spriteAsset}
+    >
+      <span className="absolute left-0 top-0 block" style={{ transform: `scale(${scale})`, transformOrigin: "0 0" }}>
+        <AssetPreview alt={entity.label} projectDir={projectDir} relativePath={entity.spriteAsset} imageClassName="max-w-none" fallbackClassName="h-4 w-4" fallbackLabel="" pixelated />
+      </span>
+    </span>
+  );
+}
+
 function ParamField({
   spec,
   params,
   context,
   graph,
+  projectDir,
   onChange,
 }: {
   spec: BehaviorParamSpec;
   params: BehaviorParams;
   context: BehaviorSceneContext;
   graph: NodeGraph;
+  projectDir?: string | null;
   onChange: (key: string, value: string | number) => void;
 }) {
   const value = params[spec.key] ?? "";
   const testId = `behavior-param-${spec.key}`;
-  let control: ReactElement;
+  let control: ReactElement = <span />;
   switch (spec.kind) {
     case "entity": {
       const options = context.entities.filter((entity) => (spec.require === "sprite" ? entity.hasSprite : entity.hasSprite || entity.hasCollision));
       control = (
+        <span className="flex items-center gap-1">
+          <EntityThumb context={context} entityId={String(value)} projectDir={projectDir} />
+          <select data-testid={testId} value={String(value)} onChange={(event) => onChange(spec.key, event.target.value)} className={fieldClass}>
+            {spec.optional && <option value="">(nenhuma)</option>}
+            {value && !options.some((entity) => entity.id === value) && <option value={String(value)}>{`${value} (invalida)`}</option>}
+            {!spec.optional && !value && <option value="">(escolha)</option>}
+            {options.map((entity) => (
+              <option key={entity.id} value={entity.id}>{entity.label}</option>
+            ))}
+          </select>
+        </span>
+      );
+      break;
+    }
+    case "text":
+      control = (
+        <input data-testid={testId} value={String(value)} maxLength={24} onChange={(event) => onChange(spec.key, event.target.value)} className={fieldClass} />
+      );
+      break;
+    case "choice":
+      control = (
         <select data-testid={testId} value={String(value)} onChange={(event) => onChange(spec.key, event.target.value)} className={fieldClass}>
-          {!options.some((entity) => entity.id === value) && <option value={String(value)}>{value ? `${value} (invalida)` : "(escolha)"}</option>}
-          {options.map((entity) => (
-            <option key={entity.id} value={entity.id}>{entity.label}</option>
+          {spec.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      );
+      break;
+    case "counter": {
+      const counters = context.counters ?? [];
+      control = (
+        <select data-testid={testId} value={String(value)} onChange={(event) => onChange(spec.key, event.target.value)} className={fieldClass}>
+          {spec.optional && <option value="">(nenhum)</option>}
+          {value && !counters.some((counter) => counter.instanceId === value) && <option value={String(value)}>(contador removido)</option>}
+          {!spec.optional && !value && <option value="">(escolha)</option>}
+          {counters.map((counter) => (
+            <option key={counter.instanceId} value={counter.instanceId}>
+              {counter.label} ({counter.scope === "entity" ? `de ${context.entities.find((entity) => entity.id === counter.ownerEntity)?.label ?? counter.ownerEntity}` : "compartilhado"})
+            </option>
           ))}
         </select>
       );
@@ -114,7 +172,7 @@ function ParamField({
       control = (
         <select data-testid={testId} value={String(value)} onChange={(event) => onChange(spec.key, event.target.value)} className={fieldClass}>
           {!context.variables.includes(String(value)) && <option value={String(value)}>{value ? `${value} (ninguem escreve)` : "(escolha)"}</option>}
-          {context.variables.map((name) => <option key={name} value={name}>{name}</option>)}
+          {context.variables.map((name) => <option key={name} value={name}>{context.variableLabels?.[name] ?? name}</option>)}
         </select>
       );
       break;
@@ -164,7 +222,33 @@ function PlanFeedback({ plan, confirmed, setConfirmed }: { plan: BehaviorPlan; c
  * Comportamentos parametrizados (Experimental): descobrir, configurar, aplicar, editar e
  * remover sem conhecer ids internos. Toda acao passa pelo historico do grafo.
  */
-export default function BehaviorPanel({ graph, context, selectedEntityId, onCommit, onShowInstance }: Props) {
+/** Contadores da cena: quais itens os alimentam e quais passagens/objetivos os usam. */
+function LinksSummary({ context }: { context: BehaviorSceneContext }) {
+  const counters = context.counters ?? [];
+  if (counters.length === 0) return null;
+  const host = (id: string) => context.entities.find((entity) => entity.id === id)?.label ?? id;
+  return (
+    <div data-testid="behavior-links" className="mt-1.5 rounded border border-[#313244] bg-[#11111b] px-1.5 py-1">
+      <p className="text-[9px] uppercase tracking-[0.12em] text-[#6c7086]">Ligacoes</p>
+      {counters.map((counter) => {
+        const users = (context.references ?? []).filter((reference) => reference.refs.includes(counter.instanceId) || reference.refs.includes(counter.varName));
+        const feeders = users.filter((reference) => reference.behaviorId === "collectible");
+        const consumers = users.filter((reference) => reference.behaviorId !== "collectible");
+        return (
+          <p key={counter.instanceId} data-testid={`behavior-links-${counter.instanceId}`} className="text-[#a6adc8]">
+            <span className="font-semibold text-[#cdd6f4]">{counter.label}</span> ({counter.scope === "entity" ? `de ${host(counter.ownerEntity ?? "")}` : "compartilhado"}):
+            {" "}alimentado por {feeders.length ? feeders.map((ref) => `${ref.label}`).join(", ") : "nenhum item"}; usado por {consumers.length ? consumers.map((ref) => `${ref.label} (${host(ref.hostEntity)})`).join(", ") : "ninguem"}.
+          </p>
+        );
+      })}
+      <p className="mt-0.5 text-[9px] text-[#6c7086]">
+        Salvar o projeto guarda a configuracao, nao o progresso da partida: contadores, itens coletados, passagens e objetivos voltam ao inicio a cada partida (parar e jogar de novo).
+      </p>
+    </div>
+  );
+}
+
+export default function BehaviorPanel({ graph, context, selectedEntityId, projectDir, onCommit, onShowInstance }: Props) {
   const [mode, setMode] = useState<Mode>(null);
   const [confirmed, setConfirmed] = useState(false);
   const issues = useMemo(() => validateBehaviorInstances(graph, context), [context, graph]);
@@ -172,7 +256,7 @@ export default function BehaviorPanel({ graph, context, selectedEntityId, onComm
     if (!mode) return null;
     if (mode.kind === "add") return planApplyBehavior(graph, mode.behaviorId, mode.params, context);
     if (mode.kind === "edit") return planEditBehavior(graph, mode.instanceId, mode.params, context);
-    return planRemoveBehavior(graph, mode.instanceId);
+    return planRemoveBehavior(graph, mode.instanceId, context);
   }, [context, graph, mode]);
   const start = (next: Mode) => {
     setConfirmed(false);
@@ -228,6 +312,8 @@ export default function BehaviorPanel({ graph, context, selectedEntityId, onComm
         </ul>
       )}
 
+      <LinksSummary context={context} />
+
       {!mode && (
         <div className="mt-1.5 space-y-1">
           <p className="text-[9px] uppercase tracking-[0.12em] text-[#6c7086]">Adicionar a esta entidade</p>
@@ -250,7 +336,7 @@ export default function BehaviorPanel({ graph, context, selectedEntityId, onComm
         <div data-testid="behavior-form" className="mt-1.5 space-y-1 rounded border border-[#45475a] bg-[#181825] p-1.5">
           <p className="font-semibold">{mode.kind === "add" ? `Novo: ${definition.title}` : `Editar: ${definition.title}`}</p>
           {definition.params.map((spec) => (
-            <ParamField key={spec.key} spec={spec} params={mode.params} context={context} graph={graph} onChange={change} />
+            <ParamField key={spec.key} spec={spec} params={mode.params} context={context} graph={graph} projectDir={projectDir} onChange={change} />
           ))}
           {plan ? <PlanFeedback plan={plan} confirmed={confirmed} setConfirmed={setConfirmed} /> : null}
           <div className="flex gap-1">

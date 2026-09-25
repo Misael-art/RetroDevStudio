@@ -718,8 +718,10 @@ where
 
     // Contrato de suporte por plataforma: recusa antes de gerar codigo, com diagnostico
     // estruturado, e remove ROMs antigas para nenhum artefato velho parecer o resultado.
-    let support_issues =
+    let mut support_issues =
         crate::compiler::platform_support::logic_support_issues(target.target, &resolved_scene);
+    support_issues
+        .extend(crate::compiler::platform_support::behavior_reference_issues(&resolved_scene));
     if !support_issues.is_empty() {
         for issue in &support_issues {
             emit!(

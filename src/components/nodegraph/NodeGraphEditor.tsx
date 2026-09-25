@@ -3856,6 +3856,7 @@ export default function NodeGraphEditor() {
               graph={graph}
               context={behaviorContext}
               selectedEntityId={selectedEntity.entity_id}
+              projectDir={activeProjectDir}
               onCommit={(next, label, message) => {
                 setGraph(next, label);
                 logMessage("info", `[Comportamentos] ${message}`);
