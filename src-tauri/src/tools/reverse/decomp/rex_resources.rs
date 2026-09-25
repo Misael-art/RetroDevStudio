@@ -390,6 +390,262 @@ pub fn md_tiles_to_rgba(tiles: &[u8]) -> Vec<u8> {
     rgba
 }
 
+/// Resumo de um recurso verificado para IPC/UI.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ResourceSummary {
+    pub header_offset: u64,
+    pub stream_offset: u64,
+    pub num_tiles: u32,
+    pub data_len: u32,
+    pub stream_len: u32,
+}
+
+/// Prévia PNG chunky (4x) dos tiles decodificados, com 16 tiles por linha.
+/// Retorna (bytes_png, largura, altura, sha256 dos pixels RGBA).
+pub fn render_resource_png(data: &[u8]) -> Result<(Vec<u8>, u32, u32, String), CodecError> {
+    if data.is_empty() || !data.len().is_multiple_of(32) {
+        return Err(CodecError::new(
+            "invalid_reference",
+            "dado de tiles deve ser múltiplo de 32 bytes (tiles MD 4bpp)",
+        ));
+    }
+    let num_tiles = data.len() / 32;
+    let per_row = 16usize;
+    let rows = num_tiles.div_ceil(per_row);
+    let width = per_row * 8;
+    let height = rows * 8;
+    // RGBA canônico: tiles na ordem, com padding transparente no fim.
+    let mut rgba = vec![0u8; width * height * 4];
+    let strip = md_tiles_to_rgba(data);
+    for tile in 0..num_tiles {
+        let row = tile / per_row;
+        let col = tile % per_row;
+        for y in 0..8 {
+            for x in 0..8 {
+                let src = (y * 8 + x) * 4;
+                let dst = (((row * 8 + y) * width) + col * 8 + x) * 4;
+                rgba[dst..dst + 4].copy_from_slice(&strip[src..src + 4]);
+            }
+        }
+    }
+    let pixels_sha256 = super::rom_library::sha256_hex(&rgba);
+    let mut png_bytes: Vec<u8> = Vec::new();
+    let image = image::RgbaImage::from_raw(width as u32, height as u32, rgba.clone())
+        .ok_or_else(|| CodecError::new("overflow", "dimensões da prévia inválidas"))?;
+    image
+        .write_to(
+            &mut std::io::Cursor::new(&mut png_bytes),
+            image::ImageFormat::Png,
+        )
+        .map_err(|e| CodecError::new("overflow", format!("falha ao codificar PNG: {e}")))?;
+    Ok((png_bytes, width as u32, height as u32, pixels_sha256))
+}
+
+/// Lista os recursos LZ4W verificados de uma ROM (por conteúdo), com o
+/// SHA-256 da ROM lida (identidade para a UI).
+pub fn list_resources(rom_path: &str) -> Result<(String, Vec<ResourceSummary>), String> {
+    let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
+    let sha = super::rom_library::sha256_hex(&rom);
+    let limits = Lz4wLimits::default();
+    let set = verify_lz4w_resource_set(&rom, &limits)
+        .map_err(|e| format!("falha ao verificar recursos: {e}"))?;
+    let summaries = set
+        .resources
+        .iter()
+        .map(|r| ResourceSummary {
+            header_offset: r.candidate.header_offset as u64,
+            stream_offset: r.candidate.stream_offset as u64,
+            num_tiles: r.candidate.num_tiles as u32,
+            data_len: r.candidate.expected_len as u32,
+            stream_len: r.bytes_consumed as u32,
+        })
+        .collect();
+    Ok((sha, summaries))
+}
+
+/// Edição de pixel por (tile, linha, coluna) com índice 0..15, aplicada pela
+/// transação canônica. Zero edições = no-op explícito.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PixelEdit {
+    pub tile: u32,
+    pub row: u32,
+    pub col: u32,
+    pub index: u8,
+}
+
+/// Resultado IPC da edição.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ResourceEditResult {
+    pub outcome: String,
+    pub rom_sha256: String,
+    pub modified_rom_sha256: Option<String>,
+    pub modified_rom_path: Option<String>,
+    pub patch_bps_sha256: Option<String>,
+    pub patch_bps_path: Option<String>,
+    pub stream_offset: u64,
+    pub stream_written: Option<u32>,
+    pub original_stream_len: u32,
+    pub verified_preserved: Option<usize>,
+    pub analyzed_scope: String,
+    pub preview_png_sha256: Option<String>,
+    pub preview_pixels_sha256: Option<String>,
+    pub preview_width: Option<u32>,
+    pub preview_height: Option<u32>,
+    pub preview_data_url: Option<String>,
+}
+
+/// Prévia somente leitura de um recurso verificado (sem transação).
+pub fn preview_resource(rom_path: &str, stream_offset: u64) -> Result<ResourceEditResult, String> {
+    let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
+    let rom_sha = super::rom_library::sha256_hex(&rom);
+    let limits = Lz4wLimits::default();
+    let set = verify_lz4w_resource_set(&rom, &limits)
+        .map_err(|e| format!("falha ao verificar recursos: {e}"))?;
+    let resource = set
+        .resources
+        .iter()
+        .find(|r| r.candidate.stream_offset as u64 == stream_offset)
+        .ok_or_else(|| format!("recurso {stream_offset:#x} não verificado nesta ROM"))?;
+    let (preview_png, pw, ph, pixels_sha) =
+        render_resource_png(&resource.decoded).map_err(|e| format!("{}: {}", e.code, e.detail))?;
+    let preview_data_url = format!("data:image/png;base64,{}", {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        BASE64.encode(&preview_png)
+    });
+    Ok(ResourceEditResult {
+        outcome: "preview".into(),
+        rom_sha256: rom_sha,
+        modified_rom_sha256: None,
+        modified_rom_path: None,
+        patch_bps_sha256: None,
+        patch_bps_path: None,
+        stream_offset,
+        stream_written: None,
+        original_stream_len: resource.bytes_consumed as u32,
+        verified_preserved: None,
+        analyzed_scope: set.analyzed_scope,
+        preview_png_sha256: Some(super::rom_library::sha256_hex(&preview_png)),
+        preview_pixels_sha256: Some(pixels_sha),
+        preview_width: Some(pw),
+        preview_height: Some(ph),
+        preview_data_url: Some(preview_data_url),
+    })
+}
+
+/// Aplica edições de pixels via transação canônica e materializa cópia
+/// modificada + patch BPS no diretório canônico de artefatos.
+pub fn apply_resource_edit(
+    rom_path: &str,
+    stream_offset: u64,
+    edits: &[PixelEdit],
+    expected_rom_sha256: &str,
+) -> Result<ResourceEditResult, String> {
+    use super::extract::{canonical_dir_under, write_file_immutable};
+    let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
+    let rom_sha = super::rom_library::sha256_hex(&rom);
+    let limits = Lz4wLimits::default();
+    let set = verify_lz4w_resource_set(&rom, &limits)
+        .map_err(|e| format!("falha ao verificar recursos: {e}"))?;
+    let resource = set
+        .resources
+        .iter()
+        .find(|r| r.candidate.stream_offset as u64 == stream_offset)
+        .ok_or_else(|| format!("recurso {stream_offset:#x} não verificado nesta ROM"))?;
+    let mut edited = resource.decoded.clone();
+    for edit in edits {
+        if edit.index > 15 || edit.row > 7 || edit.col > 7 {
+            return Err(format!("edição inválida: {edit:?}"));
+        }
+        let tile = edit.tile as usize;
+        if tile >= resource.candidate.num_tiles {
+            return Err(format!("tile {} fora do recurso", edit.tile));
+        }
+        let base = tile * 32 + edit.row as usize * 4;
+        for plane in 0..4u8 {
+            let bit = if (edit.index >> plane) & 1 == 1 { 1 } else { 0 };
+            let mask = 1u8 << (7 - edit.col);
+            if bit == 1 {
+                edited[base + plane as usize] |= mask;
+            } else {
+                edited[base + plane as usize] &= !mask;
+            }
+        }
+    }
+    let outcome = reinsert_transaction(
+        &ReinsertRequest {
+            rom: &rom,
+            expected_rom_sha256,
+            resource,
+            edited_data: &edited,
+        },
+        &limits,
+    )
+    .map_err(|e| format!("{}: {}", e.code, e.detail))?;
+    let (preview_png, pw, ph, pixels_sha) = render_resource_png(if edits.is_empty() {
+        &resource.decoded
+    } else {
+        &edited
+    })
+    .map_err(|e| format!("{}: {}", e.code, e.detail))?;
+    let preview_data_url = format!("data:image/png;base64,{}", {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        BASE64.encode(&preview_png)
+    });
+    match outcome {
+        ReinsertOutcome::NoOp => Ok(ResourceEditResult {
+            outcome: "noop".into(),
+            rom_sha256: rom_sha,
+            modified_rom_sha256: None,
+            modified_rom_path: None,
+            patch_bps_sha256: None,
+            patch_bps_path: None,
+            stream_offset,
+            stream_written: None,
+            original_stream_len: resource.bytes_consumed as u32,
+            verified_preserved: None,
+            analyzed_scope: set.analyzed_scope,
+            preview_png_sha256: Some(super::rom_library::sha256_hex(&preview_png)),
+            preview_pixels_sha256: Some(pixels_sha),
+            preview_width: Some(pw),
+            preview_height: Some(ph),
+            preview_data_url: Some(preview_data_url),
+        }),
+        ReinsertOutcome::Applied(applied) => {
+            let edit_dir = canonical_dir_under(
+                &super::rom_library::decomp_work_dir(),
+                &["extract", &rom_sha, "rex"],
+            )?;
+            let modified_path =
+                edit_dir.join(format!("modified-{}.bin", applied.modified_rom_sha256));
+            write_file_immutable(
+                &modified_path,
+                &applied.modified_rom,
+                &applied.modified_rom_sha256,
+            )?;
+            let patch_path = edit_dir.join(format!("patch-{}.bps", applied.patch_bps_sha256));
+            write_file_immutable(&patch_path, &applied.patch_bps, &applied.patch_bps_sha256)?;
+            Ok(ResourceEditResult {
+                outcome: "applied".into(),
+                rom_sha256: rom_sha,
+                modified_rom_sha256: Some(applied.modified_rom_sha256),
+                modified_rom_path: Some(modified_path.to_string_lossy().into_owned()),
+                patch_bps_sha256: Some(applied.patch_bps_sha256),
+                patch_bps_path: Some(patch_path.to_string_lossy().into_owned()),
+                stream_offset,
+                stream_written: Some(applied.stream_written as u32),
+                original_stream_len: applied.original_stream_len as u32,
+                verified_preserved: Some(applied.verified_preserved),
+                analyzed_scope: applied.analyzed_scope,
+                preview_png_sha256: Some(super::rom_library::sha256_hex(&preview_png)),
+                preview_pixels_sha256: Some(pixels_sha),
+                preview_width: Some(pw),
+                preview_height: Some(ph),
+                preview_data_url: Some(preview_data_url),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -663,5 +919,43 @@ mod tests {
         // Indices específicos: pixel (1,0) = 1, pixel (6,0) = 8.
         assert_eq!(rgba[(0 * 8 + 1) * 4], 16);
         assert_eq!(rgba[(0 * 8 + 6) * 4], 8 * 16);
+    }
+
+    /// Enumera recursos LZ4W do corpus que aceitam a edição mínima (para
+    /// escolha do alvo da cadeia com evidência runtime). Executar com
+    /// --ignored.
+    #[test]
+    #[ignore = "aceite BYOR: requer ROM local; rodar com --ignored"]
+    fn byor_enumerate_fitting_resources() {
+        let path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
+            "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin"
+                .to_string()
+        });
+        let rom = std::fs::read(path).expect("rom");
+        let sha = super::super::rom_library::sha256_hex(&rom);
+        assert_eq!(
+            sha,
+            "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9"
+        );
+        let limits = Lz4wLimits::default();
+        let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto");
+        for resource in &set.resources {
+            let mut edited = resource.decoded.clone();
+            let last = edited.len() - 1;
+            edited[last] ^= 0xF0;
+            let start = resource.candidate.stream_offset;
+            if let Ok(stream) = lz4w_encode_with_dictionary(&edited, Some(&rom[..start])) {
+                if stream.len() <= resource.bytes_consumed {
+                    eprintln!(
+                        "FIT: header={:#x} stream={:#x} tiles={} stream_len={} dados={}",
+                        resource.candidate.header_offset,
+                        start,
+                        resource.candidate.num_tiles,
+                        resource.bytes_consumed,
+                        resource.candidate.expected_len
+                    );
+                }
+            }
+        }
     }
 }
