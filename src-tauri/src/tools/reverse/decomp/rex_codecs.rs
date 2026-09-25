@@ -29,7 +29,7 @@ pub struct CodecError {
 }
 
 impl CodecError {
-    fn new(code: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &'static str, detail: impl Into<String>) -> Self {
         Self {
             code,
             detail: detail.into(),
@@ -279,6 +279,20 @@ pub fn lz4w_decode_with_dictionary(
 /// Nunca produz correspondências com dicionário externo (start=0). O
 /// codificador é guloso (não-ótimo): ver comentário do módulo.
 pub fn lz4w_encode(data: &[u8]) -> Result<Vec<u8>, CodecError> {
+    lz4w_encode_with_dictionary(data, None)
+}
+
+/// Codifica dados com o **bloco anterior como dicionário** (variante do
+/// ResComp: o prefixo precede o stream na ROM e é endereçável pelos matches
+/// longos, pois o unpacker oficial copia o prefixo para o início do
+/// resultado). Os matches longos são emitidos sem a flag ROM source, com o
+/// offset medido em words a partir do fim do resultado (dicionário + saída)
+/// — exatamente o que o unpacker resolve. O dicionário deve ter comprimento
+/// par; matches nunca referenciam posições além de 0x8000 words para trás.
+pub fn lz4w_encode_with_dictionary(
+    data: &[u8],
+    dictionary: Option<&[u8]>,
+) -> Result<Vec<u8>, CodecError> {
     const MAX_INPUT: usize = 2 * 1024 * 1024;
     if data.len() > MAX_INPUT {
         return Err(CodecError::new(
@@ -289,68 +303,100 @@ pub fn lz4w_encode(data: &[u8]) -> Result<Vec<u8>, CodecError> {
             ),
         ));
     }
+    let dict = dictionary.unwrap_or(&[]);
+    if !dict.len().is_multiple_of(2) {
+        return Err(CodecError::new(
+            "invalid_reference",
+            "dicionário com comprimento ímpar não endereçável por words",
+        ));
+    }
+    let dict_words = dict.len() / 2;
     let word_count = data.len() / 2;
-    let word_at = |i: usize| -> u16 { u16::from_be_bytes([data[i * 2], data[i * 2 + 1]]) };
-    // Tabela de candidatos por valor de word (posições crescentes).
+    let total_words = dict_words + word_count;
+    // Buffer combinado: dicionário + dados (o espaço de busca de matches).
+    let mut combined: Vec<u8> = Vec::with_capacity(dict.len() + data.len());
+    combined.extend_from_slice(dict);
+    combined.extend_from_slice(data);
+    let word_at = |i: usize| -> u16 { u16::from_be_bytes([combined[i * 2], combined[i * 2 + 1]]) };
     let mut positions: std::collections::HashMap<u16, Vec<usize>> =
         std::collections::HashMap::new();
+    for j in 0..dict_words {
+        positions.entry(word_at(j)).or_default().push(j);
+    }
     let mut out: Vec<u8> = Vec::with_capacity(data.len() / 2 + 16);
     let mut literals: Vec<u16> = Vec::new();
-    let mut i = 0usize;
-    while i < word_count {
+    // Busca gulosa do melhor match representável na posição j (lazy: o
+    // chamador compara com a posição seguinte antes de decidir).
+    let find_best = |positions: &std::collections::HashMap<u16, Vec<usize>>,
+                     j: usize|
+     -> Option<(usize, usize)> {
+        let cur = word_at(j);
+        let window_start = j.saturating_sub(0x7FFF);
         let mut best: Option<(usize, usize)> = None;
-        {
-            let cur = word_at(i);
-            let window_start = i.saturating_sub(MATCH_LONG_OFFSET_MAX + 1);
-            if let Some(list) = positions.get(&cur) {
-                let mut checked = 0usize;
-                for &pos in list.iter().rev() {
-                    if pos < window_start {
-                        break;
-                    }
-                    let off = i - pos;
-                    let mut len = 1usize;
-                    while i + len < word_count
-                        && word_at(i + len) == word_at(i + len - off)
-                        && len < LONG_MAX_LENGTH_WORDS
-                    {
-                        len += 1;
-                    }
-                    let better = match best {
-                        Some((blen, boff)) => len > blen || (len == blen && off < boff),
-                        None => true,
-                    };
-                    if better {
-                        best = Some((len, off));
-                    }
-                    checked += 1;
-                    if checked >= 128 || best.is_some_and(|(l, _)| l >= LONG_MAX_LENGTH_WORDS) {
-                        break;
-                    }
+        if let Some(list) = positions.get(&cur) {
+            let mut checked = 0usize;
+            for &pos in list.iter().rev() {
+                if pos < window_start {
+                    break;
+                }
+                let off = j - pos;
+                let mut len = 1usize;
+                while j + len < total_words
+                    && word_at(j + len) == word_at(j + len - off)
+                    && len < LONG_MAX_LENGTH_WORDS
+                {
+                    len += 1;
+                }
+                let better = match best {
+                    Some((blen, boff)) => len > blen || (len == blen && off < boff),
+                    None => true,
+                };
+                if better {
+                    best = Some((len, off));
+                }
+                checked += 1;
+                if checked >= 128 || best.is_some_and(|(l, _)| l >= LONG_MAX_LENGTH_WORDS) {
+                    break;
                 }
             }
         }
-        // Só aceita formas representáveis: longo (>= 3 words — o byte extra
-        // do token não pode ser 0, que significa "sem match" — e offset
-        // <= 0x4000) ou curto (1..=16 words, offset <= 0x100). Match de 2
-        // words com offset grande não é representável e vira literal.
-        let usable = best.filter(|&(len, off)| {
-            (len > MATCH_LONG_MIN_SIZE && off <= MATCH_LONG_OFFSET_LIMIT)
+        best.filter(|&(len, off)| {
+            (len > MATCH_LONG_MIN_SIZE && off <= 0x8000)
                 || ((MATCH_MIN_SIZE..=0xF + MATCH_MIN_SIZE).contains(&len)
                     && off <= SHORT_MAX_OFFSET_WORDS)
-        });
-        match usable {
+        })
+    };
+    let mut i = 0usize;
+    while i < word_count {
+        let j = dict_words + i;
+        // Lazy matching: se a próxima posição tem match estritamente maior,
+        // emite literal agora e aproveita o match maior adiante.
+        let current = find_best(&positions, j);
+        let take_match = match current {
+            None => false,
+            Some((len, _)) => {
+                if i + 1 >= word_count {
+                    true
+                } else {
+                    match find_best(&positions, j + 1) {
+                        Some((next_len, _)) => next_len <= len,
+                        None => true,
+                    }
+                }
+            }
+        };
+        match current.filter(|_| take_match) {
             Some((len, off)) if len >= 2 => {
                 emit_segment(&mut out, &mut literals, Some((len, off)))?;
-                positions.entry(word_at(i)).or_default().push(i);
+                positions.entry(word_at(j)).or_default().push(j);
                 i += len;
             }
             _ => {
                 if literals.len() == LITERAL_MAX_WORDS {
                     emit_segment(&mut out, &mut literals, None)?;
                 }
-                literals.push(word_at(i));
-                positions.entry(word_at(i)).or_default().push(i);
+                literals.push(word_at(j));
+                positions.entry(word_at(j)).or_default().push(j);
                 i += 1;
             }
         }
@@ -388,10 +434,9 @@ fn emit_segment(
                 }
                 return Ok(());
             }
-            if len > MATCH_LONG_MIN_SIZE
-                && off <= MATCH_LONG_OFFSET_LIMIT
-                && literals.len() <= LITERAL_MAX_WORDS
-            {
+            // Forma longa: offset de até 0x8000 words a partir do fim do
+            // resultado (dicionário + saída), via negação de 15 bits.
+            if len > MATCH_LONG_MIN_SIZE && off <= 0x8000 && literals.len() <= LITERAL_MAX_WORDS {
                 let token = ((lit as u16) << 12) | ((len - MATCH_LONG_MIN_SIZE) as u16);
                 out.extend_from_slice(&token.to_be_bytes());
                 for word in literals.drain(..lit) {
