@@ -1061,9 +1061,9 @@ mod tests {
         );
         let limits = Lz4wLimits::default();
         let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto");
-        // Para o alvo 0xc8cc8 (frame 24x24, classe faísca): edição do
-        // plano 3 no pixel (0,0) — índice +8, máximo salto de cor — com
-        // impressão do índice atual para reprodução pelo formulário.
+        // Para o alvo 0xc8cc8 (frame 24x24, classe faísca): enumera edições
+        // de pixel expressíveis no formulário (chunky) que a transação
+        // aceita, com o índice resultante de maior contraste.
         let Some(target) = set
             .resources
             .iter()
@@ -1071,33 +1071,41 @@ mod tests {
         else {
             panic!("alvo 0xc8cc8 ausente");
         };
-        let current_index = (0..4usize)
-            .map(|p| {
-                let bit = (target.decoded[p] >> (7 - 0)) & 1;
-                bit << p
-            })
-            .sum::<u8>();
-        let mut edited = target.decoded.clone();
-        edited[3] |= 0x80; // plano 3, pixel 0
-        let outcome = reinsert_transaction(
-            &ReinsertRequest {
-                rom: &rom,
-                expected_rom_sha256: &sha,
-                resource: target,
-                edited_data: &edited,
-            },
-            &limits,
-        );
-        match outcome {
-            Ok(ReinsertOutcome::Applied(applied)) => eprintln!(
-                "APPLIED_HIGH: stream={:#x} indice_atual={current_index} indice_novo={}=indice|8 preservados={} patch={}",
-                target.candidate.stream_offset,
-                current_index | 8,
-                applied.verified_preserved,
-                applied.patch_bps_sha256
-            ),
-            Ok(ReinsertOutcome::NoOp) => eprintln!("NOOP inesperado"),
-            Err(error) => eprintln!("RECUSADO: {error}"),
+        let mut found = 0usize;
+        for index in (1u8..16).rev() {
+            for row in 0..8usize {
+                for col in 0..8usize {
+                    let current =
+                        md_read_pixel_index(&target.decoded, 0, row, col).unwrap();
+                    if current == index {
+                        continue;
+                    }
+                    let mut edited = target.decoded.clone();
+                    md_write_pixel_index(&mut edited, 0, row, col, index).unwrap();
+                    let outcome = reinsert_transaction(
+                        &ReinsertRequest {
+                            rom: &rom,
+                            expected_rom_sha256: &sha,
+                            resource: target,
+                            edited_data: &edited,
+                        },
+                        &limits,
+                    );
+                    if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
+                        eprintln!(
+                            "APPLIED_CHUNKY: stream={:#x} tile=0 row={row} col={col} indice_atual={current} indice_novo={index} preservados={} patch={}",
+                            target.candidate.stream_offset,
+                            applied.verified_preserved,
+                            applied.patch_bps_sha256
+                        );
+                        found += 1;
+                    }
+                }
+            }
+            if found >= 4 {
+                break;
+            }
         }
+        eprintln!("found={found}");
     }
 }

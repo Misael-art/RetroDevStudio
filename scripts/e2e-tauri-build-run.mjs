@@ -8780,7 +8780,7 @@ async function runRexLz4wEffectScenario(sessionId) {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;`);
   };
-  await setNumberInput("rex-resource-paint-index", 8);
+  await setNumberInput("rex-resource-paint-index", 15);
   await setNumberInput("rex-resource-edit-tile", 0);
   await setNumberInput("rex-resource-edit-row", 0);
   await setNumberInput("rex-resource-edit-col", 0);
