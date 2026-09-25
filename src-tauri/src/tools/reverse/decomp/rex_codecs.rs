@@ -106,17 +106,47 @@ fn read_word(stream: &[u8], pos: usize) -> Result<u16, CodecError> {
 /// - `match_count == 0 && match_byte > 0`: match longo (comprimento mínimo 3
 ///   words); `match_byte` é o comprimento menos 2 (em words) e o próximo u16
 ///   após os literais codifica o offset negado (bit 0x8000 = referência ao
-///   bloco anterior/dicionário, recusado no v1);
+///   bloco anterior/dicionário);
 /// - token `0x0000`: terminador, seguido do word final `0x8000|byte` quando a
 ///   saída tem comprimento ímpar (ou `0x0000` quando par).
 pub fn lz4w_decode(stream: &[u8], limits: &Lz4wLimits) -> Result<Lz4wDecoded, CodecError> {
+    lz4w_decode_with_dictionary(stream, None, limits)
+}
+
+/// Decodifica um stream LZ4W possivelmente dependente do **bloco anterior**
+/// (variante do ResComp: cada recurso é empacotado com os bytes emitidos
+/// antes dele como dicionário). O dicionário é o prefixo da ROM que precede
+/// o stream — determinístico e parte da identidade da observação
+/// (CONTRATOS §4: "dicionário/contexto necessários").
+///
+/// Semântica do match longo com flag ROM source, portada do unpacker
+/// oficial: offset bruto = ((-valor) & 0x7FFF) + 1, ajustado por `-offsetAdj`
+/// onde offsetAdj acumula +1 por token, +1 pelo word de offset longo e
+/// -comprimento por match. O offset ajustado mede words a partir do fim do
+/// resultado (dicionário + saída); referências além do início do dicionário
+/// são `invalid_reference`.
+pub fn lz4w_decode_with_dictionary(
+    stream: &[u8],
+    dictionary: Option<&[u8]>,
+    limits: &Lz4wLimits,
+) -> Result<Lz4wDecoded, CodecError> {
     if stream.len() < 2 {
         return Err(CodecError::new(
             "truncated",
             "stream menor que o token mínimo de 2 bytes",
         ));
     }
-    let mut out: Vec<u8> = Vec::new();
+    let dict = dictionary.unwrap_or(&[]);
+    if !dict.len().is_multiple_of(2) {
+        return Err(CodecError::new(
+            "invalid_reference",
+            "dicionário com comprimento ímpar não endereçável por words",
+        ));
+    }
+    let dict_len = dict.len();
+    let mut buf: Vec<u8> = Vec::with_capacity(dict_len + 4096);
+    buf.extend_from_slice(dict);
+    let mut offset_adj: i64 = 0;
     let mut work: u64 = 0;
     let mut ind = 0usize;
     loop {
@@ -128,18 +158,19 @@ pub fn lz4w_decode(stream: &[u8], limits: &Lz4wLimits) -> Result<Lz4wDecoded, Co
             ));
         }
         let token = read_word(stream, ind)?;
+        offset_adj += 1;
         if token == 0 {
             // Terminador; o word final sempre existe no formato.
             let final_word = read_word(stream, ind + 2)?;
             let mut consumed = ind + 4;
             if final_word & MATCH_LONG_OFFSET_ROM_SOURCE != 0 {
-                if out.len() + 1 > limits.max_output {
+                if buf.len() - dict_len + 1 > limits.max_output {
                     return Err(CodecError::new(
                         "excessive_output",
                         "byte final excederia o limite de saída",
                     ));
                 }
-                out.push((final_word & 0xFF) as u8);
+                buf.push((final_word & 0xFF) as u8);
             } else if final_word != 0 {
                 return Err(CodecError::new(
                     "invalid_reference",
@@ -150,7 +181,7 @@ pub fn lz4w_decode(stream: &[u8], limits: &Lz4wLimits) -> Result<Lz4wDecoded, Co
                 consumed = stream.len();
             }
             return Ok(Lz4wDecoded {
-                data: out,
+                data: buf.split_off(dict_len),
                 bytes_consumed: consumed,
             });
         }
@@ -166,13 +197,13 @@ pub fn lz4w_decode(stream: &[u8], limits: &Lz4wLimits) -> Result<Lz4wDecoded, Co
                 format!("{literal_words} literais truncados em {ind}"),
             ));
         }
-        if out.len() + literal_words * 2 > limits.max_output {
+        if buf.len() - dict_len + literal_words * 2 > limits.max_output {
             return Err(CodecError::new(
                 "excessive_output",
                 "limite de saída excedido em literal",
             ));
         }
-        out.extend_from_slice(&stream[ind..ind + literal_words * 2]);
+        buf.extend_from_slice(&stream[ind..ind + literal_words * 2]);
         work += literal_words as u64;
         ind += literal_words * 2;
         let (match_words, match_offset_words) = if match_nibble > 0 {
@@ -182,46 +213,62 @@ pub fn lz4w_decode(stream: &[u8], limits: &Lz4wLimits) -> Result<Lz4wDecoded, Co
                 CodecError::new("truncated", format!("offset longo truncado em {ind}"))
             })?;
             ind += 2;
-            if encoded & MATCH_LONG_OFFSET_ROM_SOURCE != 0 {
-                return Err(CodecError::new(
-                    "invalid_reference",
-                    "stream depende de dicionário externo (ROM source); fora do escopo v1",
-                ));
-            }
+            offset_adj += 1;
             // Negação de 15 bits, exatamente como o unpacker oficial:
-            // offset = ((-valor) & 0x7FFF) + 1 (bit 15 é a flag ROM source).
-            let offset =
+            // offset bruto = ((-valor) & 0x7FFF) + 1 (bit 15 = flag ROM source).
+            let raw_offset =
                 (((-(encoded as i32)) as u32 as usize) & MATCH_LONG_OFFSET_MASK as usize) + 1;
-            (match_byte + MATCH_LONG_MIN_SIZE, offset)
+            if encoded & MATCH_LONG_OFFSET_ROM_SOURCE != 0 {
+                if dict_len == 0 {
+                    return Err(CodecError::new(
+                        "invalid_reference",
+                        "stream depende de dicionário externo (ROM source); decode autônomo recusado",
+                    ));
+                }
+                let adjusted = raw_offset as i64 - offset_adj;
+                if adjusted < 1 || adjusted as usize > buf.len() / 2 {
+                    return Err(CodecError::new(
+                        "invalid_reference",
+                        format!(
+                            "referência ROM source {raw_offset} ajustada para {adjusted} words fora do resultado de {} words",
+                            buf.len() / 2
+                        ),
+                    ));
+                }
+                (match_byte + MATCH_LONG_MIN_SIZE, adjusted as usize)
+            } else {
+                (match_byte + MATCH_LONG_MIN_SIZE, raw_offset)
+            }
         } else {
             (0, 0)
         };
         if match_words > 0 {
-            let available_words = out.len() / 2;
-            if match_offset_words > available_words {
+            let total_words = buf.len() / 2;
+            if match_offset_words > total_words {
                 return Err(CodecError::new(
                     "invalid_reference",
                     format!(
-                        "offset de match {match_offset_words} words excede o histórico de {available_words} words"
+                        "offset de match {match_offset_words} words excede o histórico de {total_words} words"
                     ),
                 ));
             }
-            let mut src = out.len() - match_offset_words * 2;
+            let mut src = buf.len() - match_offset_words * 2;
             for _ in 0..match_words {
                 work += 1;
                 if work > limits.max_work {
                     return Err(CodecError::new("work_limit", "orçamento excedido no match"));
                 }
-                if out.len() + 2 > limits.max_output {
+                if buf.len() - dict_len + 2 > limits.max_output {
                     return Err(CodecError::new(
                         "excessive_output",
                         "limite de saída excedido em match",
                     ));
                 }
-                let word = u16::from_le_bytes([out[src], out[src + 1]]);
-                out.extend_from_slice(&word.to_le_bytes());
+                let word = u16::from_le_bytes([buf[src], buf[src + 1]]);
+                buf.extend_from_slice(&word.to_le_bytes());
                 src += 2;
             }
+            offset_adj -= match_words as i64;
         }
     }
 }
@@ -471,6 +518,77 @@ mod tests {
             dec(&[0x00, 0x01, 0x80, 0x02, 0x00, 0x00, 0x00, 0x00]).expect_err("dicionário externo");
         assert_eq!(err.code, "invalid_reference");
         assert!(err.detail.contains("dicionário"));
+    }
+
+    #[test]
+    fn lz4w_dictionary_stream_decodes_with_dictionary() {
+        // Dicionário: words 0x4141, 0x4242. Stream: match longo ROM source de
+        // 3 words apontando para o word 0 do dicionário.
+        // offsetAdj no momento do offset: +1 (token) +1 (word longo) = 2.
+        // S (words até a origem) = 2 (word 0 de 2) -> written = -(S+adj-1) = -3
+        // -> 0x7FFD | 0x8000 = 0xFFFD.
+        let dict = vec![0x41, 0x41, 0x42, 0x42];
+        let stream = [0x00, 0x01, 0xFF, 0xFD, 0x00, 0x00, 0x00, 0x00];
+        let decoded = lz4w_decode_with_dictionary(&stream, Some(&dict), &Lz4wLimits::default())
+            .expect("decode com dicionário");
+        // Cópia contígua de 3 words a partir do word 0: 0x4141, 0x4242 e o
+        // word recém-escrito 0x4141 (cópia sobreposta avança).
+        assert_eq!(decoded.data, vec![0x41, 0x41, 0x42, 0x42, 0x41, 0x41]);
+        // token + word de offset + terminador + word final = 8 bytes.
+        assert_eq!(decoded.bytes_consumed, 8);
+        // Sem dicionário o mesmo stream é recusado de forma estruturada.
+        let err = lz4w_decode_with_dictionary(&stream, None, &Lz4wLimits::default())
+            .expect_err("sem dicionário");
+        assert_eq!(err.code, "invalid_reference");
+    }
+
+    /// Identificação estrutural na ROM congelada do corpus (HAMOOPIG):
+    /// headers TileSet (compression=2) cujos streams decodificam, com
+    /// dicionário = prefixo da ROM antes do stream, exatamente para
+    /// `numTile * 32` bytes. Requer a ROM BYOR local; ignorado sem ela.
+    #[test]
+    fn lz4w_hamoopig_corpus_streams_decode_with_header_size() {
+        use std::path::Path;
+        let rom_path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
+            "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin"
+                .to_string()
+        });
+        if !Path::new(&rom_path).exists() {
+            eprintln!("ignorado: ROM HAMOOPIG ausente em {rom_path}");
+            return;
+        }
+        let rom = std::fs::read(&rom_path).expect("read rom");
+        let mut verified = 0usize;
+        let mut size_mismatch = 0usize;
+        for header_off in (0..rom.len().saturating_sub(8)).step_by(2) {
+            let comp = u16::from_be_bytes([rom[header_off], rom[header_off + 1]]);
+            if comp != 2 {
+                continue;
+            }
+            let num_tile = u16::from_be_bytes([rom[header_off + 2], rom[header_off + 3]]) as usize;
+            let ptr = u32::from_be_bytes([
+                rom[header_off + 4],
+                rom[header_off + 5],
+                rom[header_off + 6],
+                rom[header_off + 7],
+            ]) as usize;
+            if num_tile == 0 || num_tile > 2048 || ptr >= rom.len() || ptr % 2 != 0 {
+                continue;
+            }
+            let expected = num_tile * 32;
+            let stream = &rom[ptr..(ptr + expected * 2 + 256).min(rom.len())];
+            match lz4w_decode_with_dictionary(stream, Some(&rom[..ptr]), &Lz4wLimits::default()) {
+                Ok(decoded) if decoded.data.len() == expected => verified += 1,
+                Ok(_) => size_mismatch += 1,
+                Err(_) => {}
+            }
+        }
+        // A ROM congelada do corpus tem ~190 recursos LZ4W reais; exigir um
+        // piso alto garante que a verificação não passou por acaso.
+        assert!(
+            verified >= 100,
+            "esperava >=100 streams LZ4W com tamanho exato, obtive {verified} (mismatch {size_mismatch})"
+        );
     }
 
     #[test]
