@@ -1,0 +1,51 @@
+{
+  "claim": "translate/invert/read do perfil snes-hirom sem estado de mapper: offset linear ((banco<<16)|a)&(rom_size-1) para metade alta de 00-3F/80-BF e banco inteiro de 40-7D/C0-FF; WRAM 7E/7F; SRAM 20-3F/A0-BF $6000-$7FFF (2KB); espelho WRAM/I-O 00-3D/80-BD; invert devolve todos os aliases (janelas altas so capturam rel<0x8000; 7E/7F excluidos); leitura ROM pode ser contigua entre bancos completos",
+  "rom": {
+    "sha256": "52dc17e6abc570a5368c38fedff9381d3351ed9f6f252c521e7a42a60acc7baa",
+    "size_bytes": 1048576,
+    "format": "fixture",
+    "normalization": []
+  },
+  "locator": {
+    "kind": "cpu-address",
+    "note": "conjunto completo (18 positivos translate, 8 negativos, 7 inversoes, 10 leituras) em expected/translate-cases.json do mesmo diretorio",
+    "offset": 65528,
+    "length": 8
+  },
+  "bank_state": {
+    "model": "{ rom_size } apenas; chaves extras rejeitadas com unsupported — HiROM nao tem registradores de mapper",
+    "initial": "sem estado: traducao depende so de rom_size (mascara de espelho)"
+  },
+  "expected": {
+    "tool": "Derivacao manual da especificacao docs/rex_profiles/addressing/snes-hirom.md: bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 boards.bml (HIROM/HIROM-RAM; GPL-3.0, apenas consulta) + snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a memmap.cpp (map_hirom:2521-2534, Map_HiROMMap:3101-3119, map_HiROMSRAM, map_WRAM, map_System; Snes9x License nao comercial, apenas consulta). Nenhuma linha copiada.",
+    "version": "bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 + snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a",
+    "output_sha256": "6fb5ebaca3686dcf3c2e3bedcf8bc70a49ff49c7c956935e4417e0b999c1f695",
+    "output_len": 10804,
+    "pinned_before_implementation": true,
+    "pinned_at_commit": "08f0f87"
+  },
+  "pinning_history": [
+    "pre-pin (antes de 08f0f87): os sete casos invert foram recalculados por uma calculadora independente escrita a partir da FORMULA da spec (nao do futuro modulo); um erro de digitos manual no caso 4MB offset 0x3FFFFF (rel=0xFFFF, nao 0xFFF) foi corrigido antes do commit: unicos aliases validos sao 0xFFFFFF (banco 7F e WRAM e a metade alta de 3F/BF so cobre rel<0x8000). Os demais dezesseis literais batem com a calculadora.",
+    "08f0f87: expectativas pinadas (spec + JSON no mesmo commit; formula verificada contra as duas fontes nos dumps fixados em /tmp/rex-a-sources)",
+    "RED registrado em 37b608b (tests 1, pass 0, fail 1 — modulo snes-hirom.mjs ausente)",
+    "a implementacao passou nos 7 testes funcionais na primeira execucao, sem tocar nenhuma expectativa"
+  ],
+  "provenance": "authored-fixture",
+  "negatives": [
+    { "input": "translate(0x3E4800 ou 0xBE4800, ...)", "expected_error": "unsupported (metades baixas 3E/3F/BE/BF: convencao bsnes; extensao 00-3F/80-BF do snes9x map_System documentada como divergencia na spec)" },
+    { "input": "translate(0x1000000, ...)", "expected_error": "out-of-range (barramento 24 bits)" },
+    { "input": "translate(any, mapper_state=null)", "expected_error": "unsupported (estado obrigatorio)" },
+    { "input": "translate(any, rom_size=8388608)", "expected_error": "unsupported (acima de 4MB: ExHiROM e perfil proprio)" },
+    { "input": "translate(any, rom_size=32768)", "expected_error": "unsupported (abaixo de um banco completo de 64KB)" },
+    { "input": "translate(any, rom_size=1572864)", "expected_error": "unsupported (nao potencia de 2)" },
+    { "input": "translate(any, mapper_state={rom_size, banks})", "expected_error": "unsupported (chave estranha rejeitada; HiROM nao tem registradores)" },
+    { "input": "invert(4096.5, ...)", "expected_error": "out-of-range (offset nao inteiro)" },
+    { "input": "invert(0x100000, rom_size=1MB)", "expected_error": "nenhum — lista vazia e resposta valida (offset alem do fim)" },
+    { "input": "read(0x008000, 0, ...)", "expected_error": "out-of-range (length < 1)" },
+    { "input": "read(0xFFFFF8, 16, ...)", "expected_error": "out-of-range top-level antes de alocar" },
+    { "input": "read sobre ROM 8 bytes menor que rom_size a partir de 0x3FFFF0", "expected_error": "8 bytes validos + out-of-range no trecho faltante (sem clamp)" }
+  ],
+  "timestamp": "deterministic-event:pre-pin calculadora independente -> pin 08f0f87 -> RED 37b608b -> implementacao e este registro no commit seguinte",
+  "test_command": "node --test scripts/rex_profiles/addressing/snes-hirom.test.mjs",
+  "test_result": "8/8 pass (2026-09-25, Node v26.8.1)"
+}
