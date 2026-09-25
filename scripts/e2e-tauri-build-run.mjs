@@ -8825,8 +8825,9 @@ async function runRexLz4wEffectScenario(sessionId) {
   if (appliedSha !== modifiedSha) fail(`patch re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
 
   // ORIGINAL vs MODIFICADO no core, mesma linha de input; efeito específico.
-  // Timeline em tempo real: load pausado -> resume pela UI -> teclado
-  // nativo (o loop vivo do app redesenha o canvas).
+  // Timeline determinística: load pausado -> inputs e lotes de frames via
+  // IPC do core -> framebuffer lido por `emulator_observe` (independe do
+  // loop vivo do app, que não redesenha o canvas com o core pausado).
   const captureTimeline = async (timelineRomPath, label) => {
     const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [timelineRomPath, { startPaused: true }]);
     if (loaded !== true) fail(`Emulador não confirmou carga da ROM (${label}).`);
@@ -8840,40 +8841,66 @@ async function runRexLz4wEffectScenario(sessionId) {
       100
     );
     await closeVisibleConsoleDrawer(sessionId, label);
-    await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
-    const samples = [];
-    const snap = async () => {
-      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
-      if (!frame || !frame.rgba) fail(`framebuffer indisponível (${label}).`);
-      samples.push(Buffer.from(frame.rgba));
+    const invokeCore = async (command, args = {}) => executeAsyncScript(
+      sessionId,
+      `
+        const done = arguments[arguments.length - 1];
+        const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+        if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponivel" }); return; }
+        invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+      `,
+      [command, args]
+    );
+    const epoch = await invokeCore("emulator_get_core_epoch");
+    if (!epoch?.ok || !Number.isInteger(epoch.value)) fail(`Época do core indisponível (${label}).`);
+    const neutralInput = {
+      b: false, y: false, select: false, start: false,
+      up: false, down: false, left: false, right: false,
+      a: false, x: false, l: false, r: false,
     };
-    await pause(3000);
-    await snap();
-    await sendNativeGameKey(sessionId, "Enter", "keyDown", `${label} start`);
-    await pause(150);
-    await sendNativeGameKey(sessionId, "Enter", "keyUp", `${label} start soltar`);
-    await pause(2500);
-    await snap();
-    await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", `${label} andar`);
-    await pause(2600);
-    await snap();
+    const sendInput = async (joypad) => {
+      const ack = await invokeCore("emulator_send_input", { joypad, sessionEpoch: epoch.value });
+      if (!ack?.ok || !ack.value?.ok) fail(`Input não confirmado (${label}): ${JSON.stringify(ack)}`);
+    };
+    const runFrames = async (frames) => {
+      const run = await invokeCore("emulator_run_frames", { frames });
+      if (!run?.ok) fail(`emulator_run_frames falhou (${label}): ${JSON.stringify(run)}`);
+    };
+    const snapshot = async () => {
+      const observation = await invokeCore("emulator_observe", {});
+      if (!observation?.ok || !observation.value?.framebuffer_rgba) {
+        fail(`framebuffer do core indisponível (${label}): ${JSON.stringify(observation?.error ?? observation)}`);
+      }
+      return Buffer.from(observation.value.framebuffer_rgba);
+    };
+    const samples = [];
+    await runFrames(180);
+    samples.push(await snapshot());
+    await sendInput({ ...neutralInput, start: true });
+    await runFrames(3);
+    await sendInput(neutralInput);
+    await runFrames(240);
+    samples.push(await snapshot());
+    // Aproxima até contato e ataca repetidamente (faíscas de golpe são
+    // candidatas ao recurso de 9 tiles).
+    await sendInput({ ...neutralInput, right: true });
+    await runFrames(300);
+    samples.push(await snapshot());
     for (let round = 0; round < 3; round++) {
-      await sendNativeGameKey(sessionId, "KeyC", "keyDown", `${label} ataque A`);
-      for (let i = 0; i < 4; i++) {
-        await pause(160);
-        await snap();
+      await sendInput({ ...neutralInput, right: true, a: true });
+      for (let step = 0; step < 4; step++) {
+        await runFrames(15);
+        samples.push(await snapshot());
       }
-      await sendNativeGameKey(sessionId, "KeyC", "keyUp", `${label} ataque A soltar`);
-      await sendNativeGameKey(sessionId, "KeyX", "keyDown", `${label} ataque B`);
-      for (let i = 0; i < 4; i++) {
-        await pause(160);
-        await snap();
+      await sendInput({ ...neutralInput, right: true, b: true });
+      for (let step = 0; step < 4; step++) {
+        await runFrames(15);
+        samples.push(await snapshot());
       }
-      await sendNativeGameKey(sessionId, "KeyX", "keyUp", `${label} ataque B soltar`);
     }
-    await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", `${label} andar soltar`);
-    await pause(800);
-    await snap();
+    await sendInput(neutralInput);
+    await runFrames(60);
+    samples.push(await snapshot());
     return samples;
   };
   const originalFrames = await captureTimeline(romPath, "original");
