@@ -19,7 +19,7 @@
     "cross-oracle-parity": "verified",
     "product-decode-vs-reference": "blocked",
     "product-encode-vs-reference": "blocked",
-    "structured-negatives": "blocked",
+    "structured-negatives": "fixture",
     "resource-identification-in-rom": "blocked",
     "reinsertion": "blocked"
   },
@@ -28,6 +28,8 @@
     "Formato nao representa saida vazia; entrada de 1 byte falha no encoder APJ (stream de 1 byte so e coberto por golden de decodificacao).",
     "Os oraculos de CLI (apultra, APJ) nao tem limite de trabalho nem cancelamento; limites estruturados do contrato v1 se aplicam somente ao decoder/encoder do produto, ainda nao implementado.",
     "Implementacao Rust do produto aguarda janela/integracao do integrador (propriedade de src-tauri); nada aqui e implementacao de produto.",
-    "Modo com header 'AP\\0' (genheader) explicitamente fora desta variante."
+    "Modo com header 'AP\\0' (genheader) explicitamente fora desta variante.",
+    "Negativos rotulados negative-spec: derivados do contrato/formato e auto-verificados pelo espelho Python; os oraculos de referencia nao validam entrada (defeito registrado em evidence/reference_defects), logo aceitacao de truncamento pelo oraculo nao e comportamento esperado do produto.",
+    "Pacote de implementacao nativa: scripts/rex_profiles/codecs/aplib/PRODUCT-CONTRACT.md (API, regras de rejeicao, bytes_consumed no EOD, mapeamento vetor->expectativa) + verify-product.sh (CLI isolado; consome somente a fixture publicada)."
   ]
 }

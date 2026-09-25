@@ -29,14 +29,25 @@ FATOS DE FORMATO (autoridade = oráculos + `src/tools_a.s` do SGDK):
     senão copia 1 byte de off 1..15.
   - LWM (nFollowsLiteral): 3 após literal/111; 2 após match. Primeiro: 3.
 
+NEGATIVOS (derivados do CONTRATO, não do oráculo): os decodificadores de
+referência NÃO validam (leem bytes não inicializados além do EOF e aceitam
+truncamento); portanto rejeições esperadas vêm da especificação acima. Cada
+stream em negative/ é auto-verificado neste arquivo contra o espelho com
+`negative_check` (ERR-in=EOF no meio, ERR-off=ref inválida, ERR-rep-first,
+ERR-no-eod=decodou sem terminador); nenhum negativo é enviado aos oráculos.
+`mirror_decode` também devolve bytes_consumed (posição no EOD) para o
+vetor de fronteira de consumo.
+
 Determinístico; dados sintéticos redistribuíveis.
 """
+import json
 import sys
 from pathlib import Path
 
 OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("vectors")
 (OUT / "plain").mkdir(parents=True, exist_ok=True)
 (OUT / "golden").mkdir(parents=True, exist_ok=True)
+(OUT / "negative").mkdir(parents=True, exist_ok=True)
 
 
 def prng(seed: int):
@@ -198,7 +209,21 @@ class Stream:
 
 
 def mirror_decode(data: bytes):
-    """Espelho do decoder de referência (validado vs apultra/APJ)."""
+    out, status, pos = _decode_core(data)
+    if status == "ERR-eod":
+        return out, pos
+    if isinstance(out, (bytes, bytearray)):
+        return "ERR-no-eod", pos
+    return out, pos
+
+
+def _decode_core(data: bytes):
+    """Espelho do decoder de referência (validado vs apultra/APJ).
+
+    Devolve (out_ou_err, status, pos). status 'ERR-eod' = terminador visto;
+    caso contrário um resultado de bytes sem EOD é reportado como 'ERR-no-eod'
+    (o produto deve distinguir truncamento de decodificação completa).
+    """
     pos = 1
     out = bytearray([data[0]])
     mask = 0
@@ -236,69 +261,69 @@ def mirror_decode(data: bytes):
     while True:
         step += 1
         if step > 200000:
-            return "LOOP"
+            return "LOOP", "", None
         b = rb()
         if b is None:
-            return "ERR-in"
+            return "ERR-in", "", None
         if b == 0:
             if pos >= len(data):
-                return "ERR-in"
+                return "ERR-in", "", None
             out.append(data[pos])
             pos += 1
             lwm = 3
         else:
             b = rb()
             if b is None:
-                return "ERR-in"
+                return "ERR-in", "", None
             if b == 0:
                 oh = g2()
                 if oh is None:
-                    return "ERR-in"
+                    return "ERR-in", "", None
                 oh -= lwm
                 if oh >= 0:
                     if pos >= len(data):
-                        return "ERR-in"
+                        return "ERR-in", "", None
                     off = (oh << 8) | data[pos]
                     pos += 1
                     ln = g2()
                     if ln is None:
-                        return "ERR-in"
+                        return "ERR-in", "", None
                     if off < 128 or off >= 32000:
                         ln += 2
                     elif off >= 1280:
                         ln += 1
                 else:
                     if off_hist is None:
-                        return "ERR-rep-first"
+                        return "ERR-rep-first", "", None
                     off = off_hist
                     ln = g2()
                     if ln is None:
-                        return "ERR-in"
+                        return "ERR-in", "", None
                 off_hist = off
                 lwm = 2
                 src = len(out) - off
                 if src < 0:
-                    return "ERR-off"
+                    return "ERR-off", "", None
                 for i in range(ln):
                     out.append(out[src + i])
             else:
                 b = rb()
                 if b is None:
-                    return "ERR-in"
+                    return "ERR-in", "", None
                 if b == 0:
                     if pos >= len(data):
-                        return "ERR-in"
+                        return "ERR-in", "", None
                     cmd = data[pos]
                     pos += 1
                     if cmd == 0:
-                        return bytes(out)
+                        return bytes(out), "ERR-eod", pos
                     off = cmd >> 1
                     ln = 2 + (cmd & 1)
                     off_hist = off
                     lwm = 2
                     src = len(out) - off
                     if src < 0:
-                        return "ERR-off"
+                        return "ERR-off", "", None
                     for i in range(ln):
                         out.append(out[src + i])
                 else:
@@ -306,13 +331,13 @@ def mirror_decode(data: bytes):
                     for sh in (3, 2, 1, 0):
                         bb = rb()
                         if bb is None:
-                            return "ERR-in"
+                            return "ERR-in", "", None
                         off |= bb << sh
                     lwm = 3
                     if off:
                         src = len(out) - off
                         if src < 0:
-                            return "ERR-off"
+                            return "ERR-off", "", None
                         out.append(out[src])
                     else:
                         out.append(0)
@@ -376,21 +401,133 @@ s.token10(32100, 3)       # off>=32000 -> +2
 s.eod()
 goldens["g07_far_offset"] = s.result()
 
+s = Stream(ord("E"))
+s.literal(ord("F"))
+s.literal(ord("G"))
+s.token110(3, 3)
+s.eod()
+expected_bytes, stream = s.result()
+trailing = b"\xFF\xFE\xFD\xFC\xFB"
+goldens["g08_eod_trailing"] = (expected_bytes, stream + trailing, len(stream))
+
 fails = 0
 for name in sorted(goldens):
-    expected, stream = goldens[name]
-    got = mirror_decode(stream)
-    if got != expected:
+    entry = goldens[name]
+    expected, stream = entry[0], entry[1]
+    exp_consumed = entry[2] if len(entry) > 2 else len(stream)
+    got, consumed = mirror_decode(stream)
+    if got != expected or consumed != exp_consumed:
         fails += 1
-        print(f"{name}: FALHA espelho -> {got!r} (esperado {len(expected)} bytes)")
+        print(f"{name}: FALHA espelho -> {got!r} consumed={consumed} "
+              f"(esperado {len(expected)} bytes, consumed={exp_consumed})")
     else:
-        print(f"{name}: espelho OK (plain={len(expected)} comp={len(stream)})")
+        print(f"{name}: espelho OK (plain={len(expected)} comp={len(stream)} consumed={consumed})")
 
 if fails:
     sys.exit(f"{fails} golden(s) divergem do espelho — não publicar")
 
-for name, (expected, stream) in goldens.items():
-    (OUT / "golden" / f"{name}.ap").write_bytes(stream)
-    (OUT / "golden" / f"{name}.expected.bin").write_bytes(expected)
+for name, entry in goldens.items():
+    (OUT / "golden" / f"{name}.ap").write_bytes(entry[1])
+    (OUT / "golden" / f"{name}.expected.bin").write_bytes(entry[0])
 
-print(f"plain={len(plains)} golden={len(goldens)} em {OUT}")
+# ---------------------------------------------------------------------------
+# Negativos: derivados do CONTRATO (ver docstring). O espelho só é usado como
+# auto-verificação da condição malformada intencional; nada aqui vai aos oráculos.
+# pair=(condição, (esperado_espelho, max_out_ou_None))
+negatives = {}
+
+s = Stream(ord("N"))
+s.literal(ord("1"))
+s.literal(ord("2"))
+negatives["n01_no_eod"] = (("ERR-trunc", None), s.result())
+
+s = Stream(ord("P"))
+s.w(1, 0)
+s.w(*Stream._gamma_bits(2))          # off_hi = 2-3 = -1 -> rep-match
+s.w(*Stream._gamma_bits(2))
+negatives["n02_rep_first_token"] = (("ERR-rep-first", None), s.result())
+
+s = Stream(ord("Q"))
+s.w(1, 0)
+s.w(*Stream._gamma_bits(3))          # off_hi = 0
+s.d(200)
+s.w(*Stream._gamma_bits(2))
+negatives["n03_far_offset"] = (("ERR-off", None), s.result())
+
+s = Stream(ord("T"))
+s.literal(ord("1"))
+s.literal(ord("2"))
+s.token110(3, 3)
+s.w(1, 0)
+s.w(*Stream._gamma_bits(4))          # token10 completo até aqui; o próximo byte
+expected, stream = s.result()        # lido seria off-low -> EOF = entrada truncada
+negatives["n04_truncated_mid_token"] = (("ERR-in", None), (expected, stream))
+
+s = Stream(0xAA)                     # decodifica 260 bytes; produto com max_out<260 deve erro
+s.literal(0xBB)
+s.literal(0xCC)
+s.token10(1, 258)
+s.eod()
+negatives["n05_excessive_output"] = (("ERR-eod", 16), s.result())
+
+s = Stream(ord("S"))
+s.w(1, 1, 0)
+s.d(0x06)                            # off=3, len=2 -> fora do histórico (1 byte)
+negatives["n06_token110_first"] = (("ERR-off", None), s.result())
+
+s = Stream(ord("Z"))
+s.w(1, 1, 1)
+for sh in (3, 2, 1, 0):
+    s.w((5 >> sh) & 1)               # off4=5 > histórico
+negatives["n07_token111_first"] = (("ERR-off", None), s.result())
+
+nfail = 0
+for name in sorted(negatives):
+    (exp_kind, max_out), (expected, stream) = negatives[name]
+    core_out, core_status, core_pos = _decode_core(stream)
+    if max_out is not None:
+        # stream estruturalmente válido; a rejeição vem do limite de saída do produto
+        ok = isinstance(core_out, (bytes, bytearray)) and core_status == "ERR-eod" \
+            and len(core_out) > max_out and core_out == expected
+        got = f"len={len(core_out) if isinstance(core_out, bytes) else core_out!r}"
+    else:
+        if exp_kind == "ERR-trunc":
+            ok = core_out in ("ERR-in", "ERR-no-eod")
+            got = core_out
+        else:
+            ok = core_out == exp_kind
+            got = core_out
+    if ok:
+        print(f"{name}: negativo OK (condição {exp_kind} confirmada no espelho, stream={len(stream)} B)")
+    else:
+        nfail += 1
+        print(f"{name}: FALHA — condição intencional não reproduzida no espelho: {got!r}")
+
+if nfail:
+    sys.exit(f"{nfail} negativo(s) não confirmados no espelho — não publicar")
+
+for name, ((exp_kind, max_out), (expected, stream)) in negatives.items():
+    (OUT / "negative" / f"{name}.ap").write_bytes(stream)
+    if max_out is not None:
+        contract, exp_out_len = "excessive-output", len(expected)
+    elif exp_kind in ("ERR-trunc", "ERR-in"):
+        # EOF no meio da decodificação (sem terminador, ou byte de dados/tag
+        # exigido por um token válido não existe) => entrada truncada
+        contract, exp_out_len = "truncated", None
+    elif exp_kind in ("ERR-rep-first", "ERR-off"):
+        contract, exp_out_len = "invalid-reference", None
+    else:
+        raise AssertionError(f"condição de negativo não mapeada: {exp_kind}")
+    (OUT / "negative" / f"{name}.expected.json").write_text(json.dumps({
+        "vector": name,
+        "kind": "negative-spec",
+        "expected_error": contract,
+        "mirror_condition": exp_kind,
+        "max_out": max_out,
+        "full_decode_len_if_unbounded": exp_out_len,
+        "stream_len": len(stream),
+        "note": "Derivado do contrato/formato; oráculos de referência não validam "
+                "entrada (UB além do EOF) e NÃO foram executados sobre este stream.",
+    }, ensure_ascii=False) + "\n")
+
+print(f"plain={len(plains)} golden={len(goldens)} negative={len(negatives)} em {OUT}")

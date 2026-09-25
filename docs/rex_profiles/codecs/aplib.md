@@ -71,11 +71,20 @@ Gerados por `scripts/rex_profiles/codecs/aplib/` (`gen_vectors.py` +
   do outro com saída byte-exata. Em 6/8 os dois encoders produzem streams
   idênticos (APJ == apultra); divergência de stream é esperada e registrada
   (comprimento, não conteúdo).
-- 8 goldens montados À MÃO pela especificação (literais, 111-off0/off4,
+- 9 goldens montados À MÃO pela especificação (literais, 111-off0/off4,
   `110`, `10` curto, rep-match, mid-offset 1280, far-offset 32100, 1 byte
-  via golden) e auto-validados por espelho Python do decoder de referência;
+  via golden, e `g08_eod_trailing` para a fronteira de `bytes_consumed`:
+  EOD válido seguido de 5 bytes de lixo que o decoder NÃO pode consumir) e
+  auto-validados por espelho Python do decoder de referência;
   `build-vectors.sh` só os publica se **ambos os oráculos** decodificarem
   para a saída exata (`GOLDEN-CONFIRMED`); divergiu → rejeitados.
+- 7 negativos `negative-spec` em `data/.../aplib/negative/` (sem EOD,
+  rep-match como 1º token, offset além do histórico, truncamento no meio de
+  token, saída excessiva com `max_out`, `110`/`111` sem histórico): as
+  condições foram construídas de propósito e auto-verificadas pelo espelho;
+  **os oráculos não foram executados neles** — a referência não valida
+  entrada (UB além do EOF), então a expectativa de erro vem do contrato
+  (`truncated` / `invalid-reference` / `excessive-output`), não do oráculo.
 - Limites de formato documentados pelos oráculos: saída vazia não é
   representável (aPLib exige ≥1 byte); entrada de 1 byte quebra o APJ
   (`SKIP single`), mas o stream `5A C0 00` do estilo apultra decodifica nos
@@ -99,10 +108,14 @@ Gerados por `scripts/rex_profiles/codecs/aplib/` (`gen_vectors.py` +
 
 - [x] Fase 1: fonte/commit/licença/variante fixados.
 - [x] Fase 2: vetores de fronteira + holdout com oráculos duplos e manifest.
-- [ ] Implementação Rust no pipeline canônico (aguarda contrato congelado).
-- [ ] Negativos fase 4 com erros estruturados (após contrato): truncamento
-      em cada posição relevante, offset inválido, rep-match inicial,
-      ausência de EOD, saída excessiva, trabalho máximo, cancelamento.
+- [x] Pacote p/ implementação nativa: `scripts/rex_profiles/codecs/aplib/PRODUCT-CONTRACT.md`
+      (API, tabela de rejeição, regra de `bytes_consumed`, mapeamento
+      vetor→expectativa, limites de prova) + `verify-product.sh` (executa a
+      fixture contra um CLI do produto; negativos nunca vão ao oráculo).
+- [x] Negativos fase 4 (negative-spec): 7 vetores derivados do contrato;
+      trabalho-máximo e cancelamento ficam como política do produto (sem
+      comportamento observável na referência).
+- [ ] Implementação Rust no pipeline canônico (do integrador; roda `verify-product.sh`).
 - [ ] Confirmação de que `aplib_unpack` SGDK retorna tamanho descomprimido e
       não exige buffer extra (lido em tools.h; testar contra vetores).
 - [ ] Caso de recurso real p/ integrador ou rótulo fixture-only.

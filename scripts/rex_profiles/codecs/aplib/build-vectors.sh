@@ -15,8 +15,9 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 
 python3 "$SRC/gen_vectors.py" "$T/vectors"
-mkdir -p "$OUT/plain" "$OUT/golden"
+mkdir -p "$OUT/plain" "$OUT/golden" "$OUT/negative"
 cp "$T/vectors/golden/"* "$OUT/golden/"
+cp "$T/vectors/negative/"* "$OUT/negative/"
 
 rows=()
 for f in "$T/vectors/plain/"*.bin; do
@@ -62,14 +63,25 @@ for f in "$T/vectors/golden/"*.ap; do
   fi
 done
 
+# negativos: derivados do contrato; NÃO são enviados aos oráculos (a referência
+# não valida entrada e tem UB além do EOF — comportamento indefinido não é prova)
+for f in "$T/vectors/negative/"*.ap; do
+  name="$(basename "$f" .ap)"
+  exp="$T/vectors/negative/$name.expected.json"
+  cp "$f" "$OUT/negative/$name.ap"
+  cp "$exp" "$OUT/negative/$name.expected.json"
+  err=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['expected_error'])" "$exp")
+  rows+=("negative	$name	-	$(sha256sum "$exp" | cut -d' ' -f1)	$(stat -c%s "$f")	$(sha256sum "$f" | cut -d' ' -f1)	-	-	NEGATIVE-SPEC:$err")
+done
+
 {
   echo -e "kind\tname\tplain_len\tplain_sha256\tapultra_len\tapultra_sha256\tapj_len\tapj_sha256\tstatus"
   printf '%s\n' "${rows[@]-}"
 } > "$OUT/manifest.tsv"
 
 # hash agregado da fixture — receita canônica (mesma dos perfis mdcomp):
-#   sha256( sha256sum ordenado (LC_ALL=C) dos arquivos de plain/ e golden/
+#   sha256( sha256sum ordenado (LC_ALL=C) dos arquivos de plain/, golden/ e negative/
 #           concatenado com os bytes de manifest.tsv )
-AGG=$( { find "$OUT/plain" "$OUT/golden" -type f | LC_ALL=C sed "s|^$OUT/||" | LC_ALL=C sort | (cd "$OUT" && xargs sha256sum); cat "$OUT/manifest.tsv"; } | sha256sum | cut -d' ' -f1 )
+AGG=$( { find "$OUT/plain" "$OUT/golden" "$OUT/negative" -type f | LC_ALL=C sed "s|^$OUT/||" | LC_ALL=C sort | (cd "$OUT" && xargs sha256sum); cat "$OUT/manifest.tsv"; } | sha256sum | cut -d' ' -f1 )
 echo "agregado=$AGG"
 echo "OK -> $OUT"
