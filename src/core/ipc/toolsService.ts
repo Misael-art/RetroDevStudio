@@ -876,3 +876,71 @@ export function romSaveAnnotations(
 ): Promise<number> {
   return invoke<number>("rom_save_annotations", { romPath, annotations });
 }
+
+// ---------------------------------------------------------------------------
+// REX recursos comprimidos (LZ4W) — contratos v1, Experimental
+// ---------------------------------------------------------------------------
+
+export interface RexResourceSummary {
+  header_offset: number;
+  stream_offset: number;
+  num_tiles: number;
+  data_len: number;
+  stream_len: number;
+}
+
+export interface RexPixelEdit {
+  tile: number;
+  row: number;
+  col: number;
+  index: number;
+}
+
+export interface RexResourceResult {
+  outcome: "preview" | "noop" | "applied";
+  rom_sha256: string;
+  modified_rom_sha256: string | null;
+  modified_rom_path: string | null;
+  patch_bps_sha256: string | null;
+  patch_bps_path: string | null;
+  stream_offset: number;
+  stream_written: number | null;
+  original_stream_len: number;
+  verified_preserved: number | null;
+  analyzed_scope: string;
+  preview_png_sha256: string | null;
+  preview_pixels_sha256: string | null;
+  preview_width: number | null;
+  preview_height: number | null;
+  preview_data_url: string | null;
+}
+
+export function rexResourceList(
+  romPath: string
+): Promise<[string, RexResourceSummary[]]> {
+  return invoke<[string, RexResourceSummary[]]>("rex_resource_list", { romPath });
+}
+
+export function rexResourcePreview(
+  romPath: string,
+  streamOffset: number
+): Promise<RexResourceResult> {
+  return invoke<RexResourceResult>("rex_resource_preview", {
+    romPath,
+    streamOffset,
+  });
+}
+
+export function rexResourceApplyEdit(
+  romPath: string,
+  streamOffset: number,
+  edits: RexPixelEdit[],
+  expectedRomSha256: string
+): Promise<RexResourceResult> {
+  return invoke<RexResourceResult>("rex_resource_apply_edit", {
+    romPath,
+    streamOffset,
+    edits,
+    expectedRomSha256,
+  });
+}
