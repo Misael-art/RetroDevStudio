@@ -51,13 +51,13 @@ oráculo oficial `lz4w.jar` exercido nas duas direções; 16 testes focados.
 
 | Etapa | Status | Evidência |
 |---|---|---|
-| ROM -> origem verificável | verified (assistido, rotulado) | scan estrutural de headers TileSet + decode exato `numTile*32` com dicionário = prefixo da ROM; `chain_scan_decode_edit_reinsert_on_frozen_corpus` |
-| decode | verified | 100+ streams LZ4W do corpus HAMOOPIG congelado decodificam com tamanho exato |
-| prévia | blocked | renderização PNG no produto pendente |
-| edição | verified (nível dado) | edição determinística de pixel (`edited[0] ^= 0xF0`) exercida na cadeia |
-| encode | verified | re-codificação com dicionário cabe no espaço original; needs_space honesto nos demais |
-| reinserção em cópia + patch | verified | header@0x25788 / stream@0xc8cc8 (9 tiles): original `558bea6c…` -> modificada `a51cfaf9…`, diff de 74 bytes confinado à região do stream |
-| efeito observado no jogo | blocked | E2E desktop com core Libretro pendente (job pesado do integrador) |
+| ROM -> origem verificável | verified (assistido, rotulado) | scan estrutural de headers TileSet + decode exato `numTile*32` com dicionário = prefixo da ROM; aceite BYOR `byor_hamoopig_chain_original_noop_modified_and_patch` |
+| decode | verified | 160/191 streams LZ4W do corpus HAMOOPIG congelado decodificam com tamanho exato |
+| prévia | verified | `render_resource_png` chunky 4x no produto com pixels SHA-256 e comparação independente; exibida na aba "Recursos comprimidos" |
+| edição | verified (via UI) | formulário pixel (tile/linha/coluna/índice) + transação canônica; no-op com zero edições pela mesma UI |
+| encode | verified | re-codificação com dicionário dentro do espaço original (needs_space honesto nos demais; 159/160 recursos preservados na transação) |
+| reinserção em cópia + patch | verified | transação no produto: identidade SHA, dependente recusado (0x91a00 dependente de 0x8ff8e), cópia + BPS exportado e re-aplicado à base com hash exato |
+| efeito observado no jogo | blocked para o alvo 0xc8cc8 | E2E `rex-lz4w-effect` executa original e modificado no core Libretro com timelines determinísticas (`emulator_observe`); **nenhum frame difere** — o recurso 24×24 (classe faísca, confirmado pela estrutura do frame na ROM) não renderiza na janela explorada (boot, título, round, caminhada, 6 golpes com snapshots densos). O protótipo teto pode não invocar faíscas visualmente. Bloqueio exato: encontrar um recurso LZ4W que renderize (candidatos: estados de KO/fim de round; ou mapear SpriteDefinitions -> recursos via grafo de ponteiros) |
 
 Limitações declaradas: identificação é estrutural assistida (header declara
 codec e tamanho), não descoberta automática geral; stream editado recusado
