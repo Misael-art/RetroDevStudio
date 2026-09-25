@@ -15,6 +15,7 @@ set -euo pipefail
 
 REPO="${REX_REPO:-$(git rev-parse --show-toplevel)}"
 CACHE="${REX_CODEC_CACHE:-$HOME/.cache/rex-codecs}"
+source "$REPO/scripts/rex_profiles/codecs/common/sandbox.sh"
 KOS="$CACHE/oracle-tools/bin/koscmp"
 SRC="$REPO/scripts/rex_profiles/codecs/kosinski"
 OUT="$REPO/data/rex_profiles/codec/kosinski"
@@ -26,7 +27,7 @@ trap 'rm -rf "$T"' EXIT
 python3 "$SRC/gen_vectors.py" "$T/vectors"
 mkdir -p "$OUT/plain" "$OUT/golden"
 
-kos() { timeout 60 "$KOS" "$@" </dev/null >/dev/null 2>&1; }
+kos() { run_oracle 60 null -- "$KOS" "$@" </dev/null >/dev/null 2>&1; }
 
 rows=()
 mir_ok=0; mir_tot=0
@@ -86,7 +87,7 @@ printf '%s\n' "${rows[@]}" >> "$OUT/manifest.tsv"
 # comportamento do ORÁCULO sob entrada malformada (registrado; o PRODUTO deve
 # dar erro estruturado — a referência C++ lê bytes não-inicializados após EOF)
 probe() { # $1=nome $2=arquivo
-  if timeout 60 "$KOS" -x "$2" "$T/p.out" </dev/null >"$T/p.log" 2>&1; then
+  if run_oracle 60 null -- "$KOS" -x "$2" "$T/p.out" </dev/null >"$T/p.log" 2>&1; then
     echo "$1: oráculo ACEITA rc=0 out=$(stat -c%s "$T/p.out" 2>/dev/null || echo '?')"
   else
     echo "$1: oráculo rc=$?"

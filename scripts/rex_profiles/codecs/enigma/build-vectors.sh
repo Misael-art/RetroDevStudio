@@ -12,6 +12,7 @@ set -euo pipefail
 
 REPO="${REX_REPO:-$(git rev-parse --show-toplevel)}"
 CACHE="${REX_CODEC_CACHE:-$HOME/.cache/rex-codecs}"
+source "$REPO/scripts/rex_profiles/codecs/common/sandbox.sh"
 ENI="$CACHE/oracle-tools/bin/enicmp"
 SRC="$REPO/scripts/rex_profiles/codecs/enigma"
 OUT="$REPO/data/rex_profiles/codec/enigma"
@@ -27,11 +28,11 @@ rows=()
 for f in "$T/vectors/plain/"*.bin; do
   name="$(basename "$f" .bin)"
   case "$name" in odd_bytes_tail) continue ;; esac
-  if ! timeout 60 "$ENI" "$f" "$T/$name.eni" </dev/null >"$T/e.log" 2>&1; then
+  if ! run_oracle 60 null -- "$ENI" "$f" "$T/$name.eni" </dev/null >"$T/e.log" 2>&1; then
     echo "ENCODE-RECUSA $name ($(head -c 100 "$T/e.log" | tr '\n' ' '))"
     rows+=("plain	$name	$(stat -c%s "$f")	$(sha256sum "$f" | cut -d' ' -f1)	-	-	ENC-RECUSA"); continue
   fi
-  if ! timeout 60 "$ENI" -x "$T/$name.eni" "$T/$name.out" </dev/null >"$T/d.log" 2>&1; then
+  if ! run_oracle 60 null -- "$ENI" -x "$T/$name.eni" "$T/$name.out" </dev/null >"$T/d.log" 2>&1; then
     echo "DECODE-RECUSA $name"
     rows+=("plain	$name	$(stat -c%s "$f")	$(sha256sum "$f" | cut -d' ' -f1)	$(stat -c%s "$T/$name.eni")	$(sha256sum "$T/$name.eni" | cut -d' ' -f1)	DEC-RECUSA"); continue
   fi
@@ -48,7 +49,7 @@ done
 # NEGATIVOS medidos no oráculo (registrados; produto deve dar erro estruturado)
 probe() { # $1=nome $2=src $3=nbytes
   head -c "$3" "$2" > "$T/p.bin"
-  if timeout 60 "$ENI" -x "$T/p.bin" "$T/p.out" </dev/null >"$T/p.log" 2>&1; then
+  if run_oracle 60 null -- "$ENI" -x "$T/p.bin" "$T/p.out" </dev/null >"$T/p.log" 2>&1; then
     echo "$1: oráculo ACEITA truncada rc=0 out=$(stat -c%s "$T/p.out")"
   else
     echo "$1: oráculo rc=$?"
@@ -60,8 +61,8 @@ probe "trunc-remove-ultimo-byte" "$T/ramp_signed.eni" $(( $(stat -c%s "$T/ramp_s
 
 # NEGATIVO de domínio medido: comprimento ímpar -> decode devolve um byte a
 # menos (cauda órfã descartada). Registrado no manifest como ODD-TAIL-NEG.
-if timeout 60 "$ENI" "$T/vectors/plain/odd_bytes_tail.bin" "$T/odd.eni" </dev/null 2>&1 \
-   && timeout 60 "$ENI" -x "$T/odd.eni" "$T/odd.out" </dev/null 2>&1; then
+if run_oracle 60 null -- "$ENI" "$T/vectors/plain/odd_bytes_tail.bin" "$T/odd.eni" </dev/null 2>&1 \
+   && run_oracle 60 null -- "$ENI" -x "$T/odd.eni" "$T/odd.out" </dev/null 2>&1; then
   echo "odd-tail: in=$(stat -c%s "$T/vectors/plain/odd_bytes_tail.bin") out=$(stat -c%s "$T/odd.out") (esperado: ORÁCULO DESCARTA cauda ímpar)"
   rows+=("neg	odd_bytes_tail	5	$(sha256sum "$T/vectors/plain/odd_bytes_tail.bin" | cut -d' ' -f1)	$(stat -c%s "$T/odd.eni")	$(sha256sum "$T/odd.eni" | cut -d' ' -f1)	ODD-TAIL-OUT-$(( $(stat -c%s "$T/odd.out") ))")
 fi

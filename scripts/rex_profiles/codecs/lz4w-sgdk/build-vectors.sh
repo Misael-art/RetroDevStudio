@@ -8,6 +8,7 @@ set -euo pipefail
 
 REPO="${REX_REPO:-$(git rev-parse --show-toplevel)}"
 CACHE="${REX_CODEC_CACHE:-$HOME/.cache/rex-codecs}"
+source "$REPO/scripts/rex_profiles/codecs/common/sandbox.sh"
 LZ4W="$CACHE/oracle-tools/SGDK211/bin/lz4w.jar"
 SRC="$REPO/scripts/rex_profiles/codecs/lz4w-sgdk"
 OUT="$REPO/data/rex_profiles/codec/lz4w-sgdk"
@@ -18,7 +19,7 @@ python3 "$SRC/gen_vectors.py" "$T/vectors"
 mkdir -p "$OUT/plain" "$OUT/golden"
 cp "$T/vectors/golden/"* "$OUT/golden/"
 
-u() { timeout 60 java -jar "$LZ4W" "$@" s </dev/null >/dev/null 2>&1; }
+u() { run_java 60 512 -- -jar "$LZ4W" "$@" s </dev/null >/dev/null 2>&1; }
 
 rows=()
 for f in "$T/vectors/plain/"*.bin; do
@@ -54,7 +55,7 @@ done
 # comportamento do ORÁCULO sob entrada malformada (registrado, não exigido do produto)
 trunc_probe() { # $1=nome $2=arquivo $3=nbytes
   head -c "$3" "$2" > "$T/tr.bin"
-  if timeout 60 java -jar "$LZ4W" u "$T/tr.bin" "$T/tr.out" s </dev/null >"$T/tr.log" 2>&1; then
+  if run_java 60 512 -- -jar "$LZ4W" u "$T/tr.bin" "$T/tr.out" s </dev/null >"$T/tr.log" 2>&1; then
     echo "$1: oráculo ACEITA rc=0 out=$(stat -c%s "$T/tr.out" 2>/dev/null || echo '?')"
   else
     echo "$1: oráculo recusa rc=$? ($(head -c 120 "$T/tr.log" | tr '\n' ' '))"

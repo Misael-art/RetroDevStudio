@@ -13,6 +13,7 @@ set -euo pipefail
 
 REPO="${REX_REPO:-$(git rev-parse --show-toplevel)}"
 CACHE="${REX_CODEC_CACHE:-$HOME/.cache/rex-codecs}"
+source "$REPO/scripts/rex_profiles/codecs/common/sandbox.sh"
 NEM="$CACHE/oracle-tools/bin/nemcmp"
 SRC="$REPO/scripts/rex_profiles/codecs/nemesis"
 OUT="$REPO/data/rex_profiles/codec/nemesis"
@@ -28,10 +29,10 @@ rows=()
 for f in "$T/vectors/plain/"*.bin; do
   name="$(basename "$f" .bin)"
   case "$name" in neg_*) continue ;; esac
-  if ! timeout 60 "$NEM" "$f" "$T/$name.nem" </dev/null >"$T/e.log" 2>&1; then
+  if ! run_oracle 60 null -- "$NEM" "$f" "$T/$name.nem" </dev/null >"$T/e.log" 2>&1; then
     echo "FALHA encode: $name"; rows+=("plain	$name	-	-	-	-	ENC-FAIL"); continue
   fi
-  if ! timeout 60 "$NEM" -x "$T/$name.nem" "$T/$name.out" </dev/null >"$T/d.log" 2>&1; then
+  if ! run_oracle 60 null -- "$NEM" -x "$T/$name.nem" "$T/$name.out" </dev/null >"$T/d.log" 2>&1; then
     echo "FALHA decode: $name"; rows+=("plain	$name	-	-	-	-	DEC-FAIL"); continue
   fi
   if cmp -s "$f" "$T/$name.out"; then
@@ -47,8 +48,8 @@ done
 # NEGATIVOS: comportamento do oráculo fora do domínio (padding silencioso)
 probe_out_of_domain() { # $1=nome $2=bytes
   head -c "$2" "$T/vectors/plain/$1.bin" > "$T/oob.bin"
-  timeout 60 "$NEM" "$T/oob.bin" "$T/oob.nem" </dev/null >/dev/null 2>&1 || { echo "$1: encode rc!=0"; return; }
-  timeout 60 "$NEM" -x "$T/oob.nem" "$T/oob.out" </dev/null >/dev/null 2>&1 || { echo "$1: decode rc!=0"; return; }
+  run_oracle 60 null -- "$NEM" "$T/oob.bin" "$T/oob.nem" </dev/null >/dev/null 2>&1 || { echo "$1: encode rc!=0"; return; }
+  run_oracle 60 null -- "$NEM" -x "$T/oob.nem" "$T/oob.out" </dev/null >/dev/null 2>&1 || { echo "$1: decode rc!=0"; return; }
   echo "$1: oráculo ACEITA $2 bytes fora do domínio; decode devolve $(stat -c%s "$T/oob.out") bytes (padding)"
 }
 probe_out_of_domain neg_tiny_6 6

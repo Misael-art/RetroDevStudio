@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO="${REX_REPO:-$(git rev-parse --show-toplevel)}"
 CACHE="${REX_CODEC_CACHE:-$HOME/.cache/rex-codecs}"
+source "$REPO/scripts/rex_profiles/codecs/common/sandbox.sh"
 APULTRA="$CACHE/oracle-tools/apultra"
 APJ="$CACHE/oracle-tools/SGDK211/bin/apj.jar"
 SRC="$REPO/scripts/rex_profiles/codecs/aplib"
@@ -26,12 +27,12 @@ for f in "$T/vectors/plain/"*.bin; do
     continue
   fi
   ok=true
-  timeout 60 "$APULTRA" -c "$f" "$T/$name.ap" >/dev/null 2>&1 || ok=false
-  timeout 60 java -jar "$APJ" p "$f" "$T/$name.apj" s >/dev/null 2>&1 || ok=false
+  run_oracle 60 null -- "$APULTRA" -c "$f" "$T/$name.ap" >/dev/null 2>&1 || ok=false
+  run_java 60 512 -- -jar "$APJ" p "$f" "$T/$name.apj" s >/dev/null 2>&1 || ok=false
   if $ok; then
     # paridade cruzada: cada oráculo decodifica o stream do outro
-    timeout 60 "$APULTRA" -d "$T/$name.apj" "$T/x1" >/dev/null && cmp -s "$f" "$T/x1" || ok=false
-    timeout 60 java -jar "$APJ" u "$T/$name.ap" "$T/x2" s >/dev/null && cmp -s "$f" "$T/x2" || ok=false
+    run_oracle 60 null -- "$APULTRA" -d "$T/$name.apj" "$T/x1" >/dev/null && cmp -s "$f" "$T/x1" || ok=false
+    run_java 60 512 -- -jar "$APJ" u "$T/$name.ap" "$T/x2" s >/dev/null && cmp -s "$f" "$T/x2" || ok=false
   fi
   if $ok; then
     cp "$T/$name.ap" "$OUT/plain/$name.apultra.ap"
@@ -50,8 +51,8 @@ for f in "$T/vectors/golden/"*.ap; do
   name="$(basename "$f" .ap)"
   exp="${f%.ap}.expected.bin"
   ok=true
-  timeout 60 "$APULTRA" -d "$f" "$T/g1" >/dev/null 2>&1 && cmp -s "$exp" "$T/g1" || ok=false
-  timeout 60 java -jar "$APJ" u "$f" "$T/g2" s >/dev/null 2>&1 && cmp -s "$exp" "$T/g2" || ok=false
+  run_oracle 60 null -- "$APULTRA" -d "$f" "$T/g1" >/dev/null 2>&1 && cmp -s "$exp" "$T/g1" || ok=false
+  run_java 60 512 -- -jar "$APJ" u "$f" "$T/g2" s >/dev/null 2>&1 && cmp -s "$exp" "$T/g2" || ok=false
   if $ok; then
     rows+=("golden	$name	$(stat -c%s "$exp")	$(sha256sum "$exp" | cut -d' ' -f1)	$(stat -c%s "$f")	$(sha256sum "$f" | cut -d' ' -f1)	-	-	GOLDEN-CONFIRMED")
   else
