@@ -1,5 +1,5 @@
 {
-  "claim": "translate/invert/read do perfil snes-hirom sem estado de mapper: offset linear ((banco<<16)|a)&(rom_size-1) para metade alta de 00-3F/80-BF e banco inteiro de 40-7D/C0-FF; WRAM 7E/7F; SRAM 20-3F/A0-BF $6000-$7FFF (2KB); espelho WRAM/I-O 00-3D/80-BD; invert devolve todos os aliases (janelas altas so capturam rel<0x8000; 7E/7F excluidos); leitura ROM pode ser contigua entre bancos completos",
+  "claim": "translate/invert/read do perfil snes-hirom sem estado de mapper: offset linear ((banco<<16)|a)&(rom_size-1) para metade alta de 00-3F/80-BF e banco inteiro de 40-7D/C0-FF; WRAM 7E/7F; SRAM 20-3F/A0-BF $6000-$7FFF (2KB); espelho WRAM/I-O 00-3D/80-BD; invert devolve todos os aliases (metade alta captura rel em [0x8000,0x10000) com a=rel; bancos completos rel<0x10000; 7E/7F excluidos — ver revisao 2026-09-25 em pinning_history); leitura ROM pode ser contigua entre bancos completos",
   "rom": {
     "sha256": "52dc17e6abc570a5368c38fedff9381d3351ed9f6f252c521e7a42a60acc7baa",
     "size_bytes": 1048576,
@@ -19,8 +19,11 @@
   "expected": {
     "tool": "Derivacao manual da especificacao docs/rex_profiles/addressing/snes-hirom.md: bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 boards.bml (HIROM/HIROM-RAM; GPL-3.0, apenas consulta) + snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a memmap.cpp (map_hirom:2521-2534, Map_HiROMMap:3101-3119, map_HiROMSRAM, map_WRAM, map_System; Snes9x License nao comercial, apenas consulta). Nenhuma linha copiada.",
     "version": "bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 + snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a",
-    "output_sha256": "6fb5ebaca3686dcf3c2e3bedcf8bc70a49ff49c7c956935e4417e0b999c1f695",
-    "output_len": 10804,
+    "output_sha256": "19e8deea10970179593804428fd92b638ed862cb233f0ecbc3c202b9ae7628ac",
+    "output_len": 15683,
+    "output_sha256_history": [
+      { "sha256": "6fb5ebaca3686dcf3c2e3bedcf8bc70a49ff49c7c956935e4417e0b999c1f695", "len": 10804, "pinned_at_commit": "08f0f87", "status": "substituido em 2026-09-25: os quatro primeiros invert_cases estavam factualmente errados (ver pinning_history)" }
+    ],
     "pinned_before_implementation": true,
     "pinned_at_commit": "08f0f87"
   },
@@ -28,7 +31,8 @@
     "pre-pin (antes de 08f0f87): os sete casos invert foram recalculados por uma calculadora independente escrita a partir da FORMULA da spec (nao do futuro modulo); um erro de digitos manual no caso 4MB offset 0x3FFFFF (rel=0xFFFF, nao 0xFFF) foi corrigido antes do commit: unicos aliases validos sao 0xFFFFFF (banco 7F e WRAM e a metade alta de 3F/BF so cobre rel<0x8000). Os demais dezesseis literais batem com a calculadora.",
     "08f0f87: expectativas pinadas (spec + JSON no mesmo commit; formula verificada contra as duas fontes nos dumps fixados em /tmp/rex-a-sources)",
     "RED registrado em 37b608b (tests 1, pass 0, fail 1 — modulo snes-hirom.mjs ausente)",
-    "a implementacao passou nos 7 testes funcionais na primeira execucao, sem tocar nenhuma expectativa"
+    "a implementacao passou nos 7 testes funcionais na primeira execucao, sem tocar nenhuma expectativa",
+    "2026-09-25 (crosscheck executivo, tarefa #8): o motor declarativo independente (janelas parseadas de bsnes@7d5aa1e boards.bml + primitivas Bus::reduce/Bus::mirror reimplementadas a partir dos dumps sha256-verificados) DIVERGIU do perfil em invert. Chao de verdade por enumeracao exaustiva dos 16.7M enderecos do barramento via translate (unica funcao derivada diretamente das fontes, nao tocada): o perfil produzia aliases inexistentes p.ex. 0x008000 para offset 0 em 1MB e perdia aliases legitimos p.ex. 0x3FFFFF/0xBFFFFF para offset 0x3FFFFF em 4MB. Causa: formula 'rel<0x8000 => alias=0x8000+rel' invertia start+0x8000+rel, nao offset. A calculadora de pre-pin herdou a MESMA formula da spec — confirmacao empirica do risco 'duas calculadoras derivadas da mesma formula repetem o mesmo erro'. Correcao: invert agora usa rel = (offset - ((b<<16)&mask)) & mask com alias b:rel para metade alta em [0x8000,0x10000) e bancos completos em [0,0x10000); os quatro primeiros invert_cases foram re-pinhados com a nota revision_2026_09_25 em cada caso; formula corrigida em docs/rex_profiles/addressing/snes-hirom.md (Secao invert, bloco de revisao)."
   ],
   "provenance": "authored-fixture",
   "negatives": [

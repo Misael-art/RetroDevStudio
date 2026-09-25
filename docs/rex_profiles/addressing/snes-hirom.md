@@ -91,12 +91,25 @@ de `3E/3F`/`BE/BF` son `unsupported`, sin adivinar.
 ## `invert(rom_offset, mapper_state)`
 
 Devuelve **todos** los aliases: para cada banco `0x00-0xFF` elegible por
-las reglas 2/3, `rel = (offset − (banco<<16 & mask)) & mask` es alias si
-`rel < 0x8000` (bancos de mitad alta ⇒ `a = 0x8000 + rel`) o `rel <
-0x10000` (bancos completos ⇒ `a = rel`). Orden creciente; dos bancos
-apuntando al mismo offset generan aliases distintos (p. ej. en 4MB,
-`0x008000` y `0x408000` ambos → offset `0x8000`). Lista vacía (offset más
-allá del fin) es respuesta válida.
+las reglas 2/3, sea `start = (banco<<16) & mask` y `rel = (offset − start)
+& mask`; es alias si `0x8000 ≤ rel < 0x10000` (bancos de mitad alta ⇒
+`a = rel`) o si `rel < 0x10000` (bancos completos ⇒ `a = rel`), con alias
+`banco<<16 + rel`. Esto es directo de la definición de `translate`
+(`offset = start + a`, sin overflow porque `start + a ≤ mask`). Orden
+creciente; dos bancos apuntando al mismo offset generan aliases distintos
+(p. ej. en 4MB, `0x008000` y `0x408000` ambos → offset `0x8000`). Lista
+vacía (offset más allá del fin) es respuesta válida.
+
+> Revisión 2026-09-25 (cross-check ejecutivo): la fórmula anterior exigía
+> `rel < 0x8000` y construía el alias como `0x8000 + rel`, lo que invertía
+> el offset `start + 0x8000 + rel` — ni producía los aliases reales de la
+> mitad alta ni cubría los legítimos. La corrección fue validada por
+> enumeración exhaustiva de las 16,7M de direcciones del barramento a
+> través de `translate` y por el motor declarativo independiente de
+> `scripts/rex_profiles/addressing/crosscheck/` (ventanas
+> bsnes@7d5aa1e boards.bml, sha256 `b8006d805bef610bb527a486e8b576d48531e6afd94fce7083d3ca9eb553b378`).
+> Los `invert_cases` pinados fueron re-pinhados con nota de revisión en
+> `data/rex_profiles/addressing/snes-hirom/expected/translate-cases.json`.
 
 ## `read(cpu_address, length, mapper_state, rom)`
 

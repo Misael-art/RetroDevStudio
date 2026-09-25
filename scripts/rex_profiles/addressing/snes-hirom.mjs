@@ -97,8 +97,15 @@ export function translate(cpuAddress, mapperState) {
 }
 
 // invert(rom_offset, mapper_state) -> { aliases: [cpu_address...] } | { error }
-// Todos os aliases: bancos de metade alta capturam so rel < 0x8000; bancos
-// completos capturam rel < 0x10000; 7E/7F nunca sao aliases (WRAM).
+// Todos os aliases: bancos de metade alta capturam so a em [0x8000,0x10000);
+// bancos completos capturam a < 0x10000; 7E/7F nunca sao aliases (WRAM).
+// Formula: offset = ((b<<16) + a) & mask = start + a, com start = (b<<16)&mask
+// multiplo de 0x10000 e start+a <= mask (sem overflow), logo a = offset-start
+// em aritmetica modular por mask; rel >= 0x10000 quando offset < start.
+// Rev. 2026-09-25: a versao anterior usava rel < 0x8000 e somava 0x8000 ao
+// alias, inventando aliases de offset = start+0x8000+rel. Corrigida apos
+// enumeracao exaustiva do barramento via translate do proprio perfil e
+// confirmacao pelo motor de cross-check (banco de dados bsnes HIROM).
 export function invert(romOffset, mapperState) {
   const stateErr = validateState(mapperState);
   if (stateErr) return stateErr;
@@ -113,12 +120,11 @@ export function invert(romOffset, mapperState) {
   const aliases = [];
   for (let b = 0; b <= 0xff; b += 1) {
     const start = (b << 16) & mask;
+    const rel = (romOffset - start) & mask;
     if (isHalfBank(b)) {
-      const rel = (romOffset - start) & mask;
-      if (rel < 0x8000) aliases.push((b << 16) + 0x8000 + rel);
+      if (rel >= 0x8000 && rel < 0x10000) aliases.push((b << 16) + rel);
     }
     if (isFullBank(b)) {
-      const rel = (romOffset - start) & mask;
       if (rel < 0x10000) aliases.push((b << 16) + rel);
     }
   }

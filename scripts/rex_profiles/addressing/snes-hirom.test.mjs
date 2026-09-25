@@ -64,7 +64,7 @@ test('translate: entradas invalidas nao causam panic', () => {
   assert.equal(validateState({ rom_size: 'x' }).error.code, 'unsupported');
 });
 
-test('invert: todos os aliases pinados (janelas altas so capturam rel<0x8000; 7E/7F excluidos)', () => {
+test('invert: todos os aliases pinados (metade alta captura rel em [0x8000,0x10000) com a=rel; 7E/7F excluidos)', () => {
   for (const c of expected.invert_cases) {
     const offset = c.rom_offset_value ?? parseHex(c.rom_offset);
     const got = invert(offset, c.mapper_state);
