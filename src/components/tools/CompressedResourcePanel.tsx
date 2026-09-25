@@ -9,7 +9,6 @@ import {
 } from "../../core/ipc/toolsService";
 
 const TILE = 8;
-const SCALE = 4;
 const PER_ROW = 16;
 
 function parseOffset(value: string): number | null {
@@ -90,21 +89,24 @@ export function CompressedResourcePanel({
   const paintAt = useCallback(
     (event: React.MouseEvent<HTMLImageElement>) => {
       if (!preview || preview.preview_width == null || selected == null) return;
+      const summary = resources.find((r) => r.stream_offset === selected);
+      if (!summary) return;
       const rect = event.currentTarget.getBoundingClientRect();
-      const px = Math.floor(((event.clientX - rect.left) / rect.width) * preview.preview_width);
-      const py = Math.floor(((event.clientY - rect.top) / rect.height) * (preview.preview_height ?? 0));
-      if (px < 0 || py < 0) return;
-      const tileRow = Math.floor(py / (TILE * SCALE));
-      const tileCol = Math.floor(px / (TILE * SCALE));
+      // Coordenadas em pixels NATURAIS da prévia (1 pixel = 1 px do preview).
+      const px = ((event.clientX - rect.left) / rect.width) * preview.preview_width;
+      const py = ((event.clientY - rect.top) / rect.height) * (preview.preview_height ?? 0);
+      const tileRow = Math.floor(py / TILE);
+      const tileCol = Math.floor(px / TILE);
       const tile = tileRow * PER_ROW + tileCol;
-      const row = Math.floor((py % (TILE * SCALE)) / SCALE);
-      const col = Math.floor((px % (TILE * SCALE)) / SCALE);
+      if (px < 0 || py < 0 || tile >= summary.num_tiles) return;
+      const row = Math.floor(py) % TILE;
+      const col = Math.floor(px) % TILE;
       setEdits((current) => [
         ...current.filter((e) => !(e.tile === tile && e.row === row && e.col === col)),
         { tile, row, col, index: paintIndex },
       ]);
     },
-    [preview, selected, paintIndex]
+    [preview, selected, paintIndex, resources]
   );
 
   const apply = useCallback(async () => {

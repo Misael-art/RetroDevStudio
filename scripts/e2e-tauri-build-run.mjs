@@ -8770,17 +8770,36 @@ async function runRexLz4wEffectScenario(sessionId) {
     250
   );
 
-  // EDIÇÃO: clique no canvas pinta um pixel; aplicar pela transação.
+  // EDIÇÃO: índice 9 no pixel (7,7) do ÚLTIMO tile — altera só o último
+  // byte do dado (região com espaço comprovado pela enumeração de fit).
+  const lastIndexInput = `${panel} [data-testid="rex-resource-paint-index"]`;
+  await executeScript(sessionId, `
+    const input = document.querySelector('${lastIndexInput}');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '9');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;`);
   const canvasRect = await executeScript(sessionId, `
     const canvas = document.querySelector('${panel} [data-testid="rex-resource-canvas"]');
     const rect = canvas.getBoundingClientRect();
-    // Ultimo tile (canto inferior direito): regiao com espaco comprovado.
-    return { x: rect.left + rect.width - 2, y: rect.top + rect.height - 2, w: rect.width, h: rect.height };`);
+    // Ultimo tile da prévia: (col 3, row 4) na grade de 16; pixel (7,7).
+    return {
+      x: rect.left + rect.width * (28 + 7.5) / 128,
+      y: rect.top + rect.height * (32 + 7.5) / 40,
+      w: rect.width,
+      h: rect.height,
+    };`);
   await executeScript(sessionId, `
     const canvas = document.querySelector('${panel} [data-testid="rex-resource-canvas"]');
     const options = { bubbles: true, clientX: ${canvasRect.x}, clientY: ${canvasRect.y} };
     canvas.dispatchEvent(new MouseEvent('click', options));
     return true;`);
+  await waitFor(
+    async () => ((await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "").includes("1 edição(ões) pendente(s)"),
+    15000,
+    `clique na prévia não registrou edição pendente; painel: ${((await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "").slice(-800)}`,
+    250
+  );
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
   const resultText = await waitFor(
     async () => {
