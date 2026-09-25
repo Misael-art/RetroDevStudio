@@ -979,5 +979,6 @@ mod tests {
             ),
             Ok(ReinsertOutcome::NoOp) => eprintln!("NOOP inesperado"),
             Err(error) => eprintln!("RECUSADO: {error}"),
-        }    }
+        }
+    }
 }
