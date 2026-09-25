@@ -1247,7 +1247,7 @@ fn collect_logic_output(
         };
         graph.graph_sha256 = graph_revision_hash(serialized_graph);
 
-        let compiled = compile_logic_graph(&graph, runtime_entities);
+        let compiled = compile_logic_graph(&graph, &entity.entity_id, runtime_entities);
         output.setup_nodes.extend(compiled.setup_nodes);
         output.runtime_nodes.extend(compiled.runtime_nodes);
         output.scripts.extend(compiled.scripts);
@@ -1260,6 +1260,7 @@ fn collect_logic_output(
 
 fn compile_logic_graph(
     graph: &StoredNodeGraph,
+    entity_id: &str,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
 ) -> CompiledLogicOutput {
     let mut output = CompiledLogicOutput::default();
@@ -1290,16 +1291,19 @@ fn compile_logic_graph(
                 }
                 // "Ao iniciar" roda uma unica vez por partida (carga da ROM zera a guarda),
                 // e nao a cada quadro como "A cada quadro".
-                let graph_tag: String = graph.graph_sha256.chars().take(8).collect();
-                let guard = sanitize_identifier(&format!(
+                // IDs codificados em hexadecimal preservam a identidade de cada instancia
+                // sem colisoes introduzidas pela sanitizacao ou por hash truncado.
+                let identity_hex = |id: &str| {
+                    id.as_bytes()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                };
+                let guard = format!(
                     "rds_started_{}_{}",
-                    if graph_tag.is_empty() {
-                        "g".to_string()
-                    } else {
-                        graph_tag
-                    },
-                    start_node.id
-                ));
+                    identity_hex(entity_id),
+                    identity_hex(&start_node.id)
+                );
                 let mut once = vec![LogicOp::SetVar {
                     var_name: guard.clone(),
                     value: LogicMathExpr::Literal(1),
@@ -5150,6 +5154,21 @@ mod tests {
         // O tick continua sem guarda (roda a cada quadro).
         assert!(c.contains("logic_var_frames = 1;"), "{c}");
         assert_eq!(c.matches("logic_var_rds_started_").count(), 3, "{c}"); // declaracao, teste e marca
+
+        // Grafos byte a byte iguais em entidades diferentes precisam de guardas distintas.
+        // O AST real e o C emitido devem executar o inicio uma vez por instancia.
+        let mut two_entities = scene.clone();
+        let mut other = two_entities.entities[0].clone();
+        other.entity_id = "other_host".to_string();
+        two_entities.entities.push(other);
+        let two_ast = super::generate_ast(&project, &two_entities);
+        let two_c = crate::compiler::sgdk_emitter::emit_sgdk(&two_ast, &project.name).main_c;
+        let guards: Vec<&str> = two_c
+            .lines()
+            .filter(|line| line.starts_with("static volatile s32 logic_var_rds_started_"))
+            .collect();
+        assert_eq!(guards.len(), 2, "{two_c}");
+        assert_ne!(guards[0], guards[1], "guardas compartilhadas: {two_c}");
     }
 
     #[test]
