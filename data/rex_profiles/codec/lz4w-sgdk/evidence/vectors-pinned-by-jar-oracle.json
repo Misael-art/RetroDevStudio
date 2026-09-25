@@ -1,0 +1,30 @@
+{
+  "claim": "vectors-and-holdout: 12 plains + 9 goldens em data/rex_profiles/codec/lz4w-sgdk/ com resultados fixados pelo oráculo externo lz4w.jar v1.43 ANTES de qualquer implementação do produto; goldens montados à mão pela spec só são publicados se o oráculo decodificar para a saída exata; 8/8 streams reais do oráculo reproduzidas pelo espelho da spec (calibração, não oracle independente).",
+  "rom": {
+    "sha256": "ad9be55b8a921522a97686de18988944405f48eac5b4ecff34470859212af063",
+    "size_bytes": 1576,
+    "format": "fixture",
+    "normalization": [
+      {
+        "step": "hash agregado = sha256(manifest.tsv + sha256sum ordenado de plain/ e golden/); regenerável por scripts/rex_profiles/codecs/lz4w-sgdk/build-vectors.sh",
+        "sha256_after": "ad9be55b8a921522a97686de18988944405f48eac5b4ecff34470859212af063"
+      }
+    ]
+  },
+  "locator": { "kind": "offset-range", "offset": 0, "length": 0 },
+  "bank_state": {},
+  "expected": {
+    "tool": "lz4w.jar v1.43 (CLI java -jar lz4w.jar p|u; externo ao produto; encode+decode do mesmo oráculo — limitação de independência declarada no manifest)",
+    "version": "jar SHA-256 bfcf9c692696aac21be23f0d48a9ccf788963a4ae7039cb7af276ed745bca4bb (SGDK v2.11); fonte LZ4W.java @ SGDK commit 2eac605a7744a6eb4f61824bb24ccab39b8bd8b8",
+    "output_sha256": "87161cc59f1dde6102994cb90174b36d20bd84d4d3a1e41b3a20be8b0de55796",
+    "output_len": 1576,
+    "pinned_before_implementation": true
+  },
+  "provenance": "authored-fixture",
+  "negatives": [
+    { "input": "k09_mixed.lz4 truncada em 6 bytes (antes do EOD)", "expected_error": "oráculo: rc=1 ArrayIndexOutOfBoundsException (produtos devem retornar erro estruturado 'truncated'; comportamento do oráculo registrado, não replicável como especificação)" },
+    { "input": "k07_long_match_near.lz4 truncada em 4 bytes (mitade de match longo)", "expected_error": "oráculo: rc=1 ArrayIndexOutOfBoundsException" },
+    { "input": "k01_literals_even.lz4 sem a palavra final (12 bytes)", "expected_error": "oráculo: rc=0 aceita silenciosamente e produz os 6 bytes completos" }
+  ],
+  "timestamp": "2026-09-25: execução de build-vectors.sh no worktree codex/rex-b-codecs (conjunto determinístico e regenerável)"
+}

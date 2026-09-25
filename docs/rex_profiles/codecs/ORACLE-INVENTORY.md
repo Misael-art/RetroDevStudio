@@ -23,7 +23,7 @@ Licenças:
 - mdcomp: LGPL-3.0, exceto `src/asm` (licença própria). **Proibido transplantar
   código LGPL para o produto**; uso restrito como ferramenta externa de teste.
 - aPLib original (Jørgen Ibsen): licença própria "free for any use" — não
-  baixado; apultra cobre o formato e é开源 zlib.
+  baixado; apultra cobre o formato e é zlib/CC0.
 
 ## Comandos de oráculo verificados (host atual)
 
@@ -39,11 +39,18 @@ Build: ver `scripts/rex_profiles/codecs/setup-oracles.sh`.
     produto deve aceitar stream de apultra **e** de apj (mesmo formato raw
     aPLib; confirmar variantes no contrato).
 - **LZ4W SGDK**
-  - encode: `java -jar lz4w.jar p IN OUT s`; com dicionário: `p PREV@IN OUT s`
+  - encode: `java -jar lz4w.jar p IN OUT s`; com dicionário:
+    `p PREV&IN OUT s` (sintaxe `&` conforme usage oficial v1.43)
   - decode: `java -jar lz4w.jar u IN OUT s`
   - roundtrip release-jar verificado no host.
-  - Dicionário externo é **dependência declarada** (launcher aceita
-    `prevfile@infile`); nunca tratar stream LZ4W órfão como autônomo.
+  - Dicionário externo é **dependência declarada**; nunca tratar stream LZ4W
+    órfão como autônomo quando produzido em modo prev.
+  - Verificado 2026-09-25: o CLI do jar NÃO adiciona header de tamanho ao
+    arquivo de saída (stream começa no primeiro bloco); a flag do bloco final
+    no código/medição é `0x8000|byte` (a doc `bin/lz4w.txt` diz `D==0` —
+    doc desatualizada; código+empiria registados como referência).
+  - Truncamento no oráculo: `AIOOBE` rc=1 se falta a palavra corrente; ACEITA
+    silenciosamente stream sem palavra final. Sem limites de trabalho.
 - **Kosinski (mdcomp HEAD C++)**
   - encode: `koscmp IN OUT` ; decode: `koscmp -x IN OUT` ; recompress: `-c`
     ; modular: `-m [-p PAD]` (capacidade separada, não incluída na variante
@@ -71,6 +78,11 @@ Build: ver `scripts/rex_profiles/codecs/setup-oracles.sh`.
 5. Sem JDK no host (só JRE 17): ECJ falhou para fontes SGDK; os jars oficiais
    v2.11 cobrem `lz4w`/`apj`. Paridade jar-vs-HEAD-git é verificada
    comportamentalmente nos vetores, não por build.
+6. **LZ4W não tem segundo oráculo independente multi-autor** (busca GitHub +
+   web 2026-09-25: `lz4w_unpack` aparece só como cópia/port do asm ou fonte
+   SGDK; GnGeo tem chamada sem licença e implementação em asm derivada).
+   Encode e decode vêm do mesmo jar → declaração de capacidade honesta no
+   manifest do perfil: paridade de ecossistema, não oracle duplo.
 
 ## Corpus local (BYOR, read-only)
 

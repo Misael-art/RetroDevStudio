@@ -1,0 +1,35 @@
+{
+  "contract_version": 1,
+  "id": "lz4w-sgdk",
+  "kind": "codec",
+  "version": 1,
+  "platform": "mega-drive",
+  "variant": "LZ4W v1.43 stream cru do CLI lz4w.jar (sem header de tamanho): palavras de 16 bits, header de bloco LLLL MMMM OOOOOOOO; literais copiados byte a byte; match curto len=M+1 off=O+1 (palavras); M=0,O!=0 = match longo len=O+2 com palavra de offset negativas ((-val)&0x7FFF)+1, bit 0x8000=fonte ROM; EOD=0x0000; palavra final 0x8000|ultimo byte impar. Sem dicionario/prev (modo 'prev&in' = capacidade separada).",
+  "support": "fixture-only",
+  "source": {
+    "name": "SGDK LZ4W v1.43 (LZ4W.java + CLI lz4w.jar; desempacotador alvo 68k = src/tools_a.s lz4w_unpack)",
+    "url": "https://github.com/Stephane-D/SGDK",
+    "commit": "2eac605a7744a6eb4f61824bb24ccab39b8bd8b8",
+    "license": "MIT",
+    "license_url": "https://github.com/Stephane-D/SGDK/blob/master/LICENSE"
+  },
+  "capabilities": {
+    "variant-fixed": "verified",
+    "vectors-and-holdout": "fixture",
+    "cross-oracle-parity": "blocked",
+    "product-decode-vs-reference": "blocked",
+    "product-encode-vs-reference": "blocked",
+    "structured-negatives": "blocked",
+    "dictionary-prev-mode": "blocked",
+    "rom-source-match": "blocked",
+    "resource-identification-in-rom": "blocked",
+    "reinsertion": "blocked"
+  },
+  "limits": [
+    "AUTOR UNICO: LZ4W e formato proprietary de Stephane Dallongeville; busca em GH/web 2026-09-25 nao achou segunda implementacao independente multi-autor (GnGeo sem licenca; demais copias do asm/fonte SGDK). encode/decode vem do MESMO jar externo => paridade de ecossistema, NAO oraculo duplo independente como em aplib.",
+    "bin/lz4w.txt descreve o flag do bloco final como D==0 escreve byte; o codigo do oraculo e o comportamento medido exigem D==1 (0x8000). Codigo+empiria sao a referencia registrada; a discrepancia documental e um fato do perfil, nao um ajuste de referencia.",
+    "O oráculo CLI NAO sinaliza truncamento de forma consistente: stream truncada antes do fim lanca ArrayIndexOutOfBoundsException (rc=1), mas sem palavra final aceita silenciosamente (rc=0). Erros estruturados do contrato v1 (truncated/overflow/...) sao obrigacoes do PRODUTO, sem espelho possivel no oraculo.",
+    "Modo dicionario 'prev&in' e matches com bit fonte-ROM (0x8000 na palavra de offset longo) NAO sao exercitados pelos vetores fixture; declarados como capacidades separadas blocked.",
+    "Sem prova em recurso real de ROM: support=fixture-only ate evidencia de identificacao do integrador."
+  ]
+}

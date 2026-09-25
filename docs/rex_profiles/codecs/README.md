@@ -14,7 +14,7 @@ Ordem da missão: aPLib -> LZ4W SGDK -> Nemesis -> Kosinski -> Enigma.
 | Perfil | Fase 1 fonte/commit/licença | Fase 2 vetores | Fase 3 implementação | Fase 4 negativos | Fase 5 cross-oracle | Status |
 |---|---|---|---|---|---|---|
 | aplib | OK | OK (8 plains CROSS-OK + 8 goldens GOLDEN-CONFIRMED, manifest com hashes) | pendente | pendente | OK paridade apultra<->APJ | Experimental (vetores confirmados; aguarda contrato p/ produto) |
-| lz4w-sgdk | OK | pendente | pendente | pendente | OK paridade básica de oráculo | Experimental (referência fixada) |
+| lz4w-sgdk | OK | OK (12 plains RT-OK + 9 goldens GOLDEN-CONFIRMED, manifest com hashes) | pendente | pendente (negativos do ORÁCULO registrados; do produto após contrato) | N/A estrutural: sem 2º oráculo multi-autor (limitação declarada no manifest) | Experimental (vetores confirmados por oráculo único do ecossistema) |
 | nemesis | OK | pendente | pendente | pendente | pendente | Experimental (referência fixada) |
 | kosinski | OK | pendente | pendente | pendente | pendente | Experimental (referência fixada) |
 | enigma | OK | pendente | pendente | pendente | pendente | Experimental (referência fixada) |
