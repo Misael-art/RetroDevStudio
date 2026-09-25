@@ -1,0 +1,106 @@
+{
+  "profile": "snes-hirom",
+  "kind": "real-zip-member",
+  "container": {
+    "path": "/home/misael/emulation/roms/snes/Chrono Trigger (USA).zip",
+    "sha256": "1ae09131d8081b383b60089236967c229d7834cc8be21220f36fc70516e8f37f",
+    "size_bytes": 3017740,
+    "format": "zip",
+    "membros_non_rom": [
+      "Vimm's Lair.txt"
+    ]
+  },
+  "rom_member": {
+    "name": "Chrono Trigger (USA).sfc",
+    "sha256": "06d1c2b06b716052c5596aaa0c2e5632a027fee1a9a28439e509f813c30829a9",
+    "size_bytes": 4194304,
+    "crc32_inventario": "2d206bf7",
+    "note": "identidade do membro separada da do contêiner"
+  },
+  "normalization": {
+    "rom_size": "0x400000",
+    "steps": [
+      "sen normalizacion: membro = 4MB exacto, potencia de 2, sen SMC"
+    ]
+  },
+  "header_hypothesis": {
+    "fields": {
+      "banner_0xFFC0": "CHRONO TRIGGER",
+      "ffd5": "0x31",
+      "ffd6": "0x2"
+    },
+    "note": "$FFD5=0x31: nibre baixo 1 = modo HiROM (sneslab.net/wiki/SNES_ROM_Header: $3X = 3.58MHz + modo no nibre baixo). Header e hipótese; confirmación abaixo por 3 vías: referencia externa + comportamiento + motor.",
+    "references": [
+      "superfamicom.org/info/chrono-trigger (consultado 2026-09-25): \"ROM Bank: HiROM, ROM Size: 32 Mb\" — coincide co membro medido (0x400000)",
+      "sneslab.net/wiki/SNES_ROM_Header (consultado 2026-09-25): modo de mapa no nibre baixo de $FFD5 (0=Lo, 1=Hi, 5=ExHi)",
+      "bsnes@7d5aa1e boards.bml HIROM (sha256 b8006d80...)"
+    ]
+  },
+  "behavioral_discrimination": {
+    "claim": "HiROM(4MB): banner visible en 00/40/80/C0 (todos os bancos cuxa máscara cae en 0xFFC0) co MESMO offset, e 7E/7F = WRAM sen ROM",
+    "banner_windows": [
+      {
+        "cpu_address": "0xffc0",
+        "region": "rom",
+        "offset": "0xffc0",
+        "visible_banner": "CHRONO TRIGGER"
+      },
+      {
+        "cpu_address": "0x40ffc0",
+        "region": "rom",
+        "offset": "0xffc0",
+        "visible_banner": "CHRONO TRIGGER"
+      },
+      {
+        "cpu_address": "0x80ffc0",
+        "region": "rom",
+        "offset": "0xffc0",
+        "visible_banner": "CHRONO TRIGGER"
+      },
+      {
+        "cpu_address": "0xc0ffc0",
+        "region": "rom",
+        "offset": "0xffc0",
+        "visible_banner": "CHRONO TRIGGER"
+      },
+      {
+        "cpu_address": "0x7effc0",
+        "region": "wram",
+        "offset": "0xffc0",
+        "visible_banner": null
+      }
+    ],
+    "wram_exclusion": [
+      {
+        "cpu_address": "0x7e0000",
+        "translate": {
+          "region": "wram",
+          "offset": 0
+        }
+      },
+      {
+        "cpu_address": "0x7fffff",
+        "translate": {
+          "region": "wram",
+          "offset": 65535
+        }
+      }
+    ]
+  },
+  "parity_engine_vs_profile": {
+    "sample": 6000,
+    "mismatches": 0,
+    "examples": []
+  },
+  "alias_byte_equality": {
+    "offsets_with_aliases": 1484,
+    "alias_reads": 4469,
+    "mismatches": 0,
+    "window_edge_short": 0,
+    "examples": []
+  },
+  "invert_vs_engine": "coberto por parity + alias; ver crosscheck (exaustivo xa verde)",
+  "generated_by": "scripts/rex_profiles/addressing/real_cases/verify.mjs",
+  "date": "2026-09-25",
+  "corpus_policy": "so-lectura; sen extracción; membros lidos en memoria con unzip -p"
+}
