@@ -362,9 +362,66 @@ pub fn reinsert_transaction(
     }))
 }
 
-/// Renderiza tiles MD 4bpp (planar) como RGBA chunky, uma linha de tiles.
-/// Convenção VDP/SGDK: índice do pixel = Σ (bit do plano p) << p, com o bit
-/// mais significativo do byte de plano na coluna 0. Índices 0..15.
+/// Contrato único de endereçamento de pixel em tiles MD 4bpp **chunky**
+/// (packed nibble), o mesmo formato emitido pelo rescomp do SGDK
+/// (`ImageUtil.convert8bppTo4bpp`: nibble alto = pixel par) e usado pelo
+/// editor de tiles Sonic do produto (`sprite_composition`, byte =
+/// base + tile*32 + linha*4 + col/2, nibble alto na coluna par).
+/// Retorna (offset do byte dentro do dado do recurso, nibble alto?).
+pub fn md_pixel_location(tile: usize, row: usize, col: usize) -> Result<(usize, bool), CodecError> {
+    if tile > 0xFFFF || row > 7 || col > 7 {
+        return Err(CodecError::new(
+            "overflow",
+            format!("pixel ({tile},{row},{col}) fora dos limites do tile 8x8"),
+        ));
+    }
+    let offset = tile * 32 + row * 4 + col / 2;
+    Ok((offset, col.is_multiple_of(2)))
+}
+
+/// Lê o índice (0..15) de um pixel no formato chunky.
+pub fn md_read_pixel_index(
+    data: &[u8],
+    tile: usize,
+    row: usize,
+    col: usize,
+) -> Result<u8, CodecError> {
+    let (offset, high) = md_pixel_location(tile, row, col)?;
+    let byte = data
+        .get(offset)
+        .ok_or_else(|| CodecError::new("overflow", "pixel fora do buffer de tiles"))?;
+    Ok(if high { byte >> 4 } else { byte & 0x0F })
+}
+
+/// Escreve o índice (0..15) de um pixel no formato chunky, preservando o
+/// outro nibble do byte e todos os demais bytes.
+pub fn md_write_pixel_index(
+    data: &mut [u8],
+    tile: usize,
+    row: usize,
+    col: usize,
+    index: u8,
+) -> Result<(), CodecError> {
+    if index > 15 {
+        return Err(CodecError::new(
+            "overflow",
+            format!("índice de paleta {index} fora de 0..15"),
+        ));
+    }
+    let (offset, high) = md_pixel_location(tile, row, col)?;
+    let byte = data
+        .get_mut(offset)
+        .ok_or_else(|| CodecError::new("overflow", "pixel fora do buffer de tiles"))?;
+    *byte = if high {
+        (*byte & 0x0F) | (index << 4)
+    } else {
+        (*byte & 0xF0) | index
+    };
+    Ok(())
+}
+
+/// Renderiza tiles MD 4bpp **chunky** (packed nibble) como RGBA, uma faixa
+/// de tiles. Formato idêntico ao emitido pelo rescomp do SGDK.
 pub fn md_tiles_to_rgba(tiles: &[u8]) -> Vec<u8> {
     let num_tiles = tiles.len() / 32;
     let width = num_tiles * 8;
@@ -372,11 +429,8 @@ pub fn md_tiles_to_rgba(tiles: &[u8]) -> Vec<u8> {
     for tile in 0..num_tiles {
         for row in 0..8 {
             for col in 0..8 {
-                let mut index = 0u8;
-                for plane in 0..4u8 {
-                    let bits = tiles[tile * 32 + row * 4 + plane as usize];
-                    index |= ((bits >> (7 - col)) & 1) << plane;
-                }
+                let index =
+                    md_read_pixel_index(tiles, tile, row, col).expect("tile dentro dos limites");
                 let x = tile * 8 + col;
                 let y = row;
                 let offset = (y * width + x) * 4;
@@ -553,23 +607,20 @@ pub fn apply_resource_edit(
         .ok_or_else(|| format!("recurso {stream_offset:#x} não verificado nesta ROM"))?;
     let mut edited = resource.decoded.clone();
     for edit in edits {
-        if edit.index > 15 || edit.row > 7 || edit.col > 7 {
-            return Err(format!("edição inválida: {edit:?}"));
-        }
         let tile = edit.tile as usize;
         if tile >= resource.candidate.num_tiles {
             return Err(format!("tile {} fora do recurso", edit.tile));
         }
-        let base = tile * 32 + edit.row as usize * 4;
-        for plane in 0..4u8 {
-            let bit = if (edit.index >> plane) & 1 == 1 { 1 } else { 0 };
-            let mask = 1u8 << (7 - edit.col);
-            if bit == 1 {
-                edited[base + plane as usize] |= mask;
-            } else {
-                edited[base + plane as usize] &= !mask;
-            }
-        }
+        // Contrato chunky único (md_write_pixel_index): preserva o outro
+        // nibble e todos os demais bytes.
+        md_write_pixel_index(
+            &mut edited,
+            tile,
+            edit.row as usize,
+            edit.col as usize,
+            edit.index,
+        )
+        .map_err(|e| format!("{}: {}", e.code, e.detail))?;
     }
     let outcome = reinsert_transaction(
         &ReinsertRequest {
@@ -893,35 +944,103 @@ mod tests {
         );
     }
 
-    /// Prévia chunky MD: comparação independente de pixels (segunda
-    /// implementação do render para conferência).
+    /// Golden literal assimétrico: `12 34 56 78` na linha 0 do tile 0
+    /// representa os índices 1..8 (nibble alto = coluna par). O esperado é
+    /// escrito à mão, NÃO obtido do renderer do produto.
     #[test]
-    fn md_tiles_to_rgba_matches_independent_pixel_recompute() {
-        // Tile autoral: colunas de índices crescentes.
+    fn md_chunky_golden_literal_asymmetric() {
         let mut tiles = vec![0u8; 32];
-        for row in 0..8 {
-            tiles[row * 4] = 0b0100_0000; // plano 0: coluna 1
-            tiles[row * 4 + 3] = 0b0000_0010; // plano 3: coluna 6
-        }
+        // Linha 0 do tile 0: 12 34 56 78.
+        tiles[0] = 0x12;
+        tiles[1] = 0x34;
+        tiles[2] = 0x56;
+        tiles[3] = 0x78;
+        // Índices esperados por pixel, escritos literalmente:
+        let expected: [[u8; 8]; 8] = [
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0],
+        ];
         let rgba = md_tiles_to_rgba(&tiles);
-        assert_eq!(rgba.len(), 8 * 8 * 4);
-        // Recomputação independente pixel a pixel (convenção VDP: plano 0
-        // é o bit menos significativo do índice).
         for y in 0..8 {
             for x in 0..8 {
-                let mut index = 0u8;
-                for plane in 0..4 {
-                    let bits = tiles[y * 4 + plane];
-                    index |= ((bits >> (7 - x)) & 1) << plane;
-                }
+                let index = rgba[(y * 8 + x) * 4] / 16;
+                assert_eq!(index, expected[y][x], "pixel ({x},{y})");
+                assert_eq!(rgba[(y * 8 + x) * 4 + 3], 255);
+            }
+        }
+        // Leitura individual bate com o golden.
+        for col in 0..8 {
+            assert_eq!(
+                md_read_pixel_index(&tiles, 0, 0, col).unwrap(),
+                (col + 1) as u8
+            );
+        }
+        // Escrita preserva o outro nibble: editar pixel (0,0) para 15 mantém
+        // o byte 0x12 -> 0xF2 (nibble baixo 2 intocado) e nada mais muda.
+        let mut edited = tiles.clone();
+        md_write_pixel_index(&mut edited, 0, 0, 0, 15).unwrap();
+        assert_eq!(edited[0], 0xF2);
+        for (i, (a, b)) in edited.iter().zip(tiles.iter()).enumerate() {
+            if i != 0 {
+                assert_eq!(a, b, "byte {i} não deveria mudar");
+            }
+        }
+        // Primeira e última posições do recurso de 2 tiles.
+        let mut two = vec![0u8; 64];
+        md_write_pixel_index(&mut two, 0, 0, 0, 5).unwrap();
+        assert_eq!(two[0] >> 4, 5);
+        md_write_pixel_index(&mut two, 1, 7, 7, 9).unwrap();
+        assert_eq!(two[63] & 0x0F, 9);
+        // Índice inválido recusado sem alterar o buffer.
+        let mut untouched = two.clone();
+        assert!(md_write_pixel_index(&mut two, 0, 0, 0, 16).is_err());
+        assert_eq!(two, untouched);
+    }
+
+    /// No-op: escrever o mesmo índice não altera nenhum byte.
+    #[test]
+    fn md_write_pixel_index_noop_when_same_index() {
+        let mut tiles = vec![0x12, 0x34, 0x56, 0x78];
+        tiles.resize(32, 0);
+        let before = tiles.clone();
+        md_write_pixel_index(&mut tiles, 0, 0, 0, 1).unwrap();
+        assert_eq!(tiles, before);
+        md_write_pixel_index(&mut tiles, 0, 0, 1, 2).unwrap();
+        assert_eq!(tiles, before);
+    }
+
+    /// Prévia chunky: comparação independente de pixels (segunda
+    /// implementação do mapeamento, escrita à mão no teste).
+    #[test]
+    fn md_tiles_to_rgba_matches_independent_pixel_recompute() {
+        // Tile autoral chunky: linha 0 = 0x01 0x23 0x45 0x67 (índices 0..7),
+        // linha 1 = 0x89 0xAB 0xCD 0xEF (índices 8..15), resto zero.
+        let mut tiles = vec![0u8; 32];
+        tiles[0..4].copy_from_slice(&[0x01, 0x23, 0x45, 0x67]);
+        tiles[4..8].copy_from_slice(&[0x89, 0xAB, 0xCD, 0xEF]);
+        let rgba = md_tiles_to_rgba(&tiles);
+        assert_eq!(rgba.len(), 8 * 8 * 4);
+        // Recomputação independente pixel a pixel (nibble alto = coluna par).
+        for y in 0..8 {
+            for x in 0..8 {
+                let byte = tiles[y * 4 + x / 2];
+                let index = if x % 2 == 0 { byte >> 4 } else { byte & 0x0F };
                 let expected = index * 16;
                 let got = rgba[(y * 8 + x) * 4];
                 assert_eq!(got, expected, "pixel ({x},{y})");
+                assert_eq!(rgba[(y * 8 + x) * 4 + 3], 255);
             }
         }
-        // Indices específicos: pixel (1,0) = 1, pixel (6,0) = 8.
+        // Pixels específicos: (0,0)=0, (1,0)=1 e (0,1)=8 (linha 1, nibble alto).
+        assert_eq!(rgba[(0 * 8 + 0) * 4], 0);
         assert_eq!(rgba[(0 * 8 + 1) * 4], 16);
-        assert_eq!(rgba[(0 * 8 + 6) * 4], 8 * 16);
+        assert_eq!(rgba[(1 * 8 + 0) * 4], 128);
     }
 
     /// Enumera recursos LZ4W do corpus que aceitam a edição mínima (para
