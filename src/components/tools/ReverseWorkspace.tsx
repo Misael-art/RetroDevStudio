@@ -418,7 +418,7 @@ export default function ReverseWorkspace() {
         <CompressedResourcePanel logMessage={logMessage} />
         <div className="flex flex-wrap gap-2">
           {viewTabs.filter((tab) => tab.id !== "resources").map((tab) => (
-            <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Voltar para {tab.label}</button>
+            <button key={tab.id} type="button" data-testid={`reverse-tab-${tab.id}`} onClick={() => setActiveView(tab.id)} className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Voltar para {tab.label}</button>
           ))}
         </div>
       </div>
@@ -432,7 +432,7 @@ export default function ReverseWorkspace() {
         <InspectionPanel logMessage={logMessage} />
         <div className="flex flex-wrap gap-2">
           {viewTabs.filter((tab) => tab.id !== "inspection").map((tab) => (
-            <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Voltar para {tab.label}</button>
+            <button key={tab.id} type="button" data-testid={`reverse-tab-${tab.id}`} onClick={() => setActiveView(tab.id)} className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Voltar para {tab.label}</button>
           ))}
         </div>
       </div>
