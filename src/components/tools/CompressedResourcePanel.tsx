@@ -40,6 +40,9 @@ export function CompressedResourcePanel({
   const [result, setResult] = useState<RexResourceResult | null>(null);
   const [edits, setEdits] = useState<RexPixelEdit[]>([]);
   const [paintIndex, setPaintIndex] = useState(1);
+  const [editTile, setEditTile] = useState(0);
+  const [editRow, setEditRow] = useState(0);
+  const [editCol, setEditCol] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -219,7 +222,31 @@ export function CompressedResourcePanel({
                 className="w-14 rounded border border-[#313244] bg-[#11111b] px-1 py-0.5 text-[#cdd6f4]"
               />
             </label>
-            <span>{edits.length} edição(ões) pendente(s)</span>
+            <span data-testid="rex-resource-edit-count">{edits.length} edição(ões) pendente(s)</span>
+            <span className="flex items-center gap-1">
+              tile
+              <input type="number" min={0} value={editTile} data-testid="rex-resource-edit-tile" onChange={(event) => setEditTile(Number(event.target.value) || 0)} className="w-14 rounded border border-[#313244] bg-[#11111b] px-1 py-0.5 text-[#cdd6f4]" />
+              linha
+              <input type="number" min={0} max={7} value={editRow} data-testid="rex-resource-edit-row" onChange={(event) => setEditRow(Number(event.target.value) || 0)} className="w-12 rounded border border-[#313244] bg-[#11111b] px-1 py-0.5 text-[#cdd6f4]" />
+              coluna
+              <input type="number" min={0} max={7} value={editCol} data-testid="rex-resource-edit-col" onChange={(event) => setEditCol(Number(event.target.value) || 0)} className="w-12 rounded border border-[#313244] bg-[#11111b] px-1 py-0.5 text-[#cdd6f4]" />
+              <button
+                type="button"
+                data-testid="rex-resource-add-edit"
+                onClick={() => {
+                  if (!preview || selected == null) return;
+                  const summary = resources.find((r) => r.stream_offset === selected);
+                  if (!summary || editTile >= summary.num_tiles) return;
+                  setEdits((current) => [
+                    ...current.filter((e) => !(e.tile === editTile && e.row === editRow && e.col === editCol)),
+                    { tile: editTile, row: editRow, col: editCol, index: paintIndex },
+                  ]);
+                }}
+                className="rounded border border-[#89b4fa] bg-[#89b4fa]/10 px-2 py-0.5 text-[#89b4fa]"
+              >
+                Adicionar edição
+              </button>
+            </span>
             <button
               type="button"
               data-testid="rex-resource-apply"

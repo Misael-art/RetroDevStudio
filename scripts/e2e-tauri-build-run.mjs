@@ -8770,30 +8770,21 @@ async function runRexLz4wEffectScenario(sessionId) {
     250
   );
 
-  // EDIÇÃO: índice 9 no pixel (7,7) do ÚLTIMO tile — altera só o último
-  // byte do dado (região com espaço comprovado pela enumeração de fit).
-  const lastIndexInput = `${panel} [data-testid="rex-resource-paint-index"]`;
-  await executeScript(sessionId, `
-    const input = document.querySelector('${lastIndexInput}');
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    setter.call(input, '9');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    return true;`);
-  const canvasRect = await executeScript(sessionId, `
-    const canvas = document.querySelector('${panel} [data-testid="rex-resource-canvas"]');
-    const rect = canvas.getBoundingClientRect();
-    // Ultimo tile da prévia: (col 3, row 4) na grade de 16; pixel (7,7).
-    return {
-      x: rect.left + rect.width * (28 + 7.5) / 128,
-      y: rect.top + rect.height * (32 + 7.5) / 40,
-      w: rect.width,
-      h: rect.height,
-    };`);
-  await executeScript(sessionId, `
-    const canvas = document.querySelector('${panel} [data-testid="rex-resource-canvas"]');
-    const options = { bubbles: true, clientX: ${canvasRect.x}, clientY: ${canvasRect.y} };
-    canvas.dispatchEvent(new MouseEvent('click', options));
-    return true;`);
+  // EDIÇÃO determinística: índice 9 no pixel (7,7) do ÚLTIMO tile (67) —
+  // altera só o último byte do dado (espaço comprovado pela enumeração).
+  const setNumberInput = async (testId, value) => {
+    await executeScript(sessionId, `
+      const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, '${value}');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;`);
+  };
+  await setNumberInput("rex-resource-paint-index", 9);
+  await setNumberInput("rex-resource-edit-tile", 67);
+  await setNumberInput("rex-resource-edit-row", 7);
+  await setNumberInput("rex-resource-edit-col", 7);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
   await waitFor(
     async () => ((await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "").includes("1 edição(ões) pendente(s)"),
     15000,
