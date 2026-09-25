@@ -6643,8 +6643,8 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
   if (running.frame.romSha256 !== romSha256) fail(`Game View executa outra ROM: ${JSON.stringify({ running: running.frame.romSha256, romSha256 })}`);
   const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
-  const watch = ["spr_player_x", "spr_player_y", "logic_var_reference_score", "logic_var_goal_open", "logic_var_passage_2_open", "logic_var_goal_reached"]
-    .map((name) => ({ name, address: symbols.get(name), width: name.startsWith("spr_") ? 2 : 4 }));
+  const watch = ["spr_player_x", "spr_player_y", "logic_var_reference_score", "logic_var_goal_open", "logic_var_passage_2_open", "logic_var_goal_reached", "spr_player_vel_y", "rds_joy_prev_1"]
+    .map((name) => ({ name, address: symbols.get(name), width: name.endsWith("vel_y") || name.startsWith("logic_") ? 4 : 2 }));
   if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch)}`);
   const observe = async () => {
     const raw = await executeAsyncScript(sessionId, `
@@ -6662,7 +6662,7 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
       return v > 0x7fffffff ? v - 0x100000000 : v;
     };
     const values = watch.map((entry, index) => decode(raw.data[index], entry.width));
-    return { x: values[0], y: values[1], score: values[2], mainOpen: values[3], secondOpen: values[4], goal: values[5], audioTotal: raw.audioTotal, t: Date.now() };
+    return { x: values[0], y: values[1], score: values[2], mainOpen: values[3], secondOpen: values[4], goal: values[5], velY: values[6], joyPrev: values[7], frame: (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0, audioTotal: raw.audioTotal, t: Date.now() };
   };
   const waitAck = (button, expected, context) => waitFor(async () => {
     const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
@@ -6671,7 +6671,12 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   const sampleY = async (ms) => {
     const samples = [];
     const end = Date.now() + ms;
-    while (Date.now() < end) { samples.push((await observe()).y); await pause(30); }
+    const hardEnd = Date.now() + 20000;
+    while ((Date.now() < end || samples.length === 0 || samples[samples.length - 1].frame - samples[0].frame < 3) && Date.now() < hardEnd) {
+      samples.push(await observe());
+      await pause(20);
+    }
+    if (samples[samples.length - 1].frame - samples[0].frame < 3) fail(`ROM nao avancou quadros durante input: ${JSON.stringify(samples.slice(-4))}`);
     return samples;
   };
   await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
@@ -6679,11 +6684,16 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   const acks = [];
   // Standing still until the physics settles on the floor.
   let groundY = null;
+  const settleSamples = [];
   await waitFor(async () => {
-    const a = (await observe()).y; await pause(250); const b = (await observe()).y;
-    groundY = b;
-    return a === b;
-  }, 20000, "Personagem nao pousou.", 100);
+    const sample = await observe();
+    settleSamples.push(sample);
+    groundY = sample.y;
+    return settleSamples.length >= 4 && sample.frame > settleSamples[0].frame && settleSamples.slice(-4).every((s) => s.y === groundY);
+  }, 20000, "Personagem nao pousou.", 100).catch(async (error) => {
+    await writeFile(path.join(validationDir, `${artifactPrefix}-settle-trace.json`), JSON.stringify({ appSha256: report.testedApplication.sha256, romSha256, projectDir, watch, settleSamples }, null, 2));
+    throw error;
+  });
   // Old binding (Z = button A) must no longer jump.
   await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "Z (antigo pulo)");
   acks.push(await waitAck("y", true, "Z"));
@@ -6697,7 +6707,10 @@ async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootst
   const xSamples = await sampleY(2500);
   await sendNativeGameKey(sessionId, "KeyX", "keyUp", "soltar X");
   acks.push(await waitAck("b", false, "soltar X"));
-  const jumpProof = { groundY, zMinY: Math.min(...zSamples), xMinY: Math.min(...xSamples), zSamples: zSamples.length, xSamples: xSamples.length };
+  const jumpProof = { groundY, zMinY: Math.min(...zSamples.map((s) => s.y)), xMinY: Math.min(...xSamples.map((s) => s.y)), zSamples: zSamples.length, xSamples: xSamples.length };
+  const jumpTracePath = path.join(validationDir, `${artifactPrefix}-jump-trace.json`);
+  await writeFile(jumpTracePath, JSON.stringify({ appSha256: report.testedApplication.sha256, romSha256, projectDir, watch, acks, zSamples, xSamples }, null, 2));
+  addReportArtifact(report, jumpTracePath, "input nativo e trajetoria RAM do salto editado");
   if (jumpProof.zMinY < groundY - 1) fail(`Tecla Z ainda faz pular apos trocar para o botao B: ${JSON.stringify(jumpProof)}`);
   if (!(jumpProof.xMinY <= groundY - 8)) fail(`Tecla X (botao B) nao fez pular: ${JSON.stringify(jumpProof)}`);
   await waitFor(async () => (await observe()).y === groundY, 10000, "Personagem nao voltou ao chao.", 100);
@@ -7064,6 +7077,10 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
     { name: `logic_var_${passageRight2.id}_open`, width: 4 },
     { name: `logic_var_${passageLeft2.id}_open`, width: 4 },
     { name: `logic_var_${passageId}_open`, width: 4 },
+    { name: `${spriteSymbol("player_2", "y").slice(0, -2)}_vel_y`, width: 4 },
+    { name: `${spriteSymbol("player_2", "y").slice(0, -2)}_on_ground`, width: 2 },
+    { name: "rds_joy_prev_1", width: 2 },
+    { name: `${spriteSymbol("player_3", "y").slice(0, -2)}_on_ground`, width: 2 },
   ].map((entry) => ({ ...entry, address: symbols.get(entry.name) }));
   if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch.filter((entry) => !Number.isInteger(entry.address)).map((entry) => entry.name))}`);
   // Collision boxes exactly as the ROM computes them (position + collision offset, size).
@@ -7094,7 +7111,7 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
       return v > 0x7fffffff ? v - 0x100000000 : v;
     };
     const v = watch.map((entry, index) => decode(raw.data[index], entry.width));
-    return { p1: [v[0], v[1]], p2: [v[2], v[3]], p3: [v[4], v[5]], copy: [v[6], v[7]], score: v[8], openB: v[9], openA: v[10], openC: v[11], frame: (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0 };
+    return { p1: [v[0], v[1]], p2: [v[2], v[3]], p3: [v[4], v[5]], copy: [v[6], v[7]], score: v[8], openB: v[9], openA: v[10], openC: v[11], p2VelY: v[12], p2OnGround: v[13], joyPrev: v[14], p3OnGround: v[15], frame: (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0 };
   };
   const waitAck = (button, expected, context) => waitFor(async () => {
     const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
@@ -7102,31 +7119,50 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
   const KEY_BUTTON = { ArrowRight: "right", ArrowLeft: "left", KeyC: "a", KeyZ: "y", KeyX: "b", Enter: "start" };
   const down = async (code, label) => { await sendNativeGameKey(sessionId, code, "keyDown", label); await waitAck(KEY_BUTTON[code], true, label); };
-  const up = async (code, label) => { await sendNativeGameKey(sessionId, code, "keyUp", `soltar ${label}`); await waitAck(KEY_BUTTON[code], false, `soltar ${label}`); };
+  const up = async (code, label) => {
+    await sendNativeGameKey(sessionId, code, "keyUp", `soltar ${label}`);
+    await waitAck(KEY_BUTTON[code], false, `soltar ${label}`);
+    if (code === "KeyX") {
+      await waitFor(async () => ((await observe()).joyPrev & 0x10) === 0, 20000, `${label}: ROM nao consumiu a liberacao de B`, 30);
+    }
+  };
   // Samples until `done(samples)` or the emulated-frame budget runs out.
-  const sampleUntil = async (done, maxFrames, label) => {
+  const sampleUntil = async (done, maxFrames, label, pollMs = 20) => {
     const samples = [await observe()];
     const startFrame = samples[0].frame;
     const cap = Date.now() + 90000;
     while (!done(samples) && samples[samples.length - 1].frame - startFrame < maxFrames && Date.now() < cap) {
-      await pause(20);
+      await pause(pollMs);
       samples.push(await observe());
     }
-    if (!done(samples)) fail(`${label}: condicao nao ocorreu em ${maxFrames} quadros: ${JSON.stringify(samples.slice(-4))}`);
+    if (!done(samples)) {
+      const tracePath = path.join(validationDir, `${artifactPrefix}-failed-${label.replace(/[^a-z0-9]+/gi, "-")}-trace.json`);
+      await writeFile(tracePath, JSON.stringify({ appSha256: report.testedApplication.sha256, romSha256, romCopy, projectDir, watch, tapTrace, input: await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;"), samples }, null, 2));
+      fail(`${label}: condicao nao ocorreu em ${maxFrames} quadros; trajetoria preservada em ${tracePath}: ${JSON.stringify(samples.slice(-4))}`);
+    }
     return samples;
   };
+  const tapTrace = [];
   // A tap must last a few emulated frames (emulation runs at a few FPS under WebDriver),
   // otherwise press and release both happen between two frames and the game never sees it.
   const tap = async (code, label) => {
+    const traceStart = tapTrace.length;
     await down(code, label);
     const pressedAt = (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0;
-    await waitFor(async () => ((await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0) - pressedAt >= 3, 20000, `${label}: quadros nao avancaram.`, 30);
+    tapTrace.push({ label, phase: "down", sample: await observe(), input: await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") });
+    await waitFor(async () => {
+      const sample = await observe();
+      tapTrace.push({ label, phase: "held", sample });
+      return sample.frame - pressedAt >= 3;
+    }, 20000, `${label}: quadros nao avancaram.`, 30);
     await up(code, label);
+    tapTrace.push({ label, phase: "up", sample: await observe(), input: await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") });
+    return tapTrace.slice(traceStart).map((entry) => entry.sample);
   };
   const settled = (key, ground) => (samples) => samples.length > 3 && samples.slice(-3).every((s) => s[key][1] === ground);
   await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
   await focusGameCanvasNatively(sessionId);
-  const initial = await sampleUntil((samples) => samples.length > 6 && samples.slice(-4).every((s, i, all) => s.p2[1] === all[0].p2[1] && s.p3[1] === all[0].p3[1]), 600, "entidades pousarem");
+  const initial = await sampleUntil((samples) => samples.length > 6 && samples[samples.length - 1].frame > samples[0].frame && samples.slice(-4).every((s, i, all) => s.p2[1] === all[0].p2[1] && s.p3[1] === all[0].p3[1] && s.p2OnGround !== 0 && s.p3OnGround !== 0), 600, "entidades pousarem");
   const ground2 = initial[initial.length - 1].p2[1];
   const ground3 = initial[initial.length - 1].p3[1];
   const minY = (samples, key) => Math.min(...samples.map((s) => s[key][1]));
@@ -7134,15 +7170,15 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   const jump = {};
 
   // J1: jump from the ground (tap X): rises, lands.
-  await tap("KeyX", "X (salto do chao)");
-  let run = await sampleUntil((samples) => samples.some((s) => s.p2[1] < ground2) && settled("p2", ground2)(samples), 400, "salto J1");
+  const j1Press = await tap("KeyX", "X (salto do chao)");
+  let run = j1Press.concat(await sampleUntil((samples) => samples.some((s) => s.p2[1] < ground2) && settled("p2", ground2)(samples), 400, "salto J1"));
   jump.apex1 = ground2 - minY(run, "p2");
   jump.p3DuringJ1 = run.every((s) => s.p3[1] === ground3);
   if (!(jump.apex1 >= 8)) problems.push(`J1: sem salto a partir do chao (apex ${jump.apex1})`);
   if (!jump.p3DuringJ1) problems.push("J1: Player 3 se moveu no salto de Player 2");
   // J2: second press in the air must not restart the impulse.
-  await tap("KeyX", "X (salto J2)");
-  run = await sampleUntil((samples) => samples.some((s) => ground2 - s.p2[1] >= Math.max(4, jump.apex1 / 2)), 200, "subida J2");
+  run = await tap("KeyX", "X (salto J2)");
+  if (run[run.length - 1].p2[1] >= ground2) fail(`J2: toque terminou apos o pouso: ${JSON.stringify(run)}`);
   jump.airPressAtY = run[run.length - 1].p2[1];
   await tap("KeyX", "X (pressao no ar)");
   run = run.concat(await sampleUntil(settled("p2", ground2), 400, "pouso J2"));
@@ -7164,8 +7200,8 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   jump.apex4 = ground2 - minY(run, "p2");
   if (!(jump.apex4 >= 8)) problems.push("J4: sem novo salto apos pousar");
   // J5: independent support: Player 3 in the air, Player 2 on the ground can still jump.
-  await tap("Enter", "Enter (Player 3 salta)");
-  run = await sampleUntil((samples) => samples.some((s) => s.p3[1] < ground3), 200, "Player 3 no ar");
+  const j5Press = await tap("Enter", "Enter (Player 3 salta)");
+  run = j5Press.concat(await sampleUntil((samples) => samples.some((s) => s.p3[1] < ground3), 200, "Player 3 no ar"));
   await tap("KeyX", "X com Player 3 no ar");
   run = run.concat(await sampleUntil((samples) => samples.some((s) => s.p2[1] < ground2) && settled("p2", ground2)(samples) && settled("p3", ground3)(samples), 400, "J5"));
   jump.p3Apex = ground3 - minY(run, "p3");
@@ -7195,7 +7231,7 @@ async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBoo
   start = await observe();
   passage.p3StartedOverlapped = intersects(start.p3[0], C);
   await down("KeyC", "C (sair de dentro de C)");
-  run = await sampleUntil((samples) => !intersects(samples[samples.length - 1].p3[0], C) && box(samples[samples.length - 1].p3[0]).left >= C.right + 12, 300, "Player 3 sair de C");
+  run = await sampleUntil((samples) => !intersects(samples[samples.length - 1].p3[0], C) && box(samples[samples.length - 1].p3[0]).left >= C.right + 12, 300, "Player 3 sair de C", 0);
   await up("KeyC", "C");
   const cDeltas = run.slice(1).map((s, i) => s.p3[0] - run[i].p3[0]).filter((d) => d !== 0);
   passage.p3Exit = { from: start.p3[0], to: run[run.length - 1].p3[0], gcd: cDeltas.reduce((a, d) => { const g = (x, y) => (y === 0 ? Math.abs(x) : g(y, x % y)); return g(a, d); }, 0), p2Static: run.every((s) => s.p2[0] === start.p2[0]), copyStatic: run.every((s) => s.copy[0] === start.copy[0]) };
