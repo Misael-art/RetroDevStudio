@@ -1,0 +1,147 @@
+{
+  "profile": "md-linear",
+  "contract_version": 1,
+  "pinned_before_implementation": true,
+  "derived_from": [
+    "docs/rex_profiles/addressing/md-linear.md",
+    "Genesis-Plus-GX@939ce4f045f981f89965f24780cef045cc5e52d7 (md_cart.c, mem68k.c, genesis.c — especificacao, sem copia)"
+  ],
+  "fixture": {
+    "generator": "scripts/rex_profiles/addressing/build-fixtures.mjs",
+    "rom_size": 524288,
+    "sha256": "13b08feab9b43c2ef781468b83192bb0a8c37fa303734219b4f033a040afe24b"
+  },
+  "translate_cases": [
+    { "name": "primeira posicao da ROM", "cpu_address": "0x000000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "rom", "offset": "0x000000" } },
+    { "name": "ultima posicao da ROM", "cpu_address": "0x07FFFF", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "rom", "offset": "0x07FFFF" } },
+    { "name": "espelho k=1 retorna ao inicio", "cpu_address": "0x080000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "rom", "offset": "0x000000" } },
+    { "name": "ultima posicao da janela do cartucho", "cpu_address": "0x3FFFFF", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "rom", "offset": "0x07FFFF" } },
+    { "name": "offset direto no meio", "cpu_address": "0x023456", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "rom", "offset": "0x023456" } },
+    { "name": "espelho com ROM de 256KB", "cpu_address": "0x100000", "mapper_state": { "rom_size": 262144 }, "expect": { "region": "rom", "offset": "0x000000" } },
+    { "name": "ROM minima de 64KB espelha 64x", "cpu_address": "0x3FFFFF", "mapper_state": { "rom_size": 65536 }, "expect": { "region": "rom", "offset": "0x00FFFF" } },
+    { "name": "work-ram inicio da janela", "cpu_address": "0xE00000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "work-ram", "offset": "0x0000" } },
+    { "name": "work-ram espelho classico FF0000", "cpu_address": "0xFF0000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "work-ram", "offset": "0x0000" } },
+    { "name": "work-ram meio", "cpu_address": "0xE12345", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "work-ram", "offset": "0x2345" } },
+    { "name": "work-ram ultima posicao", "cpu_address": "0xFFFFFF", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "work-ram", "offset": "0xFFFF" } },
+    { "name": "z80-ram inicio", "cpu_address": "0xA00000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "z80-ram", "offset": "0x0000" } },
+    { "name": "z80-ram fim do primeiro espelho", "cpu_address": "0xA01FFF", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "z80-ram", "offset": "0x1FFF" } },
+    { "name": "z80-ram segundo espelho", "cpu_address": "0xA02000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "z80-ram", "offset": "0x0000" } },
+    { "name": "z80-ram espelho alto", "cpu_address": "0xA08000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "z80-ram", "offset": "0x0000" } },
+    { "name": "z80-ram espelho alto meio", "cpu_address": "0xA0A123", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "z80-ram", "offset": "0x0123" } },
+    { "name": "io inicio", "cpu_address": "0xA10000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "io", "offset": "0x0000" } },
+    { "name": "io registro especifico", "cpu_address": "0xA10003", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "io", "offset": "0x0003" } },
+    { "name": "io fim da sub-janela baixa", "cpu_address": "0xA12FFF", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "io", "offset": "0x2FFF" } },
+    { "name": "io acima do TIME", "cpu_address": "0xA14000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "io", "offset": "0x4000" } },
+    { "name": "cart-io inicio (TIME)", "cpu_address": "0xA13000", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "cart-io", "offset": "0x00" } },
+    { "name": "cart-io registrador 0xF1", "cpu_address": "0xA130F1", "mapper_state": { "rom_size": 524288 }, "expect": { "region": "cart-io", "offset": "0xF1" } }
+  ],
+  "translate_negatives": [
+    { "name": "open bus 0x400000", "cpu_address": "0x400000", "mapper_state": { "rom_size": 524288 }, "expect_error": { "code": "unsupported" } },
+    { "name": "open bus fim 0x7FFFFF", "cpu_address": "0x7FFFFF", "mapper_state": { "rom_size": 524288 }, "expect_error": { "code": "unsupported" } },
+    { "name": "VDP fora do escopo", "cpu_address": "0xC00000", "mapper_state": { "rom_size": 524288 }, "expect_error": { "code": "unsupported" } },
+    { "name": "sound bus YM2612", "cpu_address": "0xA04000", "mapper_state": { "rom_size": 524288 }, "expect_error": { "code": "unsupported" } },
+    { "name": "sound bus misc", "cpu_address": "0xA0C000", "mapper_state": { "rom_size": 524288 }, "expect_error": { "code": "unsupported" } },
+    { "name": "acima do barramento 24 bits", "cpu_address": "0x1000000", "mapper_state": { "rom_size": 524288 }, "expect_error": { "code": "out-of-range" } },
+    { "name": "mapper_state ausente", "cpu_address": "0x000000", "mapper_state": null, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size sem potencia de 2 (caso corpus 531577)", "cpu_address": "0x000000", "mapper_state": { "rom_size": 531577 }, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size acima de 4MB exige mapper", "cpu_address": "0x000000", "mapper_state": { "rom_size": 8388608 }, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size abaixo do minimo 64KB", "cpu_address": "0x000000", "mapper_state": { "rom_size": 32768 }, "expect_error": { "code": "unsupported" } }
+  ],
+  "invert_cases": [
+    {
+      "name": "offset 0 em ROM 512KB tem 8 aliases",
+      "rom_offset": "0x000000",
+      "mapper_state": { "rom_size": 524288 },
+      "expect_aliases": ["0x000000", "0x080000", "0x100000", "0x180000", "0x200000", "0x280000", "0x300000", "0x380000"]
+    },
+    {
+      "name": "ultimo offset em ROM 512KB",
+      "rom_offset": "0x07FFFF",
+      "mapper_state": { "rom_size": 524288 },
+      "expect_aliases": ["0x07FFFF", "0x0FFFFF", "0x17FFFF", "0x1FFFFF", "0x27FFFF", "0x2FFFFF", "0x37FFFF", "0x3FFFFF"]
+    },
+    {
+      "name": "offset em ROM 256KB tem 16 aliases",
+      "rom_offset": "0x000123",
+      "mapper_state": { "rom_size": 262144 },
+      "expect_aliases": ["0x000123", "0x040123", "0x080123", "0x0C0123", "0x100123", "0x140123", "0x180123", "0x1C0123", "0x200123", "0x240123", "0x280123", "0x2C0123", "0x300123", "0x340123", "0x380123", "0x3C0123"]
+    },
+    {
+      "name": "offset alem do fim da ROM nao tem alias",
+      "rom_offset": "0x080000",
+      "mapper_state": { "rom_size": 524288 },
+      "expect_aliases": []
+    },
+    {
+      "name": "invert exige mapper_state",
+      "rom_offset": "0x000000",
+      "mapper_state": null,
+      "expect_error": { "code": "unsupported" }
+    }
+  ],
+  "read_cases": [
+    {
+      "name": "leitura simples no inicio",
+      "cpu_address": "0x000000",
+      "length": 8,
+      "mapper_state": { "rom_size": 524288 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x000000", "bytes_hex": "089a1d21d82bdb1d" }
+      ]
+    },
+    {
+      "name": "cruzamento de espelho gera dois segmentos com offsets distintos",
+      "cpu_address": "0x07FFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 524288 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x7FFF8", "bytes_hex": "541dbf4125d1484a" },
+        { "region": "rom", "offset": "0x00000", "bytes_hex": "089a1d21d82bdb1d" }
+      ]
+    },
+    {
+      "name": "leitura na ultima posicao valida cruza para area nao suportada",
+      "cpu_address": "0x3FFFFF",
+      "length": 2,
+      "mapper_state": { "rom_size": 524288 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x7FFFF", "bytes_hex": "4a" },
+        { "error": { "code": "unsupported" } }
+      ]
+    },
+    {
+      "name": "regiao nao-ROM classifica offset sem backing ROM",
+      "cpu_address": "0xFFFFFE",
+      "length": 2,
+      "mapper_state": { "rom_size": 524288 },
+      "expect_segments": [
+        { "region": "work-ram", "offset": "0xFFFE", "error": { "code": "unsupported", "detail_contains": "backing" } }
+      ]
+    },
+    {
+      "name": "leitura alem do barramento 24 bits e rejeitada antes de alocar",
+      "cpu_address": "0x1000000",
+      "length": 1,
+      "mapper_state": { "rom_size": 524288 },
+      "expect_error": { "code": "out-of-range" }
+    },
+    {
+      "name": "length zero e rejeitado",
+      "cpu_address": "0x000000",
+      "length": 0,
+      "mapper_state": { "rom_size": 524288 },
+      "expect_error": { "code": "out-of-range" }
+    },
+    {
+      "name": "rom menor que rom_size declarado: trecho faltante e out-of-range, sem clamp",
+      "cpu_address": "0x000000",
+      "length": 524288,
+      "mapper_state": { "rom_size": 524288 },
+      "rom_short_by": 8,
+      "expect_segments": [
+        { "region": "rom", "offset": "0x000000", "bytes_len": 524280 },
+        { "error": { "code": "out-of-range" } }
+      ]
+    }
+  ]
+}
