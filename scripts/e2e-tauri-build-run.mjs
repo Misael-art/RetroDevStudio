@@ -8774,7 +8774,8 @@ async function runRexLz4wEffectScenario(sessionId) {
   const canvasRect = await executeScript(sessionId, `
     const canvas = document.querySelector('${panel} [data-testid="rex-resource-canvas"]');
     const rect = canvas.getBoundingClientRect();
-    return { x: rect.left + rect.width * 0.25, y: rect.top + rect.height * 0.25, w: rect.width, h: rect.height };`);
+    // Ultimo tile (canto inferior direito): regiao com espaco comprovado.
+    return { x: rect.left + rect.width - 2, y: rect.top + rect.height - 2, w: rect.width, h: rect.height };`);
   await executeScript(sessionId, `
     const canvas = document.querySelector('${panel} [data-testid="rex-resource-canvas"]');
     const options = { bubbles: true, clientX: ${canvasRect.x}, clientY: ${canvasRect.y} };
@@ -8784,7 +8785,10 @@ async function runRexLz4wEffectScenario(sessionId) {
   const resultText = await waitFor(
     async () => {
       const text = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-result"]')?.textContent ?? ''`)) || "";
-      return text.includes("applied") ? text : false;
+      if (text.includes("applied")) return text;
+      const errorText = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-error"]')?.textContent ?? ''`)) || "";
+      if (errorText) fail(`transação recusou a edição: ${errorText}`);
+      return false;
     },
     30000,
     "transação não aplicou a edição.",
