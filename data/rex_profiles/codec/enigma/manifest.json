@@ -21,7 +21,7 @@
     "cross-oracle-parity": "blocked",
     "product-decode-vs-reference": "blocked",
     "product-encode-vs-reference": "blocked",
-    "structured-negatives": "blocked",
+    "structured-negatives": "fixture",
     "resource-identification-in-rom": "blocked",
     "reinsertion": "blocked"
   },
@@ -30,6 +30,9 @@
     "FORA DO DOMINIO o oraculo e silencioso e PERIGOSO: entrada de comprimento IMPAR descarta o ultimo byte sem aviso (medido: 5->4); stream truncada e ACEITA com rc=0 produzindo saida maior que a truncada-possivel (medido: 40 bytes de um stream de array produzem 62) — o decoder classico continua alem do fim legitimo por refill de buffer. Erros estruturados do contrato v1 (truncated/excessive-output/work-limit) sao obrigacoes do PRODUTO, sem espelho no oraculo.",
     "ORACULO UNICO nesta rodada (mdcomp HEAD); driver 68k classico de Sonic (enigma_decoder) nao exercitado como 2o oraculo; paridade blocked.",
     "Recompressao nao promete bytes identicos ao parser do enicmp; contrato e decodificacao exata nos dois sentidos produto<->oraculo.",
-    "Sem prova em recurso real de ROM: support=fixture-only."
+    "Sem prova em recurso real de ROM: support=fixture-only.",
+    "Negativos negative-spec (e01..e07) derivados do contrato/dominio com sondas deterministicas re-asseridas no build: impar 5->4 (cauda descartada em silencio), truncado -1 -> 4098 != 4096 sem sinalizar, declaracao inflada em [4..5] IGNORADA pelo oraculo (saida byte-identica ao pleno), modo 0x02 inexistente decodificado identico ao pleno, stream vazia e garbage 0xFF aceitos com 0 bytes.",
+    "Dominio explicito: plain deve ter comprimento PAR (array de int16 BE). Entrada impar e erro estruturado do produto (input-not-in-domain); a referencia truncando para o par anterior e o defeito que a diretriz do integrador proibiu replicar.",
+    "Semantica completa dos cabeçalhos Enigma (campos apos o byte de modo) NAO foi fixada nesta fase — apenas o observado: 0x09/0x08 bits em streams publicadas; declaracoes de comprimento sao entrada nao-confiavel (sonda e03). Especificacao final cabe a fase 3."
   ]
 }

@@ -21,7 +21,7 @@
     "cross-oracle-parity": "blocked",
     "product-decode-vs-reference": "blocked",
     "product-encode-vs-reference": "blocked",
-    "structured-negatives": "blocked",
+    "structured-negatives": "fixture",
     "compressed-pointer-mode": "blocked",
     "resource-identification-in-rom": "blocked",
     "reinsertion": "blocked"
@@ -32,6 +32,9 @@
     "FORA DO DOMINIO o oraculo e silencioso: entrada nao-multiplo-de-32 e aceita no encode e o decode devolve o padding ate o multiplo (medido: 6->32 e 100->128). O produto deve tratar entrada fora do dominio como erro estruturado ('overflow'/'invalid' declarado no contrato), NAO replicar o padding silencioso.",
     "O decode do oraculo usa work-buffer com escrita direta em arquivo; streams arbitrarias podem produzir lixo deterministico SEM erro (ver ORACLE-INVENTORY limitacao 1: loop sem limite de trabalho em entrada nao-Nemesis — todo teste exige timeout).",
     "Modo de ponteiro comprimido do CLI nemcmp ('=[pointer]', registro de fim de stream com -i) nao coberto — capacidade separada blocked.",
-    "Sem prova em recurso real de ROM: support=fixture-only."
+    "Sem prova em recurso real de ROM: support=fixture-only.",
+    "Negativos negative-spec (n01..n07) derivados do contrato/dominio, cada um com SONDA DETERMINISTICA no build que reproduz o numero medido (padding 6->32 e 100->128; garbage 64B -> exatamente 1048544B; truncado -> tamanho pleno com conteudo divergente a partir do byte 65508; prefixo de 8B -> oraculo morre no limite do sandbox rc=137). O oraculo NUNCA e verificador do spec.",
+    "Domino explicito do formato: plain deve ser multiplo de 32 bytes E > 0. Fora dai o produto DEVE dar erro estruturado (input-not-in-domain), nunca padrinhar. O encode de plain vazio SEGFAULTA o oraculo (rc=139) — perigo registrado.",
+    "Truncamento NAO e detectavel por metadados no oraculo: stream cortada de 1 byte decodifica com o MESMO tamanho da saida plena (65536) e conte divergente so no rabo; qualquer decoder que so valida tamanho aceita lixo — o produto precisa de parser real."
   ]
 }
