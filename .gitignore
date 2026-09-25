@@ -87,3 +87,7 @@ vitest-output.txt
 
 # --- Agent tooling ---
 .serena/
+
+# --- Python fixtures tooling ---
+__pycache__/
+*.pyc
