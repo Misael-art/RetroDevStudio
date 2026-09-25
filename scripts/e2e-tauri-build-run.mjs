@@ -16,7 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   UI_LAYOUT_ORACLE_RESOLUTIONS,
@@ -8867,16 +8867,32 @@ async function runRexLz4wEffectScenario(sessionId) {
       const run = await invokeCore("emulator_run_frames", { frames });
       if (!run?.ok) fail(`emulator_run_frames falhou (${label}): ${JSON.stringify(run)}`);
     };
-    const snapshot = async () => {
+    const snapshot = async (dumpName) => {
       const observation = await invokeCore("emulator_observe", {});
       if (!observation?.ok || !observation.value?.framebuffer_rgba) {
         fail(`framebuffer do core indisponível (${label}): ${JSON.stringify(observation?.error ?? observation)}`);
+      }
+      if (dumpName) {
+        const rgba = Buffer.from(observation.value.framebuffer_rgba);
+        const width = observation.value.framebuffer_width;
+        const height = observation.value.framebuffer_height;
+        const ppm = Buffer.alloc(width * height * 3);
+        for (let p = 0; p < width * height; p++) {
+          ppm[p * 3] = rgba[p * 4];
+          ppm[p * 3 + 1] = rgba[p * 4 + 1];
+          ppm[p * 3 + 2] = rgba[p * 4 + 2];
+        }
+        const ppmPath = path.join(validationDir, `rex-frame-${label}-${dumpName}.ppm`);
+        await writeFile(ppmPath, Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`), ppm]));
+        await new Promise((resolve) => execFile("convert", [ppmPath, ppmPath.replace(".ppm", ".png")], () => resolve()));
       }
       return Buffer.from(observation.value.framebuffer_rgba);
     };
     const samples = [];
     await runFrames(180);
-    samples.push(await snapshot());
+    samples.push(await snapshot("boot"));
+    await runFrames(420);
+    samples.push(await snapshot("pos-start"));
     await sendInput({ ...neutralInput, start: true });
     await runFrames(3);
     await sendInput(neutralInput);
@@ -8891,7 +8907,7 @@ async function runRexLz4wEffectScenario(sessionId) {
       await sendInput({ ...neutralInput, right: true, a: true });
       for (let step = 0; step < 4; step++) {
         await runFrames(15);
-        samples.push(await snapshot());
+        samples.push(await snapshot(round === 0 && step === 2 ? "ataque-a" : undefined));
       }
       await sendInput({ ...neutralInput, right: true, b: true });
       for (let step = 0; step < 4; step++) {
