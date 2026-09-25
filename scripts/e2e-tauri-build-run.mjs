@@ -473,6 +473,7 @@ function parseArgs(argv) {
           "inspection-sprite-secondary",
           "inspection-sonic",
           "inspection-sonic-tiles",
+          "rex-lz4w-effect",
           "inspection-preview-unavailable",
           "logic-recovery",
           "logic-recovery-branch",
@@ -8694,8 +8695,180 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
   console.log("OK: Desktop Tauri logic-recovery E2E passou com recuperação, grafo, patch e efeito observado.");
 }
 
-async function runBranchLogicRecoveryScenario(sessionId, projectDir) {
-  const nodeRomPath = process.env.RDS_LOGIC_BRANCH_NODE_ROM ?? "";
+// Cadeia REX LZ4W pela interface: prévia, no-op, edição via transação,
+// patch re-aplicado à base com hash exato e efeito observado no core.
+async function runRexLz4wEffectScenario(sessionId) {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const expectedSha = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+  const targetOffsetHex = "8ff8e";
+  const romPath = process.env.RDS_REX_RESOURCE_ROM ?? process.env.RDS_INSPECTION_ROM ?? "";
+  if (!romPath || !(await pathExists(romPath))) {
+    fail("RDS_REX_RESOURCE_ROM deve apontar para a ROM BYOR congelada existente.");
+  }
+  const romBytes = await readFile(romPath);
+  const romSha = createHash("sha256").update(romBytes).digest("hex");
+  if (romSha !== expectedSha) fail(`ROM inesperada: ${romSha}`);
+
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+  const panel = "[data-testid='rex-resource-panel']";
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid='rex-resource-rom-input']'));`),
+    15000,
+    "painel de recursos comprimidos não abriu.",
+    250
+  );
+  await executeScript(sessionId, `
+    const input = document.querySelector('${panel} input[type='text']');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, ${JSON.stringify(romPath)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;`);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid='rex-resource-select'] option[value='${targetOffsetHex}']'));`),
+    30000,
+    "recursos verificados não apareceram (verificação estrutural falhou).",
+    250
+  );
+  await executeScript(sessionId, `
+    const select = document.querySelector('${panel} [data-testid='rex-resource-select']');
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+    setter.call(select, '${targetOffsetHex}');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;`);
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid='rex-resource-canvas']'));`),
+    30000,
+    "prévia chunky não apareceu.",
+    250
+  );
+  const previewPixelsSha = await executeScript(
+    sessionId,
+    `return document.querySelector('${panel} [data-testid='rex-resource-pixels-sha']').textContent;`
+  );
+  if (typeof previewPixelsSha !== "string" || previewPixelsSha.length < 8) fail("prévia sem hash de pixels.");
+
+  // NO-OP: aplicar com zero edições pela mesma transação.
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  await waitFor(
+    async () => ((await executeScript(sessionId, `return document.querySelector('${panel} [data-testid='rex-resource-result']')?.textContent ?? ''`)) || "").includes("noop"),
+    30000,
+    "transação não reportou no-op com zero edições.",
+    250
+  );
+
+  // EDIÇÃO: clique no canvas pinta um pixel; aplicar pela transação.
+  const canvasRect = await executeScript(sessionId, `
+    const canvas = document.querySelector('${panel} [data-testid='rex-resource-canvas']');
+    const rect = canvas.getBoundingClientRect();
+    return { x: rect.left + rect.width * 0.25, y: rect.top + rect.height * 0.25, w: rect.width, h: rect.height };`);
+  await executeScript(sessionId, `
+    const canvas = document.querySelector('${panel} [data-testid='rex-resource-canvas']');
+    const options = { bubbles: true, clientX: ${canvasRect.x}, clientY: ${canvasRect.y} };
+    canvas.dispatchEvent(new MouseEvent('click', options));
+    return true;`);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const resultText = await waitFor(
+    async () => {
+      const text = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid='rex-resource-result']')?.textContent ?? ''`)) || "";
+      return text.includes("applied") ? text : false;
+    },
+    30000,
+    "transação não aplicou a edição.",
+    250
+  );
+  const modifiedMatch = resultText.match(/cópia: (\S+)/);
+  const patchMatch = resultText.match(/patch: (\S+)/);
+  if (!modifiedMatch || !patchMatch) fail(`proveniência ausente no resultado: ${resultText.slice(0, 200)}`);
+  const modifiedPath = modifiedMatch[1];
+  const patchPath = patchMatch[1];
+  const modifiedSha = createHash("sha256").update(await readFile(modifiedPath)).digest("hex");
+  const patchSha = createHash("sha256").update(await readFile(patchPath)).digest("hex");
+  const preservedMatch = resultText.match(/preservados (\d+)/);
+  if (!preservedMatch || Number(preservedMatch[1]) < 1) fail("contagem de recursos preservados ausente.");
+
+  // Patch re-aplicado à cópia da base: hash exato da cópia modificada.
+  const baseCopy = path.join(validationDir, "rex-lz4w-base-copy.bin");
+  const patchApplied = path.join(validationDir, "rex-lz4w-patch-applied.bin");
+  await writeFile(baseCopy, romBytes);
+  const applyResult = await executeScript(sessionId, `
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    return await invoke('patch_apply_bps', { romPath: ${JSON.stringify(baseCopy)}, patchPath: ${JSON.stringify(patchPath)}, outputPath: ${JSON.stringify(patchApplied)} });`);
+  if (!applyResult || applyResult.ok !== true) fail(`patch_apply_bps falhou: ${JSON.stringify(applyResult)}`);
+  const appliedSha = createHash("sha256").update(await readFile(patchApplied)).digest("hex");
+  if (appliedSha !== modifiedSha) fail(`patch re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
+
+  // ORIGINAL vs MODIFICADO no core, mesma linha de input; efeito específico.
+  const captureTimeline = async (label) => {
+    await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: false }]);
+    await pause(1200);
+    const frames = [];
+    const script = async () => {
+      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+      if (frame && frame.pixels) frames.push(frame.pixels);
+    };
+    await script();
+    await sendNativeGameKey(sessionId, "Enter", "keyDown", `${label} start`);
+    await pause(200);
+    await sendNativeGameKey(sessionId, "Enter", "keyUp", `${label} start soltar`);
+    await pause(1500);
+    await script();
+    await sendNativeGameKey(sessionId, "KeyA", "keyDown", `${label} ataque A`);
+    await pause(700);
+    await script();
+    await sendNativeGameKey(sessionId, "KeyA", "keyUp", `${label} ataque A soltar`);
+    await sendNativeGameKey(sessionId, "KeyS", "keyDown", `${label} ataque B`);
+    await pause(700);
+    await script();
+    await sendNativeGameKey(sessionId, "KeyS", "keyUp", `${label} ataque B soltar`);
+    await pause(600);
+    await script();
+    return frames;
+  };
+  const originalFrames = await captureTimeline("original");
+  const modifiedFrames = await captureTimeline("modificado");
+  if (originalFrames.length !== modifiedFrames.length || originalFrames.length < 2) {
+    fail(`timelines desiguais: ${originalFrames.length} vs ${modifiedFrames.length}`);
+  }
+  let diffFrame = -1;
+  let diffPixels = 0;
+  let minDiffX = 1e9, minDiffY = 1e9, maxDiffX = -1, maxDiffY = -1;
+  for (let i = 0; i < originalFrames.length; i++) {
+    const a = originalFrames[i];
+    const b = modifiedFrames[i];
+    if (a.length !== b.length) fail("framebuffers de tamanhos diferentes");
+    let count = 0;
+    let minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
+    for (let p = 0; p < a.length; p += 4) {
+      if (a[p] !== b[p] || a[p + 1] !== b[p + 1] || a[p + 2] !== b[p + 2]) {
+        count++;
+        const pixelIndex = p / 4;
+        const x = pixelIndex % 320;
+        const y = Math.floor(pixelIndex / 320);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+    if (count > 0) {
+      diffFrame = i; diffPixels = count;
+      minDiffX = minX; minDiffY = minY; maxDiffX = maxX; maxDiffY = maxY;
+      break;
+    }
+  }
+  if (diffFrame < 0) fail("nenhum frame difere entre original e modificado: recurso não observado em jogo.");
+  const boxW = maxDiffX - minDiffX + 1;
+  const boxH = maxDiffY - minDiffY + 1;
+  if (diffPixels > 256 || boxW > 64 || boxH > 64) {
+    fail(`efeito não é específico: ${diffPixels} pixels em caixa ${boxW}x${boxH} (esperado região pequena do recurso).`);
+  }
+  console.log(`[rex-lz4w-effect] ${JSON.stringify({
+    romSha, targetOffset: `0x${targetOffsetHex}`, previewPixelsSha, modifiedSha, patchSha,
+    preserved: Number(preservedMatch[1]), diffFrame, diffPixels, box: { minDiffX, minDiffY, boxW, boxH },
+  })}`);
+}
+
+async function runBranchLogicRecoveryScenario(sessionId, projectDir) {  const nodeRomPath = process.env.RDS_LOGIC_BRANCH_NODE_ROM ?? "";
   const routineRomPath = process.env.RDS_LOGIC_BRANCH_ROUTINE_ROM ?? "";
   const offset = Number.parseInt(process.env.RDS_LOGIC_BRANCH_OFFSET ?? "", 0);
   const routineSignature = Buffer.from("064000010C4000056C0A33FC0000E0FFFF004E7533FC0001E0FFFF004E75", "hex");
@@ -9591,6 +9764,12 @@ async function main() {
     if (options.scenario === "logic-recovery-branch") {
       currentE2eRunContext.appPath = options.app;
       await runBranchLogicRecoveryScenario(sessionId, options.project);
+      return;
+    }
+
+    if (options.scenario === "rex-lz4w-effect") {
+      currentE2eRunContext.appPath = options.app;
+      await runRexLz4wEffectScenario(sessionId);
       return;
     }
 
