@@ -138,7 +138,7 @@ repositorio — só hashes, enderezos e hashes de fragmentos.
   banner en 00/40/80/C0.
 - **SSF2 — estado de rexistradores + troca de banco verificable** (item 3):
   escrita `0x12` en `0xa1300a` → `banks{5:18}` → base
-  `(0x12<<19)&(8MB−1)=0x1000000` → probe `0x292345` → offset `0x112345`
+  `(0x12<<19)&(8MB−1)` = `0x900000 & 0x7FFFFF` = `0x100000` → probe `0x292345` → offset `0x112345`
   (perfil ≡ motor GPGX ≡ bytes reais do ficheiro, sha do fragmento
   `f38455ab…17fba33`, `bytes_igual_ficheiro: true`).
 - **ExHiROM fixture-only** (item 4): os únicos membros >4MB con sinal de

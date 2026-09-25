@@ -284,8 +284,9 @@ const results = {};
   const eng0 = ssf2Engine(PAD, {});
   const banner = ascii(image, 0x100, 16);
   // Troca de banco VERIFICABLE co ficheiro real: escribir 0x12 no rexistro da
-  // xanela 5 (0xA1300A) -> base = (0x12<<19) & (8MB-1) = 0x1200000... lemos
-  // bytes da xanela 5 e comparamos coas bytes do ficheiro na base esperada.
+  // xanela 5 (0xA1300A) -> base = (0x12<<19) & (8MB-1) = 0x900000 & 0x7FFFFF
+  // = 0x100000; lemos bytes da xanela 5 (probe 0x292345 -> offset 0x100000+
+  // 0x12345 = 0x112345) e comparamos coas bytes do ficheiro na base esperada.
   const w = 5;
   const data = 0x12;
   const switched = mdSsf2.writeMapperRegister(0xa13000 | (w << 1), data, state);
