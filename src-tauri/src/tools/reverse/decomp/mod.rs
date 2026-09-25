@@ -21,6 +21,7 @@ pub mod holdout;
 pub mod inspection;
 pub mod logic_recovery;
 pub mod object_diff;
+pub mod rex_codecs;
 pub mod rom_library;
 pub mod sprite_composition;
 pub mod symbols;
