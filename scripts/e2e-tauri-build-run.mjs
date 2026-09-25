@@ -8833,34 +8833,79 @@ async function runRexLz4wEffectScenario(sessionId) {
     "Game View não abriu para as timelines REX.",
     250
   );
-  const captureTimeline = async (label) => {
-    await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: false }]);
-    await pause(1200);
-    const frames = [];
-    const script = async () => {
-      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
-      if (frame && frame.pixels) frames.push(frame.pixels);
-    };
-    await script();
-    await sendNativeGameKey(sessionId, "Enter", "keyDown", `${label} start`);
-    await pause(200);
-    await sendNativeGameKey(sessionId, "Enter", "keyUp", `${label} start soltar`);
-    await pause(1500);
-    await script();
-    await sendNativeGameKey(sessionId, "KeyC", "keyDown", `${label} ataque A`);
-    await pause(700);
-    await script();
-    await sendNativeGameKey(sessionId, "KeyC", "keyUp", `${label} ataque A soltar`);
-    await sendNativeGameKey(sessionId, "KeyX", "keyDown", `${label} ataque B`);
-    await pause(700);
-    await script();
-    await sendNativeGameKey(sessionId, "KeyX", "keyUp", `${label} ataque B soltar`);
-    await pause(600);
-    await script();
-    return frames;
+  const invokeCore = async (command, args = {}) => executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponivel" }); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [command, args]
+  );
+  const neutralInput = {
+    b: false, y: false, select: false, start: false,
+    up: false, down: false, left: false, right: false,
+    a: false, x: false, l: false, r: false,
   };
-  const originalFrames = await captureTimeline("original");
-  const modifiedFrames = await captureTimeline("modificado");
+  // Timeline determinística: boot 180 frames -> Start -> caminhada -> dois
+  // golpes (poses renderizam os frames LZ4W do lutador).
+  const captureTimeline = async (timelineRomPath, label) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [timelineRomPath, { startPaused: true }]);
+    if (loaded !== true) fail(`Emulador não confirmou carga da ROM (${label}).`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `${label}: ROM não ficou pausada pronta.`,
+      100
+    );
+    await closeVisibleConsoleDrawer(sessionId, label);
+    const epoch = await invokeCore("emulator_get_core_epoch");
+    if (!epoch?.ok || !Number.isInteger(epoch.value)) fail(`Época do core indisponível (${label}).`);
+    const sendInput = async (joypad) => {
+      const ack = await invokeCore("emulator_send_input", { joypad, sessionEpoch: epoch.value });
+      if (!ack?.ok || !ack.value?.ok) fail(`Input não confirmado (${label}): ${JSON.stringify(ack)}`);
+    };
+    const runFrames = async (frames) => {
+      const run = await invokeCore("emulator_run_frames", { frames });
+      if (!run?.ok) fail(`emulator_run_frames falhou (${label}): ${JSON.stringify(run)}`);
+    };
+    const snapshot = async () => {
+      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+      if (!frame || !frame.rgba) fail(`framebuffer indisponível (${label}).`);
+      return Buffer.from(frame.rgba);
+    };
+    const samples = [];
+    await runFrames(180);
+    samples.push(await snapshot());
+    await sendInput({ ...neutralInput, start: true });
+    await runFrames(3);
+    await sendInput(neutralInput);
+    await runFrames(240);
+    samples.push(await snapshot());
+    await sendInput({ ...neutralInput, right: true });
+    await runFrames(180);
+    samples.push(await snapshot());
+    await sendInput({ ...neutralInput, right: true, a: true });
+    await runFrames(30);
+    samples.push(await snapshot());
+    await runFrames(30);
+    samples.push(await snapshot());
+    await sendInput({ ...neutralInput, right: true, b: true });
+    await runFrames(30);
+    samples.push(await snapshot());
+    await runFrames(30);
+    samples.push(await snapshot());
+    await sendInput(neutralInput);
+    await runFrames(60);
+    samples.push(await snapshot());
+    return samples;
+  };
+  const originalFrames = await captureTimeline(romPath, "original");
+  const modifiedFrames = await captureTimeline(patchApplied, "modificado");
   if (originalFrames.length !== modifiedFrames.length || originalFrames.length < 2) {
     fail(`timelines desiguais: ${originalFrames.length} vs ${modifiedFrames.length}`);
   }
@@ -8871,10 +8916,11 @@ async function runRexLz4wEffectScenario(sessionId) {
     const a = originalFrames[i];
     const b = modifiedFrames[i];
     if (a.length !== b.length) fail("framebuffers de tamanhos diferentes");
+    if (a.equals(b)) continue;
     let count = 0;
     let minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
     for (let p = 0; p < a.length; p += 4) {
-      if (a[p] !== b[p] || a[p + 1] !== b[p + 1] || a[p + 2] !== b[p + 2]) {
+      if (!a.equals(b) && (a[p] !== b[p] || a[p + 1] !== b[p + 1] || a[p + 2] !== b[p + 2])) {
         count++;
         const pixelIndex = p / 4;
         const x = pixelIndex % 320;
