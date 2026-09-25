@@ -34,8 +34,8 @@ em região + offset dentro da ROM normalizada, e a inversão (offset → aliases
 | b ∈ $7E, $7F | `wram` | `(b & 1) * 0x10000 + a` & 0xFFFF (WRAM 64KB) |
 | b ∈ $00-$3D ou $80-$BD, a < $2000 | `wram-mirror` | `a & 0x1FFF` (espelho do início da WRAM; s9x map_System) |
 | b ∈ $70-$7D ou $F0-$FF, a < $8000 | `sram` | `a & 0x7FFF` (janela declarada; tamanho real é propriedade do save, não deste perfil) |
-| b ∈ $00-$3D ou $80-$BD, $2000 ≤ a < $4000, fora do espelho WRAM | `io` | `a` (registradores PPU/APU/CPU/DMA classificados, não decodificados) |
-| demais faixas com a < $8000 | `unsupported` | open bus / vetores / reservado conforme janela |
+| b ∈ $00-$3D ou $80-$BD, $2000 ≤ a < $8000, fora do espelho WRAM | `io` | `a` (janelas PPU/APU $21xx, joypad $40xx, CPU/DMA $42xx-$43xx, timer $45xx, SMP $5xxx, DSP $6xxx: classificadas, nao decodificadas) |
+| demais faixas com a < $8000 | `unsupported` | open bus / reservado conforme janela |
 
 - Precedência na ordem da tabela (espelho WRAM vence `io`); janela ROM nunca
   cobre a < $8000 (ver ambiguidade abaixo).

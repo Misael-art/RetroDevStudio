@@ -32,11 +32,11 @@ export const BLOCK_SIZE = 0x10000; // bloco de assinatura = 64KB
 // Preenche `rom` com um stream pseudo-aleatorio independente por bloco de 64KB:
 // blocos distintos nunca compartilham o stream, logo um byte errado de banco
 // ou um offset errado produz valores diferentes com probabilidade esmagadora.
-export function fillDistinctBlocks(rom, blockCount, seedBase = 0x4d444d44) {
+export function fillDistinctBlocks(rom, blockCount, seedBase = 0x4d444d44, blockSize = BLOCK_SIZE) {
   for (let b = 0; b < blockCount; b += 1) {
     const next = xorshift32((seedBase ^ Math.imul(b + 1, 0x9e3779b9)) >>> 0);
-    const start = b * BLOCK_SIZE;
-    for (let i = 0; i < BLOCK_SIZE; i += 1) {
+    const start = b * blockSize;
+    for (let i = 0; i < blockSize; i += 1) {
       rom[start + i] = next() >>> 24;
     }
   }
@@ -53,6 +53,27 @@ export function buildMdSsf2Fixture() {
   const romSize = 0x400000; // 4MB: 8 janelas de 512KB no estado inicial identidade
   const rom = new Uint8Array(romSize);
   fillDistinctBlocks(rom, romSize / BLOCK_SIZE, 0x5546322d); // seed base distinta do perfil linear
+  return rom;
+}
+
+export function buildSnesLoromFixture() {
+  const romSize = 0x100000; // 1MB: 32 paginas de 32KB (pagina = bloco de assinatura)
+  const rom = new Uint8Array(romSize);
+  fillDistinctBlocks(rom, romSize / 0x8000, 0x4c4f524d, 0x8000);
+  return rom;
+}
+
+export function buildSnesHiromFixture() {
+  const romSize = 0x100000; // 1MB: mapa linear por banco de 64KB
+  const rom = new Uint8Array(romSize);
+  fillDistinctBlocks(rom, romSize / BLOCK_SIZE, 0x4849524d);
+  return rom;
+}
+
+export function buildSnesExhiromFixture() {
+  const romSize = 0x800000; // 8MB: duas areas de 4MB (base 0x400000 na segunda)
+  const rom = new Uint8Array(romSize);
+  fillDistinctBlocks(rom, romSize / BLOCK_SIZE, 0x45584849);
   return rom;
 }
 
@@ -73,6 +94,9 @@ function main() {
   const builders = {
     'md-linear': buildMdLinearFixture,
     'md-ssf2': buildMdSsf2Fixture,
+    'snes-lorom': buildSnesLoromFixture,
+    'snes-hirom': buildSnesHiromFixture,
+    'snes-exhirom': buildSnesExhiromFixture,
   };
   const builder = builders[profile];
   if (!builder) {
