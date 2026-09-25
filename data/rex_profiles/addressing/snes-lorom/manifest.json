@@ -1,0 +1,34 @@
+{
+  "contract_version": 1,
+  "id": "snes-lorom",
+  "kind": "addressing",
+  "version": 1,
+  "platform": "snes",
+  "variant": "LoROM: ROM na metade alta ($8000-$FFFF) dos bancos 00-7D/80-FF com paginas de 32KB e alias A15 (banco&0x7F); WRAM 7E/7F + espelhos nas metades baixas 00-3D/80-BD; I-O $2000-$7FFF nesses bancos; SRAM 70-7D/F0-FF; sem registradores de mapper",
+  "support": "fixture-only",
+  "source": {
+    "name": "bsnes resource/system/boards.bml + snes9x memmap.cpp (map_lorom, Map_LoROMMap) + SNESdev wiki Memory map (A15 desconectado)",
+    "url": "https://github.com/byuu/bsnes (boards.bml), https://github.com/Snes9x/snes9x (memmap.cpp), https://www.snesdev.org",
+    "commit": "bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4; snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a",
+    "license": "bsnes: GPL-3.0; Snes9x: License nao comercial; SNESdev wiki: CC BY-SA. Todas consultadas apenas como especificacao; nenhuma linha copiada",
+    "license_url": "https://github.com/byuu/bsnes/blob/master/LICENSE.txt ; https://github.com/Snes9x/snes9x/blob/master/LICENSE"
+  },
+  "capabilities": {
+    "specification": "fixture",
+    "fixture": "fixture",
+    "translate": "fixture",
+    "invert": "fixture",
+    "read": "fixture",
+    "register-write-changes-translation": "not-applicable",
+    "negatives": "fixture",
+    "corpus-identification": "blocked"
+  },
+  "limits": [
+    "corpus-identification blocked: o perfil nao detecta mapa de ROM real; identificacao fica como hipotese no inventario do corpus (header/PRG size nao provem LoROM vs HiROM)",
+    "metades baixas dos bancos 40-7D/C0-FF respondem ambiguous (Discordanca A): snes9x Map_LoROMMap as mapeia como ROM, bsnes as deixa como janela aberta; com A15 desconectado o cartucho decide e nenhuma fonte primaria autoriza escolher",
+    "sem estado de mapper: rom_size e obrigatoria e unica; chaves extras sao rejeitadas (perfil nao aceita estado inventado)",
+    "exige rom_size potencia de 2 entre 32KB e 4MB; dumps fora disso (ex.: 6MB/8MB com mascaramento) pertencem a outros mapas (ExHiROM) e exigem perfil proprio",
+    "BWE/BWB, BSAT (bancos BE/BF baixos) e janelas 3E/3F baixas ficam unsupported — sem dispositivo nas fontes pinadas",
+    "leituras nunca cruzam paginas ROM: em LoROM o byte apos $xxxxFFFF e metade baixa do proximo banco; multi-pagina exige tantos segmentos do que o mapa permitiria como leitura contigua"
+  ]
+}

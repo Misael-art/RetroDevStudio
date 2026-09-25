@@ -47,7 +47,7 @@ test('translate discrimina formula errada: pagina exige (bank&0x7F)*0x8000, nao 
   assert.deepEqual(translate(0x808000, { rom_size: 0x100000 }), { region: 'rom', offset: 0x000000 });
   assert.deepEqual(translate(0x208000, { rom_size: 0x100000 }), { region: 'rom', offset: 0x000000 });
   assert.deepEqual(translate(0x008000, { rom_size: 0x100000 }), { region: 'rom', offset: 0x000000 });
-  assert.deepEqual(translate(0x018000, { rom_size: 0x100000 }), { region: 'rom', offset: 0x010000 });
+  assert.deepEqual(translate(0x018000, { rom_size: 0x100000 }), { region: 'rom', offset: 0x008000 });
 });
 
 test('translate: entradas invalidas nao causam panic', () => {
