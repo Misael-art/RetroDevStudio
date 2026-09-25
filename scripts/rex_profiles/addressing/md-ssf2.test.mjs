@@ -49,13 +49,13 @@ test('translate: negativos pinados (erro estruturado, nunca offset 0)', () => {
   }
 });
 
-test('translate discrimina estado errado: banks {1:5} vs {1:9} vs identidade divergem', () => {
+test('translate discrimina estado errado: banks {1:5} vs {1:6} vs identidade divergem', () => {
   const id = translate(0x080000, { rom_size: 0x400000 });
   const b5 = translate(0x080000, { rom_size: 0x400000, banks: { 1: 5 } });
-  const b9 = translate(0x080000, { rom_size: 0x400000, banks: { 1: 9 } });
+  const b6 = translate(0x080000, { rom_size: 0x400000, banks: { 1: 6 } });
   assert.deepEqual(id, { region: 'rom', offset: 0x080000 });
-  assert.deepEqual(b5, { region: 'rom', offset: 0x0a0000 });
-  assert.deepEqual(b9, { region: 'rom', offset: 0x120000 });
+  assert.deepEqual(b5, { region: 'rom', offset: 0x280000 });
+  assert.deepEqual(b6, { region: 'rom', offset: 0x300000 });
 });
 
 test('translate: entradas invalidas nao causam panic', () => {
@@ -108,8 +108,8 @@ test('write->read observa efeito do registrador na ROM (exigencia da rodada)', (
   assert.equal(hex(initial.segments[0].bytes), 'f4b8fb8371b6131a');
   const { state } = writeMapperRegister(0xa130f3, 5, { rom_size: 0x400000 });
   const after = read(0x080000, 8, state, rom);
-  assert.equal(hex(after.segments[0].bytes), '1f7f9e948c416f8e');
-  assert.equal(after.segments[0].offset, 0x0a0000);
+  assert.equal(hex(after.segments[0].bytes), 'cc267827f7cf2c10');
+  assert.equal(after.segments[0].offset, 0x280000);
 });
 
 test('invert: todos os aliases pinados (ordem crescente, multi-janela, lista vazia)', () => {

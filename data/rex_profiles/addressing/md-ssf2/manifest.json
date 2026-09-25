@@ -1,0 +1,33 @@
+{
+  "contract_version": 1,
+  "id": "md-ssf2",
+  "kind": "addressing",
+  "version": 1,
+  "platform": "mega-drive",
+  "variant": "mapper Super Street Fighter 2: area do cartucho 0x000000-0x3FFFFF dividida em 8 janelas de 512KB; janelas 1-7 remapeaveis por escrita de byte em 0xA13000-0xA130FF (janela 0 fixa); pagina de 512KB por valor de banco",
+  "support": "fixture-only",
+  "source": {
+    "name": "Genesis Plus GX (descricao do mapper) + Bart Trzynadlowski, ssf2.txt",
+    "url": "https://github.com/ekeeke/Genesis-Plus-GX",
+    "commit": "939ce4f045f981f89965f24780cef045cc5e52d7",
+    "license": "Genesis-Plus-GX License (estilo MAME, nao comercial); doc de Bart consultada via Wayback 20191212014333",
+    "license_url": "https://github.com/ekeeke/Genesis-Plus-GX/blob/master/LICENSE.txt"
+  },
+  "capabilities": {
+    "specification": "fixture",
+    "fixture": "fixture",
+    "translate": "fixture",
+    "invert": "fixture",
+    "read": "fixture",
+    "register-write-changes-translation": "fixture",
+    "negatives": "fixture",
+    "corpus-identification": "blocked"
+  },
+  "limits": [
+    "corpus-identification blocked: a deteccao de mapper em ROM real (title 'SUPER STREET FIGHTER2', nunca header 'SEGA SSF2'/'SEGA SSF' que indicam MegaSD/Everdrive) fica como hipotese no inventario do corpus; header nao e prova",
+    "nao modela SRAM do SSF2 (0x200000-0x20FFFF em modo WP), $A130F1 MD/WP, MegaSD enhanced SSF2, Everdrive extended SSF nem reinitializacao /VRES; quem chama reconstroi estados com writeMapperRegister",
+    "estado inicial documentado e o de reset com mapeamento default identidade (janela i => pagina i); sequencias de inicializacao reais do jogo nao sao reproduzidas",
+    "exige rom_size normalizada (potencia de 2 entre 512KB e 8MB); dump real de 5MB exige pad 0xFF registrado na evidencia",
+    "valores de banco escritos sao brutos; o mascaramento (banco<<19)&(rom_size-1) espelha ponteiros fora da ROM em vez de reportar erro (comportamento da fonte)"
+  ]
+}
