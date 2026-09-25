@@ -65,10 +65,16 @@
       "expect_aliases": ["0x008000", "0x808000"]
     },
     {
-      "name": "ultimo offset valido em 4MB: bancos 3F e BF, fim da pagina",
+      "name": "ultimo offset valido em 4MB: pagina 0x7F so e alcancavel pelo banco FF (7E/7F sao WRAM)",
       "rom_offset": "0x3FFFFF",
       "mapper_state": { "rom_size": 4194304 },
-      "expect_aliases": ["0x3FFFFF", "0xBFFFFF"]
+      "expect_aliases": ["0xFFFFFF"]
+    },
+    {
+      "name": "offset 0x12345 em 4MB (sem mascara dupla): pagina 2 so pelos bancos 02 e 82",
+      "rom_offset": "0x12345",
+      "mapper_state": { "rom_size": 4194304 },
+      "expect_aliases": ["0x02A345", "0x82A345"]
     },
     {
       "name": "offset alem do fim da ROM: lista vazia, resposta valida",
@@ -110,13 +116,13 @@
       ]
     },
     {
-      "name": "segmento por pagina: fim da pagina mascarada 32 emenda na pagina 33 mas corta em dois segmentos",
+      "name": "fim da pagina 32 (banco 20 mascarado para offset 0x07FF8): o proximo byte e 0x210000, metade baixa do banco 21 = espelho WRAM. Em LoROM leitura ROM nunca emenda em outra pagina ROM.",
       "cpu_address": "0x20FFF8",
       "length": 16,
       "mapper_state": { "rom_size": 1048576 },
       "expect_segments": [
         { "region": "rom", "offset": "0x07FF8", "bytes_hex": "fd1af8adbc1d24c0" },
-        { "region": "rom", "offset": "0x08000", "bytes_hex": "c40f02879debd45b" }
+        { "region": "wram-mirror", "offset": "0x0000", "error": { "code": "unsupported", "detail_contains": "backing" } }
       ]
     },
     {
