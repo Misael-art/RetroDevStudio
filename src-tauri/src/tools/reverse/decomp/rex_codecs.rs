@@ -587,22 +587,24 @@ mod tests {
         assert_eq!(err.code, "invalid_reference");
     }
 
-    /// Identificação estrutural na ROM congelada do corpus (HAMOOPIG):
-    /// headers TileSet (compression=2) cujos streams decodificam, com
-    /// dicionário = prefixo da ROM antes do stream, exatamente para
-    /// `numTile * 32` bytes. Requer a ROM BYOR local; ignorado sem ela.
+    /// Aceite BYOR (executar explicitamente: `cargo test --lib -- --ignored
+    /// rex_codecs`): identificação estrutural na ROM congelada do corpus
+    /// (HAMOOPIG). Exige o arquivo com SHA-256 esperado; ausência FALHA
+    /// (nunca termina como PASS silencioso).
     #[test]
+    #[ignore = "aceite BYOR: requer ROM local com SHA esperado; rodar com --ignored"]
     fn lz4w_hamoopig_corpus_streams_decode_with_header_size() {
-        use std::path::Path;
         let rom_path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
             "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin"
                 .to_string()
         });
-        if !Path::new(&rom_path).exists() {
-            eprintln!("ignorado: ROM HAMOOPIG ausente em {rom_path}");
-            return;
-        }
-        let rom = std::fs::read(&rom_path).expect("read rom");
+        let rom = std::fs::read(&rom_path)
+            .unwrap_or_else(|e| panic!("aceite BYOR exige a ROM local ({rom_path}): {e}"));
+        assert_eq!(
+            super::super::rom_library::sha256_hex(&rom),
+            "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+            "ROM inesperada: o aceite BYOR é válido apenas para o corpus congelado"
+        );
         let mut verified = 0usize;
         let mut size_mismatch = 0usize;
         for header_off in (0..rom.len().saturating_sub(8)).step_by(2) {
@@ -617,7 +619,7 @@ mod tests {
                 rom[header_off + 6],
                 rom[header_off + 7],
             ]) as usize;
-            if num_tile == 0 || num_tile > 2048 || ptr >= rom.len() || ptr % 2 != 0 {
+            if num_tile == 0 || num_tile > 2048 || ptr >= rom.len() || !ptr.is_multiple_of(2) {
                 continue;
             }
             let expected = num_tile * 32;
