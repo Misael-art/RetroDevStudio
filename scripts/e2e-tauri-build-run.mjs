@@ -8825,6 +8825,14 @@ async function runRexLz4wEffectScenario(sessionId) {
   if (appliedSha !== modifiedSha) fail(`patch re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
 
   // ORIGINAL vs MODIFICADO no core, mesma linha de input; efeito específico.
+  // Game View aberta com controles visíveis antes das timelines.
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="viewport-game-canvas"]'));`),
+    15000,
+    "Game View não abriu para as timelines REX.",
+    250
+  );
   const captureTimeline = async (label) => {
     await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: false }]);
     await pause(1200);
@@ -8839,14 +8847,14 @@ async function runRexLz4wEffectScenario(sessionId) {
     await sendNativeGameKey(sessionId, "Enter", "keyUp", `${label} start soltar`);
     await pause(1500);
     await script();
-    await sendNativeGameKey(sessionId, "KeyA", "keyDown", `${label} ataque A`);
+    await sendNativeGameKey(sessionId, "KeyC", "keyDown", `${label} ataque A`);
     await pause(700);
     await script();
-    await sendNativeGameKey(sessionId, "KeyA", "keyUp", `${label} ataque A soltar`);
-    await sendNativeGameKey(sessionId, "KeyS", "keyDown", `${label} ataque B`);
+    await sendNativeGameKey(sessionId, "KeyC", "keyUp", `${label} ataque A soltar`);
+    await sendNativeGameKey(sessionId, "KeyX", "keyDown", `${label} ataque B`);
     await pause(700);
     await script();
-    await sendNativeGameKey(sessionId, "KeyS", "keyUp", `${label} ataque B soltar`);
+    await sendNativeGameKey(sessionId, "KeyX", "keyUp", `${label} ataque B soltar`);
     await pause(600);
     await script();
     return frames;

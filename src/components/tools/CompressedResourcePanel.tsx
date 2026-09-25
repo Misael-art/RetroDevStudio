@@ -272,8 +272,12 @@ export function CompressedResourcePanel({
             )}
             {result.verified_preserved != null && <> · preservados {result.verified_preserved}</>}
           </p>
-          {result.modified_rom_path && <p className="text-[10px] text-[#6c7086]">cópia: {result.modified_rom_path}</p>}
-          {result.patch_bps_path && <p className="text-[10px] text-[#6c7086]">patch: {result.patch_bps_path}</p>}
+          {result.modified_rom_path && (
+            <p className="text-[10px] text-[#6c7086]">cópia: {result.modified_rom_path}{" "}</p>
+          )}
+          {result.patch_bps_path && (
+            <p className="text-[10px] text-[#6c7086]">patch: {result.patch_bps_path}{" "}</p>
+          )}
           <p className="text-[10px] text-[#6c7086]">{result.analyzed_scope}</p>
         </div>
       )}
