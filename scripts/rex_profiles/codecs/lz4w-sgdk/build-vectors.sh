@@ -69,4 +69,9 @@ trunc_probe "sem-final-word" "$OUT/golden/k01_literals_even.lz4" 12
   printf '%s\n' "${rows[@]-}"
 } > "$OUT/manifest.tsv"
 
+# hash agregado da fixture — receita canônica (mesma dos perfis mdcomp):
+#   sha256( sha256sum ordenado (LC_ALL=C) dos arquivos de plain/ e golden/
+#           concatenado com os bytes de manifest.tsv )
+AGG=$( { find "$OUT/plain" "$OUT/golden" -type f | LC_ALL=C sed "s|^$OUT/||" | LC_ALL=C sort | (cd "$OUT" && xargs sha256sum); cat "$OUT/manifest.tsv"; } | sha256sum | cut -d' ' -f1 )
+echo "agregado=$AGG"
 echo "OK -> $OUT"

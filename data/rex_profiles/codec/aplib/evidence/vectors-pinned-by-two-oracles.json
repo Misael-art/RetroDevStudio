@@ -1,13 +1,13 @@
 {
   "claim": "vectors-and-holdout: os 8 plains + 8 goldens de data/rex_profiles/codec/aplib/ tem resultados esperados fixados por DOIS oráculos externos independentes (apultra e APJ/SGDK) antes de qualquer implementação do produto; paridade cruzada byte-exata observada.",
   "rom": {
-    "sha256": "5db490f412ebc8aea69090a39673e7a6c2188b982c55b598df44dad7afaaab35",
+    "sha256": "91d2ee413d904683c17c7e030ab159acb2c20d20422d9cc152e309086fc814db",
     "size_bytes": 3392,
     "format": "fixture",
     "normalization": [
       {
-        "step": "hash agregado = sha256(manifest.tsv + sha256sum ordenado de todos os arquivos em plain/ e golden/); regenerável deterministicamente por scripts/rex_profiles/codecs/aplib/build-vectors.sh",
-        "sha256_after": "5db490f412ebc8aea69090a39673e7a6c2188b982c55b598df44dad7afaaab35"
+        "step": "hash agregado (receita canônica) = sha256( sha256sum ordenado LC_ALL=C dos arquivos de plain/ e golden/ + bytes de manifest.tsv ); reimpresso pela linha agregado= de scripts/rex_profiles/codecs/aplib/build-vectors.sh — regeneração 2026-09-25 byte-idêntica (fixtures e manifest inalterados; agregado antigo não era reproduzível por receita documentada)",
+        "sha256_after": "91d2ee413d904683c17c7e030ab159acb2c20d20422d9cc152e309086fc814db"
       }
     ]
   },

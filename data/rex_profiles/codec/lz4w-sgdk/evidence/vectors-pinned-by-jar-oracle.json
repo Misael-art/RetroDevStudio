@@ -1,13 +1,13 @@
 {
   "claim": "vectors-and-holdout: 12 plains + 9 goldens em data/rex_profiles/codec/lz4w-sgdk/ com resultados fixados pelo oráculo externo lz4w.jar v1.43 ANTES de qualquer implementação do produto; goldens montados à mão pela spec só são publicados se o oráculo decodificar para a saída exata; 8/8 streams reais do oráculo reproduzidas pelo espelho da spec (calibração, não oracle independente).",
   "rom": {
-    "sha256": "ad9be55b8a921522a97686de18988944405f48eac5b4ecff34470859212af063",
+    "sha256": "d3c363bdd645e05eaa59e5a3e8b2a24fbdaab9e675e1a43daf15d45adcf040b3",
     "size_bytes": 1576,
     "format": "fixture",
     "normalization": [
       {
-        "step": "hash agregado = sha256(manifest.tsv + sha256sum ordenado de plain/ e golden/); regenerável por scripts/rex_profiles/codecs/lz4w-sgdk/build-vectors.sh",
-        "sha256_after": "ad9be55b8a921522a97686de18988944405f48eac5b4ecff34470859212af063"
+        "step": "hash agregado (receita canônica) = sha256( sha256sum ordenado LC_ALL=C dos arquivos de plain/ e golden/ + bytes de manifest.tsv ); reimpresso pela linha agregado= de scripts/rex_profiles/codecs/lz4w-sgdk/build-vectors.sh — regeneração 2026-09-25 byte-idêntica (fixtures e manifest inalterados; agregado antigo não era reproduzível por receita documentada)",
+        "sha256_after": "d3c363bdd645e05eaa59e5a3e8b2a24fbdaab9e675e1a43daf15d45adcf040b3"
       }
     ]
   },
