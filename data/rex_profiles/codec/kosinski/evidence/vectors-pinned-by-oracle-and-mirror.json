@@ -1,0 +1,29 @@
+{
+  "claim": "vectors-and-holdout + oracle-mirror-parity: 12 plains + 8 goldens em data/rex_profiles/codec/kosinski/ com resultados fixados pelo oráculo externo koscmp (mdcomp HEAD) ANTES de qualquer implementação do produto; cada plain faz roundtrip exato pelo oráculo E é reproduzida byte a byte pelo espelho Python (kos_mirror.py, que inclui a early-fetch de descritor calibrada contra as streams reais — 12/12); cada golden artesanal é publicado somente se koscmp -x o decodificar para a saída exata (8/8 confirmados).",
+  "rom": {
+    "sha256": "eaa42e64deb2e96cdd6c60437c93bd205465917984164db722fc895e8702b144",
+    "size_bytes": 159806,
+    "format": "fixture",
+    "normalization": [
+      {
+        "step": "hash agregado = sha256( sha256sum ordenado (LC_ALL=C) dos arquivos de plain/ e golden/ concatenado com os bytes de manifest.tsv ); regenerável por scripts/rex_profiles/codecs/kosinski/build-vectors.sh (linha 'agregado=')",
+        "sha256_after": "eaa42e64deb2e96cdd6c60437c93bd205465917984164db722fc895e8702b144"
+      }
+    ]
+  },
+  "locator": { "kind": "offset-range", "offset": 0, "length": 0 },
+  "bank_state": {},
+  "expected": {
+    "tool": "koscmp CLI (mdcomp src/koscmp.cc; externo ao produto; encode+decode do mesmo oráculo — paridade multi-autor declarada blocked no manifest)",
+    "version": "mdcomp commit 72c6df405a75d322c5b3722da46c3abb864d3793; binário local ~/.cache/rex-codecs/oracle-tools/bin/koscmp",
+    "output_sha256": "7b3fcdfd289bd87f44d0389c5796f1504f2d1036bf51d03f62264443ac3c5a53",
+    "output_len": 3503,
+    "pinned_before_implementation": true
+  },
+  "provenance": "authored-fixture",
+  "negatives": [
+    { "input": "m05_separate_long_far.kos sem o último byte (EOD incompleto)", "expected_error": "oráculo: rc=0 ACEITA e produz 8692 bytes (> esperado 8451), sem erro — o produto DEVE retornar 'truncated' e respeitar max-output/excessive-output; comportamento do oráculo registrado como perigo, não como especificação" },
+    { "input": "stream artesanal com match separado dist=1 e histórico vazio (02 00 FF FF)", "expected_error": "oráculo: rc=0 com comportamento não-determinístico de leitura fora do histórico (medido: saída 0 bytes) — o produto DEVE retornar 'invalid-reference'" }
+  ],
+  "timestamp": "2026-09-25: execução de build-vectors.sh no worktree codex/rex-b-codecs (conjunto determinístico e regenerável)"
+}
