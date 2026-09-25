@@ -20,7 +20,7 @@
     "cross-oracle-parity": "blocked",
     "product-decode-vs-reference": "blocked",
     "product-encode-vs-reference": "blocked",
-    "structured-negatives": "blocked",
+    "structured-negatives": "fixture",
     "modular-mode": "blocked",
     "resource-identification-in-rom": "blocked",
     "reinsertion": "blocked"
@@ -31,6 +31,9 @@
     "O terminador 'continue' (c==1) nao emite copia nem consome mais bytes — quirk preservado do oraculo e exercitado no golden m06; implementacoes do produto devem aceita-lo, nao rejeita-lo.",
     "Vetores sao fixtures sinteticas autorais (provenance authored-fixture); nenhuma stream real de ROM Kosinski foi usada. Identificacao de recurso em ROM permanece blocked para o integrador.",
     "Recompressao nao promete bytes identicos ao encoder mdcomp (parser otimo e especifico da ferramenta); o contrato e decodificacao exata nas duas direcoes produto<->oraculo.",
-    "Modo modular (-m), padding por modulo e endereciamento de multiplos modulos nao cobertos; capacidade separada blocked."
+    "Modo modular (-m), padding por modulo e endereciamento de multiplos modulos nao cobertos; capacidade separada blocked.",
+    "bytes_consumed MEDIDO no oraculo: o koscmp pode emitir 1 byte de padding APOS o terminator (... 00 F0 00 00); o decoder para no terminator, logo bytes_consumed <= tamanho da stream. Confirmado nas 12 streams reais (espelho strict 12/12).",
+    "Negativos (negative/) sao derivados do CONTRATO v1/formato, auto-verificados pelo espelho Python em modo strict; o oraculo NAO e executado sobre eles (a referencia nao valida nada — defeito registrado pelas sondas do build).",
+    "EXCECAO declarada: golden m02_single_with_eod e literal unico SEM terminator — aceito pelo oraculo por exaustao; sob o contrato do produto seria 'truncated' (por isso nao e negativo: prova a aceitacao da referencia). Nome preservado para nao alterar fixture publicada."
   ]
 }

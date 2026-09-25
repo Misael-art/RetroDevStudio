@@ -11,6 +11,12 @@
 #     qualquer divergência aborta antes de publicar)
 #  3. golden: koscmp -x golden == expected exato          (stream artesanal
 #     aceita pelo oráculo — independência builder<->decoder do oráculo)
+#  4. strict: nas streams REAIS do oráculo o espelho em modo contrato
+#     (terminator exigido + dist <= histórico) também deve bater — prova de
+#     que vetores bem-formados satisfazem o CONTRATO v1, não só a referência
+#  5. negativos: derivados do contrato/formato (negative-spec); o oráculo NÃO
+#     é executado sobre eles (a referência não valida — defeito registrado
+#     pelas sondas abaixo); auto-verificados pelo espelho strict no gerador.
 set -euo pipefail
 
 REPO="${REX_REPO:-$(git rev-parse --show-toplevel)}"
@@ -25,12 +31,15 @@ trap 'rm -rf "$T"' EXIT
 [ -x "$KOS" ] || { echo "oráculo ausente: $KOS (ver scripts/rex_profiles/codecs/setup-oracles.sh)"; exit 1; }
 
 python3 "$SRC/gen_vectors.py" "$T/vectors"
-mkdir -p "$OUT/plain" "$OUT/golden"
+# república limpa: o build é a definição das subáreas de vetores (evidência e
+# manifest ficam fora); evita que fixture órfã de rodada antiga passe nos loops
+rm -rf "$OUT/plain" "$OUT/golden" "$OUT/negative"
+mkdir -p "$OUT/plain" "$OUT/golden" "$OUT/negative"
 
 kos() { run_oracle 60 null -- "$KOS" "$@" </dev/null >/dev/null 2>&1; }
 
 rows=()
-mir_ok=0; mir_tot=0
+mir_ok=0; mir_tot=0; strict_ok=0
 
 # 1+2: roundtrip do oráculo em cada plain + paridade do espelho
 for f in "$T/vectors/plain/"*.bin; do
@@ -55,17 +64,34 @@ got, consumed = mirror_decode(st)
 sys.exit(0 if got == exp and isinstance(got, bytes) and 0 <= consumed <= len(st) else 1)
 EOF
   then mir_ok=$((mir_ok+1)); else echo "ESPELHO-DIVERGE: $name"; fi
+  # camada 4: a MESMA stream real também deve bater em modo contrato (strict)
+  # — koscmp emite terminator e nunca referencia antes do início; se o espelho
+  # strict divergir numa stream do próprio oráculo, o modelo do contrato está
+  # errado e NÃO se publica.
+  if python3 - "$SRC" "$T/$name.kos" "$f" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from kos_mirror import mirror_decode
+st = open(sys.argv[2], "rb").read()
+exp = open(sys.argv[3], "rb").read()
+got, consumed = mirror_decode(st, strict=True)
+# MEDIDO: o koscmp pode emitir 1 byte de padding APOS o terminator
+# (... 00 F0 00 00); bytes_consumed do contrato e a posição onde o decoder
+# PARA (no terminator), logo consumed <= len(st), não necessariamente ==.
+sys.exit(0 if got == exp and isinstance(got, bytes) and 0 <= consumed <= len(st) else 1)
+EOF
+  then strict_ok=$((strict_ok+1)); else echo "STRICT-DIVERGE: $name"; fi
   mir_tot=$((mir_tot+1))
   cp "$f" "$OUT/plain/$name.bin"
   cp "$T/$name.kos" "$OUT/plain/$name.kos"
   rows+=("plain	$name	$(stat -c%s "$f")	$(sha256sum "$f" | cut -d' ' -f1)	$(stat -c%s "$T/$name.kos")	$(sha256sum "$T/$name.kos" | cut -d' ' -f1)	RT-OK+MIRROR")
 done
 
-if [ "$mir_ok" -ne "$mir_tot" ] || [ "$mir_tot" -eq 0 ]; then
-  echo "espelho diverge do oráculo em $((mir_tot-mir_ok))/$mir_tot — NÃO PUBLICAR"
+if [ "$mir_ok" -ne "$mir_tot" ] || [ "$strict_ok" -ne "$mir_tot" ] || [ "$mir_tot" -eq 0 ]; then
+  echo "espelho diverge do oráculo: parity=$mir_ok/$mir_tot strict=$strict_ok/$mir_tot — NÃO PUBLICAR"
   exit 1
 fi
-echo "espelho vs oráculo: $mir_ok/$mir_tot OK"
+echo "espelho vs oráculo: $mir_ok/$mir_tot OK (strict: $strict_ok/$mir_tot)"
 
 # 3: goldens artesanais confirmados pelo oráculo
 for f in "$T/vectors/golden/"*.kos; do
@@ -79,6 +105,45 @@ for f in "$T/vectors/golden/"*.kos; do
     echo "GOLDEN REJEITADO: $name"
     rows+=("golden	$name	-	-	-	-	GOLDEN-REJEITADO")
   fi
+done
+
+# camada 4 sobre goldens: todos devem bater em modo contrato (strict), COM
+# exceção declarada: m02 é literal-único SEM terminator (prova de aceitação
+# da referência; sob o contrato do produto seria 'truncated').
+strict_g=0; strict_g_tot=0
+for f in "$OUT/golden/"*.kos; do
+  name="$(basename "$f" .kos)"
+  [ "$name" = "m02_single_with_eod" ] && continue
+  exp="${f%.kos}.expected.bin"
+  if python3 - "$SRC" "$f" "$exp" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from kos_mirror import mirror_decode
+st = open(sys.argv[2], "rb").read()
+exp = open(sys.argv[3], "rb").read()
+got, consumed = mirror_decode(st, strict=True)
+sys.exit(0 if got == exp and isinstance(got, bytes) and 0 <= consumed <= len(st) else 1)
+EOF
+  then strict_g=$((strict_g+1)); else echo "GOLDEN-STRICT-DIVERGE: $name"; fi
+  strict_g_tot=$((strict_g_tot+1))
+done
+if [ "$strict_g" -ne "$strict_g_tot" ] || [ "$strict_g_tot" -eq 0 ]; then
+  echo "goldens divergem do modo contrato em $((strict_g_tot-strict_g))/$strict_g_tot — NÃO PUBLICAR"
+  exit 1
+fi
+echo "goldens em modo contrato (strict): $strict_g/$strict_g_tot OK (exceção declarada: m02)"
+
+# 5: negativos negative-spec — derivados do contrato/formato; o oráculo NÃO é
+# executado neles (a referência não valida; sondas abaixo registram o defeito).
+# Auto-verificados pelo espelho strict dentro de gen_vectors.py (abortou antes
+# se algum não batesse).
+for f in "$T/vectors/negative/"*.kos; do
+  name="$(basename "$f" .kos)"
+  json="${f%.kos}.expected.json"
+  err="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['expected_error'])" "$json")"
+  cp "$f" "$OUT/negative/$name.kos"
+  cp "$json" "$OUT/negative/$name.expected.json"
+  rows+=("negative	$name	-	-	$(stat -c%s "$f")	$(sha256sum "$f" | cut -d' ' -f1)	NEGATIVE-SPEC:$err")
 done
 
 printf 'kind\tnome\tplain_bytes\tplain_sha256\tcomp_bytes\tcomp_sha256\tstatus\n' > "$OUT/manifest.tsv"
@@ -100,8 +165,9 @@ printf '\x02\x00\xff\xff\x00' > "$T/badref.kos"   # separado dist=3, histórico 
 probe "dist-maior-que-historico" "$T/badref.kos"
 
 grep -c GOLDEN-CONFIRMED "$OUT/manifest.tsv" | xargs -I{} echo "goldens confirmados: {}"
+grep -c NEGATIVE-SPEC "$OUT/manifest.tsv" | xargs -I{} echo "negativos negative-spec: {}"
 # hash agregado da fixture — receita canônica e reproduzível:
-#   sha256( (sha256sum ordenado de plain/ e golden/) || bytes de manifest.tsv )
-AGG=$( { find "$OUT/plain" "$OUT/golden" -type f | LC_ALL=C sed "s|^$OUT/||" | LC_ALL=C sort | (cd "$OUT" && xargs sha256sum); cat "$OUT/manifest.tsv"; } | sha256sum | cut -d' ' -f1 )
+#   sha256( (sha256sum ordenado de plain/, golden/ e negative/) || bytes de manifest.tsv )
+AGG=$( { find "$OUT/plain" "$OUT/golden" "$OUT/negative" -type f | LC_ALL=C sed "s|^$OUT/||" | LC_ALL=C sort | (cd "$OUT" && xargs sha256sum); cat "$OUT/manifest.tsv"; } | sha256sum | cut -d' ' -f1 )
 echo "agregado=$AGG"
 echo "publicado em $OUT"

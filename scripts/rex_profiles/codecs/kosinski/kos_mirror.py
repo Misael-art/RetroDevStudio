@@ -37,10 +37,17 @@ mirror_decode(st) -> (out: bytes | 'ERR-trunc' | 'ERR-off', bytes_consumed)
   (lê 0x00 em getbyte após EOF — ver sondas em build-vectors.sh);
   o espelho sinaliza truncamento para o produto, que deve dar erro
   estruturado. Validação de goldens usa apenas streams bem-formadas.
+
+mirror_decode(st, strict=True) impõe o CONTRATO DO PRODUTO (derive dos
+requisitos v1, não do oráculo — a referência não valida nada):
+  - EOF sem terminator visto (fluxo só termina legalmente no token
+    0,1 + c==0) -> 'ERR-trunc' (código do produto: truncated);
+  - dist > histórico já escrito -> 'ERR-off' (código: invalid-reference);
+    o modo não-strict replica o oráculo (preenche 0, seekg sem validação).
 """
 
 
-def mirror_decode(st: bytes):
+def mirror_decode(st: bytes, strict: bool = False):
     pos = 0
     bitbuf = 0
     bitcnt = 0  # bits restantes na palavra de 16 corrente
@@ -106,7 +113,7 @@ def mirror_decode(st: bytes):
                     return "ERR-trunc", consumed
                 if c == 0:
                     consumed = pos  # decoder para aqui; resto não é consumido
-                    return bytes(out), consumed
+                    return bytes(out), consumed  # terminator visto: ok em strict
                 if c == 1:
                     continue  # quirk 'continue': sem cópia
                 ln = c + 1
@@ -123,8 +130,18 @@ def mirror_decode(st: bytes):
             dist = 0x100 - d
         if dist <= 0 or dist > 0x2000:
             return "ERR-off", consumed
+        # CONTRATO DO PRODUTO (strict): o oráculo NÃO valida histórico — seekg
+        # abaixo do início lê 0 (UB medida). Uma referência que cai antes do
+        # primeiro byte escrito é entrada malformada; o produto deve retornar
+        # invalid-reference.
+        if strict and dist > len(out):
+            return "ERR-off", consumed
         src = len(out) - dist
         for i in range(ln):
             j = src + i
             out.append(out[j] if j >= 0 else 0)  # seekg negativo -> 0
+    # Só se chega aqui por exaustão da stream SEM terminator (todo stream bem
+    # formado retorna no ramo c==0). Em strict o contrato exige terminator.
+    if strict:
+        return "ERR-trunc", consumed
     return bytes(out), consumed
