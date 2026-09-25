@@ -613,10 +613,12 @@ pub fn apply_resource_edit(
         ReinsertOutcome::Applied(applied) => {
             let edit_dir = canonical_dir_under(
                 &super::rom_library::decomp_work_dir(),
-                &["extract", &rom_sha, "rex"],
+                &["extract", &rom_sha, "edits"],
             )?;
-            let modified_path =
-                edit_dir.join(format!("modified-{}.bin", applied.modified_rom_sha256));
+            let modified_path = edit_dir.join(format!(
+                "rex-lz4w-modified-{}.bin",
+                applied.modified_rom_sha256
+            ));
             write_file_immutable(
                 &modified_path,
                 &applied.modified_rom,
