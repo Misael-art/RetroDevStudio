@@ -269,6 +269,267 @@ fn copy(
     Ok(())
 }
 
+/// Limites da **codificação** aPLib. Separados dos do decode porque orçam
+/// objetos diferentes: aqui o orçamento é o tamanho do stream produzido (o
+/// slot do recurso na ROM), não o da saída.
+#[derive(Debug, Clone, Copy)]
+pub struct AplibEncodeLimits {
+    /// Espaço máximo aceitável para o stream (bytes). `usize::MAX` = sem
+    /// orçamento (compressão de blob, não reinserção em slot).
+    pub max_stream: usize,
+    /// Orçamento de trabalho (bits emitidos, bytes emitidos, candidatos
+    /// examinados). Nunca depende de relógio.
+    pub max_work: u64,
+}
+
+impl Default for AplibEncodeLimits {
+    fn default() -> Self {
+        Self {
+            max_stream: usize::MAX,
+            max_work: 32 * 1024 * 1024,
+        }
+    }
+}
+
+/// Escritor na ordem de consumo do desempacotador: os 8 slots de cada tag são
+/// preenchidos MSB→LSB e os bytes de dados entram fisicamente logo após o byte
+/// de tag que os anuncia — inclusive quando um token atravessa a fronteira da
+/// tag, porque o decodificador lê o byte de tag **inteiro** antes dos bits dele.
+struct Emissor {
+    stream: Vec<u8>,
+    tag_idx: usize,
+    /// Próximo slot da tag em uso (0..8); 8 significa "busca tag nova".
+    slot: u8,
+    work: u64,
+    max_work: u64,
+}
+
+impl Emissor {
+    fn novo(max_work: u64) -> Self {
+        Self {
+            stream: Vec::new(),
+            tag_idx: 0,
+            slot: 8,
+            work: 0,
+            max_work,
+        }
+    }
+
+    fn gasta(&mut self) -> Result<(), CodecError> {
+        self.work += 1;
+        if self.work > self.max_work {
+            return Err(CodecError::new(
+                "work_limit",
+                format!(
+                    "aPLib encode: {} operações excederam o orçamento de {}",
+                    self.work, self.max_work
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn bit(&mut self, valor: u8) -> Result<(), CodecError> {
+        if self.slot == 8 {
+            self.stream.push(0);
+            self.tag_idx = self.stream.len() - 1;
+            self.slot = 0;
+        }
+        if valor == 1 {
+            self.stream[self.tag_idx] |= 0x80 >> self.slot;
+        }
+        self.slot += 1;
+        self.gasta()
+    }
+
+    fn byte(&mut self, valor: u8) -> Result<(), CodecError> {
+        self.stream.push(valor);
+        self.gasta()
+    }
+
+    /// Token `0`: literal.
+    fn literal(&mut self, valor: u8) -> Result<(), CodecError> {
+        self.bit(0)?;
+        self.byte(valor)
+    }
+
+    /// Token `110` com byte de comando `0x00`: fim do stream.
+    fn eod(&mut self) -> Result<(), CodecError> {
+        self.bit(1)?;
+        self.bit(1)?;
+        self.bit(0)?;
+        self.byte(0)
+    }
+
+    /// Token `110` com byte de comando não nulo: match de 2 ou 3 bytes com
+    /// offset 1..=127 — exatamente o que o decodificador resolve como
+    /// `off = cmd >> 1`, `len = 2 + (cmd & 1)`.
+    fn cmd_110(&mut self, offset: usize, length: usize) -> Result<(), CodecError> {
+        debug_assert!((1..=127).contains(&offset) && (2..=3).contains(&length));
+        self.bit(1)?;
+        self.bit(1)?;
+        self.bit(0)?;
+        self.byte(((offset << 1) | (length - 2)) as u8)
+    }
+
+    /// Escrivão de `gamma2`: os dígitos de `v` sem o `1` líder (MSB→LSB), cada
+    /// um seguido de um bit de controle que só zera no último par. É o inverso
+    /// exato do leitor do decodificador (`v = (v << 1) | dado`), e o menor
+    /// valor legível/gravável é 2.
+    fn gamma2(&mut self, valor: u64) -> Result<(), CodecError> {
+        debug_assert!((2..=GAMMA2_LIMIT).contains(&valor));
+        let digitos = 63 - valor.leading_zeros();
+        for i in (0..digitos).rev() {
+            self.bit(((valor >> i) & 1) as u8)?;
+            self.bit(if i == 0 { 0 } else { 1 })?;
+        }
+        Ok(())
+    }
+
+    /// Token `10`: match explícito. `acumulado = off_hi + LWM` é o que o
+    /// decodificador subtrai para recuperar `off_hi`, então o valor emitido
+    /// depende do estado de LWM do momento — mesmo estado que o decode mantém.
+    fn match_10(&mut self, offset: usize, length: usize, lwm: u64) -> Result<(), CodecError> {
+        let ajuste = ajuste_de_comprimento(offset);
+        debug_assert!(length >= ajuste + 2 && offset >= 1);
+        self.bit(1)?;
+        self.bit(0)?;
+        self.gamma2(
+            u64::try_from(offset >> 8)
+                .map_err(|_| CodecError::new("overflow", "aPLib encode: offset fora de u64"))?
+                + lwm,
+        )?;
+        self.byte((offset & 0xFF) as u8)?;
+        self.gamma2(u64::try_from(length - ajuste).map_err(|_| {
+            CodecError::new("overflow", "aPLib encode: comprimento cru fora de u64")
+        })?)
+    }
+}
+
+/// Ajuste de comprimento do token `10`, espelhando o decodificador: `+2` fora
+/// de `128..32000`, `+1` em `1280..32000`, `+0` em `128..1279`.
+fn ajuste_de_comprimento(offset: usize) -> usize {
+    if !(128..MIN_MATCH4_OFFSET).contains(&offset) {
+        2
+    } else if offset >= MIN_MATCH3_OFFSET {
+        1
+    } else {
+        0
+    }
+}
+
+/// O `10` só expressa comprimento cru (`len − ajuste`) ≥ 2, que é o menor
+/// `gamma2` legível. Há combinações que o formato simplesmente não endereça —
+/// comprimento 2 com offset em `1280..31999` é a única faixa (2 − 1 = 1): o
+/// encoder recusa o match e segue com literal em vez de emitir stream inválido.
+fn expressavel_pelo_10(offset: usize, length: usize) -> bool {
+    length >= ajuste_de_comprimento(offset) + 2
+}
+
+/// Teto de candidatos examinados por posição (política de busca, não do
+/// formato). O custo é determinístico: nunca depende de relógio nem do host.
+const CANDIDATOS_POR_POSICAO: usize = 1024;
+
+/// Menor match que vale a pena codificar: 2 bytes. Abaixo disso só `111`
+/// (1 byte, offset ≤ 15), que este passo ainda não emite.
+const MATCH_MINIMO: usize = 2;
+
+/// Procura o match mais longo a partir de `pos`, entre os `CANDIDATOS_POR_POSICAO`
+/// offsets mais recentes. Só lê histórico já emitido (`offset <= pos`), nunca
+/// referência para frente — que o 68000/aPLib interpretam como outro byte.
+fn match_mais_longo(data: &[u8], pos: usize) -> Option<(usize, usize)> {
+    let limite = pos.min(CANDIDATOS_POR_POSICAO);
+    let mut melhor: Option<(usize, usize)> = None;
+    for offset in 1..=limite {
+        let mut length = 0;
+        while pos + length < data.len() && data[pos - offset + length] == data[pos + length] {
+            length += 1;
+        }
+        if length >= MATCH_MINIMO
+            && match melhor {
+                None => true,
+                Some((_, maior)) => length > maior,
+            }
+        {
+            melhor = Some((offset, length));
+        }
+    }
+    melhor
+}
+
+/// O token `110` só expressa comprimentos 2 e 3; em ambos custa 3 bits + 1
+/// byte = 11 bits contra 18 (dois literais) ou 27 (três literais), então vale
+/// sempre que o match cabe.
+const CMD110_MAX_LEN: usize = 3;
+/// O byte de comando tem 7 bits úteis para offset (`cmd >> 1`).
+const CMD110_MAX_OFFSET: usize = 127;
+
+/// Codifica dados no aPLib da variante SGDK (stream raw, sem header `"AP\0"`).
+///
+/// Erros do vocabulário declarado em CONTRACTS §4: `needs_space` quando o
+/// orçamento de espaço não cabe, `work_limit` quando o orçamento de trabalho
+/// estoura, `overflow` quando a entrada não é representável pelo formato
+/// (saída vazia — a mesma razão pela qual o decode recusa stream vazio com
+/// `truncated`). Nenhuma dessas é panic e nenhuma aloca antes de validar.
+pub fn aplib_encode(data: &[u8], limits: &AplibEncodeLimits) -> Result<Vec<u8>, CodecError> {
+    if data.is_empty() {
+        return Err(CodecError::new(
+            "overflow",
+            "aPLib: o formato não expressa saída de 0 bytes; nenhum stream representa entrada vazia",
+        ));
+    }
+    if limits.max_stream == 0 {
+        return Err(CodecError::new(
+            "needs_space",
+            "aPLib encode: orçamento de 0 bytes; nenhum stream cabe, nem o menor possível (3 bytes)",
+        ));
+    }
+    let mut emissor = Emissor::novo(limits.max_work);
+    // O byte 0 do stream raw É o primeiro literal, sem token e sem tag.
+    emissor.byte(data[0])?;
+    // LWM e histórico andam com o emissor porque o decodificador os usa para
+    // interpretar o que for emitido: 3 após literal, 2 após match.
+    let mut lwm: u64 = 3;
+    let mut pos = 1;
+    while pos < data.len() {
+        let candidato = match_mais_longo(data, pos);
+        let expressao = candidato.filter(|(offset, length)| {
+            (*length <= CMD110_MAX_LEN && *offset <= CMD110_MAX_OFFSET)
+                || expressavel_pelo_10(*offset, *length)
+        });
+        match expressao {
+            Some((offset, length)) if length <= CMD110_MAX_LEN && offset <= CMD110_MAX_OFFSET => {
+                emissor.cmd_110(offset, length)?;
+                lwm = 2;
+                pos += length;
+            }
+            Some((offset, length)) => {
+                emissor.match_10(offset, length, lwm)?;
+                lwm = 2;
+                pos += length;
+            }
+            None => {
+                emissor.literal(data[pos])?;
+                lwm = 3;
+                pos += 1;
+            }
+        }
+    }
+    emissor.eod()?;
+    if emissor.stream.len() > limits.max_stream {
+        return Err(CodecError::new(
+            "needs_space",
+            format!(
+                "aPLib encode: {} bytes de plain precisam de {} bytes de stream, orçamento de {}",
+                data.len(),
+                emissor.stream.len(),
+                limits.max_stream
+            ),
+        ));
+    }
+    Ok(emissor.stream)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -571,6 +832,199 @@ mod tests {
             .expect("max_output 0 deve recusar antes de qualquer byte")
             .code,
             "excessive_output"
+        );
+    }
+
+    /// `g01b_single_byte` é o único golden cujo stream o encoder **não** tem
+    /// escolha de produzir: 1 byte de saída é o literal físico do byte 0 e o
+    /// resto tem que ser o EOD (`110` + `0x00`). O stream abaixo é o arquivo
+    /// GOLDEN-CONFIRMED pelos dois oráculos (`4eb77c03…`).
+    #[test]
+    fn aplib_encode_de_um_byte_e_o_golden_byte_a_byte() {
+        let stream = aplib_encode(&[0x5A], &AplibEncodeLimits::default()).expect("1 byte codifica");
+        assert_eq!(
+            stream,
+            vetor("golden/g01b_single_byte.ap"),
+            "encode([0x5A]) deveria ser literal + EOD, byte a byte como o golden"
+        );
+    }
+
+    /// Primeira economia obrigatória do formato: um match de 2 ou 3 bytes com
+    /// offset ≤ 127 sai pelo token `110` (3 bits + byte de comando), não por
+    /// literais. O stream abaixo foi montado à mão na ordem de consumo — `41`
+    /// literal físico, tag `36` (literais B e C, depois `110` cmd `06` = off 3
+    /// len 2, depois `110` cmd `00` = EOD).
+    #[test]
+    fn aplib_encode_usa_o_token_110_para_match_curto_em_vez_de_literais() {
+        let dados = b"ABCAB";
+        let stream = aplib_encode(dados, &AplibEncodeLimits::default()).expect("codifica");
+        assert_eq!(
+            stream,
+            vec![0x41, 0x36, 0x42, 0x43, 0x06, 0x00],
+            "stream esperado montado à mão; saiu: {stream:02x?}"
+        );
+        let decode = decodificar(&stream, AplibLimits::default());
+        assert_eq!(&decode.data, dados, "ida-e-volta");
+        assert_eq!(
+            decode.bytes_consumed,
+            stream.len(),
+            "o EOD tem que ser o último byte lido"
+        );
+    }
+
+    /// Match de comprimento 5 com offset 5: o `110` não expressa (só 2 ou 3),
+    /// então sai pelo token `10`. Montado à mão na ordem de consumo —
+    /// `41` literal físico; tag `0a` = literais B,C,D,E + `10` + gamma2(3)
+    /// (off_hi = 5 − LWM 3 = 0 → acumulado 3); byte `05` = off_low; tag `b0` =
+    /// gamma2(3) para o comprimento cru (ajuste `+2` porque off < 128 → 5−2=3)
+    /// + EOD.
+    #[test]
+    fn aplib_encode_usa_o_token_10_para_match_longo() {
+        let dados = b"ABCDEABCDE";
+        let stream = aplib_encode(dados, &AplibEncodeLimits::default()).expect("codifica");
+        assert_eq!(
+            stream,
+            vec![0x41, 0x0A, 0x42, 0x43, 0x44, 0x45, 0x05, 0xB0, 0x00],
+            "stream esperado montado à mão; saiu: {stream:02x?}"
+        );
+        let decode = decodificar(&stream, AplibLimits::default());
+        assert_eq!(&decode.data, dados, "ida-e-volta");
+        assert_eq!(decode.bytes_consumed, stream.len(), "EOD no fim");
+    }
+
+    /// Os 8 plains da fixture atravessam as faixas de offset que mudam o ajuste
+    /// de comprimento (`<128`, `128..1279`, `1280..31999`, `≥32000`) e os
+    /// tamanhos reais de recurso (8 KB de tile chunky, 64 KB de zeros, janela de
+    /// 40 KB). O pacote da agente B **não publica os bytes dos plains** — publica
+    /// os streams dos oráculos e o SHA-256 de cada plain (`manifest.tsv`,
+    /// coluna 3), então os dados de entrada são o decode do próprio stream
+    /// pinado, conferido contra o hash. Ida-e-volta pelo decoder do produto é o
+    /// contrato mínimo do encoder; a *qualidade* do stream é medida à parte, não
+    /// afirmada aqui.
+    #[test]
+    fn aplib_encode_reproduz_cada_plain_da_fixture_pelo_decoder() {
+        let mut casos = 0;
+        for linha in linhas() {
+            if linha[0] != "plain" {
+                continue;
+            }
+            let nome = &linha[1];
+            let esperado_bytes: usize = linha[2].parse().expect("plain_len numérico");
+            let stream_oraculo = vetor(&format!("plain/{nome}.apultra.ap"));
+            let dados = decodificar(&stream_oraculo, AplibLimits::default()).data;
+            assert_eq!(dados.len(), esperado_bytes, "{nome}: plain lido do oráculo");
+            assert_eq!(
+                sha256_hex(&dados),
+                linha[3],
+                "{nome}: plain diverge do hash pinado no manifest.tsv"
+            );
+
+            let stream = aplib_encode(&dados, &AplibEncodeLimits::default())
+                .unwrap_or_else(|e| panic!("{nome}: encode recusou: {e}"));
+            let decode = decodificar(
+                &stream,
+                AplibLimits {
+                    max_output: dados.len() + 1,
+                    max_work: 64 * 1024 * 1024,
+                },
+            );
+            assert_eq!(decode.data, dados, "{nome}: ida-e-volta");
+            assert_eq!(
+                decode.bytes_consumed,
+                stream.len(),
+                "{nome}: consumo deveria ser o stream inteiro"
+            );
+            casos += 1;
+        }
+        assert_eq!(casos, 8, "esperava 8 plains no manifest.tsv");
+    }
+
+    /// Gerador determinístico (LCG 64, semente fixa) de dados sem correspondência
+    /// útil — o pior caso de um codec de dicionário.
+    fn pseudo_aleatorio(n: usize) -> Vec<u8> {
+        let mut estado: u64 = 0x2545_F491_4F6C_DD1D;
+        (0..n)
+            .map(|_| {
+                estado = estado
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (estado >> 33) as u8
+            })
+            .collect()
+    }
+
+    /// Orçamento de espaço é a razão de existir do encoder nesta rodada: um
+    /// recurso só é editável sem expansão se a re-codificação couber no slot.
+    /// Não cabendo, a recusa tem que ser estruturada (`needs_space`) e dizer os
+    /// dois números — o que o stream exige e o que foi autorizado — em vez de
+    /// devolver um stream estourado ou um erro vago.
+    #[test]
+    fn aplib_encode_declara_needs_space_com_os_dois_numeros_quando_nao_cabe() {
+        let dados = pseudo_aleatorio(4096);
+        let cheio = aplib_encode(&dados, &AplibEncodeLimits::default())
+            .expect("sem orçamento de espaço o encode sempre responde");
+        assert!(
+            cheio.len() > dados.len(),
+            "entrada sem correspondência deveria expandir; veio {} B para {} B de plain",
+            cheio.len(),
+            dados.len()
+        );
+
+        let orcamento = 64;
+        let erro = aplib_encode(
+            &dados,
+            &AplibEncodeLimits {
+                max_stream: orcamento,
+                max_work: 32 * 1024 * 1024,
+            },
+        )
+        .err()
+        .expect("4096 bytes incompressíveis não cabem num slot de 64");
+        assert_eq!(erro.code, "needs_space");
+        assert!(
+            erro.detail.contains(&cheio.len().to_string()) && erro.detail.contains("64"),
+            "detail deveria citar o tamanho exigido e o orçamento; veio: {}",
+            erro.detail
+        );
+
+        // Fronteira honesta: o tamanho exatamente produzido cabe, e um a menos
+        // não. Um `needs_space` que recusa o próprio limite seria armadilha para
+        // a transação, que decide por folga = slot − stream.
+        assert!(aplib_encode(
+            &dados,
+            &AplibEncodeLimits {
+                max_stream: cheio.len(),
+                max_work: 32 * 1024 * 1024,
+            }
+        )
+        .is_ok());
+        assert_eq!(
+            aplib_encode(
+                &dados,
+                &AplibEncodeLimits {
+                    max_stream: cheio.len() - 1,
+                    max_work: 32 * 1024 * 1024,
+                }
+            )
+            .err()
+            .expect("um byte a menos não cabe")
+            .code,
+            "needs_space"
+        );
+
+        assert_eq!(
+            aplib_encode(
+                &dados,
+                &AplibEncodeLimits {
+                    max_stream: 0,
+                    max_work: 32 * 1024 * 1024,
+                }
+            )
+            .err()
+            .expect("orçamento zero recusa antes de alocar")
+            .code,
+            "needs_space",
+            "max_stream 0 não pode produzir stream algum"
         );
     }
 }
