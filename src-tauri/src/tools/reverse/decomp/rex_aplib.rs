@@ -291,6 +291,33 @@ impl Default for AplibEncodeLimits {
     }
 }
 
+/// Orçamento de trabalho do encode, compartilhado pelo emissor e pela busca por
+/// repetições. Conta operações determinísticas — bit emitido, byte emitido,
+/// candidato examinado, byte comparado — e nunca relógio: o mesmo `max_work`
+/// responde igual em qualquer host, e estourar é recusa estruturada, não stream
+/// parcial.
+#[derive(Debug, Clone, Copy)]
+struct Orcamento {
+    gasto: u64,
+    maximo: u64,
+}
+
+impl Orcamento {
+    fn gastar(&mut self) -> Result<(), CodecError> {
+        self.gasto += 1;
+        if self.gasto > self.maximo {
+            return Err(CodecError::new(
+                "work_limit",
+                format!(
+                    "aPLib encode: {} operações excederam o orçamento de {}",
+                    self.gasto, self.maximo
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Escritor na ordem de consumo do desempacotador: os 8 slots de cada tag são
 /// preenchidos MSB→LSB e os bytes de dados entram fisicamente logo após o byte
 /// de tag que os anuncia — inclusive quando um token atravessa a fronteira da
@@ -300,8 +327,7 @@ struct Emissor {
     tag_idx: usize,
     /// Próximo slot da tag em uso (0..8); 8 significa "busca tag nova".
     slot: u8,
-    work: u64,
-    max_work: u64,
+    orcamento: Orcamento,
 }
 
 impl Emissor {
@@ -310,23 +336,15 @@ impl Emissor {
             stream: Vec::new(),
             tag_idx: 0,
             slot: 8,
-            work: 0,
-            max_work,
+            orcamento: Orcamento {
+                gasto: 0,
+                maximo: max_work,
+            },
         }
     }
 
     fn gasta(&mut self) -> Result<(), CodecError> {
-        self.work += 1;
-        if self.work > self.max_work {
-            return Err(CodecError::new(
-                "work_limit",
-                format!(
-                    "aPLib encode: {} operações excederam o orçamento de {}",
-                    self.work, self.max_work
-                ),
-            ));
-        }
-        Ok(())
+        self.orcamento.gastar()
     }
 
     fn bit(&mut self, valor: u8) -> Result<(), CodecError> {
@@ -426,35 +444,113 @@ fn expressavel_pelo_10(offset: usize, length: usize) -> bool {
     length >= ajuste_de_comprimento(offset) + 2
 }
 
-/// Teto de candidatos examinados por posição (política de busca, não do
-/// formato). O custo é determinístico: nunca depende de relógio nem do host.
+/// Teto de candidatos da cadeia examinados por posição (política de busca, não
+/// do formato). Cada candidato custa uma comparação, então o custo por posição
+/// tem teto absoluto e é debitado no orçamento de trabalho.
 const CANDIDATOS_POR_POSICAO: usize = 1024;
 
 /// Menor match que vale a pena codificar: 2 bytes. Abaixo disso só `111`
-/// (1 byte, offset ≤ 15), que este passo ainda não emite.
+/// (1 byte, offset ≤ 15), que este encoder ainda não emite.
 const MATCH_MINIMO: usize = 2;
 
-/// Procura o match mais longo a partir de `pos`, entre os `CANDIDATOS_POR_POSICAO`
-/// offsets mais recentes. Só lê histórico já emitido (`offset <= pos`), nunca
-/// referência para frente — que o 68000/aPLib interpretam como outro byte.
-fn match_mais_longo(data: &[u8], pos: usize) -> Option<(usize, usize)> {
-    let limite = pos.min(CANDIDATOS_POR_POSICAO);
-    let mut melhor: Option<(usize, usize)> = None;
-    for offset in 1..=limite {
-        let mut length = 0;
-        while pos + length < data.len() && data[pos - offset + length] == data[pos + length] {
-            length += 1;
-        }
-        if length >= MATCH_MINIMO
-            && match melhor {
-                None => true,
-                Some((_, maior)) => length > maior,
-            }
-        {
-            melhor = Some((offset, length));
+/// Nenhuma posição indexada.
+const SEM_POSICAO: u32 = u32::MAX;
+
+/// Índice do próprio buffer para busca de repetições **a qualquer distância**.
+/// `cabeca[c]` é a posição mais recente cujo par de bytes inicial vale `c` —
+/// os 2 bytes são a chave exata, sem hash, então 65 536 entradas e zero
+/// colisões — e `anterior[p]` é o próximo elo da mesma cadeia.
+///
+/// É isso que a janela de recência não dava: num TileSet de 16 KiB a referência
+/// útil costuma estar no começo do blob, não nos últimos 1 024 bytes. O custo
+/// não é varrer o histórico, e sim andar a cadeia até `CANDIDATOS_POR_POSICAO`,
+/// com cada byte comparado debitado no orçamento.
+struct BuscaRepeticoes<'a> {
+    data: &'a [u8],
+    cabeca: Vec<u32>,
+    anterior: Vec<u32>,
+    /// Marca d'água: toda posição `< inserido` já está na cadeia. A emissão
+    /// pula os bytes cobertos por um match, mas essas posições também são
+    /// candidatas legítimas para um match posterior, então entram aqui.
+    inserido: usize,
+}
+
+impl<'a> BuscaRepeticoes<'a> {
+    fn novo(data: &'a [u8]) -> Self {
+        Self {
+            data,
+            cabeca: vec![SEM_POSICAO; 1 << 16],
+            anterior: vec![SEM_POSICAO; data.len()],
+            inserido: 0,
         }
     }
-    melhor
+
+    fn chave(&self, pos: usize) -> usize {
+        u16::from_be_bytes([self.data[pos], self.data[pos + 1]]) as usize
+    }
+
+    /// Indexa todas as posições ainda ausentes abaixo de `pos`, desde que
+    /// tenham os 2 bytes da chave.
+    fn ate(&mut self, pos: usize) {
+        let limite = pos.min(self.data.len() - 1);
+        while self.inserido < limite {
+            let p = self.inserido;
+            self.inserido += 1;
+            let chave = self.chave(p);
+            self.anterior[p] = self.cabeca[chave];
+            self.cabeca[chave] = p as u32;
+        }
+    }
+
+    /// Match mais longo a partir de `pos`, usando apenas posições já emitidas
+    /// (offset ≥ 1, nunca referência para frente — o 68000 e o aPLib lêem o que
+    /// vem depois do EOD como outro byte). Comprimentos além do próprio offset
+    /// são válidos: é a repetição que o `copy` do decodificador produz byte a
+    /// byte.
+    fn mais_longo(
+        &mut self,
+        pos: usize,
+        orcamento: &mut Orcamento,
+    ) -> Result<Option<(usize, usize)>, CodecError> {
+        self.ate(pos);
+        let teto = self.data.len() - pos;
+        let mut melhor: Option<(usize, usize)> = None;
+        if teto >= MATCH_MINIMO {
+            let mut atual = self.cabeca[self.chave(pos)];
+            let mut examinados = 0;
+            while atual != SEM_POSICAO && examinados < CANDIDATOS_POR_POSICAO {
+                orcamento.gastar()?;
+                examinados += 1;
+                let candidato = atual as usize;
+                atual = self.anterior[candidato];
+                let maior = melhor.map_or(0, |(_, length)| length);
+                // Filtro de rejeição: candidato que nem alcança o comprimento já
+                // conhecido não serve. Ele NÃO autoriza assumir os `maior` bytes
+                // iniciais como iguais — foram conferidos em outro candidato —,
+                // então a extensão abaixo recomeça do zero; assumir o prefixo
+                // produziria match inválido e o decoder divergiria (medido em
+                // `noisy_runs_16k`, onde corredas longas escondem esse caso).
+                if self.data[candidato + maior] != self.data[pos + maior] {
+                    continue;
+                }
+                let mut length = 0;
+                while length < teto {
+                    orcamento.gastar()?;
+                    if self.data[candidato + length] != self.data[pos + length] {
+                        break;
+                    }
+                    length += 1;
+                }
+                if length > maior {
+                    melhor = Some((pos - candidato, length));
+                    if length == teto {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(melhor.filter(|(_, length)| *length >= MATCH_MINIMO))
+    }
 }
 
 /// O token `110` só expressa comprimentos 2 e 3; em ambos custa 3 bits + 1
@@ -484,7 +580,17 @@ pub fn aplib_encode(data: &[u8], limits: &AplibEncodeLimits) -> Result<Vec<u8>, 
             "aPLib encode: orçamento de 0 bytes; nenhum stream cabe, nem o menor possível (3 bytes)",
         ));
     }
+    if data.len() > u32::MAX as usize {
+        return Err(CodecError::new(
+            "overflow",
+            format!(
+                "aPLib encode: {} bytes excedem as 2^32 posições endereçáveis do índice de busca",
+                data.len()
+            ),
+        ));
+    }
     let mut emissor = Emissor::novo(limits.max_work);
+    let mut busca = BuscaRepeticoes::novo(data);
     // O byte 0 do stream raw É o primeiro literal, sem token e sem tag.
     emissor.byte(data[0])?;
     // LWM e histórico andam com o emissor porque o decodificador os usa para
@@ -492,7 +598,7 @@ pub fn aplib_encode(data: &[u8], limits: &AplibEncodeLimits) -> Result<Vec<u8>, 
     let mut lwm: u64 = 3;
     let mut pos = 1;
     while pos < data.len() {
-        let candidato = match_mais_longo(data, pos);
+        let candidato = busca.mais_longo(pos, &mut emissor.orcamento)?;
         let expressao = candidato.filter(|(offset, length)| {
             (*length <= CMD110_MAX_LEN && *offset <= CMD110_MAX_OFFSET)
                 || expressavel_pelo_10(*offset, *length)
@@ -1026,5 +1132,141 @@ mod tests {
             "needs_space",
             "max_stream 0 não pode produzir stream algum"
         );
+    }
+
+    /// O stream que um encoder **sem nenhum match** produziria: literal físico
+    /// no byte 0, depois token `0` por byte, depois EOD. Serve de régua para
+    /// medir cobertura de offset — e ele próprio tem que decodificar, senão a
+    /// comparação de tamanho não quer dizer nada.
+    fn stream_todos_literais(dados: &[u8]) -> Vec<u8> {
+        let mut emissor = Emissor::novo(u64::MAX);
+        emissor.byte(dados[0]).expect("sem teto de trabalho");
+        for &byte in &dados[1..] {
+            emissor.literal(byte).expect("sem teto de trabalho");
+        }
+        emissor.eod().expect("sem teto de trabalho");
+        emissor.stream
+    }
+
+    /// Cobertura de offset distante. Em recursos reais a referência útil é o
+    /// começo do blob (padrão de tiles, cabeçalho de mapa), dezenas de
+    /// kilobytes antes do ponto de reinício — exatamente o que uma busca
+    /// restrita aos offsets mais recentes nunca vê. A asserção não é "comprimiu
+    /// bastante" (vaga): é `stream < régua-de-literais − 1000`, onde a régua é o
+    /// resultado que o próprio formato produz para a mesma entrada sem match.
+    /// As três cópias têm distâncias 39 900, 35 400 e 20 800 e comprimentos 400.
+    #[test]
+    fn aplib_encode_encontra_repeticoes_distantes_fora_da_janela_recente() {
+        let dicionario = pseudo_aleatorio(40_000);
+        let mut dados = dicionario.clone();
+        for faixa in [100..500, 5_000..5_400, 20_000..20_400] {
+            dados.extend_from_slice(&dicionario[faixa]);
+        }
+        assert_eq!(dados.len(), 41_200);
+
+        let regua = stream_todos_literais(&dados);
+        assert_eq!(
+            decodificar(&regua, AplibLimits::default()).data,
+            dados,
+            "a régua precisa ser um stream válido do formato"
+        );
+
+        let stream =
+            aplib_encode(&dados, &AplibEncodeLimits::default()).expect("codifica 41 200 bytes");
+        assert!(
+            stream.len() + 1000 <= regua.len(),
+            "3 matches de 400 bytes a ≥ 20 000 de distância deveriam economizar mais de \
+             1 000 bytes sobre a régua de literais; régua {} B, stream {} B",
+            regua.len(),
+            stream.len()
+        );
+
+        let decode = decodificar(
+            &stream,
+            AplibLimits {
+                max_output: dados.len() + 1,
+                max_work: 64 * 1024 * 1024,
+            },
+        );
+        assert_eq!(
+            decode.data, dados,
+            "ida-e-volta do stream com matches distantes"
+        );
+        assert_eq!(
+            decode.bytes_consumed,
+            stream.len(),
+            "EOD no último byte lido"
+        );
+    }
+
+    /// O orçamento de trabalho tem que cobrir a **busca**, não só a escrita: um
+    /// match de 8 191 bytes custa ~40 operações de emissão e ~8 000 comparações
+    /// de byte. Sem debitá-las, `max_work` é um teto falso justamente no pior
+    /// caso do encoder (entrada repetitiva), e a recusa `work_limit` que o
+    /// decode já oferece não existiria no encode.
+    #[test]
+    fn aplib_encode_debita_a_busca_no_orcamento_de_trabalho() {
+        let dados = vec![0x5Au8; 8192];
+        aplib_encode(&dados, &AplibEncodeLimits::default())
+            .expect("orçamento padrão comporta 8 KiB repetidos");
+        let erro = aplib_encode(
+            &dados,
+            &AplibEncodeLimits {
+                max_stream: usize::MAX,
+                max_work: 2000,
+            },
+        )
+        .err()
+        .expect("2 000 operações não pagam ~8 000 comparações de busca");
+        assert_eq!(erro.code, "work_limit");
+        assert!(
+            erro.detail.contains("2000"),
+            "detail deveria citar o orçamento estourado; veio: {}",
+            erro.detail
+        );
+    }
+
+    /// Benchmark de capacidade congelado (medido em 2026-09-26, logo depois da
+    /// cobertura de offsets distantes): o tamanho **exato** do stream que o
+    /// encoder do produto produz para cada plain da fixture, contra o tamanho do
+    /// stream que o `apultra` produziu para o mesmo plain. Congelo por igualdade
+    /// e não por teto — do jeito do benchmark de recompressão do LZ4W: mexer na
+    /// qualidade muda um pino, e mudar um pino é decisão registrada, não
+    /// deriva.
+    ///
+    /// Pino ≠ alvo, e a diferença é conhecida: `tile_like` está 15 bytes e
+    /// `noisy_runs_16k` 277 bytes acima do oráculo porque o produto ainda não
+    /// emite `111` (cópia de 1 byte) nem rep-match (`gamma2` de comprimento puro
+    /// sobre o último offset). Fechar esses dois tokens é o próximo passo; os
+    /// outros seis plains já saem byte a byte iguais ao oráculo.
+    #[test]
+    fn aplib_encode_tem_a_capacidade_medida_congelada_por_plain() {
+        const PINOS: [(&str, usize, usize); 8] = [
+            // (nome, stream do produto, stream do oráculo = alvo)
+            ("ab_repeat", 8, 8),
+            ("far_window_40k", 305, 305),
+            ("near_window_2k", 55, 55),
+            ("noisy_runs_16k", 1482, 1205),
+            ("pseudo_random_8k", 294, 294),
+            ("text_rep", 29, 28),
+            ("tile_like", 56, 41),
+            ("zeros_64k", 8, 8),
+        ];
+        for (nome, produto_esperado, alvo) in PINOS {
+            let stream_oraculo = vetor(&format!("plain/{nome}.apultra.ap"));
+            assert_eq!(
+                stream_oraculo.len(),
+                alvo,
+                "{nome}: o stream do oráculo mudou; o alvo da tabela precisa ser re-medido"
+            );
+            let dados = decodificar(&stream_oraculo, AplibLimits::default()).data;
+            let stream = aplib_encode(&dados, &AplibEncodeLimits::default())
+                .unwrap_or_else(|e| panic!("{nome}: encode recusou: {e}"));
+            assert_eq!(
+                stream.len(),
+                produto_esperado,
+                "{nome}: capacidade do encoder saiu do congelado (alvo do oráculo: {alvo} B)"
+            );
+        }
     }
 }
