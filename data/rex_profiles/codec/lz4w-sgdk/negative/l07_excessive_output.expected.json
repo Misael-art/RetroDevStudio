@@ -1,0 +1,1 @@
+{"vector": "l07_excessive_output", "kind": "negative-spec", "expected_error": "excessive-output", "mirror_condition": "ERR-eod", "max_out": 16, "stream_len": 10, "note": "Derivado do contrato/formato; a referência aceita truncamento em silêncio (defeito registrado) e NÃO foi executada aqui."}

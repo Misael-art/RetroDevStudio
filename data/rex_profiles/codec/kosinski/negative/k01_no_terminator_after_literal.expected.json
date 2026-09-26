@@ -1,0 +1,1 @@
+{"vector": "k01_no_terminator_after_literal", "kind": "negative-spec", "expected_error": "truncated", "mirror_condition": "ERR-trunc", "max_out": null, "stream_len": 3, "note": "Derivado do contrato/formato; o oráculo koscmp NÃO valida histórico nem exige terminator (defeito registrado em build-vectors.sh) e NÃO foi executado sobre este stream."}

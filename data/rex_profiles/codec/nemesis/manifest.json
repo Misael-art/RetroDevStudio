@@ -1,0 +1,40 @@
+{
+  "contract_version": 1,
+  "id": "nemesis",
+  "kind": "codec",
+  "version": 1,
+  "platform": "mega-drive",
+  "variant": "Nemesis (mdcomp src/lib/nemesis.cc, nemcmp CLI HEAD): compressao de Art Words 8x8 com codigos de nibble adaptativos (arvore dinamica por passada), rounded/plano de bit; entrada no dominio do formato = multiplo de 32 bytes. Decodificador do produto deve ler streams do oraculo; compressor do produto precisa apenas decodificar pelo oraculo (nao reproduzir bytes identicos).",
+  "support": "fixture-only",
+  "source": {
+    "name": "mdcomp (Flamewing) nemcmp C++ HEAD, src/lib/nemesis.cc",
+    "url": "https://github.com/flamewing/mdcomp",
+    "commit": "72c6df405a75d322c5b3722da46c3abb864d3793",
+    "license": "LGPL-3.0-or-later",
+    "license_url": "https://github.com/flamewing/mdcomp/blob/master/COPYING"
+  },
+  "capabilities": {
+    "variant-fixed": "verified",
+    "vectors-and-holdout": "fixture",
+    "roundtrip-vs-reference": "fixture",
+    "golden-literal-streams": "blocked",
+    "cross-oracle-parity": "blocked",
+    "product-decode-vs-reference": "blocked",
+    "product-encode-vs-reference": "blocked",
+    "structured-negatives": "fixture",
+    "compressed-pointer-mode": "blocked",
+    "resource-identification-in-rom": "blocked",
+    "reinsertion": "blocked"
+  },
+  "limits": [
+    "GOLDEN LITERAL BLOQUEADO com motivo: um stream .nem artesanal exige espelhar a construcao da tabela adaptativa de codigos de nibble do oraculo; construir esse espelho sem a referencia seria ADIVINHAR a saida (proibido: nunca ajustar referencias). A prova desta fase e roundtrip plain->nemcmp->nemcmp -x==plain (9/9), que fixa o resultado do DECODE do produto em cada fixture.",
+    "ORACULO UNICO nesta rodada (mdcomp HEAD); o desempacotador 68k classico nao foi exercitado como segundo oraculo; paridade declarada blocked.",
+    "FORA DO DOMINIO o oraculo e silencioso: entrada nao-multiplo-de-32 e aceita no encode e o decode devolve o padding ate o multiplo (medido: 6->32 e 100->128). O produto deve tratar entrada fora do dominio como erro estruturado ('overflow'/'invalid' declarado no contrato), NAO replicar o padding silencioso.",
+    "O decode do oraculo usa work-buffer com escrita direta em arquivo; streams arbitrarias podem produzir lixo deterministico SEM erro (ver ORACLE-INVENTORY limitacao 1: loop sem limite de trabalho em entrada nao-Nemesis — todo teste exige timeout).",
+    "Modo de ponteiro comprimido do CLI nemcmp ('=[pointer]', registro de fim de stream com -i) nao coberto — capacidade separada blocked.",
+    "Sem prova em recurso real de ROM: support=fixture-only.",
+    "Negativos negative-spec (n01..n07) derivados do contrato/dominio, cada um com SONDA DETERMINISTICA no build que reproduz o numero medido (padding 6->32 e 100->128; garbage 64B -> exatamente 1048544B; truncado -> tamanho pleno com conteudo divergente a partir do byte 65508; prefixo de 8B -> oraculo morre no limite do sandbox rc=137). O oraculo NUNCA e verificador do spec.",
+    "Domino explicito do formato: plain deve ser multiplo de 32 bytes E > 0. Fora dai o produto DEVE dar erro estruturado (input-not-in-domain), nunca padrinhar. O encode de plain vazio SEGFAULTA o oraculo (rc=139) — perigo registrado.",
+    "Truncamento NAO e detectavel por metadados no oraculo: stream cortada de 1 byte decodifica com o MESMO tamanho da saida plena (65536) e conte divergente so no rabo; qualquer decoder que so valida tamanho aceita lixo — o produto precisa de parser real."
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "profile": "nemesis",
+  "kind_note": "negative-spec: derivados do CONTRATO v1/domínio do formato, NÃO do oráculo (a referência não valida nada e SEGFAULTA em entrada vazia). Não há espelho Python do decode (tabela adaptativa de nibble blocked), então cada caso tem uma sonda determinística executada em build-vectors.sh que reproduz o número medido; a divergência aborta o build.",
+  "vectors": [
+    {
+      "name": "n01_align_input_6b",
+      "input_kind": "plain",
+      "input_file": "n01_align_input_6b.bin",
+      "input_note": "b'ABCDEF' — 6 bytes, não-múltiplo de 32",
+      "expected_error": "input-not-in-domain (alinhamento Art Word: plain % 32 == 0 e plain > 0)",
+      "oracle_probe": "encode ACEITA rc=0; decode devolve 32 bytes (padding silencioso) — medido 2026-09-25 e re-asserido no build",
+      "product_must": "recusar ANTES de codificar; nunca padrinhar silenciosamente"
+    },
+    {
+      "name": "n02_align_input_100b",
+      "input_kind": "plain",
+      "input_file": "n02_align_input_100b.bin",
+      "input_note": "100 bytes de 0xBA — não-múltiplo de 32",
+      "expected_error": "input-not-in-domain (alinhamento)",
+      "oracle_probe": "encode ACEITA rc=0; decode devolve 128 bytes (padding) — re-asserido no build",
+      "product_must": "recusar; padding silencioso da referência é defeito registrado"
+    },
+    {
+      "name": "n03_empty_stream",
+      "input_kind": "stream",
+      "input_file": "n03_empty_stream.nem",
+      "input_note": "stream de 0 bytes",
+      "expected_error": "truncated",
+      "oracle_probe": "decode rc=0 produzindo 0 bytes (falsa-aceitação); o produto não tem como distinguir 'stream vazia' de 'sem dados' sem violar o contrato: stream válida exige conteúdo de tabela+códigos",
+      "product_must": "erro estruturado truncated"
+    },
+    {
+      "name": "n04_garbage_ff_64b",
+      "input_kind": "stream",
+      "input_file": "n04_garbage_ff_64b.nem",
+      "input_note": "64 bytes 0xFF — entrada arbitrária não-Nemesis",
+      "expected_error": "bounded-failure: o produto DEVE falhar com erro estruturado (work-limit / invalid / cancelled) e NUNCA emitir mais que max_out",
+      "oracle_probe": "MEDIDO: decode produz 1048544 bytes (1.02 MB) a partir de 64 bytes de lixo — expansão sem limite; re-asserido no build (tamanho exato 1048544)",
+      "product_must": "max_out + work-limit obrigatórios; este vector é a prova quantitative da exigência"
+    },
+    {
+      "name": "n05_truncated_last_byte",
+      "input_kind": "stream",
+      "input_file": "n05_truncated_last_byte.nem",
+      "input_note": "planes_64k.nem sem o último byte (21274/21275)",
+      "expected_error": "truncated",
+      "oracle_probe": "MEDIDO: decode rc=0 devolve 65536 bytes — MESMO tamanho do pleno, divergindo só no conteúdo a partir do byte 65508 (falsa-aceitação por tamanho; detecção exige parser real, impossível por metadados). Sonda do build re-assert out==65536 && cmp-diverge; o oráculo NÃO é usado como verificador do spec truncated",
+      "product_must": "EOF antes do fim dos códigos ⇒ truncated; jamais devolver 'sucesso' de stream cortada"
+    },
+    {
+      "name": "n06_hanging_prefix",
+      "input_kind": "stream",
+      "input_file": "n06_hanging_prefix.nem",
+      "input_note": "prefixo de 8 bytes (de 16) de alt_55_aa_96.nem",
+      "expected_error": "work-limit (cancelamento cooperativo)",
+      "oracle_probe": "MEDIDO: decode consome CPU até SIGKILL do sandbox (rc=137) — loop sem limite de trabalho com buffer não-Nemesis; re-sondado no build com timeout (qualquer rc!=0 satisfaz a prova de perigo)",
+      "product_must": "limite de trabalho + cancelamento: sem eles o produto herda o loop da referência"
+    },
+    {
+      "name": "n07_maxout_real_stream",
+      "input_kind": "stream+limit",
+      "input_file": "n07_planes_64k.nem",
+      "input_note": "stream REAL válida (planes_64k.nem, plena, RT-OK) com max_out=1024",
+      "expected_error": "excessive-output",
+      "oracle_probe": "stream bem-formada: decode pleno = 65536 bytes (prova RT-OK publicada); com max_out=1024 o produto DEVE abortar cedo, sem emitir além do limite",
+      "product_must": "limite é obrigação do produto, não defeito da entrada (mesma semântica de k05/l07)"
+    }
+  ],
+  "defect_probes": [
+    "encode de plain VAZIO (0 bytes): nemcmp SEGFAULTA (rc=139) — a referência nem o caminho de entrada domain-boundary é seguro; o produto trata plain vazio como input-not-in-domain"
+  ]
+}

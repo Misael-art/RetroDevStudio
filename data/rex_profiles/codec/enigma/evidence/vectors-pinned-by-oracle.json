@@ -1,0 +1,58 @@
+{
+  "claim": "vectors-and-holdout (roundtrip-only): 10 plains de arrays int16 BE (incl. vazio, limiar de zeros, deltas extremos, ruído inline, rampa com sinal) codificados por enicmp e decodificados por enicmp -x com saída EXATA; par (plain .bin, stream .eni) publicado com hashes. Negativo de domínio medido: comprimento ímpar descarta cauda (5->4). Golden literal bloqueado com motivo (manifest). + structured-negatives: 7 negativos negative-spec (e01..e07) com sondas determinísticas re-asseridas a cada build (ímpar 5->4 com cauda descartada, truncado -1 -> 4098, declaração inflada ignorada byte-a-byte, modo 0x02 decodificado como válido, vazia/lixo aceitas, stream real p/ max_out).",
+  "rom": {
+    "sha256": "a96f0183e505b27abc12d4f85206c87cd35da704b0de13e83f6ed4685f571658",
+    "size_bytes": 12940,
+    "format": "fixture",
+    "normalization": [
+      {
+        "step": "hash agregado = sha256( sha256sum ordenado (LC_ALL=C) dos arquivos de plain/ e negative/ concatenado com os bytes de manifest.tsv ); reimpresso pela linha 'agregado=' do build-vectors.sh; size_bytes = du -sb do diretório do perfil data/rex_profiles/codec/enigma medido ANTES desta reescrita da evidência; a âncora de integridade é o hash agregado, não o tamanho. Vetores publicados anteriores byte-idênticos (diff do manifest.tsv aditivo, exceto a linha neg/odd_bytes_tail do enigma substituída por e01 com o MESMO sha256 de entrada).",
+        "sha256_after": "a96f0183e505b27abc12d4f85206c87cd35da704b0de13e83f6ed4685f571658"
+      }
+    ],
+    "size_bytes_pre_evidence_rewrite": 38401
+  },
+  "locator": {
+    "kind": "offset-range",
+    "offset": 0,
+    "length": 0
+  },
+  "bank_state": {},
+  "expected": {
+    "tool": "enicmp CLI (mdcomp src/enicmp.cc; externo ao produto; encode+decode do mesmo oráculo — paridade multi-autor blocked)",
+    "version": "mdcomp commit 72c6df405a75d322c5b3722da46c3abb864d3793; binário local ~/.cache/rex-codecs/oracle-tools/bin/enicmp",
+    "output_sha256": "58b33fbce0423aa8cfc439ed1b6aac0d8cbaada63770021a7aac32f62d7ae7c3",
+    "output_len": 1834,
+    "pinned_before_implementation": true
+  },
+  "provenance": "authored-fixture",
+  "negatives": [
+    {
+      "input": "array de 5 bytes (comprimento ímpar)",
+      "expected_error": "oráculo: aceita, mas decode devolve 4 bytes (descarta cauda silenciosamente) — produto deve retornar erro estruturado 'out-of-range/invalid', não truncar"
+    },
+    {
+      "input": "stream .eni truncada em 40 bytes (metade de array)",
+      "expected_error": "oráculo: rc=0 ACEITA e produz 62 bytes de saída (continua até esgotar/refill, sem detectar o corte) — produto precisa de 'truncated' + max-output + work-limit"
+    },
+    {
+      "input": "stream .eni sem o último byte",
+      "expected_error": "oráculo: rc=0 produz os 400 bytes completos — truncamento não detectado; comportamento registrado como perigo, não especificação"
+    }
+  ],
+  "timestamp": "2026-09-25: execução de build-vectors.sh no worktree codex/rex-b-codecs | 2026-09-25 (2ª rodada): negativos negative-spec + sondas re-assertivas no build",
+  "negative_spec": {
+    "source": "scripts/rex_profiles/codecs/enigma/negative-spec.json (publicado em negative/)",
+    "files": [
+      "e01_odd_bytes_tail.bin",
+      "e02_truncated_last_byte.eni",
+      "e03_len_inflated.eni",
+      "e04_mode_02.eni",
+      "e05_empty_stream.eni",
+      "e06_garbage_ff_255b.eni",
+      "e07_planes_4k.eni",
+      "negative-spec.json"
+    ],
+    "method": "derivados do CONTRATO v1/domínio, NÃO do oráculo; cada spec tem sonda determinística no build que reproduz o número medido (2026-09-25) — divergência aborta; o oráculo nunca é verificador do spec (a referência não valida: segfault no encode vazio, padding silencioso, truncado falsa-aceito, loop morto só pelo sandbox)"
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "claim": "vectors-and-holdout: 12 plains + 9 goldens + 1 vetor de dicionário (d01) + 7 negativos negative-spec em data/rex_profiles/codec/lz4w-sgdk/ com resultados fixados pelo oráculo externo lz4w.jar v1.43 ANTES de qualquer implementação do produto; goldens montados à mão pela spec só são publicados se o oráculo decodificar para a saída exata; 12/12 streams reais do oráculo (plain+golden) reproduzidas byte a byte pelo espelho da spec, INCLUINDO o stream dicionário d01 (paridade do espelho com prev, e ERR-off sem prev — calibração, não oracle independente); negativos derivados do CONTRATO, auto-validados pelo espelho strict, oráculos NÃO executados sobre eles.",
+  "rom": {
+    "sha256": "294b3df6f7b0ab43df7695c8537623802aef09ce6b88fd0f03762c08a1592972",
+    "size_bytes": 18029,
+    "format": "fixture",
+    "normalization": [
+      {
+        "step": "hash agregado (receita canônica) = sha256( sha256sum ordenado LC_ALL=C dos arquivos de plain/, golden/, dict/ e negative/ + bytes de manifest.tsv ); reimpresso pela linha agregado= de scripts/rex_profiles/codecs/lz4w-sgdk/build-vectors.sh; size_bytes = du -sb do diretório do perfil (mesma receita do perfil aplib). Vetores anteriores permaneceram byte-idênticos (diff do manifest.tsv = só +8 linhas: d01 + l01..l07)",
+        "sha256_after": "294b3df6f7b0ab43df7695c8537623802aef09ce6b88fd0f03762c08a1592972"
+      }
+    ]
+  },
+  "locator": { "kind": "offset-range", "offset": 0, "length": 0 },
+  "bank_state": {},
+  "expected": {
+    "tool": "lz4w.jar v1.43 (CLI java -jar lz4w.jar p|u [prev@in]; externo ao produto; encode+decode do mesmo oráculo — limitação de independência declarada no manifest)",
+    "version": "jar SHA-256 bfcf9c692696aac21be23f0d48a9ccf788963a4ae7039cb7af276ed745bca4bb (SGDK v2.11); fonte LZ4W.java @ SGDK commit 2eac605a7744a6eb4f61824bb24ccab39b8bd8b8",
+    "output_sha256": "294b3df6f7b0ab43df7695c8537623802aef09ce6b88fd0f03762c08a1592972",
+    "output_len": 18029,
+    "pinned_before_implementation": true
+  },
+  "provenance": "authored-fixture",
+  "dictionary": {
+    "vector": "d01",
+    "encoding": "java -jar lz4w.jar p d01_dict.bin@d01_plain.bin (separador real '@'; ajuda do CLI diz '&' — defeito de doc registrado); pack determinístico",
+    "proof": "roundtrip do oráculo com prev (DICT-RT-OK) + paridade byte-a-byte do espelho Python transcrito do unpack real (offsetAdj decrementa o comprimento após TODO match, curto E longo — sem isso o 2º ROM-match divergia); sem prev: oráculo estoura (IndexOutOfBounds) e espelho da ERR-off",
+    "product_contract": "stream NÃO autônoma: decode(stream, dict exato) == plain; decode sem o dicionário exato DEVE retornar invalid-reference (derivação do contrato; a referência não valida entrada)"
+  },
+  "negatives": [
+    { "input": "l01_no_eod_no_final_word.lz4", "expected_error": "truncated (contrato v1; espelho strict confirma a condição; oráculo aceitaria/recusa de forma inconsistente)" },
+    { "input": "l02_trunc_mid_literals.lz4", "expected_error": "truncated" },
+    { "input": "l03_short_match_no_history.lz4", "expected_error": "invalid-reference" },
+    { "input": "l04_long_match_no_history.lz4", "expected_error": "invalid-reference" },
+    { "input": "l05_rom_source_bit.lz4", "expected_error": "invalid-reference (bit-fonte ROM sem dicionário declarado = contexto não fornecido)" },
+    { "input": "l06_odd_length_stream.lz4", "expected_error": "truncated (tamanho ímpar fora do formato de palavras)" },
+    { "input": "l07_excessive_output.lz4", "expected_error": "excessive-output (max_out=16 < 82 bytes; stream decodifica integral no espelho)" },
+    { "input": "k09_mixed.lz4 truncada em 6 bytes (antes do EOD) — PROBE do oráculo", "expected_error": "oráculo: rc=1 ArrayIndexOutOfBoundsException (registrado; não é especificação)" },
+    { "input": "k07_long_match_near.lz4 truncada em 4 bytes — PROBE do oráculo", "expected_error": "oráculo: rc=1 ArrayIndexOutOfBoundsException" },
+    { "input": "k01_literals_even.lz4 sem a palavra final — PROBE do oráculo", "expected_error": "oráculo: rc=0 aceita silenciosamente e produz os 6 bytes completos (defeito: truncamento sem erro)" }
+  ],
+  "timestamp": "2026-09-25: execução de build-vectors.sh no worktree codex/rex-b-codecs (conjunto determinístico e regenerável; negativos e dicionário adicionados nesta rodada)"
+}

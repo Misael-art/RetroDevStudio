@@ -1,0 +1,15 @@
+{
+  "dst_total": 33792,
+  "cases": [
+    {
+      "id": "r11_wrap_deep_ref",
+      "dict_len": 33184,
+      "dict_sha256": "812e0b1ee7de8b8adb26c1ce7edba777d2cb5a7619723041edc6f644b15641bb",
+      "dict_committed": true,
+      "stream_len": 8,
+      "plain_len": 6,
+      "stride": 33792,
+      "dst_offset": 0
+    }
+  ]
+}
