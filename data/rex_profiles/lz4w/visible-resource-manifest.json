@@ -36,6 +36,31 @@
     "claim": "ningun frame da cadea SpriteDefinition->animacion->frame->TileSet LZ4W ten colocacion visible en checkpoint-129 con portas minTiles=8, minRichCells=8, cobertura>=0.7, cores>=4, formatos planar E chunky",
     "retractedClaims": ["def 0x22a2a visible en (130-132,98) 42/55 (falso positivo: fondo plano + matcher axenstico)", "hit 0x24948 (cores non batian coa paleta runtime en fase de fade)"]
   },
+  "resource0xc8cc8": {
+    "classVerdict": "TileSet SGDK 2.11 chunky 4bpp de 9 tiles (efecto 3x3), NON '9 paletas x 16 cores'; clasificación por estrutura, non por tamaño nin enderezo",
+    "tileSetHeader": { "offset": "0x25788", "compression": 2, "compressionName": "LZ4W", "numTile": 9, "tiles": "0xc8cc8" },
+    "verifiedReferences": {
+      "to0xc8cc8": ["0x2578c (campo tiles do header @0x25788; unica u32 absoluta en todo o binario)"],
+      "toTileSetHeader": ["0x25792 (campo tileset* de SpriteFrame @0x25790)"],
+      "paletteLikeAlias": { "offset": "0x2578a", "note": "lectura {numColor=9,data=0xc8cc8} = campo numTile re-interpretado DENTRO do header TileSet; a unica lectura palette-like do binario" }
+    },
+    "consumerChain": "SpriteDefinition@0x258e8 (palette real 0x221e6, w=64 h=72) -> animacion@0x258de -> SpriteFrame@0x25790 (VDPSprite 3x3, numTile 9) -> TileSet@0x25788 -> stream@0xc8cc8",
+    "reachableEvidence": "4 referencias u32 a 0x258e8 no segmento de codigo: 0x4f22, 0x5734, 0x6070, 0x616e (todas < 0x10000)",
+    "structuralDiscriminators": {
+      "decodedBytes": 288,
+      "bytesConsumed": 144,
+      "nextNeighborStream": "0xc8d58 == 0xc8cc8 + 144 (TileSet do frame 1 da mesma animacion: repacks que cambian a lonxitude desprazan datos vecins)",
+      "nibbleAlphabet": [0, 10, 12, 13, 14, 15],
+      "oddBit0Words": 18,
+      "paletteCalibration": "960 palabras / 60 paletas de todas as defs validadas: 0 con bit0=1; o payload ten 18 => incompatible co formato de paleta SGDK"
+    },
+    "payloadHashes": {
+      "compressed144Sha256": "c537b9ad0895f566c49b751f57f375f8ffe9e481a3b03bf0af5486bec69e7353",
+      "decoded288Sha256": "5e3e68a9ebadb5b178d9e8941017b92ffa49667aa8a0b39c268f735d6af87d46"
+    },
+    "loadVisibleStatus": "alcanzable=probado estaticamente; cargado/visible=requere xanela do integrador (VRAM/CRAM antes/depois; index de VDP_loadTileSet). O efecto E2E global (3174 px) non se explica por clase-paleta e si por desprazamento de streams no repack.",
+    "tests": "scripts/rex_profiles/lz4w/resourceclass.test.mjs (expectativas RED antes da implementacion)"
+  },
   "aplibGoldenVectors": {
     "dir": "data/rex_profiles/codecs/aplib-golden",
     "procedencia": "copia SHA-rexistrada de REX-B-CODECS-2026-09-24 data/rex_profiles/codec/aplib/golden (oracles apultra 8f340057 + APJ v1.32)",

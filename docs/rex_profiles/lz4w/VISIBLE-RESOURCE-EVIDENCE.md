@@ -16,7 +16,7 @@ ROM nos repositorios: só hashes, enderezos e campos estruturais.
 Layouts estruturais tomados directamente das fontes do SDK pinado
 (`SpriteDefinition`/`TileSet`/`Palette` en `m68k/inc`, `TileMap.java`,
 `Image.java`, `Map.java` en `tools/src`), non inferidos por secuencias de
-punteiros.
+ponteiros.
 
 ## Evidencia de frame activo / capturas autorizadas
 
@@ -36,7 +36,7 @@ A cadea validada `SpriteDefinition → animación → frame → TileSet → stre
 colocación visible en checkpoint-129 baixo portas estritas
 (`minTiles=8, minRichCells=8`, cobertura ≥0,7, ≥4 cores por colocación) —
 probado con **ambos** formatos de tile (planar e chunky). Grafo estático de
-punteiros proba alcançabilidade, non execución; a ejecución visual queda
+ponteiros proba alcançabilidade, non execución; a ejecución visual queda
 sen probar para sprites porque a captura non mostra gameplay.
 
 **Retracción explícita:** as afirmacións previas (pre-porte) «def 0x22a2a
@@ -100,3 +100,53 @@ captura que alcance o gameplay (pendente — xanela do integrador).
 27,98% do frame — non é a capa base); `0x21ba4` (NONE, 2 tiles). Ningún
 TiledImage referencia TileSet LZ4W: o LZ4W da ROM vive só en sprites e o
 «realmente usado en pantalla» nas capturas autorizadas é APLIB.
+
+## Fase 4 — clase e consumidor de `0xc8cc8` (sen clasificación por tamaño nin enderezo)
+
+A hipótese do produto (ROUND_STATE.md @ 7bf3393) clasificaba `0xc8cc8` como
+«288 bytes = 9 paletas × 16 cores». Esa lectura é un artefacto de tamaño:
+288 = 9·32 bytes de tile 4bpp **e** 144 palabras BE, e calquera par
+`{u16=0x0009, u32=0x000c8cc8}` se le tamén como Palette definition
+`{numColor=9, data=0xc8cc8}`. O alias está en `0x2578a`, **dentro** do header
+TileSet `@0x25788`: é o campo `numTile` re-interpretado. Pins verificadas en
+`scripts/rex_profiles/lz4w/resourceclass.test.mjs` (expectativas RED antes da
+implementación, medidas sobre a ROM):
+
+- **Referencia verificada**: a única referencia absoluta u32 a `0xc8cc8` en
+  todo o binario vive en `0x2578c`, que é o campo `tiles` do header
+  TileSet SGDK 2.11 `@0x25788 = {u16 compression=2 (LZ4W), u16 numTile=9,
+  u32 tiles=0xc8cc8}`. A única referencia a `0x25788` está en `0x25792`, o
+  campo `tileset*` de `SpriteFrame @0x25790`.
+- **Consumidor**: `validateRom` (layout pinado do xerador rescomp) pecha a
+  cadea `SpriteDefinition @0x258e8` (paleta real `0x221e6`) → animación →
+  frame 0 `@0x25790` → TileSet `@0x25788` → `0xc8cc8`. O VDPSprite do frame
+  ten `cellsWide=3 · cellsTall=3 = 9 = numTile`. A definición está
+  referenciada 4 veces desde o segmento de código (`0x4f22`, `0x5734`,
+  `0x6070`, `0x616e`, todos < `0x10000`): **alcanzable** probado
+  estaticamente. Non existe ningunha Palette definition SGDK cuxo `data`
+  apunte a `0xc8cc8` fóra do alias do seu propio header.
+- **Clase estructural do payload**: decodificado LZ4W (dicionario = prefixo
+  `rom[0..0xc8cc8]`) → 288 bytes, `bytesConsumed = 144`. Alfabeto de nibbles
+  = `{0, 10, 12, 13, 14, 15}` sen 1..9 nin 11 (5 cores + transparente), e 18
+  palabras BE con bit0=1 (`0xaaaa`, `0xefef`…), **imposibles** en saída de
+  paleta SGDK. Calibración na propia ROM: as 960 palabras das 60 paletas de
+  tódalas definicións validadas teñen bit0=0. Conclusión: son **datos de
+  tile 4bpp (chunky) dun efecto 3×3**, non paletas.
+- **Separación honesta**: alcanzábelo (cadea + 4 sitios de código) ≠ cargado
+  ≠ visible. A observación de carga (VRAM/CRAM/RAM) require a xanela do
+  integrador. O efecto E2E reclamado (3174 px nunha caixa 208×94 ao editar un
+  nibble) non é consistente cun cambio dun só píxel de tile, e si o é cun
+  **desprazamento de streams** na recomposición: o frame 1 da mesma animación
+  ten os seus tiles exactamente en `0xc8d58 = 0xc8cc8 + 144`, polo que calquer
+  repack que altere a lonxitude do stream despraza todos os datos seguintes
+  (os ponteiros son absolutos). Probas: decodificación do veciño a
+  `numTile·32` exacta. Suxestión de observación na xanela: dump de VRAM/CRAM
+  antes/depois do parche, e o `index` pasado a `VDP_loadTileSet`
+  (rexión de patterns vs. name table).
+- Hashes (sen bytes na repo): stream comprimido (144 B)
+  `c537b9ad0895f566c49b751f57f375f8ffe9e481a3b03bf0af5486bec69e7353`;
+  payload decodificado (288 B)
+  `5e3e68a9ebadb5b178d9e8941017b92ffa49667aa8a0b39c268f735d6af87d46`.
+- O **segundo alvo presérvase**: `TiledImage @0x21b5c` (APLIB) segue sendo o
+  recurso visible probado píxel a píxel (95,90% cp129); `0xc8cc8` é recurso
+  de sprite LZ4W cargado por outra ruta, sen conflicting claims.
