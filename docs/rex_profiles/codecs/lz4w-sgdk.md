@@ -132,6 +132,63 @@ Pendente da diretiva: "streams emitidas pelo encoder Rust" — `rex_codecs.rs` �
 arquivo em WIP do integrador e NÃO foi tocado; os vetores desta evidência
 ficam prontos para replay assim que existirem streams Rust.
 
+## Replay das streams do ENCODER RUST vs 68k oficial vs jar (2026-09-26)
+
+Ferramenta: `scripts/rex_profiles/codecs/lz4w-sgdk/variants/rust_streams/`
+(`gen_rust_streams.sh` compila `driver.rs` contra cópia VERBATIM pinada de
+`rex_codecs.rs` — lida somente-leitura; `gen_rust_cases.py` monta tabelas com
+`(src, dict, plen, stride)`; `harness2.s` copia o dicionário para a base do
+dst e chama `lz4w_unpack(src, dst+plen)`; mesma cadeia de oráculo do desempate
+anterior, com identidade do desempacotador re-provada a cada build).
+Evidência completa + cadeia reproduzível:
+`data/rex_profiles/codec/lz4w-sgdk/evidence/rust-streams-2026-09-26/`.
+
+Pinos: encoder legacy `07ee9b2c…` (o que produziu a divergência), snapshot
+WIP do integrador `04eaa0b0…` (janela não-ROM já limitada a 0x4000 words),
+driver `33291212…`, jar v1.43 `bfcf9c69…`, desempacotador montado `ff18bacb…`.
+BYOR: dicts/streams/plains derivados da ROM (r09/r10/r13) ficam fora do git
+(SHA + offset `0xC8CC8` registrados no manifest).
+
+| caso | o que discrimina | jar | 68k oficial | veredito |
+|---|---|---|---|---|
+| r01 | literais + cauda ímpar (word final 0x80XX emitido pelo Rust) | ok | ok | IDÊNTICO ao esperado-Rust |
+| r02 | matches curtos dist=2 e dist=1 (O=0) | ok | ok | IDÊNTICO |
+| r03 | LONGO não-ROM ~302 words na própria saída | ok | ok | IDÊNTICO |
+| r04 | value word 0x0000 (off=1) vs terminador | ok | ok | IDÊNTICO |
+| r05 | dict 600 w: curto + LONGO não-ROM off=500 ao dict | ok | ok | IDÊNTICO |
+| r09 | stream ORIGINAL do corpus 0xc8cc8 (3 refs ROM-bit) | ok | ok 288 B | IDÊNTICO (baseline) |
+| r10 | stream da edição canônica (`edited[0]^=0xF0`, encoder 07ee9b2c) | ok 288 B | **difere @160** | DIVERGÊNCIA real |
+| r11 | MÍNIMO: 8 B, 1 longo não-ROM len=3 **off=16590** (value 0x3F33) | ok | lê `$000204` da ROM | DIVERGÊNCIA reproduzida no menor caso |
+| r12 | fronteira: mesmo shape com **off=16385** (value 0x4000) | ok | ok | IDÊNTICO |
+| r13 | mesma edição canônica com encoder WIP `04eaa0b0` | ok | ok 288 B | IDÊNTICO (fix valida no hardware) |
+
+**Causa raiz (medida, não hipotetizada)** — `tools_a.s` 2.11, `.long_match`:
+`move.w (a0)+,d0; add.w d0,d0; lea -2(a1,d0.w),a2` é aritmética de 16 bits.
+Referência LONGA sem flag ROM-source só aponta para trás quando
+`value ≥ 0x4000` ⟺ `off ≤ 16385` words. Com `off ≥ 16386` o desvio fica
+positivo e o 68k lê PARA FRENTE, aliassando pelo bus de 24 bits (r11: lê o
+movem.l do reset handler em `$000204`; r10: leu `$0022AA`). O empacotador jar
+limita refs não-ROM a `0x3FFF+1 = 16385` words; o encoder Rust legado
+permitia `off ≤ 0x8000` e por isso produzia streams silenciosamente
+indecodificáveis no unpacker oficial quando o dicionário-dst tinha > 32 KiB.
+
+**Status do WIP do integrador (medido contra snapshot `04eaa0b0`)**: o decoder
+recusa a stream r10 legacy (off 18555 → `invalid_reference`) e o encoder passa
+a limitar a janela não-ROM a 0x4000 words — r13 decodifica byte-idêntica no
+68k. duas observações honestas: (a) o decoder WIP também recusa off=16385
+(value 0x4000), que 68k+jar ACEITAM — 1 word mais conservativo que o teto do
+empacotador oficial (falso-positivo potencial em streams jar reais no limite);
+(b) com a janela reduzida, a edição canônica de 0xc8cc8 passou a produzir
+stream de 150 B > slot original de 144 B — a regra de tamanho de
+`reinsert_transaction` recusaria ESTA edição; o achado-efeito para o produto,
+não decisão.
+
+Atribuição corrigida em relação ao diário de medição: os primeiros rc=1 do
+jar em r09/r10 foram BUG MEU no `unpack-jar.sh` (dicts BYOR grandes excluídos
+do diretório de casos → jar rodou sem dicionário); com `DICTDIR` correto,
+jar rc=0 e saída idêntica ao esperado. Nenhum comportamento de referência foi
+ajustado.
+
 ## Vetores fase 2 (construídos e confirmados)
 
 `scripts/rex_profiles/codecs/lz4w-sgdk/` → `data/rex_profiles/codec/lz4w-sgdk/`:
@@ -177,6 +234,13 @@ ficam prontos para replay assim que existirem streams Rust.
       exceção × 68k over-read silencioso) — registrada como diagnóstico da
       referência. Ver "Desempate medido" acima e evidência
       `variants-68k-2026-09-25`.
-- [ ] Caso "streams emitidas pelo encoder Rust" da diretiva: aguarda streams do
-      `rex_codecs.rs` (WIP do integrador, não tocado); replay pronto.
+- [x] Caso "streams emitidas pelo encoder Rust" da diretiva: EXECUTADO
+      2026-09-26 — replay 68k + jar + esperado-Rust sobre 10 casos; divergência
+      r10 reduzida ao mínimo r11 (8 B, off 16590) com fronteira r12 (16385 OK)
+      e confirmação r13 no WIP do integrador. Ver "Replay das streams do
+      ENCODER RUST" e evidência `rust-streams-2026-09-26`.
+- [ ] Decisão do integrador sobre a observação (a) do replay Rust: teto
+      off=16385 (value 0x4000) é aceito por 68k+jar mas recusado pelo decoder
+      WIP com `MATCH_LONG_OFFSET_LIMIT = 0x4000` — ajustar para `≤ 16385` ou
+      manter conservador é decisão de produto (evidência medida fornecida).
 - [ ] Caso de recurso real p/ integrador ou rótulo fixture-only permanente.

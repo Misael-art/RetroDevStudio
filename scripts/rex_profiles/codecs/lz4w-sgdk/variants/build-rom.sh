@@ -44,8 +44,8 @@ cat > "$WORK/obj/master.s" <<'EOF'
 .include "official.s"
 .include "table.s"
 EOF
-cp "$HERE/harness.s" "$WORK/obj/harness.s"
-cp "$CASES/table.s" "$WORK/obj/table.s"
+cp "${HARNESS:-$HERE/harness.s}" "$WORK/obj/harness.s"
+cp "${TABLE:-$CASES/table.s}" "$WORK/obj/table.s"
 
 run_wine as -m68000 --register-prefix-optional --bitwise-or \
   -I "$WORK/obj" -o "$WORK/obj/master.o" "$WORK/obj/master.s"
