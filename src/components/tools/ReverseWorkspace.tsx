@@ -18,6 +18,7 @@ import {
 } from "../../core/ipc/toolsService";
 import { ExperimentalNotice } from "./ToolNotices";
 import InspectionPanel from "./InspectionPanel";
+import { CompressedResourcePanel } from "./CompressedResourcePanel";
 import ToolPathField from "./ToolPathField";
 
 type ReverseView =
@@ -28,7 +29,8 @@ type ReverseView =
   | "audio"
   | "code"
   | "projection"
-  | "inspection";
+  | "inspection"
+  | "resources";
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -400,6 +402,7 @@ export default function ReverseWorkspace() {
           : "Projection suportada para esta ROM; revise hints antes de gerar qualquer saida.";
   const viewTabs: { id: ReverseView; label: string }[] = [
     { id: "inspection", label: "Inspeção visual" },
+    { id: "resources", label: "Recursos comprimidos" },
     { id: "map", label: "ROM Map" },
     { id: "hex", label: "Hex" },
     { id: "graphics", label: "Graphics" },
@@ -409,6 +412,19 @@ export default function ReverseWorkspace() {
     { id: "projection", label: "Projection" },
   ];
 
+  if (activeView === "resources") {
+    return (
+      <div className="flex flex-col gap-3 p-3">
+        <CompressedResourcePanel logMessage={logMessage} />
+        <div className="flex flex-wrap gap-2">
+          {viewTabs.filter((tab) => tab.id !== "resources").map((tab) => (
+            <button key={tab.id} type="button" data-testid={`reverse-tab-${tab.id}`} onClick={() => setActiveView(tab.id)} className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Voltar para {tab.label}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (activeView === "inspection") {
     return (
       <div className="flex flex-col gap-3 p-3">
@@ -416,7 +432,7 @@ export default function ReverseWorkspace() {
         <InspectionPanel logMessage={logMessage} />
         <div className="flex flex-wrap gap-2">
           {viewTabs.filter((tab) => tab.id !== "inspection").map((tab) => (
-            <button key={tab.id} type="button" onClick={() => setActiveView(tab.id)} className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Voltar para {tab.label}</button>
+            <button key={tab.id} type="button" data-testid={`reverse-tab-${tab.id}`} onClick={() => setActiveView(tab.id)} className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Voltar para {tab.label}</button>
           ))}
         </div>
       </div>
@@ -444,6 +460,14 @@ export default function ReverseWorkspace() {
           className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8] hover:text-[#e5e7eb]"
         >
           Inspeção visual
+        </button>
+        <button
+          type="button"
+          data-testid="reverse-tab-resources"
+          onClick={() => setActiveView("resources")}
+          className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#94a3b8] hover:text-[#e5e7eb]"
+        >
+          Recursos comprimidos
         </button>
         {manifest &&
           viewTabs

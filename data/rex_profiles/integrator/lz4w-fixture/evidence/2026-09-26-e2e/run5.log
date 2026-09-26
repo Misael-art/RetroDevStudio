@@ -1,0 +1,82 @@
+[RDS preflight host]
+  SGDK real: OK (/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/sgdk via SGDK_ROOT)
+  tauri-driver: OK (/home/misael/.cargo/bin/tauri-driver)
+  WebDriver nativo: OK (/usr/sbin/WebKitWebDriver)
+  Ready: SIM
+== Building debug Tauri app ==
+
+> retrodev-studio@0.1.0 build:debug
+> node scripts/build.mjs debug
+
+RetroDev Studio - Script Unificado de Compilacao
+Modo: debug
+Target dir canonico: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test
+Target dir dev bruto: /home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/cargo-target
+Target dir validation: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation
+
+[Prep] Mantendo artefatos anteriores e validando atualizacao por timestamp.
+
+
+[Build] Compilando Tauri (modo: debug)...
+
+[Build] Cargo target efetivo: /home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/cargo-target
+
+> retrodev-studio@0.1.0 tauri
+> tauri build --debug --no-bundle
+
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `npm run build`
+
+> retrodev-studio@0.1.0 build
+> tsc -b && vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 127 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                0.40 kB │ gzip:   0.27 kB
+dist/assets/index-CsDEyHM5.css               128.97 kB │ gzip:  18.31 kB
+dist/assets/projectCapability-Bg1a-pW9.js      0.99 kB │ gzip:   0.47 kB │ map:    12.17 kB
+dist/assets/ppmImage-B4Dzt-DT.js               5.66 kB │ gzip:   1.58 kB │ map:    10.99 kB
+dist/assets/AssetPreview-CcI1IjiP.js           6.65 kB │ gzip:   1.72 kB │ map:    11.60 kB
+dist/assets/nodeDefinitions-ipRGuZeJ.js       19.56 kB │ gzip:   3.83 kB │ map:    42.72 kB
+dist/assets/ContextualPalette-aCSvW7LU.js     26.40 kB │ gzip:   6.44 kB │ map:    42.67 kB
+dist/assets/ExplorerWorkspace-oeJkkYTD.js     31.49 kB │ gzip:   5.97 kB │ map:    46.65 kB
+dist/assets/RetroFXDesigner-CXhgzyPv.js       49.47 kB │ gzip:   9.06 kB │ map:    68.56 kB
+dist/assets/behaviorLibrary-DgNnfnmx.js       66.16 kB │ gzip:  15.96 kB │ map:   133.26 kB
+dist/assets/InspectorPanel-Bs01a8Si.js       118.89 kB │ gzip:  21.66 kB │ map:   174.74 kB
+dist/assets/ReverseWorkspace-HjWkVP9r.js     147.26 kB │ gzip:  24.86 kB │ map:   198.59 kB
+dist/assets/ArtStudioPanel-_pTgTtzt.js       182.37 kB │ gzip:  33.88 kB │ map:   271.52 kB
+dist/assets/ToolsPanel-BCewDwX7.js           194.92 kB │ gzip:  34.14 kB │ map:   274.03 kB
+dist/assets/ViewportPanel-BG8k2Hyi.js        226.33 kB │ gzip:  42.29 kB │ map:   343.81 kB
+dist/assets/NodeGraphEditor-Dpjg6Mpa.js      312.59 kB │ gzip:  66.94 kB │ map:   483.70 kB
+dist/assets/index-CnXdMA15.js              1,072.75 kB │ gzip: 204.69 kB │ map: 1,773.52 kB
+✓ built in 7.38s
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 26.95s
+       Built application at: /home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/cargo-target/debug/retro-dev-studio
+
+============================================================
+  Artefatos gerados:
+============================================================
+  EXE Debug: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio [OK]
+  Dev work target: /home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/cargo-target
+  Validation dir: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation
+  Build report: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/build-report.json
+============================================================
+
+[Hint] Use --open-dir para abrir a pasta do binario ao final do build.
+== Starting tauri-driver ==
+[rex-fixture-e2e] 1: terra firme do fonte conferida (plantio em 16/16 tiles, byte 23 pinado) -> {"romSha":"159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5","truthPath":"/tmp/rex-lz4w-fixture/project/ground_truth.json","edit":{"tile":0,"row":5,"col":7,"fromIndex":0,"toIndex":15},"expectedOriginalPixelsSha":"19cc30aefe4da564b8d5c066f1707212ed772925ad19f6b0814899a6c06142f3","expectedEditedPixelsSha":"917048cc35508e9a67f9ddf1dd10cf3d352b01d03a9ebce8d6d6b84778ec1af1"}
+[rex-fixture-e2e] 2: descoberta + decode pela UI: recurso único, slot conferido pelo header, prévia == fonte recomposto -> {"resourceOptions":[{"label":"0x5f988 — 16 tiles (stream 444 B)","value":"5f988"}],"headerOffset":95464,"streamOffset":"5f988","slotBytes":444,"pixelsSha":"19cc30aefe4da564"}
+[rex-fixture-e2e] 3: no-op com zero edições reportado pela transação canônica -> {"result":"desfecho: nooprecursos LZ4W estruturalmente verificados nesta ROM: 1/5 candidatos; preservação garantida apenas para est"}
+[rex-fixture-e2e] 4: edição aplicada pela transação; escrita confinada ao slot; bytes comerciais intocados fora dele -> {"modifiedPath":"/home/misael/.retrodev/decomp_work/extract/159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5/edits/rex-lz4w-modified-e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9.bin","modifiedSha":"e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9","patchSha":"52ce036f071bd54380fcf1ccdd7229cab32d39d9502da651114ccbafaf16e18d","patchBytes":74,"streamSlot":{"start":391560,"size":444},"bytesDiferentes":268,"faixaAlterada":["5f9a1","5fb3f"],"diferenteForaDoSlot":0}
+[rex-fixture-e2e] 5: patch BPS re-aplicado à base reproduz a cópia modificada (hash exato) -> {"appliedSha":"e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9","patchSha":"52ce036f071bd54380fcf1ccdd7229cab32d39d9502da651114ccbafaf16e18d"}
+[rex-fixture-e2e] 6: cópia reaberta no produto decodifica exatamente no plain editado (prévia conferida por hash) -> {"editedPixelsSha":"917048cc35508e9a","esperado":"917048cc35508e9a"}
+[rex-fixture-e2e] 7: prova de memória: 1 byte no WRAM (plain descompactado) exatamente onde o fonte do fixture diz; VRAM não legível no core, então a perna de VRAM fica NÃO PROVADA (registrada como limitação, não como sucesso) -> {"frames":120,"core":{"label":"Genesis Plus GX v1.7.4 46a5521","path":"/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so"},"wram":{"available":true,"offset":"0x5e","before":"f0","after":"ff"},"vram":{"observed":false,"reason":"o core Genesis Plus GX v1.7.4 46a5521 não expõe a região VIDEO_RAM (total_size=0/0); a cadeia causal fica provada por WRAM + framebuffer","available":false},"regiões":{"wram":{"total":65536,"lidos":65536},"vram":{"total":0,"lidos":0}},"controle":{"wram":0,"vram":null,"framebuffer":0}}
+[rex-fixture-e2e] framebuffer 320x224; pixels de tela diferentes: [1,1] → [[7,5,2170913,9175180]]; dumps em /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-fixture-frame-*.ppm
+[rex-fixture-e2e] 8: EFEITO VISUAL CAUSAL PELA INTERFACE: exatamente 1 pixel de tela muda, no coordenada prevista pelo fonte, com a cor da classe de índice certa -> {"framebuffer":"320x224","origemDoBloco":[0,0],"pixelPrevisto":[7,5],"diferencaPorFrame":[1,1],"antes":"0x212021","depois":"0x8c008c","classesDeCor":11,"indicesComMesmaCor":[0,1,2,3,4,6,7,8,9,10],"indiceAntes":0,"indiceDepois":15}
+[rex-fixture-e2e] 9: canvas do app == framebuffer do core (mesmo frame congelado) na ROM modificada -> {"canvas":"320x224","core":"320x224","presented":true}
+ERRO: painel de recursos não reabriu após as medições. [timeout: condicao nao foi satisfeita em 30143ms (orcamento 30000ms); isto e esgotamento de tempo, nao um defeito confirmado]
+rc=1

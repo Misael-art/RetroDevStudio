@@ -1,0 +1,11 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.00s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+[bench] S-B=160 coube_ajuste=1 coube_validacao=0 folga_total=-9156B com_folga>=0=1 rodada=27440ms/120000ms
+[bench] distribuição: {"cabe": 2, "needs_space": 523, "noop_preservando_stream": 119}
+[bench] capacidade de edição por amostragem (24 bits/recuso): ajuste 1/128 validação 0/32 — battery §4-edita coube_ajuste=1 coube_validacao=0
+test tools::reverse::decomp::rex_resources::tests::lz4w_recompression_benchmark ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 720 filtered out; finished in 27.60s
+

@@ -1,0 +1,22 @@
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.92s
+     Running unittests src/lib.rs (target-test/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+[rex-fixture] base: empacotado(rescomp)=378B re-codificado=380B folga=-2B dicionário=195780 words
+[rex-fixture] varredura: 15360 candidatos, 0 cabem, menor encode 380B, slot 378B, folga base -2B, distribuição {380: 7800, 382: 3540, 384: 2160, 386: 1740, 388: 120}
+
+thread 'tools::reverse::decomp::rex_resources::tests::fixture_lz4w_decodes_to_authored_source_and_edit_has_predicted_pixel' (2555829) panicked at src/tools/reverse/decomp/rex_resources.rs:1494:13:
+nenhuma edição de pixel coube no espaço do fixture: 0 de 15360 candidatos cabem, menor encode 380B, slot 378B, folga base -2B (o codificador guloso do produto produz 380B para o plain NÃO editado)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test tools::reverse::decomp::rex_resources::tests::fixture_lz4w_decodes_to_authored_source_and_edit_has_predicted_pixel ... FAILED
+
+failures:
+
+failures:
+    tools::reverse::decomp::rex_resources::tests::fixture_lz4w_decodes_to_authored_source_and_edit_has_predicted_pixel
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 718 filtered out; finished in 8.40s
+
+error: test failed, to rerun pass `--lib`
+rc=101

@@ -1,0 +1,6 @@
+
+running 1 test
+test tools::reverse::decomp::rex_codecs::tests::lz4w_hamoopig_corpus_streams_decode_with_header_size ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 720 filtered out; finished in 0.15s
+

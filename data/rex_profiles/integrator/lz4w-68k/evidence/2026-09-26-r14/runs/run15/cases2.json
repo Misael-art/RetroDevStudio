@@ -1,0 +1,15 @@
+{
+  "dst_total": 33280,
+  "cases": [
+    {
+      "id": "i15_hardware_ceiling_16385",
+      "dict_len": 32774,
+      "dict_sha256": "8fd2c9faa8944967ee3206bc42db5b378b927d4326381c26b6dbfbdb09fda6eb",
+      "dict_committed": true,
+      "stream_len": 8,
+      "plain_len": 6,
+      "stride": 33280,
+      "dst_offset": 0
+    }
+  ]
+}

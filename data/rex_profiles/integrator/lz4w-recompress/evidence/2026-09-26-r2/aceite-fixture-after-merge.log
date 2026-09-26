@@ -1,0 +1,12 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.70s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+[rex-fixture] base: empacotado(rescomp)=444B re-codificado=444B folga=0B dicionário=195780 words
+[rex-fixture] CABE tile=0 row=5 col=7 idx=15 encode=436B slot=444B (candidato 1)
+[rex-fixture] varredura: 1 candidatos, 1 cabem, menor encode 436B, slot 444B, folga base 0B, distribuição {436: 1}
+[rex-fixture] rom_sha=159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5 stream=0x5f988 escrito=436 slot=444 tile=0 row=5 col=7 idx=15 tela=(7,5) previa_pos=(7, 5) previa=128x8 pixels_sha=917048cc35508e9a67f9ddf1dd10cf3d352b01d03a9ebce8d6d6b84778ec1af1 png_sha=a3513ae638b536e3619437652aa7bee731657ec3f72cddd2e5fc34e6cbeb93e0
+test tools::reverse::decomp::rex_resources::tests::fixture_lz4w_decodes_to_authored_source_and_edit_has_predicted_pixel ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 720 filtered out; finished in 1.38s
+

@@ -1,0 +1,79 @@
+{
+  "schema": "rex-integrator-evidence/v1",
+  "id": "lz4w-68k-oracle-2026-09-26-r14",
+  "measured_at": "2026-09-26",
+  "mission": "docs/handoffs/PROMPT_REX_INTEGRATOR_RESUME_2026-09-26.md — PASSO 4 do briefing do operador (integrar sem regressões): revalidar no desempacotador 68000 OFICIAL as streams emitidas pelo codificador ALTERADO (iteração mesclada das duas tabelas de candidatos).",
+  "supersedes": "data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r13 (mesmo harness, mesmo jogo de casos; muda apenas o sujeito: rex_codecs.rs com find_best mesclado)",
+  "subject_under_test": {
+    "repo_commit_at_measurement": "47f2c8911a579ae05901d206a596a2e53981766c + working tree",
+    "codec_file": "src-tauri/src/tools/reverse/decomp/rex_codecs.rs",
+    "codec_sha256": "bee8524f78aa288ac2a084a6413aa8318dabbb1c96560226000eb6de052d5e05",
+    "encoder_change_under_test": "lz4w_encode_with_dictionary_index::find_best percorre a tabela do dicionário e a da saída em ordem mesclada por proximidade, com o mesmo teto de 128 candidatos; formato, janela (0x4000 words), filtro de aceite e lazy inalterados. Diagnóstico: docs/rex_profiles/LZ4W_ENCODER_444_VS_448_2026-09-26.md",
+    "driver_source_file": "scripts/rex_profiles/integrator/lz4w_68k/driver_integrator.rs",
+    "driver_source_sha256": "c0acae00c766fa035ca8bc7eef5d747674ad6021f37b040b807574a9b4f39e3c",
+    "driver_binary_sha256": "bdb12f4dcaef52805f17d9b8412b3617782e0d621ea652f5d6e35eaebc9a06d2",
+    "reproduce_sh_sha256": "edbb9e9427f1b42bde04acfc9e5c767ef259254adeea47dcf3571f965adbd78e",
+    "verbatim_confere": "cmp do working tree contra /tmp/rex-68k-int-2026-09-26-r5/crate/{rex_codecs.rs,main.rs}: ambos IDÊNTICOS",
+    "note_pino": "o campo 'driver-sha256' do ORACLE-RUN.log é o hash do BINÁRIO compilado; os fontes verbatim que rodaram têm os hashes acima",
+    "harness_sha256": {
+      "lib/build-rom.sh": "4fa44daa60846cc5f0f95d21af56cbbf565bf833761da6f952b9a2e3fd4789c9",
+      "lib/run-capture.sh": "29ec1781eaf5b2e72ed67d3f1c1717a9751dd6f09cb35b5538f9193f0da2eb2a",
+      "lib/unpack-jar.sh": "442deabf689e738208c15d95506f526b5fe76924c1dc4004daab5d934b64d9be",
+      "lib/compare_rust.py": "579e2371a733be9b59d9a98ff36e48eecd0ec707681771cf70058cef0d445cf7",
+      "lib/gen_rust_cases.py": "0fbc608c49de7ad2847a582e629877660a490d79bf8eefacb646fa59c5270b1b",
+      "lib/harness2.s": "b69f3e61b6c28483b4c806f60b1292d4fd3aabc6e59535554d3edcaab1e26a5f"
+    }
+  },
+  "inputs": {
+    "rom_comercial_S_B": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9 (BYOR, nunca no git)",
+    "rom_fixture_autoral_S_A": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5"
+  },
+  "casos_emitidos_pelo_codificador_sob_teste": {
+    "i20_lits_odd..i24_dict_mixed": "5 casos sintéticos emitidos pelo encoder (driver)",
+    "i14_encoder_deep_16384": "stream de 8 bytes emitida pelo encoder com match longo off=16384 words (encosta na janela do codificador)",
+    "i18_corpus_edit_c8cc8": "edição canônica do recurso 0xc8cc8 emitida pelo encoder: 146 bytes vs slot 144 → needs_space honesto, nunca sobrescreve vizinhos",
+    "i31_fixture_product_edit": "edição plantada no fixture autoral emitida pelo encoder: 436 bytes dentro do slot de 444"
+  },
+  "runs": {
+    "runI": {
+      "veredito": "TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)",
+      "rom_sha256": "8aa7cb1e7a2870811f40da593e66b8707e01dff4df9633ecd46d450948fbd8f2",
+      "capture_sha256": "8440e2c8daec0f2134718d55d8986ecd311e6300a39d5ac0059f938ea277503c"
+    },
+    "runC": {
+      "veredito": "IDÊNTICO",
+      "rom_sha256": "fc38f818784b3f3d66b83111fee3f855616f614ec6b96a235a630b6d56b9fbb2",
+      "capture_sha256": "6aa4a4ac1399b5dae4224e4c5e7b04655220797e45c8ec119b1ccbf48cf66ade"
+    },
+    "runE": {
+      "veredito": "IDÊNTICO",
+      "rom_sha256": "5142bec71474bff5ddc12ad9d524c0b1712597805d23013aec470b029b9bee47",
+      "capture_sha256": "727c9f87e427341c497f8073055f588ecf9d5089d70c395d9d2855d3ab296e40"
+    },
+    "run14": {
+      "veredito": "IDÊNTICO",
+      "rom_sha256": "0e705a6747cce67644bc6a8d29ebadf86ba25b37616b2eac8d549f6ee200ca54",
+      "capture_sha256": "be735717bebf4ba5c1d728460f160827a63f90a130e77c030c09516c942020b2"
+    },
+    "run15": {
+      "veredito": "IDÊNTICO (teto de hardware 16385 lido pelo 68k)",
+      "rom_sha256": "b3c6aadeead6f44aa339ba803e1c5d723c769d0d626d231890f347f7f1ab601d",
+      "capture_sha256": "c2a491f47cb28160b8996867e72501049a055f92b90b1e3b6a51f4fdf76e89b8"
+    },
+    "run16": {
+      "veredito": "DIVERGÊNCIA ESPERADA POR CONTRATO: o 68k lê além do teto e produz bytes errados; o produto recusa a stream (invalid_reference). Veredito INVERTIDO é condição de passagem.",
+      "rom_sha256": "7b2ac68f5d1875cd874cb5d406a38f38a3ab2a660c20a6af618daa6a906fd9ee",
+      "capture_sha256": "c030fb65b58b75d323aa0c85540fe6cde8a64b7ec4293a92234d7aeddc07e24c"
+    },
+    "runF": {
+      "veredito": "IDÊNTICO nos dois casos (rescomp original 444B e edição do produto 436B)",
+      "rom_sha256": "794251c103f7ee9edbf8bbd6c9896f832de644c1b80dbd5f7860240194910751",
+      "capture_sha256": "7ea12ee62a2910a57f716379d0c2c33a79840ae1f4d7a019b18eb723cc0c09ed"
+    }
+  },
+  "determinismo": "Esta corrida é a repetição exata de uma anterior (workdir /tmp/rex-68k-int-2026-09-26-r4, mesmo jogo de casos, pinado em rex_codecs.rs @ 7b037745… antes do `cargo fmt`). As 7 ROMs e os 7 captures têm SHA-256 IDÊNTICOS entre as duas execuções; o único hash que muda é o do binário do driver (recompilado). A corrida promovida é a do pino final.",
+  "conclusao": "As streams produzidas pelo codificador com busca mesclada são lidas byte a byte pelo desempacotador 68000 oficial do SGDK 2.11 (SGDK/wine + MAME 0.289) e coincidem com o oráculo Java lz4w.jar v1.43 e com a expectativa do decoder Rust nos 12 casos. A guarda do teto de hardware (run16) continua correta. Nada no formato foi alterado.",
+  "limite_desta_evidencia": "Este replay cobre o fixture autoral e dois recursos do corpus (0xc8cc8 original e editado) mais casos sintéticos. Não é varredura dos 160 recursos do corpus no 68k; a equivalência generalizada do codificador é sustentada pelo decoder Rust + benchmark congelado, não por replay exaustivo em hardware.",
+  "politica_byor": "Nenhum byte derivado da ROM comercial foi promovido: apenas logs de veredito/build/mame/jar, cases2.json (SHA e comprimentos), rust_meta.tsv e o log da corrida. capture.bin/rom.bin/streams/plain/dict ficaram em /tmp.",
+  "reproducao": "REX_CODECS_SHA=bee8524f78aa288ac2a084a6413aa8318dabbb1c96560226000eb6de052d5e05 RDS_REX_LZ4W_FIXTURE_ROM=<rom do fixture> bash scripts/rex_profiles/integrator/lz4w_68k/reproduce.sh /tmp/rex-68k-int-2026-09-26-r5"
+}

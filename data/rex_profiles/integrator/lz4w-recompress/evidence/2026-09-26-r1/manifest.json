@@ -1,0 +1,33 @@
+{
+  "schema": "rex-integrator-evidence/v1",
+  "id": "lz4w-recompress-bench-2026-09-26-r1",
+  "papel": "LINHA DE BASE congelada do benchmark de recompressão (PASSO 2 do briefing) — medida ANTES de qualquer ajuste no codificador.",
+  "measured_at": "2026-09-26",
+  "especificacao": "scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md (§1-§8, congelada antes da medição)",
+  "sujeito": {
+    "codec_file": "src-tauri/src/tools/reverse/decomp/rex_codecs.rs",
+    "codec_sha256": "656bdc9f17c5abe42c4909a36e2e3052a0a498b4e26409f60de8092ae12f719e",
+    "codec_pino": "commit 13a5792 (teto de hardware 16385), sem a busca mesclada por proximidade",
+    "como_reproduzir_hoje": "o §5 passo 1 da árvore atual produz os números de r2/r3/r4, NÃO os desta rodada; a linha de base desta rodada continua reproduzível sem reverter código pela réplica congelada `scripts/rex_profiles/integrator/lz4w_recompress/model_encoder.py` (igualdade byte a byte com sa-product.stream de 448 bytes)."
+  },
+  "entradas": {
+    "S-A_fixture_autoral": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5",
+    "S-B_corpus_byor": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9 (BYOR: pré-requisito local, nunca versionado)"
+  },
+  "resultados": {
+    "recursos_S_B": 160,
+    "folga_total_S_B_bytes": -13188,
+    "recursos_com_folga_nao_negativa": 1,
+    "distribuicao_edicoes": { "cabe": 2, "needs_space": 523, "noop_preservando_stream": 119 },
+    "coube_ajuste": 1,
+    "coube_validacao": 0,
+    "codificador_recusou_a_base": 0,
+    "tempo_rodada_ms": 7599,
+    "orcamento": "2 000 ms/recurso, 120 000 ms/rodada; nenhum estouro (estouros_por_recurso = [])",
+    "fixture_reencode_bytes": 448
+  },
+  "split": "validação = índice % 5 == 0 (32 recursos), ajuste = demais (128); o fixture é grupo 'referencia' e não participa do ajuste",
+  "politica_no_op": "edição que preserva o stream original sai em coluna própria (noop_preservando_stream) e NÃO conta como sucesso do codificador (§5 da especificação)",
+  "conteudo_versionado": "bench.json (metadados por recurso: offsets, comprimentos, contagens de tokens — nenhum byte de ROM), logs de veredito, dumps sa-* do FIXTURE AUTORAL apenas",
+  "limite": "mede capacidade de re-encode; não executa a transação canônica do produto (essa é exercida pelos aceites BYOR/fixture) e não prova comportamento em hardware (isso está em docs/rex_profiles/LZ4W_68K_ORACLE.md)"
+}

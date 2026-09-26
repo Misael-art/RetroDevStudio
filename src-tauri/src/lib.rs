@@ -2442,6 +2442,51 @@ fn rom_save_annotations(
 }
 
 #[tauri::command]
+async fn rex_resource_list(
+    rom_path: String,
+) -> Result<
+    (
+        String,
+        Vec<tools::reverse::decomp::rex_resources::ResourceSummary>,
+    ),
+    String,
+> {
+    run_heavy_result_command("rex_resource_list", move || {
+        tools::reverse::decomp::rex_resources::list_resources(&rom_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_resource_preview(
+    rom_path: String,
+    stream_offset: u64,
+) -> Result<tools::reverse::decomp::rex_resources::ResourceEditResult, String> {
+    run_heavy_result_command("rex_resource_preview", move || {
+        tools::reverse::decomp::rex_resources::preview_resource(&rom_path, stream_offset)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rex_resource_apply_edit(
+    rom_path: String,
+    stream_offset: u64,
+    edits: Vec<tools::reverse::decomp::rex_resources::PixelEdit>,
+    expected_rom_sha256: String,
+) -> Result<tools::reverse::decomp::rex_resources::ResourceEditResult, String> {
+    run_heavy_result_command("rex_resource_apply_edit", move || {
+        tools::reverse::decomp::rex_resources::apply_resource_edit(
+            &rom_path,
+            stream_offset,
+            &edits,
+            &expected_rom_sha256,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
 fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, String> {
     let trimmed = project_dir.trim();
     if trimmed.is_empty() {
@@ -5082,6 +5127,9 @@ pub fn run() {
             rex_inspection_save,
             rex_inspection_edit_sonic_palette,
             rex_inspection_edit_sonic_tiles,
+            rex_resource_list,
+            rex_resource_preview,
+            rex_resource_apply_edit,
             list_project_assets,
             read_project_asset_bytes,
             open_project_source_path,

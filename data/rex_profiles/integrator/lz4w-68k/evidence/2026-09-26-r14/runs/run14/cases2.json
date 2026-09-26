@@ -1,0 +1,15 @@
+{
+  "dst_total": 33280,
+  "cases": [
+    {
+      "id": "i14_encoder_deep_16384",
+      "dict_len": 32772,
+      "dict_sha256": "709c0b314add18436901c3b7160e70b295e592c7cbe14f18f2f8ac5da133c368",
+      "dict_committed": true,
+      "stream_len": 8,
+      "plain_len": 6,
+      "stride": 33280,
+      "dst_offset": 0
+    }
+  ]
+}

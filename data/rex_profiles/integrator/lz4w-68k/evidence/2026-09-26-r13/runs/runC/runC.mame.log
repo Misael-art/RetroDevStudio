@@ -1,0 +1,2 @@
+REX-DUMP frames=1 sentinel=DEADBEEF -> /home/misael/.cache/rex-codecs/oracle-tools/work15/runC/capture.bin
+capture: /home/misael/.cache/rex-codecs/oracle-tools/work15/runC/capture.bin (5120 bytes, sha256=6aa4a4ac1399b5dae4224e4c5e7b04655220797e45c8ec119b1ccbf48cf66ade)

@@ -1,5 +1,392 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-26 (e) — integrador, capacidade REAL do codificador LZ4W medida, um incremento pinado e o descarte silencioso da UI corrigido (Experimental; sem merge, sem release, sem promoção)
+
+**Commits da entrega:** `2ffb076` (benchmark congelado), `39c0fd9` (incremento
+do codificador + replay 68k `r14`), `6351f15` (aviso de UI) e o commit de
+documentação que traz este registro — todos sobre `47f2c89` (ETAPA E), branch
+`codex/rex-integrator-profiles-codecs`. Nada além disso ficou não commitado: os
+arquivos alheios à rodada (`.mimosa/`, `APJ-unpack`, `a.out`,
+`apultra-decode`, `src-tauri/.mimosa/`, `src-tauri/src-tauri/`,
+`data/canonical-local-2026-09-21/`) permanecem intactos e **não** staged — o
+último é corpus BYOR e nunca entra no git.
+
+**Objetivo recebido:** tornar mais recursos comprimidos editáveis **sem
+expansão**, *medindo a capacidade real do encoder* — em vez de acumular ajustes
+de parsing sem saber qual gargalo fecha.
+
+**Decisão metodológica central:** congelar a medição antes de mexer no
+codificador. `scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md`
+(§1-§8) fixa conjuntos (S-A fixture autoral, S-B corpus BYOR), split de
+validação por `índice % 5` (32 recursos) vs ajuste (128), as 4 edições por
+recurso definidas **antes** de medir, orçamento (2 s/recurso, 120 s/rodada,
+publicado como perda se estourar), a barreira de re-decode do que o codificador
+emite, e a regra de honestidade que o operador exigiu: **no-op que preserva o
+stream original não conta como sucesso do encoder** — sai em coluna própria
+(`noop_preservando_stream`). O teste do benchmark é `#[ignore]` e só roda com
+`RDS_REX_BENCH_OUT` absoluto; ele **falha** se a ROM do corpus ou do fixture
+faltar ou divergir do SHA pino (aceite BYOR sem `return` silencioso).
+
+**Linha de base (roda `r1`, `rex_codecs.rs @ 656bdc9f…`):** 160 recursos LZ4W
+verificados, folga somada **−13 188 B**, **1** recurso com folga ≥ 0; das 644
+edições predefinidas **2 cabem**, **523** `needs_space`, **119** no-op. Fixture:
+re-encode do plain não editado = **448 B** contra o `rescomp` de **444 B**.
+
+**Diagnóstico token a token (não se começou por reescrever o compressor):** três
+instrumentos independentes e concordantes — `tokens.py` (tokenizador próprio,
+só imprime depois de reproduzir o plain e consumir o stream inteiro),
+`model_encoder.py` (réplica **linha a linha do codificador daquela linha de
+base**, validada por igualdade byte a byte, o que permite inverter decisões sem
+reverter código) e `probe_candidates.py` (varredura sob três modelos: ideal sem
+cap, real dicionário-primeiro, mesclado). A divergência está em **uma posição**:
+no word 200 do plain do fixture, o dicionário tem 2 329 candidatos e o melhor
+representável `(3, 156)` está na **tabela de saída**; na ordem dicionário-primeiro
+o teto de 128 candidatos se esgota no dicionário antes de a saída ser consultada
+(`melhor_só_dict = (2, 1135)`, não representável). Alcançar aquele candidato
+naquela ordem custaria ~2 330 avaliações — **18× o teto**; na ordem mesclada ele
+chega em **3**. Conclusão registrada: o defeito é a **ordem** em que o orçamento
+é gasto, não o tamanho do orçamento. (Redação anterior, já retirada do estado
+corrente, atribuía o gap ao cap ou ao lazy de 1 passo — a sonda refutou as duas.)
+
+**Incremento entregue (único, delimitado):** `find_best` intercala as duas listas
+descendentes por proximidade com **mesmo** cap de 128, **mesma** janela
+(0x4000 words), **mesmo** `consider()`, **mesmo** filtro de aceite e **mesma**
+regra lazy. Formato intocado.
+
+**Antes/depois com perdas e empates declarados:** comparação recurso a recurso do
+campo `reencode_base` entre `r1` e `r2` (161 linhas = 160 do corpus + 1 do
+fixture): folga somada **−13 188 → −9 156 B** (+4 032 B), no corpus **158
+melhoraram / 0 pioraram / 2 empataram**, fixture **448 → 444 B, byte a byte
+idêntico ao stream do `rescomp`**. Reproduzido **campo a campo** no pino final
+`bee8524f…` (roda `r4`: 161/161 linhas iguais, resumo igual exceto o tempo de
+rodada 27 440 → 25 526 ms). Replay no **desempacotador 68000 oficial** do SGDK
+2.11 sob MAME 0.289 (`lz4w-68k/evidence/2026-09-26-r14`, 12 casos, 7 ROMs): as
+streams do codificador novo batem 68k == jar v1.43 == esperado-Rust, e a recusa
+contratual além do teto de hardware (`i16`, off 16386) continua divergindo no
+68k por contrato. Determinismo entre duas corridas registrado no manifesto.
+
+**O que o incremento NÃO resolveu (e isso é o achado, não um rodapé):** a
+editabilidade **não** aumentou. Continua **1/160** recurso com folga não
+negativa (`0xc8cc8`, +2 B), e a coluna nova de **capacidade por amostragem**
+(24 bits invertidos por recurso, espaçados uniformemente; um bit só "cabe" se o
+re-encode cabe **e** a re-decodificação reproduz o plain editado) diz o mesmo:
+só `0xc8cc8` tem bit amostral cabível (16 de 24), os outros 159 têm zero, e a
+edição canônica de 1 pixel ali custa **146 B contra slot de 144 B** (`needs_space`
+honesto, nada forçado). Mediana do déficit restante **56 B/recurso** contra
+2-6 B por bit: **empatar com o `rescomp` é condição necessária, não
+suficiente.** Amostragem é amostragem — exaustivo seria O(bits) codificações por
+recurso e estouraria o orçamento.
+
+**UI (obrigação de corretude do PASSO 4, não extra):** o descarte de edição fora
+do intervalo era silencioso (`paintAt` retornava cedo; o formulário não validava
+nada). `editRejectReason` agora explica tile/linha/coluna/índice/nenhum-recurso
+no painel (`rex-resource-notice`) e como `warn` no log da ferramenta, preserva a
+fila válida e **não** envia o candidato inválido. A guarda do **núcleo** continua
+definitiva (o teste afirma que `rexResourceApplyEdit` recebe só a edição boa).
+Nenhum controle inválido foi exposto para facilitar teste — os campos aceitam
+entrada livre porque o usuário pode digitar qualquer valor, e é esse caso que a
+mensagem cobre.
+
+**Gates (todos rc=0, medidos nesta ordem, um job pesado por vez):**
+`check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` **701 passed / 6
+skipped**, `cargo fmt --check`, `cargo clippy -- -D warnings`,
+`cargo test --lib` **669 passed / 0 failed / 52 ignored**; §5 do diagnóstico
+reexecutado (passo 4 dif == log versionado). Nota: `cargo clippy --all-targets`
+tem 10 achados **pré-existentes** em arquivos que este lote não toca
+(`project_mgr.rs`, `holdout.rs`, `lib.rs`, `graphics_discovery.rs`,
+`build_orch.rs`, `logic_recovery.rs`) — nenhum em `rex_*.rs`.
+
+**Higiene de evidência:** `sa-dict.bin` (391 560 B, **fixture autoral**) é
+versionado uma vez (`r1`); cópias byte a byte idênticas em `r2/r3/r4` foram
+substituídas por `sa-dict.bin.sha256` com a verificação `cmp` registrada.
+`bench.json` só contém metadados (offsets, comprimentos, contagens) — nenhum
+byte da ROM comercial. Cada rodada ganhou `manifest.json` com pino do codificador;
+onde o hash da fonte **não** foi registrado no momento da corrida (`r2`, `r3`)
+isso está dito em vez de inventado, e `r4` fecha a lacuna.
+
+**Próximo incremento (PASSO 3, medido antes de integrar):** parse de **custo
+explícito** — caminho mais curto sobre as words com custo real de token +
+literais + descrito + word de offset, respeitando ≤15 literais/token e o teto de
+128 candidatos — para obter o **piso** por recurso; validar contra busca
+exaustiva em entradas pequenas e **não** chamar de "ótimo" sem essa comparação.
+Contexto que a mídia anterior não tinha: o DP ótimo do `LZ4W.java` já foi
+tentado nesta rodada, ficou verde no suíte e **piorou** (382 B vs 380 B); um DP
+fiel precisa de estado `(posição × literais pendentes mod 15)`.
+
+**Bloqueios e fora de escopo:** nenhum externo. Permanecem fora por ordem do
+operador: merge, release, promoção de maturidade, expansão de ROM, realocação de
+ponteiros, promoção do marco do fixture para cobertura BYOR, e misturar
+otimização LZ4W + codec novo (aPLib) + UI num único commit. O alvo comercial
+`0xc8cc8` segue **BLOQUEADO** quanto a efeito de jogo.
+
+### Checkpoint 2026-09-26 (d) — integrador, ETAPA E: edição de recurso comprimido com efeito **causal demonstrado na aplicação** (Experimental; sem merge, sem release, sem promoção)
+
+**HEAD na abertura deste checkpoint:** `d4043eb` (branch
+`codex/rex-integrator-profiles-codecs`). Não commitados neste momento:
+`scripts/e2e-tauri-build-run.mjs` (cenário novo + helpers),
+`src-tauri/src/tools/reverse/decomp/rex_resources.rs` (teste de fronteira +
+limpeza de lints), `scripts/rex_profiles/integrator/lz4w_fixture/{README.md,gen_fixture.py}`,
+`scripts/rex_profiles/integrator/lz4w_fixture/analyze-frame.py` (novo), os dois
+relatórios de evidência e o `manifest.json` em
+`data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e/`, e o
+`fixture-build-report.json` versionado (sha da receita + registro de reprodução).
+
+**Hipótese:** a cadeia LZ4W do produto — descoberta → decode → transação canônica
+→ BPS → re-aplicação → emulação — produz um efeito observável **na tela do app**
+quando a edição é feita pela interface real sobre o núcleo real, e os negativos
+alcançáveis pela interface são recusados sem escrita.
+
+**Evidência a favor (medida, binário `e69077927863c15788bf2006e344f71f4a4b84408714201c48a67d450fc26574`,
+core Genesis Plus GX v1.7.4 `46a5521`):** cenário E2E `rex-lz4w-fixture-effect`
+verde **duas vezes** com o código final (run10 e run11, `rc=0` lido nos próprios
+logs, não de notificação). Pela UI: recurso único (header 95464, stream `0x5f988`,
+slot 444 B, `1/5 candidatos` verificados), prévia == fonte recomposto
+(`19cc30aefe4da564`), no-op honesto, edição `tile 0, row 5, col 7 → idx 15`
+aplicada pela transação (modificada `e55dba92…`, BPS `52ce036f…` de 74 B, 268
+bytes distintos confinados em `5f9a1..5fb3f`, `diferenteForaDoSlot:0`), BPS
+re-aplicado à base reproduzindo o hash exato, cópia reaberta decodificando no
+plain editado (`917048cc35508e9a`). Pela emulação: **1 byte** no WRAM (`0x5e`,
+`f0→ff`) e **exatamente 1 pixel de tela** diferente, na coordenada `(7,5)` prevista
+pelo fonte **antes** de qualquer emulação, com as classes de cor esperadas
+(`0x212021 → 0x8c008c`), canvas do app == framebuffer do core (320×224). Pelos
+negativos: fila de intervalo guardada (0 entradas, 0 escritas, sha da cópia
+inalterado; controle positivo enfileira 1) e `rom_identity_mismatch` quando o
+arquivo muda sob o painel (TOCTOU), com a ROM do fixture verificada intacta.
+
+**Evidência contra / limitações (registradas como não provadas, não como sucesso):**
+(a) a perna de **VRAM não é alcançável** — o core devolve
+`retro_get_memory_size(VIDEO_RAM) == 0` enquanto `emulator_read_memory` responde
+`ok:true` com dados vazios; a comparação ingênua diria "0 divergências" de forma
+**vaciada**, então o relatório publica `vram.observed:false` com o motivo e a
+cadeia fica provada por WRAM + framebuffer; (b) o DAC do Mega Drive **funde** as
+16 palavras de paleta autorais em **11 cores** (índices colididos
+`[0,1,2,3,4,6,7,8,9,10]`) — índice→cor é função mas não é injetiva, logo a
+identidade do pixel alterado é estabelecida por **posição** e a cor só confirma a
+classe (diagnóstico em `analyze-frame.py`); (c) a recusa de intervalo do **núcleo**
+é **inalcançável pela UI**: `CompressedResourcePanel.tsx` descarta
+`editTile >= num_tiles` no cliente, então o E2E prova a guarda do cliente e a
+recusa do núcleo (`rex_resources.rs:634`) foi fixada pelo teste unitário
+`apply_rejects_tile_outside_resource_without_writing` (que também asserta que a
+cópia em disco não mudou); (d) isto é prova de **mecanismo em dado autoral** — o
+alvo comercial `0xc8cc8` continua `semanticState: BLOQUEADO`, e nenhuma afirmação
+visual é feita sobre ele.
+
+**Retratação de redação no estado corrente:** a frase "a tela do app ainda não foi
+capturada por emulação" (ROUND_STATE, linha da ETAPA D) estava desatualizada e foi
+substituída; ela permanece verdadeira apenas para o alvo comercial.
+
+**Reprodução durável do artefato testado:** `build-fixture.sh` reproduziu o ROM
+bit-idêntico (`159298eb…`, 393216 B) em caminho versionado-de-receita e o
+`fixture-build-report.json` do tronco agora registra a receita atual
+(`gen_fixture.py 3e474f44…`, sha anterior `1445132f…` produzia o mesmo ROM — a
+diferença é comentário + achatamento de `tile_pixels`). `/tmp` deixa de ser a única
+origem; gap declarado: o cenário ainda alimenta a cópia em `/tmp`.
+
+**Relatório técnico da etapa (consolidação auditável):**
+`docs/rex_profiles/RELATORIO_ETAPA_E_2026-09-26.md` — veredito, tabela de artefatos
+com SHA-256 reconferido contra o disco, método com as cinco barreiras não-vacuosas,
+os dez passos com valores medidos, o argumento de causalidade, onde vive cada
+negativo, as limitações não provadas, portas com a reconciliação 699↔702 e a receita
+de reprodução. Todo número foi confrontado com o `manifest.json` e com o
+`rex-lz4w-fixture-effect-report-run11.json` antes do commit; a auditoria acrescentou
+ao relatório e ao manifesto a limitação de que **as corridas rc=0 abriram a ROM em
+`/tmp`** (`fixture.romPath`), com o caminho durável devolvendo o mesmo SHA.
+
+**Gates deste checkpoint:** `cargo test --lib -- --nocapture` **669 passed / 0 failed /
+51 ignored**; `cargo clippy -- -D warnings` limpo; `cargo fmt --check` limpo;
+`npm run check:tree`, `npm run lint`, `npx tsc --noEmit` rc=0; `npm test`
+**699 passed / 6 skipped (705)**, arquivos 75/1 skipped (76); `npm run host:certify`
+**READY** (fingerprint `60249508…`, lock `dd99a22f…`) com a mesma suíte Rust
+(669/0/51) e **702 passed / 3 skipped** no frontend. A diferença 699↔702 é
+reconciliada e não é comparação de tips: os 3 testes a mais vêm de guardas por
+disponibilidade de toolchain em `scripts/decomp/decomp-scripts.test.mjs`
+(`HAS_SGDK_BUILD_TOOLCHAIN`, `GHIDRA_AVAILABLE`, `HAS_M68K_TOOLS`), que o profile
+`full` exporta; total idêntico (705), zero falhas nas duas corridas. Log das
+portas promovido com `gates-2026-09-26.log` no pacote de evidência. Achado paralelo honesto: `cargo clippy
+--all-targets` (gate mais estrito que o documentado) falha em 10 lints de código
+de teste **pré-existente** de outros módulos (`build_orch.rs`, `project_mgr.rs`×5,
+`graphics_discovery.rs`, `holdout.rs`, `logic_recovery.rs`, `lib.rs`) — atribuídos
+e **não** corrigidos nesta rodada.
+
+**Próximo comando:** commit deste conjunto revisado + `git push` após fetch seguro.
+**Bloqueio externo:** nenhum. Por ordem do operador continuam fora do escopo:
+merge de PR, release e promoção de maturidade; expansão de ROM/realocação de
+ponteiros; bytes comerciais no staging.
+
+
+### Checkpoint 2026-09-26 (c) — integrador, ETAPA D: edição de 1 pixel com efeito **previsto** que sobrevive ao 68000, em fixture autoral (Experimental; sem merge, sem release)
+
+**HEAD no checkpoint:** `a96fb15` (branch `codex/rex-integrator-profiles-codecs`), com
+três arquivos de trabalho modificados e não commitados neste instante
+(`src-tauri/src/tools/reverse/decomp/rex_resources.rs`,
+`scripts/rex_profiles/integrator/lz4w_68k/driver_integrator.rs`,
+`scripts/rex_profiles/integrator/lz4w_68k/reproduce.sh`) mais o pacote do fixture
+(`scripts/rex_profiles/integrator/lz4w_fixture/`) e os dois pacotes de evidência
+(`data/rex_profiles/integrator/lz4w-fixture/`,
+`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r13/`) como não rastreados.
+Os 7 commits anteriores e o checkpoint pendente do Memory Bank permanecem intactos
+(`658d756` + `13a5792` + `a96fb15`). Arquivos alheios continuam intocados.
+
+**Hipótese:** a meta da rodada (uma edição de recurso comprimido com efeito causal
+demonstrado) era alcançável **sem** tocar a ROM comercial, desde que o consumidor do
+recurso fosse conhecido por construção e a edição respeitasse a granularidade real do
+formato.
+
+**Evidência a favor (medida):** fixture SGDK 2.11 autoral
+(`scripts/rex_profiles/integrator/lz4w_fixture/`, ROM `159298eb…`, TileSet LZ4W em
+header `95464`/stream `391560`, 16 tiles 8x8, plain 512B, empacotado 444B). O aceite
+`--ignored` do produto: decode == fonte recomposta; no-op honesto; a edição **prevista
+antes de qualquer emulação** `tile 0, linha 5, coluna 7: índice 0 -> 15` re-codifica a
+440B e **cabe** no slot de 444B pela transação canônica (identidade, evidência,
+dependentes, roundtrip, BPS); a ROM modificada reabre e re-decodifica para o plain
+planejado; a coordenada de tela prevista é `(7,5)` e a prévia é renderizada (SHA dos
+pixels e do PNG no log). Durabilidade: runF do replay 68000 (`…/lz4w-68k/evidence/
+2026-09-26-r13/runs/runF`) desempacota no `lz4w_unpack` oficial, sob MAME 0.289, tanto
+o stream do rescomp (`i30`) quanto o **escrito pelo produto** (`i31`) para exatamente
+512 bytes, `68k == jar == esperado`, sem sobrescrever vizinhos.
+
+**Evidência contra / medida negativa (registrada em vez de escondida):** o codificador
+do produto gasta **mais** que o empacotador oficial no plain não-editado (448B vs 444B;
+no fixture anterior, 380B vs 378B), então folga inicial é **negativa**. No fixture sem
+plantio, a varredura **exaustiva** dos 15.360 candidatos de 1 pixel deu `0 cabem`
+(`…/lz4w-fixture/evidence/2026-09-26/fixture-acceptance-exhaustive-before-plant.log`,
+8,40 s). Causa estrutural: o LZ4W casa **words de 16 bits**, não pixels — uma edição de
+1 pixel só encurta o stream se tornar dois words adjacentes idênticos. O plantio do
+near-miss (`linha 5, coluna 7` guarda `(v+1)&15`) cria exatamente essa condição; sem
+ele não haveria caso positivo, o que tornaria o teste inútil como discriminante.
+Um porte do DP ótimo de `LZ4W.java` foi implementado, ficou verde no suíte inteiro e
+**piorou** o resultado (382B vs 380B) — foi **revertido** (`git checkout --`) em vez de
+entregue; o modelo de custo de 1 palavra/token ignora o chunk de 15 literais (custo
+real de 16 literais + match curto: 20 words, não 17), logo um DP fiel precisa do estado
+`(posição x literais pendentes mod 15)`.
+
+**Correção de redação (retratação parcial):** o bloqueio comercial é o **consumidor não
+provado** (a sonda do core só alcança as regiões que o libretro expõe; CRAM e o destino
+do desempacotador ficam `missing`), **não** ausência de espaço — a edição canônica do
+aceite BYOR (`pixel (0,7,4) -> idx 15`) cabe e é aplicada. A ROM comercial não foi
+alterada nem instrumentada nesta rodada.
+
+**Últimos comandos e resultados:** `cargo test --lib -- --ignored --nocapture
+fixture_lz4w` -> 1 passed em 1,21 s (planta primeiro) e o log de 8,40 s da varredura
+exaustiva anterior; `bash scripts/rex_profiles/integrator/lz4w_68k/reproduce.sh` com
+`REX_CODECS_SHA=656bdc9f…` -> 7 execuções, 12 casos, 11 `68k == jar == esperado` e 1
+divergência **esperada** (run16, além do teto 16385); `cargo test --lib` -> 668 passed /
+0 failed / 51 ignored. **Próximos comandos:** `cargo fmt --check`,
+`cargo clippy -- -D warnings`, `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`,
+`npm test`, `npm run host:certify`, depois commit + conferência remota por fetch antes
+de qualquer push. **Bloqueio concreto:** nenhum externo nesta etapa; a ETAPA E (tela do
+app capturada por emulação no cenário E2E `rex-lz4w-fixture-effect`) é o trabalho
+seguinte, e a meta visual **não** será declarada concluída enquanto `semanticState`
+estiver BLOQUEADO.
+
+### Checkpoint 2026-09-26 (b) — integrador retomado: contrato LZ4W fechado contra o 68000 real (Experimental; sem merge, sem release)
+
+**Estado de partida preservado** (exigência do prompt de retomada): 7 commits locais
+não enviados (`e942848..7e19d6a`) + a alteração pendente no Memory Bank, que foi
+commitada verbatim como `658d756` antes de qualquer outra escrita. Arquivos
+alheios na árvore (`APJ-unpack`, `apultra-decode`, `a.out`, `.mimosa/`,
+`src-tauri/src-tauri/`, `data/canonical-local-2026-09-21/`) **não foram executados,
+apagados nem staged**; continuam fora do escopo deste checkpoint.
+
+**Hipótese testada:** o decoder do produto tratava a janela de busca do compressor
+(`0x4000` words) como limite do formato e, portanto, recusava um offset que o
+desempacotador 68000 oficial ainda lê corretamente. **Evidência a favor (medida no
+hardware, não simulada):** `.long_match` em `tools_a.s` faz
+`move.w (a0)+,d0; add.w d0,d0; bcs .lm_rom; lea -2(a1,d0.w),a2` — aritmética de
+16 bits com displacement sinalado ⇒ leitura para trás exige `value >= 0x4000`, ou
+seja `off <= 16385`. Replay sob MAME 0.289 com o `lz4w_unpack` montado do asm
+oficial (identidade conferida contra `libmd.a`: 5056 bytes, SHA-256 `ff18bacb…`,
+em **cada** uma das 6 construções de ROM): `i15` (off 16385, `value 0x4000`) é
+reproduzido **byte a byte** pelo 68k e pelo jar; `i16` (off 16386, `value 0x3FFF`)
+**diverge no hardware** no byte 0 (`0x24` em vez de `0xBE`, leitura para frente
+aliassando a ROM) enquanto o jar de 32 bits reproduz o pretendido. **Evidência
+contra nenhuma alternativa:** o produto aceita até 16385 e recusa de 16386 em
+diante, exatamente como o hardware; os goldens são calculados à mão, não pela
+fórmula do produto.
+
+**Commit do produto:** `13a5792` separou
+`MATCH_LONG_FORMAT_MAX_OFFSET_WORDS` (16385, formato/decoder) de
+`ENCODER_WINDOW_WORDS` (0x4000, estratégia/codificador) e acrescentou 8 regressões
+(16384/16385 aceitos, 16386 recusado citando o teto medido, `value 0` = off 1,
+fonte-ROM acima do teto não-ROM aceita — limites independentes —, fonte-ROM além
+do histórico recusada, truncamentos dentro de segmento estruturados, e um andador
+de tokens que exige que todo offset não-ROM emitido caiba na janela legível).
+Cabeçalho obsoleto do módulo corrigido (o arquivo já trateia streams prev-block).
+
+**Prova externa obrigatória executada** (`Rust encode -> 68k decode`, fora do
+roundtrip interno): 10 casos / 6 ROMs, todos com veredito esperado —
+`i20..i24` (famílias emitidas pelo encoder atual: literais+cauda ímpar, curtos
+off 2/off 1, longo auto-referente de 620 B, longo `value 0x0000`, dicionário
+misto) idênticos no 68k e no jar; `i09` (stream **original** do recurso 0xc8cc8
+com o menor prefixo-dicionário aceito pelo produto, medido em 4096 bytes)
+idêntico; `i18` (edição canônica re-codificada pelo encoder **atual**) idêntico
+no 68k, e o slot continua o bloqueio real: **150 bytes contra 144** →
+`needs_space`, nada forçado por sobrescrita; `i14` é a prova profunda: off 16384
+emitido pelo encoder, reproduzido byte a byte pelo hardware. Receita, pins,
+SHA-256 por execução e limites do que está provado em
+`docs/rex_profiles/LZ4W_68K_ORACLE.md`; evidência (logs, comprimentos, hashes —
+**sem byte algum da ROM comercial**) em
+`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26/`; ferramenta de
+medição vendorada com proveniência em `scripts/rex_profiles/integrator/lz4w_68k/`
+(SHAs por arquivo em `PROVENANCE.md`). **As suítes A e B continuam não
+integradas**; só a ferramenta de medição foi copiada, com origem no commit
+`9b2389d` do worktree da agente-B.
+
+**ETAPA C (precisão da observação) aplicada:** toda alegação de "não é
+descompactado" foi rebaixada ao que foi medido — *nenhuma diferença observada nas
+regiões que o core expõe* (`emulator_read_memory` regiões 2/3; CRAM e a
+chamada/destino do desempacotador ficam `missing`, porque o core libretro não
+expõe tracer e instrumentar o jogo exigiria modificar a ROM comercial, o que está
+fora da autorização). O relatório do E2E passou a publicar `observed` e
+`coverage` em vez de uma única frase conclusiva.
+
+**Gates neste HEAD:** `cargo test --lib` **668 passed / 50 ignored**; `cargo
+clippy -- -D warnings` limpo; `cargo fmt --check` limpo; testes BYOR ignoráveis
+reexecutados antes do commit (`160/191` verificados, `preservados=159`, varredura
+`fit=4` só no alvo conhecido). Frontend intocado por este checkpoint (a mudança em
+`scripts/e2e-tauri-build-run.mjs` é texto de relatório/comentário, sem alteração
+de asserção).
+
+**Próximo comando exato:** retomar a ETAPA D — varredura limitada dos recursos
+LZ4W com tiles comprovadamente em tela reutilizando `Lz4wDictionaryIndex`; se
+nenhum couber no slot, o caminho autorizado é **aPLib em Rust canônico** com os
+vetores da agente-B e oráculo independente, ou fixture SGDK autoral rotulado como
+fixture (nunca como sucesso BYOR). Bloqueio concreto atual: **nenhum recurso LZ4W
+conhecido aceita reinserção dentro do espaço original** (`fit=4` apenas em
+0xc8cc8, todas as edições `needs_space`), e expansão de ROM/realocação de
+ponteiros não está autorizada nesta rodada.
+
+
+### Checkpoint 2026-09-26 — retratação da classe do alvo, sonda causal sem diferença observada e três defeitos de formato corrigidos (Experimental; sem merge)
+
+O operador reabriu apenas o aceite semântico/visual do alvo 0xc8cc8. **Retratação**: a leitura "9 paletas × 16 cores" e o mecanismo "cor de transparência tornada opaca" eram inferências sem evidência de consumidor — retirados do estado corrente (histórico preservado nos checkpoints 2026-09-25 (b)/(c)). O "efeito de recolorimento dos lutadores" era **ruído de medição**: o resume do loop vivo entre runs separados avançava o jogo por tempo real variável, dessincronizando os frames comparados. A sonda causal nova — WRAM/VRAM lidas via `emulator_read_memory` (regiões 2/3 do GPGX; CRAM não é exposta) com run_frames determinístico — **não mediu nenhuma diferença** entre original e modificado em 900 frames, com controle original/original idêntico (determinismo e metodologia validados). **Precisão (ETAPA C, 2026-09-26): isso não prova que "o recurso 0xc8cc8 não é descompactado"** — a sonda só alcança as regiões que o core expõe (regiões 2/3; CRAM e a chamada/destino do desempacotador ficam `missing`). O que fica registrado é *ausência de diferença observada nas regiões amostradas*, que é enunciado mais fraco; consumidor continua **não provado** e a edição semântica deste recurso permanece **BLOQUEADA** (o E2E registra `semanticState: BLOQUEADO`, agora com campos `observed`/`coverage` explícitos, e exige frames idênticos).
+
+**Três defeitos reais corrigidos nesta rodada**: (1) o encoder emitia matches longos não-ROM com offset até 0x8000 words, mas o 68000 lê o word de offset como int16 após duplicação — v < 0x4001 é referência PARA FRENTE, fora do formato; janela do encoder e validação do decoder restauradas ao limite oficial de 0x4000 (o 18bdff92, artefato do binário pré-correção, decodificava byte 30 como índice 1 com dano colateral em 36-44); (2) o preview em grade lia a faixa de tiles linearmente (`src=(y*8+x)*4`), escondendo edições fora do tile 0/linha 0 — mapeamento corrigido + teste de regressão; (3) a transação não verificava a ida-e-volta — agora redecodifica o novo stream com o mesmo dicionário e recusa qualquer divergência. Evidência de bytes: intervalo alterado [30,31), byte 30 0x00→0xF0 (pixel (0,7,4)→índice 15, a única edição que coube: needs_space honesto de 150>144 nas demais posições com o encoder corrigido). Índice de dicionário reutilizável (`Lz4wDictionaryIndex`) para a varredura (item 7); varredura orçada (64 candidatos/recurso, progresso, checkpoint promovido para `scripts/rex_profiles/integrator/analysis-2026-09-26/rex-scan-checkpoint.log`): fit=0 nos 18 recursos com tiles em tela. Simulação do desempacotador 68000 (`scripts/rex_profiles/integrator/analysis-2026-09-26/rex_68000_sim.py`, fiel a tools_a.s: COPY_MATCH, .lm_len via salto relativo, .lmr com tabela de paridade, ROM-source em espaço do stream): asm ≡ Rust nos streams decodificáveis; 25/191 headers são falsos positivos estruturais (tamanho 0/inválido). **Superação metodológica (2026-09-26): a simulação deixou de ser o padrão — o desempacotador real foi montado do `tools_a.s` oficial e executado sob MAME; ver checkpoint do integrador abaixo e `docs/rex_profiles/LZ4W_68K_ORACLE.md`.** E2E final: fluxo UI completo (verificar/prévia/no-op/editar/transação/BPS re-aplicado com hash exato/salvar-reabrir com prévia alterada `74c38128`/canvas == core 320×224/frames idênticos). 159 recursos verificados preservados. Gates locais verdes; push `0ba067b`+; sem merge/release.
+
+### Checkpoint 2026-09-25 (c) — formato chunky corrigido e efeito observado no jogo pela UI (Experimental; sem merge)
+
+O operador identificou o defeito que invalidava a prova visual anterior: tiles MD 4bpp são **chunky (nibble empacotado)** — `byte = tile*32 + linha*4 + col/2`, nibble alto na coluna par — e não planar. Confirmado na fonte (`ImageUtil.convert8bppTo4bpp` do rescomp do toolchain pinado: `result[i] = (data[2i]<<4)|data[2i+1]`) e consistente com o editor de tiles Sonic já existente (`sprite_composition`). Correção no produto: contrato único `md_pixel_location`/`md_read_pixel_index`/`md_write_pixel_index` (preserva o outro nibble e todos os demais bytes), **golden literal assimétrico** `12 34 56 78` -> índices 1..8 com expectativa escrita à mão (não derivada do renderer), testes de primeira/última posição, no-op e limites.
+
+**Efeito observado no jogo, pela UI, com o E2E `rex-lz4w-effect` completo**: fluxo inteiro pela interface (verificar 160 recursos -> prévia chunky -> no-op -> edição pelo formulário pixel (0,0) índice 15 -> transação aplicada (159 preservados) -> BPS re-aplicado à cópia da base com hash exato -> **salvar/reabrir**: a ROM modificada reabre no painel com identidade própria e prévia de pixels diferente -> ROM modificada executada no core). Duas capacidades registradas em separado: framebuffer do core via `emulator_observe` (determinístico) e **apresentação pelo canvas do app** — o canvas 320×224 exibe byte a byte a subimagem 256×192 do core em (0,0) (HAMOOPIG usa 256×192; comparador localiza o conteúdo dentro do canvas). **Efeito**: frame 2 das timelines determinísticas, 3174 px em caixa (56,114) 208×94 — **os dois lutadores recolorem**. Explicação honesta: o alvo 0xc8cc8 não é tile — são **288 bytes = 9 paletas × 16 cores** (classe PALETA) e o pixel (0,0) editado é a cor 0 da paleta 0, a cor de transparência, tornada opaca; todo sprite com paleta 0 recolore. A asserção do E2E agora codifica o efeito esperado por classe (paleta: recolorimento da faixa dos sprites; tile: caixa pequena). hashes: modified `a51cfaf9…` (idêntico ao teste Rust — determinismo), patch `2aaf7808…`. Pendente honesto: recurso da classe TILE renderizando em tela que aceite edição transacional (varredura completa por tile em andamento a pedido do operador; 18 recursos com tiles em tela por casamento invariante de paleta recusam 1 pixel no tile 0). Gates: frontend/tsc/lint limpos, Rust 23 rex + suíte, fmt/clippy ok; push `da5851d`; sem merge/release.
+
+### Checkpoint 2026-09-25 (b) — cadeia LZ4W pela UI até patch verificado; efeito visual bloqueado no alvo (Experimental; sem merge)
+
+Na branch integradora `codex/rex-integrator-profiles-codecs` (PR #78), a cadeia de recurso comprimido chegou à UI do produto com transação canônica. **No produto (Rust + IPC + UI)**: `reinsert_transaction` com identidade SHA da ROM, evidência re-verificada contra os bytes, tamanhos/overflow, dicionário fixado, no-op explícito, dependências verificadas sobre o conjunto analisável declarado (160/191 recursos LZ4W verificados no corpus congelado; 159 preservados + 1 editado) e patch BPS pelo pipeline canônico re-aplicado à base com hash exato. Nova aba "Recursos comprimidos" no Reverse Workspace: listagem estrutural rotulada, prévia chunky 4x com pixels SHA-256, edição por formulário (tile/linha/coluna/índice) e por clique, proveniência com caminhos da cópia modificada e do patch. Aceites BYOR separados em testes `#[ignore]` com SHA-256 obrigatório (ausência de ROM = falha, nunca PASS silencioso).
+
+**E2E `rex-lz4w-effect`** (binário canônico reconstruído): navegação pela UI, verificação (160 recursos), prévia, no-op, edição via formulário, transação aplicada, patch BPS re-aplicado à cópia da base com hash exato, e timelines original-vs-modificado no core Libretro com `emulator_run_frames` + `emulator_observe` (framebuffer direto do core, determinístico). **Resultado honesto: nenhum frame difere** — o alvo 0xc8cc8 (9 tiles, frame 24×24 confirmado pela estrutura SpriteFrame na ROM, classe faísca de golpe) não renderiza na janela explorada (boot, título, round, caminhada com contato, 6 golpes com snapshots densos); o protótipo teto pode não invocar faíscas visualmente. Negativos comprovados em produção: ROM com identidade errada recusada; dependente conhecido alterado recusado pela UI (`dependent_modified: 0x91a00 dependente de 0x8ff8e`); falta de espaço (`excessive_output`); resposta da transação distinta exibida como erro do painel. Bloqueio exato registrado: encontrar um recurso LZ4W com renderização observada (candidatos: estados de KO/fim de round; grafo de ponteiros SpriteDefinition -> TileSet para achar o recurso renderizado). Zero divergências nos 159 recursos verificados preservados — nada disso equivale o jogo inteiro. Gates: frontend 699/6, Rust 655/0/50, clippy/fmt/tree limpos; commits coesos, push `0a6f689`, CI por consulta pontual; sem merge/release.
+
+### Checkpoint 2026-09-25 (a) — primeira cadeia real comprimida executada no produto (Experimental; sem merge)
+
+Na branch integradora `codex/rex-integrator-profiles-codecs` (PR #78, sobre #77), o LZ4W SGDK foi implementado em Rust canônico (`src-tauri/src/tools/reverse/decomp/rex_codecs.rs`) com oráculo oficial bidirecional: `decode(produto, encode(lz4w.jar, x)) == x` e `decode(lz4w.jar, encode(produto, x)) == x`. Dois defeitos reais foram fechados durante o diferencial: (1) literais são words LE copiadas verbatim (não BE); (2) match longo exige comprimento ≥ 3 (byte extra 0 = "sem match") e o offset longo é negação de **15 bits** (`& 0x7FFF`). Descoberta estrutural decisiva: **todos** os ~190 streams LZ4W da HAMOOPIG congelada são prev-block (o ResComp empacota cada recurso com os bytes anteriores como dicionário, flag ROM source); o decoder ganhou `lz4w_decode_with_dictionary` (port exato do unpacker: offsetAdj +1/token, +1/word longo, -comprimento/match) e o teste de corpus verifica 100+ streams decodificando exatamente `numTile*32` bytes com dicionário = prefixo da ROM. O encoder ganhou dicionário + lazy matching (o autocontido dá needs_space em 157/160 — honesto, os originais dependem do dicionário).
+
+Primeira cadeia real executada no produto (`rex_resources.rs`, teste `chain_scan_decode_edit_reinsert_on_frozen_corpus`): scan estrutural de headers TileSet -> verificação por decode exato -> edição determinística de pixel -> re-codificação com dicionário -> reinserção em cópia sem expansão -> diff de 74 bytes confinado à região do stream (header `0x25788`, stream `0xc8cc8`, 9 tiles; ROM original `558bea6c…` -> modificada `a51cfaf9…`) -> o stream reinserido decodifica para a edição e **todos os outros recursos verificam byte a byte idênticos** (nenhum dependente quebrado; candidatos com dependentes ou sem espaço são recusados de forma estruturada). Identificação é estrutural assistida e rotulada (header declara codec/tamanho), não descoberta automática. Pendentes para o aceite integral da rodada: prévia PNG no produto, IPC/UI, efeito observado no core Libretro via E2E desktop, aPLib decoder/encoder, perfis de endereçamento no produto. Agentes A e B entregaram parciais (PRs #80/#79) e estão bloqueados por limite de uso até ~15:21; MD linear completo do A (3 commits) e vetores Nemesis/Enigma/aPLib/LZ4W do B. Gates do integrador: 17 testes rex focados verdes, clippy/fmt limpos; sem merge/release.
+
+### Checkpoint 2026-09-24 (e) — rodada REX paralela iniciada: contratos v1 e base confirmada (Experimental; sem merge)
+
+Branch integradora `codex/rex-integrator-profiles-codecs` criada sobre `0d8c413` (sem merge/release; cadeia #75→#76→#77 conferida OPEN/MERGEABLE com bases corretas — #76 sobre `codex/nodegraph-organize-authoring`, #77 sobre `codex/reusable-behaviors`). Validação independente do integrador, distinta das provas do executor: o CI remoto do HEAD `0d8c413` agora está **verde em todos os checks** (`validate`, `linux-validate`, `desktop-smoke` consultados via `gh pr checks 77`), resolvendo a pendência do checkpoint 2026-09-25 (c); os quatro relatórios de prova foram reconferidos programaticamente (coleta 4/4, independência 6/6, NodeGraph 13/13, reference-platformer 16/16, todos `failed=0` e app SHA `9a6afe4b7c822b0ab750f8b518bb16376dae75b2698406161f3683d442d8a696`, binário local com o mesmo hash); o corpus local teve os quatro SHA-256 reconferidos (Sonic BYOR, HAMOOPIG, Taiketsu, doador PNG). Diff do harness `59714bd..0d8c413` revisado por inteiro: mudanças **endurecem** gates (avanço de quadros exigido, apoio real observado, liberação de B consumida pela ROM, trajetórias preservadas em falha, áudio medido durante fonte ativa com SFX de salto); nenhuma flexibilização detectada.
+
+Contratos REX v1 congelados em `docs/rex_profiles/CONTRACTS.md` (perfil/evidência/endereçamento/codec/recurso comprimido; erros estruturados; status cumulativos separados; oráculo externo fixado antes da implementação). Estado da rodada e dono do job pesado único (integrador) em `docs/rex_profiles/ROUND_STATE.md`, matriz inicial toda `blocked`. Worktrees A (`/home/misael/RDS-REX-A-addressing`, branch `codex/rex-a-addressing`) e B (`/home/misael/Projects/REX-B-CODECS-2026-09-24`, branch `codex/rex-b-codecs`) sobre a mesma base `0d8c413`; prompts A/B/integrador versionados em `docs/handoffs/`. Corpus preservado intacto e somente leitura para A/B. Próximo passo: publicar branch, alinhar A/B com os contratos, agentes em paralelo e integração MD linear/SSF2 + aPLib/LZ4W com cadeia real comprimida.
+
 ### Checkpoint 2026-09-25 (c) — PR #77 e correção de gate Desktop E2E no CI (Experimental; sem merge)
 
 Branch `codex/collect-counter-goal` publicada, PR dependente [#77](https://github.com/Misael-art/RetroDevStudio/pull/77) contra `codex/reusable-behaviors` (#76), sem merge/release. O primeiro Desktop E2E remoto do HEAD `5eaa4af` falhou em `reference-platformer` por duas asserções herdadas do comportamento antigo: procurava `static s32 logic_var_reference_score` embora o C atual declare `static volatile s32` desde `6ab0b44`, e exigia áudio não nulo numa janela tardia após o VGM do template (gerado para tocar meio segundo e terminar). O E2E agora exige explicitamente a declaração `static volatile s32`, mantém comparação de layout não vazia/igual após salvar e reabrir, e aciona um SFX de salto pelo teclado nativo para medir crescimento de frames não nulos recebidos e renderizados no AudioContext durante uma fonte ativa. A prova acústica/loopback permanece separada e inconclusiva quando indisponível. Regressão local `reference-platformer-2026-09-25T01-09-09-520Z-report.json` passou 16/16 no mesmo app SHA `9a6afe4b7c822b0ab750f8b518bb16376dae75b2698406161f3683d442d8a696`; projeto preservado em `/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790298551976`. Novo CI do commit de follow-up ainda pendente neste checkpoint; não usar o CI falho anterior como aceite.
