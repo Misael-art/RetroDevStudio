@@ -109,9 +109,12 @@ def resumo(sel: list[dict]) -> dict:
         "soma_gap_produto_sobre_piso_bytes": sum(gaps),
         "mediana_gap": statistics.median(gaps),
         "gap_maximo": max(gaps),
-        "recursos_com_piso_igual_produto": sum(g for g in gaps if g == 0),
-        "recursos_com_piso_menor_que_produto": sum(g for g in gaps if g > 0),
-        "recursos_com_piso_maior_que_produto": sum(g for g in gaps if g < 0),
+        # Contagens, não somas: os três casos são mutuamente exclusivos e somam
+        # `recursos`. (Escrever `sum(g ...)` aqui deu linha que parecia contagem e
+        # era soma de bytes — a primeira versão deste resumo tinha esse bug.)
+        "recursos_com_piso_igual_produto": sum(1 for g in gaps if g == 0),
+        "recursos_com_piso_menor_que_produto": sum(1 for g in gaps if g > 0),
+        "recursos_com_piso_maior_que_produto": sum(1 for g in gaps if g < 0),
         "piso_cabe_no_slot": sum(r["piso_cabe_no_slot"] for r in sel),
         "passariam_a_caber": sum(r["passaria_a_caber"] for r in sel),
         "soma_produto_bytes": sum(r["produto"] for r in sel),
