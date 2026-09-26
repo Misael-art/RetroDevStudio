@@ -157,7 +157,20 @@ e `codecs/` (B) do CONTRACTS v1.
   **não** aferi que o stream do run11 decodifica no mesmo plain — equivalência
   declarada como não provada.
   **Próximo comando:** push da branch + acompanhamento pontual do CI (um job por
-  vez, sem monitor permanente). **Depois:** PASSO 5 — consolidar a evidência
+  vez, sem monitor permanente). **Executado:** `135bda2..d0744b0` pushado
+  (fast-forward confirmado por `git fetch` antes do push: 0 atrás / 11 à frente).
+  No acompanhamento, o job `Desktop E2E` do PR falhou **só** em
+  `reference_goal=failure` — "ROM reaberta não refletiu o tilemap persistido no
+  framebuffer", timeout de `15161 ms` contra orçamento de `15000 ms`. Achei o
+  MESMO erro em corrida anterior deste branch disparada por um commit
+  **só-documentação** (`36250323843`, `15011 ms` / `15000 ms`): flake de orçamento
+  apertado no cenário `reference-platformer`, de outra frente, não atribuído a
+  esta rodada e não corrigido aqui. Dado relacionado e desconfortável, registrado
+  em vez de escondido: os cenários `rex-*` **não fazem parte** da matriz Desktop
+  E2E do runner (ela roda `smoke_md`, `reference_goal` e os `live_*`, todos
+  `skipped` menos os dois), então a prova do fixture é local e vinculada ao
+  binário que medi — não há cobertura de CI para ela.
+  **Depois:** PASSO 5 — consolidar a evidência
   TiledImage/APLIB (existe como afirmação em `PROMPT_REX_INTEGRATOR_RESUME_2026-09-26.md`
   e como código não integrado: `scripts/rex_profiles/lz4w/tiledimage.mjs` em
   `codex/rex-a-addressing @ 19094b0`, vetores aPLib em `codex/rex-b-codecs`) e
