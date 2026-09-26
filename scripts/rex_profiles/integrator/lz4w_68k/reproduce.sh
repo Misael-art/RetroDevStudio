@@ -4,6 +4,9 @@
 # oráculo Java lz4w.jar v1.43 e contra o plano esperado pelo produto.
 #
 # Pré-requisitos (medidos neste host; registrar no doc se divergir):
+# Opcional: export RDS_REX_LZ4W_FIXTURE_ROM=<rom do fixture autoral> para
+#   repassar também as streams do fixture (i30 rescomp / i31 edição do produto).
+#
 #   SGDK 2.11 em $GDK (padrão /mnt/sdcard/... , mapeado para G: no wine),
 #   wine, MAME 0.289, Java 17, lz4w.jar v1.43 no cache do oráculo, gawk, zip,
 #   e a ROM BYOR congelada em posse local (NUNCA no git).
@@ -50,6 +53,14 @@ runE:i18_corpus_edit_c8cc8
 run14:i14_encoder_deep_16384
 run15:i15_hardware_ceiling_16385
 run16:i16_beyond_ceiling_16386"
+
+# O fixture autoral só existe se a ROM do fixture foi construída localmente
+# (scripts/rex_profiles/integrator/lz4w_fixture/build-fixture.sh). Sem ela, o
+# replay do corpus segue valendo para o contrato do codec.
+if [ -n "${RDS_REX_LZ4W_FIXTURE_ROM:-}" ] && [ -f "${RDS_REX_LZ4W_FIXTURE_ROM}" ]; then
+  RUNS="$RUNS runF:i30_fixture_rescomp_orig,i31_fixture_product_edit"
+  echo "fixture ativo: $RDS_REX_LZ4W_FIXTURE_ROM"
+fi
 
 for entry in $RUNS; do
   name="${entry%%:*}"

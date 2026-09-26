@@ -1,0 +1,3 @@
+OK       i30_fixture_rescomp_orig     ret68k=  512 esperado=  512 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i31_fixture_product_edit     ret68k=  512 esperado=  512 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)

@@ -1,0 +1,25 @@
+{
+  "dst_total": 2560,
+  "cases": [
+    {
+      "id": "i30_fixture_rescomp_orig",
+      "dict_len": 256,
+      "dict_sha256": "fe7bf65fe654798ee4ce727384a89d7cbc5b85943175e960eca2caa255961739",
+      "dict_committed": true,
+      "stream_len": 444,
+      "plain_len": 512,
+      "stride": 1280,
+      "dst_offset": 0
+    },
+    {
+      "id": "i31_fixture_product_edit",
+      "dict_len": 256,
+      "dict_sha256": "fe7bf65fe654798ee4ce727384a89d7cbc5b85943175e960eca2caa255961739",
+      "dict_committed": true,
+      "stream_len": 440,
+      "plain_len": 512,
+      "stride": 1280,
+      "dst_offset": 1280
+    }
+  ]
+}

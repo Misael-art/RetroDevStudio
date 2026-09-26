@@ -1,0 +1,148 @@
+{
+  "schema": "rex-integrator-evidence/v1",
+  "id": "lz4w-68k-oracle-2026-09-26-r13",
+  "measured_at": "2026-09-26",
+  "mission": "docs/handoffs/PROMPT_REX_INTEGRATOR_RESUME_2026-09-26.md — ETAPA D (efeito causal demonstrado) + confirmação de durabilidade do stream escrito PELO PRODUTO no desempacotador 68000 oficial",
+  "supersedes": "data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26 (mesmo harness; esta execução acrescenta runF com os dois streams do fixture autoral)",
+  "subject_under_test": {
+    "repo_commit_at_measurement": "a96fb15 (working tree; os três arquivos abaixo foram commitados neste mesmo lote)",
+    "codec_file": "src-tauri/src/tools/reverse/decomp/rex_codecs.rs",
+    "codec_sha256": "656bdc9f17c5abe42c4909a36e2e3052a0a498b4e26409f60de8092ae12f719e",
+    "driver_source_file": "scripts/rex_profiles/integrator/lz4w_68k/driver_integrator.rs",
+    "driver_source_sha256": "c0acae00c766fa035ca8bc7eef5d747674ad6021f37b040b807574a9b4f39e3c",
+    "driver_binary_sha256": "c72108f7f56ae3d477d999e378740f886286e6c18cb13c9f15ed4d2cdd29d1f9",
+    "reproduce_sh_sha256": "edbb9e9427f1b42bde04acfc9e5c767ef259254adeea47dcf3571f965adbd78e",
+    "note_pino": "o campo 'driver-sha256' do ORACLE-RUN.log é o hash do BINÁRIO compilado; os fontes verbatim que rodaram têm os hashes acima e foram conferidos contra a árvore de trabalho (crate/main.rs e crate/rex_codecs.rs idênticos aos originais)",
+    "note": "o driver compila uma cópia verbatim de rex_codecs.rs; nenhum código do produto foi alterado pela medição"
+  },
+  "oracles": {
+    "unpacker_68k": {
+      "source": "SGDK 2.11 src/tools_a.s (MIT)",
+      "sha256": "34c9e8d67683ad9aa6a723891f86e70742add1007efb9a5f8f497b62bc60e2d0",
+      "assembled_function_sha256": "ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787",
+      "assembled_function_bytes": 5056,
+      "identity_proof": "build-rom.sh extrai .text.asm.lz4w_unpack de master.o e de libmd.a/tools_a.o e exige tamanho + bytes idênticos em TODAS as 7 construções de ROM desta execução"
+    },
+    "reference_java": {
+      "tool": "lz4w.jar v1.43 (SGDK oficial)",
+      "sha256": "bfcf9c692696aac21be23f0d48a9ccf788963a4ae7039cb7af276ed745bca4bb",
+      "invocation": "java -jar lz4w.jar u <dict@stream> <out>"
+    },
+    "execution": {
+      "emulator": "MAME 0.289 (mame0289-dirty), slot genesis, cart ZIPpado",
+      "mame_flags": "-noplugins -hashpath <vazio> -skip_gameinfo -autoboot_script capture.lua",
+      "toolchain_host": "wine-11.17 (cpp/as/ar/objdump/objcopy/ld do SGDK)",
+      "rustc": "1.97.0 (2d8144b78 2026-07-07)",
+      "java": "openjdk 17.0.20.1",
+      "python": "3.14.7"
+    }
+  },
+  "byor_corpus": {
+    "file": "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+    "sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+    "size_bytes": 917504,
+    "versioned_in_git": false,
+    "reason": "bytes comerciais: posse local somente; a evidência promovida é log + SHA-256 + comprimentos"
+  },
+  "authored_fixture": {
+    "package": "scripts/rex_profiles/integrator/lz4w_fixture/",
+    "rom_sha256": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5",
+    "rom_len": 393216,
+    "resource": {
+      "header_offset": 95464,
+      "stream_offset": 391560,
+      "num_tiles": 16,
+      "expected_len": 512
+    },
+    "gen_fixture_sha256": "1445132ff40be534bcc4ca6bda5787cb1971f816e015aec656ca3dad336bfb56",
+    "versioned_in_git": false,
+    "reason": "ROM reconstruída por build-fixture.sh a partir de fontes autoriais + SGDK pinado; o teste de aceite a consome por caminho explícito (RDS_REX_LZ4W_FIXTURE_ROM) e exige o SHA-256 acima"
+  },
+  "harness_provenance": {
+    "path": "scripts/rex_profiles/integrator/lz4w_68k/",
+    "vendored_from": "REX-B-CODECS-2026-09-24 @ 9b2389d27c4945c2e13d4344d0ad4e341c784861",
+    "suite_integration": "NÃO integrada — apenas a ferramenta de medição foi vendorada com proveniência; o suíte da agente-B continua no worktree dela"
+  },
+  "runs": [
+    {
+      "name": "runI",
+      "cases": ["i20_lits_odd", "i21_short_mix", "i22_long_far_nodict", "i23_long_zero_value", "i24_dict_mixed"],
+      "purpose": "streams EMITIDAS PELO ENCODER ATUAL: literais+cauda ímpar, curtos off 2/off 1, longo auto-referente, longo value 0x0000, dicionário misto",
+      "verdict": "68k == jar == esperado (5/5)",
+      "rom_sha256": "8aa7cb1e7a2870811f40da593e66b8707e01dff4df9633ecd46d450948fbd8f2",
+      "capture_sha256": "8440e2c8daec0f2134718d55d8986ecd311e6300a39d5ac0059f938ea277503c"
+    },
+    {
+      "name": "runC",
+      "cases": ["i09_corpus_orig_c8cc8"],
+      "purpose": "stream ORIGINAL do recurso 0xc8cc8 com o menor prefixo-dicionário aceito pelo produto (4096 bytes, buscado por duplicação a partir de 0x100)",
+      "verdict": "68k == jar == esperado (288 bytes)",
+      "rom_sha256": "fc38f818784b3f3d66b83111fee3f855616f614ec6b96a235a630b6d56b9fbb2",
+      "capture_sha256": "6aa4a4ac1399b5dae4224e4c5e7b04655220797e45c8ec119b1ccbf48cf66ade"
+    },
+    {
+      "name": "runE",
+      "cases": ["i18_corpus_edit_c8cc8"],
+      "purpose": "edição de ARNÊS i18 (byte 0 do plano ^ 0xF0) re-codificada pelo encoder ATUAL; prefixo mínimo aceito 1024 bytes. NÃO é a edição canônica do aceite BYOR (pixel (0,7,4) -> idx 15), que cabe e é aplicada no suíte --ignored",
+      "verdict": "68k == jar == esperado (288 bytes); slot: stream 150 > 144 -> needs_space (não forçado)",
+      "rom_sha256": "9e2088a634fae43b8754f85798f9a56941fdf9a6de980d64073198e562bf0e40",
+      "capture_sha256": "727c9f87e427341c497f8073055f588ecf9d5089d70c395d9d2855d3ab296e40"
+    },
+    {
+      "name": "run14",
+      "cases": ["i14_encoder_deep_16384"],
+      "purpose": "PROVA MANDATÓRIA fora do roundtrip interno: Rust encode -> 68000 decode no offset profundo máximo que o encoder atual alcança (16384 words, value 0x4001)",
+      "verdict": "68k == jar == esperado",
+      "rom_sha256": "0e705a6747cce67644bc6a8d29ebadf86ba25b37616b2eac8d549f6ee200ca54",
+      "capture_sha256": "be735717bebf4ba5c1d728460f160827a63f90a130e77c030c09516c942020b2"
+    },
+    {
+      "name": "run15",
+      "cases": ["i15_hardware_ceiling_16385"],
+      "purpose": "fronteira do formato construída à mão: off 16385 (value 0x4000). O decoder do produto aceite e o hardware reproduza — confirma o teto corrigido (16385, não 16384)",
+      "verdict": "produto aceita; 68k == jar == esperado",
+      "rom_sha256": "b3c6aadeead6f44aa339ba803e1c5d723c769d0d626d231890f347f7f1ab601d",
+      "capture_sha256": "c2a491f47cb28160b8996867e72501049a055f92b90b1e3b6a51f4fdf76e89b8"
+    },
+    {
+      "name": "run16",
+      "cases": ["i16_beyond_ceiling_16386"],
+      "purpose": "um word além do teto: off 16386 (value 0x3FFF), construído à mão",
+      "verdict": "DIVERGÊNCIA ESPERADA E MEDIDA: o 68k produz byte 0x24 no lugar de 0xBE (leitura para frente, aliassa a ROM) enquanto o jar de 32 bits reproduz o pretendido; o produto recusa com invalid_reference",
+      "rom_sha256": "7b2ac68f5d1875cd874cb5d406a38f38a3ab2a660c20a6af618daa6a906fd9ee",
+      "capture_sha256": "c030fb65b58b75d323aa0c85540fe6cde8a64b7ec4293a92234d7aeddc07e24c"
+    },
+    {
+      "name": "runF",
+      "cases": ["i30_fixture_rescomp_orig", "i31_fixture_product_edit"],
+      "purpose": "ETAPA D no fixture autoral: i30 é o stream que o rescomp (empacotador oficial) produziu; i31 é o stream de uma EDIÇÃO DE UM PIXEL re-codificado PELO CODIFICADOR DO PRODUTO e escrito pela transação de reinserção. Os dois vão ao mesmo dicionário (256 bytes = prefixo mínimo aceito) e a destinos distintos da VRAM capturada",
+      "verdict": "i30: 68k == jar == esperado (512 bytes). i31: 68k == jar == esperado (512 bytes, stream de 440 bytes dentro do slot de 444). Ambos sem sobrescrever vizinhos (sem_overwrite=S)",
+      "rom_sha256": "781fbaeef9841fffc786ac2633bb8de5dbc534152cf1f523c61ab7d1dbea649b",
+      "capture_sha256": "7ea12ee62a2910a57f716379d0c2c33a79840ae1f4d7a019b18eb723cc0c09ed",
+      "edit": {
+        "tile": 0,
+        "row": 5,
+        "col": 7,
+        "from_index": 0,
+        "to_index": 15,
+        "why_it_fits": "o plantio torna o último word da linha 5 (0xF0) quase-idêntico a um word existente; desfazer o near-miss deixa os dois words iguais e o LZ4W casa words, não pixels — a edição de 1 pixel então devolve um token inteiro",
+        "screen_xy": [7, 5],
+        "predicted_before_emulation": true
+      }
+    }
+  ],
+  "verdict_summary": {
+    "runs_executed": 7,
+    "cases_total": 12,
+    "cases_68k_eq_jar_eq_expected": 11,
+    "cases_divergent_by_design": 1,
+    "divergent_note": "run16/i16 é o caso NEGATIVO: a divergência é a prova de que o teto medido é 16385 e de que o produto recusa em vez de corromper"
+  },
+  "conclusion": "O desempacotador 68000 oficial reproduz, byte a byte, o stream que o CODIFICADOR DO PRODUTO escreveu para uma edição prevista de um pixel do fixture autoral (440 bytes ocupando um slot de 444). Somado ao run16, o conjunto continua provando o teto de 16385 words para referência longa não-ROM e a recusa honesta além dele. No corpus comercial nada foi forçado: i18 permanece needs_space (150 > 144).",
+  "not_promoted_to_git": [
+    "workdir/streams/*.{stream,plain,dict} dos casos derivados da ROM (i09, i18) e do fixture (i30, i31)",
+    "workdir/*/cases2/*.{stream,plain,dict} e table2.s (contêm prefixos-dicionário derivados da ROM e do fixture)",
+    "rom.bin / rom.zip / capture.bin por execução",
+    "o campo dict_committed em runs/*/cases2.json descreve o workdir da medição, NÃO este pacote"
+  ]
+}

@@ -310,6 +310,117 @@ fn corpus_cases(rom: &[u8], outdir: &Path) -> Vec<Case> {
     v
 }
 
+/// Prefixo mínimo que faz `stream` decodificar para `want`, medido a partir de
+/// `start` (variante parametrizada de `minimal_prefix`, que é presa ao START
+/// do corpus).
+fn minimal_prefix_at(stream: &[u8], rom: &[u8], start: usize, want: &[u8]) -> usize {
+    let mut p = 0x100usize;
+    loop {
+        let ok = lz4w_decode_with_dictionary(stream, Some(&rom[start - p..start]), &limits())
+            .map(|r| r.data == want && r.bytes_consumed == stream.len())
+            .unwrap_or(false);
+        if ok {
+            return p;
+        }
+        assert!(
+            p < PREFIX_CAP,
+            "prefixo insuficiente mesmo no cap {PREFIX_CAP}"
+        );
+        p = ((p * 2) & !0xFF).min(PREFIX_CAP);
+    }
+}
+
+/// Casos do FIXTURE autoral (SGDK 2.11: o rescomp OFICIAL empacota o tileset em
+/// LZ4W e `unpackTileSet()` o desempacota em runtime). Dois casos:
+///   i30  a stream como o rescomp a emitiu (linha de base do fixture);
+///   i31  a stream que o PRODUTO escreve ao aplicar a edição plantada.
+/// Repassar as duas pelo desempacotador 68000 real é o elo de durabilidade entre
+/// "a transação aceitou a edição" e "o hardware desempacota exatamente os pixels
+/// que afirmamos ter pintado". Só roda com RDS_REX_LZ4W_FIXTURE_ROM definido.
+fn fixture_cases(outdir: &Path) -> Vec<Case> {
+    let path = match std::env::var("RDS_REX_LZ4W_FIXTURE_ROM") {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("fixture: RDS_REX_LZ4W_FIXTURE_ROM ausente; pulando i30/i31");
+            return Vec::new();
+        }
+    };
+    let rom = fs::read(&path).unwrap_or_else(|e| panic!("ler fixture ROM {path}: {e}"));
+    assert_eq!(rom.len(), 393_216, "fixture ROM com tamanho inesperado");
+    // Header TileSet do fixture: {u16 compression; u16 numTile; u32 *tiles}.
+    // Offset medido no build report do fixture (rebuild reproducible).
+    let header = 95_464usize;
+    let compression = u16::from_be_bytes([rom[header], rom[header + 1]]);
+    let num_tile = u16::from_be_bytes([rom[header + 2], rom[header + 3]]);
+    let start = u32::from_be_bytes([rom[header + 4], rom[header + 5], rom[header + 6], rom[header + 7]])
+        as usize;
+    assert_eq!(compression, 2, "fixture perdeu a marca LZ4W (compression=2)");
+    assert_eq!(num_tile, 16, "fixture perdeu numTile=16");
+    let full = &rom[..start];
+    let dec =
+        lz4w_decode_with_dictionary(&rom[start..], Some(full), &limits()).expect("decode fixture");
+    assert_eq!(dec.data.len(), 512, "plain do fixture inesperado");
+
+    let mut v = Vec::new();
+    let stream30 = rom[start..start + dec.bytes_consumed].to_vec();
+    let p30 = minimal_prefix_at(&stream30, &rom, start, &dec.data);
+    v.push(Case {
+        id: "i30_fixture_rescomp_orig",
+        plain: dec.data.clone(),
+        dict: rom[start - p30..start].to_vec(),
+        stream: stream30.clone(),
+        note: format!(
+            "stream do rescomp no fixture; {} bytes; prefixo minimo {p30}",
+            dec.bytes_consumed
+        ),
+    });
+
+    // Edicao plantada: tile 0, linha 5, coluna 7 -> byte 23, nibble baixo.
+    // O gerador deixa esse pixel com v+1 enquanto a word vizinha vale v;
+    // reescreve-lo para v iguala duas words adjacentes e encurta a stream.
+    let mut edited = dec.data.clone();
+    assert_eq!(edited[23] & 0x0F, 0, "fixture perdeu o nibble plantado");
+    edited[23] = (edited[23] & 0xF0) | 0x0F;
+    let stream31 = lz4w_encode_with_dictionary(&edited, Some(full)).expect("encode i31");
+    let back =
+        lz4w_decode_with_dictionary(&stream31, Some(full), &limits()).expect("self-decode i31");
+    assert_eq!(back.data, edited, "i31: self-decode divergiu");
+    assert_eq!(back.bytes_consumed, stream31.len(), "i31: consumo parcial");
+    let p31 = minimal_prefix_at(&stream31, &rom, start, &edited);
+    let len31 = stream31.len();
+    eprintln!(
+        "i31-slot: stream {} bytes vs slot original {} bytes — {}",
+        stream31.len(),
+        dec.bytes_consumed,
+        if stream31.len() <= dec.bytes_consumed {
+            "cabe".to_string()
+        } else {
+            "NAO cabe".to_string()
+        }
+    );
+    assert!(
+        stream31.len() <= dec.bytes_consumed,
+        "i31: a edicao plantada deixou de caber no espaco do fixture"
+    );
+    v.push(Case {
+        id: "i31_fixture_product_edit",
+        plain: edited,
+        dict: rom[start - p31..start].to_vec(),
+        stream: stream31,
+        note: format!(
+            "edicao plantada (tile 0, linha 5, col 7 -> idx 15) pelo encoder do produto; \
+             {} bytes; slot {}; prefixo minimo {p31}",
+            len31,
+            dec.bytes_consumed
+        ),
+    });
+
+    for c in &v {
+        write_case(outdir, c);
+    }
+    v
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     assert!(
@@ -324,6 +435,7 @@ fn main() {
     cases.push(encoder_deep_case(&outdir));
     cases.append(&mut hand_built_boundary_cases(&outdir));
     cases.append(&mut corpus_cases(&rom, &outdir));
+    cases.append(&mut fixture_cases(&outdir));
 
     let mut rows = String::new();
     for c in &cases {
