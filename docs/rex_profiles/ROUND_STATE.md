@@ -149,13 +149,17 @@ qualidade muda pino, e mudar pino é decisão registrada).
 Paridade bidirecional de CONTRACTS §4: perna 1 (`decode` do produto sobre stream
 do oráculo) verde nos 8 plains × 2 oráculos, mais os 9 goldens com
 `bytes_consumed` exato; perna 2 (`decode` do oráculo sobre stream do **produto**)
-verde em 8 de 8 por `scripts/rex_profiles/integrator/aplib/oracle_encode_parity.py`
-— `apultra` v1.4.8 `64be2a7a…`, implementação em C que não compartilha código com
-o produto, devolve para cada stream do produto exatamente o plain pinado no
-`manifest.tsv`. Não-vacuidade do aceite provada por controle: um bit invertido na
-tag de `tile_like` foi aceito pelo oráculo e produziu hash diferente — o script
-apontou FAIL e saiu com rc=1, então o que fecha a prova é a comparação de hash,
-não o oráculo ter devolvido alguns bytes. **O que continua não alegado**:
+verde em 8 de 8 **contra cada um dos dois oráculos** — 16 aceitações por
+`scripts/rex_profiles/integrator/aplib/oracle_encode_parity.py`: `apultra` v1.4.8
+`64be2a7a…` (C, Emmanuel Marty) e `apj.jar` v1.32 do SGDK 2.11 `2d8cdc63…` (Java,
+Stephane Dallongeville, o empacotador que gerou os `plain/*.apj.ap`), duas
+implementações independentes entre si e do produto, devolvendo para cada stream do
+produto exatamente o plain pinado no `manifest.tsv`. Não-vacuidade provada com um
+controle por ramo do aceite, nos dois oráculos: bit invertido na tag de
+`tile_like` → o oráculo recusa e o script sai FAIL com rc=1; literal físico
+(byte 0) corrompido em `text_rep` → o oráculo **aceita** e produz 6000 B, e o que
+aponta FAIL é a comparação de hash. Ou seja, o que fecha a prova não é o código de
+saída do oráculo, nem ele ter devolvido alguns bytes. **O que continua não alegado**:
 optimalidade (não houve comparação exaustiva com parse ótimo, e o `111` economiza
 2 bits mas não chega a encolher stream em `ABCDA` nem em `01 00 02` — ele estoura
 o tag e cobra um tag extra), desempacotamento dos streams do produto pelo
