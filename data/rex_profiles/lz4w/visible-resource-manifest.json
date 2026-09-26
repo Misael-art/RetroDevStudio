@@ -1,0 +1,64 @@
+{
+  "purpose": "Manifiesto de evidencia do recurso visible (fase 3, axente A). Sen bytes de ROM: só hashes, enderezos e campos estruturais.",
+  "rom": {
+    "path": "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+    "sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+    "sizeBytes": 917504,
+    "internalName": "HAMOOPIG (HAMOOPI MD PORT BY HUMBERTODIAS)",
+    "sgdkPin": "/home/misael/.local/share/sgdk_forge/sdk_9e22ce585b578c4c3246 (SGDK 2.11)"
+  },
+  "evidencePpm": {
+    "dir": "/home/misael/RetroDevStudio/rex-evidence-2026-09-10/backend-hamoopig",
+    "core": "Genesis Plus GX v1.7.4 46a5521 (determinista)",
+    "sequence": "REX-00: 60 idle, Start 10, Right 60, idle final (nunca chegou a gameplay)",
+    "checkpoints": {
+      "checkpoint-059.ppm": "936a61aa4fb256bed0d58732b36eda285d4abed60fce2834a113a4e80cd08b8a",
+      "checkpoint-069.ppm": "3f72f0382764eb379c1bc5620ec031cd495de7dcfbe9b03142da68644c19c9c4",
+      "checkpoint-129.ppm": "5f4ce09d7e8f618f4b7e4fc5c899a0aacb9261fb7923ed44a6c05b7bb61cda86",
+      "checkpoint-179.ppm": "5f4ce09d7e8f618f4b7e4fc5c899a0aacb9261fb7923ed44a6c05b7bb61cda86"
+    },
+    "note": "059/069/129/179 = mesma pantalla de titulo en fases de fade; 129 e 179 byte-identicos"
+  },
+  "visibleResource": {
+    "kind": "TiledImage (SGDK 2.11 Image.java: {u32 palette* | u32 tileset* | u32 tilemap*})",
+    "offset": "0x21b5c",
+    "palette": { "def": "0x21b56", "numColor": 16, "data": "0x2cbe8" },
+    "tileset": { "def": "0x21b44", "compression": 1, "compressionName": "APLIB", "numTile": 500, "stream": "0x2e4d4", "decodedBytes": 16000, "bytesConsumed": 4485 },
+    "tilemap": { "def": "0x21b4c", "compression": 1, "compressionName": "APLIB", "w": 40, "h": 28, "stream": "0x2d534", "decodedBytes": 2240, "bytesConsumed": 1196 },
+    "tileFormat": "chunky packed-nibble 4bpp (row*4 + col/2, nibble alto = columna par); coincide co contracto do integrador (commit canonico 0e77f0b)",
+    "entryLayout": "u16 BE: index bits 0-10 | hflip 11 | vflip 12 | palette bank 13-14 | priority 15 (vdp_tile.h)",
+    "matchPerPixel_cp129": { "chunky+flip": 0.959, "chunkyNoFlip": 0.9446, "planar": 0.6479 },
+    "cleanIndices": 12,
+    "paletteQuantization": "canle8 = round((v4bit >> 1) * 239 / 7), tolerancia +/-4",
+    "residualAttribution": "pixels non explicados (4.1%) concentran-se nos indices 2 e 14 = sprites/window superpostos ao plano A; TiledImage @0x21b80 explica só 27.98% e queda descartado"
+  },
+  "lz4wNegative": {
+    "claim": "ningun frame da cadea SpriteDefinition->animacion->frame->TileSet LZ4W ten colocacion visible en checkpoint-129 con portas minTiles=8, minRichCells=8, cobertura>=0.7, cores>=4, formatos planar E chunky",
+    "retractedClaims": ["def 0x22a2a visible en (130-132,98) 42/55 (falso positivo: fondo plano + matcher axenstico)", "hit 0x24948 (cores non batian coa paleta runtime en fase de fade)"]
+  },
+  "aplibGoldenVectors": {
+    "dir": "data/rex_profiles/codecs/aplib-golden",
+    "procedencia": "copia SHA-rexistrada de REX-B-CODECS-2026-09-24 data/rex_profiles/codec/aplib/golden (oracles apultra 8f340057 + APJ v1.32)",
+    "sourceManifestSha256": "454119bded17ce300fc26f318f9289b613d45c1a64a69eaadcca8650c9543754",
+    "files": {
+      "g01b_single_byte.ap": "4eb77c03e5059ca48a7ee3553edfc80d7fb175710e9127bf82be3d3e15b333bc",
+      "g01b_single_byte.expected.bin": "bbeebd879e1dff6918546dc0c179fdde505f2a21591c9a9c96e36b054ec5af83",
+      "g01_literals.ap": "40e7a53d8e51f0e745d8a25ab0b63bcef0b7b6132db72553f350ba8dc3714f1a",
+      "g01_literals.expected.bin": "3733cd977ff8eb18b987357e22ced99f46097f31ecb239e878ae63760e83e4d5",
+      "g02_short_zero.ap": "bcbc35d0be87d70dd7f65436548a987146865236dc7fd355fef39f7f303a196d",
+      "g02_short_zero.expected.bin": "f245639459ddfe3cf7d32400c26a1b2ff471b06ad5c6f26f1f5f6e8d510b5111",
+      "g03_short_match.ap": "3986eb2b6b34348f026a2d843ce68d43459e2ba1a60630139ce70b512caccc61",
+      "g03_short_match.expected.bin": "babd6736192360b0e254b13f0eb5da9a9e17ed31bccf54b38ae8132d0515f43a",
+      "g04_long_off_lt128.ap": "d974ede4f7a428ccd2a308a0def46fcda9e6bef1fc01fcfd81a36713ba022a9a",
+      "g04_long_off_lt128.expected.bin": "11770b3ea657fe68cba19675143e4715c8de9d763d3c21a85af6b7513d43997d",
+      "g05_repmatch.ap": "c8a521fbf5321e54392b6fa15f7c9c5f8becb450a52fff272fb227ca5cf1d9ff",
+      "g05_repmatch.expected.bin": "195dadd56624856f89bd9a78f8420c3acf5f91af85b4225bf2146a12003b00ce",
+      "g06_mid_offset.ap": "a9f90ddde202e5a95d28a29ca73e644637fb6d375ac735800535ec1952cb5e46",
+      "g06_mid_offset.expected.bin": "f95c80cd879196fdfa5ac55acfcc787e41ce7d45d0db62996397fdfdd25134c5",
+      "g07_far_offset.ap": "f0a20d593cdda4e61c59513427046931312eced0f9b36b342ca7f37a4d7ba2a4",
+      "g07_far_offset.expected.bin": "f91e8ae2ecefabe91ec2c4d1ce277f1c29728a04159571584eee239509a36a4d",
+      "g08_eod_trailing.ap": "d3d5efd4eab5fcf0de868f8e219c87ae70a4a464fd040482100ec1a2304c3e80",
+      "g08_eod_trailing.expected.bin": "6dbe90be4616944f6e1adddeb10e2bec46d0f3992519882a4a34b0467b914330"
+    }
+  }
+}
