@@ -1,0 +1,214 @@
+{
+  "resumo": {
+    "ajuste": {
+      "recursos": 128,
+      "soma_gap_produto_sobre_piso_bytes": 2784,
+      "mediana_gap": 22.0,
+      "gap_maximo": 54,
+      "recursos_com_piso_igual_produto": 2,
+      "recursos_com_piso_menor_que_produto": 126,
+      "recursos_com_piso_maior_que_produto": 0,
+      "piso_cabe_no_slot": 99,
+      "passariam_a_caber": 93,
+      "soma_produto_bytes": 180668,
+      "soma_piso_bytes": 177884,
+      "soma_slot_bytes": 178062
+    },
+    "validacao": {
+      "recursos": 32,
+      "soma_gap_produto_sobre_piso_bytes": 818,
+      "mediana_gap": 24.0,
+      "gap_maximo": 48,
+      "recursos_com_piso_igual_produto": 0,
+      "recursos_com_piso_menor_que_produto": 32,
+      "recursos_com_piso_maior_que_produto": 0,
+      "piso_cabe_no_slot": 26,
+      "passariam_a_caber": 25,
+      "soma_produto_bytes": 48258,
+      "soma_piso_bytes": 47440,
+      "soma_slot_bytes": 47500
+    },
+    "referencia": {
+      "recursos": 1,
+      "soma_gap_produto_sobre_piso_bytes": 0,
+      "mediana_gap": 0,
+      "gap_maximo": 0,
+      "recursos_com_piso_igual_produto": 1,
+      "recursos_com_piso_menor_que_produto": 0,
+      "recursos_com_piso_maior_que_produto": 0,
+      "piso_cabe_no_slot": 1,
+      "passariam_a_caber": 0,
+      "soma_produto_bytes": 444,
+      "soma_piso_bytes": 444,
+      "soma_slot_bytes": 444
+    }
+  },
+  "varredura": {
+    "dir_de_dumps": "/tmp/rex-lz4w-floor-dumps-r7-2026-09-26",
+    "streams_de_piso_escritos": true,
+    "dp_floor_sha256": "092f4a5c4e8685918bcf1d951f7dceadd294b190dcb5bc73afa68b9400670875"
+  },
+  "tempo_varredura_s": 49.9
+}
+
+   recurso       grupo  plain   slot produto   piso   gap  caberia?
+   0xc48aa      ajuste   3008   2074    2132   2078   +54  não
+   0x8d5b8      ajuste   2368   1584    1632   1582   +50  SIM
+   0xc0094   validacao   2944   1826    1872   1824   +48  SIM
+   0x88660   validacao   2304   1540    1586   1540   +46  SIM
+   0xc50c4      ajuste   2656   1390    1434   1388   +46  SIM
+   0x89940      ajuste   2496   1632    1672   1630   +42  SIM
+   0x9ee84      ajuste   1856   1466    1510   1468   +42  não
+   0x88c64      ajuste   2752   1620    1654   1616   +38  SIM
+   0x8b8a2      ajuste   2176   1526    1560   1522   +38  SIM
+   0x8be98      ajuste   2208   1462    1494   1456   +38  SIM
+   0x97bf0   validacao   2720   1854    1892   1854   +38  SIM
+   0xa6f56      ajuste   2816   1748    1782   1744   +38  SIM
+   0x8ecec      ajuste   2304   1382    1418   1382   +36  SIM
+   0xb0374   validacao   2176   1422    1456   1420   +36  SIM
+   0xba1b6      ajuste   2208   1550    1586   1550   +36  SIM
+   0xbcf58      ajuste   2208   1788    1828   1792   +36  não
+   0xc7a0e      ajuste   2624   1658    1694   1658   +36  SIM
+   0x8cf50      ajuste   2080   1640    1676   1642   +34  não
+   0x8e164   validacao   2016   1464    1500   1466   +34  não
+   0xaf820      ajuste   2048   1322    1356   1322   +34  SIM
+   0xbbd06      ajuste   2016   1496    1532   1498   +34  não
+   0xc374a   validacao   2208   1756    1790   1756   +34  SIM
+   0xc9d18   validacao   2112   1514    1544   1510   +34  SIM
+   0x89fa0      ajuste   2496   1702    1728   1696   +32  SIM
+   0xa1916      ajuste   1952   1390    1426   1394   +32  não
+   0xafd4a      ajuste   2720   1578    1610   1578   +32  SIM
+   0xb8f6c   validacao   2048   1406    1432   1400   +32  SIM
+   0xbb1b8      ajuste   2144   1624    1656   1624   +32  SIM
+   0xbc96e      ajuste   1920   1514    1544   1512   +32  SIM
+   0xcce60      ajuste   2048   1444    1476   1444   +32  SIM
+   0x8aca2      ajuste   2176   1556    1590   1560   +30  não
+   0x8b2b6      ajuste   2016   1516    1542   1512   +30  SIM
+   0x8c44e   validacao   2496   1580    1612   1582   +30  não
+   0x93fce   validacao   2112   1538    1564   1534   +30  SIM
+   0x9c320      ajuste   2176   1462    1488   1458   +30  SIM
+   0xa80be      ajuste   2176   1548    1580   1550   +30  não
+   0xaf1e8      ajuste   2528   1592    1622   1592   +30  SIM
+   0xb8368      ajuste   1888   1530    1556   1526   +30  SIM
+   0xb98c4      ajuste   2048    726     752    722   +30  SIM
+   0xc07b6      ajuste   2784   1160    1190   1160   +30  SIM
+   0xc5632   validacao   2848   1846    1872   1842   +30  SIM
+   0x945d0      ajuste   2496   1574    1604   1576   +28  não
+   0x9ad6e      ajuste   2272   1576    1600   1572   +28  SIM
+   0x9ce08   validacao   1856   1420    1440   1412   +28  SIM
+   0x9e23e      ajuste   2304   1574    1604   1576   +28  não
+   0xa1302      ajuste   2112   1556    1580   1552   +28  SIM
+   0xa4b94      ajuste   2176   1498    1526   1498   +28  SIM
+   0xa657e      ajuste   2240   1146    1172   1144   +28  SIM
+   0xa8dda      ajuste   2208   1454    1486   1458   +28  não
+   0xb8962      ajuste   2176   1546    1576   1548   +28  não
+   0xba7c4   validacao   1632   1264    1292   1264   +28  SIM
+   0xc0c3e      ajuste   2784    842     870    842   +28  SIM
+   0xc45b6      ajuste   2368    756     784    756   +28  SIM
+   0x925ce      ajuste   2176   1716    1744   1718   +26  não
+   0x98970      ajuste   2208    648     674    648   +26  SIM
+   0xa4632      ajuste   2112   1378    1406   1380   +26  não
+   0xb9b9a      ajuste   2336   1564    1588   1562   +26  SIM
+   0xbb810      ajuste   2048   1270    1296   1270   +26  SIM
+   0xbe352   validacao   2368   1554    1584   1558   +26  não
+   0xbe964      ajuste   1696   1328    1354   1328   +26  SIM
+   0xcb58e      ajuste   2528   1706    1734   1708   +26  não
+   0x8a646   validacao   2048   1628    1652   1628   +24  SIM
+   0x91fcc   validacao   2304   1538    1566   1542   +24  não
+   0x95c08   validacao   1984   1482    1506   1482   +24  SIM
+   0x961d2      ajuste   2240   1646    1668   1644   +24  SIM
+   0x97502      ajuste   2464   1774    1800   1776   +24  não
+   0x9832e      ajuste   2048   1602    1620   1596   +24  SIM
+   0x9c8d6      ajuste   1824   1330    1348   1324   +24  SIM
+   0x9e864   validacao   2112   1568    1586   1562   +24  SIM
+   0xa1e84   validacao   1952   1516    1538   1514   +24  SIM
+   0xa38d8   validacao   1696   1178    1196   1172   +24  SIM
+   0xa69f8   validacao   1632   1374    1396   1372   +24  SIM
+   0xbd654      ajuste   2240   1734    1756   1732   +24  SIM
+   0xc21c4      ajuste   2208   1624    1638   1614   +24  SIM
+   0xc7356   validacao   2752    980    1000    976   +24  SIM
+   0xcaf4e      ajuste   2240   1600    1626   1602   +24  não
+   0x892b8      ajuste   2272   1672    1690   1668   +22  SIM
+   0x8ca7a      ajuste   1664   1238    1256   1234   +22  SIM
+   0x8e71c      ajuste   2112   1488    1512   1490   +22  não
+   0x9327a      ajuste   2560   1702    1724   1702   +22  SIM
+   0x96840      ajuste   2208   1570    1594   1572   +22  não
+   0x99aee      ajuste   2304   1512    1532   1510   +22  SIM
+   0x9a0d6      ajuste   2336   1522    1546   1524   +22  não
+   0x9be14      ajuste   1696   1292    1316   1294   +22  não
+   0xa86ca   validacao   3008   1808    1830   1808   +22  SIM
+   0xbacb4      ajuste   1632   1284    1302   1280   +22  SIM
+   0xc3e26      ajuste   2400   1936    1956   1934   +22  SIM
+   0xc5d68      ajuste   2464   1516    1538   1516   +22  SIM
+   0xcc2c6      ajuste   1856   1454    1474   1452   +22  SIM
+   0x8f7e6      ajuste   1856    936     952    932   +20  SIM
+   0x92c82      ajuste   1888   1528    1550   1530   +20  não
+   0x9a6c8      ajuste   2784   1702    1720   1700   +20  SIM
+   0xa0548   validacao   2048   1388    1412   1392   +20  não
+   0xa0ab4      ajuste   1728   1338    1356   1336   +20  SIM
+   0xb94ea      ajuste   1472    986    1000    980   +20  SIM
+   0xbf988      ajuste   3072   1804    1822   1802   +20  SIM
+   0xc1aae   validacao   2272   1814    1832   1812   +20  SIM
+   0xc6354      ajuste   2464   1756    1770   1750   +20  SIM
+   0x8f252      ajuste   1824   1428    1448   1430   +18  não
+   0x8fb8e   validacao   1952   1024    1042   1024   +18  SIM
+   0x91422      ajuste   2496   1502    1514   1496   +18  SIM
+   0x93920      ajuste   2272   1710    1728   1710   +18  SIM
+   0x950e2      ajuste   2656   1280    1296   1278   +18  SIM
+   0x9f930      ajuste   2144   1646    1664   1646   +18  SIM
+   0xa56ae      ajuste   1600   1164    1178   1160   +18  SIM
+   0xa5fd8      ajuste   1696   1446    1464   1446   +18  SIM
+   0xb7902      ajuste   2144   1202    1218   1200   +18  SIM
+   0xbdd1a      ajuste   2176   1592    1608   1590   +18  SIM
+   0xc6a30      ajuste   2368    680     694    676   +18  SIM
+   0xc95a4      ajuste   1088    334     346    328   +18  SIM
+   0xcc874      ajuste   2240   1516    1536   1518   +18  não
+   0x8dbe8      ajuste   1728   1404    1420   1404   +16  SIM
+   0x955e2      ajuste   2592   1574    1590   1574   +16  SIM
+   0x96e62      ajuste   2400   1696    1708   1692   +16  SIM
+   0x9b396   validacao   1696   1360    1370   1354   +16  SIM
+   0xa2470      ajuste   2016   1156    1170   1154   +16  SIM
+   0xa3d72      ajuste   2048   1162    1174   1158   +16  SIM
+   0xa516e   validacao   1600   1344    1362   1346   +16  não
+   0xa5b3a      ajuste   1664   1182    1194   1178   +16  SIM
+   0xbee94      ajuste   1952   1238    1250   1234   +16  SIM
+   0xc2d6c      ajuste   1856   1278    1292   1276   +16  SIM
+   0xc923c      ajuste   1568    872     888    872   +16  SIM
+   0xc9780      ajuste   2048   1432    1450   1434   +16  não
+   0x94bf6      ajuste   1984   1260    1274   1260   +14  SIM
+   0x9d8ac      ajuste   1760   1288    1294   1280   +14  SIM
+   0xa2d96      ajuste   1952   1348    1362   1348   +14  SIM
+   0xa32da      ajuste   2048   1534    1546   1532   +14  SIM
+   0xa762a      ajuste   1984   1434    1442   1428   +14  SIM
+   0xb7db4      ajuste   2272   1460    1474   1460   +14  SIM
+   0xbf36a      ajuste   1920   1566    1578   1564   +14  SIM
+   0xca970      ajuste   1984   1502    1518   1504   +14  não
+   0xcbc38   validacao   2208   1678    1692   1678   +14  SIM
+   0xcd404      ajuste   2112   1558    1570   1556   +14  SIM
+   0x8ff8e      ajuste   2176   1610    1622   1610   +12  SIM
+   0x90dd8      ajuste   2208   1610    1616   1604   +12  SIM
+   0x995ac   validacao   2048   1346    1354   1342   +12  SIM
+   0x9f43e      ajuste   1536   1266    1280   1268   +12  não
+   0xa7bc4      ajuste   1536   1274    1286   1274   +12  SIM
+   0xc6cd8      ajuste   2816   1662    1672   1660   +12  SIM
+   0xca302      ajuste   2048   1646    1660   1648   +12  não
+   0x990ea      ajuste   1984   1218    1228   1218   +10  SIM
+   0x9b8e6      ajuste   1792   1326    1340   1330   +10  não
+   0xbc2de   validacao   1984   1680    1684   1674   +10  SIM
+   0xc281c      ajuste   1920   1360    1370   1360   +10  SIM
+   0xc772a      ajuste   2560    740     738    728   +10  não
+   0x91a00      ajuste   1952   1484    1492   1484    +8  SIM
+   0xa0fee      ajuste   1984    788     794    786    +8  SIM
+   0xc0f88      ajuste   2176   1386    1394   1386    +8  SIM
+   0xc14f2      ajuste   2272   1468    1474   1466    +8  SIM
+   0x9d394      ajuste   1664   1304    1308   1302    +6  SIM
+   0x9ddb4      ajuste   1440   1162    1168   1162    +6  SIM
+   0x9ff9e      ajuste   1952   1450    1456   1450    +6  SIM
+   0xa28f4      ajuste   1728   1186    1188   1182    +6  SIM
+   0xa41fc      ajuste   1600   1078    1078   1072    +6  não
+   0xc326a      ajuste   1824   1248    1254   1248    +6  SIM
+   0xc8f12   validacao   1696    810     804    800    +4  não
+   0xc8d58      ajuste    800    442     436    434    +2  não
+   0xc96f2      ajuste    672    142     138    136    +2  não
+
+[jsonl] /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/rex_profiles/integrator/lz4w-recompress/evidence/2026-09-26-r7-final-pin/floor-sweep.jsonl: 161 linhas

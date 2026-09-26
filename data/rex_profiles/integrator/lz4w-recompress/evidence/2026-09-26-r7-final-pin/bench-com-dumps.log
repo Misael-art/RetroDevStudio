@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.75s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+[bench] dumps de material: 161 recursos em /tmp/rex-lz4w-floor-dumps-r7-2026-09-26
+[bench] S-B=160 coube_ajuste=5 coube_validacao=1 folga_total=-3364B com_folga>=0=7 rodada=58537ms/120000ms
+[bench] estratégia da base: dp_custo_explicito=161 guloso_fallback=0 | média 361 ms/recurso
+[bench] distribuição: {"cabe": 20, "needs_space": 505, "noop_preservando_stream": 119}
+[bench] capacidade de edição por amostragem (24 bits/recuso): ajuste 6/128 validação 1/32 — battery §4-edita coube_ajuste=5 coube_validacao=1
+test tools::reverse::decomp::rex_resources::tests::lz4w_recompression_benchmark ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 727 filtered out; finished in 58.66s
+
