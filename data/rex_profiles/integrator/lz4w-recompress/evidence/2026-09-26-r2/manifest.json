@@ -1,0 +1,29 @@
+{
+  "schema": "rex-integrator-evidence/v1",
+  "id": "lz4w-recompress-bench-2026-09-26-r2",
+  "papel": "mesma especificação congelada, medida logo depois da busca de candidatos MESCLADA por proximidade (diagnóstico: docs/rex_profiles/LZ4W_ENCODER_444_VS_448_2026-09-26.md).",
+  "measured_at": "2026-09-26",
+  "sujeito": {
+    "codec_file": "src-tauri/src/tools/reverse/decomp/rex_codecs.rs",
+    "codec_sha256": "não registrado no momento da corrida (a mudança ainda seria reformatada pelo `cargo fmt`); a confirmação pin-a-pin desta rodada está em ../2026-09-26-r4-final-pin/",
+    "mudanca": "find_best percorre dicionário e saída em ordem mesclada por proximidade; teto de 128 candidatos, janela 0x4000 words, filtro de aceite e lazy inalterados"
+  },
+  "resultados": {
+    "recursos_S_B": 160,
+    "folga_total_S_B_bytes": -9156,
+    "delta_vs_r1_bytes": 4032,
+    "recursos_S_B_melhoraram": 158,
+    "recursos_S_B_pioraram": 0,
+    "recursos_S_B_empataram": 2,
+    "recursos_com_folga_nao_negativa": 1,
+    "distribuicao_edicoes": { "cabe": 2, "needs_space": 523, "noop_preservando_stream": 119 },
+    "coube_ajuste": 1,
+    "coube_validacao": 0,
+    "tempo_rodada_ms": 7736,
+    "fixture_reencode_bytes": 444
+  },
+  "como_os_contagens_foram_apuradas": "comparação recurso a recurso do campo `reencode_base` entre os bench.json de r1 e r2 (161 linhas = 160 do corpus + 1 do fixture; no corpus: 158 + 0 + 2 = 160; o fixture melhorou 448 -> 444)",
+  "sa_dumps": "sa-product.stream (444 B) é byte a byte o sa-rescomp.stream; sa-plain.bin idêntico ao de r1; sa-dict.bin removido após verificação de igualdade byte a byte com ../2026-09-26-r1/sa-dict.bin (ver sa-dict.bin.sha256)",
+  "politica_byor": "nenhum byte da ROM comercial; só vereditos, comprimentos e metadados",
+  "limite": "r2 não mede a capacidade de edição por amostragem (coluna introduzida em r3)"
+}

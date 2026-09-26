@@ -1,0 +1,3 @@
+DIVERGE  i16_beyond_ceiling_16386     ret68k=    6 esperado=    6 68k_igu=N jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+         primeiro diff 68k @0: 68k=36 esperado=190 (len 68k=6 esperado=6)
+RESULTADO: 1 caso(s) com divergência

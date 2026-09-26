@@ -1,0 +1,33 @@
+{
+  "schema": "rex-integrator-evidence/v1",
+  "id": "lz4w-recompress-bench-2026-09-26-r3",
+  "papel": "rodada que acrescenta a MEDIÇÃO DE CAPACIDADE DE EDIÇÃO POR AMOSTRAGEM (24 bits invertidos por recurso, espaçados uniformemente) à especificação congelada — a coluna que responde 'quantos recursos ficam editáveis sem expansão', não apenas 'quanto o re-encode cabe'.",
+  "measured_at": "2026-09-26",
+  "sujeito": {
+    "codec_file": "src-tauri/src/tools/reverse/decomp/rex_codecs.rs",
+    "codec_sha256": "não registrado no momento da corrida; reproduzida campo a campo no pino final em ../2026-09-26-r4-final-pin/ (ver compare-r3-r4.log de lá)",
+    "mudanca": "busca de candidatos mesclada por proximidade (diagnóstico em docs/rex_profiles/LZ4W_ENCODER_444_VS_448_2026-09-26.md)"
+  },
+  "resultados": {
+    "recursos_S_B": 160,
+    "folga_total_S_B_bytes": -9156,
+    "recursos_com_folga_nao_negativa": 1,
+    "mediana_folga_base_S_B_bytes": -56,
+    "extremos_folga_base_S_B_bytes": { "min": -148, "max": 2 },
+    "distribuicao_edicoes": { "cabe": 2, "needs_space": 523, "noop_preservando_stream": 119 },
+    "edicao_amostral_bits_por_recurso": 24,
+    "recursos_totais_ajuste": 128,
+    "recursos_totais_validacao": 32,
+    "recursos_com_edicao_amostral_cabivel_ajuste": 1,
+    "recursos_com_edicao_amostral_cabivel_validacao": 0,
+    "tempo_rodada_ms": 27440
+  },
+  "cabeca_da_amostragem": "um bit cabe quando o re-encode do plain editado cabe no slot E a re-decodificação reproduz o plain editado (assert no próprio teste); amostragem deliberada — exaustivo seria O(bits) codificações por recurso e estouraria o orçamento de 2 s/recurso",
+  "veredito_honesto": "a correção melhorou o codificador em 4 032 bytes no corpus sem piorar nenhum recurso, MAS não aumentou a editabilidade: continua 1/160 com folga não negativa (0xc8cc8, +2 B) e a edição canônica de 1 pixel ali custa 146 B contra slot de 144 B (needs_space). Paridade com o rescomp é necessária, não suficiente.",
+  "sa_dumps": "produto (444 B) == rescomp; sa-dict.bin removido após verificação de igualdade byte a byte com ../2026-09-26-r1/sa-dict.bin",
+  "arquivos": {
+    "bench.json": "161 linhas + resumo (metadados, nenhum byte de ROM)",
+    "bench-sampled.log": "stdout da corrida, incluindo a linha [bench] capacidade de edição por amostragem",
+    "aceites-final.log": "árvore de aceites: fixture (re-codificado 444 B, folga 0 B, edição 436 B cabe) + decode do corpus + cadeia BYOR (preservados=159)"
+  }
+}

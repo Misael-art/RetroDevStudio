@@ -2,8 +2,17 @@
 
 **Status:** evidência medida em 2026-09-26 (integrador) · **Contrato:** `CONTRACTS.md` §4
 ("roundtrip puramente interno não é prova") · **Pino do código medido:**
-`rex_codecs.rs` @ `13a5792` com SHA-256
-`656bdc9f17c5abe42c4909a36e2e3052a0a498b4e26409f60de8092ae12f719e`
+`rex_codecs.rs` com SHA-256
+`bee8524f78aa288ac2a084a6413aa8318dabbb1c96560226000eb6de052d5e05`
+(busca de candidatos mesclada por proximidade; evidência em
+`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r14/`).
+
+Cadeia de pinos desta medição — o mesmo harness rodou sobre dois códigos:
+
+| `rex_codecs.rs` | o que mudou | evidência |
+|---|---|---|
+| `656bdc9f…` @ `13a5792` | teto de hardware 16385 no decoder | `…/lz4w-68k/evidence/2026-09-26/` |
+| `bee8524f…` (working tree) | `find_best` percorre dicionário e saída em ordem mesclada por proximidade | `…/lz4w-68k/evidence/2026-09-26-r14/` |
 
 ## 1. Por que este documento existe
 
@@ -63,7 +72,8 @@ diferente (`.lm_rom`), com alcance próprio — os dois limites são independent
 Ferramenta de medição em `scripts/rex_profiles/integrator/lz4w_68k/`
 (proveniência das cópias em `PROVENANCE.md`). Evidência bruta (logs, comprimentos,
 SHA-256 por execução) em
-`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26/` — **nenhum byte da
+`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r14/` (pino atual) e
+`…/evidence/2026-09-26/` (pino anterior) — **nenhum byte da
 ROM comercial é versionado**; a ROM BYOR é pré-requisito local do `reproduce.sh`
 (SHA-256 `558bea6c…`, 917 504 bytes).
 
@@ -81,6 +91,8 @@ ROM comercial é versionado**; a ROM BYOR é pré-requisito local do `reproduce.
 | `i14_encoder_deep_16384` | **encoder atual** | `Rust encode → 68k decode` no offset mais fundo alcançável (16384, `value 0x4001`) | ok | idêntico | idêntico |
 | `i15_hardware_ceiling_16385` | construída à mão | **teto do formato**: off 16385 (`value 0x4000`) | **aceita** | idêntico | idêntico |
 | `i16_beyond_ceiling_16386` | construída à mão | um word além: off 16386 (`value 0x3FFF`) | **recusa** (`invalid_reference`) | **DIVERGE**: byte 0 = `0x24` em vez de `0xBE` | idêntico ao pretendido |
+| `i30_fixture_rescomp_orig` | **fixture autoral** | stream do `rescomp` no plain não editado (444 B, prefixo mínimo 256 B) | ok | idêntico | idêntico |
+| `i31_fixture_product_edit` | **encoder atual** sobre a edição do produto | edição plantada (tile 0, linha 5, col 7 → índice 15): 436 B dentro do slot de 444 | ok | idêntico | idêntico |
 
 Consequências diretas:
 
@@ -92,8 +104,12 @@ Consequências diretas:
    concordar com o jar aqui seria **errado para o alvo**; o produto decide pelo
    hardware.
 3. Recompressão do recurso real continua recusada pelo espaço: a edição
-   canônica re-codificada pelo encoder atual produz **150 bytes contra um slot
-   de 144** (`needs_space` honesto — nada foi forçado por sobrescrita).
+   canônica re-codificada produz **150 bytes** no pino `656bdc9f…` e
+   **146 bytes** no pino `bee8524f…` (busca mesclada) — contra um slot de **144**
+   (`needs_space` honesto em ambos; nada foi forçado por sobrescrita). O
+   incremento melhorou o codificador em 4 bytes nesse caso sem alterar o
+   veredito. Diagnóstico do porquê:
+   `LZ4W_ENCODER_444_VS_448_2026-09-26.md` §4.1.
 
 ## 5. Relação com a medição anterior (agente-B)
 
@@ -127,9 +143,16 @@ vendorada com proveniência registrada.
 ## 7. Reexecutar
 
 ```bash
-REX_CODECS_SHA=656bdc9f17c5abe42c4909a36e2e3052a0a498b4e26409f60de8092ae12f719e \
+REX_CODECS_SHA=bee8524f78aa288ac2a084a6413aa8318dabbb1c96560226000eb6de052d5e05 \
+RDS_REX_LZ4W_FIXTURE_ROM=<caminho absoluto da ROM do fixture autoral> \
   bash scripts/rex_profiles/integrator/lz4w_68k/reproduce.sh /tmp/rex-68k-int-<data>
 ```
+
+Promovida a partir de `/tmp/rex-68k-int-2026-09-26-r5` (a corrida anterior,
+`…-r4`, pinava o mesmo código antes do `cargo fmt` em `7b037745…`: as 7 ROMs e os
+7 captures têm SHA-256 idênticos entre as duas, mudando apenas o hash do binário
+do driver — o determinismo registrado no `manifest.json` de `r14` é desta
+comprovação).
 
 Pré-requisitos medidos: SGDK 2.11 em `$GDK` (mapeado a `G:` no wine), wine-11.17,
 MAME 0.289, Java 17, `lz4w.jar` v1.43 no cache do oráculo, `gawk`, `zip`, e a ROM

@@ -436,26 +436,37 @@ pub fn lz4w_encode_with_dictionary_index(
         }
         let mut best: Option<(usize, usize)> = None;
         let mut checked = 0usize;
-        if let Some(index) = index {
-            if let Some(list) = index.positions.get(&cur) {
-                for &pos in list.iter().rev() {
-                    if pos < window_start {
-                        break;
-                    }
-                    if consider(pos, j, total_words, &word_at, &mut best, &mut checked) {
-                        break;
-                    }
-                }
+        // Percorre dicionário e saída MESCLADOS por proximidade: o orçamento de
+        // candidatos é compartilhado, e em regiões densas o dicionário gastava
+        // os 128 antes de a saída ser consultada. Medido em
+        // `docs/rex_profiles/LZ4W_ENCODER_444_VS_448_2026-09-26.md`.
+        let empty: &[usize] = &[];
+        let dict_list: &[usize] = index
+            .and_then(|index| index.positions.get(&cur))
+            .map_or(empty, Vec::as_slice);
+        let out_list: &[usize] = out_positions.get(&cur).map_or(empty, Vec::as_slice);
+        let (mut di, mut oi) = (dict_list.len(), out_list.len());
+        while di > 0 || oi > 0 {
+            let take_dict = match (di > 0, oi > 0) {
+                (true, true) => dict_list[di - 1] >= out_list[oi - 1],
+                (true, false) => true,
+                (false, true) => false,
+                (false, false) => break,
+            };
+            let pos = if take_dict {
+                di -= 1;
+                dict_list[di]
+            } else {
+                oi -= 1;
+                out_list[oi]
+            };
+            if pos < window_start {
+                // Ordem mesclada descendente: se o mais próximo ficou fora da
+                // janela, todos os restantes também ficaram.
+                break;
             }
-        }
-        if let Some(list) = out_positions.get(&cur) {
-            for &pos in list.iter().rev() {
-                if pos < window_start {
-                    break;
-                }
-                if consider(pos, j, total_words, &word_at, &mut best, &mut checked) {
-                    break;
-                }
+            if consider(pos, j, total_words, &word_at, &mut best, &mut checked) {
+                break;
             }
         }
         best.filter(|&(len, off)| {

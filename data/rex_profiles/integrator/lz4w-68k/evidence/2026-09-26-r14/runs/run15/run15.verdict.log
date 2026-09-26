@@ -1,0 +1,2 @@
+OK       i15_hardware_ceiling_16385   ret68k=    6 esperado=    6 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)
