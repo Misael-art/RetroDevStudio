@@ -8697,6 +8697,21 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
 
 // Cadeia REX LZ4W pela interface: prévia, no-op, edição via transação,
 // patch re-aplicado à base com hash exato e efeito observado no core.
+// Observa o framebuffer direto do core via IPC (capacidade separada do
+// canvas do app; usada pelas timelines determinísticas REX).
+async function invokeCoreObserve(sessionId) {
+  return executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done(null); return; }
+      invoke('emulator_observe', {}).then((value) => done(value)).catch(() => done(null));
+    `,
+    []
+  );
+}
+
 async function runRexLz4wEffectScenario(sessionId) {
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const expectedSha = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
@@ -8825,7 +8840,70 @@ async function runRexLz4wEffectScenario(sessionId) {
   const appliedSha = createHash("sha256").update(await readFile(patchApplied)).digest("hex");
   if (appliedSha !== modifiedSha) fail(`patch re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
 
+  // SALVAR/REABRIR: a cópia modificada reabre no MESMO pipeline da UI —
+  // identidade própria e prévia com pixels DIFERENTES do original (a edição
+  // persistiu no artefato e o painel re-deriva tudo de disco).
+  await executeScript(sessionId, `
+    const input = document.querySelector('${panel} input[type="text"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, ${JSON.stringify(modifiedPath)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;`);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  const reopenedSha = await waitFor(
+    async () => {
+      const text = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-rom-sha"]')?.textContent ?? ''`)) || "";
+      return text.includes(modifiedSha.slice(0, 16)) ? modifiedSha : false;
+    },
+    30000,
+    "ROM modificada não reabriu com a própria identidade no painel.",
+    250
+  );
+  await executeScript(sessionId, `
+    const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+    setter.call(select, '${targetOffsetHex}');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;`);
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-canvas"]'));`),
+    30000,
+    "prévia da ROM modificada não apareceu.",
+    250
+  );
+  const modifiedPreviewSha = await executeScript(
+    sessionId,
+    `return document.querySelector('${panel} [data-testid="rex-resource-pixels-sha"]').textContent;`
+  );
+  if (modifiedPreviewSha === previewPixelsSha) {
+    fail(`prévia da ROM modificada é idêntica à original: a edição não persistiu no artefato`);
+  }
+
   // ORIGINAL vs MODIFICADO no core, mesma linha de input; efeito específico.
+  // CAPACIDADE SEPARADA — apresentação normal do app: o canvas deve exibir
+  // o mesmo framebuffer que o core produz (resumindo o loop vivo e
+  // comparando canvas vs emulator_observe no mesmo instante).
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="viewport-game-canvas"]'));`),
+    15000,
+    "Game View não abriu para a verificação de apresentação do canvas.",
+    250
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
+  await pause(400);
+  {
+    const canvasFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    const observation = await invokeCoreObserve(sessionId);
+    if (canvasFrame?.rgba && observation?.framebuffer_rgba) {
+      const canvasSha = createHash("sha256").update(Buffer.from(canvasFrame.rgba)).digest("hex");
+      const coreSha = createHash("sha256").update(Buffer.from(observation.framebuffer_rgba)).digest("hex");
+      console.log(`[rex-lz4w-canvas] ${JSON.stringify({ canvasSha: canvasSha.slice(0, 16), coreSha: coreSha.slice(0, 16), identical: canvasSha === coreSha })}`);
+      if (canvasSha !== coreSha) {
+        fail("canvas do app não exibe o framebuffer do core na apresentação normal");
+      }
+    }
+  }
   // Timeline determinística: load pausado -> inputs e lotes de frames via
   // IPC do core -> framebuffer lido por `emulator_observe` (independe do
   // loop vivo do app, que não redesenha o canvas com o core pausado).

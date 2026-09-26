@@ -1061,48 +1061,74 @@ mod tests {
         );
         let limits = Lz4wLimits::default();
         let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto");
-        // Para o alvo 0xc8cc8 (frame 24x24, classe faísca): enumera edições
-        // de pixel expressíveis no formulário (chunky) que a transação
-        // aceita, com o índice resultante de maior contraste.
-        let Some(target) = set
-            .resources
-            .iter()
-            .find(|r| r.candidate.stream_offset == 0xc8cc8)
-        else {
-            panic!("alvo 0xc8cc8 ausente");
-        };
+        // Enumera edições chunky aplicáveis (transação completa) nos
+        // recursos COM TILES ENCONTRADOS EM TELA nos dumps do core
+        // (casamento invariante de paleta; ver relatório da rodada).
+        let on_screen: [usize; 18] = [
+            0x9e23e, 0xa0ab4, 0xa32da, 0xa56ae, 0xbb810, 0xbcf58, 0xbdd1a, 0xbe352,
+            0xbe964, 0xbee94, 0xc0094, 0xc07b6, 0xc0c3e, 0xc0f88, 0xc14f2, 0xc281c,
+            0xc8d58, 0xc8f12,
+        ];
         let mut found = 0usize;
-        for index in (1u8..16).rev() {
-            for row in 0..8usize {
-                for col in 0..8usize {
-                    let current =
-                        md_read_pixel_index(&target.decoded, 0, row, col).unwrap();
-                    if current == index {
-                        continue;
-                    }
-                    let mut edited = target.decoded.clone();
-                    md_write_pixel_index(&mut edited, 0, row, col, index).unwrap();
-                    let outcome = reinsert_transaction(
-                        &ReinsertRequest {
-                            rom: &rom,
-                            expected_rom_sha256: &sha,
-                            resource: target,
-                            edited_data: &edited,
-                        },
-                        &limits,
-                    );
-                    if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
-                        eprintln!(
-                            "APPLIED_CHUNKY: stream={:#x} tile=0 row={row} col={col} indice_atual={current} indice_novo={index} preservados={} patch={}",
-                            target.candidate.stream_offset,
-                            applied.verified_preserved,
-                            applied.patch_bps_sha256
-                        );
-                        found += 1;
+        for resource in set.resources.iter().rev() {
+            let start_off = resource.candidate.stream_offset;
+            if !on_screen.contains(&start_off) {
+                continue;
+            }
+            // Fase 1: fit por encode em TODOS os tiles (varredura completa
+            // solicitada pelo operador; índice 15 = máximo contraste).
+            let mut fitting: Vec<(usize, usize)> = Vec::new();
+            for tile in 0..resource.candidate.num_tiles {
+                for row in 0..8usize {
+                    for col in 0..8usize {
+                        let current =
+                            md_read_pixel_index(&resource.decoded, tile, row, col).unwrap();
+                        if current == 15 {
+                            continue;
+                        }
+                        let mut edited = resource.decoded.clone();
+                        md_write_pixel_index(&mut edited, tile, row, col, 15).unwrap();
+                        if let Ok(stream) = lz4w_encode_with_dictionary(
+                            &edited,
+                            Some(&rom[..start_off]),
+                        ) {
+                            if stream.len() <= resource.bytes_consumed {
+                                fitting.push((tile, row * 8 + col));
+                            }
+                        }
                     }
                 }
             }
-            if found >= 4 {
+            // Fase 2: transação nos candidatos que couberam (máx 3 por recurso).
+            let mut applied_here = 0usize;
+            for (tile, pixel) in fitting.iter().take(3) {
+                let row = pixel / 8;
+                let col = pixel % 8;
+                let mut edited = resource.decoded.clone();
+                md_write_pixel_index(&mut edited, *tile, row, col, 15).unwrap();
+                let outcome = reinsert_transaction(
+                    &ReinsertRequest {
+                        rom: &rom,
+                        expected_rom_sha256: &sha,
+                        resource,
+                        edited_data: &edited,
+                    },
+                    &limits,
+                );
+                if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
+                    eprintln!(
+                        "APPLIED_SCREEN: stream={:#x} tiles={} tile={} row={row} col={col} indice_novo=15 preservados={} patch={}",
+                        start_off,
+                        resource.candidate.num_tiles,
+                        tile,
+                        applied.verified_preserved,
+                        applied.patch_bps_sha256
+                    );
+                    found += 1;
+                    applied_here += 1;
+                }
+            }
+            if found >= 6 {
                 break;
             }
         }
