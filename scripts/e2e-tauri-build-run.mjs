@@ -9076,6 +9076,29 @@ async function runRexLz4wEffectScenario(sessionId) {
     if (count > 0) {
       diffFrame = i; diffPixels = count;
       minDiffX = minX; minDiffY = minY; maxDiffX = maxX; maxDiffY = maxY;
+      // Dump do par que difere para inspeção visual.
+      const dumpFrame = async (buffer, tag) => {
+        const width = 320;
+        const height = buffer.length / 4 / width;
+        const ppm = Buffer.alloc(width * height * 3);
+        for (let p = 0; p < width * height; p++) {
+          ppm[p * 3] = buffer[p * 4];
+          ppm[p * 3 + 1] = buffer[p * 4 + 1];
+          ppm[p * 3 + 2] = buffer[p * 4 + 2];
+        }
+        const ppmPath = path.join(validationDir, `rex-diff-${tag}-${i}.ppm`);
+        await writeFile(ppmPath, Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`), ppm]));
+        await new Promise((resolve) => execFile("convert", [ppmPath, ppmPath.replace(".ppm", ".png")], () => resolve()));
+      };
+      await dumpFrame(originalFrames[i], "original");
+      await dumpFrame(modifiedFrames[i], "modificado");
+      const overlay = Buffer.from(originalFrames[i]);
+      for (let p = 0; p < overlay.length; p += 4) {
+        if (originalFrames[i][p] !== modifiedFrames[i][p] || originalFrames[i][p + 1] !== modifiedFrames[i][p + 1] || originalFrames[i][p + 2] !== modifiedFrames[i][p + 2]) {
+          overlay[p] = 255; overlay[p + 1] = 0; overlay[p + 2] = 255;
+        }
+      }
+      await dumpFrame(overlay, "overlay");
       break;
     }
   }
@@ -9083,7 +9106,7 @@ async function runRexLz4wEffectScenario(sessionId) {
   const boxW = maxDiffX - minDiffX + 1;
   const boxH = maxDiffY - minDiffY + 1;
   if (diffPixels > 256 || boxW > 64 || boxH > 64) {
-    fail(`efeito não é específico: ${diffPixels} pixels em caixa ${boxW}x${boxH} (esperado região pequena do recurso).`);
+    fail(`efeito não é específico: ${diffPixels} pixels em caixa ${boxW}x${boxH} em (${minDiffX},${minDiffY}) (esperado região pequena do recurso).`);
   }
   console.log(`[rex-lz4w-effect] ${JSON.stringify({
     romSha, targetOffset: `0x${targetOffsetHex}`, previewPixelsSha, modifiedSha, patchSha,
