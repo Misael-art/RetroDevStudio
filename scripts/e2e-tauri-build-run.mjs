@@ -474,6 +474,7 @@ function parseArgs(argv) {
           "inspection-sonic",
           "inspection-sonic-tiles",
           "rex-lz4w-effect",
+          "rex-lz4w-fixture-effect",
           "inspection-preview-unavailable",
           "logic-recovery",
           "logic-recovery-branch",
@@ -9032,10 +9033,15 @@ async function runRexLz4wEffectScenario(sessionId) {
       if (!result?.ok || !Array.isArray(result.data)) {
         fail(`causal: leitura da região ${region} falhou (${label.tag}): ${JSON.stringify(result)?.slice(0, 200)}`);
       }
-      return Buffer.from(result.data);
+      const total = Number(result.total_size ?? -1);
+      if (total < 0) fail(`causal: região ${region} sem total_size (${label.tag}).`);
+      // total_size == 0 => o core não expõe a região; data vazia NÃO é "região
+      // igual entre runs", é ausência de observação.
+      return { totalSize: total, available: total > 0 && result.data.length > 0, bytes: Buffer.from(result.data) };
     };
     const wram = await readRegion(2, 0x10000);
     const vram = await readRegion(3, 0x10000);
+    if (!wram.available) fail(`causal: core não expõe WRAM (região 2, total_size=0) (${label.tag}).`);
     return { wram, vram };
   };
   const causal = {
@@ -9056,23 +9062,29 @@ async function runRexLz4wEffectScenario(sessionId) {
     if (start >= 0) regions.push([start, a.length]);
     return regions;
   };
-  const wramRegions = regionDiff(causal.original.wram, causal.modified.wram);
-  const vramRegions = regionDiff(causal.original.vram, causal.modified.vram);
+  const wramRegions = regionDiff(causal.original.wram.bytes, causal.modified.wram.bytes);
+  const vramRegions = causal.original.vram.available
+    ? regionDiff(causal.original.vram.bytes, causal.modified.vram.bytes)
+    : null;
   console.log(`[rex-causal] WRAM dif em ${wramRegions.length} região(ões): ${JSON.stringify(wramRegions.slice(0, 8).map(([a, b]) => [a.toString(16), b.toString(16), b - a]))}`);
-  console.log(`[rex-causal] VRAM dif em ${vramRegions.length} região(ões): ${JSON.stringify(vramRegions.slice(0, 8).map(([a, b]) => [a.toString(16), b.toString(16), b - a]))}`);
-  await writeFile(path.join(validationDir, "rex-causal-wram-original.bin"), causal.original.wram);
-  await writeFile(path.join(validationDir, "rex-causal-wram-modificado.bin"), causal.modified.wram);
-  await writeFile(path.join(validationDir, "rex-causal-vram-original.bin"), causal.original.vram);
-  await writeFile(path.join(validationDir, "rex-causal-vram-modificado.bin"), causal.modified.vram);
+  console.log(vramRegions === null
+    ? `[rex-causal] VRAM NÃO OBSERVÁVEL: o core não expõe a região VIDEO_RAM (total_size=0); nenhuma afirmação é feita sobre VRAM`
+    : `[rex-causal] VRAM dif em ${vramRegions.length} região(ões): ${JSON.stringify(vramRegions.slice(0, 8).map(([a, b]) => [a.toString(16), b.toString(16), b - a]))}`);
+  await writeFile(path.join(validationDir, "rex-causal-wram-original.bin"), causal.original.wram.bytes);
+  await writeFile(path.join(validationDir, "rex-causal-wram-modificado.bin"), causal.modified.wram.bytes);
+  await writeFile(path.join(validationDir, "rex-causal-vram-original.bin"), causal.original.vram.bytes);
+  await writeFile(path.join(validationDir, "rex-causal-vram-modificado.bin"), causal.modified.vram.bytes);
   // Controle de determinismo: ORIGINAL vs ORIGINAL deve ser idêntico.
   const causalAgain = await readMemoryRegions({ romPath: romPath, tag: "original-2", frames: 900 });
-  const wramSelf = regionDiff(causal.original.wram, causalAgain.wram).length;
-  const vramSelf = regionDiff(causal.original.vram, causalAgain.vram).length;
-  console.log(`[rex-causal] controle original/original: WRAM dif=${wramSelf}, VRAM dif=${vramSelf}`);
-  if (wramSelf > 0 || vramSelf > 0) fail(`determinismo quebrado no controle original/original (WRAM ${wramSelf}, VRAM ${vramSelf})`);
-  let semanticBlocked = wramRegions.length === 0 && vramRegions.length === 0;
+  const wramSelf = regionDiff(causal.original.wram.bytes, causalAgain.wram.bytes).length;
+  const vramSelf = causal.original.vram.available
+    ? regionDiff(causal.original.vram.bytes, causalAgain.vram.bytes).length
+    : null;
+  console.log(`[rex-causal] controle original/original: WRAM dif=${wramSelf}, VRAM dif=${vramSelf ?? "não observável"}`);
+  if (wramSelf > 0 || (vramSelf ?? 0) > 0) fail(`determinismo quebrado no controle original/original (WRAM ${wramSelf}, VRAM ${vramSelf})`);
+  let semanticBlocked = wramRegions.length === 0 && (vramRegions === null || vramRegions.length === 0);
   if (semanticBlocked) {
-    console.log(`[rex-causal] RECURSO NÃO CARREGADO na janela de 900 frames: nenhuma diferença de WRAM/VRAM — consumidor não provado; edição semântica permanece BLOQUEADA (item 6)`);
+    console.log(`[rex-causal] RECURSO NÃO CARREGADO na janela de 900 frames: nenhuma diferença em ${vramRegions === null ? "WRAM (VRAM não observável no core)" : "WRAM/VRAM"} — consumidor não provado; edição semântica permanece BLOQUEADA (item 6)`);
   }
 
   // CAPACIDADE SEPARADA — apresentação normal do app (passo próprio, após
@@ -9202,11 +9214,13 @@ async function runRexLz4wEffectScenario(sessionId) {
     }
   }
   // Estado SEMÂNTICO do alvo 0xc8cc8: DESCONHECIDO. A sonda causal mediu que
-  // WRAM e VRAM permaneceram byte a byte idênticas entre original e modificado
-  // (900 frames; controle original/original idêntico, o que valida o
-  // determinismo e a metodologia). ISSO NÃO PROVA que o recurso não seja
-  // descompactado: a sonda só cobre as regiões que o core expõe via
-  // emulator_read_memory (2/3; CRAM e outras regiões ficam missing), e o
+  // WRAM permaneceu byte a byte idêntica entre original e modificado (900
+  // frames; controle original/original idêntico, o que valida o determinismo e
+  // a metodologia). ISSO NÃO PROVA que o recurso não seja descompactado: a
+  // região VRAM nem sequer é exposta pelo core carregado (retro_get_memory_size
+  // == 0, leitura devolve buffer vazio com ok:true — ver os .bin de 0 bytes em
+  // validationDir), então "VRAM dif=0" nessa janela era ausência de observação,
+  // não evidência. CRAM e outras regiões também ficam missing, e o
   // desempacotamento pode ocorrer em região/janela não observados. O "efeito"
   // visto antes era ruído do resume do loop vivo entre runs separados. Efeito
   // esperado só pode ser definido após a prova do consumidor; até lá a edição
@@ -9222,6 +9236,823 @@ async function runRexLz4wEffectScenario(sessionId) {
     coverage: { sampled: ["WRAM (região 2)", "VRAM (região 3)"], missing: ["CRAM", "outras regiões não expostas pelo core", "chamada/destino do desempacotador (sem tracer no core)"] },
     semanticState: "BLOQUEADO — consumidor do recurso não provado; ausência de diferença observada NÃO é prova de ausência de descompactação",
   })}`);
+}
+
+function ppmFromRgba(frame) {
+  const { bytes, width } = frame;
+  const height = Math.floor(bytes.length / 4 / width);
+  const ppm = Buffer.alloc(width * height * 3);
+  for (let p = 0; p < width * height; p++) {
+    ppm[p * 3] = bytes[p * 4];
+    ppm[p * 3 + 1] = bytes[p * 4 + 1];
+    ppm[p * 3 + 2] = bytes[p * 4 + 2];
+  }
+  return Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`), ppm]);
+}
+
+// ETAPA E — prova causal pelo produto no fixture autoral.
+//
+// Diferença em relação ao cenário BYOR: aqui a cadeia de consumo é conhecida
+// POR CONSTRUÇÃO (fonte C do fixture: unpackTileSet -> VDP_loadTileSet ->
+// VDP_fillTileMapRectInc, tile t em uma única célula (t % map_w, t / map_w)).
+// A expectativa de tela nasce do fonte gerador, não da observação, e a edição
+// de UM pixel do recurso deve aparecer como UM único pixel diferente no
+// framebuffer. O que a emulação alcança: o WRAM (1 byte no plain chunky
+// descompactado) e a tela. VRAM não é provável aqui — o core carregado não expõe
+// a região (seria +4 bytes planar no tile da VRAM, afirmado como consequência do
+// formato, não medido). A identidade do pixel é estabelecida pela POSIÇÃO
+// prevista pelo fonte: o DAC funde as 16 palavras de paleta em 11 cores, então
+// índice->cor é função mas não é injetiva e a cor só confirma a classe.
+async function runRexLz4wFixtureEffectScenario(sessionId) {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sha = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const FIXTURE_ROM_SHA256 = "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5";
+  // Offsets/tamanhos do receituário do fixture (build report + driver 68k).
+  const FIXTURE_HEADER_OFFSET = 95464;
+  const FIXTURE_SLOT_BYTES = 444;
+  const FIXTURE_STREAM_OFFSET_HEX = "5f988";
+  const SETTLE_FRAMES = 60;
+  const steps = [];
+  const record = (step, claim, observed) => {
+    steps.push({ step, claim, observed });
+    console.log(`[rex-fixture-e2e] ${step}: ${claim} -> ${JSON.stringify(observed)}`);
+  };
+
+  const fixtureRomPath = process.env.RDS_REX_LZ4W_FIXTURE_ROM ?? "";
+  if (!fixtureRomPath || !(await pathExists(fixtureRomPath))) {
+    fail("RDS_REX_LZ4W_FIXTURE_ROM deve apontar para a ROM do fixture autoral existente (BYOR não é dependência provisionável).");
+  }
+  const romBytes = await readFile(fixtureRomPath);
+  const romSha = sha(romBytes);
+  if (romSha !== FIXTURE_ROM_SHA256) fail(`ROM do fixture inesperada: ${romSha} != ${FIXTURE_ROM_SHA256}`);
+  const truthPath = process.env.RDS_REX_LZ4W_FIXTURE_TRUTH
+    ?? path.join(path.dirname(path.dirname(fixtureRomPath)), "ground_truth.json");
+  if (!(await pathExists(truthPath))) {
+    fail(`terra firme do fixture ausente em ${truthPath}: a expectativa causal precisa nascer do fonte, não da observação.`);
+  }
+  const truth = JSON.parse(await readFile(truthPath, "utf8"));
+  if (truth.schema !== "rex-lz4w-fixture-ground-truth/v1") fail(`schema de terra firme inesperado: ${truth.schema}`);
+  if (!Array.isArray(truth.tile_pixels) || typeof truth.tile_pixels[0] !== "string") {
+    fail("ground_truth.json é de uma receita antiga (tile_pixels aninhado); reconstrua o fixture com build-fixture.sh.");
+  }
+  const TILE_PX = Number(truth.tile_px);
+  const TILE_COUNT = Number(truth.tile_count);
+  const MAP_W = Number(truth.map_w);
+  const MAP_H = Number(truth.map_h);
+  const NOISE_ROWS = Number(truth.noise_rows);
+  const NEAR_MISS_ROW = Number(truth.near_miss_row);
+  const PLANT_COL = Number(truth.planted_edit.col);
+  if (TILE_PX !== 8 || TILE_COUNT !== 16 || MAP_W !== 4 || MAP_H !== 4) {
+    fail(`layout do fixture mudou: ${JSON.stringify({ TILE_PX, TILE_COUNT, MAP_W, MAP_H })}`);
+  }
+  if (NEAR_MISS_ROW !== NOISE_ROWS + 1 || PLANT_COL !== TILE_PX - 1) {
+    fail(`regra de plantio mudou: near_miss_row=${NEAR_MISS_ROW} noise_rows=${NOISE_ROWS} col=${PLANT_COL}`);
+  }
+  const indexAt = (tile, row, col) => Number.parseInt(truth.tile_pixels[tile][row * TILE_PX + col], 16);
+  const valueOf = (tile, row) => (tile * 7 + row * 3) & 15;
+  // O plantio é conferido em TODOS os tiles: a linha near_miss é sólida em v
+  // e o último pixel vale (v+1)&15 — é isso que torna a edição de 1 pixel
+  // encurtante, porque o LZ4W casa words de 16 bits, não pixels.
+  for (let tile = 0; tile < TILE_COUNT; tile++) {
+    const v = valueOf(tile, NEAR_MISS_ROW);
+    for (let col = 0; col < PLANT_COL; col++) {
+      if (indexAt(tile, NEAR_MISS_ROW, col) !== v) {
+        fail(`tile ${tile}: linha plantada deixou de ser sólida em v=${v} na coluna ${col}`);
+      }
+    }
+    if (indexAt(tile, NEAR_MISS_ROW, PLANT_COL) !== ((v + 1) & 15)) {
+      fail(`tile ${tile}: último pixel da linha plantada não vale (v+1)&15`);
+    }
+  }
+  const EDIT_TILE = 0;
+  const editLinear = EDIT_TILE * TILE_PX * TILE_PX + NEAR_MISS_ROW * TILE_PX + PLANT_COL;
+  const fromIndex = indexAt(EDIT_TILE, NEAR_MISS_ROW, PLANT_COL);
+  const toIndex = valueOf(EDIT_TILE, NEAR_MISS_ROW);
+  if (fromIndex === toIndex) fail("edição plantada não mudaria nenhum índice");
+  const originalIdx = [];
+  for (let tile = 0; tile < TILE_COUNT; tile++) {
+    for (let row = 0; row < TILE_PX; row++) for (let col = 0; col < TILE_PX; col++) originalIdx.push(indexAt(tile, row, col));
+  }
+  const editedIdx = originalIdx.slice();
+  editedIdx[editLinear] = toIndex;
+  const chunkyFromIndices = (indices) => {
+    const bytes = Buffer.alloc(indices.length / 2);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (indices[i * 2] << 4) | indices[i * 2 + 1];
+    return bytes;
+  };
+  const originalChunky = chunkyFromIndices(originalIdx);
+  const editedChunky = chunkyFromIndices(editedIdx);
+  // Pino compartilhado com o driver 68k (i31): byte 23, nibble baixo.
+  if (fromIndex !== 0 || (originalChunky[23] & 0x0f) !== 0 || (editedChunky[23] & 0x0f) !== 15) {
+    fail(`edição prevista não cai no byte 23/nibble baixo: original=${originalChunky[23].toString(16)} editado=${editedChunky[23].toString(16)}`);
+  }
+  // Prévia esperada replicando o layout do produto (grade de 16 tiles,
+  // cinza index*16): valida o DECODE pela interface sem usar o decodificador.
+  const previewRgba = (indices) => {
+    const perRow = 16;
+    const width = perRow * TILE_PX;
+    const height = Math.ceil(TILE_COUNT / perRow) * TILE_PX;
+    const rgba = Buffer.alloc(width * height * 4);
+    for (let tile = 0; tile < TILE_COUNT; tile++) {
+      for (let row = 0; row < TILE_PX; row++) {
+        for (let col = 0; col < TILE_PX; col++) {
+          const index = indices[tile * TILE_PX * TILE_PX + row * TILE_PX + col];
+          const dst = ((Math.floor(tile / perRow) * TILE_PX + row) * width + (tile % perRow) * TILE_PX + col) * 4;
+          rgba[dst] = index * 16;
+          rgba[dst + 1] = index * 16;
+          rgba[dst + 2] = index * 16;
+          rgba[dst + 3] = 255;
+        }
+      }
+    }
+    return { rgba, width, height };
+  };
+  const expectedOriginalPixelsSha = sha(previewRgba(originalIdx).rgba);
+  const expectedEditedPixelsSha = sha(previewRgba(editedIdx).rgba);
+  if (expectedOriginalPixelsSha === expectedEditedPixelsSha) fail("prévias original e editada colapsaram");
+  record(1, "terra firme do fonte conferida (plantio em 16/16 tiles, byte 23 pinado)", {
+    romSha, truthPath, edit: { tile: EDIT_TILE, row: NEAR_MISS_ROW, col: PLANT_COL, fromIndex, toIndex },
+    expectedOriginalPixelsSha, expectedEditedPixelsSha,
+  });
+
+  // ---- expectativa de TELA derivada do fonte do fixture ----
+  const BLOCK_W = MAP_W * TILE_PX;
+  const BLOCK_H = MAP_H * TILE_PX;
+  const blockFrom = (indices) => {
+    const map = new Int16Array(BLOCK_W * BLOCK_H);
+    for (let y = 0; y < BLOCK_H; y++) {
+      for (let x = 0; x < BLOCK_W; x++) {
+        const tile = Math.floor(y / TILE_PX) * MAP_W + Math.floor(x / TILE_PX);
+        map[y * BLOCK_W + x] = indices[tile * TILE_PX * TILE_PX + (y % TILE_PX) * TILE_PX + (x % TILE_PX)];
+      }
+    }
+    return map;
+  };
+  const originalBlock = blockFrom(originalIdx);
+  const editedBlock = blockFrom(editedIdx);
+  const blockX = (EDIT_TILE % MAP_W) * TILE_PX + PLANT_COL;
+  const blockY = Math.floor(EDIT_TILE / MAP_W) * TILE_PX + NEAR_MISS_ROW;
+
+  // ---- painel de recursos pela interface real ----
+  const panel = '[data-testid="rex-resource-panel"]';
+  const textOf = async (testId) => (await executeScript(
+    sessionId,
+    `return (document.querySelector('${panel} [data-testid="${testId}"]')?.textContent ?? '')`
+  )) || "";
+  const hasResourcePanel = () => executeScript(sessionId, `
+    return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`);
+  // A vista ativa é estado React do ReverseWorkspace. Quando ela já está em
+  // "resources", o botão reverse-tab-resources NÃO existe (a lista de abas o
+  // exclui em ReverseWorkspace.tsx:418-427), e o painel guarda romPath, romSha,
+  // recursos e edições da fase anterior. `fresh` dá a volta por Inspeção, o que
+  // desmonta CompressedResourcePanel e zera o estado; assim a lista de recursos
+  // observada a seguir só pode vir do verify desta configuração.
+  const openResourcePanel = async (label, { fresh = false } = {}) => {
+    // As medições rodam o viewport, que troca o workspace ativo para uma concha
+    // SEM painel direito (game/logic/artstudio têm showRight:false em
+    // src/core/workspaceLayout.ts). Nela o ReverseWorkspace não é montado, e
+    // openToolsWorkspace sozinho só mexe no painel direito já existente.
+    await callAutomationApi(sessionId, "selectWorkspace", ["debug"]);
+    await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+    try {
+      await waitFor(
+        async () => executeScript(sessionId, `
+          return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'))
+            || Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`),
+        30000, `reverse workspace não montou nenhuma superfície de recursos (${label}).`, 250
+      );
+    } catch (error) {
+      const body = await executeScript(sessionId, `
+        return (document.body?.textContent ?? '').replace(/\s+/g, ' ').slice(0, 200);`);
+      const tabs = await executeScript(sessionId, `
+        return [...document.querySelectorAll('[data-testid^="reverse-tab-"]')]
+          .map((el) => el.getAttribute('data-testid')).join(',');`);
+      fail(`superfície de recursos ausente (${label}): ${error?.message ?? error} | abas=[${tabs}] | corpo="${body}"`);
+    }
+    if (fresh && await hasResourcePanel()) {
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`),
+        15000, `a vista Inspeção não montou para reset do painel (${label}).`, 250
+      );
+    }
+    if (!(await hasResourcePanel())) {
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+      try {
+        await waitFor(hasResourcePanel, 15000, `painel de recursos comprimidos não abriu (${label}).`, 250);
+      } catch (error) {
+        const tabs = await executeScript(sessionId, `
+          return [...document.querySelectorAll('[data-testid^="reverse-tab-"]')]
+            .map((el) => el.getAttribute('data-testid')).join(',');`);
+        const panelText = (await executeScript(sessionId, `return (document.querySelector('${panel}')?.textContent ?? '').slice(0, 400)`)) || "";
+        fail(`painel de recursos não abriu (${label}): ${error?.message ?? error} | abas=[${tabs}] | painel="${panelText}"`);
+      }
+    }
+  };
+  await openResourcePanel("abertura inicial");
+  const setPanelInput = async (testId, value) => {
+    await executeScript(sessionId, `
+      const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(String(value))});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;`);
+  };
+  const selectOffset = async (offsetHex) => {
+    await executeScript(sessionId, `
+      const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, '${offsetHex}');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;`);
+  };
+  const waitPreview = async (label) => {
+    await waitFor(
+      async () => {
+        const errorText = await textOf("rex-resource-error");
+        if (errorText) fail(`prévia recusou (${label}): ${errorText}`);
+        return executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-canvas"]'));`);
+      },
+      30000, `prévia não apareceu (${label}); painel: ${(await executeScript(sessionId, `return (document.querySelector('${panel}')?.textContent ?? '')`))?.slice(-400) || "vazio"}`, 250
+    );
+    await pause(400);
+    return textOf("rex-resource-pixels-sha");
+  };
+
+  await setPanelInput("rex-resource-rom-input", fixtureRomPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-select"]'));`),
+    30000, "nenhum recurso verificado no fixture.", 250
+  );
+  const options = (await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => ({ value: o.value, label: o.textContent }));`)) || [];
+  const resourceOptions = options.filter((o) => o.value);
+  // O offset do stream é conferido contra o HEADER TileSet do próprio fixture
+  // (compression==2, numTile==16), lido direto do arquivo — não do produto.
+  const header = romBytes.readUInt32BE(FIXTURE_HEADER_OFFSET + 4);
+  if (romBytes.readUInt16BE(FIXTURE_HEADER_OFFSET) !== 2) fail("fixture perdeu a marca LZ4W (compression=2)");
+  if (romBytes.readUInt16BE(FIXTURE_HEADER_OFFSET + 2) !== TILE_COUNT) fail("fixture perdeu numTile=16");
+  if (header.toString(16) !== FIXTURE_STREAM_OFFSET_HEX) {
+    fail(`ponteiro do header (${header.toString(16)}) não bate com o offset esperado (${FIXTURE_STREAM_OFFSET_HEX})`);
+  }
+  const target = resourceOptions.find((o) => o.value === FIXTURE_STREAM_OFFSET_HEX);
+  if (!target) fail(`produto não listou o recurso do fixture (${FIXTURE_STREAM_OFFSET_HEX}); opções: ${JSON.stringify(resourceOptions)}`);
+  if (resourceOptions.length !== 1) fail(`fixture deveria ter exatamente 1 recurso LZ4W; produto achou ${resourceOptions.length}: ${JSON.stringify(resourceOptions)}`);
+  const streamLenMatch = (target.label ?? "").match(/stream (\d+) B/);
+  if (!streamLenMatch || Number(streamLenMatch[1]) !== FIXTURE_SLOT_BYTES) {
+    fail(`slot do stream divergiu do receituário (${FIXTURE_SLOT_BYTES} B): ${target.label}`);
+  }
+  await selectOffset(FIXTURE_STREAM_OFFSET_HEX);
+  const pixelsLine = await waitPreview("original");
+  const pixelsSha = (pixelsLine.match(/pixels ([0-9a-f]{16})/) ?? [])[1] ?? "";
+  if (pixelsSha !== expectedOriginalPixelsSha.slice(0, 16)) {
+    fail(`prévia do produto não é o fonte autoral recomputado: ui=${pixelsSha} esperado=${expectedOriginalPixelsSha.slice(0, 16)}`);
+  }
+  record(2, "descoberta + decode pela UI: recurso único, slot conferido pelo header, prévia == fonte recomposto", {
+    resourceOptions, headerOffset: FIXTURE_HEADER_OFFSET, streamOffset: FIXTURE_STREAM_OFFSET_HEX,
+    slotBytes: Number(streamLenMatch[1]), pixelsSha,
+  });
+
+  // NO-OP honesto pela mesma transação (zero edições não é sucesso fabricado).
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  await waitFor(
+    async () => (await textOf("rex-resource-result")).includes("noop"),
+    30000, "transação não reportou no-op com zero edições.", 250
+  );
+  record(3, "no-op com zero edições reportado pela transação canônica", { result: (await textOf("rex-resource-result")).slice(0, 120) });
+
+  // Edição prevista plantada: tile 0, linha near_miss, última coluna -> v.
+  await setPanelInput("rex-resource-paint-index", toIndex);
+  await setPanelInput("rex-resource-edit-tile", EDIT_TILE);
+  await setPanelInput("rex-resource-edit-row", NEAR_MISS_ROW);
+  await setPanelInput("rex-resource-edit-col", PLANT_COL);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await waitFor(
+    async () => (await executeScript(sessionId, `return (document.querySelector('${panel}')?.textContent ?? '')`)).includes("1 edição(ões) pendente(s)"),
+    15000, "edição não registrada no painel.", 250
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const resultText = await waitFor(
+    async () => {
+      const text = await textOf("rex-resource-result");
+      if (text.includes("applied")) return text;
+      const errorText = await textOf("rex-resource-error");
+      if (errorText) fail(`transação recusou a edição prevista: ${errorText}`);
+      return false;
+    },
+    60000, "transação não aplicou a edição prevista.", 250
+  );
+  const modifiedPath = (resultText.match(/cópia: (\S+)/) ?? [])[1] ?? "";
+  const patchPath = (resultText.match(/patch: (\S+)/) ?? [])[1] ?? "";
+  if (!modifiedPath || !patchPath) fail(`proveniência ausente no resultado: ${resultText.slice(0, 240)}`);
+  const modifiedBytes = await readFile(modifiedPath);
+  const patchBytes = await readFile(patchPath);
+  const modifiedSha = sha(modifiedBytes);
+  const patchSha = sha(patchBytes);
+  if (modifiedBytes.length !== romBytes.length) fail(`ROM modificada expandiu: ${modifiedBytes.length} != ${romBytes.length}`);
+  // Fora do slot nada mudou: a escrita é local ao stream.
+  const romCopyDiffs = [];
+  for (let i = 0; i < romBytes.length; i++) if (romBytes[i] !== modifiedBytes[i]) romCopyDiffs.push(i);
+  const streamStart = Number.parseInt(FIXTURE_STREAM_OFFSET_HEX, 16);
+  const outsideSlot = romCopyDiffs.filter((i) => i < streamStart || i >= streamStart + FIXTURE_SLOT_BYTES);
+  if (outsideSlot.length > 0) {
+    fail(`transação escreveu fora do slot do stream em ${outsideSlot.length} byte(s): ${outsideSlot.slice(0, 8).map((v) => v.toString(16))}`);
+  }
+  if (romCopyDiffs.length === 0) fail("cópia idêntica à base: edição não foi escrita");
+  record(4, "edição aplicada pela transação; escrita confinada ao slot; bytes comerciais intocados fora dele", {
+    modifiedPath, modifiedSha, patchSha,
+    patchBytes: patchBytes.length,
+    streamSlot: { start: streamStart, size: FIXTURE_SLOT_BYTES },
+    bytesDiferentes: romCopyDiffs.length,
+    faixaAlterada: [romCopyDiffs[0].toString(16), romCopyDiffs[romCopyDiffs.length - 1].toString(16)],
+    diferenteForaDoSlot: outsideSlot.length,
+  });
+
+  // BPS re-aplicado à base reproduz a cópia com hash exato.
+  const baseCopy = path.join(validationDir, "rex-fixture-base-copy.bin");
+  const patchApplied = path.join(validationDir, "rex-fixture-patch-applied.bin");
+  await writeFile(baseCopy, romBytes);
+  const bps = await executeScript(sessionId, `
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    return await invoke('patch_apply_bps', { romPath: ${JSON.stringify(baseCopy)}, patchPath: ${JSON.stringify(patchPath)}, outputPath: ${JSON.stringify(patchApplied)} });`);
+  if (!bps || bps.ok !== true) fail(`patch_apply_bps falhou: ${JSON.stringify(bps)}`);
+  const appliedSha = sha(await readFile(patchApplied));
+  if (appliedSha !== modifiedSha) fail(`patch re-aplicado diverge da cópia: ${appliedSha} != ${modifiedSha}`);
+  record(5, "patch BPS re-aplicado à base reproduz a cópia modificada (hash exato)", { appliedSha, patchSha });
+
+  // Reabrir a cópia pelo MESMO pipeline da UI: decode vem do disco.
+  await setPanelInput("rex-resource-rom-input", modifiedPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => (await textOf("rex-resource-rom-sha")).includes(modifiedSha.slice(0, 16)),
+    30000, "cópia modificada não reabriu com a própria identidade no painel.", 250
+  );
+  await selectOffset(FIXTURE_STREAM_OFFSET_HEX);
+  const editedPixelsLine = await waitPreview("modificada");
+  const editedPixelsSha = (editedPixelsLine.match(/pixels ([0-9a-f]{16})/) ?? [])[1] ?? "";
+  if (editedPixelsSha !== expectedEditedPixelsSha.slice(0, 16)) {
+    fail(`prévia da cópia não é o plain editado previsto: ui=${editedPixelsSha} esperado=${expectedEditedPixelsSha.slice(0, 16)}`);
+  }
+  record(6, "cópia reaberta no produto decodifica exatamente no plain editado (prévia conferida por hash)", {
+    editedPixelsSha, esperado: expectedEditedPixelsSha.slice(0, 16),
+  });
+
+  // ---- medições no core: memória e tela, mesma janela de frames ----
+  const loadPaused = async (romPathForCore, label) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [romPathForCore, { startPaused: true }]);
+    if (loaded !== true) fail(`carga da ROM falhou (${label}).`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      20000, `ROM não ficou pausada pronta (${label}).`, 100
+    );
+    await closeVisibleConsoleDrawer(sessionId, label);
+  };
+  const observe = async (label) => {
+    // emulator_observe devolve EmulatorObservationResult DIRETO (sem envelope).
+    const observation = await invokeCoreObserveCommand(sessionId, "emulator_observe", {});
+    if (!observation?.ok || !Array.isArray(observation.framebuffer_rgba)) {
+      fail(`framebuffer do core indisponível (${label}): ${JSON.stringify(observation?.message ?? observation)?.slice(0, 200)}`);
+    }
+    return {
+      bytes: Buffer.from(observation.framebuffer_rgba),
+      width: Number(observation.framebuffer_width),
+      height: Number(observation.framebuffer_height),
+      romSha256: observation.rom_sha256 ?? "",
+      coreLabel: observation.core_label ?? "",
+      corePath: observation.core_path ?? "",
+      framesRun: Number(observation.frames_run ?? -1),
+      nonBlackPixels: Number(observation.non_black_pixels ?? -1),
+    };
+  };
+  const runFrames = async (frames, label) => {
+    const run = await invokeCoreObserveCommand(sessionId, "emulator_run_frames", { frames });
+    if (!run?.ok) fail(`emulator_run_frames falhou (${label}): ${JSON.stringify(run)?.slice(0, 200)}`);
+  };
+  // `emulator_read_memory` responde ok:true inclusive quando o core nao expoe a
+  // regiao (retro_get_memory_size == 0 -> data vazia). Sem checar tamanho, uma
+  // regiao ausente vira um "0 divergencias" vacuamente Aprovado.
+  const readRegion = async (region, size, label) => {
+    const result = await invokeCoreObserveCommand(sessionId, "emulator_read_memory", { region, offset: 0, length: size });
+    if (!result?.ok || !Array.isArray(result.data)) {
+      fail(`leitura da região ${region} falhou (${label}): ${JSON.stringify(result)?.slice(0, 200)}`);
+    }
+    const total = Number(result.total_size ?? -1);
+    if (total < 0) fail(`região ${region} sem total_size (${label}): ${JSON.stringify(result).slice(0, 200)}`);
+    return { available: total > 0 && result.data.length > 0, totalSize: total, bytesRead: result.data.length, bytes: Buffer.from(result.data) };
+  };
+  const capture = async (romPathForCore, label, expectedRomSha) => {
+    await loadPaused(romPathForCore, label);
+    const epoch = await invokeCoreObserveEpoch(sessionId);
+    if (!epoch) fail(`época do core indisponível (${label}).`);
+    await runFrames(SETTLE_FRAMES, label);
+    const memory = { wram: await readRegion(2, 0x10000, label), vram: await readRegion(3, 0x10000, label) };
+    if (!memory.wram.available) fail(`o core não expõe WRAM (região 2, total_size=${memory.wram.totalSize}) — a prova de memória não pode ser feita (${label}).`);
+    const first = await observe(label);
+    await runFrames(SETTLE_FRAMES, label);
+    const second = await observe(label);
+    // O core precisa confirmar que roda MESMO a ROM pedida; sem isso a
+    // comparação entre runs não significa nada.
+    for (const frame of [first, second]) {
+      if (frame.romSha256 !== expectedRomSha) {
+        fail(`core reporta ROM ${frame.romSha256} em vez de ${expectedRomSha} (${label})`);
+      }
+      if (frame.nonBlackPixels < 1000) fail(`tela quase preta (${label}): ${frame.nonBlackPixels} px não pretos`);
+    }
+    return { ...memory, frames: [first, second] };
+  };
+  const byteDiffs = (a, b) => {
+    const out = [];
+    for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) out.push(i);
+    return out;
+  };
+
+  const baseline = await capture(fixtureRomPath, "original", romSha);
+  const control = await capture(fixtureRomPath, "original-controle", romSha);
+  const edited = await capture(modifiedPath, "modificado", modifiedSha);
+  if (baseline.frames[0].width !== edited.frames[0].width || baseline.frames[0].height !== edited.frames[0].height) {
+    fail(`dimensões de framebuffer divergem entre runs: ${baseline.frames[0].width}x${baseline.frames[0].height} vs ${edited.frames[0].width}x${edited.frames[0].height}`);
+  }
+  // A tela do fixture é estática após o desempacotamento; qualquer mudança
+  // entre amostras seria não-determinismo, não efeito da edição.
+  const staticCheck = (which) => {
+    const frames = which.frames;
+    const moved = byteDiffs(frames[0].bytes, frames[1].bytes).length;
+    if (moved > 0) fail(`tela do fixture não é estática (${which.label}): ${moved} byte(s) mudaram entre frames`);
+  };
+  const vramComparable = baseline.vram.available && control.vram.available;
+  const controlDiffs = {
+    wram: byteDiffs(baseline.wram.bytes, control.wram.bytes).length,
+    vram: vramComparable ? byteDiffs(baseline.vram.bytes, control.vram.bytes).length : null,
+    framebuffer: byteDiffs(baseline.frames[0].bytes, control.frames[0].bytes).length,
+  };
+  if (controlDiffs.wram || controlDiffs.vram || controlDiffs.framebuffer) {
+    fail(`determinismo quebrado no controle original/original: ${JSON.stringify(controlDiffs)}`);
+  }
+  staticCheck({ ...baseline, label: "original" });
+  staticCheck({ ...edited, label: "modificado" });
+
+  const wramDiffs = byteDiffs(baseline.wram.bytes, edited.wram.bytes);
+  if (wramDiffs.length !== 1) {
+    fail(`WRAM deveria divergir em exatamente 1 byte (o plain chunky descompactado); divergiu em ${wramDiffs.length}: ${wramDiffs.slice(0, 8).map((v) => v.toString(16))}`);
+  }
+  const wramAt = wramDiffs[0];
+  if ((baseline.wram.bytes[wramAt] & 0x0f) !== fromIndex || (edited.wram.bytes[wramAt] & 0x0f) !== toIndex) {
+    fail(`byte divergente no WRAM não é o plain esperado em ${wramAt.toString(16)}: ${baseline.wram.bytes[wramAt].toString(16)} -> ${edited.wram.bytes[wramAt].toString(16)}`);
+  }
+  // O core Libretro carregado decide quais regiões são legíveis. O Genesis Plus
+  // GX expõe SYSTEM_RAM mas retro_get_memory_size(VIDEO_RAM) == 0: nesse caso a
+  // perna de VRAM NÃO é observável e não pode ser contada como Aprovado.
+  if (baseline.vram.available !== control.vram.available || baseline.vram.available !== edited.vram.available
+    || baseline.vram.totalSize !== control.vram.totalSize || baseline.vram.totalSize !== edited.vram.totalSize) {
+    fail(`disponibilidade de VRAM oscilou entre runs: ${JSON.stringify({ baseline: baseline.vram.totalSize, controle: control.vram.totalSize, editado: edited.vram.totalSize })}`);
+  }
+  if (baseline.wram.bytesRead !== edited.wram.bytesRead) {
+    fail(`WRAM lida em tamanhos diferentes entre original e modificado: ${baseline.wram.bytesRead} vs ${edited.wram.bytesRead}`);
+  }
+  const vramObserved = baseline.vram.available && edited.vram.available;
+  let vramProof = {
+    observed: false,
+    reason: `o core ${baseline.frames[0].coreLabel || "?"} não expõe a região VIDEO_RAM (total_size=${baseline.vram.totalSize}/${edited.vram.totalSize}); a cadeia causal fica provada por WRAM + framebuffer`,
+  };
+  if (vramObserved) {
+    const vramDiffs = byteDiffs(baseline.vram.bytes, edited.vram.bytes);
+    if (vramDiffs.length !== 4) {
+      fail(`VRAM deveria divergir em exatamente 4 bytes (1 pixel 4bpp planar); divergiu em ${vramDiffs.length}: ${vramDiffs.slice(0, 12).map((v) => v.toString(16))}`);
+    }
+    const vramBlocks = new Set(vramDiffs.map((i) => Math.floor(i / 32)));
+    if (vramBlocks.size !== 1) fail(`divergência de VRAM espalhada por ${vramBlocks.size} tiles: ${vramDiffs.map((v) => v.toString(16))}`);
+    const vramTileBase = [...vramBlocks][0] * 32;
+    const vramRows = vramDiffs.map((i) => i - vramTileBase).sort((a, b) => a - b);
+    const expectedRows = [0, 1, 2, 3].map((k) => k * 8 + NEAR_MISS_ROW);
+    if (JSON.stringify(vramRows) !== JSON.stringify(expectedRows)) {
+      fail(`bytes divergentes em VRAM não formam a linha ${NEAR_MISS_ROW} de um tile 4bpp: ${JSON.stringify(vramRows)} vs ${JSON.stringify(expectedRows)}`);
+    }
+    const planeBits = vramDiffs.map((i) => baseline.vram.bytes[i] ^ edited.vram.bytes[i]);
+    if (new Set(planeBits).size !== 1 || (planeBits[0] & (planeBits[0] - 1)) !== 0) {
+      fail(`VRAM: mudança não é um único bit por plano: ${planeBits.map((v) => v.toString(16))}`);
+    }
+    const bit = Math.log2(planeBits[0]);
+    if (bit !== TILE_PX - 1 - PLANT_COL) {
+      fail(`VRAM: bit do plano ${bit} não corresponde à coluna ${PLANT_COL} (esperado ${TILE_PX - 1 - PLANT_COL})`);
+    }
+    if (vramDiffs.some((i) => (baseline.vram.bytes[i] & planeBits[0]) !== 0 || (edited.vram.bytes[i] & planeBits[0]) !== planeBits[0])) {
+      fail("VRAM: plano não passou de 0 para 1 no pixel previsto");
+    }
+    vramProof = {
+      observed: true,
+      tileBase: `0x${vramTileBase.toString(16)}`,
+      offsets: vramDiffs.map((i) => `0x${i.toString(16)}`),
+      bit,
+    };
+  }
+  record(7, vramObserved
+    ? "prova de memória: 1 byte no WRAM (plain descompactado) e 1 pixel (4 planos) no VRAM, exatamente onde o fonte do fixture diz"
+    : "prova de memória: 1 byte no WRAM (plain descompactado) exatamente onde o fonte do fixture diz; VRAM não legível no core, então a perna de VRAM fica NÃO PROVADA (registrada como limitação, não como sucesso)", {
+    frames: SETTLE_FRAMES * 2,
+    core: { label: baseline.frames[0].coreLabel, path: baseline.frames[0].corePath },
+    wram: { available: true, offset: `0x${wramAt.toString(16)}`, before: baseline.wram.bytes[wramAt].toString(16), after: edited.wram.bytes[wramAt].toString(16) },
+    vram: vramObserved ? vramProof : { ...vramProof, available: false },
+    regiões: { wram: { total: baseline.wram.totalSize, lidos: baseline.wram.bytesRead }, vram: { total: baseline.vram.totalSize, lidos: baseline.vram.bytesRead } },
+    controle: controlDiffs,
+  });
+
+  // ---- origem da tela resolvida pela ESTRUTURA de cores, sem fórmula ----
+  // Não se assume nenhuma conversão paleta->RGB: exige-se apenas que o mesmo
+  // índice tenha sempre a mesma cor dentro do bloco (função índice->cor). Não se
+  // exige injetividade porque o DAC do Mega Drive funde níveis (0x3 e 0x7 têm a
+  // mesma tensão): no fixture, 0x333 e 0x777 colidem, então a bijetor falharia
+  // em qualquer origem. O desempate é o número de classes de cor observadas —
+  // o bloco real tem de ser a janela com MAIS classes, o que elimina as janelas
+  // puramente preto (uma só classe) que também seriam "consistentes".
+  const partitionMatch = (frame, ox, oy, expected) => {
+    const indexToColor = new Map();
+    const colors = new Set();
+    for (let y = 0; y < BLOCK_H; y++) {
+      let p = ((oy + y) * frame.width + ox) * 4;
+      for (let x = 0; x < BLOCK_W; x++, p += 4) {
+        const color = (frame.bytes[p] << 16) | (frame.bytes[p + 1] << 8) | frame.bytes[p + 2];
+        const index = expected[y * BLOCK_W + x];
+        const knownColor = indexToColor.get(index);
+        if (knownColor !== undefined) { if (knownColor !== color) return null; } else indexToColor.set(index, color);
+        colors.add(color);
+      }
+    }
+    if (indexToColor.size !== new Set(expected).size) return null;
+    return { indexToColor, classes: colors.size };
+  };
+  const findOrigins = (frame, expected) => {
+    const hits = [];
+    for (let oy = 0; oy + BLOCK_H <= frame.height; oy++) {
+      for (let ox = 0; ox + BLOCK_W <= frame.width; ox++) {
+        const found = partitionMatch(frame, ox, oy, expected);
+        if (found) hits.push({ ox, oy, ...found });
+      }
+    }
+    if (hits.length === 0) return { best: hits, maxClasses: 0 };
+    const maxClasses = Math.max(...hits.map((hit) => hit.classes));
+    return { best: hits.filter((hit) => hit.classes === maxClasses), maxClasses };
+  };
+  const frameDiffPixels = (a, b) => {
+    const out = [];
+    for (let p = 0; p < Math.min(a.bytes.length, b.bytes.length); p += 4) {
+      if (a.bytes[p] !== b.bytes[p] || a.bytes[p + 1] !== b.bytes[p + 1] || a.bytes[p + 2] !== b.bytes[p + 2]) {
+        out.push([(p / 4) % a.width, Math.floor(p / 4 / a.width),
+          (a.bytes[p] << 16) | (a.bytes[p + 1] << 8) | a.bytes[p + 2],
+          (b.bytes[p] << 16) | (b.bytes[p + 1] << 8) | b.bytes[p + 2]]);
+      }
+    }
+    return out;
+  };
+  const frameDiffs = [0, 1].map((i) => frameDiffPixels(baseline.frames[i], edited.frames[i]));
+  await writeFile(path.join(validationDir, "rex-fixture-frame-original.ppm"), ppmFromRgba(baseline.frames[0]));
+  await writeFile(path.join(validationDir, "rex-fixture-frame-modificado.ppm"), ppmFromRgba(edited.frames[0]));
+  console.log(`[rex-fixture-e2e] framebuffer ${baseline.frames[0].width}x${baseline.frames[0].height}; pixels de tela diferentes: ${JSON.stringify(frameDiffs.map((d) => d.length))} → ${JSON.stringify(frameDiffs[0].slice(0, 6))}; dumps em ${validationDir}/rex-fixture-frame-*.ppm`);
+  const originalOrigins = findOrigins(baseline.frames[0], originalBlock);
+  const editedOrigins = findOrigins(edited.frames[0], editedBlock);
+  if (originalOrigins.best.length !== 1 || editedOrigins.best.length !== 1) {
+    const histogram = (frame) => {
+      const counts = new Map();
+      for (let p = 0; p < frame.bytes.length; p += 4) {
+        const color = (frame.bytes[p] << 16) | (frame.bytes[p + 1] << 8) | frame.bytes[p + 2];
+        counts.set(color, (counts.get(color) ?? 0) + 1);
+      }
+      return [...counts.entries()].sort((a, b) => b[1] - a[1])
+        .slice(0, 10).map(([color, n]) => `${color.toString(16)}x${n}`).join(" ");
+    };
+    fail(`origem do bloco não é única: original=${originalOrigins.best.length} modificado=${editedOrigins.best.length}; ` +
+      `classes de cor no melhor acerto: ${JSON.stringify({ original: originalOrigins.maxClasses, modificado: editedOrigins.maxClasses })}; ` +
+      `cores do frame original: ${histogram(baseline.frames[0])}`);
+  }
+  if (originalOrigins.best[0].ox !== editedOrigins.best[0].ox || originalOrigins.best[0].oy !== editedOrigins.best[0].oy) {
+    fail(`origem do bloco mudou entre runs: ${JSON.stringify(originalOrigins.best[0])} vs ${JSON.stringify(editedOrigins.best[0])}`);
+  }
+  if (originalOrigins.maxClasses !== editedOrigins.maxClasses) {
+    fail(`número de classes de cor do bloco mudou entre runs: ${originalOrigins.maxClasses} vs ${editedOrigins.maxClasses}`);
+  }
+  const { ox: originX, oy: originY } = originalOrigins.best[0];
+  const mapBefore = originalOrigins.best[0].indexToColor;
+  const mapAfter = editedOrigins.best[0].indexToColor;
+  // O DAC do Mega Drive funde níveis de brilho: as 16 palavras de paleta
+  // autoradas do fixture renderizam 11 cores. Por isso o índice NÃO é
+  // identificável pela cor; a identificação é por POSIÇÃO (o fonte do fixture
+  // diz onde cada tile vai) e a cor só confirma a classe do pixel.
+  const mergedIndices = [...mapBefore.keys()].filter((index) => {
+    const color = mapBefore.get(index);
+    return [...mapBefore.entries()].some(([other, otherColor]) => other !== index && otherColor === color);
+  }).sort((a, b) => a - b);
+  for (let index = 0; index < 16; index++) {
+    if (mapBefore.get(index) !== mapAfter.get(index)) {
+      fail(`cor do índice ${index} divergiu entre original e modificado — a edição não deveria tocar a paleta`);
+    }
+  }
+  if (mapBefore.get(fromIndex) === mapBefore.get(toIndex)) {
+    fail(`classes de índice ${fromIndex} e ${toIndex} são a MESMA cor no core: a edição não teria efeito visual observável`);
+  }
+  const predictedX = originX + blockX;
+  const predictedY = originY + blockY;
+  for (const diffs of frameDiffs) {
+    if (diffs.length !== 1) {
+      fail(`framebuffer divergiu em ${diffs.length} pixel(s); exatamente 1 era previsto: ${JSON.stringify(diffs.slice(0, 6))}`);
+    }
+    const [x, y, before, after] = diffs[0];
+    if (x !== predictedX || y !== predictedY) {
+      fail(`pixel divergente em (${x},${y}), previsto em (${predictedX},${predictedY}) (tile ${EDIT_TILE}, linha ${NEAR_MISS_ROW}, col ${PLANT_COL})`);
+    }
+    if (before !== mapBefore.get(fromIndex)) fail(`cor antes (${before.toString(16)}) não é a cor da classe de índice ${fromIndex}`);
+    if (after !== mapAfter.get(toIndex)) fail(`cor depois (${after.toString(16)}) não é a cor da classe de índice ${toIndex}`);
+  }
+  record(8, "EFEITO VISUAL CAUSAL PELA INTERFACE: exatamente 1 pixel de tela muda, no coordenada prevista pelo fonte, com a cor da classe de índice certa", {
+    framebuffer: `${baseline.frames[0].width}x${baseline.frames[0].height}`,
+    origemDoBloco: [originX, originY],
+    pixelPrevisto: [predictedX, predictedY],
+    diferencaPorFrame: frameDiffs.map((d) => d.length),
+    antes: `0x${frameDiffs[0][0][2].toString(16)}`,
+    depois: `0x${frameDiffs[0][0][3].toString(16)}`,
+    classesDeCor: originalOrigins.maxClasses,
+    indicesComMesmaCor: mergedIndices,
+    indiceAntes: fromIndex, indiceDepois: toIndex,
+  });
+
+  // Apresentação: o canvas do app exibe o framebuffer do core no mesmo frame.
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
+  await pause(800);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-pause");
+  await pause(250);
+  {
+    const canvasFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    const core = await observe("apresentacao");
+    if (!canvasFrame?.rgba) fail("canvas do app indisponível.");
+    const canvasBytes = Buffer.from(canvasFrame.rgba);
+    const canvasW = Number(canvasFrame.width);
+    const canvasH = Number(canvasFrame.height);
+    let presented = canvasBytes.equals(core.bytes);
+    if (!presented && canvasW >= core.width && canvasH >= core.height) {
+      const coreRow0 = core.bytes.subarray(0, core.width * 4);
+      for (let oy = 0; oy <= canvasH - core.height && !presented; oy++) {
+        for (let ox = 0; ox <= canvasW - core.width && !presented; ox++) {
+          const start = (oy * canvasW + ox) * 4;
+          if (!canvasBytes.subarray(start, start + core.width * 4).equals(coreRow0)) continue;
+          presented = true;
+          for (let y = 0; y < core.height && presented; y++) {
+            const c = ((oy + y) * canvasW + ox) * 4;
+            if (!canvasBytes.subarray(c, c + core.width * 4).equals(core.bytes.subarray(y * core.width * 4, (y + 1) * core.width * 4))) {
+              presented = false;
+            }
+          }
+        }
+      }
+    }
+    if (!presented) fail(`canvas do app não apresenta o framebuffer do core: canvas=${canvasW}x${canvasH} core=${core.width}x${core.height}`);
+    record(9, "canvas do app == framebuffer do core (mesmo frame congelado) na ROM modificada", {
+      canvas: `${canvasW}x${canvasH}`, core: `${core.width}x${core.height}`, presented: true,
+    });
+  }
+
+  // As medições carregaram ROMs no viewport e a vista ativa do workspace é
+  // estado React; os negativos exigem painel recém-montado, senão o seletor e o
+  // sha observados podem ser resíduo da fase positiva.
+  await openResourcePanel("após as medições", { fresh: true });
+  // ---- negativos alcançáveis pela interface ----
+  // Cada negativo começa por "Verificar recursos": verify limpa resultado,
+  // prévia e edições pendentes, então a recusa observada é do PRIMEIRO apply
+  // daquela configuração (sem resto de estado do apply positivo).
+  const scratchRom = path.join(validationDir, "rex-fixture-scratch.bin");
+  await writeFile(scratchRom, romBytes);
+  const clearPanel = async (expectedSha, label) => {
+    // Barreira real: o painel tem de reler o arquivo AGORA e reportar o sha que
+    // ele tinha no disco antes do clique. Sem isso, um seletor residual da
+    // verificação anterior satisfaz a espera vazia e, no negativo de
+    // identidade, a mutação aconteceria enquanto o verify ainda lia.
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+    await waitFor(
+      async () => (await textOf("rex-resource-rom-sha")).includes(expectedSha.slice(0, 16)),
+      30000, `verificação (${label}) não reportou o sha esperado ${expectedSha.slice(0, 16)}.`, 250
+    );
+    await waitFor(
+      async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-select"]'));`),
+      30000, `cópia de trabalho do fixture não verificou recursos (${label}).`, 250
+    );
+    await selectOffset(FIXTURE_STREAM_OFFSET_HEX);
+    await waitPreview(label);
+  };
+  await setPanelInput("rex-resource-rom-input", scratchRom);
+  await clearPanel(romSha, "intervalo");
+  await setPanelInput("rex-resource-paint-index", toIndex);
+  // Negativo de intervalo, pelo que a interface REAL permite observar: o painel
+  // descarta edição com tile >= num_tiles (CompressedResourcePanel.tsx:242),
+  // então a recusa observável é "nada entra na fila e nada é escrito". A recusa
+  // do núcleo (rex_resources.rs:634, "tile N fora do recurso") é provada no
+  // teste unitário do produto, não aqui.
+  await setPanelInput("rex-resource-edit-tile", TILE_COUNT);
+  await setPanelInput("rex-resource-edit-row", 0);
+  await setPanelInput("rex-resource-edit-col", 0);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await pause(400);
+  const guardedCount = await textOf("rex-resource-edit-count");
+  if (!/^\s*0\b/.test(guardedCount)) {
+    fail(`edição com tile ${TILE_COUNT} (fora do recurso de ${TILE_COUNT} tiles) entrou na fila da UI: ${guardedCount}`);
+  }
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const boundsOutcome = await waitFor(
+    async () => {
+      const resultText = await textOf("rex-resource-result");
+      return resultText ? resultText : false;
+    },
+    30000, "aplicação sem edição válida não foi reportada pelo painel.", 250
+  );
+  const boundsError = await textOf("rex-resource-error");
+  if (boundsOutcome.includes("applied")) fail(`transação aplicou edição fora do recurso: ${boundsOutcome}`);
+  if ((await sha(await readFile(scratchRom))) !== romSha) fail("a recusa de intervalo escreveu na cópia de trabalho");
+  // Controle positivo da guarda: os mesmos cliques com tile VÁLIDO enfileiram a
+  // edição. Sem este passo, o 0 acima poderia ser um botão morto.
+  await setPanelInput("rex-resource-edit-tile", EDIT_TILE);
+  await setPanelInput("rex-resource-edit-row", NEAR_MISS_ROW);
+  await setPanelInput("rex-resource-edit-col", PLANT_COL);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await waitFor(
+    async () => /^\s*1\b/.test(await textOf("rex-resource-edit-count")),
+    15000, "a UI não enfileirou a edição válida (controle positivo da guarda de intervalo).", 250
+  );
+  const boundsProof = {
+    guardedCount, boundsOutcome, boundsError,
+    controlePositivo: "tile válido enfileira 1 edição; tile fora do recurso enfileira 0",
+    recusaDoNucleo: "rex_resources.rs:634 ('tile N fora do recurso') — teste unitário do produto",
+  };
+  // TOCTOU: a ROM muda no disco depois da verificação, sob o mesmo painel.
+  await openResourcePanel("antes do negativo de identidade", { fresh: true });
+  await setPanelInput("rex-resource-rom-input", scratchRom);
+  await clearPanel(romSha, "identidade");
+  const mutated = Buffer.from(romBytes);
+  mutated[mutated.length - 1] ^= 0xff;
+  await writeFile(scratchRom, mutated);
+  await setPanelInput("rex-resource-edit-tile", EDIT_TILE);
+  await setPanelInput("rex-resource-edit-row", NEAR_MISS_ROW);
+  await setPanelInput("rex-resource-edit-col", PLANT_COL);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const identityError = await waitFor(
+    async () => {
+      const errorText = await textOf("rex-resource-error");
+      return errorText.startsWith("rom_identity_mismatch") ? errorText : false;
+    },
+    30000, `ROM alterada sob o painel não foi recusada por identidade; último erro: ${await textOf("rex-resource-error")}`, 250
+  );
+  if ((await textOf("rex-resource-result")).includes("applied")) fail("transação aplicou edição com ROM alterada no disco");
+  const scratchAfter = sha(await readFile(scratchRom));
+  if (scratchAfter === romSha) fail("negativo de identidade não alterou o arquivo de teste (prova vazia)");
+  await openResourcePanel("reabertura do fixture após os negativos", { fresh: true });
+  await setPanelInput("rex-resource-rom-input", fixtureRomPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(async () => (await textOf("rex-resource-rom-sha")).includes(romSha.slice(0, 16)), 30000, "fixture original não reabriu após os negativos.", 250);
+  const fixtureAfterNegatives = sha(await readFile(fixtureRomPath));
+  if (fixtureAfterNegatives !== romSha) fail(`fixture autoral foi alterada durante o teste: ${fixtureAfterNegatives}`);
+  record(10, "negativos pela UI: fila de intervalo guardada (0 entradas, 0 escritas; controle positivo enfileira 1) e identidade de ROM recusada (arquivo alterado sob o painel)", {
+    bounds: boundsProof, identityError, fixtureRomIntact: true,
+    excessiveOutput: "coberto no teste de aceite do produto com varredura exaustiva de 15.360 candidatos de 1 pixel (README do fixture)",
+    dependentModified: "não alcançável aqui: o fixture tem 1 recurso LZ4W; coberto no BYOR (0x91a00 dependente de 0x8ff8e)",
+  });
+
+  const appBytes = await readFile(currentE2eRunContext?.appPath ?? "").catch(() => null);
+  const reportPath = path.join(validationDir, `rex-lz4w-fixture-effect-${artifactTimestamp()}-report.json`);
+  await writeFile(reportPath, `${JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    scenario: "rex-lz4w-fixture-effect",
+    application: {
+      path: currentE2eRunContext?.appPath ?? null,
+      sha256: appBytes ? sha(appBytes) : null,
+    },
+    fixture: {
+      romPath: fixtureRomPath, romSha256: romSha, truthPath,
+      truthSha256: sha(await readFile(truthPath)),
+      headerOffset: FIXTURE_HEADER_OFFSET, streamOffset: streamStart, slotBytes: FIXTURE_SLOT_BYTES,
+    },
+    edit: { tile: EDIT_TILE, row: NEAR_MISS_ROW, col: PLANT_COL, fromIndex, toIndex },
+    artifacts: { modifiedRomPath: modifiedPath, modifiedRomSha256: modifiedSha, patchPath, patchBpsSha256: patchSha },
+    prediction: {
+      origemDoBloco: [originX, originY], tela: [predictedX, predictedY],
+      preview: [blockX, blockY], memory: { wramByte: wramAt, vram: vramProof },
+    },
+    steps,
+    limitacoes: vramObserved ? [] : [vramProof.reason],
+    semanticState: "VERIFIED — fixture autoral com consumidor provado por construção",
+    escopo: "esta prova vale para o fixture autoral; o alvo comercial 0xc8cc8 continua com semanticState BLOQUEADO (consumidor não provado)",
+  }, null, 2)}\n`, "utf8");
+  console.log(`[rex-lz4w-fixture-effect] relatório=${reportPath}`);
+  console.log(`[rex-lz4w-fixture-effect] ${JSON.stringify({
+    romSha, modifiedSha, patchSha,
+    pixelDeTela: [predictedX, predictedY],
+    pixelsDiferentes: frameDiffs[0].length,
+    wramDiffs: wramDiffs.length, vramProva: vramProof,
+    semanticState: "VERIFIED (fixture autoral; consumidor por construção)",
+  })}`);
+  console.log(vramObserved
+    ? "OK: Desktop Tauri rex-lz4w-fixture-effect passou — efeito causal de 1 pixel provado pela interface e pelo core (WRAM + VRAM + tela)."
+    : `OK: Desktop Tauri rex-lz4w-fixture-effect passou — efeito causal de 1 pixel provado pela interface e pelo core (WRAM + tela). ${vramProof.reason}`);
 }
 
 async function runBranchLogicRecoveryScenario(sessionId, projectDir) {  const nodeRomPath = process.env.RDS_LOGIC_BRANCH_NODE_ROM ?? "";
@@ -10126,6 +10957,12 @@ async function main() {
     if (options.scenario === "rex-lz4w-effect") {
       currentE2eRunContext.appPath = options.app;
       await runRexLz4wEffectScenario(sessionId);
+      return;
+    }
+
+    if (options.scenario === "rex-lz4w-fixture-effect") {
+      currentE2eRunContext.appPath = options.app;
+      await runRexLz4wFixtureEffectScenario(sessionId);
       return;
     }
 
