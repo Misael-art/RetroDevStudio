@@ -9105,7 +9105,17 @@ async function runRexLz4wEffectScenario(sessionId) {
   if (diffFrame < 0) fail("nenhum frame difere entre original e modificado: recurso não observado em jogo.");
   const boxW = maxDiffX - minDiffX + 1;
   const boxH = maxDiffY - minDiffY + 1;
-  if (diffPixels > 256 || boxW > 64 || boxH > 64) {
+  // Efeito esperado para o alvo 0xc8cc8: o dado decodificado tem 288 bytes
+  // = 9 paletas × 16 cores (classe PALETA, não tile). O pixel (0,0) editado
+  // é a cor 0 da paleta 0 — a cor de TRANSPARÊNCIA — tornada opaca: todo
+  // sprite que usa a paleta 0 recolore (ambos os lutadores). A "região
+  // esperada" é, portanto, a faixa dos sprites na cena, não uma caixa de 8px.
+  const expectedPaletteEffect = targetOffsetHex === "c8cc8";
+  if (expectedPaletteEffect) {
+    if (diffPixels < 300) fail(`efeito de paleta fraco demais: ${diffPixels} px`);
+    if (minDiffY < 80 || maxDiffY > 223) fail(`efeito de paleta fora da faixa dos sprites: caixa em (${minDiffX},${minDiffY}) ${boxW}x${boxH}`);
+    if (boxW > 300 || boxH > 140) fail(`efeito de paleta fora da área de jogo: caixa ${boxW}x${boxH} em (${minDiffX},${minDiffY})`);
+  } else if (diffPixels > 256 || boxW > 64 || boxH > 64) {
     fail(`efeito não é específico: ${diffPixels} pixels em caixa ${boxW}x${boxH} em (${minDiffX},${minDiffY}) (esperado região pequena do recurso).`);
   }
   console.log(`[rex-lz4w-effect] ${JSON.stringify({
