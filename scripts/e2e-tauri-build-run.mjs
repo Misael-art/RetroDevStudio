@@ -8880,30 +8880,6 @@ async function runRexLz4wEffectScenario(sessionId) {
   }
 
   // ORIGINAL vs MODIFICADO no core, mesma linha de input; efeito específico.
-  // CAPACIDADE SEPARADA — apresentação normal do app: o canvas deve exibir
-  // o mesmo framebuffer que o core produz (resumindo o loop vivo e
-  // comparando canvas vs emulator_observe no mesmo instante).
-  await clickByTestId(sessionId, "workspace-rail-game");
-  await waitFor(
-    async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="viewport-game-canvas"]'));`),
-    15000,
-    "Game View não abriu para a verificação de apresentação do canvas.",
-    250
-  );
-  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
-  await pause(400);
-  {
-    const canvasFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
-    const observation = await invokeCoreObserve(sessionId);
-    if (canvasFrame?.rgba && observation?.framebuffer_rgba) {
-      const canvasSha = createHash("sha256").update(Buffer.from(canvasFrame.rgba)).digest("hex");
-      const coreSha = createHash("sha256").update(Buffer.from(observation.framebuffer_rgba)).digest("hex");
-      console.log(`[rex-lz4w-canvas] ${JSON.stringify({ canvasSha: canvasSha.slice(0, 16), coreSha: coreSha.slice(0, 16), identical: canvasSha === coreSha })}`);
-      if (canvasSha !== coreSha) {
-        fail("canvas do app não exibe o framebuffer do core na apresentação normal");
-      }
-    }
-  }
   // Timeline determinística: load pausado -> inputs e lotes de frames via
   // IPC do core -> framebuffer lido por `emulator_observe` (independe do
   // loop vivo do app, que não redesenha o canvas com o core pausado).
@@ -8920,6 +8896,62 @@ async function runRexLz4wEffectScenario(sessionId) {
       100
     );
     await closeVisibleConsoleDrawer(sessionId, label);
+    // CAPACIDADE SEPARADA (apresentação normal do app): resume o loop vivo,
+    // pausa de novo e compara canvas vs core no MESMO frame congelado.
+    await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
+    await pause(600);
+    await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-pause");
+    await pause(200);
+    {
+      const canvasFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+      const observation = await invokeCoreObserve(sessionId);
+      if (!canvasFrame?.rgba || !observation?.framebuffer_rgba) {
+        fail(`apresentação indisponível (${label}): canvas=${Boolean(canvasFrame?.rgba)} core=${Boolean(observation?.framebuffer_rgba)}`);
+      }
+      const canvasSha = createHash("sha256").update(Buffer.from(canvasFrame.rgba)).digest("hex");
+      const coreSha = createHash("sha256").update(Buffer.from(observation.framebuffer_rgba)).digest("hex");
+      const dims = { canvas: `${canvasFrame.width}x${canvasFrame.height}`, core: `${observation.framebuffer_width}x${observation.framebuffer_height}` };
+      console.log(`[rex-lz4w-canvas] ${JSON.stringify({ label, ...dims, canvasSha: canvasSha.slice(0, 16), coreSha: coreSha.slice(0, 16), identical: canvasSha === coreSha })}`);
+      const canvasBytes = Buffer.from(canvasFrame.rgba);
+      const coreBytes = Buffer.from(observation.framebuffer_rgba);
+      const canvasW = Number(canvasFrame.width);
+      const canvasH = Number(canvasFrame.height);
+      const coreW = Number(observation.framebuffer_width);
+      const coreH = Number(observation.framebuffer_height);
+      let identical = canvasSha === coreSha;
+      if (!identical && canvasBytes.length === canvasW * canvasH * 4 && coreBytes.length === coreW * coreH * 4 && canvasW >= coreW && canvasH >= coreH) {
+        // Conteúdo do core posicionado dentro do canvas: localiza o offset
+        // pela primeira linha e verifica todas as linhas nesse offset.
+        const coreRow0 = coreBytes.subarray(0, coreW * 4);
+        let offsetX = -1;
+        let offsetY = -1;
+        outer: for (let oy = 0; oy <= canvasH - coreH; oy++) {
+          for (let ox = 0; ox <= canvasW - coreW; ox++) {
+            const start = (oy * canvasW + ox) * 4;
+            if (canvasBytes.subarray(start, start + coreW * 4).equals(coreRow0)) {
+              offsetX = ox;
+              offsetY = oy;
+              break outer;
+            }
+          }
+        }
+        if (offsetX >= 0) {
+          let allRows = true;
+          for (let y = 0; y < coreH && allRows; y++) {
+            const cStart = ((offsetY + y) * canvasW + offsetX) * 4;
+            const kStart = y * coreW * 4;
+            if (!canvasBytes.subarray(cStart, cStart + coreW * 4).equals(coreBytes.subarray(kStart, kStart + coreW * 4))) {
+              allRows = false;
+            }
+          }
+          identical = allRows;
+          console.log(`[rex-lz4w-canvas] subimagem em (${offsetX},${offsetY}): identical=${identical}`);
+        }
+      }
+      if (!identical) {
+        fail(`canvas do app não exibe o framebuffer do core (${label}): ${canvasSha.slice(0, 8)} != ${coreSha.slice(0, 8)} dims=${JSON.stringify(dims)}`);
+      }
+    }
     const invokeCore = async (command, args = {}) => executeAsyncScript(
       sessionId,
       `
