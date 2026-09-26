@@ -3,16 +3,17 @@
 **Status:** evidência medida em 2026-09-26 (integrador) · **Contrato:** `CONTRACTS.md` §4
 ("roundtrip puramente interno não é prova") · **Pino do código medido:**
 `rex_codecs.rs` com SHA-256
-`bee8524f78aa288ac2a084a6413aa8318dabbb1c96560226000eb6de052d5e05`
-(busca de candidatos mesclada por proximidade; evidência em
-`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r14/`).
+`6044135b30f51bc746f8b15e6baf6b94cabbbd52c067ce969ea0cb231fa83e18`
+(DP de custo explícito + política de escrita com orçamento de espaço; evidência em
+`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r15/`).
 
-Cadeia de pinos desta medição — o mesmo harness rodou sobre dois códigos:
+Cadeia de pinos desta medição — o mesmo harness rodou sobre três códigos:
 
 | `rex_codecs.rs` | o que mudou | evidência |
 |---|---|---|
 | `656bdc9f…` @ `13a5792` | teto de hardware 16385 no decoder | `…/lz4w-68k/evidence/2026-09-26/` |
-| `bee8524f…` (working tree) | `find_best` percorre dicionário e saída em ordem mesclada por proximidade | `…/lz4w-68k/evidence/2026-09-26-r14/` |
+| `bee8524f…` @ `b8cf3b0` | `find_best` percorre dicionário e saída em ordem mesclada por proximidade | `…/lz4w-68k/evidence/2026-09-26-r14/` |
+| `6044135b…` @ `cde88cc` | DP de custo explícito (`..._explained`) e política por orçamento de espaço (`..._fitting`); o produto passa a ter **dois** caminhos de codificação | `…/lz4w-68k/evidence/2026-09-26-r15/` |
 
 ## 1. Por que este documento existe
 
@@ -55,7 +56,9 @@ diferente (`.lm_rom`), com alcance próprio — os dois limites são independent
   `.text.asm.lz4w_unpack` do objeto montado e do `libmd.a` oficial e exige
   **bytes + tamanho idênticos**: 5056 bytes, SHA-256
   `ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787`, conferido
-  nas **6** construções de ROM desta rodada.
+  nas **7** construções de ROM de cada rodada (r14 e r15: `runI`, `runC`, `runE`,
+  `run14`, `run15`, `run16`, `runF`). A versão anterior deste parágrafo dizia
+  "6": contagem errada, não mudança na cadeia de rodadas.
 * Execução: **MAME 0.289** (slot `genesis`, cart ZIPpado,
   `-noplugins -hashpath <vazio> -skip_gameinfo -autoboot_script capture.lua`).
   A RAM é despejada pela sentinela `$FF0180 = 0xDEADBEEF`; o tamanho retornado
@@ -79,20 +82,32 @@ ROM comercial é versionado**; a ROM BYOR é pré-requisito local do `reproduce.
 
 ## 4. Casos e vereditos
 
+Coluna "Origem da stream" distingue os dois caminhos do codificador: **"entrada
+DP-first"** = `lz4w_encode_with_dictionary_index_explained` (o que o benchmark de
+recompressão mede); **"caminho de escrita"** = `..._index_fitting` com o slot do
+recurso como orçamento (o que a transação grava na ROM). 14 casos em 7 blocos de
+execução: o `ORACLE-RUN.log` de r15 não tem linha `FATAL`, a única linha `DIVERGE`
+é `i16` (exigida por contrato, e o bloco fecha com "DIVERGÊNCIA DO 68k
+CONFIRMADA"), e os outros 6 blocos fecham com `RESULTADO: TODOS OS CASOS
+IDÊNTICES`. O código de saída do shell não foi capturado no log — quem precisa
+dele como evidência reexecuta o §7.
+
 | Caso | Origem da stream | O que testa | Produto | 68k oficial | jar v1.43 |
 |---|---|---|---|---|---|
-| `i20_lits_odd` | **encoder atual** | só literais + cauda ímpar (11 bytes) | ok | idêntico | idêntico |
-| `i21_short_mix` | **encoder atual** | matches curtos off 2 e off 1 | ok | idêntico | idêntico |
-| `i22_long_far_nodict` | **encoder atual** | longo auto-referente dentro da saída (620 B) | ok | idêntico | idêntico |
-| `i23_long_zero_value` | **encoder atual** | longo com `value = 0x0000` (off 1) | ok | idêntico | idêntico |
-| `i24_dict_mixed` | **encoder atual** | dicionário + curto + longo não-ROM + autorref. | ok | idêntico | idêntico |
+| `i20_lits_odd` | **entrada DP-first** | só literais + cauda ímpar (11 bytes) | ok | idêntico | idêntico |
+| `i21_short_mix` | **entrada DP-first** | matches curtos off 2 e off 1 | ok | idêntico | idêntico |
+| `i22_long_far_nodict` | **entrada DP-first** | longo auto-referente dentro da saída (620 B) | ok | idêntico | idêntico |
+| `i23_long_zero_value` | **entrada DP-first** | longo com `value = 0x0000` (off 1) | ok | idêntico | idêntico |
+| `i24_dict_mixed` | **entrada DP-first** | dicionário + curto + longo não-ROM + autorref. | ok | idêntico | idêntico |
 | `i09_corpus_orig_c8cc8` | **corpus (original)** | recurso real 0xc8cc8 com prefixo mínimo aceito (4096 B) | ok | idêntico (288 B) | idêntico |
-| `i18_corpus_edit_c8cc8` | **encoder atual** sobre a edição canônica | re-codificação do alvo real do produto | ok | idêntico (288 B) | idêntico |
-| `i14_encoder_deep_16384` | **encoder atual** | `Rust encode → 68k decode` no offset mais fundo alcançável (16384, `value 0x4001`) | ok | idêntico | idêntico |
+| `i18_corpus_edit_c8cc8` | **entrada DP-first** sobre a edição canônica | re-codificação do alvo real do produto: 144 B dentro do slot de 144 | ok | idêntico (288 B) | idêntico |
+| `i40_corpus_edit_fitting_c8cc8` | **caminho de escrita** (`..._fitting`, orçamento = slot) | a mesma edição pelo caminho que a transação usa: 144 B, estratégia `CostDp`, byte a byte igual a `i18` | ok | idêntico (288 B) | idêntico |
+| `i14_encoder_deep_16384` | **encoder atual** | `Rust encode → 68k decode` no offset mais fundo alcançável (16384, `value 0x4001`); dicionário com 16 386 words par-a-par distintos para forçar **as duas estratégias** ao token longo | ok | idêntico | idêntico |
 | `i15_hardware_ceiling_16385` | construída à mão | **teto do formato**: off 16385 (`value 0x4000`) | **aceita** | idêntico | idêntico |
 | `i16_beyond_ceiling_16386` | construída à mão | um word além: off 16386 (`value 0x3FFF`) | **recusa** (`invalid_reference`) | **DIVERGE**: byte 0 = `0x24` em vez de `0xBE` | idêntico ao pretendido |
 | `i30_fixture_rescomp_orig` | **fixture autoral** | stream do `rescomp` no plain não editado (444 B, prefixo mínimo 256 B) | ok | idêntico | idêntico |
-| `i31_fixture_product_edit` | **encoder atual** sobre a edição do produto | edição plantada (tile 0, linha 5, col 7 → índice 15): 436 B dentro do slot de 444 | ok | idêntico | idêntico |
+| `i31_fixture_product_edit` | **entrada DP-first** sobre a edição do produto | edição plantada (tile 0, linha 5, col 7 → índice 15): 436 B dentro do slot de 444 | ok | idêntico | idêntico |
+| `i41_fixture_edit_fitting` | **caminho de escrita** (`..._fitting`, orçamento = slot) | a mesma edição como a transação a escreve: 436 B, estratégia `Greedy`, byte a byte IDÊNTICA ao stream que o pino só-guloso escrevia | ok | idêntico | idêntico |
 
 Consequências diretas:
 
@@ -103,13 +118,21 @@ Consequências diretas:
    oráculo Java — que aritmetiza em 32 bits — decodifica o pretendido. Ou seja,
    concordar com o jar aqui seria **errado para o alvo**; o produto decide pelo
    hardware.
-3. Recompressão do recurso real continua recusada pelo espaço: a edição
-   canônica re-codificada produz **150 bytes** no pino `656bdc9f…` e
-   **146 bytes** no pino `bee8524f…` (busca mesclada) — contra um slot de **144**
-   (`needs_space` honesto em ambos; nada foi forçado por sobrescrita). O
-   incremento melhorou o codificador em 4 bytes nesse caso sem alterar o
-   veredito. Diagnóstico do porquê:
-   `LZ4W_ENCODER_444_VS_448_2026-09-26.md` §4.1.
+3. Recompressão do recurso real **deixou de ser recusada por espaço**: a edição
+   canônica re-codificada media **150 bytes** no pino `656bdc9f…`, **146 bytes**
+   no pino `bee8524f…` (busca mesclada, `needs_space` honesto contra um slot de
+   **144**) e **144 bytes** no pino `6044135b…` — cabe no próprio slot, e é essa
+   stream de 144 B que o 68k desempacotou (`i40`), sem expansão de ROM e sem
+   tocar vizinhos. Nada foi forçado por sobrescrita em nenhum dos três pinos.
+   Diagnóstico do porquê, token a token: `LZ4W_ENCODER_444_VS_448_2026-09-26.md`
+   §4.1.
+4. Os dois caminhos do codificador não são intercambiáveis para quem escreve num
+   slot: no fixture, `i31` (DP-first) e `i41` (escrita) têm o MESMO comprimento e
+   parses diferentes, e só `i41` reproduz byte a byte o que o pino só-guloso
+   escrevia — a razão está na pegada de escrita (um re-parse global reescreve a
+   stream inteira e o prefixo é o dicionário do vizinho), documentada em
+   `rex_codecs.rs` e medida em
+   `data/rex_profiles/integrator/lz4w-recompress/evidence/2026-09-26-r7-final-pin/`.
 
 ## 5. Relação com a medição anterior (agente-B)
 
@@ -137,25 +160,37 @@ vendorada com proveniência registrada.
   reporta erro, apenas escreve. Esses códigos são provados somente nos testes do
   produto, e isso fica declarado em vez de ser alegado como equivalência.
 * A busca do prefixo mínimo (`minimal_prefix`) é feita pela aceitação do
-  produto; o valor 4096 bytes para o recurso original e 1024 para a edição são
-  medidas desta máquina/caso, não uma constante do formato.
+  produto; os valores medidos em r15 — 4096 B para o stream original de
+  `0xc8cc8`, 512 B para a edição canônica (nos dois caminhos) e 256 B para o
+  fixture — são medidas destes casos, não constantes do formato.
+* O hardware leu **os dois caminhos** do codificador, mas não uniformemente: o
+  caminho de escrita da transação tem exatamente 2 casos próprios (`i40` no
+  recurso real, `i41` no fixture); o resto das streams codificadas sai pela
+  entrada DP-first, que é o que o benchmark mede. A bateria dos 160 recursos do
+  corpus continua aferida pelo decoder do produto, não pelo 68k — provar em
+  hardware cada stream re-codificada seria uma rodada por recurso.
 
 ## 7. Reexecutar
 
 ```bash
-REX_CODECS_SHA=bee8524f78aa288ac2a084a6413aa8318dabbb1c96560226000eb6de052d5e05 \
+REX_CODECS_SHA=6044135b30f51bc746f8b15e6baf6b94cabbbd52c067ce969ea0cb231fa83e18 \
 RDS_REX_LZ4W_FIXTURE_ROM=<caminho absoluto da ROM do fixture autoral> \
   bash scripts/rex_profiles/integrator/lz4w_68k/reproduce.sh /tmp/rex-68k-int-<data>
 ```
 
-Promovida a partir de `/tmp/rex-68k-int-2026-09-26-r5` (a corrida anterior,
-`…-r4`, pinava o mesmo código antes do `cargo fmt` em `7b037745…`: as 7 ROMs e os
-7 captures têm SHA-256 idênticos entre as duas, mudando apenas o hash do binário
-do driver — o determinismo registrado no `manifest.json` de `r14` é desta
-comprovação).
+Promovida a partir de `/tmp/rex-68k-int-2026-09-26-r15` (r14, o pino anterior,
+tinha vindo de `/tmp/rex-68k-int-2026-09-26-r5`; a corrida `…-r4` pinava o mesmo
+código antes do `cargo fmt` em `7b037745…`: as 7 ROMs e os 7 captures têm SHA-256
+idênticos entre as duas, mudando apenas o hash do binário do driver — o
+determinismo registrado no `manifest.json` de `r14` é desta comprovação).
 
 Pré-requisitos medidos: SGDK 2.11 em `$GDK` (mapeado a `G:` no wine), wine-11.17,
 MAME 0.289, Java 17, `lz4w.jar` v1.43 no cache do oráculo, `gawk`, `zip`, e a ROM
 BYOR congelada em posse local. O script **falha** se o codec medido divergir do
-pino, se o desempacotador montado divergir do `libmd.a`, se qualquer caso que o
-encoder atual emite divergir do 68k, ou se o 68k **não** divergir em `i16`.
+pino, se o desempacotador montado divergir do `libmd.a`, se qualquer caso emitido
+pelos dois caminhos do encoder divergir do 68k, se o caminho de escrita deixar de
+caber no espaço do fixture (asserção no driver), ou se o 68k **não** divergir em
+`i16`. A identidade byte a byte de `i41` com o stream do pino só-guloso
+(SHA-256 `2776ec2c…`) NÃO é asserção do script: é confronto registrado no
+`manifest.json` de r15 — quem mexer no codificador deve conferir esse SHA antes de
+alegar que a escrita não mudou.
