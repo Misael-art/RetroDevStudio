@@ -11,10 +11,11 @@
 //! o oráculo é a ferramenta oficial `lz4w.jar` (pack e unpack) do toolchain
 //! pinado, exercida nos testes quando disponível no host.
 //!
-//! Escopo v1: apenas streams **autocontidos** (empacotados com start=0).
-//! Streams empacotados com bloco anterior (flag ROM source) dependem de
-//! dicionário externo e são recusados com `invalid_reference`, não
-//! decodificados por adivinhação.
+//! Dois escopos convivem: `lz4w_decode`/`lz4w_encode` tratam streams
+//! **autocontidas** (empacotadas com start=0); as variantes `_with_dictionary`
+//! tratam streams prev-block (flag ROM source), que são o formato real do
+//! ResComp. Sem dicionário declarado, uma referência externa é recusada com
+//! `invalid_reference` — nunca decodificada por adivinhação.
 //!
 //! Codificador v1: guloso com tabela de candidatos por word (janela de
 //! 0x4000 words, no máximo 128 candidatos por posição). Não é o parser
@@ -75,10 +76,20 @@ pub struct Lz4wDecoded {
 
 const MATCH_MIN_SIZE: usize = 1;
 const MATCH_LONG_MIN_SIZE: usize = 2;
-/// Offset longo máximo (words), incluindo o limite do compressor oficial.
-const MATCH_LONG_OFFSET_LIMIT: usize = 0x4000;
-/// Janela máxima do compressor oficial (0x3FFF + 1 words de offset).
-const MATCH_LONG_OFFSET_MAX: usize = 0x3FFF;
+/// Teto de offset longo não-ROM que o **desempacotador 68000 oficial** ainda lê
+/// para trás (words). Derivado do asm e medido no hardware: `.long_match` faz
+/// `move.w (a0)+,d0; add.w d0,d0; lea -2(a1,d0.w),a2`, isto é, o word de offset
+/// é duplicado em 16 bits e usado como displacement com *sinal*. Com
+/// `value = (-(off-1)) & 0x7FFF`, o displacement é negativo (para trás)
+/// exatamente quando `value >= 0x4000`, ou seja `off <= 16385`; para
+/// `1 <= value <= 0x3FFF` (`off >= 16386`) o 68000 leria PARA FRENTE e
+/// aliassaria com a ROM — bytes errados silenciosos. `value == 0` é o caso
+/// `off == 1` e é válido. Evidência: `docs/rex_profiles/LZ4W_68K_ORACLE.md`.
+const MATCH_LONG_FORMAT_MAX_OFFSET_WORDS: usize = 0x4001;
+/// Janela de busca que o **codificador** usa, por estratégia: a mesma do
+/// compressor oficial (`0x3FFF + 1` words). É um word abaixo do teto do
+/// formato de propósito — escolha de codificação, não limitação do decodificador.
+const ENCODER_WINDOW_WORDS: usize = 0x4000;
 /// Máscara de 15 bits do offset longo codificado (negação two's complement).
 const MATCH_LONG_OFFSET_MASK: u16 = 0x7FFF;
 const MATCH_LONG_OFFSET_ROM_SOURCE: u16 = 0x8000;
@@ -237,14 +248,15 @@ pub fn lz4w_decode_with_dictionary(
                 }
                 (match_byte + MATCH_LONG_MIN_SIZE, adjusted as usize)
             } else {
-                // Convenção do empacotador oficial: não-ROM exige offset
-                // para trás de até 0x4000 words; com o word de offset
-                // apontando para frente, o 68000 leria referência inválida.
-                if raw_offset > MATCH_LONG_OFFSET_LIMIT {
+                // O desempacotador 68000 oficial só consegue ler para trás
+                // até 16385 words (ver MATCH_LONG_FORMAT_MAX_OFFSET_WORDS);
+                // acima disso o stream é inválido para o alvo, não apenas
+                // incomum — e o 68000 produziria bytes errados em silêncio.
+                if raw_offset > MATCH_LONG_FORMAT_MAX_OFFSET_WORDS {
                     return Err(CodecError::new(
                         "invalid_reference",
                         format!(
-                            "match longo não-ROM com offset {raw_offset} words excede a janela de {MATCH_LONG_OFFSET_LIMIT} do empacotador (v={encoded:#06x})"
+                            "match longo não-ROM com offset {raw_offset} words excede o teto lido pelo 68000 ({MATCH_LONG_FORMAT_MAX_OFFSET_WORDS}) (v={encoded:#06x})"
                         ),
                     ));
                 }
@@ -299,7 +311,8 @@ pub fn lz4w_encode(data: &[u8]) -> Result<Vec<u8>, CodecError> {
 /// resultado). Os matches longos são emitidos sem a flag ROM source, com o
 /// offset medido em words a partir do fim do resultado (dicionário + saída)
 /// — exatamente o que o unpacker resolve. O dicionário deve ter comprimento
-/// par; a janela não-ROM é 0x4000 words (limite do empacotador oficial).
+/// par; o codificador limita-se a `ENCODER_WINDOW_WORDS` (0x4000) words —
+/// escolha de estratégia, um word abaixo do teto que o 68000 lê para trás.
 pub fn lz4w_encode_with_dictionary(
     data: &[u8],
     dictionary: Option<&[u8]>,
@@ -390,10 +403,10 @@ pub fn lz4w_encode_with_dictionary_index(
                      j: usize|
      -> Option<(usize, usize)> {
         let cur = word_at(j);
-        // Janela não-ROM = 0x4000 words (limite do empacotador oficial):
-        // com v < 0x4001 o 68000 interpretaria o offset como referência
-        // PARA FRENTE (int16 positivo), fora do formato.
-        let window_start = j.saturating_sub(MATCH_LONG_OFFSET_LIMIT);
+        // Janela de busca do codificador (estratégia, 1 word abaixo do teto do
+        // formato): manter o offset <= 0x4000 garante que todo stream emitido é
+        // lido para trás pelo 68000 — ver MATCH_LONG_FORMAT_MAX_OFFSET_WORDS.
+        let window_start = j.saturating_sub(ENCODER_WINDOW_WORDS);
         fn consider(
             pos: usize,
             j: usize,
@@ -446,7 +459,7 @@ pub fn lz4w_encode_with_dictionary_index(
             }
         }
         best.filter(|&(len, off)| {
-            (len > MATCH_LONG_MIN_SIZE && off <= MATCH_LONG_OFFSET_LIMIT)
+            (len > MATCH_LONG_MIN_SIZE && off <= ENCODER_WINDOW_WORDS)
                 || ((MATCH_MIN_SIZE..=0xF + MATCH_MIN_SIZE).contains(&len)
                     && off <= SHORT_MAX_OFFSET_WORDS)
         })
@@ -519,10 +532,10 @@ fn emit_segment(
                 }
                 return Ok(());
             }
-            // Forma longa: offset de até 0x4000 words (limite do
-            // empacotador oficial) a partir do fim do resultado.
+            // Forma longa: offset dentro da janela do codificador, medida a
+            // partir do fim do resultado (dicionário + saída).
             if len > MATCH_LONG_MIN_SIZE
-                && off <= MATCH_LONG_OFFSET_LIMIT
+                && off <= ENCODER_WINDOW_WORDS
                 && literals.len() <= LITERAL_MAX_WORDS
             {
                 let token = ((lit as u16) << 12) | ((len - MATCH_LONG_MIN_SIZE) as u16);
@@ -701,6 +714,204 @@ mod tests {
                 .expect("decode");
         assert_eq!(decoded.data, data, "roundtrip com dicionário divergiu");
         assert_eq!(decoded.bytes_consumed, stream.len());
+    }
+
+    // ---- Fronteira da janela não-ROM (contrato medido no 68000) ------------
+    //
+    // Casos construídos À MÃO, com o valor de cada word de offset calculado na
+    // mão (não pela fórmula do produto): dicionário de `dict_words` words
+    // zerados com `0xBEEF` no word 2, e um único match longo de 3 words cuja
+    // fonte é exatamente esse word — `off = dict_words - 2`. O stream resultante
+    // é `[0x0001][value][0x0000][0x0000]` e a saída esperada são os três words
+    // `BE EF 00 00 00 00`.
+
+    fn zero_dict(dict_words: usize) -> Vec<u8> {
+        let mut d = vec![0u8; dict_words * 2];
+        d[4] = 0xBE;
+        d[5] = 0xEF;
+        d
+    }
+
+    fn deep_long_stream(value: u16) -> Vec<u8> {
+        let mut s = vec![0x00, 0x01];
+        s.extend_from_slice(&value.to_be_bytes());
+        s.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+        s
+    }
+
+    const DEEP_LONG_EXPECTED: [u8; 6] = [0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00];
+
+    fn decode_deep_long(dict_words: usize, value: u16) -> Result<Lz4wDecoded, CodecError> {
+        lz4w_decode_with_dictionary(
+            &deep_long_stream(value),
+            Some(&zero_dict(dict_words)),
+            &Lz4wLimits::default(),
+        )
+    }
+
+    #[test]
+    fn lz4w_non_rom_long_offset_16384_words_decodes() {
+        // off 16384 -> value = -(16383) & 0x7FFF = 0xC001 & 0x7FFF = 0x4001.
+        let decoded = decode_deep_long(16386, 0x4001).expect("off 16384 deve decodificar");
+        assert_eq!(decoded.data, DEEP_LONG_EXPECTED);
+        assert_eq!(decoded.bytes_consumed, 8, "saída completa consumida");
+    }
+
+    /// Regressão da confusão de constantes: o teto que o 68000 lê para trás é
+    /// 16385 words (`value == 0x4000`), um word além da janela de 0x4000 que o
+    /// codificador escolhe. O decoder recusava como inválido um stream que o
+    /// hardware desempacota corretamente.
+    #[test]
+    fn lz4w_non_rom_long_offset_16385_words_is_the_measured_ceiling() {
+        // off 16385 -> value = -(16384) & 0x7FFF = 0xC000 & 0x7FFF = 0x4000.
+        let decoded = decode_deep_long(16387, 0x4000).expect("off 16385 é o teto do formato");
+        assert_eq!(decoded.data, DEEP_LONG_EXPECTED);
+        assert_eq!(decoded.bytes_consumed, 8);
+    }
+
+    #[test]
+    fn lz4w_non_rom_long_offset_16386_words_is_rejected() {
+        // off 16386 -> value = -(16385) & 0x7FFF = 0xBFFF & 0x7FFF = 0x3FFF:
+        // no 68000 o displacement duplicado fica POSITIVO (leitura para frente,
+        // aliasando a ROM) — bytes errados em silêncio, então é stream inválido.
+        let err = decode_deep_long(16388, 0x3FFF).expect_err("off 16386 fora do formato");
+        assert_eq!(err.code, "invalid_reference");
+        assert!(
+            err.detail.contains("16385"),
+            "erro deve citar o teto medido: {err}"
+        );
+    }
+
+    #[test]
+    fn lz4w_non_rom_long_offset_one_word_uses_value_zero() {
+        // value 0x0000 não é terminador: é o offset de 1 word (cópia do último
+        // word escrito). Aqui a fonte é o próprio dicionário, off = 1.
+        let dict = vec![0xAA, 0xBB];
+        let stream = [0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = lz4w_decode_with_dictionary(&stream, Some(&dict), &Lz4wLimits::default())
+            .expect("off 1");
+        // 3 words a partir do word 0 do dicionário, com cópia sobreposta.
+        assert_eq!(decoded.data, vec![0xAA, 0xBB, 0xAA, 0xBB, 0xAA, 0xBB]);
+        assert_eq!(decoded.bytes_consumed, 8);
+    }
+
+    /// O teto de 16385 words pertence à referência **não-ROM** (contada a
+    /// partir do fim da saída). A referência ROM-source é contada a partir do
+    /// ponteiro de origem e só é limitada pelo histórico disponível
+    /// (dicionário + saída). Confundir as duas constantes foi o defeito que
+    /// fez o decoder recusar streams que o 68000 desempacota corretamente.
+    #[test]
+    fn lz4w_rom_source_reference_above_non_rom_ceiling_decodes() {
+        // Dicionário de 20000 words; match longo de 3 words com ROM-source.
+        // value 0xB9AF -> raw = ((-0xB9AF) & 0x7FFF) + 1 = 18001 + 1 = 18002;
+        // offsetAdj no momento do word = 2 -> ajustado = 18000 words (> 16385).
+        // Fonte: word 20000 - 18000 = 2000 do dicionário.
+        let mut dict = vec![0u8; 40000];
+        dict[4000] = 0xC0;
+        dict[4001] = 0xDE;
+        let stream = [0x00, 0x01, 0xB9, 0xAF, 0x00, 0x00, 0x00, 0x00];
+        let decoded = lz4w_decode_with_dictionary(&stream, Some(&dict), &Lz4wLimits::default())
+            .expect("referência ROM-source de 18000 words é lida pelo 68000");
+        assert_eq!(decoded.data, vec![0xC0, 0xDE, 0x00, 0x00, 0x00, 0x00]);
+        assert_eq!(decoded.bytes_consumed, 8);
+    }
+
+    #[test]
+    fn lz4w_rom_source_reference_beyond_history_is_rejected() {
+        // value 0xFFFA -> raw = 7, ajustado = 7 - 2 = 5 words, mas só há
+        // 4 words de dicionário e nenhum de saída.
+        let dict = vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        let stream = [0x00, 0x01, 0xFF, 0xFA, 0x00, 0x00, 0x00, 0x00];
+        let err = lz4w_decode_with_dictionary(&stream, Some(&dict), &Lz4wLimits::default())
+            .expect_err("fonte além do dicionário");
+        assert_eq!(err.code, "invalid_reference");
+        assert!(err.detail.contains("ROM source"), "erro: {err}");
+    }
+
+    #[test]
+    fn lz4w_truncations_inside_segments_are_structured() {
+        // Literal declarada mas ausente no stream.
+        let err = lz4w_decode(&[0x30, 0x00, 0x11, 0x22], &Lz4wLimits::default())
+            .expect_err("3 words literais, só 1 presente");
+        assert_eq!(err.code, "truncated");
+        // Match longo sem o word de offset.
+        let err = lz4w_decode(&[0x00, 0x05, 0x00], &Lz4wLimits::default()).expect_err("sem offset");
+        assert_eq!(err.code, "truncated");
+        // Terminador sem o word final.
+        let err = lz4w_decode(&[0xF0, 0x0F, 0xAA, 0xBB], &Lz4wLimits::default())
+            .expect_err("sem word final");
+        assert_eq!(err.code, "truncated");
+    }
+
+    /// A janela de busca do codificador é estratégia (0x4000), mas todo word
+    /// não-ROM que ele emite precisa estar dentro do que o 68000 lê para trás
+    /// (<= 16385). Varre os tokens produzidos e exige o teto do formato —
+    /// é a regressão direta do caso r10 (off 18555 emitido pelo encoder antigo).
+    #[test]
+    fn lz4w_encoder_never_emits_unreadable_non_rom_offsets() {
+        fn long_offsets(stream: &[u8]) -> Vec<usize> {
+            let mut out = Vec::new();
+            let mut ind = 0usize;
+            loop {
+                assert!(ind + 2 <= stream.len(), "token truncado em {ind}");
+                let token = u16::from_be_bytes([stream[ind], stream[ind + 1]]);
+                ind += 2;
+                if token == 0 {
+                    return out;
+                }
+                let lit = ((token >> 12) & 0xF) as usize;
+                let nib = ((token >> 8) & 0xF) as usize;
+                let byte = (token & 0xFF) as usize;
+                ind += lit * 2;
+                if nib == 0 && byte > 0 {
+                    let v = u16::from_be_bytes([stream[ind], stream[ind + 1]]);
+                    ind += 2;
+                    if v & 0x8000 == 0 {
+                        out.push((((-(v as i32)) as u32 as usize) & 0x7FFF) + 1);
+                    }
+                }
+            }
+        }
+        // Dicionário grande o bastante para a janela antiga (0x8000 words) ser
+        // alcançável, com repetições profundas que convidam matches longos.
+        let mut dictionary = Vec::new();
+        let mut y: u32 = 0x2f6e2b1;
+        for _ in 0..40000 {
+            y = y.wrapping_mul(1664525).wrapping_add(1013904223);
+            dictionary.extend_from_slice(&((y >> 16) as u16).to_be_bytes());
+        }
+        let mut data = Vec::new();
+        let mut z: u32 = 0x853c49e9;
+        for _ in 0..4096 {
+            z = z.wrapping_mul(1664525).wrapping_add(1013904223);
+            data.extend_from_slice(&((z >> 16) as u16).to_be_bytes());
+        }
+        // Insere repetições que apontam para o fundo do dicionário, incluindo
+        // a distância máxima alcançável pela janela do codificador.
+        for k in [27_713usize, 30_000, 35_000, 39_990] {
+            let src = k * 2;
+            let w = [dictionary[src], dictionary[src + 1]];
+            for _ in 0..40 {
+                data.extend_from_slice(&w);
+            }
+        }
+        let index = Lz4wDictionaryIndex::build(&dictionary).expect("índice");
+        let stream = lz4w_encode_with_dictionary_index(&data, Some(&index)).expect("encode");
+        let decoded =
+            lz4w_decode_with_dictionary(&stream, Some(&dictionary), &Lz4wLimits::default())
+                .expect("decode");
+        assert_eq!(decoded.data, data, "roundtrip divergiu");
+        let offsets = long_offsets(&stream);
+        assert!(
+            !offsets.is_empty(),
+            "fixture sem match longo não-ROM não exercita a fronteira"
+        );
+        for off in &offsets {
+            assert!(
+                *off <= MATCH_LONG_FORMAT_MAX_OFFSET_WORDS,
+                "encoder emitiu offset não-ROM {off} > teto lido pelo 68000"
+            );
+        }
     }
 
     /// Aceite BYOR (executar explicitamente: `cargo test --lib -- --ignored
