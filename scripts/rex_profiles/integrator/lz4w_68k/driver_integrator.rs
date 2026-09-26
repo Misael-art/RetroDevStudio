@@ -23,8 +23,18 @@
 //   i09       stream ORIGINAL do corpus (recurso 0xc8cc8) com o menor prefixo
 //             de dicionário que o produto aceita — linha de base de regressão.
 //   i18       edição canônica do corpus (byte 0 do plano ^ 0xF0) re-codificada
-//             pelo encoder atual; o slot original é registrado como medida
+//             pela entrada DP-first; o slot original é registrado como medida
 //             (needs_space), nunca forçado.
+//   i40       a MESMA edição canônica re-codificada pelo caminho de escrita do
+//             produto (`..._fitting`, com o slot como orçamento): são os bytes
+//             que a transação grava de fato.
+//   i30/i31/i41 idem para o fixture autoral: stream do rescomp, edição pela
+//             entrada DP-first e edição pelo caminho de escrita.
+//
+// Estratégias: desde a DP de custo explícito o produto tem DOIS caminhos
+// (guloso e DP) e ambos emitem o mesmo formato; o replay cobre os dois — os
+// casos sintéticos e i14/i18/i31 saem pela entrada DP-first, i40/i41 pela de
+// escrita. Os casos de fronteira i15/i16 são construídos à mão.
 //
 // Saída por caso em <outdir>/streams: <id>.stream, <id>.plain, <id>.dict e
 // rust_meta.tsv (compatível com gen_rust_cases.py).
@@ -35,7 +45,10 @@ use std::path::{Path, PathBuf};
 #[path = "rex_codecs.rs"]
 mod rex_codecs;
 
-use rex_codecs::{lz4w_decode_with_dictionary, lz4w_encode_with_dictionary, Lz4wLimits};
+use rex_codecs::{
+    lz4w_decode_with_dictionary, lz4w_encode_with_dictionary,
+    lz4w_encode_with_dictionary_index_fitting, Lz4wDictionaryIndex, Lz4wLimits,
+};
 
 const START: usize = 0xC8CC8;
 /// Cap do prefixo truncado: Work RAM total da Mega Drive é 64 KiB, e o harness
@@ -176,14 +189,24 @@ fn synth_cases(outdir: &Path) -> Vec<Case> {
 }
 
 /// off = 16384 words: o máximo que o ENCODER atual ainda alcança (janela de
-/// estratégia 0x4000). Dicionário de 16386 words com 0xBEEF no word 2 e plano
-/// de 3 words cuja única fonte é esse word.
+/// estratégia 0x4000). O dicionário tem 16386 words **duas a duas distintas** e
+/// o plano é a trinca `dict[2..5]`: cada word do plano tem uma única fonte no
+/// espaço combinado, exatamente a 16384 words. Com o dicionário de zeros
+/// (versão histórica) a DP achava um match curto auto-referente mais barato e o
+/// caso deixava de emitir o offset profundo — assim guloso e DP são obrigados ao
+/// MESMO token longo, e o replay exercita o teto das duas estratégias.
 fn encoder_deep_case(outdir: &Path) -> Case {
     let dict_words = 16386usize;
-    let mut dict = vec![0u16; dict_words];
-    dict[2] = 0xBEEF;
-    let dict = be_words(&dict);
-    let plain: Vec<u8> = vec![0xBE, 0xEF, 0x00, 0x00, 0x00, 0x00];
+    let dict_vals: Vec<u16> = (0..dict_words)
+        .map(|j| (0x0100u16 + j as u16) ^ 0xA5A5)
+        .collect();
+    assert_eq!(
+        dict_vals.iter().collect::<std::collections::HashSet<_>>().len(),
+        dict_words,
+        "dicionário com word repetida: o caso deixaria de ter fonte única"
+    );
+    let dict = be_words(&dict_vals);
+    let plain = be_words(&dict_vals[2..5]);
     let c = encoded_case(
         "i14_encoder_deep_16384",
         &plain,
@@ -275,7 +298,8 @@ fn corpus_cases(rom: &[u8], outdir: &Path) -> Vec<Case> {
         note: format!("original do corpus; prefixo mínimo aceito {p9} bytes"),
     });
 
-    // i18: edição canônica re-codificada pelo encoder ATUAL.
+    // i18: edição canônica re-codificada pelo encoder ATUAL (entrada DP-first,
+    // a mesma que o benchmark usa para medir capacidade).
     let mut edited = dec.data.clone();
     edited[0] ^= 0xF0;
     let stream18 = lz4w_encode_with_dictionary(&edited, Some(full)).expect("encode i18");
@@ -295,11 +319,44 @@ fn corpus_cases(rom: &[u8], outdir: &Path) -> Vec<Case> {
     );
     v.push(Case {
         id: "i18_corpus_edit_c8cc8",
-        plain: edited,
+        plain: edited.clone(),
         dict: rom[START - p18..START].to_vec(),
         stream: stream18,
         note: format!(
-            "edição canônica pelo encoder atual; prefixo {p18} bytes; slot original {} bytes",
+            "edição canônica pelo encoder atual (DP-first); prefixo {p18} bytes; slot original {} bytes",
+            dec.bytes_consumed
+        ),
+    });
+
+    // i40: os bytes que a TRANSAÇÃO escreve. O produto grava com orçamento de
+    // espaço (`..._fitting`, guloso preferido, DP como resgate); i18 é a entrada
+    // DP-first. Sem este caso o replay provaria um stream que o produto não
+    // escreve no corpus.
+    let index = Lz4wDictionaryIndex::build(full).expect("índice i40");
+    let (stream40, estrategia40) = lz4w_encode_with_dictionary_index_fitting(
+        &edited,
+        Some(&index),
+        dec.bytes_consumed,
+    )
+    .expect("encode i40");
+    let back = lz4w_decode_with_dictionary(&stream40, Some(full), &limits())
+        .expect("self-decode i40");
+    assert_eq!(back.data, edited, "i40: self-decode divergiu");
+    assert_eq!(back.bytes_consumed, stream40.len(), "i40: consumo parcial");
+    let p40 = minimal_prefix(&stream40, rom, &edited);
+    eprintln!(
+        "i40-slot: stream {} bytes (estratégia {estrategia40:?}) vs slot {} bytes",
+        stream40.len(),
+        dec.bytes_consumed
+    );
+    v.push(Case {
+        id: "i40_corpus_edit_fitting_c8cc8",
+        plain: edited,
+        dict: rom[START - p40..START].to_vec(),
+        stream: stream40,
+        note: format!(
+            "edição canônica pelo caminho de escrita do produto (fitting, {estrategia40:?}); \
+             prefixo {p40} bytes; slot original {} bytes",
             dec.bytes_consumed
         ),
     });
@@ -404,13 +461,53 @@ fn fixture_cases(outdir: &Path) -> Vec<Case> {
     );
     v.push(Case {
         id: "i31_fixture_product_edit",
-        plain: edited,
+        plain: edited.clone(),
         dict: rom[start - p31..start].to_vec(),
         stream: stream31,
         note: format!(
-            "edicao plantada (tile 0, linha 5, col 7 -> idx 15) pelo encoder do produto; \
-             {} bytes; slot {}; prefixo minimo {p31}",
+            "edicao plantada (tile 0, linha 5, col 7 -> idx 15) pelo encoder do produto \
+             (DP-first); {} bytes; slot {}; prefixo minimo {p31}",
             len31,
+            dec.bytes_consumed
+        ),
+    });
+
+    // i41: os bytes que a TRANSAÇÃO escreve no fixture — o caminho de escrita
+    // com orçamento de espaço, preferindo a pegada pequena do guloso.
+    let index = Lz4wDictionaryIndex::build(full).expect("indice i41");
+    let (stream41, estrategia41) = lz4w_encode_with_dictionary_index_fitting(
+        &edited,
+        Some(&index),
+        dec.bytes_consumed,
+    )
+    .expect("encode i41");
+    let back = lz4w_decode_with_dictionary(&stream41, Some(full), &limits())
+        .expect("self-decode i41");
+    assert_eq!(back.data, edited, "i41: self-decode divergiu");
+    assert_eq!(
+        back.bytes_consumed,
+        stream41.len(),
+        "i41: consumo parcial"
+    );
+    let p41 = minimal_prefix_at(&stream41, &rom, start, &edited);
+    assert!(
+        stream41.len() <= dec.bytes_consumed,
+        "i41: o caminho de escrita deixou de caber no espaco do fixture"
+    );
+    eprintln!(
+        "i41-slot: stream {} bytes (estrategia {estrategia41:?}) vs slot {} bytes",
+        stream41.len(),
+        dec.bytes_consumed
+    );
+    let len41 = stream41.len();
+    v.push(Case {
+        id: "i41_fixture_edit_fitting",
+        plain: edited,
+        dict: rom[start - p41..start].to_vec(),
+        stream: stream41,
+        note: format!(
+            "edicao plantada pelo caminho de escrita do produto (fitting, {estrategia41:?}); \
+             {len41} bytes; slot {}; prefixo minimo {p41}",
             dec.bytes_consumed
         ),
     });

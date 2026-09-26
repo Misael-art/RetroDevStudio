@@ -49,7 +49,7 @@ cat "$W/driver.stdout" "$W/driver.stderr"
 # divergir; o produto recusa a stream).
 RUNS="runI:i20_lits_odd,i21_short_mix,i22_long_far_nodict,i23_long_zero_value,i24_dict_mixed
 runC:i09_corpus_orig_c8cc8
-runE:i18_corpus_edit_c8cc8
+runE:i18_corpus_edit_c8cc8,i40_corpus_edit_fitting_c8cc8
 run14:i14_encoder_deep_16384
 run15:i15_hardware_ceiling_16385
 run16:i16_beyond_ceiling_16386"
@@ -58,7 +58,7 @@ run16:i16_beyond_ceiling_16386"
 # (scripts/rex_profiles/integrator/lz4w_fixture/build-fixture.sh). Sem ela, o
 # replay do corpus segue valendo para o contrato do codec.
 if [ -n "${RDS_REX_LZ4W_FIXTURE_ROM:-}" ] && [ -f "${RDS_REX_LZ4W_FIXTURE_ROM}" ]; then
-  RUNS="$RUNS runF:i30_fixture_rescomp_orig,i31_fixture_product_edit"
+  RUNS="$RUNS runF:i30_fixture_rescomp_orig,i31_fixture_product_edit,i41_fixture_edit_fitting"
   echo "fixture ativo: $RDS_REX_LZ4W_FIXTURE_ROM"
 fi
 
