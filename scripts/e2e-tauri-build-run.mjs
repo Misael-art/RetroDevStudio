@@ -9953,10 +9953,32 @@ async function runRexLz4wFixtureEffectScenario(sessionId) {
   await setPanelInput("rex-resource-edit-col", 0);
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
   await pause(400);
+  // O que este negativo pode observar pela interface: (1) nada entra na fila e
+  // (2) o painel EXPLICA o descarte em vez de calar (6351f15 passou a renderizar
+  // "nenhuma edição pendente" quando a fila está vazia — a asserção antiga exigia
+  // o literal "0 …" e apodreceu sem que o E2E fosse reexecutado). A recusa do
+  // núcleo (rex_resources.rs, "tile N fora do recurso") é provada no teste
+  // unitário do produto, não aqui.
   const guardedCount = await textOf("rex-resource-edit-count");
-  if (!/^\s*0\b/.test(guardedCount)) {
+  if (!/^\s*(0\b|nenhuma edição)/.test(guardedCount)) {
     fail(`edição com tile ${TILE_COUNT} (fora do recurso de ${TILE_COUNT} tiles) entrou na fila da UI: ${guardedCount}`);
   }
+  const guardNotice = await waitFor(
+    async () => {
+      const notice = await textOf("rex-resource-notice");
+      return notice.includes(`tile ${TILE_COUNT} fora do recurso`) &&
+        notice.includes("fila atual foi preservada")
+        ? notice
+        : false;
+    },
+    10000,
+    `o painel não explicou o descarte da edição fora do intervalo (fila: ${guardedCount}).`,
+    250
+  );
+  record(10, "negativo de intervalo pela interface: fila vazia E aviso explicando o descarte", {
+    editCount: guardedCount.trim(),
+    notice: guardNotice,
+  });
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
   const boundsOutcome = await waitFor(
     async () => {
@@ -10011,7 +10033,7 @@ async function runRexLz4wFixtureEffectScenario(sessionId) {
   await waitFor(async () => (await textOf("rex-resource-rom-sha")).includes(romSha.slice(0, 16)), 30000, "fixture original não reabriu após os negativos.", 250);
   const fixtureAfterNegatives = sha(await readFile(fixtureRomPath));
   if (fixtureAfterNegatives !== romSha) fail(`fixture autoral foi alterada durante o teste: ${fixtureAfterNegatives}`);
-  record(10, "negativos pela UI: fila de intervalo guardada (0 entradas, 0 escritas; controle positivo enfileira 1) e identidade de ROM recusada (arquivo alterado sob o painel)", {
+  record(11, "negativos pela UI: fila de intervalo guardada (0 entradas, 0 escritas; controle positivo enfileira 1) e identidade de ROM recusada (arquivo alterado sob o painel)", {
     bounds: boundsProof, identityError, fixtureRomIntact: true,
     excessiveOutput: "coberto no teste de aceite do produto com varredura exaustiva de 15.360 candidatos de 1 pixel (README do fixture)",
     dependentModified: "não alcançável aqui: o fixture tem 1 recurso LZ4W; coberto no BYOR (0x91a00 dependente de 0x8ff8e)",
