@@ -780,6 +780,44 @@ mod tests {
         (rom, r1, r2)
     }
 
+    /// A fronteira de intervalo é da transação, não da UI: o painel descarta
+    /// edits com tile >= num_tiles no cliente
+    /// (`CompressedResourcePanel.tsx`, botão "Adicionar edição"), então só a
+    /// API do produto exercita a recusa. Ela acontece antes de qualquer escrita.
+    #[test]
+    fn apply_rejects_tile_outside_resource_without_writing() {
+        let (rom, r1, _r2) = synthetic_rom();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("relogio")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rds-rex-bounds-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("diretorio temporario");
+        let path = dir.join("rom.bin");
+        std::fs::write(&path, &rom).expect("escrever rom");
+        let sha = super::super::rom_library::sha256_hex(&rom);
+        let out_of_range_tile = r1.candidate.num_tiles as u32;
+        let err = apply_resource_edit(
+            path.to_str().expect("utf8"),
+            r1.candidate.stream_offset as u64,
+            &[PixelEdit {
+                tile: out_of_range_tile,
+                row: 0,
+                col: 0,
+                index: 15,
+            }],
+            &sha,
+        )
+        .expect_err("tile igual a num_tiles esta fora do recurso");
+        assert!(err.contains("fora do recurso"), "recusa inesperada: {err}");
+        assert_eq!(
+            std::fs::read(&path).expect("reler rom"),
+            rom,
+            "a recusa de intervalo alterou a ROM"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn transaction_rejects_rom_identity_mismatch() {
         let (rom, r1, _r2) = synthetic_rom();
@@ -1169,9 +1207,9 @@ mod tests {
             }
         }
         // Pixels específicos: (0,0)=0, (1,0)=1 e (0,1)=8 (linha 1, nibble alto).
-        assert_eq!(rgba[(0 * 8 + 0) * 4], 0);
-        assert_eq!(rgba[(0 * 8 + 1) * 4], 16);
-        assert_eq!(rgba[(1 * 8 + 0) * 4], 128);
+        assert_eq!(rgba[0], 0);
+        assert_eq!(rgba[4], 16);
+        assert_eq!(rgba[32], 128);
     }
 
     /// Enumera recursos LZ4W do corpus que aceitam a edição mínima (para
