@@ -14,6 +14,7 @@
 //! LZ4W estruturalmente verificados desta ROM) — os limites estão no
 //! resultado, nunca apresentados como equivalência global do jogo.
 
+use super::rex_aplib::{aplib_decode, AplibLimits};
 use super::rex_codecs::{lz4w_decode_with_dictionary, CodecError, Lz4wLimits};
 
 /// Codec declarado por um header TileSet do SGDK.
@@ -123,6 +124,53 @@ pub fn verify_lz4w_resource(
         ));
     }
     Ok(VerifiedLz4wResource {
+        candidate: candidate.clone(),
+        decoded: decoded.data,
+        bytes_consumed: decoded.bytes_consumed,
+    })
+}
+
+/// Recurso aPLib verificado: o stream decodifica exatamente para o tamanho
+/// declarado pelo header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedAplibResource {
+    pub candidate: TilesetCandidate,
+    pub decoded: Vec<u8>,
+    pub bytes_consumed: usize,
+}
+
+/// Verifica um candidato aPLib: decode **sem dicionário** e tamanho exato.
+///
+/// Diferente do LZ4W, o stream aPLib é autônomo: não consome o prefixo da ROM,
+/// então não há dependentes por dicionário — em contrapartida é
+/// `bytes_consumed` que separa o recurso do bloco vizinho, e o decode lê até o
+/// EOD sem saber onde a ROM termina.
+pub fn verify_aplib_resource(
+    rom: &[u8],
+    candidate: &TilesetCandidate,
+    limits: &AplibLimits,
+) -> Result<VerifiedAplibResource, CodecError> {
+    if candidate.compression != TilesetCompression::Aplib {
+        return Err(CodecError::new(
+            "invalid_reference",
+            "verificação aPLib exige header com compression=1",
+        ));
+    }
+    let stream = rom
+        .get(candidate.stream_offset..)
+        .ok_or_else(|| CodecError::new("invalid_reference", "stream fora da ROM"))?;
+    let decoded = aplib_decode(stream, limits)?;
+    if decoded.data.len() != candidate.expected_len {
+        return Err(CodecError::new(
+            "invalid_reference",
+            format!(
+                "decode aPLib produziu {} bytes, header declara {}",
+                decoded.data.len(),
+                candidate.expected_len
+            ),
+        ));
+    }
+    Ok(VerifiedAplibResource {
         candidate: candidate.clone(),
         decoded: decoded.data,
         bytes_consumed: decoded.bytes_consumed,
@@ -729,6 +777,133 @@ pub fn apply_resource_edit(
 mod tests {
     use super::super::rex_codecs::lz4w_encode_with_dictionary;
     use super::*;
+    use std::path::PathBuf;
+
+    /// Stream aPLib real de oráculo, lido da fixture autoral versionada e
+    /// conferido contra o SHA-256 pinado no `manifest.tsv` dos vetores.
+    /// Ausência é falha de teste, não skip.
+    fn vetor_aplib(rel: &str, sha256_pinado: &str) -> Vec<u8> {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../data/rex_profiles/integrator/aplib/vectors");
+        let caminho = dir.join(rel);
+        let bytes = std::fs::read(&caminho).unwrap_or_else(|e| {
+            panic!(
+                "vetor aPLib obrigatório ausente: {}: {e}",
+                caminho.display()
+            )
+        });
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(&bytes),
+            sha256_pinado,
+            "vetor aPLib divergiu do hash pinado: {}",
+            caminho.display()
+        );
+        bytes
+    }
+
+    // `tile_like`: 8 192 B de dados em formato de tile (= 256 tiles de 32 B),
+    // comprimido por apultra e apj em streams idênticos de 41 B.
+    const SHA_STREAM_TILE_LIKE: &str =
+        "f494516d9e040b423342e2f1d120c31853d69d16798f99b2fcb00031e7989fa9";
+    const SHA_PLAIN_TILE_LIKE: &str =
+        "b81313391be143a836534d3a4ef99c978db8e730170c0d207893f2d8b2b5a03f";
+    const TILE_LIKE: &str = "plain/tile_like.apj.ap";
+    const TILE_LIKE_TILES: u16 = 256;
+    const TILE_LIKE_LEN: usize = 8192;
+
+    /// ROM sintética com um header TileSet APLIB (`compression=1`) apontando
+    /// para o stream, seguido de sentinela: os bytes depois do EOD pertencem ao
+    /// bloco vizinho e não podem ser consumidos.
+    fn rom_aplib_sintetica(num_tiles: u16) -> Vec<u8> {
+        let stream = vetor_aplib(TILE_LIKE, SHA_STREAM_TILE_LIKE);
+        let mut rom = vec![0u8; 16];
+        rom[0..2].copy_from_slice(&1u16.to_be_bytes());
+        rom[2..4].copy_from_slice(&num_tiles.to_be_bytes());
+        rom[4..8].copy_from_slice(&16u32.to_be_bytes());
+        rom.extend_from_slice(&stream);
+        rom.extend_from_slice(&[0xA5u8; 8]);
+        rom
+    }
+
+    #[test]
+    fn verify_aplib_resource_decodifica_header_aplib_e_para_no_eod() {
+        let rom = rom_aplib_sintetica(TILE_LIKE_TILES);
+        let candidato = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.header_offset == 0 && c.compression == TilesetCompression::Aplib)
+            .expect("header TileSet APLIB em 0 não foi scanneado");
+        assert_eq!(candidato.stream_offset, 16);
+        assert_eq!(candidato.num_tiles, TILE_LIKE_TILES as usize);
+        assert_eq!(candidato.expected_len, TILE_LIKE_LEN);
+        let verificado = verify_aplib_resource(&rom, &candidato, &AplibLimits::default())
+            .expect("recurso aPLib sintético foi recusado");
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(&verificado.decoded),
+            SHA_PLAIN_TILE_LIKE,
+            "o decode não bate com o plain pinado pelo oráculo"
+        );
+        assert_eq!(verificado.decoded.len(), TILE_LIKE_LEN);
+        assert_eq!(
+            verificado.bytes_consumed,
+            vetor_aplib(TILE_LIKE, SHA_STREAM_TILE_LIKE).len(),
+            "consumo deveria parar no byte seguinte ao EOD"
+        );
+        assert_eq!(
+            &rom[16 + verificado.bytes_consumed..16 + verificado.bytes_consumed + 8],
+            &[0xA5u8; 8],
+            "a sentinela do bloco vizinho foi lida como parte do stream"
+        );
+    }
+
+    #[test]
+    fn verify_aplib_resource_recusa_tamanho_declarado_divergente_e_header_de_outro_codec() {
+        // 255 tiles declarados (8 160 B) contra um stream que produz 8 192 B: o
+        // tamanho do header é a condição de verificação, não uma dica.
+        let rom = rom_aplib_sintetica(TILE_LIKE_TILES - 1);
+        let candidato = TilesetCandidate {
+            header_offset: 0,
+            compression: TilesetCompression::Aplib,
+            num_tiles: (TILE_LIKE_TILES - 1) as usize,
+            stream_offset: 16,
+            expected_len: TILE_LIKE_LEN - 32,
+        };
+        let erro = verify_aplib_resource(&rom, &candidato, &AplibLimits::default())
+            .err()
+            .expect("header com tamanho declarado errado deveria ser recusado");
+        assert_eq!(erro.code, "invalid_reference", "{erro}");
+
+        let mut rom_lz4w = rom_aplib_sintetica(TILE_LIKE_TILES);
+        rom_lz4w[1] = 2; // compression=2 (LZ4W) no mesmo header
+        let candidato_aplib = TilesetCandidate {
+            header_offset: 0,
+            compression: TilesetCompression::Lz4w,
+            num_tiles: TILE_LIKE_TILES as usize,
+            stream_offset: 16,
+            expected_len: TILE_LIKE_LEN,
+        };
+        let erro = verify_aplib_resource(&rom_lz4w, &candidato_aplib, &AplibLimits::default())
+            .err()
+            .expect("verificação aPLib deveria recusar header LZ4W");
+        assert_eq!(erro.code, "invalid_reference", "{erro}");
+    }
+
+    #[test]
+    fn verify_lz4w_resource_continua_recusando_header_aplib() {
+        // Guarda simétrica: o incremento aPLib não abre a via LZ4W para
+        // compression=1.
+        let rom = rom_aplib_sintetica(TILE_LIKE_TILES);
+        let candidato = TilesetCandidate {
+            header_offset: 0,
+            compression: TilesetCompression::Aplib,
+            num_tiles: TILE_LIKE_TILES as usize,
+            stream_offset: 16,
+            expected_len: TILE_LIKE_LEN,
+        };
+        let erro = verify_lz4w_resource(&rom, &candidato, &Lz4wLimits::default())
+            .err()
+            .expect("guarda LZ4W foi aberta");
+        assert_eq!(erro.code, "invalid_reference", "{erro}");
+    }
 
     fn hamoopig_rom() -> Option<(Vec<u8>, String)> {
         let path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
