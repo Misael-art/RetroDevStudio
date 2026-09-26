@@ -1838,6 +1838,29 @@ mod tests {
             "RDS_REX_BENCH_OUT tem de ser absoluto (recebido: {out_dir})"
         );
         std::fs::create_dir_all(&out_dir).expect("criar RDS_REX_BENCH_OUT");
+        // Dumps de material para o instrumento de piso (`dp_floor.py`), que é
+        // Python e precisa do plain/dicionário/stream de cada recurso. São
+        // OPCIONAIS e nunca podem cair dentro do repositório: o corpus S-B é
+        // ROM comercial, e bytes comerciais não vão para o git (AGENTS.md).
+        let dump_dir = std::env::var("RDS_REX_BENCH_DUMP_DIR")
+            .ok()
+            .filter(|v| !v.is_empty());
+        let mut dump_index: Vec<serde_json::Value> = Vec::new();
+        if let Some(dir) = &dump_dir {
+            let path = std::path::Path::new(dir);
+            assert!(
+                path.is_absolute(),
+                "RDS_REX_BENCH_DUMP_DIR tem de ser absoluto (recebido: {dir})"
+            );
+            let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+            let repo = crate_dir.parent().unwrap_or(crate_dir);
+            assert!(
+                !path.starts_with(repo),
+                "RDS_REX_BENCH_DUMP_DIR aponta para dentro do repositório ({dir}): o dump contém \
+                 plain de ROM comercial e só pode ser escrito fora de {repo:?}"
+            );
+            std::fs::create_dir_all(path).expect("criar RDS_REX_BENCH_DUMP_DIR");
+        }
         let corpus_path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
             "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin".to_string()
         });
@@ -1984,6 +2007,36 @@ mod tests {
                         EDIT_SAMPLE_BITS,
                     ),
                 }));
+                if let (Some(dir), Ok(stream)) = (&dump_dir, base.as_ref()) {
+                    let stem = format!("{conjunto}-{start:08x}");
+                    let writes = [
+                        (
+                            format!("{dir}/{stem}-plain.bin"),
+                            resource.decoded.as_slice(),
+                        ),
+                        (format!("{dir}/{stem}-dict.bin"), dict_bytes),
+                        (format!("{dir}/{stem}-produto.stream"), stream.as_slice()),
+                        (
+                            format!("{dir}/{stem}-rescomp.stream"),
+                            &rom[start..start + slot],
+                        ),
+                    ];
+                    for (path, bytes) in writes {
+                        std::fs::write(&path, bytes)
+                            .unwrap_or_else(|e| panic!("escrever {path}: {e}"));
+                    }
+                    dump_index.push(serde_json::json!({
+                        "conjunto": conjunto,
+                        "grupo": if conjunto == "S-A-fixture" { "referencia" }
+                            else if index % 5 == 0 { "validacao" } else { "ajuste" },
+                        "recurso": format!("{start:#x}"),
+                        "stem": stem,
+                        "plain_len": resource.decoded.len(),
+                        "slot": slot,
+                        "dict_bytes": dict_bytes.len(),
+                        "produto_len": stream.len(),
+                    }));
+                }
                 let ms = elapsed.elapsed().as_millis();
                 if ms > PER_RESOURCE_BUDGET_MS {
                     estouro_por_recurso.push(format!(
@@ -2092,6 +2145,24 @@ mod tests {
         )
         .expect("escrever bench.json");
 
+        if let Some(dir) = &dump_dir {
+            std::fs::write(
+                format!("{dir}/dumps-index.json"),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "roms": { "S-B": corpus_sha, "S-A": fixture_sha },
+                    "dicionario": "cauda de DICT_TAIL_BYTES bytes do prefixo do stream (equivale ao \
+                                   prefixo integral: asserção janela_dicionario)",
+                    "recursos": dump_index,
+                }))
+                .expect("serializar índice de dumps"),
+            )
+            .expect("escrever dumps-index.json");
+            eprintln!(
+                "[bench] dumps de material: {} recursos em {dir}",
+                dump_index.len()
+            );
+        }
+
         eprintln!(
             "[bench] S-B={} coube_ajuste={} coube_validacao={} folga_total={}B com_folga>=0={} rodada={}ms/{}ms{}",
             s_b.len(),
@@ -2111,6 +2182,83 @@ mod tests {
         assert!(
             round_ms <= ROUND_BUDGET_MS * 4,
             "benchmark extrapola o orçamento em mais de 4x: {round_ms}ms"
+        );
+    }
+
+    /// Barreira do instrumento de piso com o decodificador REAL do produto.
+    ///
+    /// `dp_floor.py` valida o próprio modelo contra busca exaustiva e contra o
+    /// tokenizador Python de `tokens.py`; nenhum dos dois é o código do produto.
+    /// Este teste fecha essa lacuna: pega cada stream de piso escrito por
+    /// `floor_sweep.py --escrever-streams` e o decodifica com
+    /// `lz4w_decode_with_dictionary`, o mesmo caminho que a transação usa. Se um
+    /// stream de piso não voltar ao plain exato consumindo-se inteiro, o "piso"
+    /// medido é bug de modelo, não margem do codificador — e a varredura inteira
+    /// é descartada.
+    ///
+    /// Receita: ver §9 de `scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md`.
+    #[test]
+    #[ignore = "verifica dumps descartáveis de /tmp; exige RDS_REX_BENCH_DUMP_DIR + --escrever-streams"]
+    fn piso_streams_do_dp_decodificam_pelo_decoder_do_produto() {
+        let dir = std::env::var("RDS_REX_BENCH_DUMP_DIR")
+            .expect("RDS_REX_BENCH_DUMP_DIR ausente: o verificador consome os dumps do benchmark");
+        let path = std::path::Path::new(&dir);
+        assert!(
+            path.is_absolute(),
+            "RDS_REX_BENCH_DUMP_DIR tem de ser absoluto (recebido: {dir})"
+        );
+        let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let repo = crate_dir.parent().unwrap_or(crate_dir);
+        assert!(
+            !path.starts_with(repo),
+            "o diretório de dumps ({dir}) está dentro do repositório: contém plain de ROM comercial"
+        );
+
+        let indice: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(path.join("dumps-index.json"))
+                .expect("dumps-index.json ausente no diretório de dumps"),
+        )
+        .expect("dumps-index.json ilegível");
+        let recursos = indice["recursos"].as_array().expect("recursos[]");
+        assert!(
+            !recursos.is_empty(),
+            "índice de dumps vazio: nada verificado"
+        );
+
+        let limits = Lz4wLimits::default();
+        let mut verificados = 0usize;
+        let mut ganho_total_bytes = 0i64;
+        for entry in recursos {
+            let stem = entry["stem"].as_str().expect("stem");
+            let recurso = entry["recurso"].as_str().expect("recurso");
+            let stream = match std::fs::read(path.join(format!("{stem}-piso.stream"))) {
+                Ok(b) => b,
+                Err(_) => panic!("{recurso}: {stem}-piso.stream ausente — rode floor_sweep.py com --escrever-streams"),
+            };
+            let dict = std::fs::read(path.join(format!("{stem}-dict.bin"))).expect("dict");
+            let plain = std::fs::read(path.join(format!("{stem}-plain.bin"))).expect("plain");
+            let decodificado = lz4w_decode_with_dictionary(&stream, Some(&dict), &limits)
+                .unwrap_or_else(|e| panic!("{recurso}: stream de piso recusado pelo decoder: {e}"));
+            assert_eq!(
+                decodificado.data, plain,
+                "{recurso}: stream de piso não reproduz o plain — o 'piso' é bug de modelo"
+            );
+            assert_eq!(
+                decodificado.bytes_consumed,
+                stream.len(),
+                "{recurso}: stream de piso consumido parcialmente"
+            );
+            verificados += 1;
+            ganho_total_bytes += entry["produto_len"].as_i64().unwrap_or(0) - stream.len() as i64;
+        }
+        assert_eq!(
+            verificados,
+            recursos.len(),
+            "todo recurso do índice tem de ser verificado"
+        );
+        eprintln!(
+            "[piso] {verificados} streams de piso decodificados pelo decoder do produto; \
+             ganho total sobre o stream do produto = {ganho_total_bytes} B"
         );
     }
 
