@@ -49,20 +49,34 @@ B, e esta frente não reconstruiu o binário a partir do fonte.
 
 ## Reexecutar
 
+A reconstrução é determinística: os `.ap` e `.expected.bin` abaixo são
+byte-idênticos aos `.ap`/`.pred-A.bin` que o script escreve (verificado nesta
+data com `cmp` nos quatro arquivos).
+
 ```bash
+cd <raiz do repositório>
 python3 scripts/rex_profiles/integrator/aplib/gen_discriminating_vector.py --saidas /tmp/disc
+D=data/rex_profiles/integrator/aplib/discriminating
 for n in rep_after_cmd110 rep_after_short111; do
+  cmp /tmp/disc/$n.ap          $D/$n.ap          # stream reproduzido == commitado
+  cmp /tmp/disc/$n.pred-A.bin  $D/$n.expected.bin # predição A == pino commitado
+  # os dois oráculos têm que reproduzir o pino, cada um por si:
   ~/.cache/rex-codecs/oracle-tools/apultra -d /tmp/disc/$n.ap /tmp/disc/$n.apultra.bin
-  java -jar ~/.cache/rex-codecs/oracle-tools/SGDK211/bin/apj.jar u /tmp/disc/$n.ap /tmp/disc/$n.apj.bin s
-  cmp /tmp/disc/$n.apultra.bin /tmp/disc/$n.expected.bin 2>/dev/null \
-    || cmp /tmp/disc/$n.apultra.bin /tmp/disc/$n.pred-A.bin
-  cmp /tmp/disc/$n.apj.bin /tmp/disc/$n.pred-A.bin
+  java -jar ~/.cache/rex-codecs/oracle-tools/SGDK211/bin/apj.jar u \
+      /tmp/disc/$n.ap /tmp/disc/$n.apj.bin s
+  cmp /tmp/disc/$n.apultra.bin $D/$n.expected.bin  # oráculo 1
+  cmp /tmp/disc/$n.apj.bin     $D/$n.expected.bin  # oráculo 2
+  # e nem a predição do bug (alternativa rejeitada) coincide:
+  ! cmp -s /tmp/disc/$n.apultra.bin /tmp/disc/$n.pred-B.bin
+  ! cmp -s /tmp/disc/$n.apj.bin     /tmp/disc/$n.pred-B.bin
 done
 ```
 
 ## Onde é coberto no produto
 
-`src-tauri/src/tools/reverse/decomp/rex_aplib.rs::tests::
-aplib_rep_match_depois_de_cmd110_usa_o_offset_do_cmd` e
-`aplib_rep_match_depois_de_111_usa_o_ultimo_offset_explicito`, mais o aceite
-BYOR `rex_resources.rs::tests::byor_aplib_decodifica_os_dois_streams_do_tiledimage_visivel`.
+Um único teste cobre os dois casos:
+`src-tauri/src/tools/reverse/decomp/rex_aplib.rs::tests::aplib_rep_match_depois_de_110_e_de_111_usa_o_offset_correto`
+(lê os quatro arquivos deste diretório, exige `decode == .expected.bin`,
+`bytes_consumed == len(stream)` e `esperado != bug`). Mais o aceite BYOR
+`rex_resources.rs::tests::byor_aplib_decodifica_os_dois_streams_do_tiledimage_visivel`,
+que é onde a divergência original foi medida.

@@ -199,3 +199,51 @@ Referências: `docs/handoffs/PROMPT_REX_INTEGRATOR_RESUME_2026-09-26.md` (a
 afirmação do alvo, §"A identificou um alvo alternativo"), `docs/rex_profiles/
 CONTRACTS.md` §"Propriedade de arquivos", §4 e §5, `docs/rex_profiles/ROUND_STATE.md`
 (linha aPLib da matriz de codecs e o estado de `0xc8cc8`).
+
+## 8. Adendo do integrador (2026-09-26, mesma data) — o que a frente executou
+
+Este adendo **não reescreve** as seções acima: elas ficam como registro do
+estado em que a frente abriu. O que mudou desde então, com caminho e commit.
+
+**Superado:** §4.3 ("não há nenhum decoder aPLib em Rust"). O decoder existe em
+`src-tauri/src/tools/reverse/decomp/rex_aplib.rs` (`aplib_decode`,
+`AplibLimits`), commits `d27be00` (decoder) e `9fb2c12` (`verify_aplib_resource`
+em `rex_resources.rs:148`, ligado à cadeia de recurso sem tocar a via LZ4W).
+
+**Ordem de aceite da §6, estado real:**
+
+| Passo da §6 | Estado | Evidência |
+|---|---|---|
+| 1. importar o conjunto pinado com proveniência | **feito** | `9a9b66d`: `data/rex_profiles/integrator/aplib/vectors/` (49 arquivos = 16 plains+oráculos, 18 goldens, 14 negativos, `manifest.tsv`), `manifest.json` com SHA por arquivo, procedência e o hash agregado `3a9d7e9e…`; re-verificável por `python3 scripts/rex_profiles/integrator/aplib/verify_vectors.py data/rex_profiles/integrator/aplib/vectors` (rc=0). O pino do produto é **este** diretório; nenhuma cópia de A nem de B foi editada. |
+| 2. decode aceito pelos vetores (plain **e** `bytes_consumed`, negativos com erro exato) | **feito** | 9 testes em `rex_aplib.rs::tests` — 8 duplas cross-oráculo, 9 goldens com consumo exato (discriminante `g08` = 6, não 11), 7 negativos com o código estruturado, mais os 3 limites de política (`work_limit`, `excessive_output`, `overflow` por gamma2 sem fim) que a §6 já declarava como decisão de produto sem vetor de oráculo. |
+| 3. paridade bidirecional com os oráculos (exige `encode`) | **aberto** | Não há encoder aPLib. É o pré-requisito tanto da paridade quanto do objetivo da rodada ("recurso comprimido editável **sem expansão**"): sem `encode` com `needs_space` honesto, nenhum recurso APLIB é editável. |
+| 4. ligação com o recurso real | **parcial** | Feito: identificação a partir do header TileSet `0x21b44` pelo scanner do produto, decode dos **dois** streams reais (`0x2e4d4`: 4485 → 16000 B; `0x2d534`: 1196 → 2240 B) com hashes pinados, no teste ignorável `byor_aplib_decodifica_os_dois_streams_do_tiledimage_visivel` (`a69614e`), e perna independente em JS (`scripts/rex_profiles/integrator/aplib/byor_cross_check.mjs`, que extrai o `aplib.mjs` da agente A por `git show` e pina o conteúdo `62425497…`). Aberto: reproduzir os 95,90 % de correspondência por pixel **dentro do produto**, reconstrução visual e reinserção com transação — etapas que a §6 já separava. |
+
+**Achado que a frente adiciona ao contrato (a §3 estava incompleta):** quem
+escreve em `offset_history` são os tokens `10` **e `110`**; `111` não escreve e
+devolve LWM a 3. A §3 listava os ajustes e o rep-match, mas não fixava o `110`.
+Sem essa regra o decoder passou nos 49 arquivos importados e divergiu dos dois
+decodificadores de referência em **703 dos 16 000 bytes** do TileSet real — foi
+assim que a arbitragem BYOR virou o teste decisivo. Corrigido em `d10d5ab`; os
+dois casos ficaram pinados em `data/rex_profiles/integrator/aplib/discriminating/`
+(`rep_after_cmd110`, `rep_after_short111`) com receita de reconstrução e dos dois
+oráculos em `ORIGEM.md`. Consequência para a integridade do pacote de B: **os 49
+vetores continuam íntegros e passam**; a lacuna era de cobertura, não de conteúdo,
+e por isso os novos vetores entraram num diretório irmão, não dentro do conjunto
+pinado. Isso é insumo para `CONTRACTS` v2 (atribuição do integrador, com
+justificativa — não edição silenciosa do contrato alheio).
+
+**Sobre os dois pontos da §5:** (a) o `apj.jar` usado na arbitragem teve o SHA-256
+`2d8cdc63…` conferido contra a procedência **antes** da primeira execução, e o
+binário `apultra` executado está registrado em `ORIGEM.md` com o SHA *deste
+exemplar* (`64be2a7a…`) — a frente não reconstruiu o binário a partir do commit
+`8f340057…`, limite declarado. Os três arquivos não rastreados da raiz
+(`APJ-unpack`, `a.out`, `apultra-decode`) **não** foram usados, stagingados ou
+apagados; continuam como estão. (b) a dependência de corpus segue valendo: o
+aceite é `#[ignore]`, falha honesta se faltar arquivo ou identidade, e o produto
+fica verde sem a ROM.
+
+**Estado da matriz (`ROUND_STATE.md`):** a linha aPLib **não foi promovida** — a
+missão desta rodada veta promoção de maturidade, merge e release. As células
+seguem `blocked`/`fixture`, e a evidência acima fica registrada como evidência,
+não como estado de célula.

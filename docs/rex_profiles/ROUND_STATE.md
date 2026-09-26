@@ -58,23 +58,70 @@ roda no console. Evidência, derivação do teto e limites em `LZ4W_68K_ORACLE.m
 33 testes de LZ4W na suíte do lib + aceites ignoráveis (bench congelado, piso,
 aceite BYOR e aceite do fixture).
 
-aPLib — **frente seguinte, nada promovido**: o consolidado do que existe e onde
-existe (evidência TiledImage da agente A em `codex/rex-a-addressing`, pacote de
-contrato e vetores da agente B em `codex/rex-b-codecs`), as verificações
-independentes refeitas hoje (hash agregado `3a9d7e9e…` recomputado da árvore de
-B; os 9 goldens byte-idênticos entre os dois namespaces) e a ordem de aceite da
-implementação em Rust canônico estão em
-`APLIB_TILEDIMAGE_PROXIMA_PROVA_2026-09-26.md`. Estado do produto verificado por
-grep: só o rótulo `TilesetCompression::Aplib` (`rex_resources.rs:23`, mapeamento
-em `:54`) e **nenhum decoder** — o produto reconhece o header do alvo
-(`0x21b44`, TileSet APLIB de 500 tiles em `0x2e4d4`) e não decodifica o stream
-dele. Duas divergências ficam registradas em vez de resolvidas por alegação: (a) a
+aPLib — **decoder em Rust canônico existe e aceita os vetores pinados; nada
+promovido nesta matriz**. O consolidado do que existia antes da frente (evidência
+TiledImage da agente A em `codex/rex-a-addressing`, pacote de contrato e vetores
+da agente B em `codex/rex-b-codecs`, hash agregado `3a9d7e9e…` recomputado da
+árvore de B, os 9 goldens byte-idênticos entre os dois namespaces) e a ordem de
+aceite estão em `APLIB_TILEDIMAGE_PROXIMA_PROVA_2026-09-26.md`, com adendo datado
+registrando o que a frente executou.
+
+Estado do produto (medido, não alegado): `aplib_decode` + `AplibLimits` em
+`src-tauri/src/tools/reverse/decomp/rex_aplib.rs` (variante SGDK **raw sem header
+`"AP\0"`**), 9 testes na suíte do lib aceitando as 8 duplas de oráculo, os 9
+goldens com `bytes_consumed` exato (o discriminante `g08`), os 7 negativos com o
+erro estruturado próprio e os 3 limites de política (`work_limit`,
+`excessive_output`, `overflow` por gamma2 sem fim); `verify_aplib_resource` em
+`rex_resources.rs:148` liga o codec à cadeia de recurso (recusa `compression !=
+Aplib`, exige `expected_len`, decodifica **sem dicionário**) com 3 testes
+sintéticos, e a via LZ4W continua recusando header APLIB (teste
+`verify_lz4w_resource_continua_recusando_header_aplib`) — os dois codecs não se
+alcançam entre si.
+Vetores importados para namespace próprio do integrador
+(`data/rex_profiles/integrator/aplib/vectors/`, 49 arquivos, `manifest.json` com
+SHA por arquivo e o hash agregado) e a **cópia em `codecs/aplib-golden/` da
+agente A não foi adotada**: o pino único é o do integrador.
+
+Descoberta da frente (bug de produto, corrigido em `d10d5ab`): o token `110` não
+gravava o histórico de offset, então o rep-match seguinte reusava offset
+obsoleto. Os 49 vetores importados passaram **todos** com o bug — nenhum deles
+coloca um rep-match depois de `110`/`111`; a regra nunca esteve no contrato de B
+e só aparece em stream real. Arbitragem feita por dois decodificadores de
+referência independentes (`apultra` `8f340057…`, Zlib, e `apj.jar` SGDK v2.11
+`2d8cdc63…`), os dois concordando com o JS da agente A (`aplib.mjs`, conteúdo
+`62425497…`): no TileSet APLIB real do alvo visível o stream frameia certo
+(`4485 → 16000`) e **703 dos 16 000 bytes** saíam divergentes antes da correção.
+Os dois casos ficaram pinados como vetores discriminadores em
+`data/rex_profiles/integrator/aplib/discriminating/` (`rep_after_cmd110`,
+`rep_after_short111`; SHA por arquivo e receita de reconstrução em `ORIGEM.md`),
+cobertas pelo teste `aplib_rep_match_depois_de_110_e_de_111_usa_o_offset_correto`
+— não-vacuidade provada removendo a correção: só esse teste cai.
+
+Aceite BYOR da frente (`#[ignore]`, nunca `return` silencioso) no teste
+`byor_aplib_decodifica_os_dois_streams_do_tiledimage_visivel`: ROM `558bea6c…`,
+TileSet `0x21b44` → stream `0x2e4d4` com `bytes_consumed` 4485 e plain de
+`16000 B` (`dd7affc3…`); TileMap `0x21b4c` → stream `0x2d534` com 1196 e
+`2240 B` (`c196aa5b…`); e a separação estrutural `0x2d534 + 1196 < 0x2e4d4`.
+Repetido por perna independente em JS
+(`scripts/rex_profiles/integrator/aplib/byor_cross_check.mjs`). **O que isso não é**: não é reconstrução visual no produto (os 95,90 % de
+correspondência por pixel continuam medidos só em JS pela agente A), não é
+identificação automática (os dois endereços vêm do header lido, e identificação é
+capacidade separada de decode), e **não há encoder aPLib** — enquanto não houver
+`encode` com `needs_space` honesto, nenhum recurso APLIB é "editável sem
+expansão", e a paridade bidirecional com os oráculos que o CONTRACTS §4 exige
+(`decode(produto, encode(ref))` e `decode(ref, encode(produto))`) continua
+aberta. Promoção de maturidade fica com o operador; a célula acima permanece
+`blocked` por decisão de missão, não por falta deste registro.
+
+Duas divergências continuam registradas em vez de resolvidas por alegação: (a) a
 linha aPLib desta matriz diz `variant-fixed: blocked` enquanto o `manifest.json`
 de B diz `"variant-fixed": "verified"`; (b) o próprio CONTRACTS v1 é inconsistente
 sobre o caminho — §1 pede `data/rex_profiles/<kind>/<profile_id>/`, o que dá
 `codec/aplib/` (foi o que B publicou), enquanto a cláusula de propriedade declara
 `data/rex_profiles/codecs/` para B (foi onde A copiou os goldens). Resolver é
-atribuição do integrador e exige v2 com justificativa, não edição silenciosa.
+atribuição do integrador e exige v2 com justificativa, não edição silenciosa. O
+que a frente fez na prática, com registro: o produto pinou **um** conjunto próprio
+(`data/rex_profiles/integrator/aplib/`), sem editar o namespace de B nem o de A.
 
 O decoder distinguia antes a janela de busca do compressor (`0x4000`) do limite
 do formato e recusava o último offset que o 68000 ainda lê para trás. Medido no
@@ -114,6 +161,61 @@ produto. Evidência do integrador vive em namespace próprio
 e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
+
+- 2026-09-26 (integrador, **PASSO 5 — aPLib em Rust canônico: decoder, arbitragem
+  por oráculo externo e aceite BYOR**), esta célula é o checkpoint.
+  **HEAD/commits da frente** em `codex/rex-integrator-aplib-decode`: `9a9b66d`
+  (vetores de B importados para namespace próprio, pinados por SHA), `d27be00`
+  (`aplib_decode`/`AplibLimits` + 8 testes dos vetores), `9fb2c12`
+  (`verify_aplib_resource` na cadeia + 3 testes sintéticos + garantia de que a via
+  LZ4W continua recusando APLIB), `d10d5ab` (correção do `110` + os dois vetores
+  discriminadores + script de reconstrução + registro em `manifest.json`) e
+  `a69614e` (aceite BYOR das duas streams reais + perna JS independente);
+  mais este registro de documentação.
+  **Alterações não commitadas após eles: nenhuma** (o `git status --short` desta
+  árvore lista apenas arquivos alheios à rodada: `.mimosa/`, `APJ-unpack`,
+  `a.out`, `apultra-decode`, `src-tauri/.mimosa/`, `src-tauri/src-tauri/` e
+  `data/canonical-local-2026-09-21/` = corpus BYOR, nunca versionável; nenhum foi
+  executado, stagingado ou apagado).
+  **Hipótese testada:** um decoder que passa nos 49 vetores pinados por dois
+  oráculos decodifica corretamente os dois streams APLIB do alvo visível — e,
+  ao ligá-lo à cadeia, nada na via LZ4W muda.
+  **Evidência a favor (medida nesta árvore):** `cargo test --lib` **687 passed /
+  0 failed / 54 ignored**; `cargo test --lib -- --ignored byor_aplib` **1 passed**
+  (TileSet `0x21b44` → `0x2e4d4`: `bytes_consumed 4485`, plain 16 000 B `dd7affc3…`;
+  TileMap `0x21b4c` → `0x2d534`: 1196, 2 240 B `c196aa5b…`; separação
+  `0x2d534 + 1196 < 0x2e4d4`); `cargo clippy -- -D warnings` rc=0;
+  `cargo fmt -- --check` limpo; `verify_vectors.py` rc=0 com o hash agregado
+  `3a9d7e9e…` recomputado dos 49 arquivos; a perna JS (`byor_cross_check.mjs`)
+  reproduz o mesmo enquadramento `16000/4485` e `2240/1196`.
+  **Evidência CONTRA — a hipótese estava errada e foi assim que se soube:** com os
+  49 vetores **todos verdes**, o decoder divergia dos dois decodificadores de
+  referência em **703 dos 16 000 bytes** do TileSet real (enquadramento idêntico:
+  antes da correção `34a894c3…`, depois `dd7affc3…`, `bytes_consumed` 4485 nos dois). Causa:
+  o token `110` não gravava `offset_history`, então o rep-match seguinte reusava
+  offset obsoleto. A regra faltava na especificação de B e nenhum vetor importado
+  coloca um rep-match depois de `110`/`111`. Corrigido em `d10d5ab`; os dois casos
+  ficaram pinados (`data/rex_profiles/integrator/aplib/discriminating/`, SHA por
+  arquivo + `ORIGEM.md` com receita de reconstrução e dos dois oráculos) e a
+  não-vacuidade foi provada removendo a correção: **só** o teste novo cai.
+  Arbitragem por três caminhos independentes que concordam (`apultra` `64be2a7a…`
+  deste exemplar, origem declarada `8f340057…`; `apj.jar` SGDK v2.11 `2d8cdc63…`
+  conferido antes de executar; `aplib.mjs` da agente A `62425497…`) — o produto
+  não é a autoridade do formato, nem a port da agente A.
+  **Limite honesto (não provado nesta frente):** não há encoder aPLib, então a
+  paridade bidirecional do CONTRACTS §4 e a editabilidade **sem expansão** estão
+  abertas; os 95,90 % de correspondência por pixel seguem medidos só em JS, não no
+  produto; a identificação continua assistida pelo header (não é descoberta
+  geral); não há reinserção/transação aPLib; e `work_limit`/`cancelled`/`overflow`
+  são política do produto sem vetor de oráculo.
+  **Matriz:** a linha aPLib **não foi promovida** (`blocked`, `fixture`) — missão
+  veta promoção de maturidade, merge e release; o que entra aqui é evidência
+  registrada, e a decisão de célula é do operador.
+  **Próximo comando:** `git fetch` seguro e push de `codex/rex-integrator-aplib-decode`
+  (ahead local não substitui consulta remota); depois, frente do **encoder** aPLib
+  com `needs_space` honesto — o pré-requisito do objetivo da rodada.
+  **Bloqueio:** nenhum técnico pendente; o que trava é escopo (encode ausente,
+  promoção e merge são decisão do operador).
 
 - 2026-09-26 (integrador, **PASSO 6 — E2E reexecutado no pino novo e entrega**),
   esta célula é o checkpoint: commits da frente — `fa98bda`
