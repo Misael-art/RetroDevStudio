@@ -78,7 +78,7 @@ legível.
 | reinserção em cópia + patch | verified | transação no produto: identidade SHA, dependente recusado (0x91a00 dependente de 0x8ff8e), cópia + BPS exportado e re-aplicado à base com hash exato |
 | efeito observado no jogo | **BLOQUEADO — classe do alvo desconhecida** | **Retratação (2026-09-26)**: a leitura "9 paletas × 16 cores" e o mecanismo "transparência tornada opaca" eram hipóteses sem evidência de consumidor — retirados do estado corrente (preservados no histórico do Memory Bank). O "efeito" anterior era ruído: o resume do loop vivo entre runs dessincronizava os frames comparados. **Sonda causal** (no E2E): com ROM/core/estado/inputs idênticos (run_frames determinístico), **nenhuma diferença foi medida** em WRAM/VRAM entre original e modificado em 900 frames (controle original/original também idêntico, o que valida determinismo e metodologia). **Precisão (2026-09-26, ETAPA C): isso não prova que o recurso não seja descompactado** — a sonda só alcança as regiões que o core expõe (`emulator_read_memory` regiões 2/3; CRAM e o destino/chamada do desempacotador ficam `missing`). Ausência de diferença observada ≠ ausência de carregamento. Consumidor não provado; **edição semântica deste recurso permanece BLOQUEADA**. Evidências de bytes: intervalo alterado [30,31), byte 30 0x00→0xF0 (pixel (0,7,4), a única edição que coube com o encoder corrigido; needs_space honesto nas demais). **Defeitos corrigidos nesta rodada**: (1) tiles são chunky (nibble empacotado), não planar — golden literal `12 34 56 78`→1..8; (2) o encoder emitia matches longos não-ROM com offset acima do que o 68000 lê para trás (janela do codificador restaurada a 0x4000 por estratégia; o teto **do formato** medido no hardware é 16385 e o decoder agora aceita até ele — `LZ4W_68K_ORACLE.md`); (3) o preview em grade lia a faixa linearmente e escondia edições fora do tile 0/linha 0; (4) verificação de ida-e-volta dentro da transação. Canvas do app == framebuffer do core comprovado como capacidade separada (subimagem 256×192 ou 320×224 conforme o estado). Varredura dos 18 recursos com tiles em tela: fit=0 no orçamento do tile 0 (needs_space honesto) |
 | efeito demonstrado em **fixture autoral** (ETAPA D) | verified (mecanismo) | ROM Mega Drive autoral construída aqui (`scripts/rex_profiles/integrator/lz4w_fixture/`, SGDK 2.11, `TILESET ... LZ4W NONE`, SHA da ROM `159298eb…`), onde a cadeia de consumo é conhecida **por construção** (`unpackTileSet` -> `VDP_loadTileSet` -> `VDP_fillTileMapRectInc`, tile `t` numa única célula `(t%4, t/4)`). O aceite `--ignored` percorre a cadeia real do produto: decode == fonte recomposta; no-op honesto; **linha de base medida antes da busca** (`slot(rescomp)=444B` vs `re-codificação do plain não-editado=448B`, folga `-4B`); edição de 1 pixel **prevista antes de qualquer emulação** (`tile 0, row 5, col 7 -> idx 15`, re-encode 440B **dentro** do slot de 444B) aplicada pela transação canônica; ROM modificada reaberta e re-decodificada == plain planejado; coordenada de tela prevista `(7,5)` e prévia renderizada (SHA dos pixels/PNG). O stream **escrito pelo produto** desempacota no 68000 oficial: `data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r13/runs/runF` (`i30` rescomp, `i31` produto) ambos `68k == jar == esperado` em 512B. **Discriminante negativa preservada**: no fixture **sem** plantio, varredura exaustiva dos 15.360 candidatos de 1 pixel deu `0 cabem` (`.../lz4w-fixture/evidence/2026-09-26/fixture-acceptance-exhaustive-before-plant.log`). **Por que o plantio é necessário e isso não é trapaça**: o LZ4W casa **words de 16 bits**, não pixels; uma edição de 1 pixel só encurta o stream se tornar dois words adjacentes idênticos. O gap de codificador foi medido duas vezes (444/448 e 378/380) e **não** foi escondido: o porte do DP ótimo de `LZ4W.java` foi implementado, ficou verde no suíte e **piorou** (382B vs 380B) — revertido em vez de entregue; um DP fiel precisa de estado `(posição x literais pendentes mod 15)` porque o custo de 1 palavra/token ignora o chunk de 15 literais. Limite honesto: prova de **mecanismo**, não de cobertura de alvos reais; a tela do app foi capturada por emulação na ETAPA E (ver linha seguinte) |
-| efeito causal demonstrado **na aplicação** (ETAPA E) | verified (fixture autoral) | cenário E2E `rex-lz4w-fixture-effect` (`scripts/e2e-tauri-build-run.mjs`) rodando o binário real `e6907792…` e o core oficial Genesis Plus GX v1.7.4 `46a5521`: descuberta+decode **pela UI** (header 95464, stream `0x5f988`, slot 444 B, `1/5 candidatos`), no-op honesto, edição de 1 pixel aplicada pela transação canônica (modificada `e55dba92…`, BPS `52ce036f…` 74 B, 268 bytes distintos, faixa `5f9a1..5fb3f`, `diferenteForaDoSlot:0`), BPS re-aplicado reproduzindo o hash exato, cópia reaberta decodificando no plain editado (`917048cc35508e9a`), **prova de memória** em WRAM (1 byte, `0x5e f0→ff`) e **exatamente 1 pixel de tela diferente na coordenada prevista (7,5)** com as classes de cor certas (`0x212021 → 0x8c008c`, 11 classes), canvas == framebuffer do core (320×224), e os dois negativos alcançáveis: guarda de intervalo da fila (0 entradas, 0 escritas, com controle positivo enfileirando 1) e `rom_identity_mismatch` por TOCTOU com a ROM do fixture verificada intacta. Verde duas vezes com o código final (run10/run11, rc=0 lido nos próprios logs). Pacote promovido com manifesto vinculado ao binário: `data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e/` (`manifest.json`). **Limitações medidas, registradas como não provadas e não como sucesso**: (a) o core não expõe `VIDEO_RAM` (`retro_get_memory_size==0`, mas `emulator_read_memory` responde `ok:true` com dados vazios — armadilha de prova vacuada), então a perna de VRAM fica `observed:false`; (b) a fusão de DAC do Mega Drive reduz as 16 palavras de paleta autorais a **11 cores** — índice→cor é função, não injeção, portanto a identidade do pixel alterado é estabelecida por **posição** e a cor só confirma a classe (`scripts/rex_profiles/integrator/lz4w_fixture/analyze-frame.py`); (c) a recusa de intervalo do **núcleo** é inalcançável pela UI (o painel descarta `editTile >= num_tiles` no cliente, `CompressedResourcePanel.tsx`), e por isso está provada no teste unitário `apply_rejects_tile_outside_resource_without_writing`, não no E2E. **Emenda (2026-09-26, PASSO 4)**: o descarte era **silencioso** — agora `editRejectReason` explica o motivo no painel (`rex-resource-notice`) e no log da ferramenta, preserva a fila válida e não envia o candidato inválido; a guarda do núcleo segue sendo a definitiva (testes `tile fora do recurso: avisa…` e `linha, coluna e índice inválidos…`). Isso não torna a recusa do núcleo alcançável pela UI: continua provada no unitário. (d) as duas corridas rc=0 **leram a ROM de `/tmp`** (`fixture.romPath` no relatório do run11; o cenário consome o que `RDS_REX_LZ4W_FIXTURE_ROM` apontar e não reconstrói o fixture sozinho) — o caminho durável devolve o mesmo SHA `159298eb…` (`fixture-rebuild-report.json`, reconferido por `sha256sum`), então a entrada é reprodutível a partir do repositório, mas não foi o arquivo do repositório que as corridas registradas abriram. Nada aqui altera o alvo comercial: `0xc8cc8` continua `BLOQUEADO`. **Re-execução pendente no pino novo (honesto):** as duas corridas rc=0 desta célula rodaram no binário `e6907792…`, **anterior** ao incremento de codificador de r7; o que está provado no binário `6044135b…`+`d8477608…` é o aceite `--ignored` do produto (escrito=436, mesmos SHA de pixels/PNG, conferido na rodada r7) e o replay 68k (`i41` byte a byte igual), não o cenário E2E completo — que precisa de uma corrida no binário novo como job pesado próprio. **Relatório técnico:** `docs/rex_profiles/RELATORIO_ETAPA_E_2026-09-26.md` |
+| efeito causal demonstrado **na aplicação** (ETAPA E) | verified (fixture autoral) | cenário E2E `rex-lz4w-fixture-effect` (`scripts/e2e-tauri-build-run.mjs`) rodando o binário real `e6907792…` e o core oficial Genesis Plus GX v1.7.4 `46a5521`: descuberta+decode **pela UI** (header 95464, stream `0x5f988`, slot 444 B, `1/5 candidatos`), no-op honesto, edição de 1 pixel aplicada pela transação canônica (modificada `e55dba92…`, BPS `52ce036f…` 74 B, 268 bytes distintos, faixa `5f9a1..5fb3f`, `diferenteForaDoSlot:0`), BPS re-aplicado reproduzindo o hash exato, cópia reaberta decodificando no plain editado (`917048cc35508e9a`), **prova de memória** em WRAM (1 byte, `0x5e f0→ff`) e **exatamente 1 pixel de tela diferente na coordenada prevista (7,5)** com as classes de cor certas (`0x212021 → 0x8c008c`, 11 classes), canvas == framebuffer do core (320×224), e os dois negativos alcançáveis: guarda de intervalo da fila (0 entradas, 0 escritas, com controle positivo enfileirando 1) e `rom_identity_mismatch` por TOCTOU com a ROM do fixture verificada intacta. Verde duas vezes com o código final (run10/run11, rc=0 lido nos próprios logs). Pacote promovido com manifesto vinculado ao binário: `data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e/` (`manifest.json`). **Limitações medidas, registradas como não provadas e não como sucesso**: (a) o core não expõe `VIDEO_RAM` (`retro_get_memory_size==0`, mas `emulator_read_memory` responde `ok:true` com dados vazios — armadilha de prova vacuada), então a perna de VRAM fica `observed:false`; (b) a fusão de DAC do Mega Drive reduz as 16 palavras de paleta autorais a **11 cores** — índice→cor é função, não injeção, portanto a identidade do pixel alterado é estabelecida por **posição** e a cor só confirma a classe (`scripts/rex_profiles/integrator/lz4w_fixture/analyze-frame.py`); (c) a recusa de intervalo do **núcleo** é inalcançável pela UI (o painel descarta `editTile >= num_tiles` no cliente, `CompressedResourcePanel.tsx`), e por isso está provada no teste unitário `apply_rejects_tile_outside_resource_without_writing`, não no E2E. **Emenda (2026-09-26, PASSO 4)**: o descarte era **silencioso** — agora `editRejectReason` explica o motivo no painel (`rex-resource-notice`) e no log da ferramenta, preserva a fila válida e não envia o candidato inválido; a guarda do núcleo segue sendo a definitiva (testes `tile fora do recurso: avisa…` e `linha, coluna e índice inválidos…`). Isso não torna a recusa do núcleo alcançável pela UI: continua provada no unitário. (d) as duas corridas rc=0 **leram a ROM de `/tmp`** (`fixture.romPath` no relatório do run11; o cenário consome o que `RDS_REX_LZ4W_FIXTURE_ROM` apontar e não reconstrói o fixture sozinho) — o caminho durável devolve o mesmo SHA `159298eb…` (`fixture-rebuild-report.json`, reconferido por `sha256sum`), então a entrada é reprodutível a partir do repositório, mas não foi o arquivo do repositório que as corridas registradas abriram. Nada aqui altera o alvo comercial: `0xc8cc8` continua `BLOQUEADO`. **REEXECUTADO no pino novo (rodada r8, `.../lz4w-fixture/evidence/2026-09-26-e2e-r8-new-pin/`):** cenário completo reconstruído e verde (`rc=0`, 11 passos) no binário `e36f9f49…`, com `rex_codecs.rs @ 6044135b…` + `rex_resources.rs @ d8477608…`. A ROM do fixture foi lida do **caminho durável do repositório**, então a limitação (d) acima não se aplica a esta corrida. Novos números da escrita: modificada `07905193…`, BPS `c3bc1e94…` (62 B, 264 bytes distintos, faixa `5f9a1..5fb3b`, `diferenteForaDoSlot:0`), pixels `917048cc…` inalterados. **Triangulação que não existia:** os 436 B que a UI escreveu neste binário têm SHA-256 `2776ec2c…` — IDÊNTICO ao stream do caso `i41` que o desempacotador 68000 leu em hardware; UI→ROM, driver→MAME e decoder do produto agora apontam para os mesmos bytes. **Por que os hashes mudaram em relação ao run11:** `39c0fd9` (incremento r1→r4, já publicado) mudou a codificação gulosa do fixture — o run11 escrevia `47cfeb81…` no mesmo comprimento; NÃO é efeito deste incremento, e a equivalência de plain entre os dois streams não foi aferida (só o do run2 tem prévia conferida). **Achado de processo (falha minha, registrada com o log da corrida falha):** o negativo de intervalo do cenário ainda exigia o literal antigo `0 edição(ões)` e apodreceu quando `6351f15` passou a renderizar "nenhuma edição pendente" — o E2E não fora reexecutado desde então. O passo 10 agora exige as duas coisas que o contrato do PASSO 4 promete: fila vazia **e** aviso explicando o descarte; a recusa do núcleo segue provada no unitário. **Relatório técnico:** `docs/rex_profiles/RELATORIO_ETAPA_E_2026-09-26.md` |
 
 Limitações declaradas: identificação é estrutural assistida (header declara
 codec e tamanho), não descoberta automática geral; stream editado recusado
@@ -96,6 +96,58 @@ produto. Evidência do integrador vive em namespace próprio
 e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
+
+- 2026-09-26 (integrador, **PASSO 6 — E2E reexecutado no pino novo e entrega**),
+  esta célula é o checkpoint: commits da frente — `fa98bda`
+  (`scripts/e2e-tauri-build-run.mjs`: o negativo de intervalo passa a exigir o
+  aviso do PASSO 4, e o passo seguinte foi renumerado) e este registro com o
+  pacote `data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e-r8-new-pin/`
+  (logs dos dois runs + relatório + manifesto com SHA-256 por arquivo).
+  Alterações não commitadas após eles: **nenhuma**; seguem intocados os arquivos
+  alheios à rodada (`.mimosa/`, `APJ-unpack`, `a.out`, `apultra-decode`,
+  `src-tauri/.mimosa/`, `src-tauri/src-tauri/`,
+  `data/canonical-local-2026-09-21/` = corpus BYOR, nunca versionável).
+  **Hipótese testada:** o incremento de encoder da rodada r7 sobrevive ao caminho
+  *completo pela interface* — descoberta, prévia, transação canônica, BPS,
+  reabertura e efeito de tela — e as garantias do PASSO 4 (aviso de descarte com
+  fila preservada) são observáveis no binário novo, não só no unitário.
+  **Evidência a favor:** cenário `rex-lz4w-fixture-effect` **rc=0**, 11 registros,
+  no binário `e36f9f49…` construído por esta corrida com
+  `rex_codecs.rs @ 6044135b…` + `rex_resources.rs @ d8477608…`; a ROM do fixture
+  foi lida do **caminho durável do repositório**, o que encerra a limitação (d)
+  do run11 (que lia `/tmp`). Escrita: modificada `07905193…`, BPS `c3bc1e94…`
+  (62 B, 264 bytes distintos, faixa `5f9a1..5fb3b`, `diferenteForaDoSlot:0`),
+  pixels `917048cc…` **inalterados** frente ao pino anterior. **Triangulação que
+  não existia:** os 436 B que a UI escreveu têm SHA-256 `2776ec2c…` — idêntico ao
+  stream do caso `i41` que o desempacotador 68000 oficial leu em hardware. Gates
+  na árvore commitada: `node --check` OK, `check:tree` OK, `lint` rc=0,
+  `tsc --noEmit` rc=0, `npm test` **701 passed / 6 skipped**,
+  `npm run host:certify` rc=0 (**READY**, fingerprint `60249508…`, e o certify
+  reexecutou o `cargo test --lib` dentro do binário atual: **675 passed / 0 failed
+  / 53 ignored** + smoke oficial SGDK e PVSnesLib `Success: true`).
+  **Evidência contra / o que NÃO se afirma:** (1) a corrida 1 foi **rc=1** por uma
+  asserção **apodrecida pelo próprio PASSO 4** (`6351f15` passou a renderizar
+  "nenhuma edição pendente" e o cenário ainda cobrava o literal `^\s*0\b`; o E2E
+  não era reexecutado desde então). O log falho está promovido de propósito e a
+  correção **fortaleceu** o teste em vez de afrouxá-lo — mas é falha de processo
+  minha, registrada como tal. (2) O `report-run2.json` promovido foi gerado antes
+  da renumeração de `fa98bda` e lista o índice `10` duas vezes (ambos os `claim`
+  completos); nada foi editado à mão no relatório. (3) A reexecução cobre **o
+  fixture autoral**, não os 160 recursos do corpus, e não altera o `BLOQUEADO`
+  semântico de `0xc8cc8`. (4) Os hashes da escrita mudaram frente ao run11 por
+  causa de `39c0fd9` (incremento r1→r4, já publicado), não deste incremento;
+  **não** aferi que o stream do run11 decodifica no mesmo plain — equivalência
+  declarada como não provada.
+  **Próximo comando:** push da branch + acompanhamento pontual do CI (um job por
+  vez, sem monitor permanente). **Depois:** PASSO 5 — consolidar a evidência
+  TiledImage/APLIB (existe como afirmação em `PROMPT_REX_INTEGRATOR_RESUME_2026-09-26.md`
+  e como código não integrado: `scripts/rex_profiles/lz4w/tiledimage.mjs` em
+  `codex/rex-a-addressing @ 19094b0`, vetores aPLib em `codex/rex-b-codecs`) e
+  implementar aPLib em Rust canônico em frente separada, com oráculos independentes.
+  **Bloqueio:** nenhum externo. **Fora de escopo por ordem do operador:** merge,
+  release, promoção de maturidade, expansão de ROM, realocação de ponteiros e
+  promoção do marco do fixture para cobertura BYOR.
+
 
 - 2026-09-26 (integrador, PASSO 3 entregue + PASSO 4 — **incremento integrado e oráculo 68k
   com o pino novo**, esta célula é o checkpoint): commits da frente — `cde88cc`
@@ -133,7 +185,9 @@ e `codecs/` (B) do CONTRACTS v1.
   emitem os bytes do piso (o modelo de piso ignora o teto de 128 candidatos/posição
   do produto); o que está provado é ≤ guloso em 161/161 e estritamente menor em 160.
   (3) *Editável ≠ compreendido*: `0xc8cc8` segue `BLOQUEADO` quanto ao conteúdo
-  semântico, e o E2E da ETAPA E ainda não foi reexecutado no binário novo.
+  semântico. **Fechado depois deste checkpoint:** o E2E da ETAPA E foi reexecutado
+  no binário novo e verde (rodada r8, `rc=0`, 11 passos, `e36f9f49…`) — veja a
+  célula da ETAPA E e o próximo comando abaixo.
   **Comandos e resultados (rodados na árvore commitada):** `cargo test --lib`
   **675 passed / 0 failed / 53 ignored** (rc=0); `cargo clippy -- -D warnings` rc=0;
   `cargo fmt -- --check` rc=0; aceite ignorável do fixture e do piso verdes na
@@ -147,12 +201,14 @@ e `codecs/` (B) do CONTRACTS v1.
   (trabalho perdido próprio); o código foi recuperado do transcript da sessão
   (linhas 8418/8430/8440) e **re-verificado do zero** — nada publicado como número
   antes da recomprovação.
-  **Próximo comando:** `node scripts/e2e-tauri-build-run.mjs --scenario
+  **Próximo comando (à época):** `node scripts/e2e-tauri-build-run.mjs --scenario
   rex-lz4w-fixture-effect --app src-tauri/target-test/debug/retro-dev-studio` com
   `RDS_REX_LZ4W_FIXTURE_ROM` apontando a ROM do fixture no caminho durável (job
   pesado próprio, um por vez), depois `npm run host:certify` e os gates de frontend
   (`check:tree`, `lint`, `tsc --noEmit`, `npm test`) para fechar o PASSO 6 com push
-  e acompanhamento pontual do CI. **Em paralelo (PASSO 5):** consolidar a evidência
+  e acompanhamento pontual do CI. **Executado e registrado acima**: o E2E passou
+  rc=0 no pino novo (rodada r8) e os gates + `host:certify` foram reexecutados com
+  ele. **Em paralelo (PASSO 5):** consolidar a evidência
   TiledImage/APLIB e implementar aPLib em Rust canônico em frente separada.
   **Bloqueio:** nenhum externo. **Fora de escopo por ordem do operador:** merge,
   release, promoção de maturidade, expansão de ROM, realocação de ponteiros e
