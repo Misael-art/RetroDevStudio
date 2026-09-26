@@ -30,7 +30,24 @@
     "matchPerPixel_cp129": { "chunky+flip": 0.959, "chunkyNoFlip": 0.9446, "planar": 0.6479 },
     "cleanIndices": 12,
     "paletteQuantization": "canle8 = round((v4bit >> 1) * 239 / 7), tolerancia +/-4",
-    "residualAttribution": "pixels non explicados (4.1%) concentran-se nos indices 2 e 14 = sprites/window superpostos ao plano A; TiledImage @0x21b80 explica só 27.98% e queda descartado"
+    "residualAttribution": "4.10% (2938 px) = oclusión total por recursos coa paleta @0x2cbc8; fade/alinhamento/diverxencia = 0; ver residualAttributionCp129 e data/rex_profiles/lz4w/residual-attribution-cp129.json"
+  },
+  "residualAttributionCp129": {
+    "comparator": "scripts/rex_profiles/lz4w/residual.mjs (tol ±4/canle; removedPixels=0)",
+    "totals": { "screenPixels": 71680, "residualPixels": 2938, "pct": 4.1 },
+    "classes": { "oclusion": 2938, "fade": 0, "alinhamento": 0, "diverxencia": 0 },
+    "clusters": 13,
+    "largestCluster": { "n": 533, "bbox": [195, 188, 228, 209] },
+    "observedColors": { "239,0,0": 1082, "140,101,66": 919, "99,69,66": 726, "239,138,140": 125, "140,0,0": 86 },
+    "attribution": {
+      "paletteTable": "0x2cbc8",
+      "paletteDef": "0x21b32 (numColor=16, data=0x2cbc8)",
+      "pointerArray": "0x21b38 = [0x21b32, 0x21b20, 0x21b28]",
+      "codeConsumer": "0xe4dc en movea.l #$21b38,a0 (2079 00021b38) en 0xe4da..0xe4df",
+      "coverage": "2938/2938 px cuxa cor cae na táboa @0x2cbc8 (±4); 0/2938 na paleta de fondo 0x2cbe8; 0/2938 explicables polo TiledImage @0x21b80"
+    },
+    "artifact": "data/rex_profiles/lz4w/residual-attribution-cp129.json",
+    "tests": "scripts/rex_profiles/lz4w/residual.test.mjs (RED antes da implementación)"
   },
   "lz4wNegative": {
     "claim": "ningun frame da cadea SpriteDefinition->animacion->frame->TileSet LZ4W ten colocacion visible en checkpoint-129 con portas minTiles=8, minRichCells=8, cobertura>=0.7, cores>=4, formatos planar E chunky",

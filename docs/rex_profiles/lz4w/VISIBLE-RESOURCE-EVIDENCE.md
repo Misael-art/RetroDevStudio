@@ -150,3 +150,42 @@ implementación, medidas sobre a ROM):
 - O **segundo alvo presérvase**: `TiledImage @0x21b5c` (APLIB) segue sendo o
   recurso visible probado píxel a píxel (95,90% cp129); `0xc8cc8` é recurso
   de sprite LZ4W cargado por outra ruta, sen conflicting claims.
+
+## Fase 4 — atribución do 4,10 % residual da reconstrución cp129
+
+O comparador base (TiledImage `@0x21b5c`, chunky+flips, tolerancia ±4 por
+canle) **non se recortou: ningún píxel foi eliminado por non coincidir**. Os
+2938 píxeles discrepantes (4,10 % de 71680) clasifícanse cunha xerarquía
+excluínte en `scripts/rex_profiles/lz4w/residual.mjs`:
+
+| clase | px | criterio |
+|---|---|---|
+| alinhamento | 0 | cor observable == cor esperada dun veciño 8-conectado |
+| fade | 0 | observable ≈ k·esperado cun k único en [0.05, 0.9] |
+| oclusión | **2938** | cor non reproducible pola paleta de fondo sen sinais de fade/desprazamento |
+| diverxencia | 0 | cor da paleta de fondo pero índice diverxente |
+
+As cinco cores observadas — `[239,0,0]`·1082, `[140,101,66]`·919,
+`[99,69,66]`·726, `[239,138,140]`·125, `[140,0,0]`·86 — non están na paleta
+do fondo (datos `0x2cbe8`) e **están todas** na táboa `@0x2cbc8` (tol ±4).
+Atribución verificada por referencias encadeadas, non por heurísticas de tamaño ou enderezo:
+
+- `0x2cbc8` → única referencia u32 `0x21b34` = campo `data` da Palette
+  definition `@0x21b32` {numColor=16}.
+- `0x21b32` → única referencia `0x21b38` = primeira entrada do array de 3
+  punteiros `[0x21b32, 0x21b20, 0x21b28]`.
+- `0x21b38` → única referencia `0xe4dc`, dentro da instrución 68k
+  `2079 00021b38` (`movea.l #$21b38, a0`) en `0xe4da..0xe4df`: o
+  **consumidor é código do programa**, non outra táboa.
+
+Conclusión honesta: o 4,10 % residual é **oclusión por recursos pintados coa
+paleta cargada desde o array `@0x21b38`** (13 componentes 8-conectados, maior
+533 px no bbox `[195,188..228,209]`), non fade (cp129 é o primeiro frame
+estable, 129≡179), non desprazamento, non diverxencia de índices. Que esa
+paleta acabase no banco CRAM que ten os lutadores é observación de runtime
+propia da xanela do integrador. Artefacto reproducible (todos os 2938 px con
+`[x,y,r,g,b,índice,cluster]` e hash interno):
+`data/rex_profiles/lz4w/residual-attribution-cp129.json`; probas:
+`scripts/rex_profiles/lz4w/residual.test.mjs`. Coherente co negativo LZ4W: os
+sprites non superaron o matcher xeométrico estrito, pero a súa sinatura de
+cor queda documentada píxel a píxel.
