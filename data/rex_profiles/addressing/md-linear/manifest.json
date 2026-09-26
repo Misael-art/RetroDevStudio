@@ -1,0 +1,32 @@
+{
+  "contract_version": 1,
+  "id": "md-linear",
+  "kind": "addressing",
+  "version": 1,
+  "platform": "mega-drive",
+  "variant": "cartucho sem mapper: ROM espelhada por mascara em 0x000000-0x3FFFFF (ROM normalizada em potencia de 2 ate 4MB)",
+  "support": "fixture-only",
+  "source": {
+    "name": "Genesis Plus GX",
+    "url": "https://github.com/ekeeke/Genesis-Plus-GX",
+    "commit": "939ce4f045f981f89965f24780cef045cc5e52d7",
+    "license": "Genesis-Plus-GX License (estilo MAME, nao comercial)",
+    "license_url": "https://github.com/ekeeke/Genesis-Plus-GX/blob/master/LICENSE.txt"
+  },
+  "capabilities": {
+    "specification": "fixture",
+    "fixture": "fixture",
+    "translate": "fixture",
+    "invert": "fixture",
+    "read": "fixture",
+    "negatives": "fixture",
+    "corpus-identification": "blocked"
+  },
+  "limits": [
+    "corpus-identification blocked: hipotese de mapper para cada ROM do corpus e registrada apenas como hipotese em data/rex_profiles/addressing/corpus-inventory.json; nenhuma atribuicao por extensao/nome de jogo",
+    "nao modela SRAM no espaco do cartucho, TMSS, VDP, YM2612, Mega-CD, SVP nem mappers com estado (SSF2 e perfil separado md-ssf2)",
+    "escrita em cart-io (0xA130xx) nao tem efeito neste perfil; perfil nao tem registradores com estado",
+    "exige rom_size ja normalizada (potencia de 2 entre 64KB e 4MB); normalizacao com pad 0xFF e responsabilidade do chamador e deve ser registrada na evidencia",
+    "espelhamento fino interno da area de I/O (sub-registros 0xA10000-0xA1001F) nao e modelado; apenas a janela por 64KB e classificada"
+  ]
+}

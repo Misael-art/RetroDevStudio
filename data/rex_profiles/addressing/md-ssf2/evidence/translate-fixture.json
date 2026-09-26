@@ -1,0 +1,53 @@
+{
+  "claim": "translate/invert/read com mapper SSF2: janelas 1-7 remapeaveis por escrita em 0xA13000-0xA130FF (w=(addr&0x0E)>>1, janela 0 fixa), base=(banco<<19)&(rom_size-1); escritas mudam traducoes e leituras seguintes; invert devolve todos os aliases do estado dado",
+  "rom": {
+    "sha256": "4e18dee7efa2de03d8e7f78a06267a8cd27001463e3226b90d29956c6ca7945e",
+    "size_bytes": 4194304,
+    "format": "fixture",
+    "normalization": []
+  },
+  "locator": {
+    "kind": "cpu-address",
+    "note": "conjunto completo (18 positivos translate, 13 negativos, 10 sequencias de escrita de registrador + 5 negativos, 9 inversoes, 11 leituras) em expected/translate-cases.json do mesmo diretorio",
+    "offset": 655360,
+    "length": 8
+  },
+  "bank_state": {
+    "model": "{ rom_size, banks? } com banks: janela 1..7 -> byte escrito; janela ausente = identidade",
+    "initial": "estado de reset sem escritas: janela i => pagina i (mapeamento default linear de md_cart.c:356-367)"
+  },
+  "expected": {
+    "tool": "Derivacao manual da especificacao: Bart Trzynadlowski ssf2.txt (Wayback 20191212014333) + Genesis-Plus-GX md_cart.c mapper_512k_w/mapper_ssf2_w (sem copia de codigo; licenca da fonte nao autoriza transplantar)",
+    "version": "939ce4f045f981f89965f24780cef045cc5e52d7",
+    "output_sha256": "9ba74bdf1af5c185aad7dd57957db6d126ab99ec32277b4700b800bd77466151",
+    "output_len": 16548,
+    "pinned_before_implementation": true,
+    "pinned_at_commit": "bf79daa905ee9cfed27589a7796527fd8e34069d"
+  },
+  "pinning_history": [
+    "bf79daa: expectativas pinadas antes de existir qualquer implementacao",
+    "correcao pre-GREEN (este commit): literais arithmeticos errados NAS EXPECTATIVAS foram corrigidos contra a formula pinada no spec (base=(banco<<19)&mask; ex. banks[1]=5 => 0x280000, nao 0x0A0000) e dois casos reenumerados contra a regra 'todos os aliases' do spec (alias de identidade da janela 5 faltava; offset do caso de ROM curta nao tocava o trecho faltante). A implementacao nunca passou antes dessas correcoes; nenhuma expectativa foi ajustada para validar a implementacao - em ambos os pontos a implementacao ja concordava com o spec.",
+    "o RED do teste por modulo inexistente esta registrado em 5f7b217"
+  ],
+  "provenance": "authored-fixture",
+  "negatives": [
+    { "input": "translate(0x400000, rom_size=4MB)", "expected_error": "unsupported (open bus)" },
+    { "input": "translate(0xC00000, rom_size=4MB)", "expected_error": "unsupported (portas VDP fora do escopo)" },
+    { "input": "translate(0x1000000, ...)", "expected_error": "out-of-range (barramento 24 bits)" },
+    { "input": "translate(any, mapper_state=null)", "expected_error": "unsupported (estado obrigatorio)" },
+    { "input": "translate(any, rom_size=65536)", "expected_error": "unsupported (abaixo de uma janela de 512KB)" },
+    { "input": "translate(any, rom_size=5242880 (5MB cru))", "expected_error": "unsupported (exige normalizacao a potencia de 2 registrada)" },
+    { "input": "translate(any, banks={'1':'5'})", "expected_error": "unsupported (valor nao inteiro; '5' nao e 5)" },
+    { "input": "translate(any, banks={'0':3})", "expected_error": "unsupported (janela 0 nao e remapeavel)" },
+    { "input": "translate(any, banks={'8':1})", "expected_error": "unsupported (janela inexistente)" },
+    { "input": "writeMapperRegister(0xA12FF0, 5, estado valido)", "expected_error": "unsupported (fora da pagina TIME)" },
+    { "input": "writeMapperRegister(0xA130F3, 256, ...)", "expected_error": "out-of-range (data nao e byte)" },
+    { "input": "invert(4194304, rom_size=4MB)", "expected_error": "nenhum — lista vazia e resposta valida (offset alem do fim)" },
+    { "input": "invert(291.5, ...)", "expected_error": "out-of-range (offset nao inteiro)" },
+    { "input": "read(0x000000, 0, ...)", "expected_error": "out-of-range (length < 1)" },
+    { "input": "read sobre ROM 8 bytes menor que rom_size a partir de 0x3FFFF0", "expected_error": "out-of-range no trecho faltante (sem clamp)" }
+  ],
+  "timestamp": "deterministic-event:pin bf79daa (expectativas) -> RED 5f7b217 (teste por modulo ausente) -> implementacao e este registro no commit seguinte",
+  "test_command": "node --test scripts/rex_profiles/addressing/md-ssf2.test.mjs",
+  "test_result": "13/13 pass (2026-09-25, Node v26.8.1; suíte completa de enderecamento 25/25)"
+}

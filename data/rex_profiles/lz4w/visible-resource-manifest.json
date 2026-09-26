@@ -1,0 +1,106 @@
+{
+  "purpose": "Manifiesto de evidencia do recurso visible (fase 3, axente A). Sen bytes de ROM: só hashes, enderezos e campos estruturais.",
+  "rom": {
+    "path": "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+    "sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+    "sizeBytes": 917504,
+    "internalName": "HAMOOPIG (HAMOOPI MD PORT BY HUMBERTODIAS)",
+    "sgdkPin": "/home/misael/.local/share/sgdk_forge/sdk_9e22ce585b578c4c3246 (SGDK 2.11)"
+  },
+  "evidencePpm": {
+    "dir": "/home/misael/RetroDevStudio/rex-evidence-2026-09-10/backend-hamoopig",
+    "core": "Genesis Plus GX v1.7.4 46a5521 (determinista)",
+    "sequence": "REX-00: 60 idle, Start 10, Right 60, idle final (nunca chegou a gameplay)",
+    "checkpoints": {
+      "checkpoint-059.ppm": "936a61aa4fb256bed0d58732b36eda285d4abed60fce2834a113a4e80cd08b8a",
+      "checkpoint-069.ppm": "3f72f0382764eb379c1bc5620ec031cd495de7dcfbe9b03142da68644c19c9c4",
+      "checkpoint-129.ppm": "5f4ce09d7e8f618f4b7e4fc5c899a0aacb9261fb7923ed44a6c05b7bb61cda86",
+      "checkpoint-179.ppm": "5f4ce09d7e8f618f4b7e4fc5c899a0aacb9261fb7923ed44a6c05b7bb61cda86"
+    },
+    "note": "059/069/129/179 = mesma pantalla de titulo en fases de fade; 129 e 179 byte-identicos"
+  },
+  "visibleResource": {
+    "kind": "TiledImage (SGDK 2.11 Image.java: {u32 palette* | u32 tileset* | u32 tilemap*})",
+    "offset": "0x21b5c",
+    "palette": { "def": "0x21b56", "numColor": 16, "data": "0x2cbe8" },
+    "tileset": { "def": "0x21b44", "compression": 1, "compressionName": "APLIB", "numTile": 500, "stream": "0x2e4d4", "decodedBytes": 16000, "bytesConsumed": 4485 },
+    "tilemap": { "def": "0x21b4c", "compression": 1, "compressionName": "APLIB", "w": 40, "h": 28, "stream": "0x2d534", "decodedBytes": 2240, "bytesConsumed": 1196 },
+    "tileFormat": "chunky packed-nibble 4bpp (row*4 + col/2, nibble alto = columna par); coincide co contracto do integrador (commit canonico 0e77f0b)",
+    "entryLayout": "u16 BE: index bits 0-10 | hflip 11 | vflip 12 | palette bank 13-14 | priority 15 (vdp_tile.h)",
+    "matchPerPixel_cp129": { "chunky+flip": 0.959, "chunkyNoFlip": 0.9446, "planar": 0.6479 },
+    "cleanIndices": 12,
+    "paletteQuantization": "canle8 = round((v4bit >> 1) * 239 / 7), tolerancia +/-4",
+    "residualAttribution": "4.10% (2938 px) = oclusión total por recursos coa paleta @0x2cbc8; fade/alinhamento/diverxencia = 0; ver residualAttributionCp129 e data/rex_profiles/lz4w/residual-attribution-cp129.json"
+  },
+  "residualAttributionCp129": {
+    "comparator": "scripts/rex_profiles/lz4w/residual.mjs (tol ±4/canle; removedPixels=0)",
+    "totals": { "screenPixels": 71680, "residualPixels": 2938, "pct": 4.1 },
+    "classes": { "oclusion": 2938, "fade": 0, "alinhamento": 0, "diverxencia": 0 },
+    "clusters": 13,
+    "largestCluster": { "n": 533, "bbox": [195, 188, 228, 209] },
+    "observedColors": { "239,0,0": 1082, "140,101,66": 919, "99,69,66": 726, "239,138,140": 125, "140,0,0": 86 },
+    "attribution": {
+      "paletteTable": "0x2cbc8",
+      "paletteDef": "0x21b32 (numColor=16, data=0x2cbc8)",
+      "pointerArray": "0x21b38 = [0x21b32, 0x21b20, 0x21b28]",
+      "codeConsumer": "0xe4dc en movea.l #$21b38,a0 (2079 00021b38) en 0xe4da..0xe4df",
+      "coverage": "2938/2938 px cuxa cor cae na táboa @0x2cbc8 (±4); 0/2938 na paleta de fondo 0x2cbe8; 0/2938 explicables polo TiledImage @0x21b80"
+    },
+    "artifact": "data/rex_profiles/lz4w/residual-attribution-cp129.json",
+    "tests": "scripts/rex_profiles/lz4w/residual.test.mjs (RED antes da implementación)"
+  },
+  "lz4wNegative": {
+    "claim": "ningun frame da cadea SpriteDefinition->animacion->frame->TileSet LZ4W ten colocacion visible en checkpoint-129 con portas minTiles=8, minRichCells=8, cobertura>=0.7, cores>=4, formatos planar E chunky",
+    "retractedClaims": ["def 0x22a2a visible en (130-132,98) 42/55 (falso positivo: fondo plano + matcher axenstico)", "hit 0x24948 (cores non batian coa paleta runtime en fase de fade)"]
+  },
+  "resource0xc8cc8": {
+    "classVerdict": "TileSet SGDK 2.11 chunky 4bpp de 9 tiles (efecto 3x3), NON '9 paletas x 16 cores'; clasificación por estrutura, non por tamaño nin enderezo",
+    "tileSetHeader": { "offset": "0x25788", "compression": 2, "compressionName": "LZ4W", "numTile": 9, "tiles": "0xc8cc8" },
+    "verifiedReferences": {
+      "to0xc8cc8": ["0x2578c (campo tiles do header @0x25788; unica u32 absoluta en todo o binario)"],
+      "toTileSetHeader": ["0x25792 (campo tileset* de SpriteFrame @0x25790)"],
+      "paletteLikeAlias": { "offset": "0x2578a", "note": "lectura {numColor=9,data=0xc8cc8} = campo numTile re-interpretado DENTRO do header TileSet; a unica lectura palette-like do binario" }
+    },
+    "consumerChain": "SpriteDefinition@0x258e8 (palette real 0x221e6, w=64 h=72) -> animacion@0x258de -> SpriteFrame@0x25790 (VDPSprite 3x3, numTile 9) -> TileSet@0x25788 -> stream@0xc8cc8",
+    "reachableEvidence": "4 referencias u32 a 0x258e8 no segmento de codigo: 0x4f22, 0x5734, 0x6070, 0x616e (todas < 0x10000)",
+    "structuralDiscriminators": {
+      "decodedBytes": 288,
+      "bytesConsumed": 144,
+      "nextNeighborStream": "0xc8d58 == 0xc8cc8 + 144 (TileSet do frame 1 da mesma animacion: repacks que cambian a lonxitude desprazan datos vecins)",
+      "nibbleAlphabet": [0, 10, 12, 13, 14, 15],
+      "oddBit0Words": 18,
+      "paletteCalibration": "960 palabras / 60 paletas de todas as defs validadas: 0 con bit0=1; o payload ten 18 => incompatible co formato de paleta SGDK"
+    },
+    "payloadHashes": {
+      "compressed144Sha256": "c537b9ad0895f566c49b751f57f375f8ffe9e481a3b03bf0af5486bec69e7353",
+      "decoded288Sha256": "5e3e68a9ebadb5b178d9e8941017b92ffa49667aa8a0b39c268f735d6af87d46"
+    },
+    "loadVisibleStatus": "alcanzable=probado estaticamente; cargado/visible=requere xanela do integrador (VRAM/CRAM antes/depois; index de VDP_loadTileSet). O efecto E2E global (3174 px) non se explica por clase-paleta e si por desprazamento de streams no repack.",
+    "tests": "scripts/rex_profiles/lz4w/resourceclass.test.mjs (expectativas RED antes da implementacion)"
+  },
+  "aplibGoldenVectors": {
+    "dir": "data/rex_profiles/codecs/aplib-golden",
+    "procedencia": "copia SHA-rexistrada de REX-B-CODECS-2026-09-24 data/rex_profiles/codec/aplib/golden (oracles apultra 8f340057 + APJ v1.32)",
+    "sourceManifestSha256": "454119bded17ce300fc26f318f9289b613d45c1a64a69eaadcca8650c9543754",
+    "files": {
+      "g01b_single_byte.ap": "4eb77c03e5059ca48a7ee3553edfc80d7fb175710e9127bf82be3d3e15b333bc",
+      "g01b_single_byte.expected.bin": "bbeebd879e1dff6918546dc0c179fdde505f2a21591c9a9c96e36b054ec5af83",
+      "g01_literals.ap": "40e7a53d8e51f0e745d8a25ab0b63bcef0b7b6132db72553f350ba8dc3714f1a",
+      "g01_literals.expected.bin": "3733cd977ff8eb18b987357e22ced99f46097f31ecb239e878ae63760e83e4d5",
+      "g02_short_zero.ap": "bcbc35d0be87d70dd7f65436548a987146865236dc7fd355fef39f7f303a196d",
+      "g02_short_zero.expected.bin": "f245639459ddfe3cf7d32400c26a1b2ff471b06ad5c6f26f1f5f6e8d510b5111",
+      "g03_short_match.ap": "3986eb2b6b34348f026a2d843ce68d43459e2ba1a60630139ce70b512caccc61",
+      "g03_short_match.expected.bin": "babd6736192360b0e254b13f0eb5da9a9e17ed31bccf54b38ae8132d0515f43a",
+      "g04_long_off_lt128.ap": "d974ede4f7a428ccd2a308a0def46fcda9e6bef1fc01fcfd81a36713ba022a9a",
+      "g04_long_off_lt128.expected.bin": "11770b3ea657fe68cba19675143e4715c8de9d763d3c21a85af6b7513d43997d",
+      "g05_repmatch.ap": "c8a521fbf5321e54392b6fa15f7c9c5f8becb450a52fff272fb227ca5cf1d9ff",
+      "g05_repmatch.expected.bin": "195dadd56624856f89bd9a78f8420c3acf5f91af85b4225bf2146a12003b00ce",
+      "g06_mid_offset.ap": "a9f90ddde202e5a95d28a29ca73e644637fb6d375ac735800535ec1952cb5e46",
+      "g06_mid_offset.expected.bin": "f95c80cd879196fdfa5ac55acfcc787e41ce7d45d0db62996397fdfdd25134c5",
+      "g07_far_offset.ap": "f0a20d593cdda4e61c59513427046931312eced0f9b36b342ca7f37a4d7ba2a4",
+      "g07_far_offset.expected.bin": "f91e8ae2ecefabe91ec2c4d1ce277f1c29728a04159571584eee239509a36a4d",
+      "g08_eod_trailing.ap": "d3d5efd4eab5fcf0de868f8e219c87ae70a4a464fd040482100ec1a2304c3e80",
+      "g08_eod_trailing.expected.bin": "6dbe90be4616944f6e1adddeb10e2bec46d0f3992519882a4a34b0467b914330"
+    }
+  }
+}
