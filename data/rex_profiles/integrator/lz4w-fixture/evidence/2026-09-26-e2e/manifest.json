@@ -1,0 +1,152 @@
+{
+  "schema": "rex-e2e-evidence-manifest/v1",
+  "promoted_at": "2026-09-26",
+  "mission": "ETAPA E — consolidação da correção LZ4W e uma edição de recurso comprimido com efeito causal demonstrado na aplicação",
+  "verdict": "PASS — efeito de 1 pixel provado pela interface e pelo core (WRAM + framebuffer), com legs não observáveis registradas como limitações",
+  "git": {
+    "head_at_promotion": "d4043eb86ccafc0092e93113b117a5b1da965a83",
+    "branch": "codex/rex-integrator-profiles-codecs",
+    "uncommitted_at_promotion": [
+      "scripts/e2e-tauri-build-run.mjs",
+      "scripts/rex_profiles/integrator/lz4w_fixture/README.md",
+      "scripts/rex_profiles/integrator/lz4w_fixture/gen_fixture.py",
+      "src-tauri/src/tools/reverse/decomp/rex_resources.rs",
+      "scripts/rex_profiles/integrator/lz4w_fixture/analyze-frame.py (novo)",
+      "data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e/* (novo pacote: logs run1..run11, dois relatórios, dois PPM, gates log e este manifesto)",
+      "docs/rex_profiles/ROUND_STATE.md e docs/06_AI_MEMORY_BANK.md (checkpoint ETAPA E)"
+    ]
+  },
+  "binary_under_test": {
+    "path": "src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "e69077927863c15788bf2006e344f71f4a4b84408714201c48a67d450fc26574",
+    "note": "todo resultado deste pacote está vinculado a este binário; reconstruí-lo muda a chave do pacote"
+  },
+  "core_under_test": {
+    "label": "Genesis Plus GX v1.7.4 46a5521",
+    "path": "~/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so"
+  },
+  "fixture": {
+    "authored": true,
+    "byor": false,
+    "commercial_bytes_included": false,
+    "rom_sha256": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5",
+    "rom_len": 393216,
+    "ground_truth_sha256": "5cc90f0b56f8b5005862c74ee9180f07d9a83d0670f8b41769a3f9753326b386",
+    "resource": {
+      "header_offset": 95464,
+      "stream_offset": 391560,
+      "stream_offset_hex": "0x5f988",
+      "num_tiles": 16,
+      "slot_bytes": 444
+    },
+    "input_path_used_by_the_run": "/tmp/rex-lz4w-fixture/project/out/rom.bin",
+    "durable_reproduction": {
+      "report": "fixture-rebuild-report.json",
+      "path": "src-tauri/target-test/validation/rex-lz4w-fixture/project/out/rom.bin",
+      "result": "bit-idêntico ao ROM testado (sha 159298eb…, 393216 B), medido em 2026-09-26",
+      "declared_gap": "o cenário ainda alimenta a cópia em /tmp; a reprodução durável existe e confere, mas o caminho do cenário não foi trocado nesta rodada"
+    }
+  },
+  "edit": {
+    "tile": 0,
+    "row": 5,
+    "col": 7,
+    "from_index": 0,
+    "to_index": 15,
+    "rule": "v = (tile*7 + row*3) & 15, plantado como (v+1)&15 na linha 5 (NEAR_MISS_ROW = NOISE_ROWS+1), coluna 7 (TILE_PX-1)"
+  },
+  "outputs": {
+    "modified_rom_sha256": "e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9",
+    "bps_sha256": "52ce036f071bd54380fcf1ccdd7229cab32d39d9502da651114ccbafaf16e18d",
+    "bps_bytes": 74,
+    "bytes_diferentes": 268,
+    "faixa_alterada": ["0x5f9a1", "0x5fb3f"],
+    "diferente_fora_do_slot": 0,
+    "bps_reaplicado_reproduz_hash_exato": true,
+    "plain_original_sha_prefix": "19cc30aefe4da564",
+    "plain_editado_sha_prefix": "917048cc35508e9a"
+  },
+  "causal_chain": {
+    "wram": { "available": true, "offset": "0x5e", "before": "f0", "after": "ff" },
+    "vram": { "observed": false, "reason": "core não expõe VIDEO_RAM (total_size=0/0)" },
+    "framebuffer": { "resolucao": "320x224", "pixels_diferentes": 1, "coordenada": [7, 5], "antes": "0x212021", "depois": "0x8c008c" },
+    "canvas_vs_core": "idênticos no frame congelado da ROM modificada (320x224)",
+    "classes_de_cor_no_frame": 11,
+    "indices_com_mesma_cor": [0, 1, 2, 3, 4, 6, 7, 8, 9, 10]
+  },
+  "negatives": {
+    "bounds_cliente": "tile = num_tiles enfileira 0 edições e não escreve na cópia de trabalho (sha inalterado); controle positivo: tile válido enfileira 1",
+    "bounds_nucleo": "rex_resources.rs:634 ('tile N fora do recurso') — provado por apply_rejects_tile_outside_resource_without_writing",
+    "identidade": "rom_identity_mismatch ao trocar o arquivo sob o painel (TOCTOU); ROM do fixture intacta",
+    "noop": "0 edições → desfecho noop, nenhuma escrita"
+  },
+  "limitacoes": [
+    "REGIÃO VIDEO_RAM NÃO EXPOSTA pelo core (retro_get_memory_size()==0) — a leg de VRAM fica NÃO PROVADA. Armadilha evitada: emulator_read_memory respondia ok:true com dados vazios, o que daria '0 divergências' vazio.",
+    "Fusão de DAC do Mega Drive: 16 palavras de paleta autorais renderizam 11 cores. índice→cor é função mas não é injetiva, então a identidade do pixel alterado é estabelecida por POSIÇÃO; a cor apenas confirma a classe (analyze-frame.py).",
+    "A recusa de intervalo do núcleo é inalcançável pela UI: o painel descarta editTile >= num_tiles no cliente (CompressedResourcePanel.tsx, 'Adicionar edição'). O E2E prova a guarda do cliente; a do núcleo só a API exercita.",
+    "Esta prova vale para o fixture autoral. O alvo comercial 0xc8cc8 continua com semanticState BLOQUEADO (consumidor não provado) — nenhuma afirmação visual foi feita sobre ele.",
+    "excessive_output e dependent-modified não são alcançáveis neste fixture (1 recurso, sem dependentes); cobertos pelo teste de aceite do produto (varredura de 15.360 candidatos de 1 pixel) e pelo BYOR (0x91a00 dependente de 0x8ff8e)."
+  ],
+  "artifacts": {
+    "rex-lz4w-fixture-effect-report-run11.json": "b93a27747d28e9e57e9a56d382b9522f47fcc4d8e5b8aff9266ef627a212850e",
+    "fixture-rebuild-report.json": "64b2927ff7f5c686438bbeeeea81adafcb7093cffb446b98f419de765348a9d6",
+    "run10.log": "420414bc6e20722552e82cc63bf26b27fa9010e8f656cef01bd0b794b16a7fa5",
+    "run11.log": "178a80cde59b51075243c4b500d87aee8e690febf5d3cbc594ad306b19566ea0",
+    "run1.log": "e7ff1dd6c07551beab7d062bf1727b23c82e538b89123a2ebf0682a5b97dbdd9",
+    "run2.log": "7d38f091a607b283c450687dfe47e9bc305d16f16d4f35fa2ebeb037bd0676db",
+    "run3.log": "fbb39941f104f8de6ca1312c5c6e307904a92b09b0f7462ebf9bd57c3fee7d24",
+    "run4.log": "f117ee48044324f44b3c4617485e08432b3ed029c8804dde90c33596a499bbab",
+    "run5.log": "15b231ac4609fe3f25d59400b9ef63a6284e9140f4a04d675fca99c574c5f477",
+    "run6.log": "bae79267709792d7f210e49afffac434b4b562300f9bfd31773b39525ebbce17",
+    "run7.log": "12a5e54e346d5edbaf25e16ea44ba4cd59bbbb11d609ee36ff9a97d473efb95a",
+    "run8.log": "32c6bcc3eb6a0ec6476303ab666da330035548b97cc351fbfcc3ca98676d0ac5",
+    "run9.log": "856003ee5bc9917b5e8d49ae013576b889f6fc4ae8392cee6d6f2d669728470b",
+    "rex-fixture-frame-original.ppm": "d77e36aee3fea1622c8e24467d401a85d367b9029aa7ce9db4ce8258cf5c997a",
+    "rex-fixture-frame-modificado.ppm": "8e9649646db9c23dbe7d3f7fb5adc338ae09cb9abe0568b8422a397035747895",
+    "gates-2026-09-26.log": "f8705d0ef42d420935958bcfdf59779867d8d01236a36a883478f964fc83c849"
+  },
+  "gates": {
+    "log": "gates-2026-09-26.log",
+    "rc_zero": ["check:tree", "lint", "tsc --noEmit", "cargo clippy -- -D warnings", "cargo fmt --check", "cargo test --lib", "npm test", "npm run host:certify"],
+    "contagens": {
+      "rust_lib_test": "669 passed / 0 failed / 51 ignored",
+      "npm_test": "705 testes (699 passed / 6 skipped), 76 arquivos (75 passed / 1 skipped)",
+      "host_certify_full": "705 testes (702 passed / 3 skipped) + mesma suíte Rust 669/0/51; host READY, fingerprint 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2, lock dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377"
+    },
+    "reconciliacao_699_vs_702": "mesma árvore, mesmo total (705): os 3 testes a mais no certify são de `scripts/decomp/decomp-scripts.test.mjs`, que pula por disponibilidade de toolchain (HAS_SGDK_BUILD_TOOLCHAIN l.122, GHIDRA_AVAILABLE l.195, HAS_M68K_TOOLS l.231); `certify --profile full` exporta SGDK/m68k/Ghidra e eles rodam. O skip fixo de validateUpstreamWindows.test.ts (2) é `process.platform === 'win32'` e é idêntico nas duas corridas.",
+    "clippy_all_targets": "18 erros no alvo lib test: 8 eram deste checkpoint (rex_resources.rs:1210-1212, aritmética constante em asserções — corrigidos) e 10 são de código de teste pré-existente de outros módulos (build_orch.rs:5225; project_mgr.rs:21081/22014/25744/26217/26316; graphics_discovery.rs:1946; holdout.rs:661; logic_recovery.rs:620; lib.rs:165) — atribuídos e não corrigidos nesta rodada; o gate documentado não usa --all-targets."
+  },
+  "frame_dumps": {
+    "procedência": "run11 (o cenário escreve sempre nos mesmos nomes; estes são os bytes do último rc=0)",
+    "verificação_independente": "comparar os dois P6 pixel a pixel devolve exatamente 1 diferença, em (7,5), (33,32,33) -> (140,0,140) — i.e. 0x212021 -> 0x8c008c, a mesma linha publicada em steps[8]. Conferido fora do cenário em 2026-09-26 com um leitor PPM de 20 linhas.",
+    "como_reproduzir": "python3 scripts/rex_profiles/integrator/lz4w_fixture/analyze-frame.py rex-fixture-frame-original.ppm <ground_truth.json> 0 0",
+    "bytes_comerciais": "nenhum: as paletas e tiles vêm do fonte autoral do fixture"
+  },
+  "recipe": {
+    "gen_fixture.py": "3e474f44882363f14006a48b1da1b7ace4db54bfb70ee5cc7babbf3869309904",
+    "analyze-frame.py": "7ad1b1e30782dfe175e1ab69fba275b0a793dfcf84ed57440810ac5d50b7703a",
+    "cenario": "scripts/e2e-tauri-build-run.mjs::runRexLz4wFixtureEffectScenario",
+    "cenario_sha_no_run11": "becf096cc941c6e4b08a7a21e0ce4e4ff3590ced022c02d5b91b5a59ba86349b",
+    "cenario_sha_pos_promocao": "3028de6faebb07c00049d0d022edcffec1bd0f969be5c46d3527d626a571bc11",
+    "unittest": "src-tauri/src/tools/reverse/decomp/rex_resources.rs::apply_rejects_tile_outside_resource_without_writing",
+    "unittest_sha_arquivo_no_run11": "24c23cabd69a6fc6901e350f7b1a57becb03b9eadd3eac33a3960fb51cb704a3",
+    "unittest_sha_arquivo_pos_promocao": "79649367b181c80061ba05927ac7ada284ec80bb162d06652507ee59661e27e8",
+    "delta_pos_promocao": "depois do run11 os dois arquivos mudaram por conteúdo não-executável de teste: comentário do bloco do cenário e asserções de `md_tiles_to_rgba` escritas sem aritmética constante (lint do `cargo clippy --all-targets`). O binário sob teste permanece `e6907792…` (reconferido por sha256sum após a promoção), e a suíte Rust completa continua verde, então as duas corridas rc=0 descrevem o mesmo código de produto."
+  },
+  "runs": {
+    "rc_zero_com_codigo_final": ["run10", "run11"],
+    "diagnostico": {
+      "run1": "ERRO: prévia não apareceu (original) — timeout de 30 s",
+      "run2": "ERRO: VRAM deveria divergir em exatamente 4 bytes (1 pixel 4bpp planar); divergiu em 0 — a asserção pedia evidência de uma região que o core não expõe (a armadilha de prova vacuada, vista pelo lado oposto)",
+      "run3": "ERRO: origem do bloco não é única: original=0 modificado=0 — o comparador índice→cor não casava em nenhuma origem",
+      "run4": "ERRO: mesma origem não única, agora com histograma de cores do frame (levou à medição da fusão de DAC: 16 palavras → 11 cores)",
+      "run5": "ERRO: painel de recursos não reabriu após as medições",
+      "run6": "ERRO: aba de recursos não apareceu (após as medições)",
+      "run7": "ERRO: aba de recursos não apareceu (após as medições) — causa: reverse-tab-resources não existe enquanto a vista de recursos está ativa",
+      "run8": "ERRO: reverse workspace não montou nenhuma superfície de recursos — causa: as medições deixam o workspace ativo numa concha sem painel direito",
+      "run9": "ERRO: edição fora do intervalo não foi recusada pelo painel — causa: a guarda é no cliente, o negativo era inalcançável por construção"
+    },
+    "aviso_de_leitura": "run1…run9 não exercitam o código final e não devem ser citadas como resultado de produto. As razões acima são transcritas das últimas linhas de cada log (rc=1 em todas), não reconstruídas de memória: cinco delas foram defeitos do próprio cenário (montagem/estado da UI) e quatro foram o próprio diagnóstico das limitações (VRAM não exposta; origem única via cor; guarda de intervalo no cliente)."
+  },
+  "scope_note": "Sem merge, sem release, sem promoção de maturidade. Bytes comerciais não staged."
+}

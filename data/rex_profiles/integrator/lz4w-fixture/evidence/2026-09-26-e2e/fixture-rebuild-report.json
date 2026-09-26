@@ -2,7 +2,7 @@
   "schema": "rex-lz4w-fixture-build/v1",
   "authored_fixture": true,
   "byor": false,
-  "rom_path": null,
+  "rom_path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-lz4w-fixture/project/out/rom.bin",
   "rom_sha256": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5",
   "rom_len": 393216,
   "resource": {
@@ -100,16 +100,5 @@
       "bytes": 282627
     }
   },
-  "sgdk_root": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/sgdk",
-  "reproduction": {
-    "date": "2026-09-26",
-    "command": "scripts/rex_profiles/integrator/lz4w_fixture/build-fixture.sh --out src-tauri/target-test/validation/rex-lz4w-fixture",
-    "rc": 0,
-    "result": "bit-idêntico ao rom_sha256 desta receita (159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5, 393216 B), medido com sha256sum nos dois caminhos",
-    "report": "data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e/fixture-rebuild-report.json",
-    "superseded_recipe_sha": "1445132ff40be534bcc4ca6bda5787cb1971f816e015aec656ca3dad336bfb56 (6876 B) — mudou só o comentário/achatamento de tile_pixels; o ROM produzido não mudou",
-    "why_this_matters": "/tmp deixa de ser a única origem do artefato testado; o pacote de evidência da ETAPA E cita esta reprodução"
-  },
-  "rom_build_note": "artefato n\u00e3o versionado; reconstruir com scripts/rex_profiles/integrator/lz4w_fixture/build-fixture.sh --out DIR e conferir rom_sha256",
-  "evidence_promotion_note": "bytes do fixture s\u00e3o autoriais (sem conte\u00fado comercial) mas continuam fora do git: s\u00e3o um artefato reconstru\u00eddo da toolchain pinada, igual \u00e0 pol\u00edtica dos fixtures de logic-recovery"
+  "sgdk_root": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/sgdk"
 }

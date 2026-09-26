@@ -111,6 +111,26 @@ para os fontes atuais). O stream escrito pelo produto também desempacota no
 runs/runF` (`i30` = stream do rescomp, `i31` = stream do produto), ambos
 `68k == jar == esperado` em 512 bytes.
 
+## Prova pela aplicação (ETAPA E, E2E)
+
+```bash
+scripts/rex_profiles/integrator/lz4w_fixture/build-fixture.sh \
+  --out src-tauri/target-test/validation/rex-lz4w-fixture   # reprodução durável do mesmo ROM
+RDS_REX_LZ4W_FIXTURE_ROM=src-tauri/target-test/validation/rex-lz4w-fixture/project/out/rom.bin \
+  npm run test:e2e:desktop -- --scenario rex-lz4w-fixture-effect
+```
+
+O cenário `rex-lz4w-fixture-effect` (`scripts/e2e-tauri-build-run.mjs`) percorre a
+interface real (aba "Recursos comprimidos": verificar → selecionar → prévia →
+formulário de pixel → transação → BPS) e depois executa a ROM modificada no core
+Libretro do host, asserindo: **1 byte** no WRAM (`0x5e`, `f0→ff`), **exatamente 1
+pixel de tela** diferente na coordenada prevista `(7,5)`, canvas do app == framebuffer do
+core, BPS re-aplicado com hash exato, e os negativos alcançáveis pela UI (guarda
+da fila de edição e `rom_identity_mismatch` por TOCTOU, com a ROM do fixture
+reconferida intacta). Verde em run10/run11 no binário `e6907792…`; pacote e
+`manifest.json` em
+`data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e/`.
+
 ## O que o fixture também mede (e não esconde)
 
 - **Gap de codificador, medido duas vezes**: no plain não-editado o rescomp
@@ -136,8 +156,30 @@ runs/runF` (`i30` = stream do rescomp, `i31` = stream do produto), ambos
   **mecanismo**, não de cobertura de alvos reais. No corpus comercial nada
   foi alterado além do que o teste BYOR já aplicava (`pixel (0,7,4) -> idx
   15`, ROM de base intacta, `needs_space` honesto onde não coube).
-- O efeito na tela do app ainda não foi capturado por emulação nesta rodada;
-  a previsão de coordenada e a prévia são o estado atual (ETAPA E).
+- O efeito na tela do app **foi** capturado por emulação (ETAPA E, cenário
+  `rex-lz4w-fixture-effect`): com o Genesis Plus GX v1.7.4 46a5521 do host, a
+  ROM modificada difere da base em **exatamente 1 pixel de tela**, na
+  coordenada prevista pelo fonte (`(7,5)`), e o canvas do app apresenta o
+  framebuffer do core no mesmo frame congelado. Rodadas em
+  `data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e/`.
+- Duas pernas **não** provadas pela emulação, registradas como limitação no
+  relatório do cenário em vez de contadas como sucesso:
+  - O core não expõe a região `VIDEO_RAM` (`retro_get_memory_size` devolve 0 e
+    `emulator_read_memory` responde `ok:true` com dados vazios — armadilha de
+    prova vacua). A cadeia causal fica provada por `WRAM` (1 byte em `0x5e`,
+    `f0 -> ff`) + framebuffer.
+  - O DAC do Mega Drive **funde** as 16 palavras de paleta autorais em 11
+    cores observadas (medido: índices colididos `[0,1,2,3,4,6,7,8,9,10]`).
+    Índice->cor é função, mas não é injetiva; a identidade do pixel editado é
+    estabelecida pela **posição** (layout do fonte), e a cor apenas confirma a
+    classe. Ferramenta de diagnóstico: `analyze-frame.py` neste diretório.
+- A recusa de edição fora do recurso **não é alcançável pela interface**: o
+  painel descarta no cliente o tile `>= num_tiles`
+  (`CompressedResourcePanel.tsx`, botão "Adicionar edição"). O que o cenário
+  prova pela UI é a guarda (nada entra na fila, nada é escrito, com controle
+  positivo de tile válido que enfileira 1 edição); a recusa do núcleo
+  (`rex_resources.rs`, `tile N fora do recurso`) é provada pelo teste unitário
+  `apply_rejects_tile_outside_resource_without_writing`.
 - O mapa é preenchido por código, não por recurso comprimido: um fixture com
   `TILEMAP`/`IMAGE` comprimidos seria um caso adicional, não está feito.
 - Licenças: toolchain SGDK 2.11 (Stephane Dallongeville) é dependência já

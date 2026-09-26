@@ -1,0 +1,35 @@
+Gates executados na árvore final da ETAPA E (2026-09-26), HEAD d4043eb + alterações deste checkpoint.
+Logs brutos (mesmo conteúdo, caminho estável): /tmp/rds-etapa-e-{clippy,clippy-documented,fmt,cargotest,npmtest,hostcertify}-2026-09-26.log
+
+$ npm run check:tree                                  -> OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.            rc=0
+$ npm run lint                                        -> eslint src vite.config.ts --max-warnings=0, sem saída                  rc=0
+$ npx tsc --noEmit                                    -> sem erros                                                                   rc=0
+$ cargo clippy -- -D warnings (src-tauri)             -> Finished dev profile                                                          rc=0
+$ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check -> sem diff                                                              rc=0
+$ cargo test --lib -- --nocapture (src-tauri)         -> test result: ok. 669 passed; 0 failed; 51 ignored; finished in 55.14s        rc=0
+$ npm test                                            -> Test Files 75 passed | 1 skipped (76); Tests 699 passed | 6 skipped (705)    rc=0
+$ npm run host:certify (host-manager.mjs certify --profile full)
+                                                      -> RetroDev Studio host: READY
+                                                         Fingerprint 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2
+                                                         Lock dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377
+                                                         Test Files 75 passed | 1 skipped (76); Tests 702 passed | 3 skipped (705)
+                                                         test result: ok. 669 passed; 0 failed; 51 ignored; finished in 105.01s       rc=0
+
+RECONCILIAÇÃO DO NÚMERO DE TESTES FRONTEND (699 x 702, ambos em 705, zero falhas):
+A diferença é de 3 testes do mesmo arquivo, `scripts/decomp/decomp-scripts.test.mjs`, que
+publica "11 tests | 4 skipped" no `npm test` e "11 tests | 1 skipped" dentro do
+`host:certify`. As guardas são por disponibilidade de toolchain no ambiente, não por código:
+`HAS_SGDK_BUILD_TOOLCHAIN` (linha 122), `GHIDRA_AVAILABLE` (195) e `HAS_M68K_TOOLS` (231).
+O profile `full` do host-manager exporta SGDK/m68k/Ghidra, então 3 testes deixam de ser
+pulados. Nenhum dos dois números é comparação entre tips: mesma árvore, mesmo total, só o
+ambiente difere. O skip fixo de `src/core/validateUpstreamWindows.test.ts` (2) é
+`process.platform === "win32"` e aparece igual nas duas corridas.
+
+ACHADO PARALELO (atribuído, não corrigido nesta rodada): `cargo clippy --all-targets -D warnings`
+(mais estrito que o gate documentado) falha com 18 erros no alvo `lib test`, dos quais 10 são
+de código de teste pré-existente de outros módulos: build_orch.rs:5225, project_mgr.rs:21081,
+22014, 25744, 26217, 26316, graphics_discovery.rs:1946, holdout.rs:661, logic_recovery.rs:620,
+lib.rs:165. Os outros 8 eram no arquivo deste checkpoint (rex_resources.rs:1210-1212,
+aritmética constante dentro de asserções) e foram corrigidos; o gate documentado
+(`cargo clippy -- -D warnings`, sem --all-targets) não alcança código de teste, por isso eles
+nunca tinham aparecido.

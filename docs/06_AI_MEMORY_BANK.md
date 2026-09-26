@@ -1,5 +1,90 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-26 (d) — integrador, ETAPA E: edição de recurso comprimido com efeito **causal demonstrado na aplicação** (Experimental; sem merge, sem release, sem promoção)
+
+**HEAD na abertura deste checkpoint:** `d4043eb` (branch
+`codex/rex-integrator-profiles-codecs`). Não commitados neste momento:
+`scripts/e2e-tauri-build-run.mjs` (cenário novo + helpers),
+`src-tauri/src/tools/reverse/decomp/rex_resources.rs` (teste de fronteira +
+limpeza de lints), `scripts/rex_profiles/integrator/lz4w_fixture/{README.md,gen_fixture.py}`,
+`scripts/rex_profiles/integrator/lz4w_fixture/analyze-frame.py` (novo), os dois
+relatórios de evidência e o `manifest.json` em
+`data/rex_profiles/integrator/lz4w-fixture/evidence/2026-09-26-e2e/`, e o
+`fixture-build-report.json` versionado (sha da receita + registro de reprodução).
+
+**Hipótese:** a cadeia LZ4W do produto — descoberta → decode → transação canônica
+→ BPS → re-aplicação → emulação — produz um efeito observável **na tela do app**
+quando a edição é feita pela interface real sobre o núcleo real, e os negativos
+alcançáveis pela interface são recusados sem escrita.
+
+**Evidência a favor (medida, binário `e69077927863c15788bf2006e344f71f4a4b84408714201c48a67d450fc26574`,
+core Genesis Plus GX v1.7.4 `46a5521`):** cenário E2E `rex-lz4w-fixture-effect`
+verde **duas vezes** com o código final (run10 e run11, `rc=0` lido nos próprios
+logs, não de notificação). Pela UI: recurso único (header 95464, stream `0x5f988`,
+slot 444 B, `1/5 candidatos` verificados), prévia == fonte recomposto
+(`19cc30aefe4da564`), no-op honesto, edição `tile 0, row 5, col 7 → idx 15`
+aplicada pela transação (modificada `e55dba92…`, BPS `52ce036f…` de 74 B, 268
+bytes distintos confinados em `5f9a1..5fb3f`, `diferenteForaDoSlot:0`), BPS
+re-aplicado à base reproduzindo o hash exato, cópia reaberta decodificando no
+plain editado (`917048cc35508e9a`). Pela emulação: **1 byte** no WRAM (`0x5e`,
+`f0→ff`) e **exatamente 1 pixel de tela** diferente, na coordenada `(7,5)` prevista
+pelo fonte **antes** de qualquer emulação, com as classes de cor esperadas
+(`0x212021 → 0x8c008c`), canvas do app == framebuffer do core (320×224). Pelos
+negativos: fila de intervalo guardada (0 entradas, 0 escritas, sha da cópia
+inalterado; controle positivo enfileira 1) e `rom_identity_mismatch` quando o
+arquivo muda sob o painel (TOCTOU), com a ROM do fixture verificada intacta.
+
+**Evidência contra / limitações (registradas como não provadas, não como sucesso):**
+(a) a perna de **VRAM não é alcançável** — o core devolve
+`retro_get_memory_size(VIDEO_RAM) == 0` enquanto `emulator_read_memory` responde
+`ok:true` com dados vazios; a comparação ingênua diria "0 divergências" de forma
+**vaciada**, então o relatório publica `vram.observed:false` com o motivo e a
+cadeia fica provada por WRAM + framebuffer; (b) o DAC do Mega Drive **funde** as
+16 palavras de paleta autorais em **11 cores** (índices colididos
+`[0,1,2,3,4,6,7,8,9,10]`) — índice→cor é função mas não é injetiva, logo a
+identidade do pixel alterado é estabelecida por **posição** e a cor só confirma a
+classe (diagnóstico em `analyze-frame.py`); (c) a recusa de intervalo do **núcleo**
+é **inalcançável pela UI**: `CompressedResourcePanel.tsx` descarta
+`editTile >= num_tiles` no cliente, então o E2E prova a guarda do cliente e a
+recusa do núcleo (`rex_resources.rs:634`) foi fixada pelo teste unitário
+`apply_rejects_tile_outside_resource_without_writing` (que também asserta que a
+cópia em disco não mudou); (d) isto é prova de **mecanismo em dado autoral** — o
+alvo comercial `0xc8cc8` continua `semanticState: BLOQUEADO`, e nenhuma afirmação
+visual é feita sobre ele.
+
+**Retratação de redação no estado corrente:** a frase "a tela do app ainda não foi
+capturada por emulação" (ROUND_STATE, linha da ETAPA D) estava desatualizada e foi
+substituída; ela permanece verdadeira apenas para o alvo comercial.
+
+**Reprodução durável do artefato testado:** `build-fixture.sh` reproduziu o ROM
+bit-idêntico (`159298eb…`, 393216 B) em caminho versionado-de-receita e o
+`fixture-build-report.json` do tronco agora registra a receita atual
+(`gen_fixture.py 3e474f44…`, sha anterior `1445132f…` produzia o mesmo ROM — a
+diferença é comentário + achatamento de `tile_pixels`). `/tmp` deixa de ser a única
+origem; gap declarado: o cenário ainda alimenta a cópia em `/tmp`.
+
+**Gates deste checkpoint:** `cargo test --lib -- --nocapture` **669 passed / 0 failed /
+51 ignored**; `cargo clippy -- -D warnings` limpo; `cargo fmt --check` limpo;
+`npm run check:tree`, `npm run lint`, `npx tsc --noEmit` rc=0; `npm test`
+**699 passed / 6 skipped (705)**, arquivos 75/1 skipped (76); `npm run host:certify`
+**READY** (fingerprint `60249508…`, lock `dd99a22f…`) com a mesma suíte Rust
+(669/0/51) e **702 passed / 3 skipped** no frontend. A diferença 699↔702 é
+reconciliada e não é comparação de tips: os 3 testes a mais vêm de guardas por
+disponibilidade de toolchain em `scripts/decomp/decomp-scripts.test.mjs`
+(`HAS_SGDK_BUILD_TOOLCHAIN`, `GHIDRA_AVAILABLE`, `HAS_M68K_TOOLS`), que o profile
+`full` exporta; total idêntico (705), zero falhas nas duas corridas. Log das
+portas promovido com `gates-2026-09-26.log` no pacote de evidência. Achado paralelo honesto: `cargo clippy
+--all-targets` (gate mais estrito que o documentado) falha em 10 lints de código
+de teste **pré-existente** de outros módulos (`build_orch.rs`, `project_mgr.rs`×5,
+`graphics_discovery.rs`, `holdout.rs`, `logic_recovery.rs`, `lib.rs`) — atribuídos
+e **não** corrigidos nesta rodada.
+
+**Próximo comando:** commit deste conjunto revisado + `git push` após fetch seguro.
+**Bloqueio externo:** nenhum. Por ordem do operador continuam fora do escopo:
+merge de PR, release e promoção de maturidade; expansão de ROM/realocação de
+ponteiros; bytes comerciais no staging.
+
+
 ### Checkpoint 2026-09-26 (c) — integrador, ETAPA D: edição de 1 pixel com efeito **previsto** que sobrevive ao 68000, em fixture autoral (Experimental; sem merge, sem release)
 
 **HEAD no checkpoint:** `a96fb15` (branch `codex/rex-integrator-profiles-codecs`), com
