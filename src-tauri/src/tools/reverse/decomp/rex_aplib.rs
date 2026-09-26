@@ -404,6 +404,22 @@ impl Emissor {
         Ok(())
     }
 
+    /// Token `10` em forma de **rep-match**: `acumulado = 2` é o único valor
+    /// que o decodificador lê como reuso de offset (ele exige `acumulado < lwm`,
+    /// e 2 é o menor `gamma2` legível), e nesse ramo o comprimento sai cru — sem
+    /// o ajuste de `+2`/`+1` do match explícito. Por isso só existe com LWM 3,
+    /// ou seja, logo depois de um literal.
+    fn rep_match(&mut self, length: usize, lwm: u64) -> Result<(), CodecError> {
+        debug_assert!(lwm > REP_ACUMULADO, "rep-match exige LWM > 2");
+        debug_assert!(length >= MATCH_MINIMO);
+        self.bit(1)?;
+        self.bit(0)?;
+        self.gamma2(REP_ACUMULADO)?;
+        self.gamma2(u64::try_from(length).map_err(|_| {
+            CodecError::new("overflow", "aPLib encode: comprimento cru fora de u64")
+        })?)
+    }
+
     /// Token `10`: match explícito. `acumulado = off_hi + LWM` é o que o
     /// decodificador subtrai para recuperar `off_hi`, então o valor emitido
     /// depende do estado de LWM do momento — mesmo estado que o decode mantém.
@@ -422,6 +438,48 @@ impl Emissor {
             CodecError::new("overflow", "aPLib encode: comprimento cru fora de u64")
         })?)
     }
+}
+
+/// LWM (`nFollowsLiteral`) que o decodificador mantém depois de um literal.
+const LWM_LITERAL: u64 = 3;
+/// ... e depois de qualquer match, inclusive o rep-match.
+const LWM_MATCH: u64 = 2;
+/// O único `acumulado` que o decodificador interpreta como rep-match.
+const REP_ACUMULADO: u64 = 2;
+
+/// A expressão mais barata que o formato oferece para um byte (ou um match) em
+/// `pos`. A ordem de preferência está centralizada aqui porque ela é a
+/// explicação do tamanho do stream: `111` ainda não é emitido, e é por isso que
+/// `noisy_runs_16k` fica 277 bytes acima do oráculo.
+enum Expressao {
+    /// Reuso do último offset, pagando só o comprimento.
+    Rep { length: usize },
+    /// Token `110`: match de 2 ou 3 bytes com offset ≤ 127.
+    Curto { offset: usize, length: usize },
+    /// Token `10`: match explícito com byte de offset.
+    Longo { offset: usize, length: usize },
+    /// Token `0`.
+    Literal,
+}
+
+/// Escolhe a expressão do candidato. O rep-match ganha sempre que está
+/// disponível — custa `2 + gamma2(comprimento)` bits contra os mesmos bits do
+/// `10` **mais** 8 bits do byte de offset, e contra os 11 bits do `110` — mas
+/// ele só existe com LWM 3 e sobre o offset do último match emitido, que é o
+/// estado que o decodificador tem, não um estado que este encoder inventa.
+fn expressao_para(candidato: Option<(usize, usize)>, lwm: u64, last_offset: usize) -> Expressao {
+    if let Some((offset, length)) = candidato {
+        if lwm > REP_ACUMULADO && last_offset != 0 && offset == last_offset {
+            return Expressao::Rep { length };
+        }
+        if length <= CMD110_MAX_LEN && offset <= CMD110_MAX_OFFSET {
+            return Expressao::Curto { offset, length };
+        }
+        if expressavel_pelo_10(offset, length) {
+            return Expressao::Longo { offset, length };
+        }
+    }
+    Expressao::Literal
 }
 
 /// Ajuste de comprimento do token `10`, espelhando o decodificador: `+2` fora
@@ -594,29 +652,37 @@ pub fn aplib_encode(data: &[u8], limits: &AplibEncodeLimits) -> Result<Vec<u8>, 
     // O byte 0 do stream raw É o primeiro literal, sem token e sem tag.
     emissor.byte(data[0])?;
     // LWM e histórico andam com o emissor porque o decodificador os usa para
-    // interpretar o que for emitido: 3 após literal, 2 após match.
-    let mut lwm: u64 = 3;
+    // interpretar o que for emitido: 3 após literal, 2 após match, e o
+    // rep-match só endereça o offset que o decodificador tem no histórico.
+    let mut lwm = LWM_LITERAL;
+    let mut last_offset: usize = 0;
     let mut pos = 1;
     while pos < data.len() {
         let candidato = busca.mais_longo(pos, &mut emissor.orcamento)?;
-        let expressao = candidato.filter(|(offset, length)| {
-            (*length <= CMD110_MAX_LEN && *offset <= CMD110_MAX_OFFSET)
-                || expressavel_pelo_10(*offset, *length)
-        });
-        match expressao {
-            Some((offset, length)) if length <= CMD110_MAX_LEN && offset <= CMD110_MAX_OFFSET => {
+        match expressao_para(candidato, lwm, last_offset) {
+            Expressao::Rep { length } => {
+                emissor.rep_match(length, lwm)?;
+                // O rep-match reafirma o mesmo offset e, como qualquer match,
+                // derruba LWM para 2: o próximo rep-match precisa de um literal
+                // no meio, exatamente como o decodificador.
+                lwm = LWM_MATCH;
+                pos += length;
+            }
+            Expressao::Curto { offset, length } => {
                 emissor.cmd_110(offset, length)?;
-                lwm = 2;
+                last_offset = offset;
+                lwm = LWM_MATCH;
                 pos += length;
             }
-            Some((offset, length)) => {
+            Expressao::Longo { offset, length } => {
                 emissor.match_10(offset, length, lwm)?;
-                lwm = 2;
+                last_offset = offset;
+                lwm = LWM_MATCH;
                 pos += length;
             }
-            None => {
+            Expressao::Literal => {
                 emissor.literal(data[pos])?;
-                lwm = 3;
+                lwm = LWM_LITERAL;
                 pos += 1;
             }
         }
@@ -978,6 +1044,41 @@ mod tests {
         );
     }
 
+    /// Rep-match: o token `10` com `gamma2 < lwm` reusa o último offset pagando
+    /// **só o comprimento**, sem byte de offset e sem ajuste de comprimento. É o
+    /// token que falta para os plains `tile_like` (15 rep-match no oráculo) e
+    /// `noisy_runs_16k` (210) — ver o resumo por tipo de token em
+    /// `scripts/rex_profiles/integrator/aplib/token_dump.py`.
+    ///
+    /// O alvo não é estimativa minha: `apultra -c` sobre estes exatos 34 bytes
+    /// produz **21 bytes** de stream, e o dump deles mostra um `match-10` de 10
+    /// bytes seguido de um `rep-match` de 10. O produto pagava o byte de offset
+    /// duas vezes.
+    #[test]
+    fn aplib_encode_reusa_o_ultimo_offset_por_rep_match() {
+        let dados = b"0123456789AB0123456789CD0123456789";
+        let stream = aplib_encode(dados, &AplibEncodeLimits::default()).expect("codifica");
+        assert!(
+            stream.len() <= 21,
+            "o oráculo faz estes 34 bytes em 21 B usando um rep-match; o produto fez {} B \
+             (stream: {stream:02x?})",
+            stream.len()
+        );
+        let decode = decodificar(
+            &stream,
+            AplibLimits {
+                max_output: dados.len() + 1,
+                max_work: 64 * 1024 * 1024,
+            },
+        );
+        assert_eq!(&decode.data, &dados[..], "ida-e-volta");
+        assert_eq!(
+            decode.bytes_consumed,
+            stream.len(),
+            "EOD no último byte lido"
+        );
+    }
+
     /// Match de comprimento 5 com offset 5: o `110` não expressa (só 2 ou 3),
     /// então sai pelo token `10`. Montado à mão na ordem de consumo —
     /// `41` literal físico; tag `0a` = literais B,C,D,E + `10` + gamma2(3)
@@ -1234,11 +1335,20 @@ mod tests {
     /// qualidade muda um pino, e mudar um pino é decisão registrada, não
     /// deriva.
     ///
-    /// Pino ≠ alvo, e a diferença é conhecida: `tile_like` está 15 bytes e
-    /// `noisy_runs_16k` 277 bytes acima do oráculo porque o produto ainda não
-    /// emite `111` (cópia de 1 byte) nem rep-match (`gamma2` de comprimento puro
-    /// sobre o último offset). Fechar esses dois tokens é o próximo passo; os
-    /// outros seis plains já saem byte a byte iguais ao oráculo.
+    /// Pino ≠ alvo, e a diferença é estreita e medida mesa por mesa
+    /// (`RDS_APLIB_DUMP=… cargo test --lib aplib_encode_dumpa` +
+    /// `scripts/rex_profiles/integrator/aplib/token_dump.py`):
+    ///
+    /// - mesa de tokens idêntica à do oráculo: `ab_repeat`, `near_window_2k`,
+    ///   `tile_like`, `zeros_64k`;
+    /// - mesmo tamanho com um `111` do oráculo pago como literal:
+    ///   `far_window_40k`, `pseudo_random_8k`;
+    /// - 1 byte acima: `text_rep`, por 4 cópias de 1 byte (`111`) que o produto
+    ///   ainda paga como literal (4 × 2 bits = 1 byte);
+    /// - 160 bytes acima: `noisy_runs_16k`, e aqui a mesa mostra forma de parse,
+    ///   não token faltante: o produto emite 305 `match-10` contra 179 do
+    ///   oráculo, e 123 rep-match contra 210 — o guloso "match mais longo"
+    ///   corta o stream de jeito diferente.
     #[test]
     fn aplib_encode_tem_a_capacidade_medida_congelada_por_plain() {
         const PINOS: [(&str, usize, usize); 8] = [
@@ -1246,27 +1356,77 @@ mod tests {
             ("ab_repeat", 8, 8),
             ("far_window_40k", 305, 305),
             ("near_window_2k", 55, 55),
-            ("noisy_runs_16k", 1482, 1205),
+            ("noisy_runs_16k", 1365, 1205),
             ("pseudo_random_8k", 294, 294),
             ("text_rep", 29, 28),
-            ("tile_like", 56, 41),
+            ("tile_like", 41, 41),
             ("zeros_64k", 8, 8),
         ];
+        let mut desvios = Vec::new();
         for (nome, produto_esperado, alvo) in PINOS {
             let stream_oraculo = vetor(&format!("plain/{nome}.apultra.ap"));
-            assert_eq!(
-                stream_oraculo.len(),
-                alvo,
-                "{nome}: o stream do oráculo mudou; o alvo da tabela precisa ser re-medido"
-            );
+            if stream_oraculo.len() != alvo {
+                desvios.push(format!(
+                    "{nome}: o stream do oráculo mudou ({}, tabela diz {alvo}); o alvo \
+                     precisa ser re-medido",
+                    stream_oraculo.len()
+                ));
+                continue;
+            }
             let dados = decodificar(&stream_oraculo, AplibLimits::default()).data;
             let stream = aplib_encode(&dados, &AplibEncodeLimits::default())
                 .unwrap_or_else(|e| panic!("{nome}: encode recusou: {e}"));
-            assert_eq!(
-                stream.len(),
-                produto_esperado,
-                "{nome}: capacidade do encoder saiu do congelado (alvo do oráculo: {alvo} B)"
-            );
+            if stream.len() != produto_esperado {
+                desvios.push(format!(
+                    "{nome}: produto {} B, congelado {produto_esperado} B, alvo do \
+                     oráculo {alvo} B",
+                    stream.len()
+                ));
+            }
         }
+        assert!(
+            desvios.is_empty(),
+            "capacidade do encoder saiu do congelado:\n  {}",
+            desvios.join("\n  ")
+        );
+    }
+
+    /// Alimenta o instrumento de tokens com o stream do **produto**: se
+    /// `RDS_APLIB_DUMP` apontar para um diretório, cada plain da fixture sai lá
+    /// como `<nome>.produto.ap`, para
+    /// `scripts/rex_profiles/integrator/aplib/token_dump.py` comparar mesa por
+    /// mesa com o stream do oráculo. Sem a variável o teste não escreve nada (o
+    /// conjunto verde não depende de dump nem publica bytes), e com ela um
+    /// fracasso de escrita é fracasso de teste.
+    ///
+    /// Uso:
+    ///   RDS_APLIB_DUMP=/tmp/aplib-dump cargo test --lib aplib_encode_dumpa
+    #[test]
+    fn aplib_encode_dumpa_os_streams_para_analise_se_pedido() {
+        let dir = match std::env::var_os("RDS_APLIB_DUMP") {
+            None => return,
+            Some(v) => PathBuf::from(v),
+        };
+        std::fs::create_dir_all(&dir)
+            .unwrap_or_else(|e| panic!("RDS_APLIB_DUMP={}: {e}", dir.display()));
+        let mut casos = 0;
+        for linha in linhas() {
+            if linha[0] != "plain" {
+                continue;
+            }
+            let nome = &linha[1];
+            let dados = decodificar(
+                &vetor(&format!("plain/{nome}.apultra.ap")),
+                AplibLimits::default(),
+            )
+            .data;
+            let stream = aplib_encode(&dados, &AplibEncodeLimits::default())
+                .unwrap_or_else(|e| panic!("{nome}: encode recusou: {e}"));
+            let caminho = dir.join(format!("{nome}.produto.ap"));
+            std::fs::write(&caminho, &stream)
+                .unwrap_or_else(|e| panic!("escrever {}: {e}", caminho.display()));
+            casos += 1;
+        }
+        assert_eq!(casos, 8, "esperava 8 plains no manifest.tsv");
     }
 }
