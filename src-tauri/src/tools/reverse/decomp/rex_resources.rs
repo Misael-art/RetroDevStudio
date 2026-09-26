@@ -1065,9 +1065,8 @@ mod tests {
         // recursos COM TILES ENCONTRADOS EM TELA nos dumps do core
         // (casamento invariante de paleta; ver relatório da rodada).
         let on_screen: [usize; 18] = [
-            0x9e23e, 0xa0ab4, 0xa32da, 0xa56ae, 0xbb810, 0xbcf58, 0xbdd1a, 0xbe352,
-            0xbe964, 0xbee94, 0xc0094, 0xc07b6, 0xc0c3e, 0xc0f88, 0xc14f2, 0xc281c,
-            0xc8d58, 0xc8f12,
+            0x9e23e, 0xa0ab4, 0xa32da, 0xa56ae, 0xbb810, 0xbcf58, 0xbdd1a, 0xbe352, 0xbe964,
+            0xbee94, 0xc0094, 0xc07b6, 0xc0c3e, 0xc0f88, 0xc14f2, 0xc281c, 0xc8d58, 0xc8f12,
         ];
         let mut found = 0usize;
         for resource in set.resources.iter().rev() {
@@ -1088,10 +1087,9 @@ mod tests {
                         }
                         let mut edited = resource.decoded.clone();
                         md_write_pixel_index(&mut edited, tile, row, col, 15).unwrap();
-                        if let Ok(stream) = lz4w_encode_with_dictionary(
-                            &edited,
-                            Some(&rom[..start_off]),
-                        ) {
+                        if let Ok(stream) =
+                            lz4w_encode_with_dictionary(&edited, Some(&rom[..start_off]))
+                        {
                             if stream.len() <= resource.bytes_consumed {
                                 fitting.push((tile, row * 8 + col));
                             }
