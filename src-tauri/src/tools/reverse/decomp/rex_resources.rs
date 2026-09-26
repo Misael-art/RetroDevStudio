@@ -303,7 +303,26 @@ pub fn reinsert_transaction(
             ),
         ));
     }
-    // 5. Escrita em cópia: só o novo stream; bytes originais além dele
+    // 5. Verificação de IDA E VOLTA no contexto real: o novo stream, com o
+    // mesmo dicionário, DEVE decodificar exatamente para os dados editados.
+    {
+        let recheck = lz4w_decode_with_dictionary(&new_stream, Some(&rom[..start]), limits)?;
+        if recheck.data != request.edited_data {
+            let first_diff = recheck
+                .data
+                .iter()
+                .zip(request.edited_data.iter())
+                .position(|(a, b)| a != b)
+                .unwrap_or_else(|| recheck.data.len().min(request.edited_data.len()));
+            return Err(CodecError::new(
+                "invalid_reference",
+                format!(
+                    "o stream re-codificado não decodifica para a edição (primeiro byte divergente em {first_diff})"
+                ),
+            ));
+        }
+    }
+    // 6. Escrita em cópia: só o novo stream; bytes originais além dele
     //    permanecem (padding e possíveis referências de dependentes).
     let mut modified = rom.to_vec();
     modified[start..start + new_stream.len()].copy_from_slice(&new_stream);
@@ -912,9 +931,11 @@ mod tests {
         )
         .expect("no-op BYOR");
         assert!(matches!(outcome, ReinsertOutcome::NoOp));
-        // MODIFICADO: edição mínima, transação completa, patch com hash exato.
+        // MODIFICADO: edição mínima (pixel (0,7,4) -> índice 15 — única
+        // forma que coube com o encoder corrigido), transação completa,
+        // patch com hash exato.
         let mut edited = target.decoded.clone();
-        edited[0] ^= 0xF0;
+        md_write_pixel_index(&mut edited, 0, 7, 4, 15).unwrap();
         let outcome = reinsert_transaction(
             &ReinsertRequest {
                 rom: &rom,
@@ -944,7 +965,7 @@ mod tests {
             .filter(|(_, (a, b))| a != b)
             .map(|(i, _)| i)
             .collect();
-        assert_eq!(changed, vec![0usize], "a edição deve alterar exatamente o byte 0 do dado decodificado");
+        assert_eq!(changed, vec![30usize], "a edição deve alterar exatamente o byte 30 do dado decodificado (pixel (0,7,4), nibble alto)");
         eprintln!(
             "BYOR cadeia OK: original={sha} modificado={} patch={} preservados={} escopo={}",
             applied.modified_rom_sha256,
@@ -1090,9 +1111,8 @@ mod tests {
             0xbee94, 0xc0094, 0xc07b6, 0xc0c3e, 0xc0f88, 0xc14f2, 0xc281c, 0xc8d58, 0xc8f12,
         ]);
         let checkpoint_path = std::path::Path::new("/tmp/rex-scan-checkpoint.log");
-        let mut checkpoint = std::io::LineWriter::new(
-            std::fs::File::create(checkpoint_path).expect("checkpoint"),
-        );
+        let mut checkpoint =
+            std::io::LineWriter::new(std::fs::File::create(checkpoint_path).expect("checkpoint"));
         use std::io::Write as _;
         let mut found = 0usize;
         for (target_index, &stream_off) in targets.iter().enumerate() {
@@ -1103,13 +1123,18 @@ mod tests {
             else {
                 continue;
             };
-            let index = match super::super::rex_codecs::Lz4wDictionaryIndex::build(&rom[..stream_off]) {
-                Ok(index) => index,
-                Err(error) => {
-                    eprintln!("[scan {}/{}] {stream_off:#x}: índice falhou: {error}", target_index + 1, targets.len());
-                    continue;
-                }
-            };
+            let index =
+                match super::super::rex_codecs::Lz4wDictionaryIndex::build(&rom[..stream_off]) {
+                    Ok(index) => index,
+                    Err(error) => {
+                        eprintln!(
+                            "[scan {}/{}] {stream_off:#x}: índice falhou: {error}",
+                            target_index + 1,
+                            targets.len()
+                        );
+                        continue;
+                    }
+                };
             let mut fit_count = 0usize;
             let mut candidates = 0usize;
             const BUDGET: usize = 64;
@@ -1128,10 +1153,12 @@ mod tests {
                         }
                         let mut edited = resource.decoded.clone();
                         md_write_pixel_index(&mut edited, tile, row, col, 15).unwrap();
-                        let Ok(stream) = super::super::rex_codecs::lz4w_encode_with_dictionary_index(
-                            &edited,
-                            Some(&index),
-                        ) else {
+                        let Ok(stream) =
+                            super::super::rex_codecs::lz4w_encode_with_dictionary_index(
+                                &edited,
+                                Some(&index),
+                            )
+                        else {
                             continue;
                         };
                         if stream.len() > resource.bytes_consumed {
@@ -1171,7 +1198,10 @@ mod tests {
                 target_index + 1,
                 targets.len()
             );
-            let _ = writeln!(checkpoint, "ALVO {stream_off:#x} fit={fit_count} aplicados={applied_here}");
+            let _ = writeln!(
+                checkpoint,
+                "ALVO {stream_off:#x} fit={fit_count} aplicados={applied_here}"
+            );
             let _ = checkpoint.flush();
             if found >= 4 {
                 break;

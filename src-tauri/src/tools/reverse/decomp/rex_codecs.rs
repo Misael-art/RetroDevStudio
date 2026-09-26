@@ -678,6 +678,31 @@ mod tests {
         assert_eq!(err.code, "invalid_reference");
     }
 
+    /// Roundtrip imediato do encoder com índice reutilizável sobre dados
+    /// com dicionário — pega divergências encode→decode no próprio formato.
+    #[test]
+    fn lz4w_encode_index_roundtrip_with_dictionary() {
+        let mut data = Vec::new();
+        let mut x: u32 = 0x9e3779b9;
+        for _ in 0..144 {
+            x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+            data.extend_from_slice(&((x >> 16) as u16).to_be_bytes());
+        }
+        let mut dictionary = Vec::new();
+        let mut y: u32 = 0x12345678;
+        for _ in 0..2048 {
+            y = y.wrapping_mul(1664525).wrapping_add(1013904223);
+            dictionary.extend_from_slice(&((y >> 16) as u16).to_be_bytes());
+        }
+        let index = Lz4wDictionaryIndex::build(&dictionary).expect("índice");
+        let stream = lz4w_encode_with_dictionary_index(&data, Some(&index)).expect("encode");
+        let decoded =
+            lz4w_decode_with_dictionary(&stream, Some(&dictionary), &Lz4wLimits::default())
+                .expect("decode");
+        assert_eq!(decoded.data, data, "roundtrip com dicionário divergiu");
+        assert_eq!(decoded.bytes_consumed, stream.len());
+    }
+
     /// Aceite BYOR (executar explicitamente: `cargo test --lib -- --ignored
     /// rex_codecs`): identificação estrutural na ROM congelada do corpus
     /// (HAMOOPIG). Exige o arquivo com SHA-256 esperado; ausência FALHA
