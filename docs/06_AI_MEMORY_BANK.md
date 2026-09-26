@@ -1,5 +1,124 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-26 (e) — integrador, capacidade REAL do codificador LZ4W medida, um incremento pinado e o descarte silencioso da UI corrigido (Experimental; sem merge, sem release, sem promoção)
+
+**Commits da entrega:** `2ffb076` (benchmark congelado), `39c0fd9` (incremento
+do codificador + replay 68k `r14`), `6351f15` (aviso de UI) e o commit de
+documentação que traz este registro — todos sobre `47f2c89` (ETAPA E), branch
+`codex/rex-integrator-profiles-codecs`. Nada além disso ficou não commitado: os
+arquivos alheios à rodada (`.mimosa/`, `APJ-unpack`, `a.out`,
+`apultra-decode`, `src-tauri/.mimosa/`, `src-tauri/src-tauri/`,
+`data/canonical-local-2026-09-21/`) permanecem intactos e **não** staged — o
+último é corpus BYOR e nunca entra no git.
+
+**Objetivo recebido:** tornar mais recursos comprimidos editáveis **sem
+expansão**, *medindo a capacidade real do encoder* — em vez de acumular ajustes
+de parsing sem saber qual gargalo fecha.
+
+**Decisão metodológica central:** congelar a medição antes de mexer no
+codificador. `scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md`
+(§1-§8) fixa conjuntos (S-A fixture autoral, S-B corpus BYOR), split de
+validação por `índice % 5` (32 recursos) vs ajuste (128), as 4 edições por
+recurso definidas **antes** de medir, orçamento (2 s/recurso, 120 s/rodada,
+publicado como perda se estourar), a barreira de re-decode do que o codificador
+emite, e a regra de honestidade que o operador exigiu: **no-op que preserva o
+stream original não conta como sucesso do encoder** — sai em coluna própria
+(`noop_preservando_stream`). O teste do benchmark é `#[ignore]` e só roda com
+`RDS_REX_BENCH_OUT` absoluto; ele **falha** se a ROM do corpus ou do fixture
+faltar ou divergir do SHA pino (aceite BYOR sem `return` silencioso).
+
+**Linha de base (roda `r1`, `rex_codecs.rs @ 656bdc9f…`):** 160 recursos LZ4W
+verificados, folga somada **−13 188 B**, **1** recurso com folga ≥ 0; das 644
+edições predefinidas **2 cabem**, **523** `needs_space`, **119** no-op. Fixture:
+re-encode do plain não editado = **448 B** contra o `rescomp` de **444 B**.
+
+**Diagnóstico token a token (não se começou por reescrever o compressor):** três
+instrumentos independentes e concordantes — `tokens.py` (tokenizador próprio,
+só imprime depois de reproduzir o plain e consumir o stream inteiro),
+`model_encoder.py` (réplica **linha a linha do codificador daquela linha de
+base**, validada por igualdade byte a byte, o que permite inverter decisões sem
+reverter código) e `probe_candidates.py` (varredura sob três modelos: ideal sem
+cap, real dicionário-primeiro, mesclado). A divergência está em **uma posição**:
+no word 200 do plain do fixture, o dicionário tem 2 329 candidatos e o melhor
+representável `(3, 156)` está na **tabela de saída**; na ordem dicionário-primeiro
+o teto de 128 candidatos se esgota no dicionário antes de a saída ser consultada
+(`melhor_só_dict = (2, 1135)`, não representável). Alcançar aquele candidato
+naquela ordem custaria ~2 330 avaliações — **18× o teto**; na ordem mesclada ele
+chega em **3**. Conclusão registrada: o defeito é a **ordem** em que o orçamento
+é gasto, não o tamanho do orçamento. (Redação anterior, já retirada do estado
+corrente, atribuía o gap ao cap ou ao lazy de 1 passo — a sonda refutou as duas.)
+
+**Incremento entregue (único, delimitado):** `find_best` intercala as duas listas
+descendentes por proximidade com **mesmo** cap de 128, **mesma** janela
+(0x4000 words), **mesmo** `consider()`, **mesmo** filtro de aceite e **mesma**
+regra lazy. Formato intocado.
+
+**Antes/depois com perdas e empates declarados:** comparação recurso a recurso do
+campo `reencode_base` entre `r1` e `r2` (161 linhas = 160 do corpus + 1 do
+fixture): folga somada **−13 188 → −9 156 B** (+4 032 B), no corpus **158
+melhoraram / 0 pioraram / 2 empataram**, fixture **448 → 444 B, byte a byte
+idêntico ao stream do `rescomp`**. Reproduzido **campo a campo** no pino final
+`bee8524f…` (roda `r4`: 161/161 linhas iguais, resumo igual exceto o tempo de
+rodada 27 440 → 25 526 ms). Replay no **desempacotador 68000 oficial** do SGDK
+2.11 sob MAME 0.289 (`lz4w-68k/evidence/2026-09-26-r14`, 12 casos, 7 ROMs): as
+streams do codificador novo batem 68k == jar v1.43 == esperado-Rust, e a recusa
+contratual além do teto de hardware (`i16`, off 16386) continua divergindo no
+68k por contrato. Determinismo entre duas corridas registrado no manifesto.
+
+**O que o incremento NÃO resolveu (e isso é o achado, não um rodapé):** a
+editabilidade **não** aumentou. Continua **1/160** recurso com folga não
+negativa (`0xc8cc8`, +2 B), e a coluna nova de **capacidade por amostragem**
+(24 bits invertidos por recurso, espaçados uniformemente; um bit só "cabe" se o
+re-encode cabe **e** a re-decodificação reproduz o plain editado) diz o mesmo:
+só `0xc8cc8` tem bit amostral cabível (16 de 24), os outros 159 têm zero, e a
+edição canônica de 1 pixel ali custa **146 B contra slot de 144 B** (`needs_space`
+honesto, nada forçado). Mediana do déficit restante **56 B/recurso** contra
+2-6 B por bit: **empatar com o `rescomp` é condição necessária, não
+suficiente.** Amostragem é amostragem — exaustivo seria O(bits) codificações por
+recurso e estouraria o orçamento.
+
+**UI (obrigação de corretude do PASSO 4, não extra):** o descarte de edição fora
+do intervalo era silencioso (`paintAt` retornava cedo; o formulário não validava
+nada). `editRejectReason` agora explica tile/linha/coluna/índice/nenhum-recurso
+no painel (`rex-resource-notice`) e como `warn` no log da ferramenta, preserva a
+fila válida e **não** envia o candidato inválido. A guarda do **núcleo** continua
+definitiva (o teste afirma que `rexResourceApplyEdit` recebe só a edição boa).
+Nenhum controle inválido foi exposto para facilitar teste — os campos aceitam
+entrada livre porque o usuário pode digitar qualquer valor, e é esse caso que a
+mensagem cobre.
+
+**Gates (todos rc=0, medidos nesta ordem, um job pesado por vez):**
+`check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` **701 passed / 6
+skipped**, `cargo fmt --check`, `cargo clippy -- -D warnings`,
+`cargo test --lib` **669 passed / 0 failed / 52 ignored**; §5 do diagnóstico
+reexecutado (passo 4 dif == log versionado). Nota: `cargo clippy --all-targets`
+tem 10 achados **pré-existentes** em arquivos que este lote não toca
+(`project_mgr.rs`, `holdout.rs`, `lib.rs`, `graphics_discovery.rs`,
+`build_orch.rs`, `logic_recovery.rs`) — nenhum em `rex_*.rs`.
+
+**Higiene de evidência:** `sa-dict.bin` (391 560 B, **fixture autoral**) é
+versionado uma vez (`r1`); cópias byte a byte idênticas em `r2/r3/r4` foram
+substituídas por `sa-dict.bin.sha256` com a verificação `cmp` registrada.
+`bench.json` só contém metadados (offsets, comprimentos, contagens) — nenhum
+byte da ROM comercial. Cada rodada ganhou `manifest.json` com pino do codificador;
+onde o hash da fonte **não** foi registrado no momento da corrida (`r2`, `r3`)
+isso está dito em vez de inventado, e `r4` fecha a lacuna.
+
+**Próximo incremento (PASSO 3, medido antes de integrar):** parse de **custo
+explícito** — caminho mais curto sobre as words com custo real de token +
+literais + descrito + word de offset, respeitando ≤15 literais/token e o teto de
+128 candidatos — para obter o **piso** por recurso; validar contra busca
+exaustiva em entradas pequenas e **não** chamar de "ótimo" sem essa comparação.
+Contexto que a mídia anterior não tinha: o DP ótimo do `LZ4W.java` já foi
+tentado nesta rodada, ficou verde no suíte e **piorou** (382 B vs 380 B); um DP
+fiel precisa de estado `(posição × literais pendentes mod 15)`.
+
+**Bloqueios e fora de escopo:** nenhum externo. Permanecem fora por ordem do
+operador: merge, release, promoção de maturidade, expansão de ROM, realocação de
+ponteiros, promoção do marco do fixture para cobertura BYOR, e misturar
+otimização LZ4W + codec novo (aPLib) + UI num único commit. O alvo comercial
+`0xc8cc8` segue **BLOQUEADO** quanto a efeito de jogo.
+
 ### Checkpoint 2026-09-26 (d) — integrador, ETAPA E: edição de recurso comprimido com efeito **causal demonstrado na aplicação** (Experimental; sem merge, sem release, sem promoção)
 
 **HEAD na abertura deste checkpoint:** `d4043eb` (branch
