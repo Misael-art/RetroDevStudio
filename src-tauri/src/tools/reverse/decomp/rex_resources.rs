@@ -14,9 +14,7 @@
 //! LZ4W estruturalmente verificados desta ROM) — os limites estão no
 //! resultado, nunca apresentados como equivalência global do jogo.
 
-use super::rex_codecs::{
-    lz4w_decode_with_dictionary, lz4w_encode_with_dictionary, CodecError, Lz4wLimits,
-};
+use super::rex_codecs::{lz4w_decode_with_dictionary, CodecError, Lz4wLimits};
 
 /// Codec declarado por um header TileSet do SGDK.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -293,7 +291,12 @@ pub fn reinsert_transaction(
         })?;
     // 4. Re-codificação com o dicionário fixado e limite de espaço.
     let original_stream_len = request.resource.bytes_consumed;
-    let new_stream = lz4w_encode_with_dictionary(request.edited_data, Some(&rom[..start]))?;
+    let index = super::rex_codecs::Lz4wDictionaryIndex::build(&rom[..start])?;
+    let (new_stream, _estrategia) = super::rex_codecs::lz4w_encode_with_dictionary_index_fitting(
+        request.edited_data,
+        Some(&index),
+        original_stream_len,
+    )?;
     if new_stream.len() > original_stream_len {
         return Err(CodecError::new(
             "excessive_output",
@@ -724,6 +727,7 @@ pub fn apply_resource_edit(
 
 #[cfg(test)]
 mod tests {
+    use super::super::rex_codecs::lz4w_encode_with_dictionary;
     use super::*;
 
     fn hamoopig_rom() -> Option<(Vec<u8>, String)> {
@@ -1927,14 +1931,21 @@ mod tests {
                 };
                 let (tokens, lit_words, short_matches, long_matches, rom_source_refs) =
                     walk_stream_shape(&rom[start..start + slot]);
-                let base = super::super::rex_codecs::lz4w_encode_with_dictionary_index(
+                let base = super::super::rex_codecs::lz4w_encode_with_dictionary_index_explained(
                     &resource.decoded,
                     Some(&dict),
                 );
+                // Estratégia registrada por recurso: o antes/depois do incremento
+                // só é lido como comparação se cada linha disser por qual caminho
+                // passou. Um `reencode_base` sem estratégia não é reproduzível.
+                let estrategia_base = base.as_ref().ok().map(|(_, s)| match s {
+                    super::super::rex_codecs::Lz4wEncodeStrategy::CostDp => "dp_custo_explicito",
+                    super::super::rex_codecs::Lz4wEncodeStrategy::Greedy => "guloso_fallback",
+                });
                 // Barreira do §6.2: o que o codificador emite tem de voltar ao
                 // plain exato consumindo o stream inteiro.
                 let reencode_base = match &base {
-                    Ok(stream) => {
+                    Ok((stream, _)) => {
                         let back = lz4w_decode_with_dictionary(stream, Some(dict_bytes), &limits)
                             .unwrap_or_else(|error| {
                                 panic!(
@@ -1979,7 +1990,7 @@ mod tests {
                     }
                     Err(_) => None,
                 };
-                rows.push(serde_json::json!({
+                let mut row = serde_json::json!({
                     "conjunto": conjunto,
                     "grupo": if conjunto == "S-A-fixture" { "referencia" }
                         else if index % 5 == 0 { "validacao" } else { "ajuste" },
@@ -1989,6 +2000,7 @@ mod tests {
                     "plain_len": resource.decoded.len(),
                     "slot": slot,
                     "reencode_base": reencode_base,
+                    "estrategia_base": estrategia_base,
                     "folga_base": reencode_base.map(|n| slot as i64 - n as i64),
                     "base_recusou": base.as_ref().err().map(|e| e.code),
                     "tokens": tokens,
@@ -2006,8 +2018,8 @@ mod tests {
                         slot,
                         EDIT_SAMPLE_BITS,
                     ),
-                }));
-                if let (Some(dir), Ok(stream)) = (&dump_dir, base.as_ref()) {
+                });
+                if let (Some(dir), Ok((stream, _))) = (&dump_dir, base.as_ref()) {
                     let stem = format!("{conjunto}-{start:08x}");
                     let writes = [
                         (
@@ -2035,9 +2047,12 @@ mod tests {
                         "slot": slot,
                         "dict_bytes": dict_bytes.len(),
                         "produto_len": stream.len(),
+                        "estrategia": estrategia_base,
                     }));
                 }
                 let ms = elapsed.elapsed().as_millis();
+                row["tempo_recurso_ms"] = serde_json::json!(ms);
+                rows.push(row);
                 if ms > PER_RESOURCE_BUDGET_MS {
                     estouro_por_recurso.push(format!(
                         "{conjunto} {start:#x}: {ms}ms > {PER_RESOURCE_BUDGET_MS}ms"
@@ -2077,8 +2092,17 @@ mod tests {
         let mut total_validacao = 0usize;
         let mut folga_total: i64 = 0;
         let mut base_recusada = 0usize;
+        let mut estrategia_dp = 0usize;
+        let mut estrategia_guloso = 0usize;
+        let mut tempo_total_ms: u64 = 0;
         let mut motivos: std::collections::BTreeMap<String, usize> = Default::default();
         for row in &rows {
+            match row["estrategia_base"].as_str() {
+                Some("dp_custo_explicito") => estrategia_dp += 1,
+                Some("guloso_fallback") => estrategia_guloso += 1,
+                _ => {}
+            }
+            tempo_total_ms += row["tempo_recurso_ms"].as_u64().unwrap_or(0);
             if conjunto_s_b(row) {
                 match row["folga_base"].as_i64() {
                     Some(folga) => folga_total += folga,
@@ -2127,6 +2151,11 @@ mod tests {
             "folga_total_S_B_bytes": folga_total,
             "recursos_com_folga_nao_negativa": s_b.iter().filter(|r| r["folga_base"].as_i64().unwrap_or(i64::MIN) >= 0).count(),
             "codificador_recusou_a_base": base_recusada,
+            "estrategia_base": {
+                "dp_custo_explicito": estrategia_dp,
+                "guloso_fallback": estrategia_guloso,
+            },
+            "tempo_medio_por_recurso_ms": if rows.is_empty() { 0 } else { tempo_total_ms / rows.len() as u64 },
             "distribuicao_resultados": motivos,
             "orcamento_ms": { "por_recurso": PER_RESOURCE_BUDGET_MS, "rodada": ROUND_BUDGET_MS },
             "estouros_por_recurso": estouro_por_recurso,
@@ -2173,6 +2202,12 @@ mod tests {
             round_ms,
             ROUND_BUDGET_MS,
             if round_ms > ROUND_BUDGET_MS { " — ESTOUROU (publicado como perda, não escondido)" } else { "" }
+        );
+        eprintln!(
+            "[bench] estratégia da base: dp_custo_explicito={} guloso_fallback={} | média {} ms/recurso",
+            estrategia_dp,
+            estrategia_guloso,
+            summary["tempo_medio_por_recurso_ms"].as_u64().unwrap_or(0)
         );
         eprintln!("[bench] distribuição: {motivos:?}");
         eprintln!(
