@@ -17,10 +17,20 @@
 //! ResComp. Sem dicionário declarado, uma referência externa é recusada com
 //! `invalid_reference` — nunca decodificada por adivinhação.
 //!
-//! Codificador v1: guloso com tabela de candidatos por word (janela de
-//! 0x4000 words, no máximo 128 candidatos por posição). Não é o parser
-//! ótimo do compressor oficial; a recompressão pode exceder o espaço
-//! original e o chamador deve tratar o erro de espaço (contrato §4).
+//! Codificador: parse por **custo explícito** (DP sobre o grafo
+//! `posição × literais pendentes`) quando cabe nos orçamentos determinísticos
+//! de `DP_MAX_*`; fora deles, ou para entradas acima da janela da DP, o
+//! caminho é o guloso com tabela de candidatos por word (janela de 0x4000
+//! words, no máximo 128 candidatos por posição) — histórico do v1. Os dois
+//! emitem o mesmo formato; a estratégia é exposta por
+//! `lz4w_encode_with_dictionary_index_explained` porque a medição publica o
+//! antes/depois por recurso. Quem tem um espaço fixo para escrever usa
+//! `lz4w_encode_with_dictionary_index_fitting`: ele prefere o guloso quando este
+//! já cabe (pegada de escrita pequena — é ela que os dependentes de um recurso
+//! vizinho sentem) e recorre à DP só quando não cabe. Nem um nem outro são o
+//! parser ótimo do compressor oficial: com poda de candidatos a DP é um **teto**
+//! do piso, e a recompressão ainda pode exceder o espaço original — o chamador
+//! deve tratar o erro de espaço (contrato §4).
 
 /// Códigos de erro estruturados do contrato de codec (CONTRACTS.md §4).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,8 +309,8 @@ pub fn lz4w_decode_with_dictionary(
 /// Codifica dados em um stream LZ4W autocontido válido para o decodificador
 /// oficial do SGDK (`lz4w_unpack`/`LZ4W.unpack`).
 ///
-/// Nunca produz correspondências com dicionário externo (start=0). O
-/// codificador é guloso (não-ótimo): ver comentário do módulo.
+/// Nunca produz correspondências com dicionário externo (start=0). Estratégia:
+/// ver comentário do módulo — DP de custo explícito com fallback guloso.
 pub fn lz4w_encode(data: &[u8]) -> Result<Vec<u8>, CodecError> {
     lz4w_encode_with_dictionary(data, None)
 }
@@ -368,6 +378,26 @@ pub fn lz4w_encode_with_dictionary_index(
     data: &[u8],
     index: Option<&Lz4wDictionaryIndex>,
 ) -> Result<Vec<u8>, CodecError> {
+    Ok(lz4w_encode_with_dictionary_index_explained(data, index)?.0)
+}
+
+/// Como `lz4w_encode_with_dictionary_index`, expondo a estratégia efetivamente
+/// usada. A medição de capacidade de edição publica um stream por recurso e
+/// precisa dizer **por qual caminho** ele veio: DP e guloso podem deixar o
+/// mesmo plain com comprimentos diferentes, e um número sem estratégia
+/// associada não é reproduzível.
+pub fn lz4w_encode_with_dictionary_index_explained(
+    data: &[u8],
+    index: Option<&Lz4wDictionaryIndex>,
+) -> Result<(Vec<u8>, Lz4wEncodeStrategy), CodecError> {
+    check_encode_input(data)?;
+    if let Some(stream) = lz4w_encode_cost_dp(data, index)? {
+        return Ok((stream, Lz4wEncodeStrategy::CostDp));
+    }
+    Ok((lz4w_encode_greedy(data, index)?, Lz4wEncodeStrategy::Greedy))
+}
+
+fn check_encode_input(data: &[u8]) -> Result<(), CodecError> {
     const MAX_INPUT: usize = 2 * 1024 * 1024;
     if data.len() > MAX_INPUT {
         return Err(CodecError::new(
@@ -378,6 +408,48 @@ pub fn lz4w_encode_with_dictionary_index(
             ),
         ));
     }
+    Ok(())
+}
+
+/// Codificação **com orçamento de espaço**: devolve o stream que cabe em
+/// `max_output`, priorizando o guloso.
+///
+/// Por que não "sempre o mais curto"? Porque o guloso é um parse **local** e a
+/// DP é um **re-parse global**: mudar um pixel pode reescrever tokens por todo o
+/// recurso. O espaço logo antes de um recurso é o dicionário do vizinho
+/// (`rom[..start]`), então uma pegada de escrita larga faz outro recurso
+/// decodificar diferente e a transação rejeita com `dependent_modified`. Foi
+/// exatamente isso que medimos no `0xc8cc8`: a edição de 1 pixel custa 1 byte no
+/// guloso e reescreve a stream inteira na DP. Quem tem slot fixo quer o stream
+/// que **cabe com a menor pegada**, não o mais curto.
+pub fn lz4w_encode_with_dictionary_index_fitting(
+    data: &[u8],
+    index: Option<&Lz4wDictionaryIndex>,
+    max_output: usize,
+) -> Result<(Vec<u8>, Lz4wEncodeStrategy), CodecError> {
+    check_encode_input(data)?;
+    let greedy = lz4w_encode_greedy(data, index)?;
+    if greedy.len() <= max_output {
+        return Ok((greedy, Lz4wEncodeStrategy::Greedy));
+    }
+    lz4w_encode_with_dictionary_index_explained(data, index)
+}
+
+/// Estratégia de codificação LZ4W efetivamente usada num `Result` de encode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lz4wEncodeStrategy {
+    /// Parse por custo explícito dentro dos orçamentos determinísticos.
+    CostDp,
+    /// Guloso com lazy de 1 passo — o caminho do v1, e o fallback quando a DP
+    /// estoura orçamento.
+    Greedy,
+}
+
+/// Caminho guloso histórico.
+fn lz4w_encode_greedy(
+    data: &[u8],
+    index: Option<&Lz4wDictionaryIndex>,
+) -> Result<Vec<u8>, CodecError> {
     let dict_words = index.map_or(0, |i| i.words);
     let word_count = data.len() / 2;
     let total_words = dict_words + word_count;
@@ -510,6 +582,276 @@ pub fn lz4w_encode_with_dictionary_index(
             }
         }
     }
+    finish_lz4w_stream(out, literals, data)
+}
+
+/// Orçamentos da DP de custo explícito. São **determinísticos** (dependem só
+/// da entrada, nunca de relógio): um orçamento de tempo faria o mesmo plain
+/// gerar streams diferentes em máquinas diferentes, o que quebraria o roundtrip
+/// byte a byte das rodadas de benchmark e a evidência vinculada ao binário.
+/// Estourou qualquer um → `None` → o chamador usa o guloso.
+///
+/// Plain máximo coberto: 0x8000 words (64 KiB). Acima disso a tabela `(n+1)×15`
+/// deixaria de ser um custo previsível na thread do app.
+const DP_MAX_PLAIN_WORDS: usize = 0x8000;
+/// Mesmos 128 candidatos por posição do guloso: a DP **não alarga** a busca, só
+/// escolhe melhor dentro dela. Com essa poda o resultado é um teto do piso do
+/// formato, não o piso — vale enquanto o gap for positivo, e é assim que a
+/// medição publica.
+const DP_MAX_SOURCES_PER_POSITION: usize = 128;
+/// Comparações de word permitidas na varredura de fontes da rodada inteira.
+/// No pior caso cada comparação estende um match, então este é também o teto de
+/// trabalho da fase de busca.
+const DP_MAX_WORD_COMPARISONS: u64 = 24_000_000;
+
+/// Transição escolhida pela DP num estado `(posição, literais pendentes)`.
+#[derive(Debug, Clone, Copy)]
+enum DpMove {
+    /// Só literais, sem fechar match.
+    Lit,
+    /// 15 literais acumulados: o token não comporta mais nenhum.
+    Flush,
+    /// Match curto: `2..=16` words com `off <= 0x100` (cabe no descritor).
+    Short { len: u16, off: u16 },
+    /// Match longo: `3..=257` words + uma word de offset.
+    Long { len: u16, off: u16 },
+}
+
+/// Parse por custo explícito do formato LZ4W: programação dinâmica sobre o
+/// grafo `(posição i, literais pendentes p)`, com o custo real de cada token
+/// (1 descritor + `lit` literais + 1 word de offset se o match é longo) e o
+/// terminador de 2 words fora do modelo.
+///
+/// O estado `p` não é decorativo: um token carrega no máximo 15 literais, então
+/// a pendência muda o custo do futuro. Um DP que omite `p` dá resposta errada —
+/// foi o bug do port de `LZ4W.java`, que piorou o produto (382 B contra 380 B)
+/// e foi revertido.
+///
+/// Exato sobre o grafo porque os comprimentos alcançáveis por uma classe de
+/// fonte formam intervalos contíguos (`[2, max_curto]`, `[3, max_longo]`: um
+/// prefixo de match também é match), e a base do token não depende de `p` —
+/// basta o mínimo de `dp[i+k][0]` sobre o intervalo, e a testemunha do
+/// comprimento máximo serve para qualquer `k` menor. **Matches não maximais
+/// entram**: restringir o DP ao comprimento máximo por fonte foi refutado por
+/// busca exaustiva em `scripts/rex_profiles/integrator/lz4w_recompress/dp_floor.py`
+/// (26.ª entrada: 10 words contra 9), porque parar um match mais cedo muda a
+/// posição seguinte e ali o próximo token pode gastar menos.
+///
+/// Retorna `Ok(None)` quando o orçamento determinístico não cabe.
+fn lz4w_encode_cost_dp(
+    data: &[u8],
+    index: Option<&Lz4wDictionaryIndex>,
+) -> Result<Option<Vec<u8>>, CodecError> {
+    let word_count = data.len() / 2;
+    if word_count > DP_MAX_PLAIN_WORDS {
+        return Ok(None);
+    }
+    let dict_bytes = index
+        .map(|i| i.dictionary.as_slice())
+        .unwrap_or(&[] as &[u8]);
+    let dict_words = index.map_or(0, |i| i.words);
+    let total_words = dict_words + word_count;
+    // Espaço combinado dicionário+plain, com offsets medidos a partir do FIM
+    // dele e sem o bit 0x8000 — a mesma convenção que o desempacotador 68000
+    // validou (docs/rex_profiles/LZ4W_68K_ORACLE.md).
+    let word_at = |abs: usize| -> u16 {
+        if abs < dict_words {
+            u16::from_be_bytes([dict_bytes[abs * 2], dict_bytes[abs * 2 + 1]])
+        } else {
+            let rel = (abs - dict_words) * 2;
+            u16::from_be_bytes([data[rel], data[rel + 1]])
+        }
+    };
+    // Fontes do plain por valor de word (posições ABSOLUTAS, ordem crescente).
+    // Diferente do guloso, a DP varre o grafo de trás para frente e precisa do
+    // mapa completo antes de começar; o dicionário já vem mapeado no índice.
+    let mut plain_sources: std::collections::HashMap<u16, Vec<usize>> =
+        std::collections::HashMap::with_capacity(word_count);
+    for i in 0..word_count {
+        plain_sources
+            .entry(word_at(dict_words + i))
+            .or_default()
+            .push(dict_words + i);
+    }
+    const SHORT_MAX_LEN: usize = 0xF + MATCH_MIN_SIZE;
+    const LONG_MIN_LEN: usize = MATCH_LONG_MIN_SIZE + 1;
+    let cells = (word_count + 1) * LITERAL_MAX_WORDS;
+    let at = |i: usize, p: usize| -> usize { i * LITERAL_MAX_WORDS + p };
+    let mut dp = vec![0u32; cells];
+    let mut mv = vec![DpMove::Lit; cells];
+    for p in 0..LITERAL_MAX_WORDS {
+        dp[at(word_count, p)] = if p > 0 { 1 + p as u32 } else { 0 };
+    }
+    let mut comparisons: u64 = 0u64;
+    for i in (0..word_count).rev() {
+        let j = dict_words + i;
+        let window_start = j.saturating_sub(ENCODER_WINDOW_WORDS);
+        let cur = word_at(j);
+        let empty: &[usize] = &[];
+        let dict_all: &[usize] = index
+            .and_then(|idx| idx.positions.get(&cur))
+            .map_or(empty, Vec::as_slice);
+        let plain_all: &[usize] = plain_sources.get(&cur).map_or(empty, Vec::as_slice);
+        // A fonte tem de estar ANTES da posição corrente (o unpacker só lê para
+        // trás) e dentro da janela. Listas crescentes => os recortes são por
+        // bipartição e a varredura desce da mais próxima.
+        let di_lo = dict_all.partition_point(|&s| s < window_start);
+        let pi_hi = plain_all.partition_point(|&s| s < j);
+        let (mut di, mut pi) = (dict_all.len(), pi_hi);
+        let (mut max_short, mut src_short) = (0usize, 0usize);
+        let (mut max_long, mut src_long) = (0usize, 0usize);
+        let mut inspected = 0usize;
+        while inspected < DP_MAX_SOURCES_PER_POSITION && (di > di_lo || pi > 0) {
+            let take_dict = match (di > di_lo, pi > 0) {
+                (true, true) => dict_all[di - 1] >= plain_all[pi - 1],
+                (true, false) => true,
+                (false, true) => false,
+                (false, false) => break,
+            };
+            let src = if take_dict {
+                di -= 1;
+                dict_all[di]
+            } else {
+                pi -= 1;
+                plain_all[pi]
+            };
+            if src < window_start {
+                // Ordem descendente mesclada: se a mais próxima ficou fora, as
+                // restantes também ficaram.
+                break;
+            }
+            inspected += 1;
+            let off = j - src;
+            let mut len = 1usize;
+            while j + len < total_words && len < LONG_MAX_LENGTH_WORDS {
+                comparisons += 1;
+                if word_at(j + len) != word_at(j + len - off) {
+                    break;
+                }
+                len += 1;
+            }
+            if len > max_long {
+                max_long = len;
+                src_long = src;
+            }
+            if off <= SHORT_MAX_OFFSET_WORDS && len > max_short {
+                max_short = len;
+                src_short = src;
+            }
+            // Ninguém alcança mais que o teto do formato, e os que vêm depois
+            // são mais distantes: a classe curta já foi coberta.
+            if max_long >= LONG_MAX_LENGTH_WORDS {
+                break;
+            }
+            if comparisons > DP_MAX_WORD_COMPARISONS {
+                return Ok(None);
+            }
+        }
+        // Melhor custo de FECHAR um match de k words em i, por classe. A base
+        // independe de p, então o mínimo do intervalo é o mesmo p qualquer.
+        let mut best_short: (u32, usize) = (u32::MAX, 0);
+        if max_short >= 2 {
+            for k in 2..=max_short.min(SHORT_MAX_LEN) {
+                let cand = 1 + dp[at(i + k, 0)];
+                if cand < best_short.0 {
+                    best_short = (cand, k);
+                }
+            }
+        }
+        let mut best_long: (u32, usize) = (u32::MAX, 0);
+        if max_long >= LONG_MIN_LEN {
+            for k in LONG_MIN_LEN..=max_long.min(LONG_MAX_LENGTH_WORDS) {
+                let cand = 2 + dp[at(i + k, 0)];
+                if cand < best_long.0 {
+                    best_long = (cand, k);
+                }
+            }
+        }
+        for p in (0..LITERAL_MAX_WORDS).rev() {
+            let (mut cost, mut choice) = if p == LITERAL_MAX_WORDS - 1 {
+                (
+                    dp[at(i + 1, 0)] + 1 + LITERAL_MAX_WORDS as u32,
+                    DpMove::Flush,
+                )
+            } else {
+                (dp[at(i + 1, p + 1)], DpMove::Lit)
+            };
+            if best_short.1 != 0 {
+                let cand = best_short.0 + p as u32;
+                if cand < cost {
+                    cost = cand;
+                    choice = DpMove::Short {
+                        len: best_short.1 as u16,
+                        off: (j - src_short) as u16,
+                    };
+                }
+            }
+            if best_long.1 != 0 {
+                let cand = best_long.0 + p as u32;
+                if cand < cost {
+                    cost = cand;
+                    choice = DpMove::Long {
+                        len: best_long.1 as u16,
+                        off: (j - src_long) as u16,
+                    };
+                }
+            }
+            dp[at(i, p)] = cost;
+            mv[at(i, p)] = choice;
+        }
+    }
+
+    // Reconstrução: mesmo emissor do caminho guloso (`emit_segment`), para que
+    // a codificação de tokens tenha UMA implementação no produto.
+    let mut out: Vec<u8> = Vec::with_capacity(word_count + 16);
+    let mut literals: Vec<u16> = Vec::new();
+    let mut i = 0usize;
+    while i < word_count {
+        let j = dict_words + i;
+        match mv[at(i, literals.len())] {
+            DpMove::Lit => {
+                literals.push(word_at(j));
+                i += 1;
+            }
+            DpMove::Flush => {
+                literals.push(word_at(j));
+                debug_assert_eq!(literals.len(), LITERAL_MAX_WORDS, "flush fora de 15");
+                emit_segment(&mut out, &mut literals, None)?;
+                i += 1;
+            }
+            DpMove::Short { len, off } => {
+                debug_assert!(
+                    (2..=SHORT_MAX_LEN).contains(&(len as usize))
+                        && off >= 1
+                        && off as usize <= SHORT_MAX_OFFSET_WORDS,
+                    "match curto irrepresentável: len={len} off={off}"
+                );
+                emit_segment(&mut out, &mut literals, Some((len as usize, off as usize)))?;
+                i += len as usize;
+            }
+            DpMove::Long { len, off } => {
+                debug_assert!(
+                    (LONG_MIN_LEN..=LONG_MAX_LENGTH_WORDS).contains(&(len as usize))
+                        && off >= 1
+                        && off as usize <= ENCODER_WINDOW_WORDS,
+                    "match longo irrepresentável: len={len} off={off}"
+                );
+                emit_segment(&mut out, &mut literals, Some((len as usize, off as usize)))?;
+                i += len as usize;
+            }
+        }
+    }
+    Ok(Some(finish_lz4w_stream(out, literals, data)?))
+}
+
+/// Fecha o stream: flush do que restou de literais + terminador de duas words
+/// (`0x0000` e o word final, que carrega o byte ímpar quando existe). Convenção
+/// única para os dois caminhos do codificador.
+fn finish_lz4w_stream(
+    mut out: Vec<u8>,
+    mut literals: Vec<u16>,
+    data: &[u8],
+) -> Result<Vec<u8>, CodecError> {
     emit_segment(&mut out, &mut literals, None)?;
     out.extend_from_slice(&[0x00, 0x00]);
     if data.len() % 2 == 1 {
@@ -1030,6 +1372,516 @@ mod tests {
         let decoded = dec(&stream).expect("decode");
         assert_eq!(decoded.data, data);
         assert_eq!(decoded.bytes_consumed, stream.len());
+    }
+
+    // ---- DP de custo explícito: a palavra "ótima" tem de ter referência ----
+    //
+    // O port para Rust NÃO herda a validação do instrumento Python: foi
+    // exatamente um port sem revalidação (`LZ4W.java`) que piorou o produto.
+    // Estas barreiras comparam o DP do produto com uma busca exaustiva escrita
+    // aqui mesmo (DFS sobre todas as fontes e todos os comprimentos
+    // representáveis), e exigem que o stream emitido volte ao plain pelo decoder
+    // do produto.
+
+    const EXAUSTIVA_SHORT_MAX_LEN: usize = 0xF + MATCH_MIN_SIZE;
+    const EXAUSTIVA_LONG_MIN_LEN: usize = MATCH_LONG_MIN_SIZE + 1;
+
+    /// Custo ótimo em words (sem o terminador) por busca exaustiva com memo
+    /// sobre o estado `(posição, literais pendentes)`.
+    ///
+    /// Enumera fonte por fonte e comprimento por comprimento: é a referência
+    /// lenta, não um segundo modelo. Só roda em entradas pequenas.
+    fn custo_exaustivo(
+        total: &[u16],
+        dict_words: usize,
+        i: usize,
+        p: usize,
+        memo: &mut std::collections::HashMap<(usize, usize), u32>,
+    ) -> u32 {
+        let n = total.len() - dict_words;
+        if i == n {
+            return if p > 0 { 1 + p as u32 } else { 0 };
+        }
+        if let Some(&v) = memo.get(&(i, p)) {
+            return v;
+        }
+        let j = dict_words + i;
+        let mut best = if p == LITERAL_MAX_WORDS - 1 {
+            1 + LITERAL_MAX_WORDS as u32 + custo_exaustivo(total, dict_words, i + 1, 0, memo)
+        } else {
+            custo_exaustivo(total, dict_words, i + 1, p + 1, memo)
+        };
+        for src in (j.saturating_sub(ENCODER_WINDOW_WORDS)..j).rev() {
+            if total[src] != total[j] {
+                continue;
+            }
+            let off = j - src;
+            let mut len = 1usize;
+            while j + len < total.len()
+                && len < LONG_MAX_LENGTH_WORDS
+                && total[j + len] == total[j + len - off]
+            {
+                len += 1;
+            }
+            if off <= SHORT_MAX_OFFSET_WORDS {
+                for k in 2..=len.min(EXAUSTIVA_SHORT_MAX_LEN) {
+                    let cand = 1 + p as u32 + custo_exaustivo(total, dict_words, i + k, 0, memo);
+                    best = best.min(cand);
+                }
+            }
+            for k in EXAUSTIVA_LONG_MIN_LEN..=len.min(LONG_MAX_LENGTH_WORDS) {
+                let cand = 2 + p as u32 + custo_exaustivo(total, dict_words, i + k, 0, memo);
+                best = best.min(cand);
+            }
+        }
+        memo.insert((i, p), best);
+        best
+    }
+
+    /// Caminha os tokens de um stream: `(literais, comprimento do match,
+    /// offset, é forma longa?)`. `len = 0` é token de só literais.
+    fn tokens_do_stream(stream: &[u8]) -> Vec<(usize, usize, usize, bool)> {
+        let mut out = Vec::new();
+        let mut i = 0usize;
+        loop {
+            assert!(i + 2 <= stream.len(), "token truncado em {i}");
+            let token = u16::from_be_bytes([stream[i], stream[i + 1]]);
+            i += 2;
+            let lit = ((token >> 12) & 0xF) as usize;
+            let nib = ((token >> 8) & 0xF) as usize;
+            let byte = (token & 0xFF) as usize;
+            i += lit * 2;
+            if token == 0 {
+                return out;
+            }
+            if nib == 0 && byte > 0 {
+                assert!(i + 2 <= stream.len(), "offset truncado em {i}");
+                let v = u16::from_be_bytes([stream[i], stream[i + 1]]);
+                i += 2;
+                assert_eq!(v & 0x8000, 0, "o produto não emite fonte ROM");
+                let off = (((-(v as i32)) as u32 as usize) & 0x7FFF) + 1;
+                out.push((lit, byte + 2, off, true));
+            } else if nib > 0 {
+                out.push((lit, nib + 1, byte + 1, false));
+            } else {
+                out.push((lit, 0, 0, false));
+            }
+        }
+    }
+
+    /// DP == busca exaustiva. Onde a poda de 128 candidatos por posição NÃO
+    /// alcança a entrada, a igualdade é exigida; onde ela alcança, a DP é um
+    /// **teto** do ótimo e só se exige `não pior que o guloso`.
+    #[test]
+    fn lz4w_encode_dp_iguala_busca_exaustiva_em_entradas_pequenas() {
+        // (rótulo, tentativas, semente, n mín, n máx, dict mín, dict máx,
+        //  alfabeto mín, alfabeto máx)
+        let configs: [(&str, usize, u32, usize, usize, usize, usize, u32, u32); 5] = [
+            ("aleatória pequena", 300, 777, 1, 10, 0, 6, 1, 4),
+            ("semente histórica", 300, 20260926, 1, 10, 0, 6, 1, 4),
+            ("flush de 15 literais", 90, 31337, 15, 34, 4, 40, 2, 8),
+            ("repetição (tetos de 16 e 257)", 15, 6, 20, 40, 1, 6, 1, 1),
+            (
+                "fontes além de 0x100 (só a forma longa alcança)",
+                120,
+                90210,
+                6,
+                34,
+                250,
+                254,
+                3,
+                4,
+            ),
+        ];
+        let mut iguais = 0usize;
+        let mut podados = 0usize;
+        let mut melhores_que_guloso = 0usize;
+        let mut teve_match_longo = 0usize;
+        let mut teve_match_curto = 0usize;
+        for (rotulo, trials, seed, n_min, n_max, d_min, d_max, a_min, a_max) in configs {
+            let mut x = seed;
+            let mut rnd = move || {
+                x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+                (x >> 16) as usize
+            };
+            for t in 0..trials {
+                let span = |lo: usize, hi: usize, rnd: &mut dyn FnMut() -> usize| {
+                    lo + (rnd() % (hi - lo + 1))
+                };
+                let n = span(n_min, n_max, &mut rnd);
+                let d = span(d_min, d_max, &mut rnd);
+                let alpha = span(a_min as usize, a_max as usize, &mut rnd) as u32;
+                let total: Vec<u16> = (0..(d + n))
+                    .map(|_| ((rnd() as u32 % alpha) as u16) + 0x100)
+                    .collect();
+                let dict_bytes: Vec<u8> = total[..d].iter().flat_map(|w| w.to_be_bytes()).collect();
+                let data: Vec<u8> = total[d..].iter().flat_map(|w| w.to_be_bytes()).collect();
+                let index = Lz4wDictionaryIndex::build(&dict_bytes).expect("índice");
+                let dp = lz4w_encode_cost_dp(&data, Some(&index))
+                    .expect("encode")
+                    .unwrap_or_else(|| panic!("{rotulo} trial {t}: DP caiu no orçamento"));
+                let guloso = lz4w_encode_greedy(&data, Some(&index)).expect("guloso");
+                assert!(
+                    dp.len() <= guloso.len(),
+                    "{rotulo} trial {t}: DP ({} B) pior que o guloso ({} B) — o modelo \
+                     não é uma restrição do mesmo grafo",
+                    dp.len(),
+                    guloso.len()
+                );
+                if dp.len() < guloso.len() {
+                    melhores_que_guloso += 1;
+                }
+                // A poda de candidatos só liga se houver mais de
+                // DP_MAX_SOURCES_PER_POSITION fontes iguais dentro da janela.
+                let fontes_max = (0..n).fold(0usize, |acc, i| {
+                    let j = d + i;
+                    let iguais = (j.saturating_sub(ENCODER_WINDOW_WORDS)..j)
+                        .filter(|&s| total[s] == total[j])
+                        .count();
+                    acc.max(iguais)
+                });
+                let mut memo = std::collections::HashMap::new();
+                let otimo = custo_exaustivo(&total, d, 0, 0, &mut memo) + 2;
+                if fontes_max <= DP_MAX_SOURCES_PER_POSITION {
+                    assert_eq!(
+                        dp.len() / 2,
+                        otimo as usize,
+                        "{rotulo} trial {t} (n={n} d={d} fontes_max={fontes_max}): DP {} \
+                         words, busca exaustiva {otimo} — total={total:?}",
+                        dp.len() / 2
+                    );
+                    iguais += 1;
+                } else {
+                    podados += 1;
+                    assert!(
+                        dp.len() / 2 >= otimo as usize,
+                        "{rotulo} trial {t}: stream menor que o ótimo exaustivo — o modelo \
+                         de custo está errado"
+                    );
+                }
+                let back =
+                    lz4w_decode_with_dictionary(&dp, Some(&dict_bytes), &Lz4wLimits::default())
+                        .unwrap_or_else(|e| panic!("{rotulo} trial {t}: decode: {e}"));
+                assert_eq!(back.data, data, "{rotulo} trial {t}: não reproduz o plain");
+                assert_eq!(
+                    back.bytes_consumed,
+                    dp.len(),
+                    "{rotulo} trial {t}: stream consumido parcialmente"
+                );
+                for (_lit, len, off, longo) in tokens_do_stream(&dp) {
+                    if longo {
+                        teve_match_longo += 1;
+                        assert!(
+                            (EXAUSTIVA_LONG_MIN_LEN..=LONG_MAX_LENGTH_WORDS).contains(&len)
+                                && off >= 1
+                                && off <= ENCODER_WINDOW_WORDS,
+                            "match longo irrepresentável: len={len} off={off}"
+                        );
+                    } else if len > 0 {
+                        teve_match_curto += 1;
+                        assert!(
+                            (2..=EXAUSTIVA_SHORT_MAX_LEN).contains(&len)
+                                && off >= 1
+                                && off <= SHORT_MAX_OFFSET_WORDS,
+                            "match curto irrepresentável: len={len} off={off}"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            podados, 0,
+            "configuração pequena acionou a poda de candidatos"
+        );
+        assert!(
+            iguais >= 800,
+            "só {iguais} casos comparados com a exaustiva"
+        );
+        // Non-vacuidade: sem estas contagens o teste não diria nada sobre os
+        // caminhos do grafo.
+        assert!(teve_match_longo > 0, "nenhum match longo emitido");
+        assert!(teve_match_curto > 0, "nenhum match curto emitido");
+        assert!(
+            melhores_que_guloso > 0,
+            "a DP nunca venceu o guloso nos {iguais} casos comparados — teste vazio"
+        );
+    }
+
+    /// Fontes além de `0x100` words só são alcançáveis pela forma longa, e a
+    /// repetição pura é o único caminho que encosta no teto de 257 words —
+    /// ambos invisíveis em entradas pequenas aleatórias.
+    #[test]
+    fn lz4w_encode_dp_fontes_distantes_e_teto_de_comprimento() {
+        // Três words distintos a 295 words de distância, e nenhum deles aparece
+        // perto da posição corrente: a única forma de fechar o plain é o match
+        // longo, e nenhum match curto empata. (Com `dict = [0xBEEF, 0, 0]` e
+        // plain `BEEF,0,0` havia uma fonte curta a `off = 3` que empatava em
+        // custo — o DP escolhia o caminho barato e o teste não provaria nada.)
+        let mut dict_words = vec![0x1111u16; 300];
+        dict_words[5..8].copy_from_slice(&[0xBEEF, 0xCAFE, 0xFACE]);
+        let dict_bytes: Vec<u8> = dict_words.iter().flat_map(|w| w.to_be_bytes()).collect();
+        let data: Vec<u8> = [0xBEEFu16, 0xCAFE, 0xFACE]
+            .iter()
+            .flat_map(|w| w.to_be_bytes())
+            .collect();
+        let index = Lz4wDictionaryIndex::build(&dict_bytes).expect("índice");
+        let dp = lz4w_encode_cost_dp(&data, Some(&index))
+            .expect("encode")
+            .expect("no orçamento");
+        let tokens = tokens_do_stream(&dp);
+        assert_eq!(
+            tokens.as_slice(),
+            &[(0usize, 3usize, 295usize, true)][..],
+            "a fonte além de 0x100 words tinha de sair como um único match longo \
+             de 3 words (off = 300 - 5 = 295)"
+        );
+        assert!(tokens[0].2 > SHORT_MAX_OFFSET_WORDS);
+        // tudo coberto por um token: 1 descritor + 1 offset + 2 de terminador.
+        assert_eq!(dp.len(), 8, "8 B é o ótimo aqui; literais custariam 12 B");
+        let back = lz4w_decode_with_dictionary(&dp, Some(&dict_bytes), &Lz4wLimits::default())
+            .expect("decode");
+        assert_eq!(back.data, data);
+        assert_eq!(back.bytes_consumed, dp.len());
+
+        // Repetição pura: 300 words idênticas com 1 de dicionário.
+        let mut dict_bytes = Vec::new();
+        dict_bytes.extend_from_slice(&0xAA55u16.to_be_bytes());
+        let data: Vec<u8> = (0..300).flat_map(|_| 0xAA55u16.to_be_bytes()).collect();
+        let index = Lz4wDictionaryIndex::build(&dict_bytes).expect("índice");
+        let dp = lz4w_encode_cost_dp(&data, Some(&index))
+            .expect("encode")
+            .expect("no orçamento");
+        let guloso = lz4w_encode_greedy(&data, Some(&index)).expect("guloso");
+        assert!(dp.len() <= guloso.len(), "DP pior que o guloso em RLE");
+        let longest = tokens_do_stream(&dp)
+            .iter()
+            .map(|(_, len, _, _)| *len)
+            .max()
+            .unwrap_or(0);
+        assert_eq!(
+            longest, LONG_MAX_LENGTH_WORDS,
+            "nenhum match encostou no teto de 257 words"
+        );
+        let back = lz4w_decode_with_dictionary(&dp, Some(&dict_bytes), &Lz4wLimits::default())
+            .expect("decode");
+        assert_eq!(back.data, data);
+    }
+
+    /// O recorte de janela é o que impede o codificador de emitir um offset que
+    /// o desempacotador não lê. Aqui a única fonte igual está a 20 000 words —
+    /// além das 0x4000 do codificador. O que se exige é que esse prefixo longo
+    /// **não mude nenhum byte** do stream: se a fonte vazasse, o dicionário
+    /// produziria um stream menor que o mesmo plain sem dicionário. (A forma
+    /// exata do stream não é a asserção: com `data = C0DE×4` a posição 0 vira
+    /// literal e as três seguintes um match curto de `off = 1` por RLE, que é
+    /// legal e mais barato do que qualquer coisa que o prefixo ofereceria.)
+    #[test]
+    fn lz4w_encode_dp_recorta_a_janela_do_codificador() {
+        const DICT_WORDS: usize = 20_000;
+        let mut dict_words = vec![0u16; DICT_WORDS];
+        dict_words[0] = 0xC0DE;
+        let dict_bytes: Vec<u8> = dict_words.iter().flat_map(|w| w.to_be_bytes()).collect();
+        let data: Vec<u8> = (0..4u16)
+            .map(|_| 0xC0DEu16)
+            .flat_map(|w| w.to_be_bytes())
+            .collect();
+        let index = Lz4wDictionaryIndex::build(&dict_bytes).expect("índice");
+        let dp = lz4w_encode_cost_dp(&data, Some(&index))
+            .expect("encode")
+            .expect("no orçamento");
+        let sem_dict = lz4w_encode_cost_dp(&data, None)
+            .expect("encode")
+            .expect("no orçamento");
+        let tokens = tokens_do_stream(&dp);
+        assert!(
+            tokens
+                .iter()
+                .all(|(_, _, off, _)| *off <= ENCODER_WINDOW_WORDS),
+            "offset além da janela do codificador: {tokens:?}"
+        );
+        assert_eq!(
+            dp,
+            sem_dict,
+            "o prefixo fora de janela alterou o stream (fonte proibida usada): \
+             com dicionário {tokens:?} vs. sem dicionário {:?}",
+            tokens_do_stream(&sem_dict)
+        );
+        let back = lz4w_decode_with_dictionary(&dp, Some(&dict_bytes), &Lz4wLimits::default())
+            .expect("decode");
+        assert_eq!(back.data, data);
+        // e o mesmo stream decodifica sem dicionário: nenhuma referência sai do
+        // histórico próprio.
+        let back = lz4w_decode(&dp, &Lz4wLimits::default()).expect("decode");
+        assert_eq!(back.data, data);
+    }
+
+    /// Quarenta words duas a duas distintas: nenhum match é possível, então o
+    /// modelo é obrigado a fechar tokens com os 15 literais cheios — o caminho
+    /// do `flush`, invisível nas configurações aleatórias do teste grande (onde
+    /// a compressão sempre desfaz 16 literais seguidos).
+    #[test]
+    fn lz4w_encode_dp_emite_flush_de_15_literais() {
+        let palavras: Vec<u16> = (0..40u16).map(|i| 0x4000 + i).collect();
+        let data: Vec<u8> = palavras.iter().flat_map(|w| w.to_be_bytes()).collect();
+        let dp = lz4w_encode_cost_dp(&data, None)
+            .expect("encode")
+            .expect("no orçamento");
+        let tokens = tokens_do_stream(&dp);
+        assert!(
+            tokens
+                .iter()
+                .any(|(lit, len, _, _)| *lit == LITERAL_MAX_WORDS && *len == 0),
+            "nenhum token com os 15 literais cheios: {tokens:?}"
+        );
+        assert_eq!(
+            tokens
+                .iter()
+                .map(|(lit, len, _, _)| lit + len)
+                .sum::<usize>(),
+            palavras.len(),
+            "os tokens não cobrem o plain inteiro: {tokens:?}"
+        );
+        let mut memo = std::collections::HashMap::new();
+        let otimo = custo_exaustivo(&palavras, 0, 0, 0, &mut memo) + 2;
+        assert_eq!(
+            dp.len() / 2,
+            otimo as usize,
+            "3 descritores + 40 literais + 2 de terminador = 45 words"
+        );
+        assert_eq!(otimo, 45);
+        let back = lz4w_decode(&dp, &Lz4wLimits::default()).expect("decode");
+        assert_eq!(back.data, data);
+        assert_eq!(back.bytes_consumed, dp.len());
+    }
+
+    /// Política com orçamento de espaço: quando o guloso já cabe no espaço, ele
+    /// é o escolhido; a DP entra como resgate. Que existem entradas em que a DP
+    /// vence o guloso é aferido aqui (varredura determinística), não presumido —
+    /// sem um caso assim os dois caminhos seriam indistinguíveis pelo comprimento
+    /// e o teste não diria nada.
+    #[test]
+    fn lz4w_encode_fitting_so_usa_o_resgate_de_dp_quando_o_guloso_nao_cabe() {
+        // (tentativas, semente, n mín, n máx, dict mín, dict máx, alf mín, alf máx)
+        let configs: [(usize, u32, usize, usize, usize, usize, u32, u32); 3] = [
+            (300, 777, 1, 10, 0, 6, 1, 4),
+            (300, 20260926, 1, 10, 0, 6, 1, 4),
+            (300, 90210, 15, 34, 4, 40, 2, 8),
+        ];
+        let mut caso = None;
+        let mut testados = 0usize;
+        'procura: for (trials, seed, n_min, n_max, d_min, d_max, a_min, a_max) in configs {
+            let mut x = seed;
+            let mut rnd = move || {
+                x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+                (x >> 16) as usize
+            };
+            for _t in 0..trials {
+                let span = |lo: usize, hi: usize, rnd: &mut dyn FnMut() -> usize| {
+                    lo + (rnd() % (hi - lo + 1))
+                };
+                let n = span(n_min, n_max, &mut rnd);
+                let d = span(d_min, d_max, &mut rnd);
+                let alpha = span(a_min as usize, a_max as usize, &mut rnd) as u32;
+                let total: Vec<u16> = (0..(d + n))
+                    .map(|_| ((rnd() as u32 % alpha) as u16) + 0x100)
+                    .collect();
+                let dict_bytes: Vec<u8> = total[..d].iter().flat_map(|w| w.to_be_bytes()).collect();
+                let data: Vec<u8> = total[d..].iter().flat_map(|w| w.to_be_bytes()).collect();
+                let index = Lz4wDictionaryIndex::build(&dict_bytes).expect("índice");
+                let guloso = lz4w_encode_greedy(&data, Some(&index)).expect("guloso");
+                let dp = lz4w_encode_cost_dp(&data, Some(&index))
+                    .expect("dp")
+                    .expect("no orçamento");
+                testados += 1;
+                if dp.len() < guloso.len() {
+                    caso = Some((dict_bytes, data, guloso, dp));
+                    break 'procura;
+                }
+            }
+        }
+        let (dict_bytes, data, guloso, dp) = match caso {
+            Some(t) => {
+                assert!(testados < 900, "varredura inteira percorrida: {testados}");
+                t
+            }
+            None => panic!(
+                "nenhuma das {testados} entradas varridas tem a DP estritamente menor que o \
+                 guloso: a política não teria dois caminhos para distinguir"
+            ),
+        };
+        let index = Lz4wDictionaryIndex::build(&dict_bytes).expect("índice");
+        assert!(
+            dp.len() < guloso.len(),
+            "caso encontrado sem ganho: guloso {} B, dp {} B",
+            guloso.len(),
+            dp.len()
+        );
+
+        // (a) o guloso cabe => é ele que o produto escreve, byte a byte.
+        let (stream, estrategia) =
+            lz4w_encode_with_dictionary_index_fitting(&data, Some(&index), guloso.len())
+                .expect("fitting");
+        assert_eq!(estrategia, Lz4wEncodeStrategy::Greedy);
+        assert_eq!(
+            stream, guloso,
+            "cabe: a pegada pequena tem de ser a escolhida"
+        );
+
+        // (b) o guloso não cabe => a DP resgata.
+        let (stream, estrategia) =
+            lz4w_encode_with_dictionary_index_fitting(&data, Some(&index), dp.len())
+                .expect("fitting");
+        assert_eq!(estrategia, Lz4wEncodeStrategy::CostDp);
+        assert_eq!(stream, dp);
+
+        // (c) nada cabe => devolve a MENOR tentativa e quem recusa é o chamador
+        //     (contrato §4: o codec não conhece o slot).
+        let (stream, estrategia) =
+            lz4w_encode_with_dictionary_index_fitting(&data, Some(&index), dp.len() - 2)
+                .expect("fitting");
+        assert_eq!(estrategia, Lz4wEncodeStrategy::CostDp);
+        assert_eq!(stream, dp);
+        assert!(stream.len() > dp.len() - 2);
+
+        // Os dois caminhos reproduzem o plain no contexto real de dicionário.
+        for stream in [&guloso, &dp] {
+            let back =
+                lz4w_decode_with_dictionary(stream, Some(&dict_bytes), &Lz4wLimits::default())
+                    .expect("decode");
+            assert_eq!(back.data, data);
+            assert_eq!(back.bytes_consumed, stream.len());
+        }
+    }
+
+    /// O orçamento é determinístico e a saída é: acima dele o produto usa o
+    /// caminho guloso, sem falha e sem stream inválido. Relógio não entra — um
+    /// limite de tempo faria a mesma entrada gerar bytes diferentes em máquinas
+    /// diferentes, quebrando a evidência vinculada ao binário.
+    #[test]
+    fn lz4w_encode_dp_acima_do_orcamento_usa_guloso_sem_falhar() {
+        let data: Vec<u8> = (0..(DP_MAX_PLAIN_WORDS + 1))
+            .flat_map(|i| (i as u16).to_be_bytes())
+            .collect();
+        assert!(
+            lz4w_encode_cost_dp(&data, None).expect("encode").is_none(),
+            "entrada acima de DP_MAX_PLAIN_WORDS deveria sair do orçamento da DP"
+        );
+        let (stream, estrategia) =
+            lz4w_encode_with_dictionary_index_explained(&data, None).expect("encode");
+        assert_eq!(estrategia, Lz4wEncodeStrategy::Greedy);
+        let back = lz4w_decode(&stream, &Lz4wLimits::default()).expect("decode");
+        assert_eq!(back.data, data);
+        assert_eq!(back.bytes_consumed, stream.len());
+
+        // E dentro do orçamento a estratégia reportada é a DP.
+        let pequeno: Vec<u8> = (0..64u16)
+            .flat_map(|i| (i.wrapping_mul(7)).to_be_bytes())
+            .collect();
+        let (stream, estrategia) =
+            lz4w_encode_with_dictionary_index_explained(&pequeno, None).expect("encode");
+        assert_eq!(estrategia, Lz4wEncodeStrategy::CostDp);
+        let back = lz4w_decode(&stream, &Lz4wLimits::default()).expect("decode");
+        assert_eq!(back.data, pequeno);
     }
 
     /// Oráculo externo condicional: quando o `lz4w.jar` do toolchain pinado
