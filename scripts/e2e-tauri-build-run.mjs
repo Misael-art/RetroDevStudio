@@ -8916,62 +8916,10 @@ async function runRexLz4wEffectScenario(sessionId) {
       100
     );
     await closeVisibleConsoleDrawer(sessionId, label);
-    // CAPACIDADE SEPARADA (apresentação normal do app): resume o loop vivo,
-    // pausa de novo e compara canvas vs core no MESMO frame congelado.
-    await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
-    await pause(600);
-    await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-pause");
-    await pause(200);
-    {
-      const canvasFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
-      const observation = await invokeCoreObserve(sessionId);
-      if (!canvasFrame?.rgba || !observation?.framebuffer_rgba) {
-        fail(`apresentação indisponível (${label}): canvas=${Boolean(canvasFrame?.rgba)} core=${Boolean(observation?.framebuffer_rgba)}`);
-      }
-      const canvasSha = createHash("sha256").update(Buffer.from(canvasFrame.rgba)).digest("hex");
-      const coreSha = createHash("sha256").update(Buffer.from(observation.framebuffer_rgba)).digest("hex");
-      const dims = { canvas: `${canvasFrame.width}x${canvasFrame.height}`, core: `${observation.framebuffer_width}x${observation.framebuffer_height}` };
-      console.log(`[rex-lz4w-canvas] ${JSON.stringify({ label, ...dims, canvasSha: canvasSha.slice(0, 16), coreSha: coreSha.slice(0, 16), identical: canvasSha === coreSha })}`);
-      const canvasBytes = Buffer.from(canvasFrame.rgba);
-      const coreBytes = Buffer.from(observation.framebuffer_rgba);
-      const canvasW = Number(canvasFrame.width);
-      const canvasH = Number(canvasFrame.height);
-      const coreW = Number(observation.framebuffer_width);
-      const coreH = Number(observation.framebuffer_height);
-      let identical = canvasSha === coreSha;
-      if (!identical && canvasBytes.length === canvasW * canvasH * 4 && coreBytes.length === coreW * coreH * 4 && canvasW >= coreW && canvasH >= coreH) {
-        // Conteúdo do core posicionado dentro do canvas: localiza o offset
-        // pela primeira linha e verifica todas as linhas nesse offset.
-        const coreRow0 = coreBytes.subarray(0, coreW * 4);
-        let offsetX = -1;
-        let offsetY = -1;
-        outer: for (let oy = 0; oy <= canvasH - coreH; oy++) {
-          for (let ox = 0; ox <= canvasW - coreW; ox++) {
-            const start = (oy * canvasW + ox) * 4;
-            if (canvasBytes.subarray(start, start + coreW * 4).equals(coreRow0)) {
-              offsetX = ox;
-              offsetY = oy;
-              break outer;
-            }
-          }
-        }
-        if (offsetX >= 0) {
-          let allRows = true;
-          for (let y = 0; y < coreH && allRows; y++) {
-            const cStart = ((offsetY + y) * canvasW + offsetX) * 4;
-            const kStart = y * coreW * 4;
-            if (!canvasBytes.subarray(cStart, cStart + coreW * 4).equals(coreBytes.subarray(kStart, kStart + coreW * 4))) {
-              allRows = false;
-            }
-          }
-          identical = allRows;
-          console.log(`[rex-lz4w-canvas] subimagem em (${offsetX},${offsetY}): identical=${identical}`);
-        }
-      }
-      if (!identical) {
-        fail(`canvas do app não exibe o framebuffer do core (${label}): ${canvasSha.slice(0, 8)} != ${coreSha.slice(0, 8)} dims=${JSON.stringify(dims)}`);
-      }
-    }
+    // Timeline PURAMENTE pausada: nenhum resume aqui — o loop vivo avança o
+    // jogo por tempo real e destruiria o alinhamento de frames entre runs.
+    // A apresentação pelo canvas é verificada em passo separado (após as
+    // timelines), com o mesmo frame congelado em ambos os lados.
     const invokeCore = async (command, args = {}) => executeAsyncScript(
       sessionId,
       `
@@ -9194,25 +9142,20 @@ async function runRexLz4wEffectScenario(sessionId) {
       break;
     }
   }
-  if (diffFrame < 0) fail("nenhum frame difere entre original e modificado: recurso não observado em jogo.");
-  const boxW = maxDiffX - minDiffX + 1;
-  const boxH = maxDiffY - minDiffY + 1;
-  // Efeito esperado para o alvo 0xc8cc8: o dado decodificado tem 288 bytes
-  // = 9 paletas × 16 cores (classe PALETA, não tile). O pixel (0,0) editado
-  // é a cor 0 da paleta 0 — a cor de TRANSPARÊNCIA — tornada opaca: todo
-  // sprite que usa a paleta 0 recolore (ambos os lutadores). A "região
-  // esperada" é, portanto, a faixa dos sprites na cena, não uma caixa de 8px.
-  const expectedPaletteEffect = targetOffsetHex === "c8cc8";
-  if (expectedPaletteEffect) {
-    if (diffPixels < 300) fail(`efeito de paleta fraco demais: ${diffPixels} px`);
-    if (minDiffY < 80 || maxDiffY > 223) fail(`efeito de paleta fora da faixa dos sprites: caixa em (${minDiffX},${minDiffY}) ${boxW}x${boxH}`);
-    if (boxW > 300 || boxH > 140) fail(`efeito de paleta fora da área de jogo: caixa ${boxW}x${boxH} em (${minDiffX},${minDiffY})`);
-  } else if (diffPixels > 256 || boxW > 64 || boxH > 64) {
-    fail(`efeito não é específico: ${diffPixels} pixels em caixa ${boxW}x${boxH} em (${minDiffX},${minDiffY}) (esperado região pequena do recurso).`);
+  // Estado SEMÂNTICO do alvo 0xc8cc8: DESCONHECIDO. A sonda causal provou
+  // que o recurso não é descompactado para WRAM/VRAM na janela explorada
+  // (900 frames; controle original/original idêntico), e o "efeito" visto
+  // antes era ruído do loop vivo entre runs separados. Efeito esperado só
+  // pode ser definido após a prova do consumidor; até lá a edição
+  // semântica deste recurso permanece BLOQUEADA e a comparação de frames
+  // deve ser IDÊNTICA (qualquer diff = ruído de não-determinismo).
+  if (diffFrame >= 0) {
+    fail(`diferença de framebuffer entre original e modificado (${diffPixels} px @ ${diffFrame}) SEM consumidor provado: ruído de não-determinismo ou efeito não explicado — aceito semanticamente só após prova da cadeia (item 3/4).`);
   }
   console.log(`[rex-lz4w-effect] ${JSON.stringify({
     romSha, targetOffset: `0x${targetOffsetHex}`, previewPixelsSha, modifiedSha, patchSha,
-    preserved: Number(preservedMatch[1]), diffFrame, diffPixels, box: { minDiffX, minDiffY, boxW, boxH },
+    preserved: Number(preservedMatch[1]),
+    semanticState: "BLOQUEADO — consumidor do recurso não provado; frames idênticos original vs modificado (determinismo verificado)",
   })}`);
 }
 
