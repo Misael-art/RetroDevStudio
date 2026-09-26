@@ -85,7 +85,8 @@
     "Fusão de DAC do Mega Drive: 16 palavras de paleta autorais renderizam 11 cores. índice→cor é função mas não é injetiva, então a identidade do pixel alterado é estabelecida por POSIÇÃO; a cor apenas confirma a classe (analyze-frame.py).",
     "A recusa de intervalo do núcleo é inalcançável pela UI: o painel descarta editTile >= num_tiles no cliente (CompressedResourcePanel.tsx, 'Adicionar edição'). O E2E prova a guarda do cliente; a do núcleo só a API exercita.",
     "Esta prova vale para o fixture autoral. O alvo comercial 0xc8cc8 continua com semanticState BLOQUEADO (consumidor não provado) — nenhuma afirmação visual foi feita sobre ele.",
-    "excessive_output e dependent-modified não são alcançáveis neste fixture (1 recurso, sem dependentes); cobertos pelo teste de aceite do produto (varredura de 15.360 candidatos de 1 pixel) e pelo BYOR (0x91a00 dependente de 0x8ff8e)."
+    "excessive_output e dependent-modified não são alcançáveis neste fixture (1 recurso, sem dependentes); cobertos pelo teste de aceite do produto (varredura de 15.360 candidatos de 1 pixel) e pelo BYOR (0x91a00 dependente de 0x8ff8e).",
+    "AS CORRIDAS rc=0 LERAM A ROM DE /tmp: fixture.romPath do run11 é /tmp/rex-lz4w-fixture/project/out/rom.bin, e o cenário consome o que RDS_REX_LZ4W_FIXTURE_ROM apontar (não reconstrói o fixture sozinho). O caminho durável src-tauri/target-test/validation/rex-lz4w-fixture/project/out/rom.bin devolve o mesmo SHA 159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5 (393216 B, conferido por sha256sum em 2026-09-26 e registrado em fixture-rebuild-report.json), então a entrada é reprodutível a partir do repositório — mas não foi o arquivo versionado que as duas corridas abriram."
   ],
   "artifacts": {
     "rex-lz4w-fixture-effect-report-run11.json": "b93a27747d28e9e57e9a56d382b9522f47fcc4d8e5b8aff9266ef627a212850e",
@@ -118,7 +119,7 @@
   },
   "frame_dumps": {
     "procedência": "run11 (o cenário escreve sempre nos mesmos nomes; estes são os bytes do último rc=0)",
-    "verificação_independente": "comparar os dois P6 pixel a pixel devolve exatamente 1 diferença, em (7,5), (33,32,33) -> (140,0,140) — i.e. 0x212021 -> 0x8c008c, a mesma linha publicada em steps[8]. Conferido fora do cenário em 2026-09-26 com um leitor PPM de 20 linhas.",
+    "verificação_independente": "comparar os dois P6 pixel a pixel devolve exatamente 1 diferença, em (7,5), (33,32,33) -> (140,0,140) — i.e. 0x212021 -> 0x8c008c, a mesma linha publicada em steps[7] (índice 0-based; o passo 8 da tabela; steps[8] é a comparação canvas==framebuffer). Conferido fora do cenário em 2026-09-26 com um leitor PPM de 20 linhas.",
     "como_reproduzir": "python3 scripts/rex_profiles/integrator/lz4w_fixture/analyze-frame.py rex-fixture-frame-original.ppm <ground_truth.json> 0 0",
     "bytes_comerciais": "nenhum: as paletas e tiles vêm do fonte autoral do fixture"
   },

@@ -63,6 +63,16 @@ bit-idêntico (`159298eb…`, 393216 B) em caminho versionado-de-receita e o
 diferença é comentário + achatamento de `tile_pixels`). `/tmp` deixa de ser a única
 origem; gap declarado: o cenário ainda alimenta a cópia em `/tmp`.
 
+**Relatório técnico da etapa (consolidação auditável):**
+`docs/rex_profiles/RELATORIO_ETAPA_E_2026-09-26.md` — veredito, tabela de artefatos
+com SHA-256 reconferido contra o disco, método com as cinco barreiras não-vacuosas,
+os dez passos com valores medidos, o argumento de causalidade, onde vive cada
+negativo, as limitações não provadas, portas com a reconciliação 699↔702 e a receita
+de reprodução. Todo número foi confrontado com o `manifest.json` e com o
+`rex-lz4w-fixture-effect-report-run11.json` antes do commit; a auditoria acrescentou
+ao relatório e ao manifesto a limitação de que **as corridas rc=0 abriram a ROM em
+`/tmp`** (`fixture.romPath`), com o caminho durável devolvendo o mesmo SHA.
+
 **Gates deste checkpoint:** `cargo test --lib -- --nocapture` **669 passed / 0 failed /
 51 ignored**; `cargo clippy -- -D warnings` limpo; `cargo fmt --check` limpo;
 `npm run check:tree`, `npm run lint`, `npx tsc --noEmit` rc=0; `npm test`
