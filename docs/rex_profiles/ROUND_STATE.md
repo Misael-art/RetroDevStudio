@@ -70,6 +70,7 @@ legível.
 | encode | verified | re-codificação com dicionário dentro do espaço original (needs_space honesto nos demais; 159/160 recursos preservados na transação) |
 | reinserção em cópia + patch | verified | transação no produto: identidade SHA, dependente recusado (0x91a00 dependente de 0x8ff8e), cópia + BPS exportado e re-aplicado à base com hash exato |
 | efeito observado no jogo | **BLOQUEADO — classe do alvo desconhecida** | **Retratação (2026-09-26)**: a leitura "9 paletas × 16 cores" e o mecanismo "transparência tornada opaca" eram hipóteses sem evidência de consumidor — retirados do estado corrente (preservados no histórico do Memory Bank). O "efeito" anterior era ruído: o resume do loop vivo entre runs dessincronizava os frames comparados. **Sonda causal** (no E2E): com ROM/core/estado/inputs idênticos (run_frames determinístico), **nenhuma diferença foi medida** em WRAM/VRAM entre original e modificado em 900 frames (controle original/original também idêntico, o que valida determinismo e metodologia). **Precisão (2026-09-26, ETAPA C): isso não prova que o recurso não seja descompactado** — a sonda só alcança as regiões que o core expõe (`emulator_read_memory` regiões 2/3; CRAM e o destino/chamada do desempacotador ficam `missing`). Ausência de diferença observada ≠ ausência de carregamento. Consumidor não provado; **edição semântica deste recurso permanece BLOQUEADA**. Evidências de bytes: intervalo alterado [30,31), byte 30 0x00→0xF0 (pixel (0,7,4), a única edição que coube com o encoder corrigido; needs_space honesto nas demais). **Defeitos corrigidos nesta rodada**: (1) tiles são chunky (nibble empacotado), não planar — golden literal `12 34 56 78`→1..8; (2) o encoder emitia matches longos não-ROM com offset acima do que o 68000 lê para trás (janela do codificador restaurada a 0x4000 por estratégia; o teto **do formato** medido no hardware é 16385 e o decoder agora aceita até ele — `LZ4W_68K_ORACLE.md`); (3) o preview em grade lia a faixa linearmente e escondia edições fora do tile 0/linha 0; (4) verificação de ida-e-volta dentro da transação. Canvas do app == framebuffer do core comprovado como capacidade separada (subimagem 256×192 ou 320×224 conforme o estado). Varredura dos 18 recursos com tiles em tela: fit=0 no orçamento do tile 0 (needs_space honesto) |
+| efeito demonstrado em **fixture autoral** (ETAPA D) | verified (mecanismo) | ROM Mega Drive autoral construída aqui (`scripts/rex_profiles/integrator/lz4w_fixture/`, SGDK 2.11, `TILESET ... LZ4W NONE`, SHA da ROM `159298eb…`), onde a cadeia de consumo é conhecida **por construção** (`unpackTileSet` -> `VDP_loadTileSet` -> `VDP_fillTileMapRectInc`, tile `t` numa única célula `(t%4, t/4)`). O aceite `--ignored` percorre a cadeia real do produto: decode == fonte recomposta; no-op honesto; **linha de base medida antes da busca** (`slot(rescomp)=444B` vs `re-codificação do plain não-editado=448B`, folga `-4B`); edição de 1 pixel **prevista antes de qualquer emulação** (`tile 0, row 5, col 7 -> idx 15`, re-encode 440B **dentro** do slot de 444B) aplicada pela transação canônica; ROM modificada reaberta e re-decodificada == plain planejado; coordenada de tela prevista `(7,5)` e prévia renderizada (SHA dos pixels/PNG). O stream **escrito pelo produto** desempacota no 68000 oficial: `data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r13/runs/runF` (`i30` rescomp, `i31` produto) ambos `68k == jar == esperado` em 512B. **Discriminante negativa preservada**: no fixture **sem** plantio, varredura exaustiva dos 15.360 candidatos de 1 pixel deu `0 cabem` (`.../lz4w-fixture/evidence/2026-09-26/fixture-acceptance-exhaustive-before-plant.log`). **Por que o plantio é necessário e isso não é trapaça**: o LZ4W casa **words de 16 bits**, não pixels; uma edição de 1 pixel só encurta o stream se tornar dois words adjacentes idênticos. O gap de codificador foi medido duas vezes (444/448 e 378/380) e **não** foi escondido: o porte do DP ótimo de `LZ4W.java` foi implementado, ficou verde no suíte e **piorou** (382B vs 380B) — revertido em vez de entregue; um DP fiel precisa de estado `(posição x literais pendentes mod 15)` porque o custo de 1 palavra/token ignora o chunk de 15 literais. Limite honesto: prova de **mecanismo**, não de cobertura de alvos reais; a tela do app ainda não foi capturada por emulação (ETAPA E) |
 
 Limitações declaradas: identificação é estrutural assistida (header declara
 codec e tamanho), não descoberta automática geral; stream editado recusado
@@ -87,6 +88,24 @@ produto. Evidência do integrador vive em namespace próprio
 e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
+
+- 2026-09-26 (integrador, ETAPA D): primeira edição de recurso comprimido com
+  **efeito previsto e demonstrado de ponta a ponta em dado autoral**. Fixture
+  SGDK 2.11 authored (`scripts/rex_profiles/integrator/lz4w_fixture/`) expõe a
+  cadeia de consumo por construção; o aceite do produto aplica uma edição de 1
+  pixel que **cabe** (440B no slot de 444B), re-decodifica a ROM modificada e
+  imprime a coordenada de tela **antes** de qualquer emulação; replay no
+  desempacotador 68000 oficial confirma o stream escrito pelo produto (runF:
+  `i30` rescomp + `i31` produto, `68k == jar == esperado`, sem sobrescrever
+  vizinhos). Medido e registrado, não escondido: o codificador do produto
+  gasta **mais** que o rescomp no plain não-editado (448 vs 444; antes 380 vs
+  378) e por isso **nenhuma** das 15.360 edições de pixel do fixture original
+  cabia — a granularidade do LZ4W é de words, daí o plantio do near-miss. O
+  DP ótimo portado de `LZ4W.java` foi implementado, verde, e **revertido** por
+  piorar (382 vs 380); um DP fiel exige a dimensão "literais pendentes mod
+  15". Retratação menor de redação: o bloqueio comercial é o **consumidor não
+  provado**, não a ausência de espaço (a edição BYOR canônica cabe). Pendente:
+  ETAPA E (prova pelo produto/emulação).
 
 - 2026-09-26 (integrador, retomada): contrato do codec fechado contra o
   desempacotador 68000 oficial. Teto da referência longa não-ROM medido no

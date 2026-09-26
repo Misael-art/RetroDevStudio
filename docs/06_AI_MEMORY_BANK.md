@@ -1,5 +1,70 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-26 (c) — integrador, ETAPA D: edição de 1 pixel com efeito **previsto** que sobrevive ao 68000, em fixture autoral (Experimental; sem merge, sem release)
+
+**HEAD no checkpoint:** `a96fb15` (branch `codex/rex-integrator-profiles-codecs`), com
+três arquivos de trabalho modificados e não commitados neste instante
+(`src-tauri/src/tools/reverse/decomp/rex_resources.rs`,
+`scripts/rex_profiles/integrator/lz4w_68k/driver_integrator.rs`,
+`scripts/rex_profiles/integrator/lz4w_68k/reproduce.sh`) mais o pacote do fixture
+(`scripts/rex_profiles/integrator/lz4w_fixture/`) e os dois pacotes de evidência
+(`data/rex_profiles/integrator/lz4w-fixture/`,
+`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r13/`) como não rastreados.
+Os 7 commits anteriores e o checkpoint pendente do Memory Bank permanecem intactos
+(`658d756` + `13a5792` + `a96fb15`). Arquivos alheios continuam intocados.
+
+**Hipótese:** a meta da rodada (uma edição de recurso comprimido com efeito causal
+demonstrado) era alcançável **sem** tocar a ROM comercial, desde que o consumidor do
+recurso fosse conhecido por construção e a edição respeitasse a granularidade real do
+formato.
+
+**Evidência a favor (medida):** fixture SGDK 2.11 autoral
+(`scripts/rex_profiles/integrator/lz4w_fixture/`, ROM `159298eb…`, TileSet LZ4W em
+header `95464`/stream `391560`, 16 tiles 8x8, plain 512B, empacotado 444B). O aceite
+`--ignored` do produto: decode == fonte recomposta; no-op honesto; a edição **prevista
+antes de qualquer emulação** `tile 0, linha 5, coluna 7: índice 0 -> 15` re-codifica a
+440B e **cabe** no slot de 444B pela transação canônica (identidade, evidência,
+dependentes, roundtrip, BPS); a ROM modificada reabre e re-decodifica para o plain
+planejado; a coordenada de tela prevista é `(7,5)` e a prévia é renderizada (SHA dos
+pixels e do PNG no log). Durabilidade: runF do replay 68000 (`…/lz4w-68k/evidence/
+2026-09-26-r13/runs/runF`) desempacota no `lz4w_unpack` oficial, sob MAME 0.289, tanto
+o stream do rescomp (`i30`) quanto o **escrito pelo produto** (`i31`) para exatamente
+512 bytes, `68k == jar == esperado`, sem sobrescrever vizinhos.
+
+**Evidência contra / medida negativa (registrada em vez de escondida):** o codificador
+do produto gasta **mais** que o empacotador oficial no plain não-editado (448B vs 444B;
+no fixture anterior, 380B vs 378B), então folga inicial é **negativa**. No fixture sem
+plantio, a varredura **exaustiva** dos 15.360 candidatos de 1 pixel deu `0 cabem`
+(`…/lz4w-fixture/evidence/2026-09-26/fixture-acceptance-exhaustive-before-plant.log`,
+8,40 s). Causa estrutural: o LZ4W casa **words de 16 bits**, não pixels — uma edição de
+1 pixel só encurta o stream se tornar dois words adjacentes idênticos. O plantio do
+near-miss (`linha 5, coluna 7` guarda `(v+1)&15`) cria exatamente essa condição; sem
+ele não haveria caso positivo, o que tornaria o teste inútil como discriminante.
+Um porte do DP ótimo de `LZ4W.java` foi implementado, ficou verde no suíte inteiro e
+**piorou** o resultado (382B vs 380B) — foi **revertido** (`git checkout --`) em vez de
+entregue; o modelo de custo de 1 palavra/token ignora o chunk de 15 literais (custo
+real de 16 literais + match curto: 20 words, não 17), logo um DP fiel precisa do estado
+`(posição x literais pendentes mod 15)`.
+
+**Correção de redação (retratação parcial):** o bloqueio comercial é o **consumidor não
+provado** (a sonda do core só alcança as regiões que o libretro expõe; CRAM e o destino
+do desempacotador ficam `missing`), **não** ausência de espaço — a edição canônica do
+aceite BYOR (`pixel (0,7,4) -> idx 15`) cabe e é aplicada. A ROM comercial não foi
+alterada nem instrumentada nesta rodada.
+
+**Últimos comandos e resultados:** `cargo test --lib -- --ignored --nocapture
+fixture_lz4w` -> 1 passed em 1,21 s (planta primeiro) e o log de 8,40 s da varredura
+exaustiva anterior; `bash scripts/rex_profiles/integrator/lz4w_68k/reproduce.sh` com
+`REX_CODECS_SHA=656bdc9f…` -> 7 execuções, 12 casos, 11 `68k == jar == esperado` e 1
+divergência **esperada** (run16, além do teto 16385); `cargo test --lib` -> 668 passed /
+0 failed / 51 ignored. **Próximos comandos:** `cargo fmt --check`,
+`cargo clippy -- -D warnings`, `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`,
+`npm test`, `npm run host:certify`, depois commit + conferência remota por fetch antes
+de qualquer push. **Bloqueio concreto:** nenhum externo nesta etapa; a ETAPA E (tela do
+app capturada por emulação no cenário E2E `rex-lz4w-fixture-effect`) é o trabalho
+seguinte, e a meta visual **não** será declarada concluída enquanto `semanticState`
+estiver BLOQUEADO.
+
 ### Checkpoint 2026-09-26 (b) — integrador retomado: contrato LZ4W fechado contra o 68000 real (Experimental; sem merge, sem release)
 
 **Estado de partida preservado** (exigência do prompt de retomada): 7 commits locais

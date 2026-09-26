@@ -5,7 +5,11 @@
   "mission": "docs/handoffs/PROMPT_REX_INTEGRATOR_RESUME_2026-09-26.md — ETAPA D (efeito causal demonstrado) + confirmação de durabilidade do stream escrito PELO PRODUTO no desempacotador 68000 oficial",
   "supersedes": "data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26 (mesmo harness; esta execução acrescenta runF com os dois streams do fixture autoral)",
   "subject_under_test": {
-    "repo_commit_at_measurement": "a96fb15 (working tree; os três arquivos abaixo foram commitados neste mesmo lote)",
+    "repo_commit_at_measurement": "a96fb1541e876a030d08cc543aa55232c943b661 + working tree",
+    "commits_landing_this_batch": {
+      "rex_resources.rs": "af836fe6aadd23ac3f079d859e5964375dd0e78b",
+      "driver_integrator.rs + reproduce.sh": "075ad96eff3ff17f7a87b96bfa1810fa13317d22"
+    },
     "codec_file": "src-tauri/src/tools/reverse/decomp/rex_codecs.rs",
     "codec_sha256": "656bdc9f17c5abe42c4909a36e2e3052a0a498b4e26409f60de8092ae12f719e",
     "driver_source_file": "scripts/rex_profiles/integrator/lz4w_68k/driver_integrator.rs",
