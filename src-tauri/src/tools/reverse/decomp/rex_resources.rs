@@ -1300,4 +1300,302 @@ mod tests {
         }
         eprintln!("found={found}");
     }
+
+    /// Parâmetros do fixture autoral (devem bater com gen_fixture.py).
+    const FIXTURE_TILE_PX: usize = 8;
+    const FIXTURE_TILE_COUNT: usize = 16;
+    const FIXTURE_NOISE_ROWS: usize = 4;
+    const FIXTURE_LCG_A: u64 = 6_364_136_223_846_793_005;
+    const FIXTURE_LCG_C: u64 = 1_442_695_040_888_963_407;
+    const FIXTURE_LCG_SEED: u64 = 0x5245_584C_5A34_5731;
+    /// Linha de cada tile que o gerador deixa sólida nos 7 primeiros pixels e
+    /// `v+1` no último: é a palavra quase-igual que uma edição de um pixel
+    /// conserta (o LZ4W casa em words de 2 pixels).
+    const FIXTURE_NEAR_MISS_ROW: usize = FIXTURE_NOISE_ROWS + 1;
+    /// Layout do plano definido em src/main.c do fixture: tile `t` colocado
+    /// uma única vez na célula `(t % 4, t / 4)` de um mapa 4x4 de tiles 8x8.
+    const FIXTURE_MAP_TILES_X: usize = 4;
+
+    /// Fonte da expectativa, recomposto AQUI a partir do seed — não lido do
+    /// decodificador nem do gerador Python. Se o decode do produto bater com
+    /// isto, a cadeia stream -> pixels está provada por construção.
+    fn fixture_expected_tiles() -> Vec<u8> {
+        let total = FIXTURE_TILE_COUNT * FIXTURE_TILE_PX * FIXTURE_TILE_PX;
+        let mut state = FIXTURE_LCG_SEED;
+        let mut indices = Vec::with_capacity(total);
+        for t in 0..FIXTURE_TILE_COUNT {
+            for row in 0..FIXTURE_TILE_PX {
+                for col in 0..FIXTURE_TILE_PX {
+                    if row < FIXTURE_NOISE_ROWS {
+                        state = state
+                            .wrapping_mul(FIXTURE_LCG_A)
+                            .wrapping_add(FIXTURE_LCG_C);
+                        indices.push(((state >> 33) & 0xF) as u8);
+                    } else {
+                        let v = ((t * 7 + row * 3) & 0xF) as u8;
+                        let near_miss = row == FIXTURE_NEAR_MISS_ROW && col == FIXTURE_TILE_PX - 1;
+                        indices.push(if near_miss { (v + 1) & 0xF } else { v });
+                    }
+                }
+            }
+        }
+        // empacota chunky 4bpp: byte = tile*32 + row*4 + col/2, nibble alto na
+        // coluna par (mesmo contrato de md_write_pixel_index).
+        let mut data = vec![0u8; total / 2];
+        let per_tile = FIXTURE_TILE_PX * FIXTURE_TILE_PX;
+        for (i, idx) in indices.iter().enumerate() {
+            let (t, rem) = (i / per_tile, i % per_tile);
+            let (row, col) = (rem / FIXTURE_TILE_PX, rem % FIXTURE_TILE_PX);
+            let byte = t * 32 + row * 4 + col / 2;
+            if col % 2 == 0 {
+                data[byte] = (data[byte] & 0x0F) | (idx << 4);
+            } else {
+                data[byte] = (data[byte] & 0xF0) | idx;
+            }
+        }
+        data
+    }
+
+    /// ACEITE do fixture LZ4W autoral (SGDK 2.11: rescomp empacota o tileset
+    /// com LZ4W e `unpackTileSet()` oficial o desempacota em runtime). NÃO é
+    /// BYOR: as expectativas vêm do fonte do fixture, não de observação.
+    ///
+    /// Cobre o que a rodada inteira precisava provar fora de um alvo
+    /// comercial: decode == fonte autoral, no-op honesto, e uma edição real
+    /// que CABE no espaço original e cujo pixel de tela é PREDITO antes de
+    /// qualquer emulação.
+    #[test]
+    #[ignore = "aceite de fixture: requer ROM local; rodar com --ignored"]
+    fn fixture_lz4w_decodes_to_authored_source_and_edit_has_predicted_pixel() {
+        let path = std::env::var("RDS_REX_LZ4W_FIXTURE_ROM")
+            .expect("RDS_REX_LZ4W_FIXTURE_ROM ausente (aceite exige arquivo)");
+        let rom = std::fs::read(&path).expect("fixture ROM ausente");
+        // Identidade do fixture: sem este pin, o teste poderia rodar contra
+        // qualquer ROM e a expectativa autoral perderia o vínculo.
+        const FIXTURE_ROM_SHA256: &str =
+            "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5";
+        let sha = super::super::rom_library::sha256_hex(&rom);
+        assert_eq!(
+            sha, FIXTURE_ROM_SHA256,
+            "fixture ROM inesperada: {sha} (rebuild pode ter alterado os bytes — realce a expectativa com origem)"
+        );
+        let limits = Lz4wLimits::default();
+        let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto LZ4W");
+        assert_eq!(
+            set.resources.len(),
+            1,
+            "fixture deve expor exatamente um recurso LZ4W verificável"
+        );
+        let resource = &set.resources[0];
+        assert_eq!(resource.candidate.num_tiles, FIXTURE_TILE_COUNT);
+        assert_eq!(resource.candidate.expected_len, FIXTURE_TILE_COUNT * 32);
+
+        // (1) decode do produto == fonte autoral, recomposto do seed.
+        assert_eq!(
+            resource.decoded,
+            fixture_expected_tiles(),
+            "decode divergiu do tileset autoral"
+        );
+
+        // (2) no-op explícito pela mesma transação.
+        let noop = reinsert_transaction(
+            &ReinsertRequest {
+                rom: &rom,
+                expected_rom_sha256: &sha,
+                resource,
+                edited_data: &resource.decoded,
+            },
+            &limits,
+        )
+        .expect("no-op");
+        assert!(matches!(noop, ReinsertOutcome::NoOp), "no-op virou escrita");
+
+        // (3) MEDIDA BASE ANTES DE QUALQUER BUSCA: o codificador do produto
+        //     reproduz o stream empacotado pelo rescomp dentro do espaço
+        //     original? Sem folga, toda edição de um word fica mais longa que
+        //     o slot por construção e enumerar candidatos é desperdício.
+        let start = resource.candidate.stream_offset;
+        let slot = resource.bytes_consumed;
+        let dict = super::super::rex_codecs::Lz4wDictionaryIndex::build(&rom[..start])
+            .expect("dicionário");
+        let baseline = super::super::rex_codecs::lz4w_encode_with_dictionary_index(
+            &resource.decoded,
+            Some(&dict),
+        )
+        .expect("encode base");
+        let headroom = slot as isize - baseline.len() as isize;
+        eprintln!(
+            "[rex-fixture] base: empacotado(rescomp)={slot}B re-codificado={}B folga={}B dicionário={} words",
+            baseline.len(),
+            headroom,
+            dict.word_count(),
+        );
+
+        // (4) busca EXAUSTIVA e determinística sobre edições de um pixel
+        //     (16 tiles x 64 pixels x 15 índices = 15.360 candidatos), com o
+        //     índice de dicionário compartilhado e filtro barato: o
+        //     comprimento do re-encode. A transação canônica (identidade,
+        //     evidência, dependentes, roundtrip, BPS) só roda para candidatos
+        //     que CABEM, e a decisão de aceite continua sendo dela.
+        let mut chosen: Option<(usize, usize, usize, u8, Vec<u8>)> = None;
+        let mut tested = 0usize;
+        let mut fits = 0usize;
+        let mut shortest = baseline.len();
+        let mut histogram: std::collections::BTreeMap<usize, usize> =
+            std::collections::BTreeMap::new();
+        // Candidatos PLANTADOS primeiro: em cada tile, o último pixel da linha
+        // near-miss volta ao valor da linha. São a única forma de um pixel só
+        // encurtar o stream (igualem duas words adjacentes); a predictibilidade
+        // deles é o que se afirma, não um acaso no fim da varredura.
+        let mut candidatos: Vec<(usize, usize, usize, u8)> = Vec::new();
+        for tile in 0..FIXTURE_TILE_COUNT {
+            let row = FIXTURE_NEAR_MISS_ROW;
+            let col = FIXTURE_TILE_PX - 1;
+            let v = ((tile * 7 + row * 3) & 0xF) as u8;
+            assert_eq!(
+                md_read_pixel_index(&resource.decoded, tile, row, col).expect("pixel"),
+                (v + 1) & 0xF,
+                "fixture perdeu a palavra quase-igual plantada no tile {tile}"
+            );
+            candidatos.push((tile, row, col, v));
+        }
+        for tile in 0..FIXTURE_TILE_COUNT {
+            for row in 0..FIXTURE_TILE_PX {
+                for col in 0..FIXTURE_TILE_PX {
+                    let original =
+                        md_read_pixel_index(&resource.decoded, tile, row, col).expect("pixel");
+                    for offset in 1..16u8 {
+                        let index = (original + offset) % 16;
+                        if row == FIXTURE_NEAR_MISS_ROW
+                            && col == FIXTURE_TILE_PX - 1
+                            && index == ((tile * 7 + row * 3) & 0xF) as u8
+                        {
+                            continue; // já tentado como plantado
+                        }
+                        candidatos.push((tile, row, col, index));
+                    }
+                }
+            }
+        }
+        'scan: for (tile, row, col, index) in candidatos {
+            let mut edited = resource.decoded.clone();
+            md_write_pixel_index(&mut edited, tile, row, col, index).expect("edição chunky");
+            let encoded =
+                super::super::rex_codecs::lz4w_encode_with_dictionary_index(&edited, Some(&dict))
+                    .expect("encode candidato");
+            tested += 1;
+            *histogram.entry(encoded.len()).or_default() += 1;
+            shortest = shortest.min(encoded.len());
+            if encoded.len() > slot {
+                continue;
+            }
+            fits += 1;
+            eprintln!(
+                            "[rex-fixture] CABE tile={tile} row={row} col={col} idx={index} encode={}B slot={slot}B (candidato {tested})",
+                            encoded.len(),
+                        );
+            match reinsert_transaction(
+                &ReinsertRequest {
+                    rom: &rom,
+                    expected_rom_sha256: &sha,
+                    resource,
+                    edited_data: &edited,
+                },
+                &limits,
+            ) {
+                Ok(ReinsertOutcome::Applied(applied)) => {
+                    chosen = Some((tile, row, col, index, applied.modified_rom.clone()));
+                    break 'scan;
+                }
+                Ok(ReinsertOutcome::NoOp) => continue,
+                Err(err) => {
+                    eprintln!("[rex-fixture] transação recusou candidato cabível: {err:?}");
+                }
+            }
+        }
+        eprintln!(
+            "[rex-fixture] varredura: {tested} candidatos, {fits} cabem, menor encode {shortest}B, slot {slot}B, folga base {headroom}B, distribuição {histogram:?}"
+        );
+        let (tile, row, col, index, modified_rom) = chosen.unwrap_or_else(|| {
+            panic!(
+                "nenhuma edição de pixel coube no espaço do fixture: {fits} de {tested} candidatos \
+                 cabem, menor encode {shortest}B, slot {slot}B, folga base {headroom}B \
+                 (o codificador guloso do produto produz {bl}B para o plain NÃO editado)",
+                bl = baseline.len(),
+            )
+        });
+
+        let applied = {
+            let mut edited = resource.decoded.clone();
+            md_write_pixel_index(&mut edited, tile, row, col, index).expect("reaplicar edição");
+            match reinsert_transaction(
+                &ReinsertRequest {
+                    rom: &rom,
+                    expected_rom_sha256: &sha,
+                    resource,
+                    edited_data: &edited,
+                },
+                &limits,
+            )
+            .expect("transação da edição escolhida")
+            {
+                ReinsertOutcome::Applied(applied) => applied,
+                ReinsertOutcome::NoOp => panic!("edição real reportada como no-op"),
+            }
+        };
+        assert!(applied.stream_written <= applied.original_stream_len);
+
+        // (5) o ROM modificado re-decodifica para o plain previsto (um único
+        //     nibble diferente do original autoral).
+        let modified_set =
+            verify_lz4w_resource_set(&modified_rom, &limits).expect("conjunto no modificado");
+        let mut predicted = fixture_expected_tiles();
+        md_write_pixel_index(&mut predicted, tile, row, col, index).expect("prever pixel");
+        assert_eq!(modified_set.resources[0].decoded, predicted);
+
+        // (6) a PRÉVIA do produto reflete a edição no lugar previsto e em
+        //     nenhum outro. Isto é o que pega a regressão histórica de ler a
+        //     faixa linearmente (que escondia edições fora do tile 0/linha 0).
+        let strip_w = FIXTURE_TILE_COUNT * FIXTURE_TILE_PX;
+        let original_rgba = md_tiles_to_rgba(&fixture_expected_tiles());
+        let edited_rgba = md_tiles_to_rgba(&predicted);
+        let mut differs: Vec<(usize, usize)> = Vec::new();
+        for y in 0..FIXTURE_TILE_PX {
+            for x in 0..strip_w {
+                let p = (y * strip_w + x) * 4;
+                if original_rgba[p..p + 4] != edited_rgba[p..p + 4] {
+                    differs.push((x, y));
+                }
+            }
+        }
+        assert_eq!(
+            differs,
+            vec![(tile * FIXTURE_TILE_PX + col, row)],
+            "prévia mudou fora do pixel editado (ou não mudou onde deveria)"
+        );
+
+        // (7) pixel de tela PREDITO antes de qualquer emulação: a célula do
+        //     mapa é (t % 4, t / 4) num plano 4x4 de tiles 8x8, então a
+        //     origem do tile é ((t%4)*8, (t/4)*8). NÃO é a coordenada da
+        //     prévia acima (esta é a faixa de tiles, não a tela).
+        let screen_x = (tile % FIXTURE_MAP_TILES_X) * FIXTURE_TILE_PX + col;
+        let screen_y = (tile / FIXTURE_MAP_TILES_X) * FIXTURE_TILE_PX + row;
+        let (preview_png, pw, ph, pixels_sha) =
+            render_resource_png(&modified_set.resources[0].decoded).expect("prévia");
+        let (_, _, _, original_pixels_sha) =
+            render_resource_png(&fixture_expected_tiles()).expect("prévia original");
+        assert_ne!(
+            pixels_sha, original_pixels_sha,
+            "prévia renderizada não refletiu a edição aplicada na ROM"
+        );
+        eprintln!(
+            "[rex-fixture] rom_sha={sha} stream={:#x} escrito={} slot={} tile={tile} row={row} col={col} idx={index} tela=({screen_x},{screen_y}) previa_pos=({}, {}) previa={pw}x{ph} pixels_sha={pixels_sha} png_sha={}",
+            resource.candidate.stream_offset,
+            applied.stream_written,
+            applied.original_stream_len,
+            tile * FIXTURE_TILE_PX + col,
+            row,
+            super::super::rom_library::sha256_hex(&preview_png),
+        );
+    }
 }
