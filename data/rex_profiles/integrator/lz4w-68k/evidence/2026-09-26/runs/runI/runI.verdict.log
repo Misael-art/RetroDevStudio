@@ -1,0 +1,6 @@
+OK       i20_lits_odd                 ret68k=   11 esperado=   11 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i21_short_mix                ret68k=   16 esperado=   16 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i22_long_far_nodict          ret68k=  620 esperado=  620 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i23_long_zero_value          ret68k=   44 esperado=   44 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i24_dict_mixed               ret68k=   34 esperado=   34 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)

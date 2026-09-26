@@ -1,0 +1,5 @@
+i20_lits_odd rc=0
+i21_short_mix rc=0
+i22_long_far_nodict rc=0
+i23_long_zero_value rc=0
+i24_dict_mixed rc=0

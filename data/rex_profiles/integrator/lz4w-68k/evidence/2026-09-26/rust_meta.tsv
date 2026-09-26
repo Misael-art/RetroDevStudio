@@ -1,0 +1,10 @@
+id=i20_lits_odd	origin=integrator-current-codec	plain_len=11	stream_len=16	dict_len=0	note=só literais
+id=i21_short_mix	origin=integrator-current-codec	plain_len=16	stream_len=18	dict_len=0	note=curtos off 2/off 1
+id=i22_long_far_nodict	origin=integrator-current-codec	plain_len=620	stream_len=656	dict_len=0	note=longo auto-referente
+id=i23_long_zero_value	origin=integrator-current-codec	plain_len=44	stream_len=10	dict_len=0	note=longo value=0x0000 (off 1)
+id=i24_dict_mixed	origin=integrator-current-codec	plain_len=34	stream_len=12	dict_len=1200	note=dict 600w misto
+id=i14_encoder_deep_16384	origin=integrator-current-codec	plain_len=6	stream_len=8	dict_len=32772	note=emitido pelo encoder; off 16384
+id=i15_hardware_ceiling_16385	origin=integrator-current-codec	plain_len=6	stream_len=8	dict_len=32774	note=aceito pelo produto
+id=i16_beyond_ceiling_16386	origin=integrator-current-codec	plain_len=6	stream_len=8	dict_len=32776	note=recusado pelo produto (invalid_reference)
+id=i09_corpus_orig_c8cc8	origin=integrator-current-codec	plain_len=288	stream_len=144	dict_len=4096	note=original do corpus; prefixo mínimo aceito 4096 bytes
+id=i18_corpus_edit_c8cc8	origin=integrator-current-codec	plain_len=288	stream_len=150	dict_len=1024	note=edição canônica pelo encoder atual; prefixo 1024 bytes; slot original 144 bytes

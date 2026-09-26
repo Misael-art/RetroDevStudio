@@ -1,10 +1,88 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
-### Checkpoint 2026-09-26 — retratação da classe do alvo, prova causal de não-carregamento e três defeitos de formato corrigidos (Experimental; sem merge)
+### Checkpoint 2026-09-26 (b) — integrador retomado: contrato LZ4W fechado contra o 68000 real (Experimental; sem merge, sem release)
 
-O operador reabriu apenas o aceite semântico/visual do alvo 0xc8cc8. **Retratação**: a leitura "9 paletas × 16 cores" e o mecanismo "cor de transparência tornada opaca" eram inferências sem evidência de consumidor — retirados do estado corrente (histórico preservado nos checkpoints 2026-09-25 (b)/(c)). O "efeito de recolorimento dos lutadores" era **ruído de medição**: o resume do loop vivo entre runs separados avançava o jogo por tempo real variável, dessincronizando os frames comparados. A sonda causal nova — WRAM/VRAM lidas via `emulator_read_memory` (regiões 2/3 do GPGX; CRAM não é exposta) com run_frames determinístico — provou que **WRAM e VRAM são idênticas** entre original e modificado em 900 frames, com controle original/original idêntico (determinismo e metodologia validados): **o recurso 0xc8cc8 não é descompactado na janela explorada; consumidor não provado; edição semântica dele permanece BLOQUEADA** (o E2E registra `semanticState: BLOQUEADO` e exige frames idênticos).
+**Estado de partida preservado** (exigência do prompt de retomada): 7 commits locais
+não enviados (`e942848..7e19d6a`) + a alteração pendente no Memory Bank, que foi
+commitada verbatim como `658d756` antes de qualquer outra escrita. Arquivos
+alheios na árvore (`APJ-unpack`, `apultra-decode`, `a.out`, `.mimosa/`,
+`src-tauri/src-tauri/`, `data/canonical-local-2026-09-21/`) **não foram executados,
+apagados nem staged**; continuam fora do escopo deste checkpoint.
 
-**Três defeitos reais corrigidos nesta rodada**: (1) o encoder emitia matches longos não-ROM com offset até 0x8000 words, mas o 68000 lê o word de offset como int16 após duplicação — v < 0x4001 é referência PARA FRENTE, fora do formato; janela do encoder e validação do decoder restauradas ao limite oficial de 0x4000 (o 18bdff92, artefato do binário pré-correção, decodificava byte 30 como índice 1 com dano colateral em 36-44); (2) o preview em grade lia a faixa de tiles linearmente (`src=(y*8+x)*4`), escondendo edições fora do tile 0/linha 0 — mapeamento corrigido + teste de regressão; (3) a transação não verificava a ida-e-volta — agora redecodifica o novo stream com o mesmo dicionário e recusa qualquer divergência. Evidência de bytes: intervalo alterado [30,31), byte 30 0x00→0xF0 (pixel (0,7,4)→índice 15, a única edição que coube: needs_space honesto de 150>144 nas demais posições com o encoder corrigido). Índice de dicionário reutilizável (`Lz4wDictionaryIndex`) para a varredura (item 7); varredura orçada (64 candidatos/recurso, progresso, checkpoint em /tmp/rex-scan-checkpoint.log): fit=0 nos 18 recursos com tiles em tela. Simulação do desempacotador 68000 (/tmp/rex_68000_sim.py, fiel a tools_a.s: COPY_MATCH, .lm_len via salto relativo, .lmr com tabela de paridade, ROM-source em espaço do stream): asm ≡ Rust nos streams decodificáveis; 25/191 headers são falsos positivos estruturais (tamanho 0/inválido). E2E final: fluxo UI completo (verificar/prévia/no-op/editar/transação/BPS re-aplicado com hash exato/salvar-reabrir com prévia alterada `74c38128`/canvas == core 320×224/frames idênticos). 159 recursos verificados preservados. Gates locais verdes; push `0ba067b`+; sem merge/release.
+**Hipótese testada:** o decoder do produto tratava a janela de busca do compressor
+(`0x4000` words) como limite do formato e, portanto, recusava um offset que o
+desempacotador 68000 oficial ainda lê corretamente. **Evidência a favor (medida no
+hardware, não simulada):** `.long_match` em `tools_a.s` faz
+`move.w (a0)+,d0; add.w d0,d0; bcs .lm_rom; lea -2(a1,d0.w),a2` — aritmética de
+16 bits com displacement sinalado ⇒ leitura para trás exige `value >= 0x4000`, ou
+seja `off <= 16385`. Replay sob MAME 0.289 com o `lz4w_unpack` montado do asm
+oficial (identidade conferida contra `libmd.a`: 5056 bytes, SHA-256 `ff18bacb…`,
+em **cada** uma das 6 construções de ROM): `i15` (off 16385, `value 0x4000`) é
+reproduzido **byte a byte** pelo 68k e pelo jar; `i16` (off 16386, `value 0x3FFF`)
+**diverge no hardware** no byte 0 (`0x24` em vez de `0xBE`, leitura para frente
+aliassando a ROM) enquanto o jar de 32 bits reproduz o pretendido. **Evidência
+contra nenhuma alternativa:** o produto aceita até 16385 e recusa de 16386 em
+diante, exatamente como o hardware; os goldens são calculados à mão, não pela
+fórmula do produto.
+
+**Commit do produto:** `13a5792` separou
+`MATCH_LONG_FORMAT_MAX_OFFSET_WORDS` (16385, formato/decoder) de
+`ENCODER_WINDOW_WORDS` (0x4000, estratégia/codificador) e acrescentou 8 regressões
+(16384/16385 aceitos, 16386 recusado citando o teto medido, `value 0` = off 1,
+fonte-ROM acima do teto não-ROM aceita — limites independentes —, fonte-ROM além
+do histórico recusada, truncamentos dentro de segmento estruturados, e um andador
+de tokens que exige que todo offset não-ROM emitido caiba na janela legível).
+Cabeçalho obsoleto do módulo corrigido (o arquivo já trateia streams prev-block).
+
+**Prova externa obrigatória executada** (`Rust encode -> 68k decode`, fora do
+roundtrip interno): 10 casos / 6 ROMs, todos com veredito esperado —
+`i20..i24` (famílias emitidas pelo encoder atual: literais+cauda ímpar, curtos
+off 2/off 1, longo auto-referente de 620 B, longo `value 0x0000`, dicionário
+misto) idênticos no 68k e no jar; `i09` (stream **original** do recurso 0xc8cc8
+com o menor prefixo-dicionário aceito pelo produto, medido em 4096 bytes)
+idêntico; `i18` (edição canônica re-codificada pelo encoder **atual**) idêntico
+no 68k, e o slot continua o bloqueio real: **150 bytes contra 144** →
+`needs_space`, nada forçado por sobrescrita; `i14` é a prova profunda: off 16384
+emitido pelo encoder, reproduzido byte a byte pelo hardware. Receita, pins,
+SHA-256 por execução e limites do que está provado em
+`docs/rex_profiles/LZ4W_68K_ORACLE.md`; evidência (logs, comprimentos, hashes —
+**sem byte algum da ROM comercial**) em
+`data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26/`; ferramenta de
+medição vendorada com proveniência em `scripts/rex_profiles/integrator/lz4w_68k/`
+(SHAs por arquivo em `PROVENANCE.md`). **As suítes A e B continuam não
+integradas**; só a ferramenta de medição foi copiada, com origem no commit
+`9b2389d` do worktree da agente-B.
+
+**ETAPA C (precisão da observação) aplicada:** toda alegação de "não é
+descompactado" foi rebaixada ao que foi medido — *nenhuma diferença observada nas
+regiões que o core expõe* (`emulator_read_memory` regiões 2/3; CRAM e a
+chamada/destino do desempacotador ficam `missing`, porque o core libretro não
+expõe tracer e instrumentar o jogo exigiria modificar a ROM comercial, o que está
+fora da autorização). O relatório do E2E passou a publicar `observed` e
+`coverage` em vez de uma única frase conclusiva.
+
+**Gates neste HEAD:** `cargo test --lib` **668 passed / 50 ignored**; `cargo
+clippy -- -D warnings` limpo; `cargo fmt --check` limpo; testes BYOR ignoráveis
+reexecutados antes do commit (`160/191` verificados, `preservados=159`, varredura
+`fit=4` só no alvo conhecido). Frontend intocado por este checkpoint (a mudança em
+`scripts/e2e-tauri-build-run.mjs` é texto de relatório/comentário, sem alteração
+de asserção).
+
+**Próximo comando exato:** retomar a ETAPA D — varredura limitada dos recursos
+LZ4W com tiles comprovadamente em tela reutilizando `Lz4wDictionaryIndex`; se
+nenhum couber no slot, o caminho autorizado é **aPLib em Rust canônico** com os
+vetores da agente-B e oráculo independente, ou fixture SGDK autoral rotulado como
+fixture (nunca como sucesso BYOR). Bloqueio concreto atual: **nenhum recurso LZ4W
+conhecido aceita reinserção dentro do espaço original** (`fit=4` apenas em
+0xc8cc8, todas as edições `needs_space`), e expansão de ROM/realocação de
+ponteiros não está autorizada nesta rodada.
+
+
+### Checkpoint 2026-09-26 — retratação da classe do alvo, sonda causal sem diferença observada e três defeitos de formato corrigidos (Experimental; sem merge)
+
+O operador reabriu apenas o aceite semântico/visual do alvo 0xc8cc8. **Retratação**: a leitura "9 paletas × 16 cores" e o mecanismo "cor de transparência tornada opaca" eram inferências sem evidência de consumidor — retirados do estado corrente (histórico preservado nos checkpoints 2026-09-25 (b)/(c)). O "efeito de recolorimento dos lutadores" era **ruído de medição**: o resume do loop vivo entre runs separados avançava o jogo por tempo real variável, dessincronizando os frames comparados. A sonda causal nova — WRAM/VRAM lidas via `emulator_read_memory` (regiões 2/3 do GPGX; CRAM não é exposta) com run_frames determinístico — **não mediu nenhuma diferença** entre original e modificado em 900 frames, com controle original/original idêntico (determinismo e metodologia validados). **Precisão (ETAPA C, 2026-09-26): isso não prova que "o recurso 0xc8cc8 não é descompactado"** — a sonda só alcança as regiões que o core expõe (regiões 2/3; CRAM e a chamada/destino do desempacotador ficam `missing`). O que fica registrado é *ausência de diferença observada nas regiões amostradas*, que é enunciado mais fraco; consumidor continua **não provado** e a edição semântica deste recurso permanece **BLOQUEADA** (o E2E registra `semanticState: BLOQUEADO`, agora com campos `observed`/`coverage` explícitos, e exige frames idênticos).
+
+**Três defeitos reais corrigidos nesta rodada**: (1) o encoder emitia matches longos não-ROM com offset até 0x8000 words, mas o 68000 lê o word de offset como int16 após duplicação — v < 0x4001 é referência PARA FRENTE, fora do formato; janela do encoder e validação do decoder restauradas ao limite oficial de 0x4000 (o 18bdff92, artefato do binário pré-correção, decodificava byte 30 como índice 1 com dano colateral em 36-44); (2) o preview em grade lia a faixa de tiles linearmente (`src=(y*8+x)*4`), escondendo edições fora do tile 0/linha 0 — mapeamento corrigido + teste de regressão; (3) a transação não verificava a ida-e-volta — agora redecodifica o novo stream com o mesmo dicionário e recusa qualquer divergência. Evidência de bytes: intervalo alterado [30,31), byte 30 0x00→0xF0 (pixel (0,7,4)→índice 15, a única edição que coube: needs_space honesto de 150>144 nas demais posições com o encoder corrigido). Índice de dicionário reutilizável (`Lz4wDictionaryIndex`) para a varredura (item 7); varredura orçada (64 candidatos/recurso, progresso, checkpoint promovido para `scripts/rex_profiles/integrator/analysis-2026-09-26/rex-scan-checkpoint.log`): fit=0 nos 18 recursos com tiles em tela. Simulação do desempacotador 68000 (`scripts/rex_profiles/integrator/analysis-2026-09-26/rex_68000_sim.py`, fiel a tools_a.s: COPY_MATCH, .lm_len via salto relativo, .lmr com tabela de paridade, ROM-source em espaço do stream): asm ≡ Rust nos streams decodificáveis; 25/191 headers são falsos positivos estruturais (tamanho 0/inválido). **Superação metodológica (2026-09-26): a simulação deixou de ser o padrão — o desempacotador real foi montado do `tools_a.s` oficial e executado sob MAME; ver checkpoint do integrador abaixo e `docs/rex_profiles/LZ4W_68K_ORACLE.md`.** E2E final: fluxo UI completo (verificar/prévia/no-op/editar/transação/BPS re-aplicado com hash exato/salvar-reabrir com prévia alterada `74c38128`/canvas == core 320×224/frames idênticos). 159 recursos verificados preservados. Gates locais verdes; push `0ba067b`+; sem merge/release.
 
 ### Checkpoint 2026-09-25 (c) — formato chunky corrigido e efeito observado no jogo pela UI (Experimental; sem merge)
 

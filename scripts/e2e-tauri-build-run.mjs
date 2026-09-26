@@ -9201,20 +9201,26 @@ async function runRexLz4wEffectScenario(sessionId) {
       break;
     }
   }
-  // Estado SEMÂNTICO do alvo 0xc8cc8: DESCONHECIDO. A sonda causal provou
-  // que o recurso não é descompactado para WRAM/VRAM na janela explorada
-  // (900 frames; controle original/original idêntico), e o "efeito" visto
-  // antes era ruído do loop vivo entre runs separados. Efeito esperado só
-  // pode ser definido após a prova do consumidor; até lá a edição
-  // semântica deste recurso permanece BLOQUEADA e a comparação de frames
-  // deve ser IDÊNTICA (qualquer diff = ruído de não-determinismo).
+  // Estado SEMÂNTICO do alvo 0xc8cc8: DESCONHECIDO. A sonda causal mediu que
+  // WRAM e VRAM permaneceram byte a byte idênticas entre original e modificado
+  // (900 frames; controle original/original idêntico, o que valida o
+  // determinismo e a metodologia). ISSO NÃO PROVA que o recurso não seja
+  // descompactado: a sonda só cobre as regiões que o core expõe via
+  // emulator_read_memory (2/3; CRAM e outras regiões ficam missing), e o
+  // desempacotamento pode ocorrer em região/janela não observados. O "efeito"
+  // visto antes era ruído do resume do loop vivo entre runs separados. Efeito
+  // esperado só pode ser definido após a prova do consumidor; até lá a edição
+  // semântica deste recurso permanece BLOQUEADA e a comparação de frames deve
+  // ser IDÊNTICA (qualquer diff = ruído de não-determinismo).
   if (diffFrame >= 0) {
     fail(`diferença de framebuffer entre original e modificado (${diffPixels} px @ ${diffFrame}) SEM consumidor provado: ruído de não-determinismo ou efeito não explicado — aceito semanticamente só após prova da cadeia (item 3/4).`);
   }
   console.log(`[rex-lz4w-effect] ${JSON.stringify({
     romSha, targetOffset: `0x${targetOffsetHex}`, previewPixelsSha, modifiedSha, patchSha,
     preserved: Number(preservedMatch[1]),
-    semanticState: "BLOQUEADO — consumidor do recurso não provado; frames idênticos original vs modificado (determinismo verificado)",
+    observed: "nenhuma diferença em WRAM/VRAM nas regiões amostradas (900 frames, run_frames determinístico; controle original/original idêntico)",
+    coverage: { sampled: ["WRAM (região 2)", "VRAM (região 3)"], missing: ["CRAM", "outras regiões não expostas pelo core", "chamada/destino do desempacotador (sem tracer no core)"] },
+    semanticState: "BLOQUEADO — consumidor do recurso não provado; ausência de diferença observada NÃO é prova de ausência de descompactação",
   })}`);
 }
 
