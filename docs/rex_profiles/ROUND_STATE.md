@@ -106,12 +106,61 @@ Repetido por perna independente em JS
 (`scripts/rex_profiles/integrator/aplib/byor_cross_check.mjs`). **O que isso não é**: não é reconstrução visual no produto (os 95,90 % de
 correspondência por pixel continuam medidos só em JS pela agente A), não é
 identificação automática (os dois endereços vêm do header lido, e identificação é
-capacidade separada de decode), e **não há encoder aPLib** — enquanto não houver
-`encode` com `needs_space` honesto, nenhum recurso APLIB é "editável sem
-expansão", e a paridade bidirecional com os oráculos que o CONTRACTS §4 exige
-(`decode(produto, encode(ref))` e `decode(ref, encode(produto))`) continua
-aberta. Promoção de maturidade fica com o operador; a célula acima permanece
-`blocked` por decisão de missão, não por falta deste registro.
+capacidade separada de decode), e a paridade bidirecional do CONTRACTS §4 está
+fechada nas duas pernas (registro abaixo). Reinserção em slot, porém, ainda
+**não**: `reinsert` em `rex_resources.rs` é caminho exclusivo de LZ4W, então
+nenhum recurso APLIB da ROM é "editável sem expansão" pelo produto hoje. Ligar o
+encoder a essa via é o próximo passo de frente, e continua sem autorização para
+expandir ROM nem realocar ponteiros. Promoção de maturidade fica com o operador;
+a célula acima permanece `blocked` por decisão de missão, não por falta deste
+registro.
+
+Encoder aPLib em Rust canônico (2026-09-26, frente do integrador).
+`aplib_encode(data, &AplibEncodeLimits { max_stream, max_work })` na variante
+**raw sem header**, com os erros do vocabulário de CONTRACTS §4 e nada além
+disso: `needs_space` citando os três números (plain, stream produzido,
+orçamento), `work_limit` quando o orçamento de operações estoura no meio do
+parse sem deixar stream inválido, `overflow` para o que o formato não expressa
+(entrada de 0 byte, entrada acima de 2^32 posições). Quatro incrementos, cada um
+com teste próprio antes do código: `632c195` guloso + `needs_space` honesto;
+`745dc59` cobertura de offsets distantes (índice hash/chain de chave exata de 2
+bytes, `1024` candidatos por posição, marca d'água que indexa também as posições
+cobertas por match); `3a3db96` rep-match reusando o offset do último match;
+`19bc865` token `111` (cópia de 1 byte a offset ≤ 15 e `0x00` órfão).
+
+Capacidade real medida, não estimada, por mesa de tokens
+(`scripts/rex_profiles/integrator/aplib/token_dump.py`: o custo por token soma
+com o rabo não usado dos bytes de tag e dá exatamente o stream consumido, e isso
+vale para os 35 streams bem-formados do acervo — 9 goldens, 16 de dois oráculos
+sobre 8 plains, 2 discriminantes, 8 dumps do produto — com zero falha; os 7
+negativos são recusados cada um pelo motivo estrutural que o define). Resultado
+em 2026-09-26: **7 das 8 mesas de tokens são idênticas às dos dois oráculos**
+(`apultra` e `apj.jar`) — contagem por tipo, plain produzido e custo. A única
+divergência é `noisy_runs_16k`, 1364 B contra 1205 B do oráculo, e a mesa diz o
+porquê em números: o produto paga **+433 B** de `match-10` (305× a 3,36 B contra
+179× a 3,31 B) para economizar 272 B entre literais e rep-matches (127× vs 241×,
+123× vs 210×). É escolha de parse do guloso — o oráculo encurta um match, paga um
+literal de 9 bits para rearmar LWM a 3 e emenda um rep-match de 1,58 B, onde o
+produto paga o `match-10` inteiro com byte de offset — e não token indisponível.
+Os oito números estão congelados por igualdade em
+`aplib_encode_tem_a_capacidade_medida_congelada_por_plain` (pino ≠ alvo; mexer na
+qualidade muda pino, e mudar pino é decisão registrada).
+
+Paridade bidirecional de CONTRACTS §4: perna 1 (`decode` do produto sobre stream
+do oráculo) verde nos 8 plains × 2 oráculos, mais os 9 goldens com
+`bytes_consumed` exato; perna 2 (`decode` do oráculo sobre stream do **produto**)
+verde em 8 de 8 por `scripts/rex_profiles/integrator/aplib/oracle_encode_parity.py`
+— `apultra` v1.4.8 `64be2a7a…`, implementação em C que não compartilha código com
+o produto, devolve para cada stream do produto exatamente o plain pinado no
+`manifest.tsv`. Não-vacuidade do aceite provada por controle: um bit invertido na
+tag de `tile_like` foi aceito pelo oráculo e produziu hash diferente — o script
+apontou FAIL e saiu com rc=1, então o que fecha a prova é a comparação de hash,
+não o oráculo ter devolvido alguns bytes. **O que continua não alegado**:
+optimalidade (não houve comparação exaustiva com parse ótimo, e o `111` economiza
+2 bits mas não chega a encolher stream em `ABCDA` nem em `01 00 02` — ele estoura
+o tag e cobra um tag extra), desempacotamento dos streams do produto pelo
+desempacotador 68000 real sob MAME (esse oráculo só existe para LZ4W hoje),
+reinserção em slot e reconstrução de TiledImage dentro do produto.
 
 Duas divergências continuam registradas em vez de resolvidas por alegação: (a) a
 linha aPLib desta matriz diz `variant-fixed: blocked` enquanto o `manifest.json`
