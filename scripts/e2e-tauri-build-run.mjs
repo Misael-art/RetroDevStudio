@@ -8815,6 +8815,7 @@ async function runRexLz4wEffectScenario(sessionId) {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;`);
   };
+  await setNumberInput("rex-resource-paint-index", 15);
   await setNumberInput("rex-resource-edit-tile", 0);
   await setNumberInput("rex-resource-edit-row", 7);
   await setNumberInput("rex-resource-edit-col", 4);
@@ -8890,12 +8891,16 @@ async function runRexLz4wEffectScenario(sessionId) {
     "prévia da ROM modificada não apareceu.",
     250
   );
+  // Estabiliza: a prévia da ROM modificada pode demorar (decode do stream).
+  await pause(2000);
   const modifiedPreviewSha = await executeScript(
     sessionId,
     `return document.querySelector('${panel} [data-testid="rex-resource-pixels-sha"]').textContent;`
   );
   if (modifiedPreviewSha === previewPixelsSha) {
-    fail(`prévia da ROM modificada é idêntica à original: a edição não persistiu no artefato (original=${previewPixelsSha}, modificada=${modifiedPreviewSha}, romPath=${romPath}, modifiedPath=${modifiedPath})`);
+    const panelShaNow = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-rom-sha"]')?.textContent ?? ''`)) || "";
+    const panelText = (await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "";
+    fail(`prévia da ROM modificada é idêntica à original: a edição não persistiu no artefato (original=${previewPixelsSha}, modificada=${modifiedPreviewSha}, modifiedPath=${modifiedPath}, painel_sha_agora=${panelShaNow}, painel=${panelText.slice(-600)})`);
   }
 
   // ORIGINAL vs MODIFICADO no core, mesma linha de input; efeito específico.
