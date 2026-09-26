@@ -1,0 +1,37 @@
+=== [2/3] aceite FIXTURE autoral (--ignored fixture_lz4w, caminho durável) ===
+HEAD: 47f2c8911a579ae05901d206a596a2e53981766c
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.64s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+[rex-fixture] base: empacotado(rescomp)=444B re-codificado=448B folga=-4B dicionário=195780 words
+[rex-fixture] CABE tile=0 row=5 col=7 idx=15 encode=440B slot=444B (candidato 1)
+[rex-fixture] varredura: 1 candidatos, 1 cabem, menor encode 440B, slot 444B, folga base -4B, distribuição {440: 1}
+[rex-fixture] rom_sha=159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5 stream=0x5f988 escrito=440 slot=444 tile=0 row=5 col=7 idx=15 tela=(7,5) previa_pos=(7, 5) previa=128x8 pixels_sha=917048cc35508e9a67f9ddf1dd10cf3d352b01d03a9ebce8d6d6b84778ec1af1 png_sha=a3513ae638b536e3619437652aa7bee731657ec3f72cddd2e5fc34e6cbeb93e0
+test tools::reverse::decomp::rex_resources::tests::fixture_lz4w_decodes_to_authored_source_and_edit_has_predicted_pixel ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 719 filtered out; finished in 1.08s
+
+rc_fixture=0
+
+=== [3/3] aceites BYOR (--ignored corpus/chain/enumerate) ===
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.37s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+test tools::reverse::decomp::rex_codecs::tests::lz4w_hamoopig_corpus_streams_decode_with_header_size ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 719 filtered out; finished in 0.11s
+
+rc_byor_codec=0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+BYOR cadeia OK: original=558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9 modificado=261618d9f19f8176c45dc66f3f398d6998d1d68772c2205b55ef8ce70fb76192 patch=e5e4b0b1c3a7f9e5a526d95cac73fa6e214a3835c27439dbc732da9bc2e3e0f2 preservados=159 escopo=recursos LZ4W estruturalmente verificados nesta ROM: 160/191 candidatos; preservação garantida apenas para este conjunto, não para o jogo inteiro
+BYOR bytes: intervalo_alterado=[30, 31) antes[0..8]=[00, 00, 00, 00, 00, 00, 00, 00] depois[0..8]=[00, 00, 00, 00, 00, 00, 00, 00] sha_antes=0000000000000000000000000000000000000000000000000000000000000000aaaaaccd0000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000a00000000ac000000acc000000add00000acd000000cd00000aaddddddddeaccdddde000aaddd0000addd000aacdd000acddd00acdc0a00cdca000aa000000a00a00a00000000000000000000000000000000000000000000000000000000c0000000dca00000ddc00000cddc0000dedd0000deeed000eeee0000eeff0000eeff0000eeee0000deedd000dddd0000dddd0000cdc00000caa00000a000000000000000000000000000000000000000000000000000000000000000 sha_depois=000000000000000000000000000000000000000000000000000000000000f000aaaaaccd0000000a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000a00000000ac000000acc000000add00000acd000000cd00000aaddddddddeaccdddde000aaddd0000addd000aacdd000acddd00acdc0a00cdca000aa000000a00a00a00000000000000000000000000000000000000000000000000000000c0000000dca00000ddc00000cddc0000dedd0000deeed000eeee0000eeff0000eeff0000eeee0000deedd000dddd0000dddd0000cdc00000caa00000a000000000000000000000000000000000000000000000000000000000000000
+test tools::reverse::decomp::rex_resources::tests::byor_hamoopig_chain_original_noop_modified_and_patch ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 719 filtered out; finished in 1.19s
+
+rc_byor_chain=0

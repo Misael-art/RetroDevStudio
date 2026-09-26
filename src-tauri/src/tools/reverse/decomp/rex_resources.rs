@@ -1636,4 +1636,485 @@ mod tests {
             super::super::rom_library::sha256_hex(&preview_png),
         );
     }
+
+    /// Caminha um stream LZ4W SEM usar o decodificador do produto, só para
+    /// contabilidade estrutural (quantos tokens, quantos literais, se há
+    /// referência a dicionário externo). Não valida offsets nem reproduz
+    /// bytes: a autoridade continua sendo `lz4w_decode_with_dictionary`.
+    fn walk_stream_shape(stream: &[u8]) -> (usize, usize, usize, usize, usize) {
+        // (tokens, literais em words, matches curtos, matches longos,
+        //  matches longos com flag ROM source)
+        let (mut tokens, mut lits, mut short, mut long, mut rom_src) = (0, 0, 0, 0, 0);
+        let mut pos = 0usize;
+        while pos + 2 <= stream.len() {
+            let word = u16::from_be_bytes([stream[pos], stream[pos + 1]]);
+            pos += 2;
+            if word == 0 {
+                break; // terminador; o word final é par/ímpar e não afeta a conta
+            }
+            tokens += 1;
+            let literal_words = ((word >> 12) & 0xF) as usize;
+            let match_nibble = ((word >> 8) & 0xF) as usize;
+            let match_byte = (word & 0xFF) as usize;
+            lits += literal_words;
+            pos += literal_words * 2;
+            if match_nibble > 0 {
+                short += 1;
+            } else if match_byte > 0 {
+                long += 1;
+                if pos + 2 <= stream.len() {
+                    let encoded = u16::from_be_bytes([stream[pos], stream[pos + 1]]);
+                    if encoded & 0x8000 != 0 {
+                        rom_src += 1;
+                    }
+                }
+                pos += 2;
+            }
+        }
+        (tokens, lits, short, long, rom_src)
+    }
+
+    /// Re-encode + classificação de cada edição do §3 para um recurso.
+    /// Toda stream que "cabe" é re-decodificada aqui: sem isso a medição
+    /// poderia contar como sucesso um bytes que nenhum desempacotador lê.
+    fn bench_edits(
+        resource: &VerifiedLz4wResource,
+        dict: &super::super::rex_codecs::Lz4wDictionaryIndex,
+        dict_bytes: &[u8],
+        limits: &Lz4wLimits,
+        slot: usize,
+    ) -> Vec<serde_json::Value> {
+        let words = resource.decoded.len() / 2;
+        let mut edits = Vec::new();
+        for (eid, word_pos) in [
+            ("E1", 0usize),
+            ("E2", words / 3),
+            ("E3", (2 * words) / 3),
+            ("E4", words.saturating_sub(1)),
+        ] {
+            let mut edited = resource.decoded.clone();
+            edited[word_pos * 2 + 1] |= 0x01;
+            if edited == resource.decoded {
+                edits.push(serde_json::json!({
+                    "edicao": eid,
+                    "word": word_pos,
+                    "resultado": "noop_preservando_stream",
+                    "motivo": "bit já valia 1: plain inalterado (§5)",
+                }));
+                continue;
+            }
+            match super::super::rex_codecs::lz4w_encode_with_dictionary_index(&edited, Some(dict)) {
+                Ok(stream) => {
+                    let back = lz4w_decode_with_dictionary(&stream, Some(dict_bytes), limits);
+                    let roundtrip = back.map(|d| d.data == edited).unwrap_or(false);
+                    if stream.len() <= slot {
+                        assert!(
+                            roundtrip,
+                            "{eid}: stream coube mas não re-decodifica para o plain editado"
+                        );
+                        edits.push(serde_json::json!({
+                            "edicao": eid, "word": word_pos, "len": stream.len(),
+                            "resultado": "cabe", "roundtrip": true,
+                        }));
+                    } else {
+                        edits.push(serde_json::json!({
+                            "edicao": eid, "word": word_pos, "len": stream.len(),
+                            "resultado": "needs_space",
+                            "motivo": format!(
+                                "re-encode {}B > slot {}B (+{}B)",
+                                stream.len(),
+                                slot,
+                                stream.len() - slot
+                            ),
+                        }));
+                    }
+                }
+                Err(error) => edits.push(serde_json::json!({
+                    "edicao": eid, "word": word_pos,
+                    "resultado": format!("recusa:{}", error.code),
+                    "motivo": error.detail,
+                })),
+            }
+        }
+        edits
+    }
+
+    /// Capacidade REAL de edição, medida por amostragem: inverte bits do plain
+    /// em posições uniformemente espaçadas e mede o comprimento do stream
+    /// resultante. NÃO é varredura exaustiva (seria O(bits) codificações por
+    /// recurso, o que estouraria o orçamento do §6.4) — por isso o tamanho da
+    /// amostra sai junto e o agregado é reportado como "amostra".
+    fn bench_amostra_edicoes(
+        resource: &VerifiedLz4wResource,
+        dict: &super::super::rex_codecs::Lz4wDictionaryIndex,
+        dict_bytes: &[u8],
+        limits: &Lz4wLimits,
+        slot: usize,
+        sample: usize,
+    ) -> serde_json::Value {
+        let bits = resource.decoded.len() * 8;
+        let n = sample.min(bits).max(1);
+        let passo = bits / n;
+        let mut comprimentos = Vec::new();
+        let mut cabem = 0usize;
+        for k in 0..n {
+            let bit = (k * passo).min(bits - 1);
+            let mut edited = resource.decoded.clone();
+            edited[bit / 8] ^= 1 << (bit % 8);
+            match super::super::rex_codecs::lz4w_encode_with_dictionary_index(&edited, Some(dict)) {
+                Ok(stream) => {
+                    if stream.len() <= slot {
+                        let back = lz4w_decode_with_dictionary(&stream, Some(dict_bytes), limits);
+                        assert!(
+                            back.is_ok_and(|d| d.data == edited),
+                            "amostra de bit {bit}: stream coube mas não re-decodifica"
+                        );
+                        cabem += 1;
+                    }
+                    comprimentos.push(stream.len());
+                }
+                Err(_) => comprimentos.push(usize::MAX),
+            }
+        }
+        let mut sorted = comprimentos.clone();
+        sorted.sort_unstable();
+        serde_json::json!({
+            "amostra_bits": comprimentos.len(),
+            "slot": slot,
+            "que_cabem": cabem,
+            "menor": sorted.first().copied(),
+            "mediana": sorted.get(sorted.len() / 2).copied(),
+            "maior": sorted.last().copied(),
+        })
+    }
+
+    /// Limite superior de dependentes por endereçamento (§4): outros
+    /// recursos cujo dicionário (janela de `0x4000` words) alcança o intervalo
+    /// ou cujo stream se sobrepõe. A autoridade é a transação.
+    fn bench_alcance(
+        resources: &[&VerifiedLz4wResource],
+        index: usize,
+        start: usize,
+        slot: usize,
+    ) -> usize {
+        resources
+            .iter()
+            .enumerate()
+            .filter(|(j, other)| {
+                if *j == index {
+                    return false;
+                }
+                let other_start = other.candidate.stream_offset;
+                let other_end = other_start + other.bytes_consumed;
+                let window_lo = other_start.saturating_sub(0x4000 * 2);
+                let dictionary_reaches =
+                    other_start > start && other_start <= start + slot && window_lo < start + slot;
+                let interval_overlaps = other_start < start + slot && start < other_end;
+                dictionary_reaches || interval_overlaps
+            })
+            .count()
+    }
+
+    /// Benchmark de recompressão LZ4W — implementação da especificação
+    /// congelada em `scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md`.
+    ///
+    /// Mede a capacidade REAL do codificador: para cada recurso verificado,
+    /// quanto cabe o re-encode do plain **não editado** em relação ao slot
+    /// (`folga_base`) e se as edições predefinidas do §3 cabem. Nenhum
+    /// parâmetro é escolhido aqui; este teste só produz a linha de base que os
+    /// incrementos do codificador têm de bater. No-op que preserva o stream
+    /// original sai em campo próprio e **não** conta como sucesso (§5).
+    #[test]
+    #[ignore = "benchmark BYOR: requer ROMs locais e RDS_REX_BENCH_OUT; rodar com --ignored"]
+    fn lz4w_recompression_benchmark() {
+        use std::time::Instant;
+
+        let out_dir = std::env::var("RDS_REX_BENCH_OUT")
+            .expect("RDS_REX_BENCH_OUT ausente: o benchmark escreve a tabela nele");
+        // O harness do cargo roda os testes com cwd no diretório do crate: um
+        // caminho relativo escreveria a evidência dentro de src-tauri/.
+        assert!(
+            std::path::Path::new(&out_dir).is_absolute(),
+            "RDS_REX_BENCH_OUT tem de ser absoluto (recebido: {out_dir})"
+        );
+        std::fs::create_dir_all(&out_dir).expect("criar RDS_REX_BENCH_OUT");
+        let corpus_path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
+            "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin".to_string()
+        });
+        // Ausência FALHA (aceite BYOR não vira skip silencioso).
+        let corpus = std::fs::read(&corpus_path)
+            .unwrap_or_else(|e| panic!("ROM do corpus ausente em {corpus_path}: {e}"));
+        let corpus_sha = super::super::rom_library::sha256_hex(&corpus);
+        assert_eq!(
+            corpus_sha,
+            "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9"
+        );
+        let fixture_path = std::env::var("RDS_REX_LZ4W_FIXTURE_ROM")
+            .expect("RDS_REX_LZ4W_FIXTURE_ROM ausente (S-A é conjunto obrigatório)");
+        let fixture = std::fs::read(&fixture_path)
+            .unwrap_or_else(|e| panic!("ROM do fixture ausente em {fixture_path}: {e}"));
+        let fixture_sha = super::super::rom_library::sha256_hex(&fixture);
+        assert_eq!(
+            fixture_sha,
+            "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5"
+        );
+
+        let limits = Lz4wLimits::default();
+        // Orçamento do §6.4: 2 s por recurso, 120 s por rodada.
+        const PER_RESOURCE_BUDGET_MS: u128 = 2_000;
+        const ROUND_BUDGET_MS: u128 = 120_000;
+        // Bits invertidos por recurso na medição de capacidade de edição (§4).
+        // Amostragem deliberada: exaustivo seria O(bits) codificações por
+        // recurso, o que estoura o orçamento acima.
+        const EDIT_SAMPLE_BITS: usize = 24;
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        let mut estouro_por_recurso: Vec<String> = Vec::new();
+        let round_start = Instant::now();
+
+        // O codificador só alcança `ENCODER_WINDOW_WORDS` (0x4000) words para
+        // trás e os offsets LZ4W são medidos a partir do FIM de
+        // (dicionário + saída), então um sufixo do prefixo deveria produzir
+        // streams idênticos aos do prefixo integral. Isso é ASSEÇÃO, não
+        // suposição: o primeiro recurso de cada conjunto é codificado das duas
+        // formas e comparado byte a byte (`janela_dicionario` no resumo). Sem
+        // essa prova a varredura codificaria 160 recursos contra um HashMap de
+        // centenas de milhares de words — custo do harness, não do codificador.
+        const DICT_TAIL_BYTES: usize = 0x1_0000;
+        let mut janela_dicionario: Vec<serde_json::Value> = Vec::new();
+
+        for (conjunto, rom) in [
+            ("S-B-corpus", corpus.as_slice()),
+            ("S-A-fixture", fixture.as_slice()),
+        ] {
+            let set = verify_lz4w_resource_set(rom, &limits).expect("conjunto verificado");
+            let mut resources: Vec<&VerifiedLz4wResource> = set.resources.iter().collect();
+            resources.sort_by_key(|r| r.candidate.stream_offset);
+            for (index, resource) in resources.iter().enumerate() {
+                let elapsed = Instant::now();
+                let start = resource.candidate.stream_offset;
+                let slot = resource.bytes_consumed;
+                let prefix = &rom[..start];
+                let dict_bytes = &prefix[prefix.len().saturating_sub(DICT_TAIL_BYTES)..];
+                let dict = match super::super::rex_codecs::Lz4wDictionaryIndex::build(dict_bytes) {
+                    Ok(dict) => dict,
+                    Err(error) => {
+                        estouro_por_recurso.push(format!("{conjunto} {start:#x}: índice: {error}"));
+                        continue;
+                    }
+                };
+                let (tokens, lit_words, short_matches, long_matches, rom_source_refs) =
+                    walk_stream_shape(&rom[start..start + slot]);
+                let base = super::super::rex_codecs::lz4w_encode_with_dictionary_index(
+                    &resource.decoded,
+                    Some(&dict),
+                );
+                // Barreira do §6.2: o que o codificador emite tem de voltar ao
+                // plain exato consumindo o stream inteiro.
+                let reencode_base = match &base {
+                    Ok(stream) => {
+                        let back = lz4w_decode_with_dictionary(stream, Some(dict_bytes), &limits)
+                            .unwrap_or_else(|error| {
+                                panic!(
+                                    "{conjunto} {start:#x}: re-encode base não decodifica: {error}"
+                                )
+                            });
+                        assert_eq!(
+                            back.data, resource.decoded,
+                            "{conjunto} {start:#x}: re-encode base não reproduz o plain"
+                        );
+                        assert_eq!(
+                            back.bytes_consumed,
+                            stream.len(),
+                            "{conjunto} {start:#x}: re-encode base consumido parcialmente"
+                        );
+                        if janela_dicionario
+                            .iter()
+                            .all(|j| j["conjunto"] != serde_json::json!(conjunto))
+                        {
+                            let full = super::super::rex_codecs::Lz4wDictionaryIndex::build(prefix)
+                                .expect("índice do prefixo integral");
+                            let stream_full =
+                                super::super::rex_codecs::lz4w_encode_with_dictionary_index(
+                                    &resource.decoded,
+                                    Some(&full),
+                                )
+                                .expect("encode com o prefixo integral");
+                            assert_eq!(
+                                stream_full, *stream,
+                                "{conjunto} {start:#x}: a janela de sufixo NÃO equivale ao \
+                                 prefixo integral — usar prefixo integral no benchmark"
+                            );
+                            janela_dicionario.push(serde_json::json!({
+                                "conjunto": conjunto,
+                                "recurso": format!("{start:#x}"),
+                                "prefixo_bytes": prefix.len(),
+                                "cauda_bytes": dict_bytes.len(),
+                                "streams_identicas": true,
+                            }));
+                        }
+                        Some(stream.len())
+                    }
+                    Err(_) => None,
+                };
+                rows.push(serde_json::json!({
+                    "conjunto": conjunto,
+                    "grupo": if conjunto == "S-A-fixture" { "referencia" }
+                        else if index % 5 == 0 { "validacao" } else { "ajuste" },
+                    "recurso": format!("{start:#x}"),
+                    "header_offset": resource.candidate.header_offset,
+                    "num_tiles": resource.candidate.num_tiles,
+                    "plain_len": resource.decoded.len(),
+                    "slot": slot,
+                    "reencode_base": reencode_base,
+                    "folga_base": reencode_base.map(|n| slot as i64 - n as i64),
+                    "base_recusou": base.as_ref().err().map(|e| e.code),
+                    "tokens": tokens,
+                    "lit_words": lit_words,
+                    "matches_curtos": short_matches,
+                    "matches_longos": long_matches,
+                    "dep_usa_rom_source": rom_source_refs > 0,
+                    "dep_alcance": bench_alcance(&resources, index, start, slot),
+                    "edicoes": bench_edits(resource, &dict, dict_bytes, &limits, slot),
+                    "edições_amostra": bench_amostra_edicoes(
+                        resource,
+                        &dict,
+                        dict_bytes,
+                        &limits,
+                        slot,
+                        EDIT_SAMPLE_BITS,
+                    ),
+                }));
+                let ms = elapsed.elapsed().as_millis();
+                if ms > PER_RESOURCE_BUDGET_MS {
+                    estouro_por_recurso.push(format!(
+                        "{conjunto} {start:#x}: {ms}ms > {PER_RESOURCE_BUDGET_MS}ms"
+                    ));
+                }
+            }
+        }
+        let estouro_rodada = round_start.elapsed().as_millis() > ROUND_BUDGET_MS;
+
+        // Dumps S-A SOMENTE (autoral, reconstruível pela receita): é o par
+        // rescomp/produto que a análise de tokens independente consome.
+        let fixture_set = verify_lz4w_resource_set(&fixture, &limits).expect("fixture");
+        let resource = &fixture_set.resources[0];
+        let start = resource.candidate.stream_offset;
+        let slot = resource.bytes_consumed;
+        let dict_bytes = &fixture[..start];
+        let index = super::super::rex_codecs::Lz4wDictionaryIndex::build(dict_bytes).expect("dict");
+        let base_stream = super::super::rex_codecs::lz4w_encode_with_dictionary_index(
+            &resource.decoded,
+            Some(&index),
+        )
+        .expect("re-encode base do fixture");
+        std::fs::write(format!("{out_dir}/sa-plain.bin"), &resource.decoded).expect("plain");
+        std::fs::write(format!("{out_dir}/sa-dict.bin"), dict_bytes).expect("dict");
+        std::fs::write(
+            format!("{out_dir}/sa-rescomp.stream"),
+            &fixture[start..start + slot],
+        )
+        .expect("rescomp");
+        std::fs::write(format!("{out_dir}/sa-product.stream"), &base_stream).expect("produto");
+
+        let mut coube_ajuste = 0usize;
+        let mut coube_validacao = 0usize;
+        let mut amostra_ajuste = 0usize;
+        let mut amostra_validacao = 0usize;
+        let mut total_ajuste = 0usize;
+        let mut total_validacao = 0usize;
+        let mut folga_total: i64 = 0;
+        let mut base_recusada = 0usize;
+        let mut motivos: std::collections::BTreeMap<String, usize> = Default::default();
+        for row in &rows {
+            if conjunto_s_b(row) {
+                match row["folga_base"].as_i64() {
+                    Some(folga) => folga_total += folga,
+                    None => base_recusada += 1,
+                }
+            }
+            let mut coube = false;
+            for edit in row["edicoes"].as_array().into_iter().flatten() {
+                let resultado = edit["resultado"].as_str().unwrap_or("?").to_string();
+                *motivos.entry(resultado.clone()).or_default() += 1;
+                coube |= resultado == "cabe";
+            }
+            match (coube, row["grupo"].as_str()) {
+                (true, Some("ajuste")) => coube_ajuste += 1,
+                (true, Some("validacao")) => coube_validacao += 1,
+                _ => {}
+            }
+            // Capacidade por amostragem (§4): pelo menos um dos bits invertidos
+            // produziu stream que cabe E re-decodifica (a barreira está dentro
+            // de `bench_amostra_edicoes`).
+            match row["grupo"].as_str() {
+                Some("ajuste") => total_ajuste += 1,
+                Some("validacao") => total_validacao += 1,
+                _ => {}
+            }
+            let amostra_cabe = row["edições_amostra"]["que_cabem"].as_u64().unwrap_or(0) > 0;
+            match (amostra_cabe, row["grupo"].as_str()) {
+                (true, Some("ajuste")) => amostra_ajuste += 1,
+                (true, Some("validacao")) => amostra_validacao += 1,
+                _ => {}
+            }
+        }
+        let round_ms = round_start.elapsed().as_millis();
+        let s_b: Vec<&serde_json::Value> = rows.iter().filter(|r| conjunto_s_b(r)).collect();
+        let summary = serde_json::json!({
+            "especificacao": "scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md",
+            "roms": { "S-B": corpus_sha, "S-A": fixture_sha },
+            "recursos_S_B": s_b.len(),
+            "coube_ajuste": coube_ajuste,
+            "coube_validacao": coube_validacao,
+            "recursos_totais_ajuste": total_ajuste,
+            "recursos_totais_validacao": total_validacao,
+            "edicao_amostral_bits_por_recurso": EDIT_SAMPLE_BITS,
+            "recursos_com_edicao_amostral_cabivel_ajuste": amostra_ajuste,
+            "recursos_com_edicao_amostral_cabivel_validacao": amostra_validacao,
+            "folga_total_S_B_bytes": folga_total,
+            "recursos_com_folga_nao_negativa": s_b.iter().filter(|r| r["folga_base"].as_i64().unwrap_or(i64::MIN) >= 0).count(),
+            "codificador_recusou_a_base": base_recusada,
+            "distribuicao_resultados": motivos,
+            "orcamento_ms": { "por_recurso": PER_RESOURCE_BUDGET_MS, "rodada": ROUND_BUDGET_MS },
+            "estouros_por_recurso": estouro_por_recurso,
+            "tempo_rodada_ms": round_ms,
+            "rodada_estourou": estouro_rodada,
+            "janela_dicionario": janela_dicionario,
+            "transacao_canonica": "não executada aqui: o benchmark mede tamanho de re-encode; a transação é exercida pelos aceites BYOR e do fixture",
+        });
+        std::fs::write(
+            format!("{out_dir}/bench.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "resumo": summary,
+                "recursos": rows,
+            }))
+            .expect("serializar"),
+        )
+        .expect("escrever bench.json");
+
+        eprintln!(
+            "[bench] S-B={} coube_ajuste={} coube_validacao={} folga_total={}B com_folga>=0={} rodada={}ms/{}ms{}",
+            s_b.len(),
+            coube_ajuste,
+            coube_validacao,
+            folga_total,
+            summary["recursos_com_folga_nao_negativa"].as_u64().unwrap_or(0),
+            round_ms,
+            ROUND_BUDGET_MS,
+            if round_ms > ROUND_BUDGET_MS { " — ESTOUROU (publicado como perda, não escondido)" } else { "" }
+        );
+        eprintln!("[bench] distribuição: {motivos:?}");
+        eprintln!(
+            "[bench] capacidade de edição por amostragem ({} bits/recuso): ajuste {amostra_ajuste}/{} validação {amostra_validacao}/{} — battery §4-edita coube_ajuste={coube_ajuste} coube_validacao={coube_validacao}",
+            EDIT_SAMPLE_BITS, total_ajuste, total_validacao
+        );
+        assert!(
+            round_ms <= ROUND_BUDGET_MS * 4,
+            "benchmark extrapola o orçamento em mais de 4x: {round_ms}ms"
+        );
+    }
+
+    fn conjunto_s_b(row: &serde_json::Value) -> bool {
+        row["conjunto"].as_str() == Some("S-B-corpus")
+    }
 }

@@ -1,0 +1,69 @@
+
+===== streamsa-rescomp.stream: sa-rescomp.stream (444 bytes) =====
+  plain reproduzido: SIM   consumido: 444/444   tokens: 25
+  kinds: {'literal': 2, 'curto': 22, 'terminador': 1}
+  custo em words: 221  |  saída: 256 words (512 bytes)  |  words de saída por word de stream: 1.158
+  #  offset  custo  cobre   out    detalhe
+  0  0x0000     16     15      0  literal    15 literais
+  1  0x0020     16     17     15  curto      15 lit + match 2w @22w (curto, <= 0x100)
+  2  0x0040     15     16     32  curto      14 lit + match 2w @22w (curto, <= 0x100)
+  3  0x005e     15     16     48  curto      14 lit + match 2w @22w (curto, <= 0x100)
+  4  0x007c     15     16     64  curto      14 lit + match 2w @22w (curto, <= 0x100)
+  5  0x009a     13     14     80  curto      12 lit + match 2w @78w (curto, <= 0x100)
+  6  0x00b4      1      2     94  curto      0 lit + match 2w @22w (curto, <= 0x100)
+  7  0x00b6     13     15     96  curto      12 lit + match 3w @100w (curto, <= 0x100)
+  8  0x00d0     14     16    111  curto      13 lit + match 3w @100w (curto, <= 0x100)
+  9  0x00ec     14     16    127  curto      13 lit + match 3w @100w (curto, <= 0x100)
+ 10  0x0108     14     16    143  curto      13 lit + match 3w @100w (curto, <= 0x100)
+ 11  0x0124     10     12    159  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 12  0x0138      2      4    171  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 13  0x013c     10     12    175  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 14  0x0150      2      4    187  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 15  0x0154     10     12    191  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 16  0x0168      2      4    203  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 17  0x016c     10     12    207  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 18  0x0180      2      4    219  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 19  0x0184     10     12    223  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 20  0x0198      2      4    235  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 21  0x019c     10     12    239  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 22  0x01b0      2      4    251  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 23  0x01b4      2      1    255  literal    1 literais
+ 24  0x01b8      1      0    256  terminador final=0x0000
+
+===== streamsa-product.stream: sa-product.stream (448 bytes) =====
+  plain reproduzido: SIM   consumido: 448/448   tokens: 24
+  kinds: {'literal': 2, 'curto': 21, 'terminador': 1}
+  custo em words: 223  |  saída: 256 words (512 bytes)  |  words de saída por word de stream: 1.148
+  #  offset  custo  cobre   out    detalhe
+  0  0x0000     16     15      0  literal    15 literais
+  1  0x0020     16     17     15  curto      15 lit + match 2w @22w (curto, <= 0x100)
+  2  0x0040     15     16     32  curto      14 lit + match 2w @22w (curto, <= 0x100)
+  3  0x005e     15     16     48  curto      14 lit + match 2w @22w (curto, <= 0x100)
+  4  0x007c     15     16     64  curto      14 lit + match 2w @22w (curto, <= 0x100)
+  5  0x009a     13     14     80  curto      12 lit + match 2w @78w (curto, <= 0x100)
+  6  0x00b4      1      2     94  curto      0 lit + match 2w @22w (curto, <= 0x100)
+  7  0x00b6     13     15     96  curto      12 lit + match 3w @100w (curto, <= 0x100)
+  8  0x00d0     14     16    111  curto      13 lit + match 3w @100w (curto, <= 0x100)
+  9  0x00ec     14     16    127  curto      13 lit + match 3w @100w (curto, <= 0x100)
+ 10  0x0108     14     16    143  curto      13 lit + match 3w @100w (curto, <= 0x100)
+ 11  0x0124     10     12    159  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 12  0x0138      2      4    171  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 13  0x013c     10     12    175  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 14  0x0150      2      4    187  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 15  0x0154     14     16    191  curto      13 lit + match 3w @100w (curto, <= 0x100)
+ 16  0x0170     10     12    207  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 17  0x0184      2      4    219  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 18  0x0188     10     12    223  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 19  0x019c      2      4    235  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 20  0x01a0     10     12    239  curto      9 lit + match 3w @156w (curto, <= 0x100)
+ 21  0x01b4      2      4    251  curto      1 lit + match 3w @100w (curto, <= 0x100)
+ 22  0x01b8      2      1    255  literal    1 literais
+ 23  0x01bc      1      0    256  terminador final=0x0000
+
+plain: 512 bytes (256 words)   dicionário: 391560 bytes
+
+===== sa-rescomp.stream x sa-product.stream: quem cobre cada word da saída =====
+  faixa(out)   | tokens |  words  | tokens |  words  | delta
+   191..203    |    1   |     10   |    1   |     14   | +4
+   203..207    |    1   |      2   |    1   |     14   | +12
+  soma dos deltas: +16 words
