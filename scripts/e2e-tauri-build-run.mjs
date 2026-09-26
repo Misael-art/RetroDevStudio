@@ -8697,6 +8697,26 @@ async function runLogicRecoveryScenario(sessionId, projectDir) {
 
 // Cadeia REX LZ4W pela interface: prévia, no-op, edição via transação,
 // patch re-aplicado à base com hash exato e efeito observado no core.
+// Comando genérico do core via IPC (época, run_frames, read_memory...).
+async function invokeCoreObserveCommand(sessionId, command, args = {}) {
+  return executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done(null); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done(value)).catch(() => done(null));
+    `,
+    [command, args]
+  );
+}
+
+async function invokeCoreObserveEpoch(sessionId) {
+  const result = await invokeCoreObserveCommand(sessionId, "emulator_get_core_epoch", {});
+  const value = result?.value ?? result;
+  return Number.isInteger(value) ? value : null;
+}
+
 // Observa o framebuffer direto do core via IPC (capacidade separada do
 // canvas do app; usada pelas timelines determinísticas REX).
 async function invokeCoreObserve(sessionId) {
@@ -9030,6 +9050,78 @@ async function runRexLz4wEffectScenario(sessionId) {
     samples.push(await snapshot());
     return samples;
   };
+  // PROVA CAUSAL: stream -> descompactador 68000 -> WRAM -> (VRAM/CRAM).
+  // Com ROM, core, estado inicial e inputs idênticos (run_frames), o diff
+  // de WRAM/VRAM entre original e modificado é o bloco descompactado e o
+  // que dele deriva — sem depender de interpretação visual.
+  const readMemoryRegions = async (label) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [label.romPath, { startPaused: true }]);
+    if (loaded !== true) fail(`causal: carga falhou (${label.tag}).`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `causal: ROM não pronta (${label.tag}).`,
+      100
+    );
+    await closeVisibleConsoleDrawer(sessionId, `causal ${label.tag}`);
+    const epoch = await invokeCoreObserveEpoch(sessionId);
+    if (!epoch) fail(`causal: época indisponível (${label.tag}).`);
+    const runFrames = async (frames) => {
+      const run = await invokeCoreObserveCommand(sessionId, "emulator_run_frames", { frames });
+      if (!run?.ok) fail(`causal: run_frames falhou (${label.tag}): ${JSON.stringify(run)?.slice(0, 200)}`);
+    };
+    await runFrames(label.frames);
+    const readRegion = async (region, size) => {
+      const result = await invokeCoreObserveCommand(sessionId, "emulator_read_memory", { region, offset: 0, length: size });
+      // emulator_read_memory devolve EmulatorMemoryResult direto ({ok, data, total_size}).
+      if (!result?.ok || !Array.isArray(result.data)) {
+        fail(`causal: leitura da região ${region} falhou (${label.tag}): ${JSON.stringify(result)?.slice(0, 200)}`);
+      }
+      return Buffer.from(result.data);
+    };
+    const wram = await readRegion(2, 0x10000);
+    const vram = await readRegion(3, 0x10000);
+    return { wram, vram };
+  };
+  const causal = {
+    original: await readMemoryRegions({ romPath: romPath, tag: "original", frames: 900 }),
+    modified: await readMemoryRegions({ romPath: modifiedPath, tag: "modificado", frames: 900 }),
+  };
+  const regionDiff = (a, b) => {
+    const regions = [];
+    let start = -1;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) {
+        if (start < 0) start = i;
+      } else if (start >= 0) {
+        if (i - start >= 4) regions.push([start, i]);
+        start = -1;
+      }
+    }
+    if (start >= 0) regions.push([start, a.length]);
+    return regions;
+  };
+  const wramRegions = regionDiff(causal.original.wram, causal.modified.wram);
+  const vramRegions = regionDiff(causal.original.vram, causal.modified.vram);
+  console.log(`[rex-causal] WRAM dif em ${wramRegions.length} região(ões): ${JSON.stringify(wramRegions.slice(0, 8).map(([a, b]) => [a.toString(16), b.toString(16), b - a]))}`);
+  console.log(`[rex-causal] VRAM dif em ${vramRegions.length} região(ões): ${JSON.stringify(vramRegions.slice(0, 8).map(([a, b]) => [a.toString(16), b.toString(16), b - a]))}`);
+  await writeFile(path.join(validationDir, "rex-causal-wram-original.bin"), causal.original.wram);
+  await writeFile(path.join(validationDir, "rex-causal-wram-modificado.bin"), causal.modified.wram);
+  await writeFile(path.join(validationDir, "rex-causal-vram-original.bin"), causal.original.vram);
+  await writeFile(path.join(validationDir, "rex-causal-vram-modificado.bin"), causal.modified.vram);
+  // Controle de determinismo: ORIGINAL vs ORIGINAL deve ser idêntico.
+  const causalAgain = await readMemoryRegions({ romPath: romPath, tag: "original-2", frames: 900 });
+  const wramSelf = regionDiff(causal.original.wram, causalAgain.wram).length;
+  const vramSelf = regionDiff(causal.original.vram, causalAgain.vram).length;
+  console.log(`[rex-causal] controle original/original: WRAM dif=${wramSelf}, VRAM dif=${vramSelf}`);
+  if (wramSelf > 0 || vramSelf > 0) fail(`determinismo quebrado no controle original/original (WRAM ${wramSelf}, VRAM ${vramSelf})`);
+  if (wramRegions.length === 0 && vramRegions.length === 0) {
+    fail("causal: nenhuma diferença de memória entre original e modificado no estado observado");
+  }
+
   const originalFrames = await captureTimeline(romPath, "original");
   const modifiedFrames = await captureTimeline(patchApplied, "modificado");
   if (originalFrames.length !== modifiedFrames.length || originalFrames.length < 2) {
