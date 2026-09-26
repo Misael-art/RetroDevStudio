@@ -154,10 +154,10 @@ def main(outdir):
         "planted_edit": {"row": NEAR_MISS_ROW, "col": TILE_PX - 1,
                          "value_rule": "v = (tile*7 + row*3) & 15; de (v+1)&15 para v"},
         # indices de cor por tile (ROW-major na imagem de entrada, opt=NONE):
-        # tile_pixels[t][row*16+col] -> o que o produto deve ler no stream e o
-        # que a tela deve mostrar em (mx*16+col, my*16+row) com mx=t%20, my=t/20.
-        "tile_pixels": [["".join("%X" % indices[t * TILE_PX * TILE_PX + r * TILE_PX + c]
-                                 for r in range(TILE_PX) for c in range(TILE_PX))]
+        # tile_pixels[t][row*8+col] -> o que o produto deve ler no stream e o
+        # que a tela deve mostrar em ((t%map_w)*8+col, (t//map_w)*8+row).
+        "tile_pixels": ["".join("%X" % indices[t * TILE_PX * TILE_PX + r * TILE_PX + c]
+                                for r in range(TILE_PX) for c in range(TILE_PX))
                         for t in range(TILE_COUNT)],
     }
     with open(os.path.join(outdir, "ground_truth.json"), "w") as fh:
