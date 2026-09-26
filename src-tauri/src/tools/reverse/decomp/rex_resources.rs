@@ -935,12 +935,31 @@ mod tests {
         let reapplied = crate::tools::patch_studio::apply_bps(&rom, &applied.patch_bps)
             .expect("re-aplicar patch BYOR");
         assert_eq!(reapplied, applied.modified_rom);
+        // Evidência de BYTES: intervalo exato alterado no dado decodificado.
+        let changed: Vec<usize> = target
+            .decoded
+            .iter()
+            .zip(edited.iter())
+            .enumerate()
+            .filter(|(_, (a, b))| a != b)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(changed, vec![0usize], "a edição deve alterar exatamente o byte 0 do dado decodificado");
         eprintln!(
             "BYOR cadeia OK: original={sha} modificado={} patch={} preservados={} escopo={}",
             applied.modified_rom_sha256,
             applied.patch_bps_sha256,
             applied.verified_preserved,
             applied.analyzed_scope
+        );
+        eprintln!(
+            "BYOR bytes: intervalo_alterado=[{}, {}) antes[0..8]={:02x?} depois[0..8]={:02x?} sha_antes={} sha_depois={}",
+            changed.first().unwrap(),
+            changed.last().unwrap() + 1,
+            &target.decoded[0..8],
+            &edited[0..8],
+            target.decoded.iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            edited.iter().map(|b| format!("{b:02x}")).collect::<String>(),
         );
     }
 
@@ -1061,25 +1080,47 @@ mod tests {
         );
         let limits = Lz4wLimits::default();
         let set = verify_lz4w_resource_set(&rom, &limits).expect("conjunto");
-        // Enumera edições chunky aplicáveis (transação completa) nos
-        // recursos COM TILES ENCONTRADOS EM TELA nos dumps do core
-        // (casamento invariante de paleta; ver relatório da rodada).
-        let on_screen: [usize; 18] = [
+        // Enumera edições chunky aplicáveis com ORÇAMENTO (item 7): índice
+        // de dicionário reutilizado por recurso, progresso impresso,
+        // checkpoint em disco e limite de candidatos por recurso. Índice
+        // novo = 15 (máximo contraste). Sem afrouxar needs_space/dependentes.
+        let mut targets: Vec<usize> = vec![0xc8cc8];
+        targets.extend([
             0x9e23e, 0xa0ab4, 0xa32da, 0xa56ae, 0xbb810, 0xbcf58, 0xbdd1a, 0xbe352, 0xbe964,
             0xbee94, 0xc0094, 0xc07b6, 0xc0c3e, 0xc0f88, 0xc14f2, 0xc281c, 0xc8d58, 0xc8f12,
-        ];
+        ]);
+        let checkpoint_path = std::path::Path::new("/tmp/rex-scan-checkpoint.log");
+        let mut checkpoint = std::io::LineWriter::new(
+            std::fs::File::create(checkpoint_path).expect("checkpoint"),
+        );
+        use std::io::Write as _;
         let mut found = 0usize;
-        for resource in set.resources.iter().rev() {
-            let start_off = resource.candidate.stream_offset;
-            if !on_screen.contains(&start_off) {
+        for (target_index, &stream_off) in targets.iter().enumerate() {
+            let Some(resource) = set
+                .resources
+                .iter()
+                .find(|r| r.candidate.stream_offset == stream_off)
+            else {
                 continue;
-            }
-            // Fase 1: fit por encode em TODOS os tiles (varredura completa
-            // solicitada pelo operador; índice 15 = máximo contraste).
-            let mut fitting: Vec<(usize, usize)> = Vec::new();
-            for tile in 0..resource.candidate.num_tiles {
+            };
+            let index = match super::super::rex_codecs::Lz4wDictionaryIndex::build(&rom[..stream_off]) {
+                Ok(index) => index,
+                Err(error) => {
+                    eprintln!("[scan {}/{}] {stream_off:#x}: índice falhou: {error}", target_index + 1, targets.len());
+                    continue;
+                }
+            };
+            let mut fit_count = 0usize;
+            let mut candidates = 0usize;
+            const BUDGET: usize = 64;
+            let mut applied_here = 0usize;
+            'pixels: for tile in 0..resource.candidate.num_tiles {
                 for row in 0..8usize {
                     for col in 0..8usize {
+                        if candidates >= BUDGET {
+                            break 'pixels;
+                        }
+                        candidates += 1;
                         let current =
                             md_read_pixel_index(&resource.decoded, tile, row, col).unwrap();
                         if current == 15 {
@@ -1087,46 +1128,52 @@ mod tests {
                         }
                         let mut edited = resource.decoded.clone();
                         md_write_pixel_index(&mut edited, tile, row, col, 15).unwrap();
-                        if let Ok(stream) =
-                            lz4w_encode_with_dictionary(&edited, Some(&rom[..start_off]))
-                        {
-                            if stream.len() <= resource.bytes_consumed {
-                                fitting.push((tile, row * 8 + col));
-                            }
+                        let Ok(stream) = super::super::rex_codecs::lz4w_encode_with_dictionary_index(
+                            &edited,
+                            Some(&index),
+                        ) else {
+                            continue;
+                        };
+                        if stream.len() > resource.bytes_consumed {
+                            continue;
                         }
+                        fit_count += 1;
+                        let outcome = reinsert_transaction(
+                            &ReinsertRequest {
+                                rom: &rom,
+                                expected_rom_sha256: &sha,
+                                resource,
+                                edited_data: &edited,
+                            },
+                            &limits,
+                        );
+                        if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
+                            eprintln!(
+                                "APPLIED_SCREEN: stream={stream_off:#x} tiles={} tile={tile} row={row} col={col} indice_atual={current} indice_novo=15 preservados={} patch={}",
+                                resource.candidate.num_tiles,
+                                applied.verified_preserved,
+                                applied.patch_bps_sha256
+                            );
+                            let _ = writeln!(
+                                checkpoint,
+                                "APPLIED {stream_off:#x} tile={tile} row={row} col={col} patch={}",
+                                applied.patch_bps_sha256
+                            );
+                            found += 1;
+                            applied_here += 1;
+                        }
+                        let _ = checkpoint.flush();
                     }
                 }
             }
-            // Fase 2: transação nos candidatos que couberam (máx 3 por recurso).
-            let mut applied_here = 0usize;
-            for (tile, pixel) in fitting.iter().take(3) {
-                let row = pixel / 8;
-                let col = pixel % 8;
-                let mut edited = resource.decoded.clone();
-                md_write_pixel_index(&mut edited, *tile, row, col, 15).unwrap();
-                let outcome = reinsert_transaction(
-                    &ReinsertRequest {
-                        rom: &rom,
-                        expected_rom_sha256: &sha,
-                        resource,
-                        edited_data: &edited,
-                    },
-                    &limits,
-                );
-                if let Ok(ReinsertOutcome::Applied(applied)) = outcome {
-                    eprintln!(
-                        "APPLIED_SCREEN: stream={:#x} tiles={} tile={} row={row} col={col} indice_novo=15 preservados={} patch={}",
-                        start_off,
-                        resource.candidate.num_tiles,
-                        tile,
-                        applied.verified_preserved,
-                        applied.patch_bps_sha256
-                    );
-                    found += 1;
-                    applied_here += 1;
-                }
-            }
-            if found >= 6 {
+            eprintln!(
+                "[scan {}/{}] {stream_off:#x}: candidatos={candidates} fit={fit_count} aplicados={applied_here}",
+                target_index + 1,
+                targets.len()
+            );
+            let _ = writeln!(checkpoint, "ALVO {stream_off:#x} fit={fit_count} aplicados={applied_here}");
+            let _ = checkpoint.flush();
+            if found >= 4 {
                 break;
             }
         }

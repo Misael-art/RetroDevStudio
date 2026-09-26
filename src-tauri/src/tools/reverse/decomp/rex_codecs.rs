@@ -237,6 +237,17 @@ pub fn lz4w_decode_with_dictionary(
                 }
                 (match_byte + MATCH_LONG_MIN_SIZE, adjusted as usize)
             } else {
+                // Convenção do empacotador oficial: não-ROM exige offset
+                // para trás de até 0x4000 words; com o word de offset
+                // apontando para frente, o 68000 leria referência inválida.
+                if raw_offset > MATCH_LONG_OFFSET_LIMIT {
+                    return Err(CodecError::new(
+                        "invalid_reference",
+                        format!(
+                            "match longo não-ROM com offset {raw_offset} words excede a janela de {MATCH_LONG_OFFSET_LIMIT} do empacotador (v={encoded:#06x})"
+                        ),
+                    ));
+                }
                 (match_byte + MATCH_LONG_MIN_SIZE, raw_offset)
             }
         } else {
@@ -288,10 +299,61 @@ pub fn lz4w_encode(data: &[u8]) -> Result<Vec<u8>, CodecError> {
 /// resultado). Os matches longos são emitidos sem a flag ROM source, com o
 /// offset medido em words a partir do fim do resultado (dicionário + saída)
 /// — exatamente o que o unpacker resolve. O dicionário deve ter comprimento
-/// par; matches nunca referenciam posições além de 0x8000 words para trás.
+/// par; a janela não-ROM é 0x4000 words (limite do empacotador oficial).
 pub fn lz4w_encode_with_dictionary(
     data: &[u8],
     dictionary: Option<&[u8]>,
+) -> Result<Vec<u8>, CodecError> {
+    match dictionary {
+        Some(dict) => {
+            let index = Lz4wDictionaryIndex::build(dict)?;
+            lz4w_encode_with_dictionary_index(data, Some(&index))
+        }
+        None => lz4w_encode_with_dictionary_index(data, None),
+    }
+}
+
+/// Índice de dicionário pré-construído e REUTILIZÁVEL: a varredura de
+/// edições codifica dezenas de variantes do MESMO recurso contra o MESMO
+/// dicionário — reconstruir o índice (e recopiar os bytes) por candidato
+/// é proibitivo para dicionários de centenas de KB.
+pub struct Lz4wDictionaryIndex {
+    dictionary: Vec<u8>,
+    positions: std::collections::HashMap<u16, Vec<usize>>,
+    words: usize,
+}
+
+impl Lz4wDictionaryIndex {
+    pub fn build(dictionary: &[u8]) -> Result<Self, CodecError> {
+        if !dictionary.len().is_multiple_of(2) {
+            return Err(CodecError::new(
+                "invalid_reference",
+                "dicionário com comprimento ímpar não endereçável por words",
+            ));
+        }
+        let words = dictionary.len() / 2;
+        let mut positions: std::collections::HashMap<u16, Vec<usize>> =
+            std::collections::HashMap::new();
+        for j in 0..words {
+            let word = u16::from_be_bytes([dictionary[j * 2], dictionary[j * 2 + 1]]);
+            positions.entry(word).or_default().push(j);
+        }
+        Ok(Self {
+            dictionary: dictionary.to_vec(),
+            positions,
+            words,
+        })
+    }
+
+    pub fn word_count(&self) -> usize {
+        self.words
+    }
+}
+
+/// Codifica usando um índice pré-construído (ou nenhum dicionário).
+pub fn lz4w_encode_with_dictionary_index(
+    data: &[u8],
+    index: Option<&Lz4wDictionaryIndex>,
 ) -> Result<Vec<u8>, CodecError> {
     const MAX_INPUT: usize = 2 * 1024 * 1024;
     if data.len() > MAX_INPUT {
@@ -303,65 +365,88 @@ pub fn lz4w_encode_with_dictionary(
             ),
         ));
     }
-    let dict = dictionary.unwrap_or(&[]);
-    if !dict.len().is_multiple_of(2) {
-        return Err(CodecError::new(
-            "invalid_reference",
-            "dicionário com comprimento ímpar não endereçável por words",
-        ));
-    }
-    let dict_words = dict.len() / 2;
+    let dict_words = index.map_or(0, |i| i.words);
     let word_count = data.len() / 2;
     let total_words = dict_words + word_count;
-    // Buffer combinado: dicionário + dados (o espaço de busca de matches).
-    let mut combined: Vec<u8> = Vec::with_capacity(dict.len() + data.len());
-    combined.extend_from_slice(dict);
-    combined.extend_from_slice(data);
-    let word_at = |i: usize| -> u16 { u16::from_be_bytes([combined[i * 2], combined[i * 2 + 1]]) };
-    let mut positions: std::collections::HashMap<u16, Vec<usize>> =
+    let dict_bytes = index.map(|i| i.dictionary.as_slice()).unwrap_or(&[]);
+    // word lookup: dicionário (do índice) para j < dict_words; dados para o
+    // resto. Match sources podem alcançar o dicionário (off > i).
+    let word_at = |i: usize| -> u16 {
+        if i < dict_words {
+            u16::from_be_bytes([dict_bytes[i * 2], dict_bytes[i * 2 + 1]])
+        } else {
+            u16::from_be_bytes([data[(i - dict_words) * 2], data[(i - dict_words) * 2 + 1]])
+        }
+    };
+    // Posições de SAÍDA (mutáveis, pequenas); as do dicionário ficam no
+    // índice imutável compartilhado.
+    let mut out_positions: std::collections::HashMap<u16, Vec<usize>> =
         std::collections::HashMap::new();
-    for j in 0..dict_words {
-        positions.entry(word_at(j)).or_default().push(j);
-    }
     let mut out: Vec<u8> = Vec::with_capacity(data.len() / 2 + 16);
     let mut literals: Vec<u16> = Vec::new();
     // Busca gulosa do melhor match representável na posição j (lazy: o
     // chamador compara com a posição seguinte antes de decidir).
-    let find_best = |positions: &std::collections::HashMap<u16, Vec<usize>>,
+    let find_best = |out_positions: &std::collections::HashMap<u16, Vec<usize>>,
                      j: usize|
      -> Option<(usize, usize)> {
         let cur = word_at(j);
-        let window_start = j.saturating_sub(0x7FFF);
+        // Janela não-ROM = 0x4000 words (limite do empacotador oficial):
+        // com v < 0x4001 o 68000 interpretaria o offset como referência
+        // PARA FRENTE (int16 positivo), fora do formato.
+        let window_start = j.saturating_sub(MATCH_LONG_OFFSET_LIMIT);
+        fn consider(
+            pos: usize,
+            j: usize,
+            total_words: usize,
+            word_at: &dyn Fn(usize) -> u16,
+            best: &mut Option<(usize, usize)>,
+            checked: &mut usize,
+        ) -> bool {
+            // retorna true para parar a busca
+            let off = j - pos;
+            let mut len = 1usize;
+            while j + len < total_words
+                && word_at(j + len) == word_at(j + len - off)
+                && len < LONG_MAX_LENGTH_WORDS
+            {
+                len += 1;
+            }
+            let better = match *best {
+                Some((blen, boff)) => len > blen || (len == blen && off < boff),
+                None => true,
+            };
+            if better {
+                *best = Some((len, off));
+            }
+            *checked += 1;
+            *checked >= 128 || best.is_some_and(|(l, _)| l >= LONG_MAX_LENGTH_WORDS)
+        }
         let mut best: Option<(usize, usize)> = None;
-        if let Some(list) = positions.get(&cur) {
-            let mut checked = 0usize;
+        let mut checked = 0usize;
+        if let Some(index) = index {
+            if let Some(list) = index.positions.get(&cur) {
+                for &pos in list.iter().rev() {
+                    if pos < window_start {
+                        break;
+                    }
+                    if consider(pos, j, total_words, &word_at, &mut best, &mut checked) {
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(list) = out_positions.get(&cur) {
             for &pos in list.iter().rev() {
                 if pos < window_start {
                     break;
                 }
-                let off = j - pos;
-                let mut len = 1usize;
-                while j + len < total_words
-                    && word_at(j + len) == word_at(j + len - off)
-                    && len < LONG_MAX_LENGTH_WORDS
-                {
-                    len += 1;
-                }
-                let better = match best {
-                    Some((blen, boff)) => len > blen || (len == blen && off < boff),
-                    None => true,
-                };
-                if better {
-                    best = Some((len, off));
-                }
-                checked += 1;
-                if checked >= 128 || best.is_some_and(|(l, _)| l >= LONG_MAX_LENGTH_WORDS) {
+                if consider(pos, j, total_words, &word_at, &mut best, &mut checked) {
                     break;
                 }
             }
         }
         best.filter(|&(len, off)| {
-            (len > MATCH_LONG_MIN_SIZE && off <= 0x8000)
+            (len > MATCH_LONG_MIN_SIZE && off <= MATCH_LONG_OFFSET_LIMIT)
                 || ((MATCH_MIN_SIZE..=0xF + MATCH_MIN_SIZE).contains(&len)
                     && off <= SHORT_MAX_OFFSET_WORDS)
         })
@@ -371,14 +456,14 @@ pub fn lz4w_encode_with_dictionary(
         let j = dict_words + i;
         // Lazy matching: se a próxima posição tem match estritamente maior,
         // emite literal agora e aproveita o match maior adiante.
-        let current = find_best(&positions, j);
+        let current = find_best(&out_positions, j);
         let take_match = match current {
             None => false,
             Some((len, _)) => {
                 if i + 1 >= word_count {
                     true
                 } else {
-                    match find_best(&positions, j + 1) {
+                    match find_best(&out_positions, j + 1) {
                         Some((next_len, _)) => next_len <= len,
                         None => true,
                     }
@@ -388,7 +473,7 @@ pub fn lz4w_encode_with_dictionary(
         match current.filter(|_| take_match) {
             Some((len, off)) if len >= 2 => {
                 emit_segment(&mut out, &mut literals, Some((len, off)))?;
-                positions.entry(word_at(j)).or_default().push(j);
+                out_positions.entry(word_at(j)).or_default().push(j);
                 i += len;
             }
             _ => {
@@ -396,7 +481,7 @@ pub fn lz4w_encode_with_dictionary(
                     emit_segment(&mut out, &mut literals, None)?;
                 }
                 literals.push(word_at(j));
-                positions.entry(word_at(j)).or_default().push(j);
+                out_positions.entry(word_at(j)).or_default().push(j);
                 i += 1;
             }
         }
@@ -434,9 +519,12 @@ fn emit_segment(
                 }
                 return Ok(());
             }
-            // Forma longa: offset de até 0x8000 words a partir do fim do
-            // resultado (dicionário + saída), via negação de 15 bits.
-            if len > MATCH_LONG_MIN_SIZE && off <= 0x8000 && literals.len() <= LITERAL_MAX_WORDS {
+            // Forma longa: offset de até 0x4000 words (limite do
+            // empacotador oficial) a partir do fim do resultado.
+            if len > MATCH_LONG_MIN_SIZE
+                && off <= MATCH_LONG_OFFSET_LIMIT
+                && literals.len() <= LITERAL_MAX_WORDS
+            {
                 let token = ((lit as u16) << 12) | ((len - MATCH_LONG_MIN_SIZE) as u16);
                 out.extend_from_slice(&token.to_be_bytes());
                 for word in literals.drain(..lit) {
@@ -452,9 +540,12 @@ fn emit_segment(
             if match_info.is_none() {
                 return Ok(());
             }
+            let (mlen, moff) = match_info.unwrap();
             return Err(CodecError::new(
                 "invalid_reference",
-                "segmento com match não representável e sem literais pendentes",
+                format!(
+                    "segmento com match não representável e sem literais pendentes (len={mlen}, off={moff})"
+                ),
             ));
         }
         let token = (lit as u16) << 12;

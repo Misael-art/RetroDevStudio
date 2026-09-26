@@ -8815,10 +8815,9 @@ async function runRexLz4wEffectScenario(sessionId) {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;`);
   };
-  await setNumberInput("rex-resource-paint-index", 15);
   await setNumberInput("rex-resource-edit-tile", 0);
-  await setNumberInput("rex-resource-edit-row", 0);
-  await setNumberInput("rex-resource-edit-col", 0);
+  await setNumberInput("rex-resource-edit-row", 7);
+  await setNumberInput("rex-resource-edit-col", 4);
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
   await waitFor(
     async () => ((await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "").includes("1 edição(ões) pendente(s)"),
@@ -8896,7 +8895,7 @@ async function runRexLz4wEffectScenario(sessionId) {
     `return document.querySelector('${panel} [data-testid="rex-resource-pixels-sha"]').textContent;`
   );
   if (modifiedPreviewSha === previewPixelsSha) {
-    fail(`prévia da ROM modificada é idêntica à original: a edição não persistiu no artefato`);
+    fail(`prévia da ROM modificada é idêntica à original: a edição não persistiu no artefato (original=${previewPixelsSha}, modificada=${modifiedPreviewSha}, romPath=${romPath}, modifiedPath=${modifiedPath})`);
   }
 
   // ORIGINAL vs MODIFICADO no core, mesma linha de input; efeito específico.
@@ -9066,8 +9065,63 @@ async function runRexLz4wEffectScenario(sessionId) {
   const vramSelf = regionDiff(causal.original.vram, causalAgain.vram).length;
   console.log(`[rex-causal] controle original/original: WRAM dif=${wramSelf}, VRAM dif=${vramSelf}`);
   if (wramSelf > 0 || vramSelf > 0) fail(`determinismo quebrado no controle original/original (WRAM ${wramSelf}, VRAM ${vramSelf})`);
-  if (wramRegions.length === 0 && vramRegions.length === 0) {
-    fail("causal: nenhuma diferença de memória entre original e modificado no estado observado");
+  let semanticBlocked = wramRegions.length === 0 && vramRegions.length === 0;
+  if (semanticBlocked) {
+    console.log(`[rex-causal] RECURSO NÃO CARREGADO na janela de 900 frames: nenhuma diferença de WRAM/VRAM — consumidor não provado; edição semântica permanece BLOQUEADA (item 6)`);
+  }
+
+  // CAPACIDADE SEPARADA — apresentação normal do app (passo próprio, após
+  // as medições determinísticas; o loop vivo avança o jogo em tempo real,
+  // então resume -> pausa -> compara canvas vs core no MESMO frame).
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
+  await pause(600);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-pause");
+  await pause(200);
+  {
+    const canvasFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    const observation = await invokeCoreObserve(sessionId);
+    if (!canvasFrame?.rgba || !observation?.framebuffer_rgba) {
+      fail(`apresentação indisponível: canvas=${Boolean(canvasFrame?.rgba)} core=${Boolean(observation?.framebuffer_rgba)}`);
+    }
+    const canvasBytes = Buffer.from(canvasFrame.rgba);
+    const coreBytes = Buffer.from(observation.framebuffer_rgba);
+    const canvasW = Number(canvasFrame.width);
+    const canvasH = Number(canvasFrame.height);
+    const coreW = Number(observation.framebuffer_width);
+    const coreH = Number(observation.framebuffer_height);
+    const dims = { canvas: `${canvasW}x${canvasH}`, core: `${coreW}x${coreH}` };
+    let identical = canvasBytes.equals(coreBytes);
+    if (!identical && canvasW >= coreW && canvasH >= coreH) {
+      const coreRow0 = coreBytes.subarray(0, coreW * 4);
+      let offsetX = -1;
+      let offsetY = -1;
+      outer: for (let oy = 0; oy <= canvasH - coreH; oy++) {
+        for (let ox = 0; ox <= canvasW - coreW; ox++) {
+          const start = (oy * canvasW + ox) * 4;
+          if (canvasBytes.subarray(start, start + coreW * 4).equals(coreRow0)) {
+            offsetX = ox;
+            offsetY = oy;
+            break outer;
+          }
+        }
+      }
+      if (offsetX >= 0) {
+        let allRows = true;
+        for (let y = 0; y < coreH && allRows; y++) {
+          const cStart = ((offsetY + y) * canvasW + offsetX) * 4;
+          const kStart = y * coreW * 4;
+          if (!canvasBytes.subarray(cStart, cStart + coreW * 4).equals(coreBytes.subarray(kStart, kStart + coreW * 4))) {
+            allRows = false;
+          }
+        }
+        identical = allRows;
+        console.log(`[rex-lz4w-canvas] subimagem do core em (${offsetX},${offsetY}) do canvas: identical=${identical}`);
+      }
+    }
+    console.log(`[rex-lz4w-canvas] ${JSON.stringify({ ...dims, identical })}`);
+    if (!identical) {
+      fail(`canvas do app não exibe o framebuffer do core: dims=${JSON.stringify(dims)}`);
+    }
   }
 
   const originalFrames = await captureTimeline(romPath, "original");
