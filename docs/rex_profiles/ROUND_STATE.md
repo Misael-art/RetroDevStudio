@@ -58,6 +58,24 @@ roda no console. Evidência, derivação do teto e limites em `LZ4W_68K_ORACLE.m
 33 testes de LZ4W na suíte do lib + aceites ignoráveis (bench congelado, piso,
 aceite BYOR e aceite do fixture).
 
+aPLib — **frente seguinte, nada promovido**: o consolidado do que existe e onde
+existe (evidência TiledImage da agente A em `codex/rex-a-addressing`, pacote de
+contrato e vetores da agente B em `codex/rex-b-codecs`), as verificações
+independentes refeitas hoje (hash agregado `3a9d7e9e…` recomputado da árvore de
+B; os 9 goldens byte-idênticos entre os dois namespaces) e a ordem de aceite da
+implementação em Rust canônico estão em
+`APLIB_TILEDIMAGE_PROXIMA_PROVA_2026-09-26.md`. Estado do produto verificado por
+grep: só o rótulo `TilesetCompression::Aplib` (`rex_resources.rs:23`, mapeamento
+em `:54`) e **nenhum decoder** — o produto reconhece o header do alvo
+(`0x21b44`, TileSet APLIB de 500 tiles em `0x2e4d4`) e não decodifica o stream
+dele. Duas divergências ficam registradas em vez de resolvidas por alegação: (a) a
+linha aPLib desta matriz diz `variant-fixed: blocked` enquanto o `manifest.json`
+de B diz `"variant-fixed": "verified"`; (b) o próprio CONTRACTS v1 é inconsistente
+sobre o caminho — §1 pede `data/rex_profiles/<kind>/<profile_id>/`, o que dá
+`codec/aplib/` (foi o que B publicou), enquanto a cláusula de propriedade declara
+`data/rex_profiles/codecs/` para B (foi onde A copiou os goldens). Resolver é
+atribuição do integrador e exige v2 com justificativa, não edição silenciosa.
+
 O decoder distinguia antes a janela de busca do compressor (`0x4000`) do limite
 do formato e recusava o último offset que o 68000 ainda lê para trás. Medido no
 hardware: teto real `16385` words (`value 0x4000`), divergência silenciosa a
