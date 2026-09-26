@@ -490,12 +490,15 @@ pub fn render_resource_png(data: &[u8]) -> Result<(Vec<u8>, u32, u32, String), C
     // RGBA canônico: tiles na ordem, com padding transparente no fim.
     let mut rgba = vec![0u8; width * height * 4];
     let strip = md_tiles_to_rgba(data);
+    let strip_width = num_tiles * 8;
     for tile in 0..num_tiles {
         let row = tile / per_row;
         let col = tile % per_row;
         for y in 0..8 {
             for x in 0..8 {
-                let src = (y * 8 + x) * 4;
+                // Fonte: posição REAL do tile na faixa (linha y, coluna
+                // tile*8+x) — a faixa tem strip_width px por linha.
+                let src = (y * strip_width + tile * 8 + x) * 4;
                 let dst = (((row * 8 + y) * width) + col * 8 + x) * 4;
                 rgba[dst..dst + 4].copy_from_slice(&strip[src..src + 4]);
             }
@@ -896,6 +899,70 @@ mod tests {
         assert!(applied.verified_preserved >= 1);
     }
 
+    /// Diagnóstico: preview_resource sobre o artefato modificado real.
+    #[test]
+    fn byor_preview_of_modified_artifact() {
+        let rom_path = "/home/misael/.retrodev/decomp_work/extract/558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9/edits/rex-lz4w-modified-261618d9f19f8176c45dc66f3f398d6998d1d68772c2205b55ef8ce70fb76192.bin";
+        if !std::path::Path::new(rom_path).exists() {
+            eprintln!("artefato ausente; rode o aceite BYOR antes");
+            return;
+        }
+        let result = preview_resource(rom_path, 0xc8cc8).expect("preview do modificado");
+        eprintln!(
+            "PREVIEW_MOD: pixels={} png={} rom={}",
+            result.preview_pixels_sha256.as_deref().unwrap_or("?"),
+            result
+                .preview_png_sha256
+                .as_deref()
+                .unwrap_or("?")
+                .get(0..16)
+                .unwrap_or("?"),
+            result.rom_sha256.get(0..16).unwrap_or("?")
+        );
+        let rom = std::fs::read(rom_path).unwrap();
+        let limits = Lz4wLimits::default();
+        let set = verify_lz4w_resource_set(&rom, &limits).unwrap();
+        let count_at_target = set
+            .resources
+            .iter()
+            .filter(|r| r.candidate.stream_offset == 0xc8cc8)
+            .count();
+        let target = set
+            .resources
+            .iter()
+            .find(|r| r.candidate.stream_offset == 0xc8cc8)
+            .unwrap();
+        eprintln!(
+            "PREVIEW_MOD: headers_para_0xc8cc8={count_at_target} byte30={:#04x} numTile={}",
+            target.decoded[30], target.candidate.num_tiles
+        );
+        // Os dois renders devem divergir no pixel (4,7) do tile 0.
+        let orig_rom = std::fs::read("/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin").unwrap();
+        let orig_set = verify_lz4w_resource_set(&orig_rom, &limits).unwrap();
+        let orig_target = orig_set
+            .resources
+            .iter()
+            .find(|r| r.candidate.stream_offset == 0xc8cc8)
+            .unwrap();
+        let rgba_mod = md_tiles_to_rgba(&target.decoded);
+        let rgba_orig = md_tiles_to_rgba(&orig_target.decoded);
+        let sha_mod = super::super::rom_library::sha256_hex(&rgba_mod);
+        let sha_orig = super::super::rom_library::sha256_hex(&rgba_orig);
+        eprintln!(
+            "PREVIEW_MOD: rgba_mod={} rgba_orig={} distintos={}",
+            sha_mod.get(0..16).unwrap_or("?"),
+            sha_orig.get(0..16).unwrap_or("?"),
+            rgba_mod != rgba_orig
+        );
+        let (png, _, _, pixels_sha_direct) = render_resource_png(&target.decoded).unwrap();
+        let same_as_result = Some(&pixels_sha_direct) == result.preview_pixels_sha256.as_ref();
+        eprintln!(
+            "PREVIEW_MOD: pixels_sha_direto={} png_len={} igual_ao_resultado={same_as_result}",
+            pixels_sha_direct.get(0..16).unwrap_or("?"),
+            png.len()
+        );
+    }
+
     /// Aceite BYOR (executar explicitamente: `cargo test --lib -- --ignored
     /// rex_resources`): exige o arquivo com SHA-256 esperado e executa a
     /// cadeia completa até patch BPS com hash exato. Ausência do arquivo
@@ -1038,9 +1105,33 @@ mod tests {
         md_write_pixel_index(&mut two, 1, 7, 7, 9).unwrap();
         assert_eq!(two[63] & 0x0F, 9);
         // Índice inválido recusado sem alterar o buffer.
-        let mut untouched = two.clone();
+        let untouched = two.clone();
         assert!(md_write_pixel_index(&mut two, 0, 0, 0, 16).is_err());
         assert_eq!(two, untouched);
+    }
+
+    /// O render em GRADE (render_resource_png) deve expor edições em
+    /// qualquer tile/linha — pega o bug histórico de leitura linear da
+    /// faixa (que escondia edições além do tile 0/linha 0).
+    #[test]
+    fn render_resource_png_exposes_edits_in_any_tile_row() {
+        let original = vec![0u8; 9 * 32];
+        let mut edited = original.clone();
+        md_write_pixel_index(&mut edited, 0, 7, 4, 15).unwrap();
+        let (_, _, _, sha_original) = render_resource_png(&original).unwrap();
+        let (_, _, _, sha_edited) = render_resource_png(&edited).unwrap();
+        assert_ne!(
+            sha_original, sha_edited,
+            "prévia em grade não refletiu a edição no tile 0, linha 7"
+        );
+        // E em um tile do fim do recurso.
+        let mut edited_tail = original.clone();
+        md_write_pixel_index(&mut edited_tail, 8, 0, 0, 15).unwrap();
+        let (_, _, _, sha_tail) = render_resource_png(&edited_tail).unwrap();
+        assert_ne!(
+            sha_original, sha_tail,
+            "prévia não refletiu edição no tile 8"
+        );
     }
 
     /// No-op: escrever o mesmo índice não altera nenhum byte.
