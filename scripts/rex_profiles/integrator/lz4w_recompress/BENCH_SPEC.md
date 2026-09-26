@@ -122,3 +122,61 @@ contagens e hashes — **nunca** bytes derivados da ROM comercial. Dumps de
 `stream`/`plain`/`dict` para análise de tokens são escritos **somente** para
 `S-A` (autoral, reconstruível pela receita pinada). O pacote de evidência fica
 em `data/rex_profiles/integrator/lz4w-recompress/evidence/<rodada>/`.
+
+Exceção aberta em 2026-09-26 pelo §9: `RDS_REX_BENCH_DUMP_DIR` permite dumps de
+material de **todos** os recursos, mas o próprio teste recusa um caminho dentro
+do repositório (asserção, não recomendação) e nada desses bytes é versionado — o
+que se versiona é o SHA-256 de cada arquivo, para que o material descartável
+continue auditável.
+
+## 9. Emenda 2026-09-26: instrumento de piso (fora do `bench.json`)
+
+Os §1–§8 continuam congelados: conjunto, divisão tuning/validação e edições
+pré-definidas não mudaram, e nenhuma coluna do `bench.json` foi tocada. Esta
+emenda acrescenta um **instrumento auxiliar** que consome os dumps e responde
+uma pergunta que o benchmark não responde: *quanto do déficit atual é qualidade
+de parsing e não falta de espaço*.
+
+- Definição. **Piso** de um recurso = o menor stream LZ4W que reproduz aquele
+  plain, sob o custo explícito do formato (1 word de descritor + 1 word por
+  literal + 1 word de offset para match longo + terminador de 2 words), dentro
+  da janela do codificador (`0x4000` words) e da convenção de offset do produto
+  (espaço dicionário+saída, sem o bit `0x8000`). Resolvido por DP sobre o grafo
+  `(posição, literais pendentes 0..14)` em
+  `scripts/rex_profiles/integrator/lz4w_recompress/dp_floor.py`.
+- Por que o estado "literais pendentes" existe: um token carrega no máximo 15
+  literais, então a pendência muda o custo do futuro. Omiti-la dá resposta
+  errada — foi o bug do DP portado de `LZ4W.java`, que piorou o produto
+  (382 B contra 380 B) e foi revertido.
+- Por que matches **não maximais** entram: restringir-se ao comprimento máximo
+  por fonte falhou na 26.ª entrada do selftest (`plain=[2,2,1,2,1,0,2,1,1,1,1,2]`,
+  `dict=[2]`: 10 words contra 9 da busca exaustiva). Cortar um match mais cedo
+  muda a posição seguinte, e ali o próximo token pode gastar menos.
+- Uso da palavra "ótimo": só vale porque `dp_floor.py --selftest` compara a DP
+  com **busca exaustiva** em 1 165 entradas pequenas, em cinco configurações que
+  cobrem caminhos distintos (match longo, offsets além de `0x100`, flush de 15
+  literais, recorte de janela, tetos de 16 e 257 words). Sem essa comparação o
+  número seria uma heurística com nome de piso.
+- Barreiras por recurso: o stream reconstruído (i) decodifica de volta ao plain
+  pelo tokenizador independente `tokens.py`, (ii) é consumido inteiro, (iii) tem
+  exatamente o comprimento que o modelo anuncia, e (iv) é decodificado pelo
+  **decoder do produto** no teste ignorado
+  `piso_streams_do_dp_decodificam_pelo_decoder_do_produto`.
+- O que o piso **não** afirma: nada sobre editabilidade (é medido no plain sem
+  edição — cabe no slot é condição necessária, não sucesso do §5), nada sobre o
+  desempacotador 68000 (a replay nos streams de piso é obrigação de quem
+  integrar, não desta medição), e nada fora da janela/modelo acima.
+- Receita (rodada `2026-09-26-r5-floor-dump`):
+
+  ```bash
+  D=/tmp/rex-lz4w-floor-dumps-$(date +%Y-%m-%d)           # FORA do repositório
+  E=$PWD/data/rex_profiles/integrator/lz4w-recompress/evidence/<rodada>
+  RDS_REX_BENCH_OUT=$E RDS_REX_BENCH_DUMP_DIR=$D \
+  RDS_REX_LZ4W_FIXTURE_ROM=<rom do fixture 159298eb…> \
+    cargo test --manifest-path src-tauri/Cargo.toml --lib lz4w_recompression_benchmark \
+    -- --ignored --nocapture                                   # > bench-com-dumps.log
+  python3 scripts/rex_profiles/integrator/lz4w_recompress/floor_sweep.py $D \
+    --escrever-streams --jsonl $E/floor-sweep.jsonl             # > floor-sweep.log
+  RDS_REX_BENCH_DUMP_DIR=$D cargo test --manifest-path src-tauri/Cargo.toml --lib \
+    piso_streams_do_dp_decodificam -- --ignored --nocapture
+  ```
