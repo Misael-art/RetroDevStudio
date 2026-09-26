@@ -905,6 +905,69 @@ mod tests {
         assert_eq!(erro.code, "invalid_reference", "{erro}");
     }
 
+    /// Aceite BYOR (ignorado por padrão: corpus nunca é dependência
+    /// provisionável). Os dois streams APLIB do TiledImage visível da ROM
+    /// comercial, decodificados pelo decoder do produto e conferidos byte a byte
+    /// contra o SHA-256 que os DOIS decodificadores de referência produzem sobre
+    /// o stream extraído da ROM (`apultra -d` e `apj.jar u`, 16 000 B e 2 240 B);
+    /// a implementação JS independente da agente A — caminho já validado por
+    /// correspondência de pixel contra checkpoint-129 — concorda com os dois.
+    /// Este aceite foi o que expôs o bug de histórico de offset do `110`
+    /// (`rex_aplib.rs`), invisível nos 49 vetores importados. Arquivo ou
+    /// identidade ausentes são falha, nunca skip silencioso.
+    #[test]
+    #[ignore = "aceite BYOR aPLib: requer ROM local com SHA esperado; rodar com --ignored"]
+    fn byor_aplib_decodifica_os_dois_streams_do_tiledimage_visivel() {
+        const SHA_ROM: &str = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+        const SHA_TILESET: &str =
+            "dd7affc3971a73840b84b028c0f41372b49c52df3f4f29d09885c59e83b80f5f";
+        const SHA_TILEMAP: &str =
+            "c196aa5ba9b29a440b2680afb000795cebee242346503fb2342fd11ee5a704f1";
+
+        let (rom, sha) = hamoopig_rom().expect("ROM BYOR ausente: o aceite exige o arquivo");
+        assert_eq!(sha, SHA_ROM, "identidade da ROM BYOR divergente");
+
+        // (a) TileSet 0x21b44: o header real tem que aparecer no scan
+        // estrutural e verificar com o tamanho declarado.
+        let candidato = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.header_offset == 0x21b44)
+            .expect("header TileSet 0x21b44 não apareceu no scan estrutural");
+        assert_eq!(candidato.compression, TilesetCompression::Aplib);
+        assert_eq!(candidato.num_tiles, 500);
+        assert_eq!(candidato.stream_offset, 0x2e4d4);
+        assert_eq!(candidato.expected_len, 16000);
+        let tileset = verify_aplib_resource(&rom, &candidato, &AplibLimits::default())
+            .expect("o decoder do produto recusou o TileSet APLIB real");
+        assert_eq!(
+            tileset.bytes_consumed, 4485,
+            "consumo diverge da medida estrutural de A"
+        );
+        assert_eq!(tileset.decoded.len(), 16000);
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(&tileset.decoded),
+            SHA_TILESET,
+            "o decode do produto divergiu dos dois decodificadores de referência"
+        );
+
+        // (b) TileMap 0x21b4c: 40x28 words = 2 240 B a partir de 0x2d534. Não é
+        // um header TileSet, então é decode direto do mesmo decoder, lendo até o
+        // fim da ROM — o EOD é o que delimita o recurso.
+        let tilemap =
+            aplib_decode(&rom[0x2d534..], &AplibLimits::default()).expect("TileMap APLIB");
+        assert_eq!(tilemap.bytes_consumed, 1196);
+        assert_eq!(tilemap.data.len(), 40 * 28 * 2);
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(&tilemap.data),
+            SHA_TILEMAP,
+            "o decode do produto divergiu da implementação JS independente"
+        );
+
+        // (c) Fronteira: os dois streams terminam dentro da ROM e não se
+        // tocam (0x2d534+1196 = 0x2d9e0 < 0x2e4d4).
+        assert!(0x2d534 + tilemap.bytes_consumed < candidato.stream_offset);
+    }
+
     fn hamoopig_rom() -> Option<(Vec<u8>, String)> {
         let path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
             "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin"
