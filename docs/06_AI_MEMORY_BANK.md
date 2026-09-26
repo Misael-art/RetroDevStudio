@@ -1,5 +1,74 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-26 (g) — integrador, **aPLib em Rust canônico**: decoder aceito pelos vetores, um bug de formato achado por arbitragem em stream real e aceite BYOR das duas streams (Experimental; sem merge, sem release, sem promoção)
+
+**Commits desta frente** (`codex/rex-integrator-aplib-decode`, baseada no trunk
+do integrador `d0744b0`, +8 commits): `9a9b66d` (vetores da agente B importados
+para namespace próprio, 49 arquivos pinados por SHA + hash agregado `3a9d7e9e…`),
+`d27be00` (`aplib_decode`/`AplibLimits` em `src-tauri/src/tools/reverse/decomp/
+rex_aplib.rs`, variante SGDK **raw sem header `"AP\0"`**), `9fb2c12`
+(`verify_aplib_resource` em `rex_resources.rs:148` — recusa `compression != Aplib`,
+exige `expected_len`, decodifica **sem dicionário** — e a garantia de que a via
+LZ4W continua recusando header APLIB), `d10d5ab` (correção do token `110` + os
+dois vetores discriminadores + script de reconstrução) e `a69614e` (aceite BYOR
+das duas streams reais + perna JS independente); `73961e5` registra o estado na
+matriz e no consolidado. **Push feito** após `git fetch` (branch nova no remoto;
+CI consultado **uma vez**: `validate`, `linux-validate`, `desktop-smoke`
+`in_progress`; sem monitor permanente).
+
+**Hipótese testada:** um decoder que passa nos 49 vetores pinados por dois
+oráculos decodifica corretamente os streams APLIB do alvo visível. **A hipótese
+estava errada**, e a frente só o soube porque o aceite BYOR foi executado: com
+**todos** os 49 vetores verdes, o decoder divergia de cada um dos dois
+decodificadores de referência em **703 dos 16 000 bytes** do TileSet real
+(`0x2e4d4`), com enquadramento idêntico (`bytes_consumed` 4485, plain 16 000 B;
+antes `34a894c3…`, depois `dd7affc3…`).
+
+**Causa (defeito de produto, não de fixture):** o token `110` não gravava
+`offset_history`, então o rep-match seguinte reusava offset obsoleto. A regra
+"quem escreve no histórico são `10` **e `110`**; `111` não escreve e devolve LWM
+a 3" **não estava** na especificação da agente B, e nenhum vetor importado coloca
+um rep-match depois de `110`/`111` — lacuna de cobertura, não de conteúdo. Por
+isso os dois novos casos entraram como vetores **irmãs**
+(`data/rex_profiles/integrator/aplib/discriminating/`, SHA por arquivo, `ORIGEM.md`
+com receita de reconstrução e de ambos os oráculos) e o conjunto pinado de B
+permaneceu íntegro (`verify_vectors.py` rc=0). Autoridade do formato: **os dois
+decodificadores externos** (`apultra` exemplar `64be2a7a…`, origem declarada
+commit `8f340057…`; `apj.jar` SGDK v2.11 `2d8cdc63…`, hash conferido **antes** da
+primeira execução) mais o JS da agente A (`aplib.mjs`, conteúdo `62425497…`) —
+três caminhos concordantes; nem o produto nem o port da agente A são autoridade.
+Não-vacuidade provada removendo a correção: **só** o teste novo cai.
+
+**Aceite BYOR (`#[ignore]`, falha honesta sem arquivo/identidade):** ROM
+`558bea6c…`; TileSet `0x21b44` → stream `0x2e4d4` (4485 → 16 000 B, `dd7affc3…`);
+TileMap `0x21b4c` → stream `0x2d534` (1196 → 2 240 B, `c196aa5b…`); separação
+estrutural `0x2d534 + 1196 < 0x2e4d4`. Nenhum byte comercial entra no
+repositório: só offsets, comprimentos e SHA-256.
+
+**Gates (árvore commitada):** `cargo test --lib` **687 passed / 0 failed / 54
+ignored**, `--ignored byor_aplib` **1 passed**, `cargo clippy -- -D warnings`
+rc=0, `cargo fmt -- --check` limpo, `npm run check:tree` OK. `cargo
+clippy --all-targets` **não** é baseline limpa neste repositório (21 falhas de
+estilo pré-existentes em `#[cfg(test)]`, inclusive código não tocado por esta
+rodada) — o gate declarado é o outro.
+
+**Não provado / aberto (registrado, não promovido):** **não há encoder aPLib**,
+então a paridade bidirecional exigida por `CONTRACTS` §4
+(`decode(produto, encode(ref))` e `decode(ref, encode(produto))`) e a
+editabilidade **sem expansão** de um recurso APLIB continuam abertas — este é o
+próximo incremento; os 95,90 % de correspondência por pixel do alvo seguem
+medidos **só em JS**, não no produto (reconstrução visual e reinserção com
+transação são etapas separadas); identificação continua assistida pelo header
+(sucesso de decode não prova identificação); `work-limit`/`cancelled`/`overflow`
+são política do produto sem vetor de oráculo; a variante com header `"AP\0"` está
+fora do escopo. **A linha aPLib da matriz de codecs NÃO foi promovida** (missões
+desta rodada vetam promoção de maturidade, merge e release); o que existe é
+evidência registrada em `docs/rex_profiles/ROUND_STATE.md` e no adendo §8 de
+`docs/rex_profiles/APLIB_TILEDIMAGE_PROXIMA_PROVA_2026-09-26.md`. Arquivos
+alheios à rodada (`APJ-unpack`, `a.out`, `apultra-decode`, `.mimosa/`,
+`src-tauri/src-tauri/`, corpus `data/canonical-local-2026-09-21/`) seguem
+intocados: não executados, não stagingados, não apagados.
+
 ### Checkpoint 2026-09-26 (f) — integrador, **piso do formato medido**: o déficit do corpus é qualidade de parsing, não falta de espaço (Experimental; sem merge, sem release, sem promoção)
 
 **Commits deste lote:** `c296102` (instrumento de piso `dp_floor.py` + varredura
