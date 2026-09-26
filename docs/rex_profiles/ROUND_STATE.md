@@ -67,7 +67,7 @@ legível.
 | decode | verified | 160/191 streams LZ4W do corpus HAMOOPIG congelado decodificam com tamanho exato; o recurso do alvo e os casos sintéticos do encoder atual reproduzem **byte a byte no desempacotador 68000 oficial** (`LZ4W_68K_ORACLE.md`) |
 | prévia | verified | `render_resource_png` chunky 4x no produto com pixels SHA-256 e comparação independente; exibida na aba "Recursos comprimidos" |
 | edição | verified (via UI) | formulário pixel (tile/linha/coluna/índice) + transação canônica; no-op com zero edições pela mesma UI |
-| encode | verified (com benchmark de capacidade congelado) | re-codificação com dicionário dentro do espaço original; busca de candidatos do dicionário e da saída **mesclada por proximidade** (mesmo teto de 128, mesma janela, mesmo lazy) levou o fixture de 448→**444 B, byte a byte o stream do `rescomp`** e o corpus de `folga_base` somada −13 188→**−9 156 B** (158 melhoraram, **0** pioraram, 2 empataram). Medida pela especificação congelada `scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md` com split de validação `índice % 5`; needs_space honesto nos demais; 159/160 recursos preservados na transação. **Capacidade real medida, não prometida**: com esse ganho continua havendo **1/160** recurso com folga não negativa (`0xc8cc8`, +2 B) e a bateria amostral (24 bits/recurso) só encontra bit cabível ali — a edição canônica de 1 pixel custa 146 B contra slot de 144 B. Causa e leitura em `LZ4W_ENCODER_444_VS_448_2026-09-26.md` §4.1; evidência `data/rex_profiles/integrator/lz4w-recompress/evidence/2026-09-26-r{1,2,3,4-final-pin}/` (r1 = linha de base pinada em `656bdc9f…`, r4 = pino final `bee8524f…`) |
+| encode | verified (com benchmark de capacidade congelado) | re-codificação com dicionário dentro do espaço original; busca de candidatos do dicionário e da saída **mesclada por proximidade** (mesmo teto de 128, mesma janela, mesmo lazy) levou o fixture de 448→**444 B, byte a byte o stream do `rescomp`** e o corpus de `folga_base` somada −13 188→**−9 156 B** (158 melhoraram, **0** pioraram, 2 empataram). Medida pela especificação congelada `scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md` com split de validação `índice % 5`; needs_space honesto nos demais; 159/160 recursos preservados na transação. **Capacidade real medida, não prometida**: com esse ganho continua havendo **1/160** recurso com folga não negativa (`0xc8cc8`, +2 B) e a bateria amostral (24 bits/recurso) só encontra bit cabível ali — a edição canônica de 1 pixel custa 146 B contra slot de 144 B. Causa e leitura em `LZ4W_ENCODER_444_VS_448_2026-09-26.md` §4.1; evidência `data/rex_profiles/integrator/lz4w-recompress/evidence/2026-09-26-r{1,2,3,4-final-pin}/` (r1 = linha de base pinada em `656bdc9f…`, r4 = pino final `bee8524f…`). **Piso medido (emenda §9, rodada r5):** um DP de custo explícito validado contra busca exaustiva (1 165 entradas) dá stream menor que o produto em **160/160** recursos do corpus — soma **9 394 B**, mediana 56 B, máximo 150 B, **zero empates e zero perdas**; no fixture autoral o piso é exatamente os 444 B que o produto já emite (gap 0, e o `rescomp` do SGDK também está ali). Consequência: **125/160** recursos teriam o plain não-editado cabendo no slot contra o parse ótimo (hoje 1), e a folga agregada do corpus passaria de −9 156 B para **+238 B** (o déficit agregado desaparece, mas a sobra não é uniforme: 35 recursos continuariam sem caber). Isso é margem de *parsing*, medida no plain sem edição, decodificada pelo decoder do produto (161/161) — não é editabilidade provada nem replay 68k feito; evidência em `data/rex_profiles/integrator/lz4w-recompress/evidence/2026-09-26-r5-floor-dump/` e leitura em `LZ4W_ENCODER_444_VS_448_2026-09-26.md` §6 |
 | reinserção em cópia + patch | verified | transação no produto: identidade SHA, dependente recusado (0x91a00 dependente de 0x8ff8e), cópia + BPS exportado e re-aplicado à base com hash exato |
 | efeito observado no jogo | **BLOQUEADO — classe do alvo desconhecida** | **Retratação (2026-09-26)**: a leitura "9 paletas × 16 cores" e o mecanismo "transparência tornada opaca" eram hipóteses sem evidência de consumidor — retirados do estado corrente (preservados no histórico do Memory Bank). O "efeito" anterior era ruído: o resume do loop vivo entre runs dessincronizava os frames comparados. **Sonda causal** (no E2E): com ROM/core/estado/inputs idênticos (run_frames determinístico), **nenhuma diferença foi medida** em WRAM/VRAM entre original e modificado em 900 frames (controle original/original também idêntico, o que valida determinismo e metodologia). **Precisão (2026-09-26, ETAPA C): isso não prova que o recurso não seja descompactado** — a sonda só alcança as regiões que o core expõe (`emulator_read_memory` regiões 2/3; CRAM e o destino/chamada do desempacotador ficam `missing`). Ausência de diferença observada ≠ ausência de carregamento. Consumidor não provado; **edição semântica deste recurso permanece BLOQUEADA**. Evidências de bytes: intervalo alterado [30,31), byte 30 0x00→0xF0 (pixel (0,7,4), a única edição que coube com o encoder corrigido; needs_space honesto nas demais). **Defeitos corrigidos nesta rodada**: (1) tiles são chunky (nibble empacotado), não planar — golden literal `12 34 56 78`→1..8; (2) o encoder emitia matches longos não-ROM com offset acima do que o 68000 lê para trás (janela do codificador restaurada a 0x4000 por estratégia; o teto **do formato** medido no hardware é 16385 e o decoder agora aceita até ele — `LZ4W_68K_ORACLE.md`); (3) o preview em grade lia a faixa linearmente e escondia edições fora do tile 0/linha 0; (4) verificação de ida-e-volta dentro da transação. Canvas do app == framebuffer do core comprovado como capacidade separada (subimagem 256×192 ou 320×224 conforme o estado). Varredura dos 18 recursos com tiles em tela: fit=0 no orçamento do tile 0 (needs_space honesto) |
 | efeito demonstrado em **fixture autoral** (ETAPA D) | verified (mecanismo) | ROM Mega Drive autoral construída aqui (`scripts/rex_profiles/integrator/lz4w_fixture/`, SGDK 2.11, `TILESET ... LZ4W NONE`, SHA da ROM `159298eb…`), onde a cadeia de consumo é conhecida **por construção** (`unpackTileSet` -> `VDP_loadTileSet` -> `VDP_fillTileMapRectInc`, tile `t` numa única célula `(t%4, t/4)`). O aceite `--ignored` percorre a cadeia real do produto: decode == fonte recomposta; no-op honesto; **linha de base medida antes da busca** (`slot(rescomp)=444B` vs `re-codificação do plain não-editado=448B`, folga `-4B`); edição de 1 pixel **prevista antes de qualquer emulação** (`tile 0, row 5, col 7 -> idx 15`, re-encode 440B **dentro** do slot de 444B) aplicada pela transação canônica; ROM modificada reaberta e re-decodificada == plain planejado; coordenada de tela prevista `(7,5)` e prévia renderizada (SHA dos pixels/PNG). O stream **escrito pelo produto** desempacota no 68000 oficial: `data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r13/runs/runF` (`i30` rescomp, `i31` produto) ambos `68k == jar == esperado` em 512B. **Discriminante negativa preservada**: no fixture **sem** plantio, varredura exaustiva dos 15.360 candidatos de 1 pixel deu `0 cabem` (`.../lz4w-fixture/evidence/2026-09-26/fixture-acceptance-exhaustive-before-plant.log`). **Por que o plantio é necessário e isso não é trapaça**: o LZ4W casa **words de 16 bits**, não pixels; uma edição de 1 pixel só encurta o stream se tornar dois words adjacentes idênticos. O gap de codificador foi medido duas vezes (444/448 e 378/380) e **não** foi escondido: o porte do DP ótimo de `LZ4W.java` foi implementado, ficou verde no suíte e **piorou** (382B vs 380B) — revertido em vez de entregue; um DP fiel precisa de estado `(posição x literais pendentes mod 15)` porque o custo de 1 palavra/token ignora o chunk de 15 literais. Limite honesto: prova de **mecanismo**, não de cobertura de alvos reais; a tela do app foi capturada por emulação na ETAPA E (ver linha seguinte) |
@@ -89,6 +89,48 @@ produto. Evidência do integrador vive em namespace próprio
 e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
+
+- 2026-09-26 (integrador, PASSO 3 — **piso medido**, incremento ainda não
+  integrado): HEAD deste checkpoint é o commit de documentação que acompanha
+  `c296102` (instrumento de piso + emenda §9 do BENCH_SPEC) e `563c5f0` (dumps
+  opcionais de material + verificador do piso pelo decoder do produto).
+  Alterações não commitadas após ele: nenhuma nas três frentes; continuam
+  intocados os arquivos alheios à rodada (`.mimosa/`, `APJ-unpack`, `a.out`,
+  `apultra-decode`, `src-tauri/.mimosa/`, `src-tauri/src-tauri/`,
+  `data/canonical-local-2026-09-21/` = corpus BYOR, nunca versionável).
+  **Hipótese testada:** o déficit de 9 156 B do corpus era culpa do *parsing*
+  guloso, e isso era mensurável antes de tocar no codificador.
+  **Evidência a favor:** DP de custo explícito com busca exaustiva como referência
+  — 1 165 entradas pequenas coincidem em TODAS (cinco configurações distintas,
+  porque a contagem de transições provou que as duas primeiras nunca emitiam
+  match longo nem tocavam o teto de 16 words); o gap produto − piso é positivo em
+  **160/160** recursos do corpus, soma **9 394 B**, mediana 56 B, máximo 150 B,
+  **zero empates e zero perdas**; no fixture o piso é exatamente o que o produto
+  já emite (444 B, igual ao `rescomp`). Os 161 streams de piso passam pelo
+  **decoder do produto** (161/161 voltam ao plain exato, consumidos inteiros) e o
+  total de 9 394 B aparece por dois caminhos independentes. Rodada r5 == rodada
+  pinada r4 campo a campo fora do tempo: o harness novo não moveu medição.
+  **Evidência contra / o que a medida NÃO afirma:** o piso é do plain **sem
+  edição**, então "cabe no slot" é condição necessária (125/160 contra 1 hoje; a
+  folga agregada viraria +238 B, mas 35 recursos continuariam fora); não houve
+  replay 68000 dos streams de piso; e a restrição a matches maximais **falhou**
+  na 26.ª entrada do selftest antes de ser abandonada — o que invalida o número
+  de piso que a versão restrita dava.
+  **Comandos e resultados:** `cargo test --lib` **669 passed / 0 failed / 53
+  ignored**; `cargo clippy -- -D warnings` rc=0; `cargo fmt -- --check` rc=0;
+  `dp_floor.py --selftest` rc=0 (1165 casos + 4 barreiras RLE); varredura 59,4 s /
+  161 recursos. `clippy --all-targets` mantém os mesmos 10 achados
+  **pré-existentes** de `project_mgr.rs`, `holdout.rs`, `lib.rs`,
+  `graphics_discovery.rs`, `build_orch.rs`, `logic_recovery.rs` — nenhum em
+  `rex_*.rs`, e nada neste lote os introduziu.
+  **Próximo comando (PASSO 3, integração do parse de custo explícito):** portar a
+  DP para `rex_codecs.rs` atrás de orçamento explícito, com as obrigações do §6 da
+  especificação (formato, decoder, teto de hardware 16 385, dependentes, recusa
+  honesta), re-pinar o codificador e refazer o replay 68k no pino novo; só então
+  publicar antes/depois com perdas e empates. **Em paralelo (PASSO 5):** TiledImage
+  APLIB em frente separada. **Bloqueio:** nenhum externo. **Fora de escopo por
+  ordem do operador:** merge, release, promoção de maturidade, expansão de ROM,
+  realocação de ponteiros e promoção do marco do fixture para cobertura BYOR.
 
 - 2026-09-26 (integrador, objetivo "capacidade real do encoder" — PASSOS 1-4 e
   entrega parcial): os três commits desta entrega são `2ffb076` (benchmark

@@ -1,5 +1,96 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-26 (f) — integrador, **piso do formato medido**: o déficit do corpus é qualidade de parsing, não falta de espaço (Experimental; sem merge, sem release, sem promoção)
+
+**Commits deste lote:** `c296102` (instrumento de piso `dp_floor.py` + varredura
+`floor_sweep.py` + emenda §9 do `BENCH_SPEC.md`) e `563c5f0` (dumps opcionais de
+material fora do repositório + teste que decodifica os streams de piso pelo
+decoder do produto), seguidos do commit de evidência/documento
+(`.../evidence/2026-09-26-r5-floor-dump/`, §6 de
+`LZ4W_ENCODER_444_VS_448_2026-09-26.md`, linha `encode` e histórico de
+`ROUND_STATE.md`). PINO DO CODIFICADOR INTACTO: `rex_codecs.rs @
+bee8524f…` — nada neste lote toca o caminho de produção, então o replay 68k `r14`
+continua valendo.
+
+**Por que este passo veio antes de mexer no compressor.** O checkpoint (e) deixou
+uma pergunta em aberto com resposta cara de adivinhar: dos −9 156 B de déficit do
+corpus, quanto era culpa do parse guloso e quanto é limite do formato? Sem esse
+número, integrar um DP seria aposta. Com ele, é decisão.
+
+**O instrumento.** DP de custo explícito sobre `(posição i, literais pendentes p
+0..14)` — 1 word de descritor + 1 por literal + 1 de offset para match longo +
+terminador de 2 words, na janela do codificador (0x4000 words) e na convenção de
+offset do produto (espaço dicionário+saída, sem o bit 0x8000). O estado `p` não é
+ornato: sem ele o modelo erra, e foi exatamente o bug do DP portado de `LZ4W.java`
+que piorou o produto (382 B contra 380 B) no checkpoint (d).
+
+**Duas correções metodológicas que este checkpoint deve registrar.**
+1. *Matches maximais não são ótimos.* A primeira versão restringia cada fonte ao
+   seu comprimento máximo; passou 25 vezes no selftest aleatório e **falhou na
+   26.ª** (`plain=[2,2,1,2,1,0,2,1,1,1,1,2] dict=[2]`: 10 words contra 9 da busca
+   exaustiva). O número que a versão restrita dava para o fixture (444 B) era
+   coincidente com o correto por acaso — e teria sido publicado como piso.
+2. *O selftest precisava ser não-vacuo.* Contando os tipos de transição emitidos,
+   as duas primeiras configurações **nunca** produziam um match longo nem
+   encostavam no teto curto de 16 words. Entraram então "fontes distantes"
+   (dicionário acima de 0x100, onde só o formato longo alcança), "repetição"
+   (alfabeto de 1 word, tetos de 16 e 257) e "janela curta" (o recorte de `WINDOW`
+   jamais exercido por entrada pequena com janela real). 1 165 entradas depois, a
+   DP coincide com a busca exaustiva em todas.
+
+**Medida (rounda `2026-09-26-r5-floor-dump`).** Gap produto − piso, no plain **sem
+edição**: positivo em **160/160** recursos do corpus; soma **9 394 B** (ajuste
+7 480 B em 128, validação 1 914 B em 32); mediana 56/60 B; máximo 150 B; **zero
+empates e zero perdas** no corpus. Agregado: soma de slots 225 562 B, soma de
+pisos 225 324 B → a folga somada do corpus viraria **+238 B** (hoje −9 156 B), e
+**125/160** recursos teriam o plain não-editado cabendo no slot contra **1** hoje
+— mas 35 continuariam fora, porque a sobra não é uniforme. No fixture autoral o
+produto **já está no piso** (444 B == `rescomp` == DP): o gap de 146 B contra slot
+de 144 B da edição canônica não é culpa do parse, e o incremento de parsing não
+abre aquele alvo.
+
+**Reconciliação por caminhos independentes.** Os 9 394 B aparecem somados (a) em
+Python, pelos comprimentos que o modelo anuncia, e (b) em Rust, pelos 161 streams
+lidos do disco e decodificados por `lz4w_decode_with_dictionary` — todos voltam ao
+plain exato consumindo-se inteiros. E o `bench.json` de r5 é campo a campo idêntico
+ao da rodada pinada r4 (161/161 linhas; resumo inteiro igual fora de
+`tempo_rodada_ms` 25 526 → 23 352), o que prova que instalar o dump não moveu
+nenhuma medição.
+
+**Custo do instrumento:** 59,4 s para os 161 recursos em Python não otimizado
+(~0,4 s/recurso) — cabe no orçamento de 2 s/recurso da especificação, então a
+viabilidade de um DP no produto não está limitada por tempo neste primeiro exame.
+
+**O que este checkpoint NÃO afirma (e por isso o incremento ainda não entrou).**
+O piso é do plain sem edição, logo "cabe no slot" é condição necessária: um bit
+invertido custa tipicamente 2–6 B por cima do piso. Não houve replay no
+desempacotador 68000 dos streams de piso — é obrigação de quem integrar, no pino
+novo, junto com o teto de hardware de 16 385 words, a proteção de dependentes, os
+limites de tempo/memória e a recusa honesta (`needs_space`) quando não couber. E
+o DP como escrito é O(posições × candidatos × comprimentos): no produto vai
+precisar de orçamento por posição, e um teto de candidatos faria do resultado um
+**limitante superior** (só "gap > 0" continua valendo com poda; "gap == 0" não).
+
+**Gates:** `cargo test --lib` 669 passed / 0 failed / 53 ignored; `cargo clippy --
+-D warnings` rc=0; `cargo fmt -- --check` rc=0; `dp_floor.py --selftest` rc=0.
+`clippy --all-targets` mantém 10 achados **pré-existentes** em `project_mgr.rs`,
+`holdout.rs`, `lib.rs`, `graphics_discovery.rs`, `build_orch.rs`,
+`logic_recovery.rs` — nenhum em `rex_*.rs`, nenhum introduzido aqui. Frontend
+intocado neste lote.
+
+**Higiene BYOR:** os dumps de material (806 arquivos, 11 613 804 B) ficaram em
+`/tmp/rex-lz4w-floor-dumps-2026-09-26` e são descartáveis; o versionado é o
+SHA-256 de cada um dentro de `floor-sweep.jsonl`. O caminho de dump é recusado por
+asserção se estiver dentro do repositório.
+
+**Próximo comando (PASSO 3, integração):** portar a DP para `rex_codecs.rs` atrás
+de orçamento explícito, re-pinar o codificador, refazer o replay 68k no pino novo e
+publicar antes/depois com perdas e empates pela especificação congelada.
+**Em paralelo (PASSO 5):** TiledImage/APLIB em frente separada. **Bloqueio:**
+nenhum externo. **Fora de escopo por ordem do operador:** merge, release, promoção
+de maturidade, expansão de ROM, realocação de ponteiros, promoção do marco do
+fixture para cobertura BYOR.
+
 ### Checkpoint 2026-09-26 (e) — integrador, capacidade REAL do codificador LZ4W medida, um incremento pinado e o descarte silencioso da UI corrigido (Experimental; sem merge, sem release, sem promoção)
 
 **Commits da entrega:** `2ffb076` (benchmark congelado), `39c0fd9` (incremento
