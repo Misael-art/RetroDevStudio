@@ -390,6 +390,22 @@ impl Emissor {
         self.byte(((offset << 1) | (length - 2)) as u8)
     }
 
+    /// Token `111`: offset de 4 bits, MSB→LSB, igual ao laço de leitura do
+    /// decodificador. `curto == 0` empurra um byte `0x00` sem consultar
+    /// histórico; 1..=15 copia 1 byte. São 7 bits e nenhum byte de dados, e o
+    /// token não escreve no histórico de offset nem derruba LWM — por isso o
+    /// chamador mantém LWM em 3 depois dele.
+    fn curto_111(&mut self, curto: usize) -> Result<(), CodecError> {
+        debug_assert!(curto <= CMD111_MAX_OFFSET);
+        self.bit(1)?;
+        self.bit(1)?;
+        self.bit(1)?;
+        for i in (0..4).rev() {
+            self.bit(((curto >> i) & 1) as u8)?;
+        }
+        Ok(())
+    }
+
     /// Escrivão de `gamma2`: os dígitos de `v` sem o `1` líder (MSB→LSB), cada
     /// um seguido de um bit de controle que só zera no último par. É o inverso
     /// exato do leitor do decodificador (`v = (v << 1) | dado`), e o menor
@@ -449,8 +465,7 @@ const REP_ACUMULADO: u64 = 2;
 
 /// A expressão mais barata que o formato oferece para um byte (ou um match) em
 /// `pos`. A ordem de preferência está centralizada aqui porque ela é a
-/// explicação do tamanho do stream: `111` ainda não é emitido, e é por isso que
-/// `noisy_runs_16k` fica 277 bytes acima do oráculo.
+/// explicação do tamanho do stream.
 enum Expressao {
     /// Reuso do último offset, pagando só o comprimento.
     Rep { length: usize },
@@ -458,16 +473,36 @@ enum Expressao {
     Curto { offset: usize, length: usize },
     /// Token `10`: match explícito com byte de offset.
     Longo { offset: usize, length: usize },
+    /// Token `111`: cópia de 1 byte com offset ≤ 15; offset `0` empurra `0x00`.
+    UmByte { curto: usize },
     /// Token `0`.
     Literal,
 }
 
-/// Escolhe a expressão do candidato. O rep-match ganha sempre que está
-/// disponível — custa `2 + gamma2(comprimento)` bits contra os mesmos bits do
-/// `10` **mais** 8 bits do byte de offset, e contra os 11 bits do `110` — mas
+/// Fonte para o token `111`: o byte em `pos` pode ser cópia de 1 byte a
+/// offset 1..=15, e um `0x00` dispensa fonte — `curto == 0` faz o decodificador
+/// empurrar o zero direto. Custa 7 bits e nenhum byte de dados, contra os ~9
+/// bits + 1 byte do literal, e por isso vence o literal sempre que existe.
+fn curto_para_um_byte(data: &[u8], pos: usize) -> Option<usize> {
+    if data[pos] == 0 {
+        return Some(0);
+    }
+    (1..=pos.min(CMD111_MAX_OFFSET)).find(|&curto| data[pos - curto] == data[pos])
+}
+
+/// Escolhe a expressão do candidato, caindo para `111` e depois para literal
+/// quando não há match de ≥ 2 bytes expressável. O rep-match ganha sempre que
+/// está disponível — custa `2 + gamma2(comprimento)` bits contra os mesmos bits
+/// do `10` **mais** 8 bits do byte de offset, e contra os 11 bits do `110` — mas
 /// ele só existe com LWM 3 e sobre o offset do último match emitido, que é o
 /// estado que o decodificador tem, não um estado que este encoder inventa.
-fn expressao_para(candidato: Option<(usize, usize)>, lwm: u64, last_offset: usize) -> Expressao {
+fn expressao_para(
+    data: &[u8],
+    pos: usize,
+    candidato: Option<(usize, usize)>,
+    lwm: u64,
+    last_offset: usize,
+) -> Expressao {
     if let Some((offset, length)) = candidato {
         if lwm > REP_ACUMULADO && last_offset != 0 && offset == last_offset {
             return Expressao::Rep { length };
@@ -478,6 +513,9 @@ fn expressao_para(candidato: Option<(usize, usize)>, lwm: u64, last_offset: usiz
         if expressavel_pelo_10(offset, length) {
             return Expressao::Longo { offset, length };
         }
+    }
+    if let Some(curto) = curto_para_um_byte(data, pos) {
+        return Expressao::UmByte { curto };
     }
     Expressao::Literal
 }
@@ -507,8 +545,8 @@ fn expressavel_pelo_10(offset: usize, length: usize) -> bool {
 /// tem teto absoluto e é debitado no orçamento de trabalho.
 const CANDIDATOS_POR_POSICAO: usize = 1024;
 
-/// Menor match que vale a pena codificar: 2 bytes. Abaixo disso só `111`
-/// (1 byte, offset ≤ 15), que este encoder ainda não emite.
+/// Menor match que a busca considera: 2 bytes. Abaixo disso só o `111` (1 byte,
+/// offset ≤ 15), escolhido à parte porque não precisa da cadeia de repetições.
 const MATCH_MINIMO: usize = 2;
 
 /// Nenhuma posição indexada.
@@ -617,6 +655,8 @@ impl<'a> BuscaRepeticoes<'a> {
 const CMD110_MAX_LEN: usize = 3;
 /// O byte de comando tem 7 bits úteis para offset (`cmd >> 1`).
 const CMD110_MAX_OFFSET: usize = 127;
+/// O token `111` endereça a cópia de 1 byte com 4 bits: offset 1..=15.
+const CMD111_MAX_OFFSET: usize = 15;
 
 /// Codifica dados no aPLib da variante SGDK (stream raw, sem header `"AP\0"`).
 ///
@@ -659,7 +699,7 @@ pub fn aplib_encode(data: &[u8], limits: &AplibEncodeLimits) -> Result<Vec<u8>, 
     let mut pos = 1;
     while pos < data.len() {
         let candidato = busca.mais_longo(pos, &mut emissor.orcamento)?;
-        match expressao_para(candidato, lwm, last_offset) {
+        match expressao_para(data, pos, candidato, lwm, last_offset) {
             Expressao::Rep { length } => {
                 emissor.rep_match(length, lwm)?;
                 // O rep-match reafirma o mesmo offset e, como qualquer match,
@@ -679,6 +719,13 @@ pub fn aplib_encode(data: &[u8], limits: &AplibEncodeLimits) -> Result<Vec<u8>, 
                 last_offset = offset;
                 lwm = LWM_MATCH;
                 pos += length;
+            }
+            Expressao::UmByte { curto } => {
+                emissor.curto_111(curto)?;
+                // `111` é o único match que o decodificador NÃO conta como match:
+                // ele devolve LWM para 3 e deixa o histórico de offset intacto.
+                lwm = LWM_LITERAL;
+                pos += 1;
             }
             Expressao::Literal => {
                 emissor.literal(data[pos])?;
@@ -1079,6 +1126,65 @@ mod tests {
         );
     }
 
+    /// Copiar 1 byte a offset ≤ 15 é o token `111`: 3 bits de token + 4 bits de
+    /// offset = 7 bits, **sem byte de dados**, contra os 9 bits do literal.
+    /// Montado à mão para `ABCDA` (só o último `A` tem fonte): `41` literal
+    /// físico; tag `1d` = literais B,C,D (`000`) + `111` + os dois primeiros bits
+    /// do offset 4 (`01`); `42 43 44` = os bytes de dados desses três literais,
+    /// que vêm FÍSICAMENTE ANTES do próximo tag porque o emissor acrescenta byte
+    /// de dados e byte de tag na mesma ordem em que o leitor os consome; tag `30`
+    /// = o resto do offset (`00`) + EOD (`110`); `00` = comando do EOD.
+    ///
+    /// Aqui `111` não encolhe o stream: ele economiza 2 bits e o byte de dados do
+    /// literal, mas estoura o tag e cobra um tag extra — 7 bytes dos dois lados
+    /// (`0c` sem `111`). O ganho em bytes aparece a cada 4 ocorrências, e é isso
+    /// que move `text_rep` de 29 para 28 no banco congelado. O que este teste
+    /// fixa é a **escolha do token**.
+    #[test]
+    fn aplib_encode_emite_111_para_copia_de_um_byte_perto() {
+        let dados = b"ABCDA";
+        let stream = aplib_encode(dados, &AplibEncodeLimits::default()).expect("codifica");
+        assert_eq!(
+            stream,
+            vec![0x41, 0x1D, 0x42, 0x43, 0x44, 0x30, 0x00],
+            "stream esperado montado à mão; saiu: {stream:02x?}"
+        );
+        let decode = decodificar(&stream, AplibLimits::default());
+        assert_eq!(&decode.data, dados, "ida-e-volta");
+        assert_eq!(
+            decode.bytes_consumed,
+            stream.len(),
+            "EOD no último byte lido"
+        );
+    }
+
+    /// `111` com offset `0000` não é cópia: o decodificador interpreta como
+    /// "empurre um byte `0x00`". É a forma mais curta de um zero sem fonte de
+    /// cópia — aqui `01 00 02`, o `00` do meio não aparece antes, então só o
+    /// ramo `curto == 0` serve. Este caso troca 9 bits por 7 sem encolher o
+    /// stream (5 bytes dos dois lados, porque os 2 bits não fecham um tag): o
+    /// que o teste fixa é a **escolha do token**, não o tamanho. Tag `e0` =
+    /// `111` + offset `0000` + o primeiro bit do literal seguinte (`0`) →
+    /// `1110000` + `0`; `02` = literal físico do byte 2; tag `c0` = EOD; `00` =
+    /// comando do EOD.
+    #[test]
+    fn aplib_encode_emite_111_para_byte_zero_em_vez_de_literal() {
+        let dados = [0x01u8, 0x00, 0x02];
+        let stream = aplib_encode(&dados, &AplibEncodeLimits::default()).expect("codifica");
+        assert_eq!(
+            stream,
+            vec![0x01, 0xE0, 0x02, 0xC0, 0x00],
+            "stream esperado montado à mão; saiu: {stream:02x?}"
+        );
+        let decode = decodificar(&stream, AplibLimits::default());
+        assert_eq!(&decode.data, &dados[..], "ida-e-volta");
+        assert_eq!(
+            decode.bytes_consumed,
+            stream.len(),
+            "EOD no último byte lido"
+        );
+    }
+
     /// Match de comprimento 5 com offset 5: o `110` não expressa (só 2 ou 3),
     /// então sai pelo token `10`. Montado à mão na ordem de consumo —
     /// `41` literal físico; tag `0a` = literais B,C,D,E + `10` + gamma2(3)
@@ -1335,20 +1441,26 @@ mod tests {
     /// qualidade muda um pino, e mudar um pino é decisão registrada, não
     /// deriva.
     ///
-    /// Pino ≠ alvo, e a diferença é estreita e medida mesa por mesa
+    /// Pino ≠ alvo, e a diferença é medida mesa por mesa
     /// (`RDS_APLIB_DUMP=… cargo test --lib aplib_encode_dumpa` +
-    /// `scripts/rex_profiles/integrator/aplib/token_dump.py`):
+    /// `scripts/rex_profiles/integrator/aplib/token_dump.py`, que conta token por
+    /// token e fecha a contabilidade de cada stream: `Σ custo + rabo de tag =
+    /// stream consumido`, verificado nos 35 streams bem-formados da fixture e nos
+    /// 8 dumps do produto. Re-medido depois do passo `111`:
     ///
-    /// - mesa de tokens idêntica à do oráculo: `ab_repeat`, `near_window_2k`,
-    ///   `tile_like`, `zeros_64k`;
-    /// - mesmo tamanho com um `111` do oráculo pago como literal:
-    ///   `far_window_40k`, `pseudo_random_8k`;
-    /// - 1 byte acima: `text_rep`, por 4 cópias de 1 byte (`111`) que o produto
-    ///   ainda paga como literal (4 × 2 bits = 1 byte);
-    /// - 160 bytes acima: `noisy_runs_16k`, e aqui a mesa mostra forma de parse,
-    ///   não token faltante: o produto emite 305 `match-10` contra 179 do
-    ///   oráculo, e 123 rep-match contra 210 — o guloso "match mais longo"
-    ///   corta o stream de jeito diferente.
+    /// - mesa de tokens idêntica à dos **dois** oráculos (`apultra` e
+    ///   `apj.jar`) em 7 das 8 mesas: `ab_repeat`, `far_window_40k`,
+    ///   `near_window_2k`, `pseudo_random_8k`, `text_rep`, `tile_like`,
+    ///   `zeros_64k`;
+    /// - `noisy_runs_16k` é a única mesa divergente, 159 bytes acima, e a mesa
+    ///   diz o porquê em números: o produto paga **+433 B** de `match-10`
+    ///   (305× a 3,36 B contra 179× a 3,31 B) para economizar 272 B entre
+    ///   literais e rep-matches (127× vs 241×, 123× vs 210×). Causa estrutural:
+    ///   rep-match só existe com LWM 3 e todo match derruba LWM para 2, então o
+    ///   guloso emenda corridas longas com `match-10` inteiro (byte de offset
+    ///   incluído), onde o oráculo encurta um match, paga um literal de 9 bits
+    ///   para rearmar LWM e emenda um rep-match de 1,58 B. É escolha de parse,
+    ///   não token indisponível.
     #[test]
     fn aplib_encode_tem_a_capacidade_medida_congelada_por_plain() {
         const PINOS: [(&str, usize, usize); 8] = [
@@ -1356,9 +1468,9 @@ mod tests {
             ("ab_repeat", 8, 8),
             ("far_window_40k", 305, 305),
             ("near_window_2k", 55, 55),
-            ("noisy_runs_16k", 1365, 1205),
+            ("noisy_runs_16k", 1364, 1205),
             ("pseudo_random_8k", 294, 294),
-            ("text_rep", 29, 28),
+            ("text_rep", 28, 28),
             ("tile_like", 41, 41),
             ("zeros_64k", 8, 8),
         ];
