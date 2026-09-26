@@ -1,0 +1,1 @@
+{"vector": "n07_token111_first", "kind": "negative-spec", "expected_error": "invalid-reference", "mirror_condition": "ERR-off", "max_out": null, "full_decode_len_if_unbounded": null, "stream_len": 2, "note": "Derivado do contrato/formato; oráculos de referência não validam entrada (UB além do EOF) e NÃO foram executados sobre este stream."}
