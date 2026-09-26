@@ -12,6 +12,9 @@ vi.mock("../../core/ipc/toolsService", () => ({
 
 const mocked = vi.mocked(service);
 
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+  true;
+
 const SUMMARY = {
   header_offset: 0x25788,
   stream_offset: 0xc8cc8,
@@ -149,8 +152,7 @@ describe("CompressedResourcePanel", () => {
     expect(resultText).toContain("preservados 159");
   });
 
-  it("erros da transação aparecem no painel", async () => {
-    mocked.rexResourceList.mockResolvedValue(["aa".repeat(32), [SUMMARY]]);
+  it("erros da transação aparecem no painel", async () => {    mocked.rexResourceList.mockResolvedValue(["aa".repeat(32), [SUMMARY]]);
     mocked.rexResourcePreview.mockResolvedValue(PREVIEW);
     mocked.rexResourceApplyEdit.mockRejectedValue("dependent_modified: transação recusada");
     await act(async () => {
@@ -182,5 +184,110 @@ describe("CompressedResourcePanel", () => {
     expect(findByTestId(container, "rex-resource-error").textContent).toContain(
       "dependent_modified"
     );
+  });
+
+  /** Deixou de existir um caminho silencioso: a pré-condição de uma edição
+   *  inválida é dita em voz alta, a fila já válida permanece intacta, e a
+   *  transação continua sendo a guarda final (o painel só filtra o que já sabe
+   *  que o núcleo recusa). */
+  async function painelComRecursoSelecionado(
+    log?: (level: "info" | "warn" | "error" | "success", message: string) => void
+  ) {
+    mocked.rexResourceList.mockResolvedValue(["aa".repeat(32), [SUMMARY]]);
+    mocked.rexResourcePreview.mockResolvedValue(PREVIEW);
+    await act(async () => {
+      root.render(<CompressedResourcePanel logMessage={log} />);
+      await flush();
+    });
+    const input = findByTestId(container, "rex-resource-rom-input") as HTMLInputElement;
+    await act(async () => {
+      typeValue(input, "/roms/hamoopig.bin");
+      await flush();
+    });
+    await act(async () => {
+      findByTestId(container, "rex-resource-verify").click();
+      await flush();
+      await flush();
+    });
+    const select = findByTestId(container, "rex-resource-select") as HTMLSelectElement;
+    await act(async () => {
+      select.value = "c8cc8";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await flush();
+    });
+  }
+
+  async function campo(testId: string, value: string) {
+    const element = findByTestId(container, testId) as HTMLInputElement;
+    await act(async () => {
+      typeValue(element, value);
+      await flush();
+    });
+  }
+
+  it("tile fora do recurso: avisa, preserva a fila válida e não envia o inválido", async () => {
+    const log = vi.fn();
+    await painelComRecursoSelecionado(log);
+    await campo("rex-resource-edit-tile", "0");
+    await campo("rex-resource-edit-row", "1");
+    await campo("rex-resource-edit-col", "2");
+    await act(async () => {
+      findByTestId(container, "rex-resource-add-edit").click();
+      await flush();
+    });
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+
+    await campo("rex-resource-edit-tile", "9"); // o recurso tem 9 tiles: 0..8
+    await act(async () => {
+      findByTestId(container, "rex-resource-add-edit").click();
+      await flush();
+    });
+    const aviso = findByTestId(container, "rex-resource-notice").textContent ?? "";
+    expect(aviso).toContain("tile 9");
+    expect(aviso).toContain("são 9 tile(s), numerados de 0 a 8");
+    expect(aviso).toContain("A fila atual foi preservada");
+    expect(log).toHaveBeenCalledWith(
+      "warn",
+      expect.stringContaining("tile 9 fora do recurso")
+    );
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+
+    mocked.rexResourceApplyEdit.mockResolvedValue({ ...PREVIEW, outcome: "applied" });
+    await act(async () => {
+      findByTestId(container, "rex-resource-apply").click();
+      await flush();
+      await flush();
+    });
+    expect(mocked.rexResourceApplyEdit.mock.calls[0][2]).toEqual([
+      { tile: 0, row: 1, col: 2, index: 1 },
+    ]);
+  });
+
+  it("linha, coluna e índice inválidos: cada um tem mensagem própria", async () => {
+    await painelComRecursoSelecionado();
+    for (const [testId, valor, trecho] of [
+      ["rex-resource-edit-row", "8", "linha 8"],
+      ["rex-resource-edit-col", "8", "coluna 8"],
+      ["rex-resource-paint-index", "16", "índice 16"],
+    ] as const) {
+      // Estado base válido; só o campo sob teste é inválido (senão a primeira
+      // queixa encontrada encobre a que se quer medir).
+      await campo("rex-resource-edit-tile", "0");
+      await campo("rex-resource-edit-row", "1");
+      await campo("rex-resource-edit-col", "2");
+      await campo("rex-resource-paint-index", "1");
+      await campo(testId, valor);
+      await act(async () => {
+        findByTestId(container, "rex-resource-add-edit").click();
+        await flush();
+      });
+      const aviso = findByTestId(container, "rex-resource-notice").textContent ?? "";
+      expect(aviso).toContain(trecho);
+      expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(
+        /^nenhuma edição/
+      );
+    }
+    expect(mocked.rexResourceApplyEdit).not.toHaveBeenCalled();
   });
 });

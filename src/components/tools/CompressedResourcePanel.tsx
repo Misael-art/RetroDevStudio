@@ -18,6 +18,31 @@ function parseOffset(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Por que uma edição não entra na fila, ou `null` se ela é válida. A guarda
+ * definitiva é o núcleo da transação (ele recusa `tile N fora do recurso`);
+ * isto existe para o descarte deixar de ser silencioso. */
+function editRejectReason(candidate: RexPixelEdit, numTiles: number | null): string | null {
+  if (numTiles == null) {
+    return "nenhum recurso selecionado: a edição não foi adicionada à fila.";
+  }
+  const { tile, row, col, index } = candidate;
+  if (!Number.isInteger(tile) || tile < 0 || tile >= numTiles) {
+    return `tile ${tile} fora do recurso: são ${numTiles} tile(s), numerados de 0 a ${numTiles - 1}. A fila atual foi preservada.`;
+  }
+  for (const [nome, valor] of [
+    ["linha", row],
+    ["coluna", col],
+  ] as const) {
+    if (!Number.isInteger(valor) || valor < 0 || valor >= TILE) {
+      return `${nome} ${valor} fora do tile: use um valor inteiro de 0 a ${TILE - 1}. A fila atual foi preservada.`;
+    }
+  }
+  if (!Number.isInteger(index) || index < 1 || index >= PER_ROW) {
+    return `índice ${index} fora da paleta: use um inteiro de 1 a ${PER_ROW - 1} (o índice 0 é transparente). A fila atual foi preservada.`;
+  }
+  return null;
+}
+
 /**
  * Painel de recursos comprimidos LZ4W (REX, Experimental). Prévia chunky,
  * edição por pixel com transação canônica (identidade, dependentes, patch
@@ -45,6 +70,27 @@ export function CompressedResourcePanel({
   const [editCol, setEditCol] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const queueEdit = useCallback(
+    (candidate: RexPixelEdit) => {
+      const summary = resources.find((r) => r.stream_offset === selected);
+      const reason = editRejectReason(candidate, summary ? summary.num_tiles : null);
+      if (reason) {
+        setNotice(reason);
+        logMessage?.("warn", `REX edição não entrou na fila: ${reason}`);
+        return;
+      }
+      setNotice(null);
+      setEdits((current) => [
+        ...current.filter(
+          (e) => !(e.tile === candidate.tile && e.row === candidate.row && e.col === candidate.col)
+        ),
+        candidate,
+      ]);
+    },
+    [resources, selected, logMessage]
+  );
 
   const verify = useCallback(async () => {
     setBusy(true);
@@ -52,6 +98,7 @@ export function CompressedResourcePanel({
     setResult(null);
     setPreview(null);
     setEdits([]);
+    setNotice(null);
     setSelected(null);
     try {
       const [sha, list] = await rexResourceList(romPath);
@@ -74,6 +121,7 @@ export function CompressedResourcePanel({
       setPreview(null);
       setResult(null);
       setEdits([]);
+      setNotice(null);
       setBusy(true);
       setError(null);
       try {
@@ -92,8 +140,6 @@ export function CompressedResourcePanel({
   const paintAt = useCallback(
     (event: React.MouseEvent<HTMLImageElement>) => {
       if (!preview || preview.preview_width == null || selected == null) return;
-      const summary = resources.find((r) => r.stream_offset === selected);
-      if (!summary) return;
       const rect = event.currentTarget.getBoundingClientRect();
       // Coordenadas em pixels NATURAIS da prévia (1 pixel = 1 px do preview).
       const px = ((event.clientX - rect.left) / rect.width) * preview.preview_width;
@@ -101,15 +147,9 @@ export function CompressedResourcePanel({
       const tileRow = Math.floor(py / TILE);
       const tileCol = Math.floor(px / TILE);
       const tile = tileRow * PER_ROW + tileCol;
-      if (px < 0 || py < 0 || tile >= summary.num_tiles) return;
-      const row = Math.floor(py) % TILE;
-      const col = Math.floor(px) % TILE;
-      setEdits((current) => [
-        ...current.filter((e) => !(e.tile === tile && e.row === row && e.col === col)),
-        { tile, row, col, index: paintIndex },
-      ]);
+      queueEdit({ tile, row: Math.floor(py) % TILE, col: Math.floor(px) % TILE, index: paintIndex });
     },
-    [preview, selected, paintIndex, resources]
+    [preview, selected, paintIndex, queueEdit]
   );
 
   const apply = useCallback(async () => {
@@ -222,7 +262,11 @@ export function CompressedResourcePanel({
                 className="w-14 rounded border border-[#313244] bg-[#11111b] px-1 py-0.5 text-[#cdd6f4]"
               />
             </label>
-            <span data-testid="rex-resource-edit-count">{edits.length} edição(ões) pendente(s)</span>
+            <span data-testid="rex-resource-edit-count">
+              {edits.length === 0
+                ? "nenhuma edição pendente"
+                : `${edits.length} edição(ões) pendente(s)`}
+            </span>
             <span className="flex items-center gap-1">
               tile
               <input type="number" min={0} value={editTile} data-testid="rex-resource-edit-tile" onChange={(event) => setEditTile(Number(event.target.value) || 0)} className="w-14 rounded border border-[#313244] bg-[#11111b] px-1 py-0.5 text-[#cdd6f4]" />
@@ -233,15 +277,9 @@ export function CompressedResourcePanel({
               <button
                 type="button"
                 data-testid="rex-resource-add-edit"
-                onClick={() => {
-                  if (!preview || selected == null) return;
-                  const summary = resources.find((r) => r.stream_offset === selected);
-                  if (!summary || editTile >= summary.num_tiles) return;
-                  setEdits((current) => [
-                    ...current.filter((e) => !(e.tile === editTile && e.row === editRow && e.col === editCol)),
-                    { tile: editTile, row: editRow, col: editCol, index: paintIndex },
-                  ]);
-                }}
+                onClick={() =>
+                  queueEdit({ tile: editTile, row: editRow, col: editCol, index: paintIndex })
+                }
                 className="rounded border border-[#89b4fa] bg-[#89b4fa]/10 px-2 py-0.5 text-[#89b4fa]"
               >
                 Adicionar edição
@@ -279,6 +317,15 @@ export function CompressedResourcePanel({
             <p className="text-[10px] text-[#6c7086]">patch: {result.patch_bps_path}{" "}</p>
           )}
           <p className="text-[10px] text-[#6c7086]">{result.analyzed_scope}</p>
+        </div>
+      )}
+
+      {notice && (
+        <div
+          className="rounded border border-[#f9e2af] bg-[#f9e2af]/10 p-2 text-[11px] text-[#f9e2af]"
+          data-testid="rex-resource-notice"
+        >
+          {notice}
         </div>
       )}
 
