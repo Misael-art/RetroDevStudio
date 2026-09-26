@@ -51,7 +51,7 @@
   "n07_token111_first": "NEGATIVE-SPEC:invalid-reference"
  },
  "limites": [
-  "Os oráculos (apultra, apj.jar) NÃO foram reexecutados por esta frente: a paridade cruzada é a que B mediu e pinou; a cópia só reproduz o hash agregado.",
+  "A paridade cruzada ORIGINAL dos 49 arquivos continua sendo a que B mediu e pinou; esta cópia só reproduz o hash agregado. Além disso, esta frente REEXECUTOU os dois oráculos em 2026-09-26 para arbitrar (a) as duas streams reais da ROM BYOR e (b) os dois vetores discriminadores novos — ver `arbitragem_da_stream_real` e `discriminadores_do_integrador`.",
   "Negativos são negative-spec (derivados do contrato); os oráculos não validam entrada, então recusa dos negativos não é comportamento observável na referência.",
   "Não existe vetor de work-limit, cancelled nem overflow: são decisões de política do produto, sem evidência externa.",
   "Isto não promove nenhuma capacidade da matriz: aPLib continua blocked em decode vs ref / encode vs ref / negativos / recurso real até o produto decodificar e os oráculos decodificarem o encode do produto."
@@ -253,5 +253,53 @@
    "bytes": 8,
    "sha256": "7d2a00bba7493ae72b49a2f9d4d8b55bf50f651a8c102ab60598046f10bdda49"
   }
+ },
+ "discriminadores_do_integrador": {
+  "criado_em": "2026-09-26",
+  "caminho": "data/rex_profiles/integrator/aplib/discriminating/",
+  "por_que": "A fixture importada de B não coloca um rep-match depois do token `110` nem depois do `111`, e o contrato de B não enuncia a regra do `110`. O decoder do produto passou nos 49 arquivos e divergiu dos dois decodificadores de referência em 703 dos 16000 bytes do TileSet APLIB real da ROM BYOR (0x2e4d4). Estes dois vetores fecham o buraco de cobertura.",
+  "quem_definiu_o_plain": "Os dois decodificadores externos, em concordância: apultra (binário ~/.cache/rex-codecs/oracle-tools/apultra, SHA-256 64be2a7a8e44d3c5a4ed33de3b6d8aba294aa02870f51c29c8985fea4b34b207, origem declarada commit 8f340057d7402c10da3d9c76c599f9ab83b8a22d) e apj.jar da SGDK 2.11 (SHA-256 verificado antes de executar: 2d8cdc63cc800e4b86ff4d9cdfe514001b77f788abcd02d61974dc319d026204). A alternativa do bug foi impressa e rejeitada por ambos.",
+  "casos": {
+   "rep_after_cmd110": "fixa que `110` ATUALIZA offset_history",
+   "rep_after_short111": "fixa que `111` NÃO atualiza offset_history e devolve LWM a 3"
+  },
+  "arquivos_por_sha256": {
+   "rep_after_cmd110.ap": {
+    "sha256": "ad493501914f6b2f4a1a86ff794773e6d04bbaf325149530735d9f0f72608032",
+    "bytes": 14
+   },
+   "rep_after_cmd110.expected.bin": {
+    "sha256": "0e70ea8abdce2d9a95ca984c2d72bf768c87a3c6762e2b94835419d07814d637",
+    "bytes": 18
+   },
+   "rep_after_short111.ap": {
+    "sha256": "92dcd1cab30f112029bcf68262697961366cca9f2881253311df74d22a29be27",
+    "bytes": 12
+   },
+   "rep_after_short111.expected.bin": {
+    "sha256": "5e28b3453fba6c3a0cb8913e485dace2ab83fa7effcae304c909b2a289a3cc95",
+    "bytes": 15
+   }
+  },
+  "construcao": "python3 scripts/rex_profiles/integrator/aplib/gen_discriminating_vector.py --saidas /tmp/disc",
+  "cobertura_no_produto": "rex_aplib.rs::tests::aplib_rep_match_depois_de_110_e_de_111_usa_o_offset_correto (falha sem o correction; verde com ele) e rex_resources.rs::tests::byor_aplib_decodifica_os_dois_streams_do_tiledimage_visivel"
+ },
+ "arbitragem_da_stream_real": {
+  "medido_em": "2026-09-26",
+  "rom": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9 (917504 B, lida do caminho local durável; nenhum byte staged)",
+  "streams": {
+   "tileset-0x2e4d4": {
+    "consumido": 4485,
+    "produzido": 16000,
+    "sha256_produzido": "dd7affc3971a73840b84b028c0f41372b49c52df3f4f29d09885c59e83b80f5f"
+   },
+   "tilemap-0x2d534": {
+    "consumido": 1196,
+    "produzido": 2240,
+    "sha256_produzido": "c196aa5ba9b29a440b2680afb000795cebee242346503fb2342fd11ee5a704f1"
+   }
+  },
+  "receita": "node scripts/rex_profiles/integrator/aplib/byor_cross_check.mjs  (JS de A) + os comandos dd/apultra/java documentados em discriminating/ORIGEM.md",
+  "concordancia": "apultra == apj.jar == JS da agente A == decoder do produto (depois da correção do histórico de offset). Antes da correção o produto produzia 34a894c3d50868aec5dd5d0fd977a3074a339f543de76ceea6f03a51b7d3bb7c no tileset, com o mesmo enquadramento (4485 consumidos, 16000 produzidos) e 703 bytes de conteúdo divergente."
  }
 }

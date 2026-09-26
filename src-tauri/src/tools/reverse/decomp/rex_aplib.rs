@@ -7,6 +7,12 @@
 //! são derivadas do contrato, não do oráculo: `apultra` e `apj.jar` não validam
 //! entrada (leem além do EOF), então aceitar stream truncado **não** é
 //! comportamento esperado do produto.
+//!
+//! Histórico de offset (o que o rep-match reusa): gravado por `10` e por `110`,
+//! **não** gravado por `111`. A fixture de B não exercita `110`/`111` seguidos de
+//! rep-match e a regra faltava no contrato dela; os dois casos estão pinados em
+//! `data/rex_profiles/integrator/aplib/discriminating/` e foram decididos pelos
+//! próprios decodificadores de referência.
 
 use super::rex_codecs::CodecError;
 
@@ -206,6 +212,10 @@ pub fn aplib_decode(stream: &[u8], limits: &AplibLimits) -> Result<AplibDecoded,
                 2 + usize::from(cmd & 1),
                 limits,
             )?;
+            // O `110` é um match explícito: grava o histórico. Sem isso, o
+            // rep-match seguinte reusa um offset obsoleto — medido em 703 bytes
+            // do TileSet APLIB real (vetor `rep_after_cmd110`).
+            last_offset = usize::from(cmd >> 1);
             lwm = 2;
             continue;
         }
@@ -333,6 +343,50 @@ mod tests {
             casos += 1;
         }
         assert_eq!(casos, 9, "esperava 9 goldens no manifest.tsv");
+    }
+
+    /// Cobertura do ramo que a fixture importada de B não exercita: um
+    /// rep-match logo depois de `110` e logo depois de `111`. Os plains abaixo
+    /// foram definidos pelos dois decodificadores de referência (procedência em
+    /// `data/rex_profiles/integrator/aplib/discriminating/ORIGEM.md`). O decoder
+    /// do produto passava nos 49 arquivos importados e errava aqui — 703 dos
+    /// 16 000 bytes do TileSet APLIB real da ROM BYOR.
+    #[test]
+    fn aplib_rep_match_depois_de_110_e_de_111_usa_o_offset_correto() {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../data/rex_profiles/integrator/aplib/discriminating");
+        let leia = |nome: &str| -> Vec<u8> {
+            let caminho = dir.join(nome);
+            std::fs::read(&caminho).unwrap_or_else(|e| {
+                panic!("vetor discriminador ausente: {}: {e}", caminho.display())
+            })
+        };
+        // (nome, plain correto, plain resultante de NÃO gravar o histórico)
+        let casos: [(&str, &[u8], &[u8]); 2] = [
+            (
+                "rep_after_cmd110",
+                b"ABCDEFDEFDFDEGDFDE",
+                b"ABCDEFDEFDFDEGDEGD",
+            ),
+            ("rep_after_short111", b"ABCDEFDEFDDFDDF", b"ABCDEFDEFDDEFDD"),
+        ];
+        for (nome, correto, bug) in casos {
+            assert_ne!(correto, bug, "{nome}: o caso deixou de discriminar");
+            let stream = leia(&format!("{nome}.ap"));
+            let esperado = leia(&format!("{nome}.expected.bin"));
+            assert_eq!(
+                esperado,
+                correto.to_vec(),
+                "{nome}: expectativa do teste divergiu do arquivo pinado"
+            );
+            let decode = decodificar(&stream, AplibLimits::default());
+            assert_eq!(decode.data, correto.to_vec(), "{nome}: plain divergente");
+            assert_eq!(
+                decode.bytes_consumed,
+                stream.len(),
+                "{nome}: consumo deveria ser o stream inteiro"
+            );
+        }
     }
 
     #[test]
