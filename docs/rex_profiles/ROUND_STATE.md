@@ -376,10 +376,25 @@ e `codecs/` (B) do CONTRACTS v1.
   **Gates desta árvore.** `npm run check:tree` rc=0 · `npm run lint` rc=0 ·
   `npx tsc --noEmit` rc=0 · `npm test` → **706 passed, 0 failed, 6 skipped**
   (invariante anterior 702; **+4** = as quatro regressões do painel, arquivo com
-  10 testes) · `cargo fmt -- --check` rc=0 · `cargo clippy -- -D warnings` rc=0 ·
-  `cargo test --lib` → **707 passed, 0 failed, 63 ignored** (invariante anterior
+  10 testes) · `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` rc=0 ·
+  `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` rc=0 ·
+  `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture` →
+  **707 passed, 0 failed, 63 ignored** (invariante anterior
   706; **+1** = o pino do índice 0 no codec). Os logs promovidos são os das
   reexecuções corretas, descritos acima.
+
+  **Push e CI registrados por SHA.** `git fetch` + `git push origin
+  codex/rex-integrator-aplib-decode` → fast-forward `19c880f..9a4335f` (0 atrás, 6
+  à frente: `794033e`, `af5d5d0`, `d769629`, `eae825a`, `ad3ff57`, `9a4335f`).
+  Consulta **pontual**, sem monitor permanente, no SHA publicado
+  `9a4335f72bf0f463faa23cdfdd5db45059c71983`: workflow `CI` → **success**
+  (`validate`, `linux-validate`), run `36315702049`; workflow `Desktop E2E` →
+  **success** (`desktop-smoke`), run `36315702070`. O que esse verde **não** cobre
+  continua sendo os dois aceites `#[ignore]` e o cenário `rex-aplib-byor-effect`,
+  que consomem BYOR — BYOR não é dependência provisionável, então o CI atesta o
+  contrato, não esta ROM. O commit que registra este parágrafo é só texto e não
+  recebeu consulta própria: o verde aplicável à árvore testada é o de `9a4335f`, e
+  pontas só de texto já observaram verde antes (`19c880f`, run `36305001760`).
 
   **Limites, parte da célula.** Continua **um** dos **4** recursos aPLib de **uma**
   ROM BYOR; `0x2e4d4`/`0x2f65a` ineditáveis em 1 pixel nos dois domínios; execução
