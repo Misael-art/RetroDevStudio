@@ -81,11 +81,17 @@ cópia, e efeito em tela nas 2 posições previstas pela geometria chunky, execu
 pelo desempacotador do próprio jogo. Evidência por hash em
 `data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna3-core/` e
 `.../2026-09-27-passo5-perna2-barra/`, e nos checkpoints do passo 5 abaixo.
+**Complemento de 2026-09-27 (entrega 2):** o painel expressa o domínio inteiro do
+4bpp (`0..15`), inclusive o índice 0 que `min=1` + `Number(v) || 1` reescreviam para
+1; a edição pinada das pernas 1 e 3 — `(53,0,4) → 0`, 937 B no slot de 938 B — agora
+é digitável na barra e a cópia que ela escreve é **byte a byte** `69389ec2…`, o
+artefato que a perna 3 executou no desempacotador do jogo. Pacote:
+`data/rex_profiles/integrator/aplib/evidence/2026-09-27-entrega2-indice-0-na-barra/`.
 
 Limites desta célula, parte do que ela afirma (não são nota de rodapé): é **um**
 dos **4** recursos aPLib da ROM; `0x2e4d4` e `0x2f65a` não aceitam nenhuma edição
-de 1 pixel (nenhum piso cabe no slot, mesmo contando índice 0: 4 540 > 4 485 e
-7 439 > 7 420), `0x2e12a` tem folga de 1 B e `0x2cd94` folga 0; prova de execução é
+de 1 pixel no domínio inteiro que a barra expressa hoje (0..15: piso 4 540 > slot
+4 485 e 7 439 > 7 420), `0x2e12a` tem folga de 1 B e `0x2cd94` folga 0; prova de execução é
 sob o core do harness (Genesis Plus GX v1.7.4 `46a5521`), não em hardware nem no
 app distribuído; e "editável" não é "compreendido" — a classe do alvo segue
 desconhecida.
@@ -248,6 +254,142 @@ produto. Evidência do integrador vive em namespace próprio
 e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
+
+- 2026-09-27 (integrador, **ENTREGAS 2 e 3 do briefing — o índice 0 deixou de ser
+  achado e passou a ser caminho**, e a barra o percorre de ponta a ponta), célula
+  de fechamento. **HEAD de partida:** `794033e` (entrega 1). **Ordem recebida:**
+  "O campo atual usa `min=1` e `Number(value) || 1`, transformando 0 em 1. O índice
+  0 pertence ao domínio 4bpp e deve ser representável" + "substitua as asserções
+  que preservavam o defeito por regressões" + "reconfirme espaço e hashes, não
+  copie números antigos". **Commits desta célula:** `af5d5d0` (conserto na UI),
+  `d769629` (pino no codec + varredura no domínio real da barra), `eae825a`
+  (regressões no cenário WebDriver) e `ad3ff57` (o `selectResource` assentado e as
+  durações por aplicação, que fecham as duas janelas de harness descritas abaixo).
+
+  **O que estava errado e por quê.** `CompressedResourcePanel.tsx` guardava o campo
+  de índice como número já coercido (`setPaintIndex(Number(event.target.value) ||
+  1)`) com `min={1}`, então o `0` digitado virava `1` **antes** de qualquer
+  validação — o `editRejectReason` nem via o 0. O 0 é índice legítimo do 4bpp: é o
+  índice que o VDP lê como transparente no plano de tiles. **Isto não é a cor RGB
+  da paleta:** editar o índice de um pixel escolhe qual entrada da paleta aquele
+  pixel usa; mexer no RGB de uma entrada é outra superfície, que este painel não
+  toca. A distinção agora está escrita no cabeçalho do painel e em cada queixa de
+  índice inválido, para não ser nota de rodapé.
+
+  **O conserto (UI).** O campo guarda o **texto** digitado (`useState("1")`) e é
+  validado por `paintIndexRejectReason`, que dá queixa própria por forma: campo
+  vazio, não número, não inteiro e fora de 0..15 — cada uma terminando com o
+  domínio e com "A fila atual foi preservada". Nada entra na fila no lugar de outra
+  cor. `editRejectReason` passou a aceitar inteiro em `[0, 16)` (antes 0 era
+  recusado como índice de paleta). Pintura por clique e botão "Adicionar edição"
+  compartilham o mesmo `queuePaint`, então as duas superfícies herdam a mesma
+  validação. A guarda do núcleo continua sendo a definitiva e não mudou.
+
+  **Hashes e espaços re-medidos, não copiados.** Com o encoder atual, em
+  2026-09-27: a edição pinada das pernas 1 e 3 — tile 53, linha 0, coluna 4,
+  índice 5 → **0** — custa **937 B** no slot de **938 B** (folga 1 B) e produz a
+  cópia `69389ec2b400220c7a069e4c36326ca3c26d81e85ff0ab81bf798dc9ae4038ac`, com
+  patch BPS `8bf6d3df…` (853 B) e **781** bytes distintos na cópia, **0** fora do
+  slot. Medido por `cargo test --lib byor_aplib -- --ignored --nocapture`.
+
+  **Varredura re-ancorada no domínio real da barra (v2,
+  `rex-aplib-capacidade-da-barra/v2`).** A varredura que escolhia o alvo deixara de
+  descrever a interface: contava 1..15. Ela agora mede os dois domínios. Em
+  `0x2e12a`: `piso_indices_da_barra` 932 B contra `piso_sem_indice_0` 934 B, e
+  `cabiveis_na_barra` **1 694** contra `cabiveis_sem_indice_0` **1 619** — o índice
+  0 abre **75** edições de 1 pixel que a barra não alcançava. Em `0x2cd94`: 78 vs
+  77 (**+1**). `0x2e4d4` e `0x2f65a` seguem em **0** nos dois domínios (piso
+  4 540 > slot 4 485; 7 439 > 7 420) — para esses dois o conserto da UI não muda
+  nada, e a célula da matriz que o diz continua verdadeira. Total de edições
+  cabíveis com índice 0 nas quatro varreduras: **76**. Higiene de medição medida
+  nesta mesma célula: o tile 53 entrava duas vezes na lista de alvos (varredura
+  completa de 64 pixels + amostra genérica `(0,0)`/`(0,4)` por tile), então uma
+  edição era contada em dobro; com `sort_unstable + dedup` as tentativas caem de
+  10 770 para **10 740** (−30 = 2 pixels duplicados × 15 índices) e `cabiveis`
+  1 695 → **1 694** — o único par duplicado que cabia era justamente o do índice 0.
+  A calibração pinada (`CUSTO_DO_PIN_5_PARA_0 = 937`) continua valendo e a lista do
+  tile 53 agora é `[[0,4,937],[7,5,938],[7,7,938]]`, com `pin_cabiveis == vec![0]`
+  e o cruzamento `cabiveis_sem_indice_0 ==` contagem das entradas com índice ≥ 1
+  asseridos no teste; as 5 sondas de recusa por forma (§5a) e os 14 índices
+  recusados com `excessive_output` (§6a) estão nos relatórios do WebDriver
+  promovidos no pacote abaixo.
+
+  **Regressões no cenário `rex-aplib-byor-effect` (schema
+  `rex-aplib-byor-effect/v2`).** As asserções que preservavam o defeito saíram e
+  entraram as que o impedem de voltar. No lib de testes da UI (`af5d5d0`, 4
+  entradas novas no arquivo, que passa a ter 10): "digitar índice 0 mantém 0 no
+  campo e a transação recebe índice 0", "entrada de índice inválida diz o motivo e
+  não entra na fila no lugar de outra cor", "pintura por clique usa o índice do
+  campo, inclusive 0, e recusa campo inválido" e "índice 0 sobrevive a desfazer
+  (re-editar o pixel), reabrir o recurso e ao no-op". No WebDriver: §5a: cinco formas fora do domínio (`linha 8`,
+  índice `16`, `-1`, `1.5`, campo vazio) cada uma com queixa própria **e** fila
+  vazia asserida. §5b: digitar **0** deixa `"0"` no campo do DOM (qualquer outro
+  valor ali é a coerção voltando), a edição entra na fila, a transação **completa**,
+  o hash anunciado é `69389ec2b400220c…`, o arquivo em disco re-hashed é exatamente
+  `69389ec2…`, a cópia tem o mesmo tamanho da ROM (917 504 B) e **0** bytes fora de
+  `[0x2e12a, +938)`. §6a mantém o lado diferencial: **14** índices de 1..15 no
+  mesmo pixel, todos recusados com `excessive_output` — prova de que 0 não é outro
+  valor disfarçado. §6b mantém a edição 5→4 em `(53,7,5)` como regressão útil:
+  cópia `80249128…`, BPS `58ae4f0b…` reaplicado, 800 bytes distintos, 163
+  preservados — os mesmos hashes das corridas do passo 5.
+
+  **Corridas desta célula, registradas como aconteceram.** Quatro corridas do
+  cenário nesta árvore, todas com a ROM `558bea6c…` conferida antes de cada uma.
+  (1) 10:34Z, logo após um build: falha no WebDriver — `setPanelInput` em
+  `rex-resource-paint-index` recebeu "o setter de HTMLInputElement.value só aceita
+  instância de HTMLInputElement", que em WebKit é o que ocorre quando o elemento
+  não está lá. Diagnóstico: a espera do harness era por `rex-resource-canvas`, e o
+  painel desmonta o bloco inteiro (prévia **e** campo de índice) ao começar a
+  re-decodagem — a sondagem pode ver o canvas do estado anterior e passar cedo.
+  (2) 10:45Z, mesmo binário, com `selectResource` esperando a condição assentada
+  (campo de índice montado **e** botão aplicar habilitado, ou seja `busy === false`)
+  e com marcadores de passo: **verde, 23 passos** — `valor_no_campo = "0"`, desfecho
+  aplicado, cópia `69389ec2…` conferida em disco, 14 recusas, 5 recusas de guarda,
+  alvo 5→4 com `80249128…`. (3) 10:52Z, build completo novo: passou 5a, **5b** e os
+  14 índices de 6a e morreu no orçamento de 60 s do desfecho em §6b, com a edição já
+  na fila, sem erro no painel e sem desfecho. (4) 10:58Z, mesmo binário da (3) e
+  orçamento por aplicação medido: **verde**, `E2E_RC=0`, com as durações registradas
+  no relatório — **7 621 ms** para o apply do índice 0, **272–327 ms** para cada uma
+  das 14 recusas e **7 400 ms** para o apply do alvo 5→4. As três últimas cópias e o
+  BPS são as mesmas das corridas do passo 5 (`69389ec2…`, `80249128…`, `58ae4f0b…`),
+  781/800 bytes distintos, 0 fora do slot, 163 preservados.
+  **O que isso ainda não explica:** a corrida (3) estourou 60 s num passo que custa
+  ~7,4 s — não foi lentidão sistemática nem a barreira do orçamento sendo atingida
+  "por pouco", e a causa do travamento único não foi estabelecida. O que mudou desde
+  então é diagnóstico, não produto: cada desfecho agora carrega sua duração e o
+  orçamento subiu para 180 s, então a próxima ocorrência é medida em vez de virar
+  timeout cego. Um `rc=101` no meio da série de gates foi erro de invoco meu
+  (`cargo` rodado fora de `src-tauri`, sem `--manifest-path`: "could not find
+  Cargo.toml"), não falha de código.
+
+  **Efeito em tela.** A perna 3 já executou a cópia `69389ec2…` no desempacotador
+  do próprio jogo (2 pixels por frame em 119 frames, coordenadas `[[212,200],
+  [284,128]]`) e as duas pernas de core foram reexecutadas hoje às 10:29Z (07:29
+  local) — `rex05`
+  (edição do backend) e `rex06` (cópia da barra, `80249128…`, 232 pixels / 116
+  frames nas posições previstas). O que esta célula fecha é a identidade: a barra
+  produz **byte a byte** o artefato que o núcleo rodou. A asserção nibble a nibble
+  da edição de índice 0 vive no lib (`indice_0_e_do_dominio_4bpp_ate_o_stream_aplib`:
+  `0x5A → 0x0A` no nibble baixo, `0xA5 → 0xA0` no alto, vizinhos intactos, e o
+  índice 0 sobrevivendo a re-codificação + decode no fixture autoral).
+
+  **Gates desta árvore.** `npm run check:tree` rc=0 · `npm run lint` rc=0 ·
+  `npx tsc --noEmit` rc=0 · `npm test` → **706 passed, 0 failed, 6 skipped**
+  (invariante anterior 702; **+4** = as quatro regressões do painel, arquivo com
+  10 testes) · `cargo fmt -- --check` rc=0 · `cargo clippy -- -D warnings` rc=0 ·
+  `cargo test --lib` → **707 passed, 0 failed, 63 ignored** (invariante anterior
+  706; **+1** = o pino do índice 0 no codec). Os logs promovidos são os das
+  reexecuções corretas, descritos acima.
+
+  **Limites, parte da célula.** Continua **um** dos **4** recursos aPLib de **uma**
+  ROM BYOR; `0x2e4d4`/`0x2f65a` ineditáveis em 1 pixel nos dois domínios; execução
+  sob core de harness, não hardware nem app distribuído; BYOR não roda no CI, e o
+  pacote não versiona ROM nem capturas derivadas dela (só hashes); "editável" não é
+  "compreendido" — a classe do alvo segue desconhecida. **Maturidade:** nada
+  promovido, produto continua `Experimental`. **Sem merge, sem release, sem
+  promoção de maturidade.** A decisão (b) do checkpoint anterior ("decidir a
+  semântica do índice 0 na UI") foi executada por ordem expressa do operador e
+  deixa de estar em aberto.
 
 - 2026-09-27 (integrador, **ENTREGA 1 do briefing do operador — a linha aPLib da
   matriz deixou de atrasar o código**), célula de correção de registro. **HEAD de

@@ -1,0 +1,191 @@
+{
+  "anunciado_pela_barra": {
+    "copia_sha256": "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce",
+    "custo_medido_pela_varredura": 938,
+    "preservados": 163
+  },
+  "coordenadas_distintas": [
+    [
+      213,
+      207
+    ],
+    [
+      285,
+      135
+    ]
+  ],
+  "core": {
+    "label": "Genesis Plus GX v1.7.4 46a5521",
+    "sha256": "07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1"
+  },
+  "determinismo_base_a_vs_base_b": 0,
+  "esperado_pelas_predicoes_acima": [
+    [
+      213,
+      207
+    ],
+    [
+      285,
+      135
+    ]
+  ],
+  "framebuffer": {
+    "altura": 224,
+    "largura": 320
+  },
+  "frames": 180,
+  "frames_divergentes": {
+    "100": 2,
+    "101": 2,
+    "102": 2,
+    "103": 2,
+    "104": 2,
+    "105": 2,
+    "106": 2,
+    "107": 2,
+    "108": 2,
+    "109": 2,
+    "110": 2,
+    "111": 2,
+    "112": 2,
+    "113": 2,
+    "114": 2,
+    "115": 2,
+    "116": 2,
+    "117": 2,
+    "118": 2,
+    "119": 2,
+    "120": 2,
+    "121": 2,
+    "122": 2,
+    "123": 2,
+    "124": 2,
+    "125": 2,
+    "126": 2,
+    "127": 2,
+    "128": 2,
+    "129": 2,
+    "130": 2,
+    "131": 2,
+    "132": 2,
+    "133": 2,
+    "134": 2,
+    "135": 2,
+    "136": 2,
+    "137": 2,
+    "138": 2,
+    "139": 2,
+    "140": 2,
+    "141": 2,
+    "142": 2,
+    "143": 2,
+    "144": 2,
+    "145": 2,
+    "146": 2,
+    "147": 2,
+    "148": 2,
+    "149": 2,
+    "150": 2,
+    "151": 2,
+    "152": 2,
+    "153": 2,
+    "154": 2,
+    "155": 2,
+    "156": 2,
+    "157": 2,
+    "158": 2,
+    "159": 2,
+    "160": 2,
+    "161": 2,
+    "162": 2,
+    "163": 2,
+    "164": 2,
+    "165": 2,
+    "166": 2,
+    "167": 2,
+    "168": 2,
+    "169": 2,
+    "170": 2,
+    "171": 2,
+    "172": 2,
+    "173": 2,
+    "174": 2,
+    "175": 2,
+    "176": 2,
+    "177": 2,
+    "178": 2,
+    "179": 2,
+    "59": 2,
+    "63": 2,
+    "64": 2,
+    "65": 2,
+    "68": 2,
+    "69": 2,
+    "70": 2,
+    "71": 2,
+    "72": 2,
+    "73": 2,
+    "74": 2,
+    "75": 2,
+    "76": 2,
+    "77": 2,
+    "78": 2,
+    "79": 2,
+    "80": 2,
+    "81": 2,
+    "82": 2,
+    "83": 2,
+    "84": 2,
+    "85": 2,
+    "86": 2,
+    "87": 2,
+    "88": 2,
+    "89": 2,
+    "90": 2,
+    "91": 2,
+    "92": 2,
+    "93": 2,
+    "94": 2,
+    "95": 2,
+    "96": 2,
+    "97": 2,
+    "98": 2,
+    "99": 2
+  },
+  "input_script_sha256": "e52d3370383f4cae7667832755bd5af594fd86a2fc2a51038cb1f7f557cc0d72",
+  "limites": "Prova o efeito em tela do artefato que a BARRA escreveu, executado pelo desempacotador do próprio jogo sob o core do harness da lib. Não prova o app distribuído, nem o resto dos recursos aPLib, nem hardware real. O índice 0 das pernas 1 e 3, que a interface não sabia expressar quando este teste foi escrito, passou a ser expressável (regressão na sonda 5b do cenário `rex-aplib-byor-effect`): a barra escreve lá, de um dígito, a cópia 69389ec2… que a perna 3 já tinha executado no core — o efeito em tela daquele artefato está provado por identidade de bytes, não por uma corrida nova desta edição pela barra.",
+  "patch_bps_sha256": "58ae4f0b5eb81ebb88579741738a473f144369dfeb1723aad9c8bb0c731331b0",
+  "pixels_alterados_total": 232,
+  "pixels_no_checkpoint_129": [
+    [
+      213,
+      207
+    ],
+    [
+      285,
+      135
+    ]
+  ],
+  "primeiro_frame_divergente": 59,
+  "recurso": {
+    "codec": "aplib",
+    "escritos_bytes": 938,
+    "indice_novo": 4,
+    "pixel_do_tile": [
+      7,
+      5
+    ],
+    "slot_bytes": 938,
+    "stream_offset": "0x2e12a",
+    "tile": 53
+  },
+  "rom_modificada": {
+    "origem": "apply_resource_edit com os campos que a barra enviou",
+    "path": "/home/misael/.retrodev/decomp_work/extract/558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9/edits/rex-aplib-modified-80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce.bin",
+    "sha256": "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce"
+  },
+  "rom_original": {
+    "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+    "sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9"
+  }
+}
