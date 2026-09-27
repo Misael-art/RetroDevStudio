@@ -16,8 +16,7 @@
 use super::json::Json;
 use super::sha256::sha256_hex;
 
-pub const WINDOWS_SHA256: &str =
-    "2de90492ed92066eb524f83f9985d84ada97e80987ff2705d554b14f86b115fa";
+pub const WINDOWS_SHA256: &str = "2de90492ed92066eb524f83f9985d84ada97e80987ff2705d554b14f86b115fa";
 pub const BUS_LIMIT: u64 = 0xff_ffff;
 
 #[derive(Clone, Debug)]
@@ -42,7 +41,10 @@ pub enum OffsetRule {
 
 #[derive(Clone, Debug)]
 pub enum RowKind {
-    Region { region: &'static str, rule: OffsetRule },
+    Region {
+        region: &'static str,
+        rule: OffsetRule,
+    },
     Error(&'static str),
 }
 
@@ -388,6 +390,33 @@ pub fn table_for(profile: &str, state_rom_size: u64) -> Table {
     }
 }
 
+/// Intervalos de `rom_size` que o motor sabe modelar, por perfil. Son os
+/// intervalos das specs pinadas (`docs/rex_profiles/addressing/*.md`),
+/// transcritos aquí **como datos** e independentemente do código do perfil
+/// baixo proba.
+///
+/// Por que fai falta: o `Table` é aritmética de xanelas, e a aritmética dá
+/// resposta para calquera potencia de 2 — pero o contrato *rexeita* tamaños
+/// fóra do intervalo do perfil antes de facer calquera conta. Un estado fóra do
+/// intervalo non é un desacordo entre perfil e referencia: é un caso que a
+/// referencia non gradúa, e gradualo faría pasar un bug por acordo.
+pub fn models_size(profile: &str, rom_size: u64) -> bool {
+    let binary = rom_size.is_power_of_two();
+    match profile {
+        "md-linear" => binary && (0x1_0000..=0x40_0000).contains(&rom_size),
+        "md-ssf2" => binary && (0x8_0000..=0x80_0000).contains(&rom_size),
+        "snes-lorom" => binary && (0x8000..=0x40_0000).contains(&rom_size),
+        "snes-hirom" => binary && (0x1_0000..=0x40_0000).contains(&rom_size),
+        // ExHiROM: 5MB/6MB son totais non binarios cuxa *segunda* área si o é.
+        "snes-exhirom" => {
+            rom_size > 0x40_0000
+                && rom_size <= 0x80_0000
+                && (rom_size - 0x40_0000).is_power_of_two()
+        }
+        _ => false,
+    }
+}
+
 // ------------------------------------------------- SSF2: táboa de páxinas
 
 /// Simulación literal do modelo de 64 páxinas de GPGX: cada escrita de
@@ -417,7 +446,7 @@ impl Ssf2Engine {
 
     /// `mapper_ssf2_w` + `mapper_512k_w`: só a páxina TIME, só slots != 0.
     pub fn write_register(&mut self, addr: u64, data: u64, rom_size: u64) {
-        if addr < 0xa13000 || addr > 0xa130ff {
+        if !(0xa13000..=0xa130ff).contains(&addr) {
             return;
         }
         if addr & 0x0e == 0 {
