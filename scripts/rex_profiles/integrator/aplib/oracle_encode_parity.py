@@ -15,9 +15,13 @@ Receita dos streams do produto (regenerável, não versionada):
     python3 scripts/rex_profiles/integrator/aplib/oracle_encode_parity.py \
         src-tauri/target-test/analysis/aplib
 
-Ausência de ferramenta, SHA divergido, stream que não desempacota ou hash que não
-bate são todos falha com rc != 0 e mensagem própria. Skip silencioso não existe:
-sem oráculo a prova não aconteceu, e o script diz isso.
+Ausência de ferramenta, SHA divergido, stream que não desempacota, hash que não
+bate, caso ausente, caso sem linha no manifesto, linha duplicada no manifesto e
+timeout de oráculo são todos falha com rc != 0 e mensagem própria. Skip silencioso
+não existe: sem oráculo a prova não aconteceu, e o script diz isso. O fecho é por
+contagem — `esperado | executado | aprovado | divergente` — e `esperado` vem do
+manifesto, não dos dumps presentes, porque "0 divergência" em 2 casos dos 8
+esperados seria exatamente o aceite curto que a igualdade de conjuntos impede.
 """
 from __future__ import annotations
 
@@ -86,16 +90,45 @@ def oracos_prontos(escolhidos):
 
 
 def pinados(manifest: Path) -> dict[str, str]:
-    """`nome -> sha256 do plain` para as linhas `plain` do manifest."""
-    linhas = manifest.read_text().splitlines()
+    """`nome -> sha256 do plain` para as linhas `plain` do manifest.
+
+    Duplicidade é falha, não última-vence: duas linhas com o mesmo nome são duas
+    referências concorrentes, e a que sobrevivesse à leitura decidiria contra o
+    que o aceite compara — o que é exatamente a escolha que não deve depender da
+    ordem do arquivo.
+    """
     saida: dict[str, str] = {}
-    for linha in linhas[1:]:
+    for linha in manifest.read_text().splitlines()[1:]:
         col = linha.split("\t")
-        if col[0] == "plain":
-            if not col[3]:
-                raise ValueError(f"linha '{col[1]}' sem SHA-256 de plain pinado")
-            saida[col[1]] = col[3]
+        if col[0] != "plain":
+            continue
+        if not col[3]:
+            raise ValueError(f"linha '{col[1]}' sem SHA-256 de plain pinado")
+        if col[1] in saida:
+            raise ValueError(
+                f"manifesto com linha 'plain' duplicada para '{col[1]}': "
+                f"{saida[col[1]][:12]}… e {col[3][:12]}…"
+                if saida[col[1]] != col[3]
+                else f"manifesto com linha 'plain' duplicada para '{col[1]}'"
+            )
+        saida[col[1]] = col[3]
     return saida
+
+
+def conjuntos(esperado: dict[str, str], dumps: list[Path]) -> tuple[list[str], list[str]]:
+    """`(faltando, desconhecidos)` entre o manifesto e os dumps presentes.
+
+    Igualdade de conjuntos é o que torna a linha `0 divergência` legível: sem ela,
+    rodar 2 casos dos 8 esperados também termina sem divergência nenhuma, e o
+    número de casos executados é a única coisa que denunciaria o aceite curto.
+    """
+    nomes = [caminho.name[: -len(".produto.ap")] for caminho in dumps]
+    presentes = set(nomes)
+    faltando = sorted(set(esperado) - presentes)
+    desconhecidos = sorted(presentes - set(esperado))
+    if len(nomes) != len(presentes):
+        raise ValueError("dois dumps com o mesmo nome no diretório")
+    return faltando, desconhecidos
 
 
 def main(argv: list[str]) -> int:
@@ -112,6 +145,13 @@ def main(argv: list[str]) -> int:
         default="ambos",
         help="o padrão exige os dois oráculos; nomear um só estreita a alegação "
         "e fica impresso no cabeçalho da saída",
+    )
+    ap.add_argument(
+        "--timeout",
+        type=float,
+        default=120.0,
+        help="teto por chamada de oráculo, em segundos. Oráculo que não "
+        "responde dentro do teto é falha contada, nunca skip.",
     )
     args = ap.parse_args(argv[1:])
 
@@ -141,25 +181,53 @@ def main(argv: list[str]) -> int:
             "`RDS_APLIB_DUMP=<dir> cargo test --lib aplib_encode_dumpa`"
         )
         return 1
+    try:
+        faltando, desconhecidos = conjuntos(esperado, dumps)
+    except ValueError as e:
+        print(f"FALHA: {e}")
+        return 1
 
-    print(f"== {len(dumps)} streams x {len(oraculos)} oráculo(s): "
-          f"{', '.join(n for n, _ in oraculos)}")
-    falhas: list[str] = []
+    execucoes = len(esperado) * len(oraculos)
+    print(f"== {len(esperado)} casos esperados (manifest.tsv) x {len(oraculos)} "
+          f"oráculo(s): {', '.join(n for n, _ in oraculos)} = {execucoes} execuções")
+    for nome in faltando:
+        print(f"FALHA  caso ausente: {nome}.produto.ap")
+    for nome in desconhecidos:
+        print(f"FALHA  caso desconhecido: {nome}.produto.ap sem linha 'plain' no manifest")
+
+    falhas: list[str] = [
+        f"caso ausente: {nome}" for nome in faltando
+    ] + [
+        f"caso desconhecido no manifesto: {nome}" for nome in desconhecidos
+    ]
     aceitos = 0
+    executados = 0
     with tempfile.TemporaryDirectory(prefix="rex-aplib-oracle-") as saida_dir:
         for caminho in dumps:
             nome = caminho.name[: -len(".produto.ap")]
             if nome not in esperado:
-                falhas.append(f"{nome}: sem linha 'plain' pinada no manifest.tsv")
+                # Já contado em `desconhecidos`: executar um caso sem referência
+                # não tem o que comparar, e chamá-lo de aprovado seria o skip
+                # silencioso que este script existe para não produzir.
                 continue
             for oraculo, monta in oraculos:
+                executados += 1
                 destino = Path(saida_dir) / f"{nome}.{oraculo}.plain"
                 try:
                     comando = monta(caminho, destino)
                 except FileNotFoundError as e:
                     falhas.append(f"{nome}/{oraculo}: {e}")
                     continue
-                r = subprocess.run(comando, capture_output=True, text=True)
+                try:
+                    r = subprocess.run(
+                        comando, capture_output=True, text=True, timeout=args.timeout
+                    )
+                except subprocess.TimeoutExpired:
+                    falhas.append(
+                        f"{nome}/{oraculo}: timeout de {args.timeout:g}s — o oráculo "
+                        "não respondeu; contado como falha, não como skip"
+                    )
+                    continue
                 if r.returncode != 0 or not destino.is_file():
                     falhas.append(
                         f"{nome}/{oraculo}: recusou o stream do produto "
@@ -180,15 +248,17 @@ def main(argv: list[str]) -> int:
                     f" -> plain {len(bytes_plain):>6} B  {obtido[:12]}…"
                 )
 
+    print(f"\nesperado {execucoes} | executado {executados} | aprovado {aceitos} "
+          f"| divergente {len(falhas)}")
     if falhas:
-        print(f"\n{len(falhas)} divergência(s):")
+        print(f"{len(falhas)} divergência(s):")
         for f in falhas:
             print(f"  FAIL {f}")
         return 1
-    print(
-        f"\n{aceitos} aceitações ({len(dumps)} streams x {len(oraculos)} oráculos), "
-        "0 divergência."
-    )
+    if aceitos != execucoes:
+        print(f"FALHA: {aceitos} aprovações para {execucoes} execuções esperadas")
+        return 1
+    print(f"OK: {aceitos}/{execucoes} execuções aprovadas, 0 divergência.")
     return 0
 
 
