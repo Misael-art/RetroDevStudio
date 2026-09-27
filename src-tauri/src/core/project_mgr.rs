@@ -26204,6 +26204,390 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         );
     }
 
+    /// REX-06 (passo 5, perna 4) — o artefato que a BARRA escreveu, executado pelo
+    /// desempacotador do próprio jogo.
+    ///
+    /// A perna 2 (cenário WebDriver `rex-aplib-byor-effect`) mediu que a interface
+    /// sabe enviar exatamente esta edição do recurso aPLib real — tile 53, pixel
+    /// (linha 7, coluna 5) do tile, índice 5→4 — e que a transação do produto
+    /// escreveu a cópia de SHA-256
+    /// 80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce com o
+    /// patch BPS reaplicando esse mesmo hash. A perna 3 (`rex05_...` acima) rodou
+    /// no core uma edição DIFERENTE, 5→0, a única que cabe naquele pixel e que a
+    /// barra não sabe expressar; ela não alcança o artefato da interface. Este
+    /// teste fecha a cadeia: a cópia sai de `apply_resource_edit` com os mesmos
+    /// quatro campos que o painel mandou, tem seu hash conferido contra o que a
+    /// barra anunciou ANTES de qualquer frame rodar, e é essa cópia que entra no
+    /// core.
+    ///
+    /// Predições fixadas antes de executar (nenhuma é leitura do resultado):
+    /// 1. `stream_written == 938` — a varredura de capacidade do encoder
+    ///    (`byor_aplib_varre_edicoes_de_um_pixel_que_a_barra_sabe_expressar`) mediu
+    ///    (53,7,5)→4 como um dos dois únicos pares que cabem no tile observado 53,
+    ///    no teto exato do slot;
+    /// 2. a cópia tem o hash anunciado pela barra — sem isso o core executaria um
+    ///    artefato irmão, não o que a interface escreveu;
+    /// 3. os pixels alterados são exatamente (285,135) e (213,207): as duas
+    ///    colocações do tile 53 no TileMap — células (35,16) e (26,25), medidas no
+    ///    passo 4 com hflip/vflip/banco todos zero — mais o offset do pixel editado
+    ///    dentro da célula de 8×8;
+    /// 4. no frame 129, o mesmo par.
+    ///
+    /// Controles herdados da perna 3: os quatro checkpoints da evidência
+    /// pré-existente (rex-evidence-2026-09-10), que amarram a janela observada a
+    /// uma medição anterior a esta frente, e duas corridas frescas da ROM íntegra,
+    /// que não podem divergir em pixel nenhum.
+    ///
+    /// Rodar: `cargo test --lib rex06_hamoopig_aplib -- --ignored --nocapture`
+    #[ignore]
+    #[test]
+    fn rex06_hamoopig_aplib_edicao_da_barra_executa_no_core() {
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::EmulatorCore;
+        use crate::tools::reverse::decomp::rex_resources::{apply_resource_edit, PixelEdit};
+        use crate::tools::reverse::decomp::rom_library::{
+            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, sha256_hex,
+            ScenarioRunRecord, SCENARIO_VERDICT_PASSED,
+        };
+        use crate::tools::reverse::equivalence::artifact_ref;
+
+        const STREAM: u64 = 0x2e12a;
+        const SLOT: u32 = 938;
+        const TILE: u32 = 53;
+        const LINHA_PIXEL: u32 = 7;
+        const COLUNA_PIXEL: u32 = 5;
+        const INDICE: u8 = 4;
+        // Anunciados pela barra nas duas rodadas verdes do cenário
+        // `rex-aplib-byor-effect` (2026-09-27T07:00:50Z e 07:03:22Z, byte a byte
+        // idênticas entre si).
+        const SHA_COPIA_DA_BARRA: &str =
+            "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce";
+        const PRESERVADOS_DA_BARRA: usize = 163;
+        const CELULAS: [(u32, u32); 2] = [(35, 16), (26, 25)];
+
+        let test_name = "rex06_hamoopig_aplib_edicao_da_barra_executa_no_core";
+        let Some((rom_path, rom_sha)) = rex_reference_rom(
+            "RDS_REX_HAMOOPIG_ROM",
+            "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+            "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+            test_name,
+        ) else {
+            return;
+        };
+
+        let artifact_root = validation_artifact_dir("rex-hamoopig-aplib-edit-barra");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create rex06 artifact dir");
+
+        // ---- os mesmos quatro campos que o painel enviou.
+        let edicao = apply_resource_edit(
+            rom_path.to_str().expect("caminho utf8 da ROM"),
+            STREAM,
+            &[PixelEdit {
+                tile: TILE,
+                row: LINHA_PIXEL,
+                col: COLUNA_PIXEL,
+                index: INDICE,
+            }],
+            &rom_sha,
+        )
+        .expect("o produto recusou a edição que a barra aplicou");
+        assert_eq!(edicao.outcome, "applied", "{edicao:?}");
+        assert_eq!(edicao.codec, "aplib");
+        assert_eq!(edicao.original_stream_len, SLOT, "slot do recurso");
+        assert_eq!(
+            edicao.stream_written,
+            Some(SLOT),
+            "predição 1 quebrada: a varredura do encoder previa custo exatamente {SLOT} B para \
+             ({TILE},{LINHA_PIXEL},{COLUNA_PIXEL})→{INDICE}; mudou o encoder, o plano do \
+             recurso ou a geometria do nibble"
+        );
+        assert_eq!(
+            edicao.verified_preserved,
+            Some(PRESERVADOS_DA_BARRA),
+            "a barra anunciou {PRESERVADOS_DA_BARRA} preservados nesta ROM"
+        );
+        let modificada_path =
+            PathBuf::from(edicao.modified_rom_path.as_ref().expect("cópia do produto"));
+        let modificada_sha = edicao.modified_rom_sha256.clone().expect("sha da cópia");
+        assert_eq!(
+            modificada_sha,
+            sha256_hex(&fs::read(&modificada_path).expect("ler cópia do produto")),
+            "o hash que o produto anunciou não é o dos bytes que ele escreveu"
+        );
+        assert_eq!(
+            modificada_sha, SHA_COPIA_DA_BARRA,
+            "predição 2 quebrada: a transação chamada por este teste escreveu uma cópia \
+             diferente da que a barra escreveu — o core abaixo executaria outro artefato"
+        );
+
+        let script = rex_input_script_180f("rex06-hamoopig-aplib-barra-180f");
+        let script_path = artifact_root.join("input-script.rds-input.json");
+        rex_write_json(
+            &script_path,
+            &serde_json::to_value(&script).expect("serialize input script"),
+        );
+
+        let run_fresh =
+            |label: &str, rom: &Path| -> (u32, u32, Vec<Vec<u8>>, String, Option<String>) {
+                let mut core = EmulatorCore::new(None);
+                core.load_rom(rom)
+                    .unwrap_or_else(|error| panic!("{test_name}: carregar ROM ({label}): {error}"));
+                let core_label = core.loaded_core_label().unwrap_or("unknown").to_string();
+                let core_sha = core
+                    .loaded_core_file()
+                    .and_then(|path| fs::read(path).ok())
+                    .map(|bytes| sha256_hex(&bytes));
+                let mut dimensao = (0u32, 0u32);
+                let mut quadros = Vec::with_capacity(script.frames.len());
+                for (index, joypad) in script.frames.iter().enumerate() {
+                    core.set_joypad(joypad.clone()).unwrap_or_else(|error| {
+                        panic!("{test_name}: set_joypad ({label}) no frame {index}: {error}")
+                    });
+                    core.run_frame().unwrap_or_else(|error| {
+                        panic!("{test_name}: frame {index} ({label}): {error}")
+                    });
+                    let (buffer, size, format) = core.get_framebuffer().expect("framebuffer");
+                    let quadro = framebuffer_to_rgba(&buffer, size, format);
+                    dimensao = (quadro.width, quadro.height);
+                    quadros.push(quadro.rgba);
+                }
+                core.stop()
+                    .unwrap_or_else(|error| panic!("{test_name}: parar core ({label}): {error}"));
+                (dimensao.0, dimensao.1, quadros, core_label, core_sha)
+            };
+
+        fn pixels_diferentes(a: &[Vec<u8>], b: &[Vec<u8>], largura: u32) -> Vec<(u32, u32, u32)> {
+            let mut achados = Vec::new();
+            for (indice, (fa, fb)) in a.iter().zip(b.iter()).enumerate() {
+                assert_eq!(
+                    fa.len(),
+                    fb.len(),
+                    "framebuffers de tamanhos diferentes no frame {indice}"
+                );
+                for pixel in 0..fa.len() / 4 {
+                    let o = pixel * 4;
+                    if fa[o..o + 3] != fb[o..o + 3] {
+                        achados.push((
+                            (pixel as u32) % largura,
+                            (pixel as u32) / largura,
+                            indice as u32,
+                        ));
+                    }
+                }
+            }
+            achados
+        }
+
+        let (largura, altura, base_a, core_label, core_sha) = run_fresh("base-a", &rom_path);
+        let (largura_b, altura_b, base_b, _, _) = run_fresh("base-b", &rom_path);
+        let (largura_m, altura_m, modificada, _, _) = run_fresh("modificada", &modificada_path);
+        assert_eq!((largura, altura), (largura_b, altura_b));
+        assert_eq!((largura, altura), (largura_m, altura_m));
+
+        // ---- 0. a janela observada é a da evidência anterior a esta frente.
+        const CHECKPOINTS_A: [(u32, &str); 4] = [
+            (
+                59,
+                "61b8731607d1bdb9a8a555696ee764f2f2159c3b5539541462ae423e9bb4f637",
+            ),
+            (
+                69,
+                "56d1423c5231a0ebbbfa49e6a686320e7e9e32092b1c00453e8a0e305ca82f83",
+            ),
+            (
+                129,
+                "3df75345502f8165fa5aae93009bac07260bd60bd6a47d148114165e2963cf63",
+            ),
+            (
+                179,
+                "3df75345502f8165fa5aae93009bac07260bd60bd6a47d148114165e2963cf63",
+            ),
+        ];
+        for (frame, sha_esperado) in CHECKPOINTS_A {
+            assert_eq!(
+                sha256_hex(&base_a[frame as usize]),
+                sha_esperado,
+                "o frame {frame} desta corrida não é o frame {frame} da evidência de \
+                 2026-09-10: a janela observada mudou"
+            );
+        }
+
+        // ---- 1. controle de determinismo: mesma ROM, duas corridas frescas.
+        let ruido = pixels_diferentes(&base_a, &base_b, largura);
+        assert!(
+            ruido.is_empty(),
+            "power-on fresco da MESMA ROM divergiu em {} pixels (primeiros {:?}): sem \
+             determinismo o diff abaixo não significaria nada",
+            ruido.len(),
+            &ruido[..ruido.len().min(4)]
+        );
+
+        // ---- 2. o desempacotador do jogo executa o stream que a barra escreveu.
+        let alterados = pixels_diferentes(&base_a, &modificada, largura);
+        assert!(
+            !alterados.is_empty(),
+            "nenhum pixel de tela mudou com a edição da barra: o tile {TILE} nunca aparece \
+             nos {} frames desta janela",
+            script.frames.len()
+        );
+
+        // ---- 3/4. exatamente o pixel editado, nas duas colocações do tile.
+        let dentro_das_celulas = |x: u32, y: u32| {
+            CELULAS.iter().any(|(cx, cy)| {
+                (cx * 8..cx * 8 + 8).contains(&x) && (cy * 8..cy * 8 + 8).contains(&y)
+            })
+        };
+        let fora: Vec<(u32, u32, u32)> = alterados
+            .iter()
+            .copied()
+            .filter(|(x, y, _)| !dentro_das_celulas(*x, *y))
+            .collect();
+        let coordenadas: Vec<[u32; 2]> = alterados
+            .iter()
+            .map(|(x, y, _)| [*x, *y])
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mut esperado: Vec<[u32; 2]> = CELULAS
+            .iter()
+            .map(|(cx, cy)| [cx * 8 + COLUNA_PIXEL, cy * 8 + LINHA_PIXEL])
+            .collect();
+        esperado.sort();
+        let frames_divergentes: std::collections::BTreeSet<u32> =
+            alterados.iter().map(|(_, _, frame)| *frame).collect();
+        assert_eq!(
+            coordenadas,
+            esperado,
+            "{} pixels alterados em {} frames, mas as coordenadas agregadas não são as duas \
+             colocações do pixel ({LINHA_PIXEL},{COLUNA_PIXEL}) do tile {TILE} previstas ANTES \
+             de executar ({esperado:?}); {} dos pixels caem fora dos retângulos das células \
+             {CELULAS:?}",
+            alterados.len(),
+            frames_divergentes.len(),
+            fora.len(),
+        );
+        let mut no_cp129: Vec<[u32; 2]> = alterados
+            .iter()
+            .filter(|(_, _, frame)| *frame == 129)
+            .map(|(x, y, _)| [*x, *y])
+            .collect();
+        no_cp129.sort();
+        assert_eq!(
+            no_cp129, esperado,
+            "no checkpoint 129 a edição da barra mudou {no_cp129:?}, não as duas colocações \
+             previstas"
+        );
+
+        // ---- artefatos.
+        let primeiro_frame = alterados
+            .iter()
+            .map(|(_, _, frame)| *frame)
+            .min()
+            .expect("frame divergente");
+        let escreve_ppm = |nome: String, quadro: &Vec<u8>| {
+            write_rgba_ppm(&artifact_root.join(nome), largura, altura, quadro)
+        };
+        for frame in [primeiro_frame, 129] {
+            escreve_ppm(
+                format!("aplib-barra-edit-{frame:03}-original.ppm"),
+                &base_a[frame as usize],
+            );
+            escreve_ppm(
+                format!("aplib-barra-edit-{frame:03}-modificada.ppm"),
+                &modificada[frame as usize],
+            );
+        }
+        let mut por_frame: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        for (_, _, frame) in &alterados {
+            let chave = frame.to_string();
+            let atual = por_frame
+                .get(&chave)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            por_frame.insert(chave, serde_json::Value::from(atual + 1));
+        }
+        let report_path = artifact_root.join("aplib-barra-edit-report.json");
+        rex_write_json(
+            &report_path,
+            &serde_json::json!({
+                "rom_original": { "path": rom_path, "sha256": rom_sha },
+                "rom_modificada": { "path": modificada_path, "sha256": modificada_sha,
+                                    "origem": "apply_resource_edit com os campos que a barra enviou" },
+                "patch_bps_sha256": edicao.patch_bps_sha256,
+                "recurso": { "stream_offset": format!("{STREAM:#x}"), "codec": "aplib",
+                             "slot_bytes": SLOT, "escritos_bytes": edicao.stream_written,
+                             "tile": TILE, "pixel_do_tile": [LINHA_PIXEL, COLUNA_PIXEL],
+                             "indice_novo": INDICE },
+                "core": { "label": core_label, "sha256": core_sha },
+                "input_script_sha256": sha256_hex(&fs::read(&script_path).expect("ler script")),
+                "frames": script.frames.len(),
+                "framebuffer": { "largura": largura, "altura": altura },
+                "determinismo_base_a_vs_base_b": ruido.len(),
+                "pixels_alterados_total": alterados.len(),
+                "pixels_no_checkpoint_129": no_cp129,
+                "coordenadas_distintas": coordenadas,
+                "esperado_pelas_predicoes_acima": esperado,
+                "frames_divergentes": por_frame,
+                "primeiro_frame_divergente": primeiro_frame,
+                "anunciado_pela_barra": { "copia_sha256": SHA_COPIA_DA_BARRA,
+                                          "preservados": PRESERVADOS_DA_BARRA,
+                                          "custo_medido_pela_varredura": SLOT },
+                "limites": "Prova o efeito em tela do artefato que a BARRA escreveu, executado \
+                            pelo desempacotador do próprio jogo sob o core do harness da lib. Não \
+                            prova o app distribuído, nem o resto dos recursos aPLib, nem hardware \
+                            real; o índice 0 continua inexpressável pela interface (achado \
+                            registrado na perna 2)."
+            }),
+        );
+
+        let run_id = format!("rex06-hamoopig-aplib-barra-edit-{}", now_unix());
+        record_scenario_run(
+            &decomp_work_dir(),
+            ScenarioRunRecord {
+                run_id: run_id.clone(),
+                scenario_id: "rex06-hamoopig-aplib-barra-edit-180f-v1".to_string(),
+                kind: "equivalence".to_string(),
+                reference_sha256: rom_sha.clone(),
+                candidate_sha256: Some(modificada_sha.clone()),
+                input_script_sha256: Some(sha256_hex(&fs::read(&script_path).expect("ler script"))),
+                core_label,
+                core_sha256: core_sha,
+                frames: script.frames.len() as u32,
+                verdict: SCENARIO_VERDICT_PASSED.to_string(),
+                oracle_results: serde_json::json!({
+                    "pixels_alterados": alterados.len(),
+                    "coordenadas_distintas": coordenadas,
+                    "frames_divergentes": por_frame,
+                    "determinismo_original_vs_original": ruido.len(),
+                    "fora_das_celulas": fora.len(),
+                    "copia_identica_a_da_barra": modificada_sha == SHA_COPIA_DA_BARRA,
+                }),
+                gaps: vec!["o core aqui é o do harness da lib, não o app distribuído".to_string()],
+                artifacts: vec![
+                    artifact_ref("input-script", &script_path).expect("artifact script"),
+                    artifact_ref("aplib-barra-edit-report", &report_path).expect("artifact report"),
+                    artifact_ref("modified-rom", &modificada_path).expect("artifact copia"),
+                ],
+                executed_at_unix: now_unix(),
+                previous_run_id: None,
+                notes: "Passo 5 perna 4: a copia que a barra escreveu (hash conferido antes de \
+                     rodar) e desempacotada pelo proprio jogo sob o core, e a unica mudanca de \
+                     tela que produz e o pixel editado nas duas colocacoes do tile."
+                    .to_string(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: registrar run no ledger: {error}"));
+        eprintln!(
+            "REX HAMOOPIG aPLib edit da barra: {} pixels alterados em {} frames, primeiro frame \
+             {primeiro_frame}, coordenadas {coordenadas:?} | original {rom_sha} -> modificada \
+             {modificada_sha} | run {run_id} (corpus {})",
+            alterados.len(),
+            por_frame.len(),
+            corpus_identity(&rom_sha),
+        );
+    }
+
     /// REX-00 negativo: a prévia regenerada do Taiketsu (import + build real,
     /// cópia em tmp — o doador nunca é compilado no lugar) tem imagem não preta
     /// e heartbeat, e AINDA ASSIM deve ser REJEITADA pelos oráculos contra a
