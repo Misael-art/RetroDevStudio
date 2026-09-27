@@ -1,0 +1,171 @@
+{
+ "schema": "rex-e2e-evidence-manifest/v1",
+ "promoted_at": "2026-09-27",
+ "mission": "Objetivo do operador, passo 5 — fluxo de edição de um recurso real (BYOR) pela frente do produto, preservando LZ4W. Esta célula cobre a PERNA 3: execução do recurso modificado pelo desempacotador do próprio jogo sob o core Libretro.",
+ "verdict": "PASS (perna 3) — o stream aPLib escrito pela transação canônica do produto é desempacotado pelo próprio jogo e a ÚNICA mudança de tela que produz cai exatamente nas duas colocações do tile editado, previstas antes de executar. Perna 2 (WebDriver pela barra) NÃO provada aqui.",
+ "git": {
+  "branch": "codex/rex-integrator-aplib-decode",
+  "head_at_promotion": "d43fdde",
+  "commits_da_perna": {
+   "perna_1": "5880a22",
+   "perna_3": "d43fdde"
+  },
+  "uncommitted_at_promotion": [
+   "data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna3-core/* (novo pacote)",
+   "docs/rex_profiles/ROUND_STATE.md (checkpoint do passo 5)",
+   "docs/06_AI_MEMORY_BANK.md (checkpoint de fim de sessão)"
+  ]
+ },
+ "binary_under_test": {
+  "path": "src-tauri/target/debug/deps/app_lib-716403bf8cac2e87",
+  "sha256": "04d2ccf2f4f26ca86fd10fa10c1f12c487387415e8e87370f6ae8388e08525a7",
+  "note": "harness de teste da lib (app_lib) construído por `cargo test --lib` nesta árvore; o binário de desktop não é exercitado nesta perna — isso é exatamente a lacuna da perna 2."
+ },
+ "core_under_test": {
+  "label": "Genesis Plus GX v1.7.4 46a5521",
+  "path": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+  "sha256": "07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1",
+  "confirmado_em": "src-tauri/target-test/validation/host-readiness.json (state READY, item libretro_md)"
+ },
+ "rom": {
+  "policy": "BYOR — a ROM comercial NÃO é versionada neste pacote nem no repositório; só os hashes viajam. Corpus somente-leitura em data/canonical-local-2026-09-21/corpus, nunca tratável como dependência provisionável.",
+  "original_path": "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+  "original_sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+  "modificada_sha256": "69389ec2b400220c7a069e4c36326ca3c26d81e85ff0ab81bf798dc9ae4038ac",
+  "modificada_procedencia": "escrita por apply_resource_edit (comando Tauri da barra) em ~/.retrodev/decomp_work/extract/<romsha>/edits/rex-aplib-modified-<sha>.bin; o nome carrega o SHA, e a escrita é create_new + re-hash quando o arquivo já existe (write_file_immutable, extract.rs:402).",
+  "patch_bps_sha256": "8bf6d3df454eb8354464a77f7863ac40554f8935f709e1531c4ddbaf5ce7dd86",
+  "bytes ROM": 917504
+ },
+ "recurso": {
+  "header_tileset": "0x21b20",
+  "stream_offset": "0x2e12a",
+  "codec": "aplib (variante raw SGDK 2.11)",
+  "tileset_tiles": 100,
+  "plain_bytes": 3200,
+  "slot_bytes": 938,
+  "escritos_bytes": 937,
+  "edicao": {
+   "tile": 53,
+   "row": 0,
+   "col": 4,
+   "indice": "5 -> 0",
+   "byte_no_plain": 1698,
+   "delta": "0x55 -> 0x05"
+  },
+  "celulas_do_tilemap": [
+   [
+    35,
+    16
+   ],
+   [
+    26,
+    25
+   ]
+  ],
+  "coordenadas_previstas": [
+   [
+    284,
+    128
+   ],
+   [
+    212,
+    200
+   ]
+  ],
+  "pino_da_escolha": "passo 4 (a31aecd / 7aeb3fa): das 61 128 edições candidatas varridas, 30 662 cabiam no slot; esta foi a pinada."
+ },
+ "observacao": {
+  "janela_frames": 180,
+  "power_on": "fresco em cada corrida (restauração de savestate não é fiel neste título — achado REX-00)",
+  "determinismo_original_vs_original": 0,
+  "pixels_alterados_total": 238,
+  "frames_divergentes": 119,
+  "pixels_por_frame_divergente": 2,
+  "frames_divergentes_sao": "59..179, exceto 60 e 61",
+  "coordenadas_distintas": [
+   [
+    212,
+    200
+   ],
+   [
+    284,
+    128
+   ]
+  ],
+  "fora_dos_retangulos_das_celulas": 0,
+  "pixels_no_checkpoint_129": [
+   [
+    212,
+    200
+   ],
+   [
+    284,
+    128
+   ]
+  ],
+  "paleta": {
+   "end": "0x2cbc8",
+   "antes": "0x0468",
+   "depois": "0x0000",
+   "tolerancia_do_comparador": "+-4 por canal"
+  }
+ },
+ "evidencia_anterior_a_frente": {
+  "arquivo": "/home/misael/RetroDevStudio/rex-evidence-2026-09-10/backend-hamoopig/checkpoint-rgba-hashes.json",
+  "sha256": "e7527a83eda147f1d3383311808b1bfd5be711d257d0b385ddc479cad5dfa8d4",
+  "data": "2026-09-12 (rex-evidence-2026-09-10)",
+  "uso": "asserção 0 do teste: os frames 59/69/129/179 da corrida original reproduzem byte a byte os quatro hashes daquele arquivo, amarrando a janela observada a uma medição pré-existente a esta frente.",
+  "conteudo": {
+   "129": "3df75345502f8165fa5aae93009bac07260bd60bd6a47d148114165e2963cf63",
+   "179": "3df75345502f8165fa5aae93009bac07260bd60bd6a47d148114165e2963cf63",
+   "59": "61b8731607d1bdb9a8a555696ee764f2f2159c3b5539541462ae423e9bb4f637",
+   "69": "56d1423c5231a0ebbbfa49e6a686320e7e9e32092b1c00453e8a0e305ca82f83"
+  }
+ },
+ "runs": {
+  "scenario_id": "rex05-hamoopig-aplib-edit-180f-v1",
+  "total_no_ledger": 6,
+  "run_ids": [
+   "rex05-hamoopig-aplib-edit-1790488323",
+   "rex05-hamoopig-aplib-edit-1790488524",
+   "rex05-hamoopig-aplib-edit-1790488705",
+   "rex05-hamoopig-aplib-edit-1790489153",
+   "rex05-hamoopig-aplib-edit-1790489496",
+   "rex05-hamoopig-aplib-edit-1790489737"
+  ],
+  "reconciliacao": "as 6 corridas do cenário registram 238 pixels, 119 frames, coordenadas [[212,200],[284,128]], determinismo 0, fora-das-células 0 e o mesmo candidate_sha256; as três primeiras são anteriores ao endurecimento (asserções 0 e 4) e coincidem",
+  "pinado": "rex05-hamoopig-aplib-edit-1790489737"
+ },
+ "gates": {
+  "arquivo": "gates-e-perna3-2026-09-27.log",
+  "sha256": "af69854b98bf5b440230968ec585674c57e57294d63001a597fa4675452fc8ca",
+  "cargo_test_lib_rex05_ignorado": "1 passed / 0 failed (rc=0)",
+  "cargo_clippy_lib_D_warnings": "rc=0",
+  "cargo_test_lib_suite": "706 passed / 0 failed / 61 ignored (rc=0), dentro do mesmo log",
+  "cargo_fmt_check": "rc=0",
+  "escopo_real_do_log": "log único e completo da árvore em HEAD d43fdde: cargo fmt --check rc=0, o teste ignorado da perna 3 (1 passed), cargo clippy --lib -- -D warnings rc=0 e a suíte completa cargo test --lib = 706 passed / 0 failed / 61 ignored, rc=0. Nada foi transcrito para dentro do log."
+ },
+ "frame_dumps_nao_versionados": {
+  "motivo": "quadros derivados de ROM comercial: versionar PPM distribuiria conteúdo derivado do binário BYOR. Os hashes viajam; os bytes ficam no diretório de validação local.",
+  "caminho_local": "src-tauri/target-test/validation/rex-hamoopig-aplib-edit/",
+  "sha256": {
+   "aplib-edit-059-original.ppm": "936a61aa4fb256bed0d58732b36eda285d4abed60fce2834a113a4e80cd08b8a",
+   "aplib-edit-059-modificada.ppm": "2e597fc96d6b128d80b3191137d4aca8897c60effacc1b0d196842136f419415",
+   "aplib-edit-129-original.ppm": "5f4ce09d7e8f618f4b7e4fc5c899a0aacb9261fb7923ed44a6c05b7bb61cda86",
+   "aplib-edit-129-modificada.ppm": "3c47db660fadca8216a99945ddc009f083d98a853db67f76fcc656578e6efcab"
+  }
+ },
+ "artefatos_versionados": {
+  "aplib-edit-report.json": "44fa479f4b8d94f4e748c40576753ae78999ddc8353b775c48e4b0818e02fa68",
+  "gates-e-perna3-2026-09-27.log": "482b8241edd5c12f3bcdb7fad40b932f0e7ab203306253659675c7f9e7153c2b",
+  "input-script.rds-input.json": "43c3d359530a76560d3b0c94ec15b7d5842574f2ee5b6892723a6c60104775a9",
+  "scenario-run-rex05.json": "1d623164c18a2c6af3b101e68e311910b969b0a9a7468594b6747fecad3233e5"
+ },
+ "receita": "cargo test --lib rex05_hamoopig_aplib -- --ignored --nocapture (exige corpus BYOR em data/canonical-local-2026-09-21/corpus ou RDS_REX_HAMOOPIG_ROM)",
+ "limites": [
+  "perna 2 (WebDriver: a barra chamando list_resources -> preview_resource -> apply_resource_edit nesta ROM) NÃO provada nesta célula; é o gap registrado no próprio run do ledger",
+  "uma edição de 1 pixel de 1 recurso de 1 ROM: não prova o resto do jogo, nem os outros 3 recursos aPLib, nem hardware real",
+  "o oráculo é o core Gens/GX sob o harness da lib, não o app distribuído",
+  "nenhum passo deste pacote autoriza merge, release ou promoção de maturidade; a linha aPLib da matriz continua blocked"
+ ]
+}

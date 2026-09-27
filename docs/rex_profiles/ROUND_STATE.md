@@ -64,7 +64,12 @@ TiledImage da agente A em `codex/rex-a-addressing`, pacote de contrato e vetores
 da agente B em `codex/rex-b-codecs`, hash agregado `3a9d7e9e…` recomputado da
 árvore de B, os 9 goldens byte-idênticos entre os dois namespaces) e a ordem de
 aceite estão em `APLIB_TILEDIMAGE_PROXIMA_PROVA_2026-09-26.md`, com adendo datado
-registrando o que a frente executou.
+registrando o que a frente executou. A célula "Recurso real" continua `blocked`
+por dois motivos separados: a perna 2 (WebDriver pela barra) está aberta, e a ordem
+do operador veta promoção de maturidade — o que já existe nela, com números e
+evidência por hash, está em
+`data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna3-core/` e no
+checkpoint do passo 5 abaixo.
 
 Estado do produto (medido, não alegado): `aplib_decode` + `AplibLimits` em
 `src-tauri/src/tools/reverse/decomp/rex_aplib.rs` (variante SGDK **raw sem header
@@ -215,6 +220,74 @@ produto. Evidência do integrador vive em namespace próprio
 e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
+
+- 2026-09-27 (integrador, **PASSO 5 — o recurso real BYOR editado pela frente do
+  produto, Pernas 1 e 3 fechadas, perna 2 aberta**), esta célula é o checkpoint.
+  **HEAD de partida:** `7aeb3fa` + o teste da perna 1 ainda não commitado.
+  **Perna 1 (`5880a22`, `byor_aplib_edite_o_recurso_pelo_fluxo_do_produto`):** as
+  três chamadas que a barra faz — `list_resources` → `preview_resource` →
+  `apply_resource_edit` — sobre a ROM BYOR, com a transação canônica inteira
+  exercida em bytes reais e conferida por fora do produto: o recurso do stream
+  `0x2e12a` aparece exatamente uma vez na lista (`aplib`, header `0x21b20`, 100
+  tiles, plain 3 200 B, custo 938), a prévia é 128×56, o no-op não escreve
+  arquivo nenhum, a edição escreve 937 B, todos os bytes divergentes caem dentro
+  do slot, o produto re-desempacota o stream escrito (`bytes_consumed == 937`,
+  um único byte de plain mudado), o vizinho de `0x2e4d4` continua decodificando o
+  mesmo plain de 16 000 B, `verify_resource_set` re-rodado na cópia diverge só no
+  stream alvo, o BPS reaplicado sobre ROM íntegra reproduz a cópia byte a byte e
+  a cópia reaberta devolve a mesma prévia.
+  **Perna 3 (`d43fdde`, `rex05_hamoopig_aplib_edit_pelo_produto_executa_no_core`):**
+  quem executa o stream que o produto escreveu é o **desempacotador do próprio
+  jogo**. A cópia modificada não é montada à mão — sai de `apply_resource_edit` e
+  o hash anunciado é conferido no disco. Três corridas frescas (power-on, não
+  savestate: neste título a restauração não é fiel — achado REX-00) sob Genesis
+  Plus GX v1.7.4 `46a5521` com o mesmo script de 180 frames. **Medido:** 0 pixel
+  de ruído entre as duas corridas da ROM íntegra; **238 pixels alterados em 119
+  frames** (59..179, menos 60/61), **exatamente 2 por frame**, agregando nas
+  coordenadas `[[212,200],[284,128]]` — as duas colocações do tile 53 que o passo
+  4 previu **antes** de executar; **0** pixels fora dos retângulos das células; e
+  no checkpoint 129, o da atribuição residual de 2 938 pixels, a mudança é
+  exatamente as mesmas duas colocações. A asserção 0 amarra a janela observada a
+  uma medição **anterior a esta frente**: os frames 59/69/129/179 desta corrida
+  reproduzem byte a byte os hashes de
+  `rex-evidence-2026-09-10/backend-hamoopig/checkpoint-rgba-hashes.json`
+  (arquivo de 2026-09-12, SHA-256 `e7527a83…`). Seis corridas no ledger, todas
+  com o mesmo `candidate_sha256` (`69389ec2…`) e os mesmos números, inclusive as
+  três anteriores ao endurecimento.
+  **Evidência discriminante e o limite dela, registrado:** a perna 1 morre em 5
+  testes se a variante aPLib de `verify_resource_set` devolve `None`, e cai na
+  fronteira `expect("edição aPLib no recurso real")` se o re-encode codificar o
+  plain original em vez do editado. Na perna 3, os dois mutantes de geometria
+  (nibble par↔ímpar em `md_pixel_location`, linha do tile invertida) **morrem
+  antes**, em `excessive_output: 3200 bytes de plain precisam de 942/941 bytes de
+  stream, orçamento de 938` — com 1 B de folga no slot nenhuma mudança de
+  geometria chega viva à asserção de coordenada. **Não foi exibido mutante que
+  passe pela perna 1 e caia só na coordenada**; o acréscimo da perna 3 é o
+  oráculo (o unpacker do jogo e o TileMap real, não o renderer da prévia), e isto
+  consta do doc-string do teste em vez de ser alegado ao contrário.
+  **Evidência promovida (por hash, sem bytes de ROM):**
+  `data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna3-core/` —
+  manifesto com ROM original/cópia/BPS/core/binário de teste/script conferidos no
+  disco, relatório do teste, registro extraído do ledger e **um** log de gates
+  real da árvore em `d43fdde`. Os quatro PPM **não** são versionados (quadros
+  derivados de ROM comercial); os SHA-256 deles viajam no manifesto.
+  **Gates desta árvore:** `cargo fmt --check` rc=0; `cargo clippy --lib --
+  -D warnings` rc=0; `cargo test --lib` **706 passed / 0 failed / 61 ignored**
+  rc=0; o aceite ignorado da perna 3 `1 passed`.
+  **Perna 2 (aberta, é o gap declarado no `gaps` do próprio run):** WebDriver
+  pela barra — a interface chamando estes mesmos três comandos nesta ROM. O
+  harness já existe para o fixture autoral (`scripts/e2e-tauri-build-run.mjs`,
+  `rex-resource-panel` em diante); o que falta é exercitar o recurso aPLib real,
+  e ele não pode vir do fixture: o único aPLib que a toolchain embute
+  (`0x270de`, o `font_08x08`) é apontado por **zero** `TiledImage` (medição do
+  passo 4), então a descoberta não o apresenta como editável — por construção a
+  perna 2 precisa de BYOR, que o CI não pode provisionar.
+  **Matriz:** linha aPLib **mantida `blocked`** — a célula "Recurso real" tinha
+  como condição de saída exatamente a execução do recurso modificado pelo
+  desempacotador do jogo, que agora existe, mas a ordem do operador veta promoção
+  de maturidade e a perna 2 está aberta; a mudança de status fica para decisão do
+  operador com as três pernas na mesa. **Bloqueio:** nenhum externo.
+
 
 - 2026-09-27 (integrador, **PASSO 4 — o alvo BYOR reconfirmado e a edição-alvo
   escolhida por medida; PASSO 2 e PASSO 6 registrados**), esta célula é o
