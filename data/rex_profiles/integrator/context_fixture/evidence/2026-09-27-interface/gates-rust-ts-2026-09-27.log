@@ -1,0 +1,11 @@
+=== cargo fmt --check (src-tauri) ===
+FMT OK
+=== cargo clippy -- -D warnings (cwd src-tauri) ===
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.57s
+=== npx tsc --noEmit (repo root) ===
+npm notice run retrodev-studio@0.1.0 npx
+npm notice run 'tsc' --noEmit -p /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/tsconfig.json
+TSC OK
+=== npm run check:tree (repo root, 2026-09-27T22:23:37Z — repetido DEPOIS de criar este diretório de evidência; o host:certify rodou antes dele existir) ===
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+rc=0 (medido do processo do npm, não de um pipe)

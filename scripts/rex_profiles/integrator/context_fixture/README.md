@@ -214,11 +214,43 @@ da imagem; se não for, a frente recusa e a fila não muda. Não existe controle
 "editar só esta ocorrência" — sem duplicar e realocar tile, isso seria
 destrutivo.
 
-Prova de frente (36 testes em 3 arquivos, com mutação conferida): remover o
+Prova de frente (38 testes em 3 arquivos, com mutação conferida): remover o
 guard de sequência faz cair "clique obsoleto"; enfileirar pelo pixel de tela em
 vez do de fonte faz cair as duas pernas de edição; arredondar em vez de recusar a
 borda faz cair as três pernas de geometria; e tirar o reset por troca de ROM faz
 cair "trocar de ROM descarta contexto, seleção e pedidos exibidos".
+
+## Prova pela interface (WebDriver, binário real)
+
+`npm run test:e2e:desktop -- --scenario rex-context-fixture-effect` percorre o
+cenário acima no WebView real, com as três receitas autorais como oráculo e **nenhum
+offset vindo da UI**. Verde em 2026-09-27 no binário `f56be451…`
+(rc=0, 17 passos, 15,6 s): os quatro cliques sob flips distintos resolvem o mesmo
+pixel de fonte, a camada lida do `<img>` bate com o SHA do oráculo externo
+(`7dc94b02…`, RGB; alpha conferido à parte — 0 divergências RGBA), a edição única
+altera exatamente as quatro posições previstas, a escrita confina ao slot, o BPS
+re-aplicado reproduz o hash da cópia e os negativos são asserções.
+
+Duas coisas só apareceram porque a interface mediu, não o núcleo:
+
+- **Zoom desenhado ≠ zoom pedido.** O preflight (`img { max-width: 100% }`) com o
+  item de flex encolhendo achatava só a largura: pedido 4x, uma camada de 120x72
+  desenhava 193,66x288 px, o pixel deixava de ser quadrado e `pixelated` perdia o
+  efeito. Travas: `maxWidth: none`, `shrink-0` no envolucro e trilho com
+  `overflow-x-auto`. O E2E mede `getBoundingClientRect`; o teste unitário pinha o
+  contrato de CSS que o produz.
+- **Ordem das guardas da transação.** A identidade era conferida depois da
+  varredura dos candidatos: com o caminho apontando para outra ROM, a recusa
+  demorava mais de 60 s e vinha como "recurso não verificado nesta ROM" — o
+  sintoma, não a causa. Agora a identidade abre a sequência e o custo da recusa é
+  um hash; a perna 11 assere a recusa em `<=1,5 s`.
+
+Os dois negativos que a UI **não** alcança nesta fixture, por construção (a
+referência inválida e o banco sem cores vivem em `ctx_ghost`, que não tem struct
+`Image`), continuam provados no núcleo:
+`composicao_recusa_referencia_fora_do_tileset_em_vez_de_pintar_ruido` e
+`composicao_recusa_banco_que_a_paleta_nao_tem_cores`. Evidência, hashes por
+arquivo e limites: `data/rex_profiles/integrator/context_fixture/evidence/2026-09-27-interface/manifest.json`.
 
 ### O aceite pode falhar? (conferência por mutação)
 

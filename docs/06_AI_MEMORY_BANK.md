@@ -1370,3 +1370,149 @@ Branch `codex/rex-integrator-aplib-decode`. HEAD desta célula: ver `git log` �
 **Push e CI registrados por SHA.** `git fetch` + `git push origin codex/rex-integrator-aplib-decode` → fast-forward `19c880f..9a4335f` (0 atrás, 6 à frente). Consulta **pontual**, no SHA publicado `9a4335f72bf0f463faa23cdfdd5db45059c71983`: workflow `CI` → **success** (`validate`, `linux-validate`), run `36315702049`; workflow `Desktop E2E` → **success** (`desktop-smoke`), run `36315702070`. O que esse verde **não** cobre continua sendo os aceites `#[ignore]` e o cenário `rex-aplib-byor-effect`, que consomem BYOR: BYOR não é dependência provisionável, então o CI atesta o contrato, não esta ROM. `npm run host:certify` foi executado antes do push (rc=0, `READY`, digital `60249508…`, log promovido no pacote). Este parágrafo foi escrito no commit só de texto `3326228`, que à época ficou sem consulta própria (precedente: `19c880f`, run `36305001760`).
 
 **Consulta pontual do HEAD final `9e63adc` (revisão de 2026-09-27, a pedido do operador).** Push `9a4335f..9e63adc` (2 commits só de texto). `GET /repos/Misael-art/RetroDevStudio/commits/9e63adcc…/check-runs` → `validate` **completed/success** (job `108614432239`, 20m56s) e `linux-validate` **completed/success** (job `108614432149`, 12m40s); run `36317340061`, encerrado às 12:17:25Z. `Desktop E2E` não existe nesse SHA por filtro de caminhos do workflow (`.github/workflows/desktop-e2e.yml`: `src/**`, `src-tauri/**`, `scripts/e2e-tauri-build-run.mjs`, `scripts/build.mjs`, `package*.json`) — `9e63adc` tocou só os dois documentos e o `manifest.json` do pacote; ausência explicada, não lida como PASS nem como falha. **Regra terminal:** o CI da rodada para de ser consultado aqui — o commit que registra esta célula é só texto e não recebe consulta própria, sob pena de uma consulta por commit de registro ao infinito. Nenhum observador ficou de pé (o `gh run watch` desta sessão terminou sozinho; `ps` não retorna `gh run` vivo).
+
+### CHECKPOINT operacional (2026-09-27 — frente do integrador: a edição contextual do recurso aPLib fecha pela **interface**, com dois defeitos reais achados por ela; Experimental; sem merge, sem release, sem promoção)
+
+**Frente e HEAD.** Branch `codex/rex-context-aplib-tilemap`, base canônica
+`/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21`. A célula é a prova pelo
+produto dos itens 1 a 4 do briefing do operador; os quatro commits que montaram a
+superfície já estavam publicados (`c731485` fixture autoral com esperado **antes**
+de compilar, `b9cbe8e` modelo de contexto no núcleo, `560347e` IPC somente leitura,
+`896a372` UI contextual). Desta célula: `e44f39d` (núcleo), `16ce6bf` (UI) e
+`7e10944` (cenário E2E `rex-context-fixture-effect`). **Ordem recebida que guiou o
+fechamento:** "O próximo resultado visível deve ser uma edição contextual
+utilizável, não apenas outro relatório do backend" + "Não aceite coordenadas,
+dimensões ou offsets da UI como autoridade" + "Depois execute o caso BYOR já
+comprovado, distinguindo camada reconstruída de framebuffer completo".
+
+**O que passou a existir de fato (medido no WebView, não no núcleo).** Binário
+`f56be4517058e38c…` (18:51:20-03:00 = 21:51:20Z; nenhum fonte do produto é mais
+novo — `find … -newer <binario>` vazio), cenário rc=0 com 17 passos e 15 638 ms:
+a barra descobre o TileSet sozinha (`0x5fa38 — aplib · 16 tiles (stream 169 B)`),
+monta contexto com identidade + vínculos + proveniência por vínculo, e a **camada
+composta lida do `<img>`** é igual ao esperado do oráculo externo no empacotamento
+certo (RGB `7dc94b02…`; alpha provado à parte, 0 divergências RGBA). Os quatro
+cliques sob `B`/`H`/nenhum/`V` convergem no **mesmo** pixel de fonte
+(`tile 2, linha 4, coluna 7`, índice atual 11) e a barra diz
+`4 ocorrências neste mapa verificado`, nomeando o TileMap. Uma edição (11→3) pela
+transação canônica altera **exatamente** as quatro posições previstas, 129 bytes,
+**0** fora de `[0x5fa38, +169)`, com o único byte do tileset em `0x5fa57`; cópia
+`1d6da6d9…`, BPS `2fafda41…` reaplicado reproduzindo o hash da cópia; salvar/reabrir
+restaura com identidade **revalidada**. Escala de página 0,75 e clique fora da
+camada também assidos.
+
+**Os dois defeitos reais que a interface achou — e que o núcleo não veria.**
+(1) **Zoom pedido ≠ zoom desenhado**: o preflight `img { max-width: 100% }` com o
+envolucro de flex encolhendo por padrão achatava **só a largura** — 4x de uma camada
+120x72 desenhava `193,66x288` px, o pixel deixava de ser quadrado, `image-rendering:
+pixelated` perdia o efeito e o mapa ponteiro→pixel da frente passava a corresponder
+a outra imagem. Correção `16ce6bf`: `maxWidth: none` nas duas prévias, `shrink-0` no
+envolucro dimensionado e trilho `overflow-x-auto` (rolar em vez de comprimir).
+(2) **Identidade conferida depois da varredura**: com outro arquivo no caminho, a
+transação varria os 205 candidatos (512 KB) e a recusa saía como "recurso não
+verificado nesta ROM" depois de >60 s — o **sintoma** descrevendo a cena e escondendo
+a **causa**, e o E2E estourando o timeout sem nenhuma superfície de erro. Correção
+`e44f39d`: a identidade abre a sequência, o custo da recusa volta a ser um hash, e a
+mensagem diz `nada foi varrido e nada foi escrito`. Em ambos os casos o teste foi
+escrito e observado **falhando antes** (no de identidade, o primeiro rascunho passou
+de imediato e não era RED; ficou discriminante ao usar `stream_offset` de **outra**
+ROM, que morria em "recurso 0x109 não verificado nesta ROM"). O E2E agora **assere**
+a recusa em ≤1,5 s em vez de só observar.
+
+**Erro meu registrado com log.** A primeira versão desta perna cobrava na barra o
+`data_size` do `symbol.txt` (170 B) — mas o símbolo dá o **array linkado**, com byte
+de padding; o que a barra anuncia é o **consumo medido** pelo decode (169 B), que é o
+que o oráculo `apj.jar` re-empacota. O cenário passou a ler `external-verify.json`
+(exigindo `independente_do_produto === true`, SHA do jar, ROM e o `pixels_sha256` da
+camada), a cobrar `medido <= array` e a conferir a cauda como zero, registrando
+`preenchimento_nonzero`. Logs das três corridas falhas (run2 slot, run3 zoom, run4
+identidade) estão versionados no pacote junto da verde.
+
+**Caso BYOR reexecutado (o binário mudou, então a evidência antiga estava
+invalidada).** `rex-aplib-byor-effect` rc=0, 0 linhas de ERRO: cópia `80249128…`,
+BPS `58ae4f0b…` reaplicado sobre base íntegra, 800 bytes distintos, **0** fora de
+`[0x2e12a, +938)`, 163 recursos preservados, 14 edições recusadas por
+`excessive_output` e o índice 0 produzindo a cópia `69389ec2…` que a perna 3 já
+tinha executado no core — **idêntico aos pinos publicados** antes desta célula. A
+perna 14 do cenário contextual abre o BYOR pelo produto e **declara** a prévia como
+camada reconstruída (`1018 ocorrências neste mapa verificado`, TileMap `0x21b28` de
+1120 células), mantendo as oclusões não modeladas explícitas na barra: camada ≠
+framebuffer.
+
+**Negativos e atribuição honesta.** Seis obrigatórios: quatro alcançados e asseridos
+pela UI (ghost sem vínculo, tile fora do conjunto, identidade trocada na leitura e na
+escrita, resposta obsoleta no mesmo tick, descarte por troca de ROM, clique fora da
+camada). Dois são **inalcançáveis por construção** nesta fixture — a referência
+inválida e o banco sem cores vivem em `ctx_ghost`, que o linker deixou **sem** struct
+`Image`, então não há como a UI chegar lá; ficam provados no núcleo por
+`composicao_recusa_referencia_fora_do_tileset_em_vez_de_pintar_ruido` e
+`composicao_recusa_banco_que_a_paleta_nao_tem_cores`, e a matriz registra a atribuição
+em vez de inflar a prova de interface.
+
+**Gates e host (logs no pacote).** `npm run host:certify` rc=0 — `READY`,
+fingerprint `60249508…`, lock `dd99a22f…`, incluindo `check:tree` OK, `lint` OK e
+**737** testes de frente (3 skipped) — e `cargo test --lib -- --nocapture
+--test-threads=1` **737 passed / 0 failed / 66 ignored** em 104,30 s. Fora do
+certify: `cargo fmt --check` OK, `cargo clippy -- -D warnings` limpo,
+`npx tsc --noEmit` OK, harness com `node --check` + eslint limpos. Um job pesado por
+vez, serializado (E2E fixture → E2E BYOR → certify → fmt/tsc/clippy); nenhum
+observador de CI ficou de pé. **Invocação que errei e consertei no meio:** `cargo
+clippy` na raiz do repositório falha com "could not find Cargo.toml" — a barra do
+projeto é rodar de `src-tauri` (`.cargo/config.toml` fixa `target-dir = target-test`
+relativo ao diretório de invocação).
+
+**Limites que continuam sendo parte da alegação.** A frente continua `Experimental`
+e a UI declara isso. "Verificada" nomeia o que foi conferido (ponteiro do struct
+`Image`, decode com tamanho exato, round-trip pelo oráculo externo) e **não** prova
+que o jogo carrega ou exibe o recurso. Não existe controle de "editar só esta
+ocorrência": sem duplicação e realocação de tile isso seria destrutivo. Contagem de
+ocorrências é **por mapa verificado**, nunca do jogo inteiro. Prioridade (bit 15) é
+conferida na palavra da célula mas não entra na composição esperada. O perfil vale
+para o toolchain pinado (rescomp `502a4670…`, apj `2d8cdc63…`, libmd `ef904a37…`) e
+para os recursos demonstrados. BYOR não é dependência provisionável: os dois
+cenários consomem ROM local explícita e não rodam no CI — o CI atesta o contrato, não
+esta ROM. **Sem merge, sem release, sem promoção de maturidade.**
+
+**Evidência promovida.** `data/rex_profiles/integrator/context_fixture/evidence/2026-09-27-interface/`
+com `manifest.json` amarrando por SHA-256: binário sob teste `f56be451…`, ROM
+autoral `705b72eb…` (393 216 B, **não** versionada — refaz pelo README do fixture),
+ROM BYOR `558bea6c…` (só hash), oráculo externo `apj.jar` `2d8cdc63…`, as três
+receitas autorais (ground truth pré-compilação, `fixture-build-report.json`,
+`external-verify.json`), o relatório verde do WebDriver (`3778e45e…`), os três logs
+de falha que produziram as correções, o relatório da reexecução BYOR (`ea14fd21…`) e
+os logs de gates/certify. O bloco `gates.shas_de_todos_os_artefatos_promovidos` do
+manifesto amarra **os 12 arquivos versionados do pacote** por SHA-256 (re-conferidos por
+`sha256sum` às 22:24Z; o manifesto não hashia a si mesmo). **Sem merge e sem release: HEAD
+desta célula fica na branch da frente.**
+
+**Gates desta célula (medidos, não copiados).** `npm run check:tree` rc=0 **depois** de
+criar o diretório de evidência (o `host:certify` rodou antes de
+`data/rex_profiles/integrator/context_fixture/` existir, então a conferência de árvore foi
+repetida de propósito às 22:23:37Z e o resultado foi **acrescentado ao log promovido**, com
+rc medido do processo do npm e não de um pipe — a primeira versão media o `grep`) ·
+`npx tsc --noEmit` rc=0 · `npm test` **737 passed, 3 skipped** · `cargo fmt -- --check`
+rc=0 · `cargo clippy -- -D warnings` rc=0 (a barra do projeto roda clippy **de
+`src-tauri`**: `src-tauri/.cargo/config.toml` fixa `target-dir = "target-test"` relativo ao
+diretório de invocação, e rodar na raiz dá "could not find Cargo.toml") · `cargo test --lib`
+**737 passed, 0 failed, 66 ignored** (104,30 s) · `node --check` e eslint do harness
+`scripts/e2e-tauri-build-run.mjs`, ambos limpos · `npm run host:certify` rc=0, `READY`,
+digital `60249508…`. Onde cada número mora, para não pedir confiança: no
+`host-certify-2026-09-27.log`, `npm test` está na linha 1450, `cargo test --lib` na 2335 e
+`READY`/fingerprint nas 2342/2344; no `gates-rust-ts-2026-09-27.log`, fmt na 2, clippy na 4,
+tsc na 8 e `check:tree` nas 9–11. Execução serializada, um job pesado por vez.
+
+**Push e CI registrados por SHA.** Push `896a372..7e10944` (fast-forward, 3 commits:
+`e44f39d` núcleo, `16ce6bf` UI, `7e10944` cenário) → runs criados às **22:10:22Z**:
+`CI` `36354347243` e `Desktop E2E` `36354347306`. Consulta **pontual** nos SHAs relevantes:
+`b9cbe8e` → `validate`/`linux-validate`/`desktop-smoke` **completed/success**; `896a372` →
+idem, **success**; `560347e` → **zero check runs** (o commit entrou no push cujo tip era
+outro; ausência explicada pelo comportamento do GitHub em pushes em lote, **não** lida como
+PASS nem como falha); `7e10944` → **`in_progress` nas duas consultas feitas nesta célula**
+(a última às 22:21:29Z): o veredito não estava disponível no momento do registro, então
+consta como **não estabelecido**, não como verde. **Regra terminal aplicada
+(precedente `19c880f`):** nenhum monitor de CI ficou de pé e a conclusão dessa execução é
+reportada **fora** do repositório — criar um commit só para registrar o veredito geraria
+uma consulta por commit de registro, ao infinito. O commit que contém este parágrafo é só
+de texto (docs + evidência) e não recebe consulta própria. O que o CI cobre aqui é o
+contrato: os dois cenários consomem ROM local explícita e não rodam no CI.
+

@@ -1,0 +1,161 @@
+{
+  "schema": "rex-context-aplib-external-verify/v1",
+  "oracle": {
+    "tool": "apj.jar (SGDK 2.11, APJ.unpack cru)",
+    "path": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/sgdk/bin/apj.jar",
+    "sha256": "2d8cdc63cc800e4b86ff4d9cdfe514001b77f788abcd02d61974dc319d026204"
+  },
+  "rom_sha256": "705b72eb848fadf11cdefd4302ef8c6751d005bd1c762918aea3b0860b20da86",
+  "decoded_sizes": {
+    "tileset": 512,
+    "map": 270,
+    "ghost": 256
+  },
+  "decoded_sha256": {
+    "tileset": "0c666624015ba8f5707530039586745deef4498c0fe5b5950d4c0252000d58f5",
+    "map": "e7980b78aef52252ba4eae93a9172c474c7a896a4c696d391f1519466d43c52b",
+    "ghost": "3f0358027cc244afdef07266c30eb26151a556b2cf58fedc90c526f9da935c31"
+  },
+  "stream_sizes": {
+    "tileset": {
+      "plain": 512,
+      "aplib": 169
+    },
+    "map": {
+      "plain": 270,
+      "aplib": 54
+    },
+    "ghost": {
+      "plain": 256,
+      "aplib": 18
+    }
+  },
+  "render_pixels_sha256": "7dc94b0254acda9139a7b54cb6bb8135b2948d78beb7e841ff745bab8479dcbc",
+  "edicao": {
+    "pixel_fonte": {
+      "tile": 2,
+      "row": 4,
+      "col": 7,
+      "de": 11,
+      "para": 3
+    },
+    "posicoes_mudadas": [
+      [
+        0,
+        3
+      ],
+      [
+        56,
+        4
+      ],
+      [
+        23,
+        12
+      ],
+      [
+        47,
+        27
+      ]
+    ]
+  },
+  "ghost": {
+    "fora_do_tileset": 1,
+    "tiles_de_sistema": [
+      0,
+      5
+    ]
+  },
+  "independente_do_produto": true,
+  "checks": [
+    {
+      "check": "decode-apj-tileset",
+      "ok": true,
+      "detalhe": "len=512 esperado=512 sha=0c666624015ba8f5 esperado=0c666624015ba8f5"
+    },
+    {
+      "check": "decode-apj-map",
+      "ok": true,
+      "detalhe": "len=270 esperado=270 sha=e7980b78aef52252 esperado=e7980b78aef52252"
+    },
+    {
+      "check": "decode-apj-ghost",
+      "ok": true,
+      "detalhe": "len=256 esperado=256 sha=3f0358027cc244af esperado=3f0358027cc244af"
+    },
+    {
+      "check": "paleta-na-rom",
+      "ok": true,
+      "detalhe": "primeiras 4 = ['0x0', '0x200', '0x400', '0x600'] vs ['0x0', '0x200', '0x400', '0x600']"
+    },
+    {
+      "check": "roundtrip-apj-tileset",
+      "ok": true,
+      "detalhe": "externo 169 B vs ROM 169 B no offset 391736"
+    },
+    {
+      "check": "roundtrip-apj-map",
+      "ok": true,
+      "detalhe": "externo 54 B vs ROM 54 B no offset 391664"
+    },
+    {
+      "check": "roundtrip-apj-ghost",
+      "ok": true,
+      "detalhe": "externo 18 B vs ROM 18 B no offset 391718"
+    },
+    {
+      "check": "render-vs-esperado",
+      "ok": true,
+      "detalhe": "dim 120x72 vs 120x72"
+    },
+    {
+      "check": "render-sha256",
+      "ok": true,
+      "detalhe": "7dc94b0254acda91 vs 7dc94b0254acda91"
+    },
+    {
+      "check": "celulas-vs-tabela",
+      "ok": true,
+      "detalhe": "0 c\u00e9lula(s) divergente(s) (col,linha,ROM,esperado): []"
+    },
+    {
+      "check": "pixel-fonte-na-rom",
+      "ok": true,
+      "detalhe": "na ROM = 0xB, esperado 0xB"
+    },
+    {
+      "check": "impacto-da-edicao",
+      "ok": true,
+      "detalhe": "mudaram [(0, 3), (56, 4), (23, 12), (47, 27)]; previsto [(0, 3), (56, 4), (23, 12), (47, 27)]"
+    },
+    {
+      "check": "cor-prevista-em-0-3",
+      "ok": true,
+      "detalhe": "antes=(0, 36, 109) depois=(0, 0, 109) esperado=(0, 0, 109)"
+    },
+    {
+      "check": "cor-prevista-em-56-4",
+      "ok": true,
+      "detalhe": "antes=(0, 36, 109) depois=(0, 0, 109) esperado=(0, 0, 109)"
+    },
+    {
+      "check": "cor-prevista-em-23-12",
+      "ok": true,
+      "detalhe": "antes=(0, 36, 109) depois=(0, 0, 109) esperado=(0, 0, 109)"
+    },
+    {
+      "check": "cor-prevista-em-47-27",
+      "ok": true,
+      "detalhe": "antes=(0, 36, 109) depois=(0, 0, 109) esperado=(0, 0, 109)"
+    },
+    {
+      "check": "ghost-fora-do-tileset",
+      "ok": true,
+      "detalhe": "ROM [107] vs esperado [107] (numTile=16)"
+    },
+    {
+      "check": "ghost-tile-de-sistema",
+      "ok": true,
+      "detalhe": "\u00edndices abaixo de numTile no mapa de base 100: [0, 5]"
+    }
+  ]
+}

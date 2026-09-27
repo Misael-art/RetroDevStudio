@@ -1,0 +1,4706 @@
+{
+  "schema": "rex-context-aplib-fixture-build/v1",
+  "authored_fixture": true,
+  "byor": false,
+  "rom_path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-context-fixture/project/out/rom.bin",
+  "rom_sha256": "705b72eb848fadf11cdefd4302ef8c6751d005bd1c762918aea3b0860b20da86",
+  "rom_len": 393216,
+  "compression_field_meaning": "0=NONE 1=APLIB 2=LZ4W (rescomp Basics.Compression)",
+  "resources": {
+    "tileset_aplib": {
+      "header_offset": 95470,
+      "stream_offset": 391736,
+      "num_tile": 16
+    },
+    "tilemap_ctx_map_aplib": {
+      "header_offset": 95478,
+      "stream_offset": 391664,
+      "w": 15,
+      "h": 9
+    },
+    "tilemap_ctx_ghost_aplib": {
+      "header_offset": 95488,
+      "stream_offset": 391718,
+      "w": 8,
+      "h": 16
+    },
+    "palette": {
+      "header_offset": 95464,
+      "stream_offset": 389640,
+      "num_color": 48
+    }
+  },
+  "symbol_crosscheck": {
+    "tileset": {
+      "symbol": "ctx_tiles",
+      "header_addr": 95470,
+      "stream_addr": 391736,
+      "data_size": 170
+    },
+    "ctx_map": {
+      "symbol": "ctx_map",
+      "header_addr": 95478,
+      "stream_addr": 391664,
+      "data_size": 54
+    },
+    "ctx_ghost": {
+      "symbol": "ctx_ghost",
+      "header_addr": 95488,
+      "stream_addr": 391718,
+      "data_size": 18
+    },
+    "palette": {
+      "symbol": "ctx_pal",
+      "header_addr": 95464,
+      "stream_addr": 389640,
+      "data_size": 96
+    }
+  },
+  "stream_sizes": {
+    "tileset": {
+      "plain": 512,
+      "aplib": 170,
+      "economia": 342,
+      "percentual": 33.2,
+      "economia_minima_exigida": 120,
+      "folga_de_celulas": 221
+    },
+    "ctx_map": {
+      "plain": 270,
+      "aplib": 54,
+      "economia": 216,
+      "percentual": 20.0,
+      "economia_minima_exigida": 120,
+      "folga_de_celulas": 95
+    },
+    "ctx_ghost": {
+      "plain": 256,
+      "aplib": 18,
+      "economia": 238,
+      "percentual": 7.0,
+      "economia_minima_exigida": 120,
+      "folga_de_celulas": 117
+    }
+  },
+  "associacoes": {
+    "verificada_por_ponteiro": {
+      "endereco": 95498,
+      "symbol": "ctx_image",
+      "campos": {
+        "palette": 95464,
+        "tileset": 95470,
+        "tilemap": 95478
+      },
+      "origem": "sgdk Image emitido pela fonte autoral e conferido contra symbol.txt"
+    },
+    "desconhecida_no_artefato": {
+      "recurso": "ctx_ghost",
+      "por_que": "o linker descartou ctx_ghost_image (struct sem referencia); nenhum ponteiro liga o mapa ao tileset",
+      "cadeias_com_o_mesmo_trinco": 0,
+      "regra": "o produto NAO pode associar ctx_ghost a ctx_tiles por proximidade de arquivo ou por tamanho"
+    }
+  },
+  "ground_truth": {
+    "schema": "rex-context-aplib-fixture-ground-truth/v1",
+    "authored_fixture": true,
+    "byor": false,
+    "expectation_source": "constantes de autoria + sem\u00e2ntica do rescomp 2.11 lida em tools/rescomp/src; nada aqui l\u00ea o ROM compilado",
+    "derived_from_compiled_rom": false,
+    "tileset": {
+      "directive": "TILESET ctx_tiles \"tiles.png\" APLIB NONE",
+      "cols": 4,
+      "rows": 4,
+      "num_tile": 16,
+      "ordering": "ROW (index = linha * cols + coluna)",
+      "num_tile_motivo": "TILESET de imagem passa addBlank=false em TilesetProcessor; com opt=NONE cada bloco vira um tile na ordem raster, logo numTile == 16",
+      "plain_bytes": 512,
+      "plain_sha256": "0c666624015ba8f5707530039586745deef4498c0fe5b5950d4c0252000d58f5",
+      "plain_hex": "00000000000000000000000000000000000000000000000000000000000000000011110001111110011001100001111000111100011000000111100000000000022222200222222733333333333333333333333b33333333993333330009933344444440444444440444444444444444444444444444444444444444444444440f0f0f0ff0f0f0f00f0f0f0ff0f0f0fe0f0f0f0ff0f0f0f00f0f0f0feeeeeeee10101018010101011010101001010101101010100101010210101010010101016666666666666666666666666666666566666666666666666666666655555555000000000111111001000010010cc010010cc01001000010011111100000000c88888888bbbbbbbbeeeeeeee111111114444444477777777aaaaaaaadddddddddddddddd00000000333333336666666699999999ccccccccffffffff22222222222222225555555588888888bbbbbbbbeeeeeeee11111111444444447777777777777777aaaaaaaadddddddd00000000333333336666666699999999ccccccccccccccccffffffff222222225555555588888888bbbbbbbbeeeeeeee11111111111111114444444477777777aaaaaaaadddddddd0000000033333333666666666666666699999999ccccccccffffffff222222225555555588888888bbbbbbbbbbbbbbbbeeeeeeee111111114444444477777777aaaaaaaadddddddd00000000"
+    },
+    "map": {
+      "directive": "TILEMAP ctx_map \"map.png\" ctx_tiles APLIB ALL  (map_base 0, ordering ROW)",
+      "cols": 15,
+      "rows": 9,
+      "cells": 135,
+      "screen_px": [
+        120,
+        72
+      ],
+      "plain_bytes": 270,
+      "plain_sha256": "e7980b78aef52252ba4eae93a9172c474c7a896a4c696d391f1519466d43c52b",
+      "plain_hex": "180200000000000000000000000008020000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000030000000000000000000300000000000000000000000000000000400600001002000000008006000000000000000000000000000020070000200700000000400500000000000000000000000000000000200100000000000000000000000000000000200400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "cells_table": [
+        {
+          "col": 0,
+          "row": 0,
+          "tile": 2,
+          "flip": "B",
+          "bank": 0,
+          "prio": 0,
+          "word": 6146
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 0,
+          "tile": 2,
+          "flip": "H",
+          "bank": 0,
+          "prio": 0,
+          "word": 2050
+        },
+        {
+          "col": 8,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 9,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 10,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 0,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 1,
+          "tile": 2,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 2
+        },
+        {
+          "col": 3,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 8,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 9,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 10,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 2,
+          "tile": 3,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 3
+        },
+        {
+          "col": 5,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 8,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 9,
+          "row": 2,
+          "tile": 3,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 3
+        },
+        {
+          "col": 10,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 3,
+          "tile": 6,
+          "flip": "",
+          "bank": 2,
+          "prio": 0,
+          "word": 16390
+        },
+        {
+          "col": 4,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 3,
+          "tile": 2,
+          "flip": "V",
+          "bank": 0,
+          "prio": 0,
+          "word": 4098
+        },
+        {
+          "col": 6,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 8,
+          "row": 3,
+          "tile": 6,
+          "flip": "",
+          "bank": 0,
+          "prio": 1,
+          "word": 32774
+        },
+        {
+          "col": 9,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 10,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 3,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 4,
+          "tile": 7,
+          "flip": "",
+          "bank": 1,
+          "prio": 0,
+          "word": 8199
+        },
+        {
+          "col": 2,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 4,
+          "tile": 7,
+          "flip": "",
+          "bank": 1,
+          "prio": 0,
+          "word": 8199
+        },
+        {
+          "col": 4,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 4,
+          "tile": 5,
+          "flip": "",
+          "bank": 2,
+          "prio": 0,
+          "word": 16389
+        },
+        {
+          "col": 7,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 8,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 9,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 10,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 4,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 5,
+          "tile": 1,
+          "flip": "",
+          "bank": 1,
+          "prio": 0,
+          "word": 8193
+        },
+        {
+          "col": 1,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 8,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 9,
+          "row": 5,
+          "tile": 4,
+          "flip": "",
+          "bank": 1,
+          "prio": 0,
+          "word": 8196
+        },
+        {
+          "col": 10,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 5,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 8,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 9,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 10,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 6,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 8,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 9,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 10,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 7,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 8,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 9,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 10,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 11,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 12,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 13,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        },
+        {
+          "col": 14,
+          "row": 8,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "word": 0
+        }
+      ],
+      "occurrences_por_tile": {
+        "0": [
+          {
+            "col": 1,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 3,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 4,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 6,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 9,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 0,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 0,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 1,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 3,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 4,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 6,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 9,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 0,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 1,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 3,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 6,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 0,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 1,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 4,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 6,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 9,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 0,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 4,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 9,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 4,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 1,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 3,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 4,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 6,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 5,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 0,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 1,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 3,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 4,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 6,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 9,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 6,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 0,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 1,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 3,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 4,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 6,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 9,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 7,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 0,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 1,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 3,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 4,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 6,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 9,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 10,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 11,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 12,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 13,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 14,
+            "row": 8,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          }
+        ],
+        "1": [
+          {
+            "col": 0,
+            "row": 5,
+            "flip": "",
+            "bank": 1,
+            "prio": 0
+          }
+        ],
+        "2": [
+          {
+            "col": 0,
+            "row": 0,
+            "flip": "B",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 7,
+            "row": 0,
+            "flip": "H",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 2,
+            "row": 1,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 5,
+            "row": 3,
+            "flip": "V",
+            "bank": 0,
+            "prio": 0
+          }
+        ],
+        "3": [
+          {
+            "col": 4,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          },
+          {
+            "col": 9,
+            "row": 2,
+            "flip": "",
+            "bank": 0,
+            "prio": 0
+          }
+        ],
+        "4": [
+          {
+            "col": 9,
+            "row": 5,
+            "flip": "",
+            "bank": 1,
+            "prio": 0
+          }
+        ],
+        "5": [
+          {
+            "col": 6,
+            "row": 4,
+            "flip": "",
+            "bank": 2,
+            "prio": 0
+          }
+        ],
+        "6": [
+          {
+            "col": 3,
+            "row": 3,
+            "flip": "",
+            "bank": 2,
+            "prio": 0
+          },
+          {
+            "col": 8,
+            "row": 3,
+            "flip": "",
+            "bank": 0,
+            "prio": 1
+          }
+        ],
+        "7": [
+          {
+            "col": 1,
+            "row": 4,
+            "flip": "",
+            "bank": 1,
+            "prio": 0
+          },
+          {
+            "col": 3,
+            "row": 4,
+            "flip": "",
+            "bank": 1,
+            "prio": 0
+          }
+        ]
+      },
+      "tiles_nao_referenciados": [
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ]
+    },
+    "ghost": {
+      "directive": "TILEMAP ctx_ghost \"ghost.png\" ctx_tiles APLIB ALL 100",
+      "cols": 8,
+      "rows": 16,
+      "plain_bytes": 256,
+      "plain_sha256": "3f0358027cc244afdef07266c30eb26151a556b2cf58fedc90c526f9da935c31",
+      "plain_hex": "006b006b006b006b006b006b006b006b000000000000000000000000000000000000000000000000000000000000000000050005000500050005000500050005006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b006b",
+      "cells_table": [
+        {
+          "col": 0,
+          "row": 0,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 0,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 0,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 0,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 0,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 0,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 0,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 1,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 1,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 2,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 3,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 4,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 5,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 6,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 7,
+          "row": 2,
+          "tile": 0,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(0)",
+          "word": 0
+        },
+        {
+          "col": 0,
+          "row": 3,
+          "tile": 5,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(5)",
+          "word": 5
+        },
+        {
+          "col": 1,
+          "row": 3,
+          "tile": 5,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(5)",
+          "word": 5
+        },
+        {
+          "col": 2,
+          "row": 3,
+          "tile": 5,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(5)",
+          "word": 5
+        },
+        {
+          "col": 3,
+          "row": 3,
+          "tile": 5,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(5)",
+          "word": 5
+        },
+        {
+          "col": 4,
+          "row": 3,
+          "tile": 5,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(5)",
+          "word": 5
+        },
+        {
+          "col": 5,
+          "row": 3,
+          "tile": 5,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(5)",
+          "word": 5
+        },
+        {
+          "col": 6,
+          "row": 3,
+          "tile": 5,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(5)",
+          "word": 5
+        },
+        {
+          "col": 7,
+          "row": 3,
+          "tile": 5,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "sistema(5)",
+          "word": 5
+        },
+        {
+          "col": 0,
+          "row": 4,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 4,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 4,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 4,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 4,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 4,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 4,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 4,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 5,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 5,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 5,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 5,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 5,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 5,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 5,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 5,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 6,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 6,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 6,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 6,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 6,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 6,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 6,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 6,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 7,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 7,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 7,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 7,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 7,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 7,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 7,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 7,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 8,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 8,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 8,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 8,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 8,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 8,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 8,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 8,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 9,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 9,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 9,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 9,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 9,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 9,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 9,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 9,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 10,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 10,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 10,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 10,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 10,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 10,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 10,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 10,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 11,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 11,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 11,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 11,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 11,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 11,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 11,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 11,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 12,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 12,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 12,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 12,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 12,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 12,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 12,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 12,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 13,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 13,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 13,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 13,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 13,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 13,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 13,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 13,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 14,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 14,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 14,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 14,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 14,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 14,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 14,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 14,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 0,
+          "row": 15,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 1,
+          "row": 15,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 2,
+          "row": 15,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 3,
+          "row": 15,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 4,
+          "row": 15,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 5,
+          "row": 15,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 6,
+          "row": 15,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        },
+        {
+          "col": 7,
+          "row": 15,
+          "tile": 107,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "origem": "tileset+base",
+          "word": 107
+        }
+      ],
+      "fora_do_tileset": [
+        {
+          "col": 0,
+          "row": 0,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 0,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 0,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 0,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 0,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 0,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 0,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 0,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 4,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 4,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 4,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 4,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 4,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 4,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 4,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 4,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 5,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 5,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 5,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 5,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 5,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 5,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 5,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 5,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 6,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 6,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 6,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 6,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 6,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 6,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 6,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 6,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 7,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 7,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 7,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 7,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 7,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 7,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 7,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 7,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 8,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 8,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 8,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 8,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 8,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 8,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 8,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 8,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 9,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 9,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 9,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 9,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 9,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 9,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 9,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 9,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 10,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 10,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 10,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 10,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 10,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 10,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 10,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 10,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 11,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 11,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 11,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 11,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 11,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 11,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 11,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 11,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 12,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 12,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 12,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 12,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 12,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 12,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 12,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 12,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 13,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 13,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 13,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 13,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 13,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 13,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 13,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 13,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 14,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 14,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 14,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 14,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 14,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 14,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 14,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 14,
+          "tile": 107
+        },
+        {
+          "col": 0,
+          "row": 15,
+          "tile": 107
+        },
+        {
+          "col": 1,
+          "row": 15,
+          "tile": 107
+        },
+        {
+          "col": 2,
+          "row": 15,
+          "tile": 107
+        },
+        {
+          "col": 3,
+          "row": 15,
+          "tile": 107
+        },
+        {
+          "col": 4,
+          "row": 15,
+          "tile": 107
+        },
+        {
+          "col": 5,
+          "row": 15,
+          "tile": 107
+        },
+        {
+          "col": 6,
+          "row": 15,
+          "tile": 107
+        },
+        {
+          "col": 7,
+          "row": 15,
+          "tile": 107
+        }
+      ],
+      "tile_de_sistema": [
+        {
+          "col": 0,
+          "row": 1,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 1,
+          "row": 1,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 2,
+          "row": 1,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 3,
+          "row": 1,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 4,
+          "row": 1,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 5,
+          "row": 1,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 6,
+          "row": 1,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 7,
+          "row": 1,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 0,
+          "row": 2,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 1,
+          "row": 2,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 2,
+          "row": 2,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 3,
+          "row": 2,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 4,
+          "row": 2,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 5,
+          "row": 2,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 6,
+          "row": 2,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 7,
+          "row": 2,
+          "tile": 0,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 0,
+          "row": 3,
+          "tile": 5,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 1,
+          "row": 3,
+          "tile": 5,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 2,
+          "row": 3,
+          "tile": 5,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 3,
+          "row": 3,
+          "tile": 5,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 4,
+          "row": 3,
+          "tile": 5,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 5,
+          "row": 3,
+          "tile": 5,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 6,
+          "row": 3,
+          "tile": 5,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        },
+        {
+          "col": 7,
+          "row": 3,
+          "tile": 5,
+          "nota": "\u00edndice em faixa mas aponta tile de sistema, n\u00e3o o tile do tileset"
+        }
+      ]
+    },
+    "palette": {
+      "directive": "PALETTE ctx_pal \"pal.pal\"",
+      "words": [
+        0,
+        512,
+        1024,
+        1536,
+        2048,
+        2560,
+        3072,
+        3584,
+        32,
+        544,
+        1056,
+        1568,
+        2080,
+        2592,
+        3104,
+        3616,
+        108,
+        576,
+        1088,
+        1600,
+        2112,
+        2624,
+        3136,
+        3648,
+        96,
+        608,
+        1120,
+        1632,
+        2144,
+        2656,
+        3168,
+        3680,
+        3692,
+        640,
+        1152,
+        1664,
+        2176,
+        2688,
+        3200,
+        3712,
+        160,
+        672,
+        1184,
+        1696,
+        2208,
+        2720,
+        3232,
+        3744
+      ],
+      "num_color": 48,
+      "plain_bytes": 96,
+      "plain_sha256": "7629b75807d1d30ff47626d6a6f3979610af54388a52ba4fd4b30f2b242d10b1",
+      "plain_hex": "000002000400060008000a000c000e00002002200420062008200a200c200e20006c02400440064008400a400c400e40006002600460066008600a600c600e600e6c02800480068008800a800c800e8000a002a004a006a008a00aa00ca00ea0",
+      "banks": 3,
+      "rgb8": [
+        [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            36
+          ],
+          [
+            0,
+            0,
+            73
+          ],
+          [
+            0,
+            0,
+            109
+          ],
+          [
+            0,
+            0,
+            146
+          ],
+          [
+            0,
+            0,
+            182
+          ],
+          [
+            0,
+            0,
+            219
+          ],
+          [
+            0,
+            0,
+            255
+          ],
+          [
+            0,
+            36,
+            0
+          ],
+          [
+            0,
+            36,
+            36
+          ],
+          [
+            0,
+            36,
+            73
+          ],
+          [
+            0,
+            36,
+            109
+          ],
+          [
+            0,
+            36,
+            146
+          ],
+          [
+            0,
+            36,
+            182
+          ],
+          [
+            0,
+            36,
+            219
+          ],
+          [
+            0,
+            36,
+            255
+          ]
+        ],
+        [
+          [
+            219,
+            109,
+            0
+          ],
+          [
+            0,
+            73,
+            36
+          ],
+          [
+            0,
+            73,
+            73
+          ],
+          [
+            0,
+            73,
+            109
+          ],
+          [
+            0,
+            73,
+            146
+          ],
+          [
+            0,
+            73,
+            182
+          ],
+          [
+            0,
+            73,
+            219
+          ],
+          [
+            0,
+            73,
+            255
+          ],
+          [
+            0,
+            109,
+            0
+          ],
+          [
+            0,
+            109,
+            36
+          ],
+          [
+            0,
+            109,
+            73
+          ],
+          [
+            0,
+            109,
+            109
+          ],
+          [
+            0,
+            109,
+            146
+          ],
+          [
+            0,
+            109,
+            182
+          ],
+          [
+            0,
+            109,
+            219
+          ],
+          [
+            0,
+            109,
+            255
+          ]
+        ],
+        [
+          [
+            219,
+            109,
+            255
+          ],
+          [
+            0,
+            146,
+            36
+          ],
+          [
+            0,
+            146,
+            73
+          ],
+          [
+            0,
+            146,
+            109
+          ],
+          [
+            0,
+            146,
+            146
+          ],
+          [
+            0,
+            146,
+            182
+          ],
+          [
+            0,
+            146,
+            219
+          ],
+          [
+            0,
+            146,
+            255
+          ],
+          [
+            0,
+            182,
+            0
+          ],
+          [
+            0,
+            182,
+            36
+          ],
+          [
+            0,
+            182,
+            73
+          ],
+          [
+            0,
+            182,
+            109
+          ],
+          [
+            0,
+            182,
+            146
+          ],
+          [
+            0,
+            182,
+            182
+          ],
+          [
+            0,
+            182,
+            219
+          ],
+          [
+            0,
+            182,
+            255
+          ]
+        ]
+      ],
+      "convencao": "palavra 68k xxxBBBxGGGxRRRx; RGB8 = round(md*255/7)",
+      "estrutura": "Palette = { dc.w numColor; dc.l dados } (rescomp Palette.out)"
+    },
+    "image_chain": {
+      "declaracao": "const Image ctx_image = { &ctx_pal, &ctx_tiles, &ctx_map }",
+      "origem": "C do fixture; o tipo Image \u00e9 do SGDK (inc/vdp_bg.h)",
+      "ghost_chain": "const Image ctx_ghost_image = { &ctx_pal, &ctx_tiles, &ctx_ghost }"
+    },
+    "composed_layer": {
+      "png": "expected/composed_layer.png",
+      "png_sha256": "fc2fe18db679b8b7a42c772e4624f45c015618b1f62a305687bc884fcb7f40a0",
+      "pixels_sha256": "7dc94b0254acda9139a7b54cb6bb8135b2948d78beb7e841ff745bab8479dcbc",
+      "largura": 120,
+      "altura": 72,
+      "regra": "\u00edndice 0 = backdrop preto (COR0), n\u00e3o pal[banco][0]; demais \u00edndices usam o banco da pr\u00f3pria c\u00e9lula"
+    },
+    "edicao_canonica": {
+      "recurso": "tileset (ctx_tiles)",
+      "pixel_fonte": {
+        "tile": 2,
+        "row": 4,
+        "col": 7,
+        "de": 11,
+        "para": 3
+      },
+      "ocorrencias_no_mapa_verificado": 4,
+      "posicoes_de_tela_previstas": [
+        {
+          "col": 0,
+          "row": 0,
+          "flip": "B",
+          "bank": 0,
+          "prio": 0,
+          "x": 0,
+          "y": 3
+        },
+        {
+          "col": 7,
+          "row": 0,
+          "flip": "H",
+          "bank": 0,
+          "prio": 0,
+          "x": 56,
+          "y": 4
+        },
+        {
+          "col": 2,
+          "row": 1,
+          "flip": "",
+          "bank": 0,
+          "prio": 0,
+          "x": 23,
+          "y": 12
+        },
+        {
+          "col": 5,
+          "row": 3,
+          "flip": "V",
+          "bank": 0,
+          "prio": 0,
+          "x": 47,
+          "y": 27
+        }
+      ],
+      "nao_prova": "ocorr\u00eancias fora deste mapa (a ROM s\u00f3 tem este mapa verificado para o tileset)"
+    },
+    "imagens_sha256": {
+      "res/tiles.png": "c120cf6a8c2828b861594e06517f4336d090b0647edde730671c27c2e7f3557c",
+      "res/map.png": "28c7d1832a5ed2aebf2b7d209e21cb5aca8d74836cbfb39f214616ae8496fef6",
+      "res/ghost.png": "0064c33e399728bbeafcb2ab5403bfe0a8943ffbff7df098a6e4b96ca9290e30",
+      "res/pal.png": "787b22ba6a5284eaefa8e2590b7f63a323335459681bb4ffe2ce44c313eafa37"
+    }
+  },
+  "source_sha256": {
+    "gen_fixture.py": {
+      "sha256": "7dfa9ec04436f68c925b6d80c8f1c860393c7e66e2a03e201368c90a8d2d8f6a",
+      "bytes": 23847
+    },
+    "src/main.c": {
+      "sha256": "954e63307dc2eb68423852a69d78a049d225df61ef9236d66fff4eec377de8f8",
+      "bytes": 2465
+    },
+    "res/main.res": {
+      "sha256": "21d1ff0e08cad0e8279ae393ecdbabb82fe32d0a02f88a52489c93f77eddc766",
+      "bytes": 167
+    },
+    "makefile": {
+      "sha256": "f712f3ce21277800ee7b2fe9cda80d64b810e1b5b115d0d8fcf4a7fa11094968",
+      "bytes": 165
+    },
+    "res/tiles.png": {
+      "sha256": "c120cf6a8c2828b861594e06517f4336d090b0647edde730671c27c2e7f3557c",
+      "bytes": 1023
+    },
+    "res/map.png": {
+      "sha256": "28c7d1832a5ed2aebf2b7d209e21cb5aca8d74836cbfb39f214616ae8496fef6",
+      "bytes": 1111
+    },
+    "res/ghost.png": {
+      "sha256": "0064c33e399728bbeafcb2ab5403bfe0a8943ffbff7df098a6e4b96ca9290e30",
+      "bytes": 941
+    },
+    "res/pal.pal": {
+      "sha256": "787b22ba6a5284eaefa8e2590b7f63a323335459681bb4ffe2ce44c313eafa37",
+      "bytes": 640
+    },
+    "toolchain/libmd.a": {
+      "sha256": "ef904a3756bc0ca7555060c810cd06c771fc2e70eed92a00befa8f9793caaae3",
+      "bytes": 1532200
+    },
+    "toolchain/rescomp.jar": {
+      "sha256": "502a467047df66b7e4c24023fa2ccdceae3e963aee664ede4bdc28fb0f55e603",
+      "bytes": 282627
+    },
+    "toolchain/apj.jar": {
+      "sha256": "2d8cdc63cc800e4b86ff4d9cdfe514001b77f788abcd02d61974dc319d026204",
+      "bytes": 13008
+    }
+  },
+  "sgdk_root": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/sgdk"
+}
