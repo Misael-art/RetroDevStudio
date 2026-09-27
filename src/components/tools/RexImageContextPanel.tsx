@@ -317,8 +317,11 @@ export function RexImageContextPanel({
       )}
 
       {imagem && camada?.png_data_url && (
-        <div className="flex flex-wrap items-start gap-3">
-          <div className="relative" style={{ width: tamanhoCamada.largura, height: tamanhoCamada.altura }}>
+        <div className="flex flex-wrap items-start gap-3 overflow-x-auto">
+          <div
+            className="relative shrink-0"
+            style={{ width: tamanhoCamada.largura, height: tamanhoCamada.altura }}
+          >
             <img
               src={camada.png_data_url}
               alt="camada composta do mapa verificado"
@@ -329,6 +332,7 @@ export function RexImageContextPanel({
               style={{
                 width: tamanhoCamada.largura,
                 height: tamanhoCamada.altura,
+                maxWidth: "none",
                 imageRendering: "pixelated",
               }}
               className="cursor-crosshair rounded border border-[#313244]"
@@ -364,7 +368,7 @@ export function RexImageContextPanel({
             <div className="flex flex-col gap-1">
               <p className="text-[10px] text-[#6c7086]">TileSet (o tile de origem fica destacado)</p>
               <div
-                className="relative"
+                className="relative shrink-0"
                 style={{
                   width: sheetPreview.largura_px * zoom,
                   height: sheetPreview.altura_px * zoom,
@@ -377,6 +381,7 @@ export function RexImageContextPanel({
                   style={{
                     width: sheetPreview.largura_px * zoom,
                     height: sheetPreview.altura_px * zoom,
+                    maxWidth: "none",
                     imageRendering: "pixelated",
                   }}
                   className="rounded border border-[#313244]"

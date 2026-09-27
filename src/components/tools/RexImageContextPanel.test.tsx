@@ -282,6 +282,22 @@ describe("RexImageContextPanel", () => {
     expect(exigir("rex-context-geometry").textContent).toContain("15x9 células");
   });
 
+  it("preserva o zoom pedido quando o painel é mais estreito que a camada", async () => {
+    await montar();
+    await carregarContexto();
+    const camada = exigir("rex-context-layer") as HTMLImageElement;
+    const envolucro = camada.parentElement as HTMLElement;
+    const trilho = envolucro.parentElement as HTMLElement;
+    // O preflight do Tailwind impõe `img { max-width: 100% }` e item de flex
+    // encolhe por padrão: sem as travas abaixo o <img> achata só a largura, o
+    // pixel deixa de ser quadrado e o zoom declarado não é o desenhado. No
+    // WebView real o E2E mede o getBoundingClientRect; aqui se pinha o contrato
+    // de CSS que produz aquele resultado.
+    expect(camada.style.maxWidth).toBe("none");
+    expect(envolucro.className).toContain("shrink-0");
+    expect(trilho.className).toContain("overflow-x-auto");
+  });
+
   it("diz o que foi conferido e o que a verificação não prova", async () => {
     await montar();
     await carregarContexto();
