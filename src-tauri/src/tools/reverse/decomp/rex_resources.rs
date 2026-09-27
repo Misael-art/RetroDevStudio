@@ -986,6 +986,17 @@ pub fn apply_resource_edit(
     use super::extract::{canonical_dir_under, write_file_immutable};
     let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
     let rom_sha = super::rom_library::sha256_hex(&rom);
+    // A identidade abre a sequência, antes de qualquer varredura: o painel pode
+    // estar com a fila de uma ROM e o caminho de outra (troca sem re-verificar),
+    // e nesse caso a varredura da ROM inteira terminaria em "recurso não
+    // verificado nesta ROM" — sintoma, não causa. A transação reconfere a
+    // identidade logo em seguida; aqui a recusa custa só um hash.
+    if rom_sha != expected_rom_sha256 {
+        return Err(format!(
+            "rom_identity_mismatch: ROM base mudou: esperado {expected_rom_sha256}, atual {rom_sha}. \
+             Re-verifique a ROM antes de aplicar; nada foi varrido e nada foi escrito."
+        ));
+    }
     let limits = TransactionLimits::default();
     let ConjuntoVerificado {
         resources,
@@ -3243,6 +3254,50 @@ mod tests {
             std::fs::read(&path).expect("reler rom"),
             rom,
             "a recusa de intervalo alterou a ROM"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Identidade antes de varredura: com o caminho apontando para uma ROM que
+    /// não é a declarada, a recusa tem que nomear a identidade — não o offset,
+    /// que pertence a outra ROM. É o estado do painel quando o operador troca o
+    /// arquivo sem re-verificar (a fila e o recurso vêm da ROM anterior, e o
+    /// offset delas não existe na nova): sem a ordem certa a barra acusaria
+    /// "recurso não verificado", que descreve o sintoma e esconde a causa. O
+    /// custo da recusa também passa a ser um hash, não uma varredura inteira.
+    #[test]
+    fn apply_recusa_identidade_antes_de_procurar_o_recurso() {
+        let (rom, r1, _r2) = synthetic_rom();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("relogio")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rds-rex-identidade-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("diretorio temporario");
+        let path = dir.join("rom.bin");
+        std::fs::write(&path, &rom).expect("escrever rom");
+        let sha_de_outra_rom = "0".repeat(64);
+        let offset_de_outra_rom = r1.candidate.stream_offset as u64 + 1;
+        let err = apply_resource_edit(
+            path.to_str().expect("utf8"),
+            offset_de_outra_rom,
+            &[PixelEdit {
+                tile: 0,
+                row: 0,
+                col: 0,
+                index: 15,
+            }],
+            &sha_de_outra_rom,
+        )
+        .expect_err("identidade divergente recusa antes de qualquer varredura");
+        assert!(
+            err.starts_with("rom_identity_mismatch"),
+            "a recusa deveria nomear a identidade, e veio: {err}"
+        );
+        assert_eq!(
+            std::fs::read(&path).expect("reler rom"),
+            rom,
+            "a recusa de identidade alterou a ROM"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
