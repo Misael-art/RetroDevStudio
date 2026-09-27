@@ -9250,32 +9250,36 @@ async function runRexLz4wEffectScenario(sessionId) {
 // perna prova é o caminho do usuário: os mesmos três comandos chamados pela
 // superfície que um humano usa, com o resultado conferido em bytes no disco.
 //
-// A edição NÃO é a das pernas 1/3, e o motivo é medido aqui: a barra não sabe
-// expressar o índice 0. O campo `índice` faz `setPaintIndex(Number(v) || 1)`,
-// então 0 é reescrito para 1 em silêncio antes de chegar a `editRejectReason`
-// (que reserva 0 como transparente). A sonda fecha o achado com prova diferencial
-// contra o hash pinado das pernas 1 e 3. Em seguida os 14 índices que a interface
-// sabe digitar são aplicados no pixel do pin — a varredura de capacidade do
-// encoder, no lib, prevê recusa total ali — e a edição que completa a perna vem
-// do alvo que essa mesma varredura mediu como cabível. O achado da UI é
-// registrado, não corrigido: mudar a semântica de paleta da barra é decisão do
-// operador, e a correção sai desta corrida.
+// A edição das pernas 1/3 (índice 0) É aplicável pela barra desde 2026-09-27, e
+// aqui ela é medida: o campo de índice guardava o número coercido
+// (`setPaintIndex(Number(v) || 1)`), que reescrevia 0 para 1 em silêncio antes de
+// `editRejectReason` — 0 é índice legítimo do 4bpp (o que o VDP lê como
+// transparente), não sentinela. A sonda 5b agora exige que a barra expresse o 0 e
+// reproduza a cópia que o núcleo executou nas pernas 1 e 3, e a sonda 6a mantém o
+// lado diferencial: os outros índices do mesmo pixel estouram o slot. As recusas
+// de entrada inválida (5a) e o alvo que a varredura mediu como cabível (6b)
+// completam a perna.
 async function runRexAplibByorEffectScenario(sessionId) {
   const ROM_SHA = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
   const STREAM = 0x2e12a;
   const STREAM_HEX = "2e12a";
   const SLOT = 938;
-  // Pixel das pernas 1 e 3 (5→0, 937 B no slot de 938): é o único que cabe e é
-  // justamente o que o campo de índice da barra não deixa digitar.
+  // Pixel das pernas 1 e 3 (5→0, 937 B no slot de 938): a única edição que cabe
+  // ali é com índice 0 — o valor que o campo de índice reescrevia para 1 e que a
+  // sonda 5b agora cobra da barra.
   const PIXEL_DO_PIN = { tile: 53, row: 0, col: 4 };
   const INDICE_ORIGINAL = 5;
   // Alvo medido, não escolhido: a varredura de capacidade do encoder
   // (`byor_aplib_varre_edicoes_de_um_pixel_que_a_barra_sabe_expressar`, na mesma
-  // ROM) deixa exatamente duas edições de um pixel com índice da barra caberem no
+  // ROM) deixa exatamente duas edições de um pixel com índice 1..15 caberem no
   // tile observado 53, ambas a 938 B — o teto do slot. A paleta pinada (0x2cbc8)
   // distingue as duas cores: 5 = 0x0468, 4 = 0x0446.
   const ALVO_DA_BARRA = { tile: 53, row: 7, col: 5, indice: 4 };
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // O cenário inteiro fala por asserts; sem marcadores, um ERRO no fim da log não
+  // diria em qual sonda a barra parou — e 5a, 5b e 6a sondam a mesma superfície
+  // em ordens diferentes.
+  const passo = (rotulo) => console.log(`[rex-aplib-byor-effect] passo ${rotulo}`);
 
   const romPath = process.env.RDS_REX_RESOURCE_ROM ?? process.env.RDS_INSPECTION_ROM ?? "";
   if (!romPath || !(await pathExists(romPath))) {
@@ -9311,13 +9315,27 @@ async function runRexAplibByorEffectScenario(sessionId) {
       sessionId,
       `return document.querySelector('${panel} [data-testid="${testId}"]')?.textContent ?? ''`
     )) || "");
-  const setPanelInput = async (testId, value) =>
-    executeScript(sessionId, `
+  const setPanelInput = async (testId, value) => {
+    // Um campo ausente não é detalhe: é a superfície que mudou, e o erro do
+    // driver sozinho não diria quais testids a barra tem montados agora.
+    const r = await executeScript(sessionId, `
       const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      if (!input) {
+        return 'AUSENTE::' + Array.from(document.querySelectorAll('[data-testid]'))
+          .map((e) => e.getAttribute('data-testid')).join(',');
+      }
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
       setter.call(input, ${JSON.stringify(String(value))});
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;`);
+    if (typeof r === "string" && r.startsWith("AUSENTE::")) {
+      fail(
+        `campo ${testId} não está montado (valor ${JSON.stringify(String(value))}); `
+        + `testids presentes na página: ${r.slice("AUSENTE::".length)}`
+      );
+    }
+    return r;
+  };
   const selectResource = async (offsetHex) => {
     await executeScript(sessionId, `
       const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
@@ -9353,6 +9371,7 @@ async function runRexAplibByorEffectScenario(sessionId) {
     });`);
 
   // ---- 1/2/3: abrir, verificar e selecionar o recurso aPLib real.
+  passo("1-3: abrir ROM, verificar, selecionar 0x2e12a");
   await setPanelInput("rex-resource-rom-input", romPath);
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
   await waitFor(
@@ -9374,6 +9393,7 @@ async function runRexAplibByorEffectScenario(sessionId) {
   if (typeof previewShaOriginal !== "string" || previewShaOriginal.length < 8) fail("prévia sem hash de pixels.");
 
   // ---- 4: no-op pela mesma transação, pela barra.
+  passo("4: no-op com fila vazia");
   await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
   await waitFor(
     async () => (await textOf("rex-resource-result")).includes("noop"),
@@ -9382,27 +9402,45 @@ async function runRexAplibByorEffectScenario(sessionId) {
     250
   );
 
-  // ---- 5a: a guarda anti-descarte-silencioso é alcançável pela barra onde a UI
-  // expressa o valor inválido (linha 8 num tile de 8 linhas).
-  await selectResource(STREAM_HEX); // limpa fila, resultado, erro e aviso
-  await setPanelInput("rex-resource-paint-index", 1);
-  await setPanelInput("rex-resource-edit-tile", PIXEL_DO_PIN.tile);
-  await setPanelInput("rex-resource-edit-row", 8);
-  await setPanelInput("rex-resource-edit-col", PIXEL_DO_PIN.col);
-  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
-  const avisoGuardaLinha = await waitFor(
-    async () => {
-      const notice = await textOf("rex-resource-notice");
-      return notice.includes("linha 8 fora do tile") ? notice : false;
-    },
-    8000,
-    `a guarda do painel não avisou a recusa da linha 8 (superfície mudou?). DOM: ${await dumpFila()}`,
-    200
-  );
-  const filaVaziaAposAviso = (await textOf("rex-resource-edit-count")).includes("nenhuma edição");
-  if (!filaVaziaAposAviso) {
-    fail(`a guarda avisou mas a edição entrou na fila mesmo assim (descarte silencioso voltou?): ${await dumpFila()}`);
+  // ---- 5a: a guarda anti-descarte-silencioso é alcançável pela barra em cada
+  // forma de entrada que não pertence ao domínio: linha 8 num tile de 8 linhas e
+  // os índices que o 4bpp não tem (16, -1, não inteiro, campo vazio). Cada sonda
+  // tem que avisar E deixar a fila vazia — entrar na fila no lugar de outra cor é
+  // exatamente o descarte silencioso que a guarda existe para impedir.
+  const recusasDoPainel = {};
+  for (const sonda of [
+    { campo: "rex-resource-edit-row", valor: 8, motivo: "linha 8 fora do tile" },
+    { campo: "rex-resource-paint-index", valor: 16, motivo: "fora da paleta" },
+    { campo: "rex-resource-paint-index", valor: -1, motivo: "fora da paleta" },
+    { campo: "rex-resource-paint-index", valor: 1.5, motivo: "não é um inteiro" },
+    { campo: "rex-resource-paint-index", valor: "", motivo: "campo de índice vazio" },
+  ]) {
+    await selectResource(STREAM_HEX); // limpa fila, resultado, erro e aviso
+    passo(`5a: sonda de recusa ${sonda.campo.replace("rex-resource-", "")}=${JSON.stringify(sonda.valor)}`);
+    await setPanelInput("rex-resource-paint-index", sonda.campo === "rex-resource-paint-index" ? sonda.valor : 1);
+    await setPanelInput("rex-resource-edit-tile", PIXEL_DO_PIN.tile);
+    await setPanelInput("rex-resource-edit-row", sonda.campo === "rex-resource-edit-row" ? sonda.valor : PIXEL_DO_PIN.row);
+    await setPanelInput("rex-resource-edit-col", PIXEL_DO_PIN.col);
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+    const aviso = await waitFor(
+      async () => {
+        const notice = await textOf("rex-resource-notice");
+        return notice.includes(sonda.motivo) ? notice : false;
+      },
+      8000,
+      `a guarda do painel não avisou a recusa de ${sonda.campo}=${JSON.stringify(sonda.valor)} (superfície mudou?). DOM: ${await dumpFila()}`,
+      200
+    );
+    const filaVazia = (await textOf("rex-resource-edit-count")).includes("nenhuma edição");
+    if (!filaVazia) {
+      fail(`a guarda avisou mas a entrada inválida entrou na fila (descarte silencioso voltou?): ${await dumpFila()}`);
+    }
+    recusasDoPainel[`${sonda.campo}=${sonda.valor === "" ? "(vazio)" : sonda.valor}`] = {
+      aviso,
+      fila_ficou_vazia: filaVazia,
+    };
   }
+  const avisoGuardaLinha = recusasDoPainel[`rex-resource-edit-row=${8}`].aviso;
 
   // Desfecho de uma aplicação pela barra: `aplicado` com o hash anunciado ou
   // `recusado` com o texto do erro estruturado do núcleo. Interpretação fora do
@@ -9442,14 +9480,18 @@ async function runRexAplibByorEffectScenario(sessionId) {
     return { kind: "recusado", sha: null, texto: bruto.recusado.slice(0, 200), completo: bruto.recusado };
   };
 
-  // ---- 5b: achado medido — a barra NÃO sabe expressar o índice 0, que é o valor
-  // pinado das pernas 1 e 3. Prova diferencial: as pernas 1/3 gravaram o índice 0
-  // com 937 B no slot de 938 B e a cópia tem hash pinado no manifesto da evidência
-  // 2026-09-27-passo5-perna3-core. Se a barra expressasse 0, esta sonda
-  // reproduziria esse hash; se o campo de índice reescreve 0 para 1, o desfecho é
-  // o mesmo do índice 1 digitado à mão (a varredura do encoder, no lib, diz que os
-  // dois estouram o slot em 942 B — a igualdade dos dois desfechos é a medição).
+  // ---- 5b: regressão do índice 0. O índice 0 é um valor do domínio 4bpp — é o
+  // que o VDP lê como transparente no plano de tiles — e o pin das pernas 1 e 3 é
+  // exatamente (53,0,4) → 0: 937 B escritos no slot de 938 B na cópia
+  // 69389ec2…, e foi ESSA cópia que a perna 3 executou no desempacotador do próprio
+  // jogo (candidate_sha256 do run rex05-hamoopig-aplib-edit). Custo e hash foram
+  // re-medidos em 2026-09-27 com o encoder atual por
+  // `cargo test --lib byor_aplib -- --ignored --nocapture`, não copiados do
+  // registro. Antes do conserto o campo reescrevia 0 para 1 (`Number(v) || 1`) e
+  // esta sonda media o achado; agora ela mede o contrário: a barra expressa o 0 e
+  // reproduz byte a byte o artefato que o núcleo já rodou.
   const SHA_COPIA_INDICE_0 = "69389ec2b400220c7a069e4c36326ca3c26d81e85ff0ab81bf798dc9ae4038ac";
+  passo("5b: regressão do índice 0 digitado na barra");
   await selectResource(STREAM_HEX);
   await setPanelInput("rex-resource-edit-tile", PIXEL_DO_PIN.tile);
   await setPanelInput("rex-resource-edit-row", PIXEL_DO_PIN.row);
@@ -9459,8 +9501,8 @@ async function runRexAplibByorEffectScenario(sessionId) {
   const sondaIndiceZero = await waitFor(
     async () => {
       const notice = await textOf("rex-resource-notice");
-      if (notice.includes("fora da paleta")) return { recusada: notice };
-      if ((await textOf("rex-resource-edit-count")).includes("1 edição")) return { enfileirada: notice };
+      if (notice) return { recusada: notice };
+      if ((await textOf("rex-resource-edit-count")).includes("1 edição")) return { enfileirada: true };
       return false;
     },
     8000,
@@ -9469,58 +9511,65 @@ async function runRexAplibByorEffectScenario(sessionId) {
   );
   const indiceNoCampoAposDigitar0 = await executeScript(sessionId, `
     return document.querySelector('${panel} [data-testid="rex-resource-paint-index"]')?.value ?? '';`);
-
-  let desfechoSonda = null;
-  let desfechoIndiceUm = null;
+  // O campo guarda o texto digitado de propósito: 0 no teclado tem que ser 0 no
+  // DOM. Qualquer outro valor aqui é a coerção silenciosa voltando.
+  if (indiceNoCampoAposDigitar0 !== "0") {
+    fail(
+      `digitar índice 0 deixou "${indiceNoCampoAposDigitar0}" no campo, não "0": a coerção do `
+      + `campo de índice voltou (Number(v) || 1?) e a barra voltou a não expressar o 0`
+    );
+  }
   if (sondaIndiceZero.recusada) {
-    // Superfície mudou: o painel passou a expressar a recusa do índice 0, então
-    // não há fila para aplicar. O achado abaixo reporta a mudança.
-    desfechoSonda = {
-      kind: "recusada-pelo-painel",
-      sha: null,
-      texto: sondaIndiceZero.recusada.slice(0, 200),
-      completo: sondaIndiceZero.recusada,
-    };
-  } else {
-    desfechoSonda = await aplicarEdicao(PIXEL_DO_PIN, 0, "sonda de índice 0 (0 digitado)");
-    // O mecanismo do achado é o campo, não a transação: se o DOM mostrar outro
-    // valor além de 1, a reescrita mudou e a interpretação abaixo deixa de valer.
-    if (indiceNoCampoAposDigitar0 !== "1") {
-      fail(
-        `digitar índice 0 deixou "${indiceNoCampoAposDigitar0}" no campo, não "1": o clamp `
-        + `setPaintIndex(Number(v) || 1) mudou e o achado da reescrita precisa ser reescrito`
-      );
-    }
-    if (desfechoSonda.kind === "aplicado" && SHA_COPIA_INDICE_0.startsWith(desfechoSonda.sha)) {
-      fail("a barra expressou o índice 0 de verdade: o achado da reescrita está superado e este cenário precisa ser reescrito.");
-    }
-    if (desfechoSonda.kind === "recusado" && !desfechoSonda.texto.includes("excessive_output")) {
-      fail(`a sonda de índice 0 foi recusada por um motivo não previsto: ${desfechoSonda.texto}`);
-    }
-    // Índices diferentes produzem plains diferentes e, portanto, streams e cópias
-    // diferentes: igualdade de desfecho fecha a prova de que 0 virou 1.
-    desfechoIndiceUm = await aplicarEdicao(PIXEL_DO_PIN, 1, "índice 1 explícito");
-    if (desfechoSonda.kind !== desfechoIndiceUm.kind || desfechoSonda.sha !== desfechoIndiceUm.sha) {
-      fail(
-        `índice 0 digitado e índice 1 explícito divergiram: ${JSON.stringify({ sonda: desfechoSonda, um: desfechoIndiceUm })}`
-      );
-    }
-    if (desfechoSonda.completo !== desfechoIndiceUm.completo) {
-      fail(
-        `os dois desfechos têm a mesma forma mas textos diferentes: ${JSON.stringify({
-          sonda: desfechoSonda.completo.slice(0, 200), um: desfechoIndiceUm.completo.slice(0, 200),
-        })}`
-      );
-    }
+    fail(`a barra recusou o índice 0 antes da transação (0 voltou a estar fora do domínio): ${sondaIndiceZero.recusada}`);
+  }
+  const desfechoSonda = await aplicarEdicao(PIXEL_DO_PIN, 0, "índice 0 digitado na barra");
+  if (desfechoSonda.kind !== "aplicado") {
+    fail(
+      `a edição pinada das pernas 1 e 3, digitada na barra, não completou: ${desfechoSonda.texto}
+       ` + `Se o encoder ou a ROM mudou, o custo do índice 0 deixou de ser 937 B de 938 — re-meça a varredura.`
+    );
+  }
+  if (desfechoSonda.sha !== SHA_COPIA_INDICE_0.slice(0, 16)) {
+    fail(
+      `a barra escreveu uma cópia diferente da que o núcleo executou na perna 3: `
+      + `${desfechoSonda.sha}… != ${SHA_COPIA_INDICE_0.slice(0, 16)}… (índice 0 reescrito por outro valor?)`
+    );
+  }
+  // Conferência em bytes do artefato DA BARRA para o índice 0: o hash já amarra
+  // cada byte, mas "sem expansão" e "nada fora do slot" são guardas da transação
+  // e aqui são medidas, não alegadas.
+  const copiaIndiceZeroPath = desfechoSonda.completo.match(/cópia: (\S+)/)?.[1];
+  if (!copiaIndiceZeroPath) fail(`proveniência ausente no desfecho do índice 0: ${desfechoSonda.completo.slice(0, 240)}`);
+  const bytesIndiceZero = await readFile(copiaIndiceZeroPath);
+  if (createHash("sha256").update(bytesIndiceZero).digest("hex") !== SHA_COPIA_INDICE_0) {
+    fail(`a cópia do índice 0 não é o artefato da perna 3 em disco: ${copiaIndiceZeroPath}`);
+  }
+  if (bytesIndiceZero.length !== romBytes.length) {
+    fail(`a cópia do índice 0 expandiu a ROM: ${bytesIndiceZero.length} != ${romBytes.length}`);
+  }
+  const deslocadosIndiceZero = [];
+  for (let i = 0; i < bytesIndiceZero.length; i += 1) {
+    if (bytesIndiceZero[i] !== romBytes[i]) deslocadosIndiceZero.push(i);
+  }
+  if (deslocadosIndiceZero.length === 0) fail("a cópia do índice 0 é idêntica à ROM: nada foi escrito.");
+  const foraDoSlotIndiceZero = deslocadosIndiceZero.filter((i) => i < STREAM || i >= STREAM + SLOT);
+  if (foraDoSlotIndiceZero.length > 0) {
+    fail(
+      `a barra escreveu ${foraDoSlotIndiceZero.length} byte(s) fora do slot no índice 0: `
+      + `${JSON.stringify(foraDoSlotIndiceZero.slice(0, 8))}`
+    );
   }
 
-  // ---- 6a: os 14 índices que a barra sabe digitar, todos no pixel das pernas 1
-  // e 3. A varredura de capacidade do encoder no lib prevê recusa total (939..942
-  // B contra 938); se um aplicar, foi o encoder ou a ROM que mudou, e a mensagem
-  // abaixo diz isso em vez de esconder.
+  // ---- 6a: os índices 1..15 do mesmo pixel das pernas 1 e 3. A varredura de
+  // capacidade do encoder no lib prevê recusa total (939..942 B contra 938), e o
+  // índice 0 — agora o único do domínio que cabe — é tratado na sonda 5b: se um
+  // destes aplicar, foi o encoder ou a ROM que mudou, e a mensagem abaixo diz isso
+  // em vez de esconder. A recusa daqui é também o lado diferencial de 5b: 0 e 1
+  // não são o mesmo byte enviado, porque um completa e os outros estouram o slot.
   const recusas = {};
   for (let indice = 1; indice <= 15; indice += 1) {
     if (indice === INDICE_ORIGINAL) continue; // é o valor original: não-editar
+    passo(`6a: índice ${indice} no pixel do pin`);
     const desfecho = await aplicarEdicao(PIXEL_DO_PIN, indice, `índice ${indice} no pixel do pin`);
     if (desfecho.kind === "aplicado") {
       fail(
@@ -9546,6 +9595,7 @@ async function runRexAplibByorEffectScenario(sessionId) {
   const resultText = desfechoAlvo.completo;
 
   // ---- 7: o que a barra escreveu, conferido em bytes no disco.
+  passo("7: bytes da cópia no disco");
   const modifiedPath = resultText.match(/cópia: (\S+)/)?.[1];
   const patchPath = resultText.match(/patch: (\S+)/)?.[1];
   if (!modifiedPath || !patchPath) fail(`proveniência ausente no resultado da barra: ${resultText.slice(0, 240)}`);
@@ -9608,7 +9658,7 @@ async function runRexAplibByorEffectScenario(sessionId) {
     reportPath,
     JSON.stringify(
       {
-        schema: "rex-aplib-byor-effect/v1",
+        schema: "rex-aplib-byor-effect/v2",
         etapa: "passo 5 perna 2 — recurso real aPLib editado pela interface",
         rom: { path: romPath, sha256: romSha },
         recurso: {
@@ -9627,21 +9677,24 @@ async function runRexAplibByorEffectScenario(sessionId) {
           alvo_aplicado_pela_barra: ALVO_DA_BARRA,
         },
         recusas_excessive_output: recusas,
-        guarda_anti_descarte_silencioso: { aviso: avisoGuardaLinha, fila_ficou_vazia: filaVaziaAposAviso },
-        achado_indice_0_inexpressavel_pela_barra: {
-          premissa: "o pin das pernas 1 e 3 é índice 0 (transparente), que editRejectReason reserva e o campo 'índice' não deixa digitar",
-          mecanismo: "CompressedResourcePanel.tsx: setPaintIndex(Number(event.target.value) || 1) reescreve 0 para 1 antes de queueEdit",
-          sonda: sondaIndiceZero,
+        guarda_anti_descarte_silencioso: recusasDoPainel,
+        regressao_indice_0_expressavel_pela_barra: {
+          dominio: "índice de paleta de pixel no 4bpp: 0..15, sendo 0 o que o VDP lê como transparente no plano de tiles (não é edição de cor RGB da paleta)",
+          conserto: "CompressedResourcePanel.tsx guarda o TEXTO do campo (useState(\"1\")) e valida por paintIndexRejectReason: vazio, não número, não inteiro e fora de 0..15 têm queixa própria e nada entra na fila no lugar de outra cor; o min=1 e o Number(value) || 1 que reescreviam 0 para 1 saíram",
+          edicao_sondada: { ...PIXEL_DO_PIN, indice: 0 },
           valor_no_campo_apos_digitar_0: indiceNoCampoAposDigitar0,
+          sonda: sondaIndiceZero,
           desfecho_da_aplicacao: desfechoSonda,
+          copia_da_barra_indice_0: {
+            path: copiaIndiceZeroPath,
+            sha256: SHA_COPIA_INDICE_0,
+            bytes_diferentes_na_copia: deslocadosIndiceZero.length,
+            bytes_fora_do_slot: foraDoSlotIndiceZero.length,
+          },
           hash_da_copia_pinada_pernas_1_e_3: SHA_COPIA_INDICE_0,
-          desfecho_indice_1_explicito: desfechoIndiceUm,
-          prova: desfechoSonda.kind === "aplicado"
-            ? "a cópia do 0 digitado não é a cópia pinada do índice 0 e é a mesma do índice 1 explícito: o campo reescreveu 0 para 1"
-            : desfechoSonda.kind === "recusado"
-              ? `campo_after_digitando_0="${indiceNoCampoAposDigitar0}", e o desfecho do 0 digitado é byte a byte o mesmo do índice 1 explícito (${desfechoSonda.texto}); índice 0 coube no slot nas pernas 1 e 3 (937 de 938 B), logo o byte enviado pelo painel não foi 0`
-              : "a superfície mudou: o painel passou a recusar índice 0 antes da transação",
-          status: "registrado como achado, NÃO corrigido — semântica de paleta da UI é decisão do operador",
+          re_medido_em: "2026-09-27 por `cargo test --lib byor_aplib -- --ignored --nocapture` (custo 937 B no slot de 938 B e a mesma cópia 69389ec2… com o encoder atual)",
+          prova_diferencial: "a barra aplicou o índice 0 e reproduziu em bytes a cópia que o núcleo executou na perna 3; os índices 1..15 do mesmo pixel, medidos na sonda 6a desta mesma rodada, foram todos recusados com excessive_output — 0 não é outro valor disfarçado",
+          status: "corrigido e regredido: o índice 0 é expressável pela interface de ponta a ponta",
         },
         saida: {
           copia_path: modifiedPath,
@@ -9657,7 +9710,8 @@ async function runRexAplibByorEffectScenario(sessionId) {
         },
         limites: [
           "prova o caminho da barra neste recurso, nesta ROM e nesta edição: não prova o resto dos 4 recursos aPLib nem o jogo inteiro",
-          "o índice aplicável pela barra NÃO é o das pernas 1 e 3 (0 é reescrito para 1 pelo campo de índice); o efeito em tela desta edição específica não foi executado no core",
+          "a barra agora aplica o índice 0 das pernas 1 e 3 e produz byte a byte a cópia 69389ec2… que a perna 3 executou no core: o efeito em tela desta edição está provado por identidade de artefato, não por uma corrida nova desta cópia pela barra",
+          "o bit a bit da edição (nibble do pixel, demais pixels intactos) é conferido no lib contra o plain re-decodificado, não aqui: a barra não expõe o desempacotamento",
           "BYOR não é dependência provisionável: este cenário não roda no CI",
         ],
       },
@@ -9676,12 +9730,11 @@ async function runRexAplibByorEffectScenario(sessionId) {
     patch: patchSha,
     preservados: preserved,
     guarda_aviso: avisoGuardaLinha.slice(0, 60),
+    recusas_painel: Object.keys(recusasDoPainel).length,
     indice_0_no_campo: indiceNoCampoAposDigitar0,
     indice_0_sonda: desfechoSonda.kind,
     indice_0_copia: desfechoSonda.sha ?? desfechoSonda.texto.slice(0, 60),
-    indice_1_explicito: desfechoIndiceUm
-      ? desfechoIndiceUm.sha ?? desfechoIndiceUm.texto.slice(0, 60)
-      : "não aplicado (0 recusado pelo painel)",
+    indice_1_a_15_todos_recusados: Object.keys(recusas).length === 14,
   })}`);
 }
 
