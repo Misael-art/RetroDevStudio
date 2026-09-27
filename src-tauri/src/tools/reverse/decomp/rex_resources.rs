@@ -1408,13 +1408,22 @@ mod tests {
     }
 
     fn hamoopig_rom() -> Option<(Vec<u8>, String)> {
-        let path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
-            "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin"
-                .to_string()
-        });
-        let rom = std::fs::read(path).ok()?;
+        let rom = std::fs::read(hamoopig_rom_path()).ok()?;
         let sha = super::super::rom_library::sha256_hex(&rom);
         Some((rom, sha))
+    }
+
+    /// Caminho canônico local da ROM BYOR: corpus somente leitura, fora do git.
+    /// Os aceites que escrevem leem **deste** arquivo, nunca de cópia em `/tmp` —
+    /// é o que permite a uma execução posterior conferir a identidade sem
+    /// re-provisionar nada.
+    fn hamoopig_rom_path() -> std::path::PathBuf {
+        match std::env::var("RDS_HAMOOPIG_ROM") {
+            Ok(p) if !p.trim().is_empty() => std::path::PathBuf::from(p),
+            _ => std::path::PathBuf::from(
+                "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+            ),
+        }
     }
 
     /// O que a transação consegue fazer num recurso real: re-codifica o plain
@@ -1921,6 +1930,325 @@ mod tests {
         // antigo no slot (é a regra de escrita — só os `novo.len()` bytes primeiros
         // são reescritos), e o bloco vizinho continua intacto.
         assert!(novo.len() < slot, "sem folga não há escrita em slot fixo");
+    }
+
+    /// Passo 5, perna 1 — o **fluxo do produto** sobre o recurso aPLib real
+    /// pinado no passo 4: listar → prévia → no-op → editar → conferir os bytes
+    /// escritos por fora → reaplicar o BPS numa cópia íntegra → reabrir a
+    /// modificada. Roda pelo mesmo caminho que a UI chama
+    /// (`list_resources`/`preview_resource`/`apply_resource_edit` são os
+    /// comandos Tauri), com a ROM lida do corpus somente leitura e os artefatos
+    /// no diretório de trabalho canônico do produto.
+    ///
+    /// O que este aceite **não** é: nem o WebDriver (perna 2) nem o oráculo
+    /// decisivo. Ele prova a transação sobre bytes reais; só a execução do
+    /// recurso modificado pelo desempacotador do próprio jogo (perna 3) prova o
+    /// efeito em tela.
+    ///
+    /// **Medido com mutante, para não alegar o que não pega.** (a) Trocando o
+    /// re-encode aPLib para codificar o plain **original** em vez do editado, este
+    /// teste cai em `expect("edição aPLib no recurso real")` — o guarda de ida e
+    /// volta de `recodificar_no_espaco` recusa a escrita, então a asserção
+    /// `aplicada.outcome == "applied"` tem dente. Caem juntos com o mesmo mutante
+    /// `reinsert_aplib_edita_tile_e_preserva_lz4w_na_mesma_rom`,
+    /// `reinsert_aplib_exige_identidade_de_rom_e_evidencia_deste_tronco`,
+    /// `reinsert_aplib_recusa_edicao_que_nao_cabe_no_slot`,
+    /// `reinsert_aplib_recusa_edicao_que_mudaria_lz4w_dependente` e
+    /// `ui_edite_recurso_aplib_pela_mesma_fronteira_do_lz4w` (5 reprovados).
+    /// (b) Enfraquecendo a guarda de dependente (comparar só o comprimento do
+    /// plain em vez do conteúdo) este teste **continua verde com os mesmos
+    /// hashes** — nesta ROM e nesta edição nenhum recurso verificado muda de
+    /// decode, e a asserção `divergentes == [STREAM]` registra esse fato, não o
+    /// funcionamento da guarda. Quem prova a guarda são
+    /// `reinsert_aplib_recusa_edicao_que_mudaria_lz4w_dependente` e
+    /// `transaction_rejects_known_dependent_modified`, que caem com o mesmo
+    /// mutante. Os dois mutantes foram revertidos e a árvore conferida por diff.
+    ///
+    /// Rodar: `cargo test --lib byor_aplib_edite_o_recurso_pelo_fluxo -- --ignored --nocapture`
+    #[test]
+    #[ignore = "fluxo BYOR aPLib: requer ROM local com SHA esperado"]
+    fn byor_aplib_edite_o_recurso_pelo_fluxo_do_produto() {
+        const SHA_ROM: &str = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+        const HEADER: u64 = 0x21b20;
+        const STREAM: u64 = 0x2e12a;
+        const SLOT: u32 = 938;
+        const CUSTO: u32 = 937;
+        const TILE: u32 = 53;
+        const LINHA: u32 = 0;
+        const COLUNA: u32 = 4;
+        const INDICE_NOVO: u8 = 0;
+        const BYTE: usize = 1698;
+        let caminho_os = hamoopig_rom_path();
+        let caminho = caminho_os.to_str().expect("caminho utf8 do corpus");
+        let (rom, sha) = hamoopig_rom().expect("ROM BYOR ausente: o aceite exige o arquivo");
+        assert_eq!(sha, SHA_ROM, "identidade da ROM BYOR divergente");
+
+        // ---- abrir e selecionar: a lista do produto tem que trazer o recurso
+        // pinado com o codec do header, e o escopo tem que declarar o denominador.
+        let (sha_listado, listados) = list_resources(caminho).expect("listar recursos");
+        assert_eq!(sha_listado, SHA_ROM, "a lista anunciou outra ROM");
+        let com_o_stream: Vec<&ResourceSummary> = listados
+            .iter()
+            .filter(|r| r.stream_offset == STREAM)
+            .collect();
+        assert_eq!(
+            com_o_stream.len(),
+            1,
+            "o stream pinado tem que aparecer exatamente uma vez"
+        );
+        let pino = com_o_stream[0];
+        assert_eq!(
+            (
+                pino.codec.as_str(),
+                pino.header_offset,
+                pino.num_tiles,
+                pino.data_len,
+                pino.stream_len
+            ),
+            ("aplib", HEADER, 100, 3200, SLOT),
+            "o recurso pinado no passo 4 mudou de identidade na lista"
+        );
+        assert_eq!(
+            listados.iter().filter(|r| r.codec == "aplib").count(),
+            4,
+            "os quatro aPLib verificados do censo têm que estar na lista"
+        );
+
+        // ---- pre-visualizar: leitura pura, sem escrita.
+        let previa = preview_resource(caminho, STREAM).expect("prévia do recurso pinado");
+        assert_eq!(previa.outcome, "preview");
+        assert_eq!(previa.codec, "aplib");
+        assert_eq!(previa.original_stream_len, SLOT);
+        assert_eq!(previa.stream_written, None, "prévia não pode escrever");
+        assert_eq!(previa.modified_rom_path, None);
+        assert_eq!(previa.patch_bps_path, None);
+        assert_eq!(
+            (previa.preview_width, previa.preview_height),
+            (Some(128), Some(56)),
+            "100 tiles em grade de 16 por linha = 7 linhas"
+        );
+        assert!(
+            previa.analyzed_scope.contains("164/205")
+                && previa.analyzed_scope.contains("aPLib 4/14"),
+            "escopo sem denominador por codec: {}",
+            previa.analyzed_scope
+        );
+
+        // ---- controle de no-op: mesmo estado, mesmas entradas, nenhuma escrita.
+        let noop = apply_resource_edit(caminho, STREAM, &[], &sha).expect("no-op pela fronteira");
+        assert_eq!(noop.outcome, "noop", "{noop:?}");
+        assert_eq!(noop.modified_rom_path, None, "no-op escreveu cópia");
+        assert_eq!(noop.patch_bps_path, None, "no-op escreveu patch");
+        assert_eq!(noop.stream_written, None);
+        assert_eq!(
+            noop.preview_pixels_sha256, previa.preview_pixels_sha256,
+            "o no-op mudou a prévia: entrada igual, saída diferente"
+        );
+
+        // ---- editar: a edição pinada do passo 4, pelos mesmos parâmetros que a
+        // UI envia (tile, linha, coluna, índice).
+        let aplicada = apply_resource_edit(
+            caminho,
+            STREAM,
+            &[PixelEdit {
+                tile: TILE,
+                row: LINHA,
+                col: COLUNA,
+                index: INDICE_NOVO,
+            }],
+            &sha,
+        )
+        .expect("edição aPLib no recurso real");
+        assert_eq!(aplicada.outcome, "applied", "{aplicada:?}");
+        assert_eq!(aplicada.codec, "aplib");
+        assert_eq!(aplicada.original_stream_len, SLOT);
+        assert_eq!(
+            aplicada.stream_written,
+            Some(CUSTO),
+            "custo congelado no passo 4: a edição cabe com 1 B de folga"
+        );
+        assert_eq!(
+            aplicada.verified_preserved,
+            Some(listados.len() - 1),
+            "preservação tem que cobrir os outros recursos verificados"
+        );
+        assert_ne!(
+            aplicada.preview_pixels_sha256, previa.preview_pixels_sha256,
+            "a edição não mudou a prévia: nada foi pintado"
+        );
+
+        // Proveniência: os artefatos existem no diretório de trabalho canônico,
+        // com o codec no nome e os SHA-256 que o produto declarou.
+        let trabalho = super::super::rom_library::decomp_work_dir();
+        let copia = std::path::Path::new(aplicada.modified_rom_path.as_deref().expect("cópia"));
+        let patch = std::path::Path::new(aplicada.patch_bps_path.as_deref().expect("patch"));
+        assert!(
+            copia.starts_with(&trabalho) && patch.starts_with(&trabalho),
+            "artefatos fora do diretório de trabalho do produto: {copia:?} {patch:?}"
+        );
+        assert!(
+            copia
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .starts_with("rex-aplib-modified-"),
+            "nome sem codec: {copia:?}"
+        );
+        let bytes_copia = std::fs::read(copia).expect("ler cópia");
+        let bytes_patch = std::fs::read(patch).expect("ler patch");
+        assert_eq!(bytes_copia.len(), rom.len(), "a cópia expandiu a ROM");
+        assert_eq!(
+            super::super::rom_library::sha256_hex(&bytes_copia),
+            aplicada
+                .modified_rom_sha256
+                .as_deref()
+                .expect("sha da cópia")
+        );
+        assert_eq!(
+            super::super::rom_library::sha256_hex(&bytes_patch),
+            aplicada.patch_bps_sha256.as_deref().expect("sha do patch")
+        );
+        // A ROM do corpus não é tocada: a edição só existe na cópia endereçada
+        // por hash e no patch.
+        assert_eq!(std::fs::read(caminho).expect("reler corpus"), rom);
+
+        // ---- conferência por fora do que o produto declara: o que foi escrito
+        // no slot, byte a byte.
+        let diferentes: Vec<usize> = (0..rom.len())
+            .filter(|&i| rom[i] != bytes_copia[i])
+            .collect();
+        assert!(!diferentes.is_empty(), "a escrita foi vazia");
+        assert!(
+            diferentes
+                .iter()
+                .all(|&i| (STREAM as usize..STREAM as usize + SLOT as usize).contains(&i)),
+            "fora do slot: {:?} primeiro de {}",
+            &diferentes[..diferentes.len().min(4)],
+            diferentes.len()
+        );
+        let lido = aplib_decode(&bytes_copia[STREAM as usize..], &AplibLimits::default())
+            .expect("o desempacotador do produto não relê o que o produto escreveu");
+        let plain_original = aplib_decode(&rom[STREAM as usize..], &AplibLimits::default())
+            .expect("plain original")
+            .data;
+        assert_eq!(lido.bytes_consumed, CUSTO as usize);
+        assert_eq!(lido.data.len(), plain_original.len());
+        let mudados: Vec<usize> = (0..lido.data.len())
+            .filter(|&i| lido.data[i] != plain_original[i])
+            .collect();
+        assert_eq!(mudados, vec![BYTE], "mais de um byte de plain mudou");
+        assert_eq!(
+            (plain_original[BYTE], lido.data[BYTE]),
+            (0x55, 0x05),
+            "não é o nibble da edição pinada"
+        );
+        // O bloco vizinho (o TileSet visível do §2 do plano) encosta em
+        // `STREAM + SLOT` e tem que continuar decodificando no mesmo plain.
+        let vizinho = aplib_decode(&bytes_copia[0x2e4d4..], &AplibLimits::default())
+            .expect("vizinho esmagado");
+        assert_eq!(vizinho.data.len(), 16000);
+        assert_eq!(
+            vizinho.data,
+            aplib_decode(&rom[0x2e4d4..], &AplibLimits::default())
+                .expect("vizinho original")
+                .data,
+            "o re-encode alterou o recurso encostado"
+        );
+
+        // Conferência geométrica por fora da prévia: no **canvas do recurso** a
+        // edição pinta um pixel (cada tile aparece uma vez na grade); na **tela**
+        // são dois, porque o TileMap coloca o tile 53 em duas células. Essa
+        // diferença de 1 para 2 é justamente o que a perna de execução cobra.
+        let largura_tira = 100 * 8;
+        let tira_original = md_tiles_to_rgba(&plain_original);
+        let tira_editada = md_tiles_to_rgba(&lido.data);
+        let pintados: Vec<(usize, usize)> = (0..largura_tira * 8)
+            .map(|p| (p % largura_tira, p / largura_tira))
+            .filter(|(x, y)| {
+                let i = (y * largura_tira + x) * 4;
+                tira_original[i..i + 4] != tira_editada[i..i + 4]
+            })
+            .collect();
+        assert_eq!(
+            pintados,
+            vec![(TILE as usize * 8 + COLUNA as usize, LINHA as usize)],
+            "a edição pintou outro pixel no canvas além do pinado"
+        );
+
+        // ---- preservação de dependentes medida **por fora** do auto-relato: o
+        // produto diz quantos recursos preservou (`verified_preserved`), mas isso
+        // é uma palavra dele. Aqui o conjunto da cópia é re-verificado do zero e
+        // cada plain é comparado com o plain correspondente da ROM íntegra. É
+        // isto que pega um LZ4W cujo dicionário contém a cauda do stream aPLib —
+        // o caso que fez a transação nascer com essa guarda.
+        let mut antes = std::collections::BTreeMap::new();
+        for r in verify_resource_set(&rom, &TransactionLimits::default())
+            .expect("conjunto da ROM íntegra")
+            .resources
+        {
+            antes.insert(r.candidate().stream_offset, r.decoded().to_vec());
+        }
+        let depois = verify_resource_set(&bytes_copia, &TransactionLimits::default())
+            .expect("conjunto da cópia modificada");
+        let agora: std::collections::BTreeMap<usize, Vec<u8>> = depois
+            .resources
+            .iter()
+            .map(|r| (r.candidate().stream_offset, r.decoded().to_vec()))
+            .collect();
+        assert_eq!(
+            agora.keys().collect::<Vec<_>>(),
+            antes.keys().collect::<Vec<_>>(),
+            "a escrita ganhou ou perdeu recursos verificáveis"
+        );
+        let divergentes: Vec<usize> = antes
+            .iter()
+            .filter(|(offset, plain)| agora[*offset] != **plain)
+            .map(|(offset, _)| *offset)
+            .collect();
+        assert_eq!(
+            divergentes,
+            vec![STREAM as usize],
+            "algum recurso além do editado mudou de decode — dependente atingido"
+        );
+        assert_eq!(agora[&(STREAM as usize)], lido.data);
+
+        // ---- reaplicar: o BPS produzido, aplicado sobre a ROM íntegra, tem que
+        // reproduzir a cópia byte a byte (oráculo do patch, não do codec).
+        let reaplicado =
+            crate::tools::patch_studio::apply_bps(&rom, &bytes_patch).expect("reaplicar BPS");
+        assert_eq!(
+            reaplicado, bytes_copia,
+            "BPS reaplicado não reproduz a cópia do produto"
+        );
+
+        // ---- reabrir: a prévia lida da cópia modificada é a prévia declarada
+        // pela edição (ida e volta pela fronteira da interface).
+        let previa_modificada =
+            preview_resource(copia.to_str().expect("caminho utf8 da cópia"), STREAM)
+                .expect("reabrir a cópia");
+        assert_eq!(
+            previa_modificada.preview_pixels_sha256, aplicada.preview_pixels_sha256,
+            "a cópia reaberta não reflete a edição aplicada"
+        );
+        assert_eq!(
+            previa_modificada.rom_sha256,
+            aplicada.modified_rom_sha256.as_deref().expect("sha")
+        );
+
+        println!(
+            "fluxo BYOR aPLib: cópia {} B sha {} | BPS {} B sha {} | recursos verificados {} | \
+             stream editado {} B escritos, {} posições do slot diferentes | \
+             prévia original {} | prévia editada {}",
+            bytes_copia.len(),
+            aplicada.modified_rom_sha256.expect("sha"),
+            bytes_patch.len(),
+            aplicada.patch_bps_sha256.expect("sha"),
+            antes.len(),
+            aplicada.stream_written.expect("custo"),
+            diferentes.len(),
+            previa.preview_pixels_sha256.expect("sha"),
+            aplicada.preview_pixels_sha256.expect("sha"),
+        );
     }
 
     /// Censo dos headers aPLib que o produto verifica nesta ROM, com o custo do
