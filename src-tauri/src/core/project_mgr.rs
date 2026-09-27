@@ -25799,6 +25799,411 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         );
     }
 
+    /// REX-05 (passo 5, perna 3) — o oráculo decisivo do aceite BYOR: quem executa
+    /// o stream que o produto escreveu é o **desempacotador do próprio jogo**.
+    ///
+    /// A cópia modificada não é montada à mão: sai de `apply_resource_edit`, o
+    /// mesmo comando Tauri que a barra chama, com a edição de pixel pinada no
+    /// passo 4 (tile 53, pixel do tile (4,0), índice 5→0, custo 937 B no slot de
+    /// 938 B). As duas ROMs então rodam sob o core real com o MESMO script de 180
+    /// frames, cada uma a partir de power-on fresco — no título HAMOOPIG a
+    /// restauração de savestate não é fiel ao power-on (achado registrado em
+    /// REX-00), então frescor é a definição de determinismo daqui.
+    ///
+    /// Cinco asserções, cada uma com um motivo próprio:
+    /// 0. a corrida da ROM íntegra tem que reproduzir byte a byte os quatro
+    ///    checkpoints (59/69/129/179) registrados em
+    ///    `rex-evidence-2026-09-10/backend-hamoopig/checkpoint-rgba-hashes.json` —
+    ///    evidência anterior a esta frente, não saída desta corrida; senão o aceite
+    ///    estaria comparando uma janela do jogo que ninguém atribuiu a recurso;
+    /// 1. original × original (duas corridas frescas) não pode diferir em NENHUM
+    ///    pixel — sem esse controle um diff não significaria nada;
+    /// 2. original × modificada tem que diferir em pelo menos um pixel, senão o
+    ///    recurso editado nunca aparece na tela nesta janela e o aceite não existe;
+    /// 3. os pixels alterados, agregados por coordenada, têm que ser exatamente os
+    ///    que o passo 4 previu antes de executar — um por colocação do tile, nos
+    ///    dois retângulos das células. Qualquer outra coordenada (dentro ou fora
+    ///    deles) significa que o re-encode alcançou algo além do recurso ou que o
+    ///    scroll da tela não é o que foi modelado; e
+    /// 4. no frame 129, que é o da atribuição residual do passo 4, a mesma
+    ///    igualdade é coberta de novo quadro a quadro.
+    ///
+    /// **Medido com mutante, registrando o limite da medição.** Invertendo a
+    /// convenção do nibble em `md_pixel_location` (coluna par ↔ ímpar) ou
+    /// invertendo a linha do tile, este aceite morre na fronteira do produto:
+    /// `excessive_output: 3200 bytes de plain precisam de 942/941 bytes de stream,
+    /// orçamento de 938`. Com 1 B de folga no slot, nenhuma mudança de geometria
+    /// chega viva até a asserção de coordenada — **não se exibiu aqui um mutante
+    /// que passe pela perna 1 e caia só na coordenada**, e isto registra a
+    /// ausência em vez de alegar o contrário. O que a perna 3 acrescenta não é um
+    /// mutante exclusivo e sim o oráculo: a perna 1 confere o stream escrito com o
+    /// desempacotador do próprio produto (oráculo autorreferente), enquanto aqui
+    /// quem lê os mesmos bytes é o unpacker do jogo sob o core, e a projeção
+    /// geométrica sai do TileMap real, não do renderer da prévia.
+    ///
+    /// Rodar: `cargo test --lib rex05_hamoopig_aplib -- --ignored --nocapture`
+    #[ignore]
+    #[test]
+    fn rex05_hamoopig_aplib_edit_pelo_produto_executa_no_core() {
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::EmulatorCore;
+        use crate::tools::reverse::decomp::rex_resources::{apply_resource_edit, PixelEdit};
+        use crate::tools::reverse::decomp::rom_library::{
+            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, sha256_hex,
+            ScenarioRunRecord, SCENARIO_VERDICT_PASSED,
+        };
+        use crate::tools::reverse::equivalence::artifact_ref;
+
+        const STREAM: u64 = 0x2e12a;
+        const SLOT: u32 = 938;
+        const CUSTO: u32 = 937;
+        const TILE: u32 = 53;
+        const LINHA_PIXEL: u32 = 0;
+        const COLUNA_PIXEL: u32 = 4;
+        // Células que o TileMap da cadeia (TiledImage 0x21b38) dá ao tile 53,
+        // medidas no passo 4 com hflip/vflip/banco todos zero — logo o pixel
+        // editado do tile cai em (284,128) e (212,200) na tela.
+        const CELULAS: [(u32, u32); 2] = [(35, 16), (26, 25)];
+
+        let test_name = "rex05_hamoopig_aplib_edit_pelo_produto_executa_no_core";
+        let Some((rom_path, rom_sha)) = rex_reference_rom(
+            "RDS_REX_HAMOOPIG_ROM",
+            "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+            "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+            test_name,
+        ) else {
+            return;
+        };
+
+        let artifact_root = validation_artifact_dir("rex-hamoopig-aplib-edit");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create rex05 artifact dir");
+
+        // ---- a escrita vem do produto, não deste teste.
+        let edicao = apply_resource_edit(
+            rom_path.to_str().expect("caminho utf8 da ROM"),
+            STREAM,
+            &[PixelEdit {
+                tile: TILE,
+                row: LINHA_PIXEL,
+                col: COLUNA_PIXEL,
+                index: 0,
+            }],
+            &rom_sha,
+        )
+        .expect("o produto recusou a edição pinada no passo 4");
+        assert_eq!(edicao.outcome, "applied", "{edicao:?}");
+        assert_eq!(edicao.codec, "aplib");
+        assert_eq!(edicao.stream_written, Some(CUSTO), "custo do passo 4");
+        assert_eq!(edicao.original_stream_len, SLOT, "slot do passo 4");
+        let modificada_path =
+            PathBuf::from(edicao.modified_rom_path.as_ref().expect("cópia do produto"));
+        let modificada_sha = edicao.modified_rom_sha256.clone().expect("sha da cópia");
+        assert_eq!(
+            modificada_sha,
+            sha256_hex(&fs::read(&modificada_path).expect("ler cópia do produto")),
+            "o hash que o produto anunciou não é o dos bytes que ele escreveu"
+        );
+
+        let script = rex_input_script_180f("rex05-hamoopig-aplib-180f");
+        let script_path = artifact_root.join("input-script.rds-input.json");
+        rex_write_json(
+            &script_path,
+            &serde_json::to_value(&script).expect("serialize input script"),
+        );
+
+        // ---- corrida fresca: power-on, load, script de input, RGBA de cada frame.
+        let run_fresh =
+            |label: &str, rom: &Path| -> (u32, u32, Vec<Vec<u8>>, String, Option<String>) {
+                let mut core = EmulatorCore::new(None);
+                core.load_rom(rom)
+                    .unwrap_or_else(|error| panic!("{test_name}: carregar ROM ({label}): {error}"));
+                let core_label = core.loaded_core_label().unwrap_or("unknown").to_string();
+                let core_sha = core
+                    .loaded_core_file()
+                    .and_then(|path| fs::read(path).ok())
+                    .map(|bytes| sha256_hex(&bytes));
+                let mut dimensao = (0u32, 0u32);
+                let mut quadros = Vec::with_capacity(script.frames.len());
+                for (index, joypad) in script.frames.iter().enumerate() {
+                    core.set_joypad(joypad.clone()).unwrap_or_else(|error| {
+                        panic!("{test_name}: set_joypad ({label}) no frame {index}: {error}")
+                    });
+                    core.run_frame().unwrap_or_else(|error| {
+                        panic!("{test_name}: frame {index} ({label}): {error}")
+                    });
+                    let (buffer, size, format) = core.get_framebuffer().expect("framebuffer");
+                    let quadro = framebuffer_to_rgba(&buffer, size, format);
+                    dimensao = (quadro.width, quadro.height);
+                    quadros.push(quadro.rgba);
+                }
+                core.stop()
+                    .unwrap_or_else(|error| panic!("{test_name}: parar core ({label}): {error}"));
+                (dimensao.0, dimensao.1, quadros, core_label, core_sha)
+            };
+
+        fn pixels_diferentes(a: &[Vec<u8>], b: &[Vec<u8>], largura: u32) -> Vec<(u32, u32, u32)> {
+            let mut achados = Vec::new();
+            for (indice, (fa, fb)) in a.iter().zip(b.iter()).enumerate() {
+                assert_eq!(
+                    fa.len(),
+                    fb.len(),
+                    "framebuffers de tamanhos diferentes no frame {indice}"
+                );
+                for pixel in 0..fa.len() / 4 {
+                    let o = pixel * 4;
+                    if fa[o..o + 3] != fb[o..o + 3] {
+                        achados.push((
+                            (pixel as u32) % largura,
+                            (pixel as u32) / largura,
+                            indice as u32,
+                        ));
+                    }
+                }
+            }
+            achados
+        }
+
+        let (largura, altura, base_a, core_label, core_sha) = run_fresh("base-a", &rom_path);
+        let (largura_b, altura_b, base_b, _, _) = run_fresh("base-b", &rom_path);
+        let (largura_m, altura_m, modificada, _, _) = run_fresh("modificada", &modificada_path);
+        assert_eq!(
+            (largura, altura),
+            (largura_b, altura_b),
+            "o core entregou framebuffers de tamanhos diferentes"
+        );
+        assert_eq!((largura, altura), (largura_m, altura_m));
+
+        // ---- 0. triangulação com evidência PRÉ-EXISTENTE a esta rodada: a corrida
+        // original tem que reproduzir byte a byte os quatro checkpoints
+        // (59/69/129/179) registrados em
+        // `/home/misael/RetroDevStudio/rex-evidence-2026-09-10/backend-hamoopig/checkpoint-rgba-hashes.json`
+        // (arquivo de 2026-09-12, SHA-256
+        // e7527a83eda147f1d3383311808b1bfd5be711d257d0b385ddc479cad5dfa8d4,
+        // anterior portanto a qualquer código desta frente). São os mesmos frames
+        // sobre os quais o residual de 2 938 pixels do passo 4 foi medido; sem esta
+        // igualdade a projeção abaixo estaria comparando uma janela do jogo que
+        // ninguém atribuiu a recurso nenhum.
+        const CHECKPOINTS_A: [(u32, &str); 4] = [
+            (
+                59,
+                "61b8731607d1bdb9a8a555696ee764f2f2159c3b5539541462ae423e9bb4f637",
+            ),
+            (
+                69,
+                "56d1423c5231a0ebbbfa49e6a686320e7e9e32092b1c00453e8a0e305ca82f83",
+            ),
+            (
+                129,
+                "3df75345502f8165fa5aae93009bac07260bd60bd6a47d148114165e2963cf63",
+            ),
+            (
+                179,
+                "3df75345502f8165fa5aae93009bac07260bd60bd6a47d148114165e2963cf63",
+            ),
+        ];
+        for (frame, sha_esperado) in CHECKPOINTS_A {
+            assert_eq!(
+                sha256_hex(&base_a[frame as usize]),
+                sha_esperado,
+                "o frame {frame} desta corrida não é o frame {frame} da evidência \
+                 registrada em 2026-09-10: a janela observada mudou"
+            );
+        }
+
+        // ---- 1. controle de determinismo: mesma ROM, duas corridas frescas.
+        let ruido = pixels_diferentes(&base_a, &base_b, largura);
+        assert!(
+            ruido.is_empty(),
+            "power-on fresco da MESMA ROM divergiu em {} pixels (primeiros {:?}): sem \
+             determinismo o diff abaixo não significaria nada",
+            ruido.len(),
+            &ruido[..ruido.len().min(4)]
+        );
+
+        // ---- 2. o desempacotador do jogo executa o stream do produto.
+        let alterados = pixels_diferentes(&base_a, &modificada, largura);
+        assert!(
+            !alterados.is_empty(),
+            "nenhum pixel de tela mudou com a edição: o tile {TILE} editado nunca aparece \
+             nos {} frames desta janela, então o aceite BYOR não existe aqui",
+            script.frames.len()
+        );
+
+        // ---- 3. exatamente os pixels que o passo 4 previu, nada além.
+        let dentro_das_celulas = |x: u32, y: u32| {
+            CELULAS.iter().any(|(cx, cy)| {
+                (cx * 8..cx * 8 + 8).contains(&x) && (cy * 8..cy * 8 + 8).contains(&y)
+            })
+        };
+        let fora: Vec<(u32, u32, u32)> = alterados
+            .iter()
+            .copied()
+            .filter(|(x, y, _)| !dentro_das_celulas(*x, *y))
+            .collect();
+        let coordenadas: Vec<[u32; 2]> = alterados
+            .iter()
+            .map(|(x, y, _)| [*x, *y])
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mut esperado: Vec<[u32; 2]> = CELULAS
+            .iter()
+            .map(|(cx, cy)| [cx * 8 + COLUNA_PIXEL, cy * 8 + LINHA_PIXEL])
+            .collect();
+        esperado.sort();
+        let frames_divergentes: std::collections::BTreeSet<u32> =
+            alterados.iter().map(|(_, _, frame)| *frame).collect();
+        assert_eq!(
+            coordenadas,
+            esperado,
+            "{} pixels alterados em {} frames, mas as coordenadas agregadas não são as duas \
+             colocações do tile {TILE} previstas ANTES de executar ({esperado:?}); {} dos pixels \
+             caem fora dos retângulos das células {CELULAS:?}",
+            alterados.len(),
+            frames_divergentes.len(),
+            fora.len(),
+        );
+
+        // ---- 4. no frame que a atribuição do passo 4 usa (129), a mudança é
+        // exatamente a mesma: duas coordenadas, as previstas. Um frame da janela
+        // registrada vale mais que um agregado, porque é nele que os retângulos
+        // das células foram conferidos contra os 2 938 pixels residuais.
+        let mut no_cp129: Vec<[u32; 2]> = alterados
+            .iter()
+            .filter(|(_, _, frame)| *frame == 129)
+            .map(|(x, y, _)| [*x, *y])
+            .collect();
+        no_cp129.sort();
+        assert_eq!(
+            no_cp129, esperado,
+            "no checkpoint 129 a edição mudou {no_cp129:?}, não as duas colocações previstas"
+        );
+
+        // ---- artefatos: PPM do primeiro frame divergente e do 129, nas duas ROMs.
+        let primeiro_frame = alterados
+            .iter()
+            .map(|(_, _, frame)| *frame)
+            .min()
+            .expect("frame divergente");
+        let escreve_ppm = |nome: String, quadro: &Vec<u8>| {
+            write_rgba_ppm(&artifact_root.join(nome), largura, altura, quadro)
+        };
+        for frame in [primeiro_frame, 129] {
+            escreve_ppm(
+                format!("aplib-edit-{frame:03}-original.ppm"),
+                &base_a[frame as usize],
+            );
+            escreve_ppm(
+                format!("aplib-edit-{frame:03}-modificada.ppm"),
+                &modificada[frame as usize],
+            );
+        }
+        let mut por_frame: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+        for (_, _, frame) in &alterados {
+            let chave = frame.to_string();
+            let atual = por_frame
+                .get(&chave)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            por_frame.insert(chave, serde_json::Value::from(atual + 1));
+        }
+        let hashes = |quadros: &[Vec<u8>]| -> serde_json::Map<String, serde_json::Value> {
+            quadros
+                .iter()
+                .enumerate()
+                .map(|(i, rgba)| (i.to_string(), serde_json::Value::String(sha256_hex(rgba))))
+                .collect()
+        };
+        let report_path = artifact_root.join("aplib-edit-report.json");
+        rex_write_json(
+            &report_path,
+            &serde_json::json!({
+                "rom_original": { "path": rom_path, "sha256": rom_sha },
+                "rom_modificada": { "path": modificada_path, "sha256": modificada_sha,
+                                    "origem": "apply_resource_edit do produto" },
+                "patch_bps_sha256": edicao.patch_bps_sha256,
+                "recurso": { "stream_offset": format!("{STREAM:#x}"), "codec": "aplib",
+                             "slot_bytes": SLOT, "escritos_bytes": CUSTO, "tile": TILE,
+                             "pixel_do_tile": [4, 0], "indice_novo": 0 },
+                "core": { "label": core_label, "sha256": core_sha },
+                "input_script_sha256": sha256_hex(&fs::read(&script_path).expect("ler script")),
+                "frames": script.frames.len(),
+                "framebuffer": { "largura": largura, "altura": altura },
+                "determinismo_base_a_vs_base_b": ruido.len(),
+                "pixels_alterados_total": alterados.len(),
+                "pixels_no_checkpoint_129": no_cp129,
+                "checkpoints_da_evidencia_2026_09_10": CHECKPOINTS_A
+                    .iter()
+                    .map(|(frame, sha)| {
+                        [
+                            serde_json::Value::from(*frame),
+                            serde_json::Value::String(sha.to_string()),
+                        ]
+                    })
+                    .collect::<Vec<_>>(),
+                "coordenadas_distintas": coordenadas,
+                "esperado_pelos_pinos_do_passo_4": esperado,
+                "frames_divergentes": por_frame,
+                "primeiro_frame_divergente": primeiro_frame,
+                "hashes_rgba_original": hashes(&base_a),
+                "hashes_rgba_modificada": hashes(&modificada),
+                "limites": "Prova o efeito em tela de UMA edição de recurso real, executada \
+                            pelo desempacotador do próprio jogo sob o core. Não prova a barra \
+                            (perna WebDriver), nem o resto do jogo, nem hardware real."
+            }),
+        );
+
+        let run_id = format!("rex05-hamoopig-aplib-edit-{}", now_unix());
+        record_scenario_run(
+            &decomp_work_dir(),
+            ScenarioRunRecord {
+                run_id: run_id.clone(),
+                scenario_id: "rex05-hamoopig-aplib-edit-180f-v1".to_string(),
+                kind: "equivalence".to_string(),
+                reference_sha256: rom_sha.clone(),
+                candidate_sha256: Some(modificada_sha.clone()),
+                input_script_sha256: Some(sha256_hex(&fs::read(&script_path).expect("ler script"))),
+                core_label,
+                core_sha256: core_sha,
+                frames: script.frames.len() as u32,
+                verdict: SCENARIO_VERDICT_PASSED.to_string(),
+                oracle_results: serde_json::json!({
+                    "pixels_alterados": alterados.len(),
+                    "coordenadas_distintas": coordenadas,
+                    "frames_divergentes": por_frame,
+                    "determinismo_original_vs_original": ruido.len(),
+                    "fora_das_celulas": fora.len(),
+                }),
+                gaps: vec![
+                    "perna WebDriver (a barra chamando estes mesmos comandos) não provada aqui"
+                        .to_string(),
+                ],
+                artifacts: vec![
+                    artifact_ref("input-script", &script_path).expect("artifact script"),
+                    artifact_ref("aplib-edit-report", &report_path).expect("artifact report"),
+                    artifact_ref("modified-rom", &modificada_path).expect("artifact copia"),
+                ],
+                executed_at_unix: now_unix(),
+                previous_run_id: None,
+                notes: "Passo 5 perna 3: o stream aPLib escrito pela transacao do produto e \
+                     desempacotado pelo proprio jogo sob o core, e a unica mudanca de tela que \
+                     produz cai nos retangulos das celulas do tile editado. Duas corridas frescas \
+                     da ROM integra servem de controle de determinismo."
+                    .to_string(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: registrar run no ledger: {error}"));
+        eprintln!(
+            "REX HAMOOPIG aPLib edit: {} pixels alterados em {} frames, primeiro frame \
+             {primeiro_frame}, coordenadas {coordenadas:?} | original {rom_sha} -> modificada \
+             {modificada_sha} | run {run_id} (corpus {})",
+            alterados.len(),
+            por_frame.len(),
+            corpus_identity(&rom_sha),
+        );
+    }
+
     /// REX-00 negativo: a prévia regenerada do Taiketsu (import + build real,
     /// cópia em tmp — o doador nunca é compilado no lugar) tem imagem não preta
     /// e heartbeat, e AINDA ASSIM deve ser REJEITADA pelos oráculos contra a
