@@ -475,6 +475,7 @@ function parseArgs(argv) {
           "inspection-sonic-tiles",
           "rex-lz4w-effect",
           "rex-lz4w-fixture-effect",
+          "rex-aplib-byor-effect",
           "inspection-preview-unavailable",
           "logic-recovery",
           "logic-recovery-branch",
@@ -9238,6 +9239,452 @@ async function runRexLz4wEffectScenario(sessionId) {
   })}`);
 }
 
+// PASSO 5, PERNA 2 — o recurso real (BYOR) aPLib editado pela BARRA.
+//
+// Espelha `runRexLz4wEffectScenario` no recurso aPLib do stream 0x2e12a (header
+// TileSet 0x21b20, 100 tiles, plain 3 200 B, slot 938 B) da mesma ROM
+// congelada. As pernas 1 e 3 já provaram do lado do backend: a transação
+// canônica escreve 937 B nesse slot (5880a22) e o desempacotador do próprio
+// jogo executa esses bytes, mudando exatamente 2 pixels nos 119 frames em que o
+// tile aparece, nas duas colocações previstas (d43fdde). O que falta e esta
+// perna prova é o caminho do usuário: os mesmos três comandos chamados pela
+// superfície que um humano usa, com o resultado conferido em bytes no disco.
+//
+// A edição NÃO é a das pernas 1/3, e o motivo é medido aqui: a barra não sabe
+// expressar o índice 0. O campo `índice` faz `setPaintIndex(Number(v) || 1)`,
+// então 0 é reescrito para 1 em silêncio antes de chegar a `editRejectReason`
+// (que reserva 0 como transparente). A sonda fecha o achado com prova diferencial
+// contra o hash pinado das pernas 1 e 3. Em seguida os 14 índices que a interface
+// sabe digitar são aplicados no pixel do pin — a varredura de capacidade do
+// encoder, no lib, prevê recusa total ali — e a edição que completa a perna vem
+// do alvo que essa mesma varredura mediu como cabível. O achado da UI é
+// registrado, não corrigido: mudar a semântica de paleta da barra é decisão do
+// operador, e a correção sai desta corrida.
+async function runRexAplibByorEffectScenario(sessionId) {
+  const ROM_SHA = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+  const STREAM = 0x2e12a;
+  const STREAM_HEX = "2e12a";
+  const SLOT = 938;
+  // Pixel das pernas 1 e 3 (5→0, 937 B no slot de 938): é o único que cabe e é
+  // justamente o que o campo de índice da barra não deixa digitar.
+  const PIXEL_DO_PIN = { tile: 53, row: 0, col: 4 };
+  const INDICE_ORIGINAL = 5;
+  // Alvo medido, não escolhido: a varredura de capacidade do encoder
+  // (`byor_aplib_varre_edicoes_de_um_pixel_que_a_barra_sabe_expressar`, na mesma
+  // ROM) deixa exatamente duas edições de um pixel com índice da barra caberem no
+  // tile observado 53, ambas a 938 B — o teto do slot. A paleta pinada (0x2cbc8)
+  // distingue as duas cores: 5 = 0x0468, 4 = 0x0446.
+  const ALVO_DA_BARRA = { tile: 53, row: 7, col: 5, indice: 4 };
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const romPath = process.env.RDS_REX_RESOURCE_ROM ?? process.env.RDS_INSPECTION_ROM ?? "";
+  if (!romPath || !(await pathExists(romPath))) {
+    fail(
+      "RDS_REX_RESOURCE_ROM deve apontar para a ROM BYOR congelada de sha256 558bea6c…: o recurso editado nesta perna é o aPLib do stream 0x2e12a dela, que o fixture autoral não contém. BYOR não é dependência provisionável, então este cenário só roda com a ROM local explícita."
+    );
+  }
+  const romBytes = await readFile(romPath);
+  const romSha = createHash("sha256").update(romBytes).digest("hex");
+  if (romSha !== ROM_SHA) fail(`ROM inesperada: ${romSha}`);
+
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  const panel = '[data-testid="rex-resource-panel"]';
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'))
+      || Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`),
+    30000,
+    "a barra não montou nenhuma superfície de recursos.",
+    250
+  );
+  if (!(await executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`))) {
+    await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+  }
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`),
+    15000,
+    "o painel de recursos comprimidos não abriu.",
+    250
+  );
+
+  const textOf = async (testId) =>
+    ((await executeScript(
+      sessionId,
+      `return document.querySelector('${panel} [data-testid="${testId}"]')?.textContent ?? ''`
+    )) || "");
+  const setPanelInput = async (testId, value) =>
+    executeScript(sessionId, `
+      const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(String(value))});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;`);
+  const selectResource = async (offsetHex) => {
+    await executeScript(sessionId, `
+      const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, '${offsetHex}');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;`);
+    await waitFor(
+      async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-canvas"]'));`),
+      30000,
+      `prévia chunky do recurso ${offsetHex} não apareceu.`,
+      250
+    );
+    await pause(1500);
+    return textOf("rex-resource-pixels-sha");
+  };
+  const optionLabels = () => executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  // Dump do estado da fila: as sondas abaixo medem exatamente estes campos, então
+  // um timeout sem eles não diria se a culpa é do painel ou da cena.
+  const dumpFila = () => executeScript(sessionId, `
+    const q = (id) => document.querySelector('${panel} [data-testid="' + id + '"]');
+    return JSON.stringify({
+      notice: q('rex-resource-notice')?.textContent ?? null,
+      error: q('rex-resource-error')?.textContent ?? null,
+      resultado: q('rex-resource-result')?.textContent ?? null,
+      fila: q('rex-resource-edit-count')?.textContent ?? null,
+      indice: q('rex-resource-paint-index')?.value ?? null,
+      tile: q('rex-resource-edit-tile')?.value ?? null,
+      linha: q('rex-resource-edit-row')?.value ?? null,
+      coluna: q('rex-resource-edit-col')?.value ?? null,
+    });`);
+
+  // ---- 1/2/3: abrir, verificar e selecionar o recurso aPLib real.
+  await setPanelInput("rex-resource-rom-input", romPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-select"] option[value="${STREAM_HEX}"]'));`),
+    60000,
+    "o recurso aPLib 0x2e12a não apareceu na lista verificada pela barra.",
+    250
+  );
+  const labels = await optionLabels();
+  const alvo = labels.filter((l) => l.startsWith(`${STREAM_HEX}|`));
+  if (alvo.length !== 1) fail(`o stream 0x2e12a aparece ${alvo.length}x na lista da barra: ${JSON.stringify(alvo)}`);
+  if (!/aplib/i.test(alvo[0])) fail(`a barra não declarou o codec do recurso: "${alvo[0]}"`);
+  if (!new RegExp(`100 tiles \\(stream ${SLOT} B\\)`).test(alvo[0])) {
+    fail(`tamanho/anúncio do slot divergem do pinado no passo 4: "${alvo[0]}"`);
+  }
+  const aplibListados = labels.filter((l) => /aplib/i.test(l)).length;
+  const totalListado = labels.filter((l) => !l.startsWith("|")).length; // descarta "selecione…"
+  const previewShaOriginal = await selectResource(STREAM_HEX);
+  if (typeof previewShaOriginal !== "string" || previewShaOriginal.length < 8) fail("prévia sem hash de pixels.");
+
+  // ---- 4: no-op pela mesma transação, pela barra.
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  await waitFor(
+    async () => (await textOf("rex-resource-result")).includes("noop"),
+    30000,
+    "a barra não reportou no-op com zero edições.",
+    250
+  );
+
+  // ---- 5a: a guarda anti-descarte-silencioso é alcançável pela barra onde a UI
+  // expressa o valor inválido (linha 8 num tile de 8 linhas).
+  await selectResource(STREAM_HEX); // limpa fila, resultado, erro e aviso
+  await setPanelInput("rex-resource-paint-index", 1);
+  await setPanelInput("rex-resource-edit-tile", PIXEL_DO_PIN.tile);
+  await setPanelInput("rex-resource-edit-row", 8);
+  await setPanelInput("rex-resource-edit-col", PIXEL_DO_PIN.col);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  const avisoGuardaLinha = await waitFor(
+    async () => {
+      const notice = await textOf("rex-resource-notice");
+      return notice.includes("linha 8 fora do tile") ? notice : false;
+    },
+    8000,
+    `a guarda do painel não avisou a recusa da linha 8 (superfície mudou?). DOM: ${await dumpFila()}`,
+    200
+  );
+  const filaVaziaAposAviso = (await textOf("rex-resource-edit-count")).includes("nenhuma edição");
+  if (!filaVaziaAposAviso) {
+    fail(`a guarda avisou mas a edição entrou na fila mesmo assim (descarte silencioso voltou?): ${await dumpFila()}`);
+  }
+
+  // Desfecho de uma aplicação pela barra: `aplicado` com o hash anunciado ou
+  // `recusado` com o texto do erro estruturado do núcleo. Interpretação fora do
+  // predicado: `waitFor` engole exceções e as transformaria em timeout.
+  const desfechoAplicacao = async (rotulo) => waitFor(
+    async () => {
+      const texto = await textOf("rex-resource-result");
+      if (texto.includes("applied")) return { aplicado: texto };
+      const erro = await textOf("rex-resource-error");
+      if (erro) return { recusado: erro };
+      return false;
+    },
+    60000,
+    `a transação não devolveu desfecho para ${rotulo}. DOM: ${await dumpFila()}`,
+    250
+  );
+  const aplicarEdicao = async (pixel, indice, rotulo) => {
+    await selectResource(STREAM_HEX);
+    await setPanelInput("rex-resource-edit-tile", pixel.tile);
+    await setPanelInput("rex-resource-edit-row", pixel.row);
+    await setPanelInput("rex-resource-edit-col", pixel.col);
+    await setPanelInput("rex-resource-paint-index", indice);
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+    await waitFor(
+      async () => (await textOf("rex-resource-edit-count")).includes("1 edição"),
+      8000,
+      `edição (${pixel.tile},${pixel.row},${pixel.col}) → ${indice} ${rotulo} não entrou na fila. DOM: ${await dumpFila()}`,
+      200
+    );
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+    const bruto = await desfechoAplicacao(rotulo);
+    if (bruto.aplicado) {
+      const sha = bruto.aplicado.match(/ROM modificada ([0-9a-f]{16})/)?.[1] ?? null;
+      if (!sha) fail(`${rotulo}: desfecho aplicado sem anunciar hash: ${bruto.aplicado.slice(0, 240)}`);
+      return { kind: "aplicado", sha, texto: bruto.aplicado.slice(0, 240), completo: bruto.aplicado };
+    }
+    return { kind: "recusado", sha: null, texto: bruto.recusado.slice(0, 200), completo: bruto.recusado };
+  };
+
+  // ---- 5b: achado medido — a barra NÃO sabe expressar o índice 0, que é o valor
+  // pinado das pernas 1 e 3. Prova diferencial: as pernas 1/3 gravaram o índice 0
+  // com 937 B no slot de 938 B e a cópia tem hash pinado no manifesto da evidência
+  // 2026-09-27-passo5-perna3-core. Se a barra expressasse 0, esta sonda
+  // reproduziria esse hash; se o campo de índice reescreve 0 para 1, o desfecho é
+  // o mesmo do índice 1 digitado à mão (a varredura do encoder, no lib, diz que os
+  // dois estouram o slot em 942 B — a igualdade dos dois desfechos é a medição).
+  const SHA_COPIA_INDICE_0 = "69389ec2b400220c7a069e4c36326ca3c26d81e85ff0ab81bf798dc9ae4038ac";
+  await selectResource(STREAM_HEX);
+  await setPanelInput("rex-resource-edit-tile", PIXEL_DO_PIN.tile);
+  await setPanelInput("rex-resource-edit-row", PIXEL_DO_PIN.row);
+  await setPanelInput("rex-resource-edit-col", PIXEL_DO_PIN.col);
+  await setPanelInput("rex-resource-paint-index", 0);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  const sondaIndiceZero = await waitFor(
+    async () => {
+      const notice = await textOf("rex-resource-notice");
+      if (notice.includes("fora da paleta")) return { recusada: notice };
+      if ((await textOf("rex-resource-edit-count")).includes("1 edição")) return { enfileirada: notice };
+      return false;
+    },
+    8000,
+    `a sonda do índice 0 não produziu nem recusa nem edição (superfície mudou?). DOM: ${await dumpFila()}`,
+    200
+  );
+  const indiceNoCampoAposDigitar0 = await executeScript(sessionId, `
+    return document.querySelector('${panel} [data-testid="rex-resource-paint-index"]')?.value ?? '';`);
+
+  let desfechoSonda = null;
+  let desfechoIndiceUm = null;
+  if (sondaIndiceZero.recusada) {
+    // Superfície mudou: o painel passou a expressar a recusa do índice 0, então
+    // não há fila para aplicar. O achado abaixo reporta a mudança.
+    desfechoSonda = {
+      kind: "recusada-pelo-painel",
+      sha: null,
+      texto: sondaIndiceZero.recusada.slice(0, 200),
+      completo: sondaIndiceZero.recusada,
+    };
+  } else {
+    desfechoSonda = await aplicarEdicao(PIXEL_DO_PIN, 0, "sonda de índice 0 (0 digitado)");
+    // O mecanismo do achado é o campo, não a transação: se o DOM mostrar outro
+    // valor além de 1, a reescrita mudou e a interpretação abaixo deixa de valer.
+    if (indiceNoCampoAposDigitar0 !== "1") {
+      fail(
+        `digitar índice 0 deixou "${indiceNoCampoAposDigitar0}" no campo, não "1": o clamp `
+        + `setPaintIndex(Number(v) || 1) mudou e o achado da reescrita precisa ser reescrito`
+      );
+    }
+    if (desfechoSonda.kind === "aplicado" && SHA_COPIA_INDICE_0.startsWith(desfechoSonda.sha)) {
+      fail("a barra expressou o índice 0 de verdade: o achado da reescrita está superado e este cenário precisa ser reescrito.");
+    }
+    if (desfechoSonda.kind === "recusado" && !desfechoSonda.texto.includes("excessive_output")) {
+      fail(`a sonda de índice 0 foi recusada por um motivo não previsto: ${desfechoSonda.texto}`);
+    }
+    // Índices diferentes produzem plains diferentes e, portanto, streams e cópias
+    // diferentes: igualdade de desfecho fecha a prova de que 0 virou 1.
+    desfechoIndiceUm = await aplicarEdicao(PIXEL_DO_PIN, 1, "índice 1 explícito");
+    if (desfechoSonda.kind !== desfechoIndiceUm.kind || desfechoSonda.sha !== desfechoIndiceUm.sha) {
+      fail(
+        `índice 0 digitado e índice 1 explícito divergiram: ${JSON.stringify({ sonda: desfechoSonda, um: desfechoIndiceUm })}`
+      );
+    }
+    if (desfechoSonda.completo !== desfechoIndiceUm.completo) {
+      fail(
+        `os dois desfechos têm a mesma forma mas textos diferentes: ${JSON.stringify({
+          sonda: desfechoSonda.completo.slice(0, 200), um: desfechoIndiceUm.completo.slice(0, 200),
+        })}`
+      );
+    }
+  }
+
+  // ---- 6a: os 14 índices que a barra sabe digitar, todos no pixel das pernas 1
+  // e 3. A varredura de capacidade do encoder no lib prevê recusa total (939..942
+  // B contra 938); se um aplicar, foi o encoder ou a ROM que mudou, e a mensagem
+  // abaixo diz isso em vez de esconder.
+  const recusas = {};
+  for (let indice = 1; indice <= 15; indice += 1) {
+    if (indice === INDICE_ORIGINAL) continue; // é o valor original: não-editar
+    const desfecho = await aplicarEdicao(PIXEL_DO_PIN, indice, `índice ${indice} no pixel do pin`);
+    if (desfecho.kind === "aplicado") {
+      fail(
+        `o índice ${indice} coube no pixel do pin (${desfecho.sha}); a varredura do encoder previa recusa total em 1..15`
+      );
+    }
+    recusas[String(indice)] = desfecho.texto;
+    if (!desfecho.texto.includes("excessive_output")) {
+      fail(`recusa inesperada no índice ${indice} (esperava excessive_output): ${desfecho.texto}`);
+    }
+  }
+
+  // ---- 6b: o alvo que a varredura mediu como cabível E a barra sabe digitar, no
+  // mesmo tile observado 53. Aqui a transação tem que completar.
+  const desfechoAlvo = await aplicarEdicao(
+    ALVO_DA_BARRA,
+    ALVO_DA_BARRA.indice,
+    `alvo medido (${ALVO_DA_BARRA.tile},${ALVO_DA_BARRA.row},${ALVO_DA_BARRA.col}) → ${ALVO_DA_BARRA.indice}`
+  );
+  if (desfechoAlvo.kind !== "aplicado") {
+    fail(`o alvo medido pela varredura não completou pela barra: ${desfechoAlvo.texto}`);
+  }
+  const resultText = desfechoAlvo.completo;
+
+  // ---- 7: o que a barra escreveu, conferido em bytes no disco.
+  const modifiedPath = resultText.match(/cópia: (\S+)/)?.[1];
+  const patchPath = resultText.match(/patch: (\S+)/)?.[1];
+  if (!modifiedPath || !patchPath) fail(`proveniência ausente no resultado da barra: ${resultText.slice(0, 240)}`);
+  const copyBytes = await readFile(modifiedPath);
+  const modifiedSha = createHash("sha256").update(copyBytes).digest("hex");
+  const patchSha = createHash("sha256").update(await readFile(patchPath)).digest("hex");
+  if (!resultText.includes(`ROM modificada ${modifiedSha.slice(0, 16)}`)) {
+    fail(`a barra anunciou outro hash: "${resultText.slice(0, 200)}" != ${modifiedSha}`);
+  }
+  if (!resultText.includes("codec aplib")) fail(`o desfecho não declara o codec: ${resultText.slice(0, 200)}`);
+  const preserved = Number(resultText.match(/preservados (\d+)/)?.[1] ?? -1);
+  if (preserved < Math.max(0, totalListado - 1)) {
+    fail(`preservados ${preserved} < recursos verificados ${totalListado} - 1: ${resultText.slice(0, 240)}`);
+  }
+  if (copyBytes.length !== romBytes.length) {
+    fail(`a cópia mudou de tamanho: ${copyBytes.length} != ${romBytes.length} (sem expansão de ROM é guarda da transação)`);
+  }
+  const deslocados = [];
+  for (let i = 0; i < copyBytes.length; i += 1) {
+    if (copyBytes[i] !== romBytes[i]) deslocados.push(i);
+  }
+  if (deslocados.length === 0) fail("a cópia da barra é idêntica à ROM original.");
+  const foraDoSlot = deslocados.filter((i) => i < STREAM || i >= STREAM + SLOT);
+  if (foraDoSlot.length > 0) {
+    fail(`a barra escreveu ${foraDoSlot.length} byte(s) fora do slot [0x${STREAM_HEX}, +${SLOT}): ${JSON.stringify(foraDoSlot.slice(0, 8))}`);
+  }
+
+  // ---- 8: BPS exportado pela barra re-aplicado a uma cópia íntegra.
+  const baseCopy = path.join(validationDir, "rex-aplib-byor-base-copy.bin");
+  const patchApplied = path.join(validationDir, "rex-aplib-byor-patch-applied.bin");
+  await writeFile(baseCopy, romBytes);
+  const reapplied = await executeScript(sessionId, `
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    return await invoke('patch_apply_bps', { romPath: ${JSON.stringify(baseCopy)}, patchPath: ${JSON.stringify(patchPath)}, outputPath: ${JSON.stringify(patchApplied)} });`);
+  if (!reapplied || reapplied.ok !== true) fail(`patch_apply_bps falhou: ${JSON.stringify(reapplied)}`);
+  const appliedSha = createHash("sha256").update(await readFile(patchApplied)).digest("hex");
+  if (appliedSha !== modifiedSha) fail(`BPS da barra re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
+
+  // ---- 9: reabrir a cópia no mesmo pipeline da UI — identidade e prévia novas.
+  await setPanelInput("rex-resource-rom-input", modifiedPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => (await textOf("rex-resource-rom-sha")).includes(modifiedSha.slice(0, 16)),
+    60000,
+    "a cópia da barra não reabriu com a própria identidade no painel.",
+    250
+  );
+  const labelsReaberto = await optionLabels();
+  const totalReaberto = labelsReaberto.filter((l) => !l.startsWith("|")).length;
+  if (totalReaberto !== totalListado) {
+    fail(`reabrir a cópia mudou o conjunto verificado: ${totalReaberto} != ${totalListado}`);
+  }
+  const previewShaModificada = await selectResource(STREAM_HEX);
+  if (previewShaModificada === previewShaOriginal) {
+    fail(`prévia da cópia idêntica à original: a edição não persistiu no artefato (${previewShaOriginal}).`);
+  }
+
+  const reportPath = path.join(validationDir, `rex-aplib-byor-effect-${artifactTimestamp()}-report.json`);
+  await writeFile(
+    reportPath,
+    JSON.stringify(
+      {
+        schema: "rex-aplib-byor-effect/v1",
+        etapa: "passo 5 perna 2 — recurso real aPLib editado pela interface",
+        rom: { path: romPath, sha256: romSha },
+        recurso: {
+          stream_offset: `0x${STREAM_HEX}`,
+          codec_anunciado_pela_barra: alvo[0],
+          slot_bytes: SLOT,
+          plain_bytes: 3200,
+          tiles_recurso: 100,
+          aplib_na_lista: aplibListados,
+          verificados_na_lista: totalListado,
+          verificados_reaberto: totalReaberto,
+        },
+        edicoes: {
+          pixel_das_pernas_1_e_3: { ...PIXEL_DO_PIN, indice_original: INDICE_ORIGINAL },
+          indices_digitados_no_pixel_do_pin: Object.keys(recusas).length,
+          alvo_aplicado_pela_barra: ALVO_DA_BARRA,
+        },
+        recusas_excessive_output: recusas,
+        guarda_anti_descarte_silencioso: { aviso: avisoGuardaLinha, fila_ficou_vazia: filaVaziaAposAviso },
+        achado_indice_0_inexpressavel_pela_barra: {
+          premissa: "o pin das pernas 1 e 3 é índice 0 (transparente), que editRejectReason reserva e o campo 'índice' não deixa digitar",
+          mecanismo: "CompressedResourcePanel.tsx: setPaintIndex(Number(event.target.value) || 1) reescreve 0 para 1 antes de queueEdit",
+          sonda: sondaIndiceZero,
+          valor_no_campo_apos_digitar_0: indiceNoCampoAposDigitar0,
+          desfecho_da_aplicacao: desfechoSonda,
+          hash_da_copia_pinada_pernas_1_e_3: SHA_COPIA_INDICE_0,
+          desfecho_indice_1_explicito: desfechoIndiceUm,
+          prova: desfechoSonda.kind === "aplicado"
+            ? "a cópia do 0 digitado não é a cópia pinada do índice 0 e é a mesma do índice 1 explícito: o campo reescreveu 0 para 1"
+            : desfechoSonda.kind === "recusado"
+              ? `campo_after_digitando_0="${indiceNoCampoAposDigitar0}", e o desfecho do 0 digitado é byte a byte o mesmo do índice 1 explícito (${desfechoSonda.texto}); índice 0 coube no slot nas pernas 1 e 3 (937 de 938 B), logo o byte enviado pelo painel não foi 0`
+              : "a superfície mudou: o painel passou a recusar índice 0 antes da transação",
+          status: "registrado como achado, NÃO corrigido — semântica de paleta da UI é decisão do operador",
+        },
+        saida: {
+          copia_path: modifiedPath,
+          copia_sha256: modifiedSha,
+          patch_bps_path: patchPath,
+          patch_bps_sha256: patchSha,
+          preservados: preserved,
+          bytes_diferentes_na_copia: deslocados.length,
+          bytes_fora_do_slot: foraDoSlot.length,
+          patch_reaplicado_sha256: appliedSha,
+          preview_sha_original: previewShaOriginal,
+          preview_sha_copia: previewShaModificada,
+        },
+        limites: [
+          "prova o caminho da barra neste recurso, nesta ROM e nesta edição: não prova o resto dos 4 recursos aPLib nem o jogo inteiro",
+          "o índice aplicável pela barra NÃO é o das pernas 1 e 3 (0 é reescrito para 1 pelo campo de índice); o efeito em tela desta edição específica não foi executado no core",
+          "BYOR não é dependência provisionável: este cenário não roda no CI",
+        ],
+      },
+      null,
+      1
+    )
+  );
+  console.log(`[rex-aplib-byor-effect] relatório=${reportPath}`);
+  console.log(`[rex-aplib-byor-effect] ${JSON.stringify({
+    romSha,
+    recurso: `0x${STREAM_HEX}`,
+    alvo_aplicado: `${ALVO_DA_BARRA.tile},${ALVO_DA_BARRA.row},${ALVO_DA_BARRA.col}->${ALVO_DA_BARRA.indice}`,
+    recusas: Object.keys(recusas).length,
+    bytes_diferentes: deslocados.length,
+    copia: modifiedSha,
+    patch: patchSha,
+    preservados: preserved,
+    guarda_aviso: avisoGuardaLinha.slice(0, 60),
+    indice_0_no_campo: indiceNoCampoAposDigitar0,
+    indice_0_sonda: desfechoSonda.kind,
+    indice_0_copia: desfechoSonda.sha ?? desfechoSonda.texto.slice(0, 60),
+    indice_1_explicito: desfechoIndiceUm
+      ? desfechoIndiceUm.sha ?? desfechoIndiceUm.texto.slice(0, 60)
+      : "não aplicado (0 recusado pelo painel)",
+  })}`);
+}
+
 function ppmFromRgba(frame) {
   const { bytes, width } = frame;
   const height = Math.floor(bytes.length / 4 / width);
@@ -11030,6 +11477,12 @@ async function main() {
     if (options.scenario === "rex-lz4w-fixture-effect") {
       currentE2eRunContext.appPath = options.app;
       await runRexLz4wFixtureEffectScenario(sessionId);
+      return;
+    }
+
+    if (options.scenario === "rex-aplib-byor-effect") {
+      currentE2eRunContext.appPath = options.app;
+      await runRexAplibByorEffectScenario(sessionId);
       return;
     }
 
