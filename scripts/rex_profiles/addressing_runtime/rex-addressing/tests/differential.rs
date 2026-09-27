@@ -32,6 +32,122 @@ fn md_linear_concorda_cos_vectores_pinados_e_co_motor_de_referencia() {
     });
 }
 
+#[test]
+fn md_ssf2_concorda_cos_vectores_pinados_e_co_motor_de_referencia() {
+    run(&ProfileImpl {
+        id: "md-ssf2",
+        translate: rex_addressing::md_ssf2::translate,
+        invert: rex_addressing::md_ssf2::invert,
+        read: rex_addressing::md_ssf2::read,
+    });
+}
+
+/// As 12 secuencias pináronse contra `rom_size = 0x800000` **fixo** no xerador
+/// (`export-vectors.mjs`), non contra o tamaño da fixture de `md-ssf2`, que é
+/// 4MB. Polo tanto as sondas sobardan a imaxe de fixture e só se pode comparar
+/// a tradución, nunca bytes. Artefacto rexistrado no informe da rodada.
+const SSF2_SEQ_ROM_SIZE: u64 = 0x800000;
+
+/// Secuencias aleatorias de escritas (12, pinadas): desde o estado identidade
+/// aplícanse todas, e gradanse os bancos resultantes **e** a tradución de oito
+/// sondas por secuencia.
+#[test]
+fn md_ssf2_secuencias_de_escrita_pinadas_remapean_e_traducen() {
+    let set = vectors::load();
+    let pv = set.profile("md-ssf2");
+    assert_eq!(
+        pv.ssf2_seqs.len(),
+        12,
+        "o reconto de secuencias pinadas cambiou"
+    );
+    for s in &pv.ssf2_seqs {
+        let mut state = MapperState::ssf2(SSF2_SEQ_ROM_SIZE, &[]);
+        for w in &s.writes {
+            state = write(state, w, &format!("seq {}", s.seq));
+        }
+        assert_eq!(
+            banks_of(&state),
+            sorted_pairs(&s.expect_banks),
+            "seq {}: bancos despois da secuencia",
+            s.seq
+        );
+        for (addr, offset) in &s.probes {
+            assert_eq!(
+                rex_addressing::md_ssf2::translate(conv::u32(*addr), &state),
+                Translate::Rom {
+                    offset: conv::u32(*offset)
+                },
+                "seq {}: sonda {:#x}",
+                s.seq,
+                addr
+            );
+        }
+    }
+}
+
+/// Casos de escrita nomeados (10, pinados): cada un di que xanela remapea que
+/// posición da páxina TIME, incluídos os espellos (`0xA130F3` → xanela 1).
+#[test]
+fn md_ssf2_casos_pinados_de_write_mapper_register() {
+    let set = vectors::load();
+    let pv = set.profile("md-ssf2");
+    assert_eq!(
+        pv.ssf2_pinned.len(),
+        10,
+        "o reconto de casos de escritura pinados cambiou"
+    );
+    for c in &pv.ssf2_pinned {
+        let mut state = conv::to_mapper_state(&c.state);
+        for w in &c.writes {
+            state = write(state, w, &format!("{} /", c.name));
+        }
+        assert_eq!(
+            banks_of(&state),
+            sorted_pairs(&c.expect_banks),
+            "{}: bancos",
+            c.name
+        );
+        for (addr, offset) in &c.expect_translate {
+            assert_eq!(
+                rex_addressing::md_ssf2::translate(conv::u32(*addr), &state),
+                Translate::Rom {
+                    offset: conv::u32(*offset)
+                },
+                "{}: tradución despois da escrita",
+                c.name
+            );
+        }
+    }
+}
+
+/// Aplica unha escrita pinada. `data` é byte por construción nos vectores: o
+/// tipo `u8` do contrato xa impide o resto (rexistrado no informe).
+fn write(state: MapperState, w: &vectors::BankWrite, label: &str) -> MapperState {
+    let addr = conv::u32(w.cpu_address);
+    let data = u8::try_from(w.data).expect("un rexistro SSF2 escribe un byte");
+    rex_addressing::md_ssf2::write_mapper_register(addr, data, &state)
+        .unwrap_or_else(|e| panic!("{label}: escrita {addr:#x} = {data} rexeitada {e:?}"))
+}
+
+/// Bancos observables dun estado, como pares ordenados.
+fn banks_of(state: &MapperState) -> Vec<(u64, u64)> {
+    let mut out: Vec<(u64, u64)> = match state.object("banks") {
+        Some(entries) => entries
+            .iter()
+            .filter_map(|(k, v)| k.parse::<u64>().ok().zip(v.as_uint()))
+            .collect(),
+        None => Vec::new(),
+    };
+    out.sort();
+    out
+}
+
+fn sorted_pairs(pairs: &[(u64, u64)]) -> Vec<(u64, u64)> {
+    let mut out = pairs.to_vec();
+    out.sort();
+    out
+}
+
 fn run(impl_: &ProfileImpl) {
     let set = vectors::load();
     let pv = set.profile(impl_.id);
@@ -376,10 +492,18 @@ fn state_is_modelable(profile: &str, state: &RawState) -> bool {
         _ => return false,
     }
     if let Some(banks) = &state.banks_raw {
-        if banks
-            .iter()
-            .any(|(k, v)| k.parse::<u64>().is_err() || !matches!(v, RawValue::Uint(_)))
-        {
+        // O `Ssf2Engine` modela a táboa de páxinas do hardware, onde o slot 0
+        // é inerte; o contrato, en cambio, **rexeita** un estado que pida
+        // remapear a xanela fixa ou unha inexistente. Eses casos son de
+        // política de estado e gradan só contra o perfil.
+        let domain = match profile {
+            "md-ssf2" => 1..=7u64,
+            _ => 0..=u64::MAX,
+        };
+        if banks.iter().any(|(k, v)| {
+            !matches!(k.parse::<u64>(), Ok(w) if domain.contains(&w))
+                || !matches!(v, RawValue::Uint(_))
+        }) {
             return false;
         }
     }

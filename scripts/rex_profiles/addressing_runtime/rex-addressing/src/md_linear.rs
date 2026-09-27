@@ -8,27 +8,16 @@
 //! `invert` devolve a lista completa, non un "enderezo canónico" inventado.
 
 use crate::error::{AddressingError, ErrorCode};
+use crate::md_common;
 use crate::{MapperState, Region, Segment, Translate};
 
 pub const PROFILE_ID: &str = "md-linear";
 /// Barramento de 24 bits do 68000.
-pub const BUS_LIMIT: u32 = 0xFFFFFF;
+pub const BUS_LIMIT: u32 = md_common::BUS_LIMIT;
 /// Último enderezo da xanela do cartucho.
-pub const CART_WINDOW_END: u32 = 0x3FFFFF;
+pub const CART_WINDOW_END: u32 = md_common::CART_WINDOW_END;
 pub const MIN_ROM_SIZE: u32 = 0x10000; // 64KB
 pub const MAX_ROM_SIZE: u32 = 0x400000; // 4MB: por riba precisa mapper
-
-/// Bus do Z80 a través do chip de E/S (RAM do chip de son + bus de son).
-const Z80_START: u32 = 0xA00000;
-const Z80_END: u32 = 0xA0FFFF;
-/// Chip de E/S do 68K.
-const IO_START: u32 = 0xA10000;
-const IO_END: u32 = 0xA1FFFF;
-/// Páxina TIME roteada ao cartucho: rexistradores do mapper nos perfis con bancos.
-const REG_PAGE_START: u32 = 0xA13000;
-const REG_PAGE_END: u32 = 0xA130FF;
-const VDP_START: u32 = 0xC00000;
-const WORK_RAM_START: u32 = 0xE00000;
 
 fn err(code: ErrorCode, detail: impl Into<String>) -> AddressingError {
     AddressingError::new(code, detail)
@@ -92,52 +81,9 @@ fn decode(cpu_address: u32, size: u32) -> Translate {
             offset: cpu_address & mask,
         };
     }
-    if (Z80_START..=Z80_END).contains(&cpu_address) {
-        // Bits 13-14 do enderezo: 0/1 = RAM do Z80, 2/3 = bus de son.
-        let sub = (cpu_address >> 13) & 3;
-        if sub == 0 || sub == 1 {
-            return Translate::Device {
-                region: Region::Z80Ram,
-                offset: cpu_address & 0x1FFF,
-            };
-        }
-        return Translate::Invalid(err(
-            ErrorCode::Unsupported,
-            format!(
-                "bus de son do Z80 ({}) fóra do contrato",
-                if sub == 2 { "YM2612" } else { "misc/VDP" }
-            ),
-        ));
-    }
-    if (IO_START..=IO_END).contains(&cpu_address) {
-        if (REG_PAGE_START..=REG_PAGE_END).contains(&cpu_address) {
-            // Páxina TIME: neste perfil as escritas non teñen efecto.
-            return Translate::Device {
-                region: Region::CartIo,
-                offset: cpu_address - REG_PAGE_START,
-            };
-        }
-        return Translate::Device {
-            region: Region::Io,
-            offset: cpu_address - IO_START,
-        };
-    }
-    if cpu_address >= WORK_RAM_START {
-        return Translate::Device {
-            region: Region::WorkRam,
-            offset: cpu_address & 0xFFFF,
-        };
-    }
-    if cpu_address >= VDP_START {
-        return Translate::Invalid(err(
-            ErrorCode::Unsupported,
-            "portas do VDP ($C00000-$DFFFFF) fóra do contrato",
-        ));
-    }
-    Translate::Invalid(err(
-        ErrorCode::Unsupported,
-        "xanela sen dispositivo mapeado no perfil md-linear (open bus / reservado / lockup)",
-    ))
+    // O resto do mapa é o chip de E/S do 68K, idéntico no perfil SSF2. Na
+    // páxina TIME ($A13000-$A130FF) as escritas non teñen efecto ningún.
+    md_common::device_or_invalid(cpu_address, PROFILE_ID)
 }
 
 /// `invert(rom_offset, mapper_state)` — **todos** os aliases do barramento, en
@@ -226,10 +172,10 @@ pub fn read(
                     .expect("un corredor non pode superar a xanela de 4MB");
                 let start = offset as usize;
                 if start + run > rom.len() {
-                    // Imaxe máis curta que `rom_size`: o faltante é erro, sen
-                    // clamp e sen bytes inventados.
-                    let available = rom.len() - start;
-                    if available > 0 {
+                    // Imaxe máis curta que `rom_size`: devólvese o prefixo
+                    // válido e o faltante queda como erro, sen clamp e sen
+                    // bytes inventados.
+                    if start < rom.len() {
                         segments.push(Segment::Bytes {
                             region: Region::Rom,
                             offset,
