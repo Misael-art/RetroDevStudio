@@ -1,0 +1,1587 @@
+npm notice run retrodev-studio@0.1.0 test
+npm notice run vitest run
+(node:820167) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.10 [39m[90m/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21[39m
+
+(node:820203) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2morganizes everything visually, persists, and undoes/redoes without changing logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2msnaps a pending connection to a compatible port, cancels with Escape and connects only on release
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mgroups a behavior, renames, collapses and drags it without touching logic
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mnever lets a collapsed group cover another node's controls; organize, expand, undo and reopen
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mkeeps pinned nodes still when organizing
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2medits the jump button from the rules view and keeps the other behaviors intact
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2medits the jump button from the rules view and keeps the other behaviors intact
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2medits the jump button from the rules view and keeps the other behaviors intact
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2medits the jump button from the rules view and keeps the other behaviors intact
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2medits the jump button from the rules view and keeps the other behaviors intact
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2medits the jump button from the rules view and keeps the other behaviors intact
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2medits the jump button from the rules view and keeps the other behaviors intact
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mdoes not delete the node when Backspace is pressed inside a field
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mdoes not delete the node when Backspace is pressed inside a field
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mdoes not delete the node when Backspace is pressed inside a field
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mdoes not delete the node when Backspace is pressed inside a field
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mdoes not delete the node when Backspace is pressed inside a field
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mdoes not delete the node when Backspace is pressed inside a field
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mignores a stale graph_ref hydration that resolves after the user switched entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mignores a stale graph_ref hydration that resolves after the user switched entity
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mignores a stale graph_ref hydration that resolves after the user switched entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mignores a stale graph_ref hydration that resolves after the user switched entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mignores a stale graph_ref hydration that resolves after the user switched entity
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mignores a stale graph_ref hydration that resolves after the user switched entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/NodeGraphEditor.authoring.test.tsx[2m > [22m[2mNodeGraphEditor authoring (reference graph)[2m > [22m[2mignores a stale graph_ref hydration that resolves after the user switched entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/nodegraph/NodeGraphEditor.authoring.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 9144[2mms[22m[39m
+     [33m[2m✓[22m[39m organizes everything visually, persists, and undoes/redoes without changing logic [33m 1535[2mms[22m[39m
+     [33m[2m✓[22m[39m snaps a pending connection to a compatible port, cancels with Escape and connects only on release [33m 776[2mms[22m[39m
+     [33m[2m✓[22m[39m groups a behavior, renames, collapses and drags it without touching logic [33m 1371[2mms[22m[39m
+     [33m[2m✓[22m[39m never lets a collapsed group cover another node's controls; organize, expand, undo and reopen [33m 2627[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps pinned nodes still when organizing [33m 1102[2mms[22m[39m
+     [33m[2m✓[22m[39m edits the jump button from the rules view and keeps the other behaviors intact [33m 1060[2mms[22m[39m
+     [33m[2m✓[22m[39m does not delete the node when Backspace is pressed inside a field [33m 332[2mms[22m[39m
+     [33m[2m✓[22m[39m ignores a stale graph_ref hydration that resolves after the user switched entity [33m 340[2mms[22m[39m
+(node:820647) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/App.test.tsx[2m > [22m[2mApp build flow[2m > [22m[2msetSceneDraft sem projeto aberto lanca erro (nao mascarado)
+[22m[39mAn update to default inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/App.test.tsx[2m > [22m[2mApp build flow[2m > [22m[2mnewRevision menor que expected falha pela funcao setHwValidationResult do store
+[22m[39mAn update to SceneSaveStatusChip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to default inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to SceneSaveStatusChip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to default inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to default inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to App inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/App.test.tsx [2m([22m[2m76 tests[22m[2m)[22m[33m 7068[2mms[22m[39m
+     [33m[2m✓[22m[39m shows explicit live error detail without blocking Build & Run [33m 387[2mms[22m[39m
+(node:820955) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mapplies, edits, undoes and removes behaviors on two entities independently
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mkeeps an edit when the user switches entity before the autosave debounce
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2masks for confirmation before adding a second movement to the same entity
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/BehaviorPanel.test.tsx[2m > [22m[2mBehaviorPanel through the NodeGraph editor[2m > [22m[2mbuilds a gated passage from a movement and refuses removing the movement first
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/nodegraph/BehaviorPanel.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[33m 6036[2mms[22m[39m
+     [33m[2m✓[22m[39m applies, edits, undoes and removes behaviors on two entities independently [33m 4374[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps an edit when the user switches entity before the autosave debounce [33m 1094[2mms[22m[39m
+     [33m[2m✓[22m[39m builds a gated passage from a movement and refuses removing the movement first [33m 341[2mms[22m[39m
+(node:821169) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/nodegraph/NodeGraphEditor.test.tsx [2m([22m[2m36 tests[22m[2m)[22m[33m 3015[2mms[22m[39m
+     [33m[2m✓[22m[39m renders overview/minimap context and focuses the entry node without mutating saved positions [33m 387[2mms[22m[39m
+     [33m[2m✓[22m[39m zooms and pans the canvas without losing the selected node or edge hover state [33m 327[2mms[22m[39m
+(node:821294) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/tools/ToolsPanel.test.tsx [2m([22m[2m22 tests[22m[2m)[22m[33m 1185[2mms[22m[39m
+(node:821396) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/artstudio/ArtStudioPanel.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 1143[2mms[22m[39m
+(node:821483) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/host-manager.test.mjs [2m([22m[2m33 tests[22m[2m)[22m[33m 686[2mms[22m[39m
+(node:821678) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/inspector/InspectorPanel.test.tsx[2m > [22m[2mInspectorPanel[2m > [22m[2mduplicates a prefab entity without inheriting its manual logic or graph_ref, remapping its behaviors
+[22m[39mAn update to InspectorPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/components/inspector/InspectorPanel.test.tsx [2m([22m[2m13 tests[22m[2m)[22m[33m 711[2mms[22m[39m
+(node:821749) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/build-environment.test.mjs [2m([22m[2m6 tests[22m[2m)[22m[33m 620[2mms[22m[39m
+(node:821909) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/retrofx/RetroFXDesigner.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[33m 504[2mms[22m[39m
+(node:821967) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/hierarchy/HierarchyPanel.test.tsx[2m > [22m[2mHierarchyPanel[2m > [22m[2mremounting (workspace switch) keeps unsaved edits instead of re-reading the scene from disk
+[22m[39mAn update to HierarchyPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/hierarchy/HierarchyPanel.test.tsx[2m > [22m[2mHierarchyPanel[2m > [22m[2mregressao: erro tardio de hidratacao nao limpa o draft novo
+[22m[39mAn update to HierarchyPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/hierarchy/HierarchyPanel.test.tsx[2m > [22m[2mHierarchyPanel[2m > [22m[2mregressao: troca de projeto ignora resposta de hidratacao tardia do projeto anterior
+[22m[39mAn update to HierarchyPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/components/hierarchy/HierarchyPanel.test.tsx [2m([22m[2m11 tests[22m[2m)[22m[33m 370[2mms[22m[39m
+(node:822016) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mkeeps a completion emitted before start returns and reconciles the final status
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mdoes not let a slow preview for candidate A replace candidate B
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mrenders the donor-assisted composed sprite frame through IPC
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mselects a second manifest-backed frame without changing the resource provenance
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mselects a second manifest-backed frame without changing the resource provenance
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mkeeps frame B image, selection, and provenance when frame A resolves out of order
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mkeeps frame B image, selection, and provenance when frame A resolves out of order
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mrejects a delayed response carrying the wrong frame metadata without reusing the previous image
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+[90mstderr[2m | src/components/tools/InspectionPanel.test.tsx[2m > [22m[2mInspectionPanel[2m > [22m[2mrejects a delayed response carrying the wrong frame metadata without reusing the previous image
+[22m[39mAn update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to InspectionPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ [32m✓[39m src/components/tools/InspectionPanel.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[33m 451[2mms[22m[39m
+(node:822101) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/releaseManifest.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 322[2mms[22m[39m
+(node:822161) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/linux-host-scripts.test.mjs [2m([22m[2m6 tests[22m[2m)[22m[33m 315[2mms[22m[39m
+(node:822340) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/tools/CompressedResourcePanel.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 293[2mms[22m[39m
+(node:822381) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/sgdk-e2e-host-preflight.test.mjs [2m([22m[2m4 tests[22m[2m)[22m[32m 270[2mms[22m[39m
+(node:822531) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/tools/ReverseWorkspace.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 230[2mms[22m[39m
+(node:822592) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/inspector/InspectorPanel.assetVisualState.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 221[2mms[22m[39m
+(node:822642) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/common/AdaptivePanel.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 161[2mms[22m[39m
+(node:822681) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders empty state before inspection
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders empty state before inspection
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders blockers and keeps Experimental visible
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders blockers and keeps Experimental visible
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders complete evidence axes without cosmetic success promotion
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders complete evidence axes without cosmetic success promotion
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders the gameplay_parity axis and does not expose a capture button that always fails
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders the gameplay_parity axis and does not expose a capture button that always fails
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mshows the last parity report from the store when present
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mshows the last parity report from the store when present
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders audio warnings semaphore
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/tools/ProjectCapabilityPanel.test.tsx[2m > [22m[2mProjectCapabilityPanel[2m > [22m[2mrenders audio warnings semaphore
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/tools/ProjectCapabilityPanel.test.tsx [2m([22m[2m6 tests[22m[2m)[22m[32m 156[2mms[22m[39m
+(node:822716) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/explorer/ExplorerWorkspace.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 133[2mms[22m[39m
+(node:822752) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/common/LayoutSplitter.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 120[2mms[22m[39m
+(node:822784) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mfilters diagnostics by severity and area, expands details, and copies the full error
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mfilters diagnostics by severity and area, expands details, and copies the full error
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mannounces diagnostic entries to assistive technology via a live log region
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mannounces diagnostic entries to assistive technology via a live log region
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mshows non-diagnostic entries when filter is all
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mshows non-diagnostic entries when filter is all
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mhides non-diagnostic entries when severity filter is active
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mhides non-diagnostic entries when severity filter is active
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mhides non-diagnostic entries when area filter is active
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Console.test.tsx[2m > [22m[2mConsole actionable diagnostics[2m > [22m[2mhides non-diagnostic entries when area filter is active
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/common/Console.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[32m 118[2mms[22m[39m
+(node:822863) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/common/Dialog.test.tsx[2m > [22m[2mDialog[2m > [22m[2mexposes its title and description and focuses the requested control
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Dialog.test.tsx[2m > [22m[2mDialog[2m > [22m[2mexposes its title and description and focuses the requested control
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Dialog.test.tsx[2m > [22m[2mDialog[2m > [22m[2mtraps forward and backward tab navigation
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Dialog.test.tsx[2m > [22m[2mDialog[2m > [22m[2mtraps forward and backward tab navigation
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Dialog.test.tsx[2m > [22m[2mDialog[2m > [22m[2mcloses with Escape and restores focus to the invoker
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Dialog.test.tsx[2m > [22m[2mDialog[2m > [22m[2mcloses with Escape and restores focus to the invoker
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Dialog.test.tsx[2m > [22m[2mDialog[2m > [22m[2mcan keep Escape from dismissing the dialog
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/Dialog.test.tsx[2m > [22m[2mDialog[2m > [22m[2mcan keep Escape from dismissing the dialog
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/common/Dialog.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 109[2mms[22m[39m
+(node:822921) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/store/editorStore.test.ts [2m([22m[2m89 tests[22m[2m)[22m[32m 103[2mms[22m[39m
+(node:822962) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/hierarchy/LayerPanel.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[32m 85[2mms[22m[39m
+(node:823011) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/nodeLayout.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 73[2mms[22m[39m
+(node:823043) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/common/FormControls.test.tsx [2m([22m[2m4 tests[22m[2m)[22m[32m 55[2mms[22m[39m
+(node:823075) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/artstudio/AssetQualityPanel.test.tsx[2m > [22m[2mAssetQualityPanel[2m > [22m[2mrenders compact Qualidade ROM summary and expands technical details
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/artstudio/AssetQualityPanel.test.tsx[2m > [22m[2mAssetQualityPanel[2m > [22m[2mrenders compact Qualidade ROM summary and expands technical details
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/artstudio/AssetQualityPanel.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 54[2mms[22m[39m
+(node:823108) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/decomp/decomp-scripts.test.mjs [2m([22m[2m11 tests[22m[2m | [22m[33m4 skipped[39m[2m)[22m[32m 52[2mms[22m[39m
+(node:823159) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/common/Button.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+(node:823188) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/common/FormField.test.tsx[2m > [22m[2mFormField[2m > [22m[2mprogrammatically associates its label and generated safe id
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/FormField.test.tsx[2m > [22m[2mFormField[2m > [22m[2mprogrammatically associates its label and generated safe id
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/FormField.test.tsx[2m > [22m[2mFormField[2m > [22m[2mconnects description and error while preserving existing references
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/FormField.test.tsx[2m > [22m[2mFormField[2m > [22m[2mconnects description and error while preserving existing references
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/FormField.test.tsx[2m > [22m[2mFormField[2m > [22m[2mpreserves an id and aria state already defined by the control
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/common/FormField.test.tsx[2m > [22m[2mFormField[2m > [22m[2mpreserves an id and aria state already defined by the control
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/common/FormField.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+(node:823221) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/nodegraph/SgdkPatternTemplateGallery.test.tsx[2m > [22m[2mSgdkPatternTemplateGallery[2m > [22m[2mrenders experimental SGDK template gallery and inserts selected template
+[22m[39mThe current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/nodegraph/SgdkPatternTemplateGallery.test.tsx[2m > [22m[2mSgdkPatternTemplateGallery[2m > [22m[2mrenders experimental SGDK template gallery and inserts selected template
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/nodegraph/SgdkPatternTemplateGallery.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 43[2mms[22m[39m
+(node:823253) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/behaviorLibrary.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+(node:823282) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/inspector/HardwareLimitsPanel.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 40[2mms[22m[39m
+(node:823323) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/nodeCompiler.test.ts [2m([22m[2m42 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+(node:823358) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/components/inspector/RuntimeContractsPanel.test.tsx[2m > [22m[2mRuntimeContractsPanel[2m > [22m[2mrenders declared observed missing states for Inspector and Debug surfaces
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/components/inspector/RuntimeContractsPanel.test.tsx[2m > [22m[2mRuntimeContractsPanel[2m > [22m[2mrenders declared observed missing states for Inspector and Debug surfaces
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/components/inspector/RuntimeContractsPanel.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 37[2mms[22m[39m
+(node:823390) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/collectGoal.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+(node:823424) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | src/core/useProjectAssetVisualState.test.tsx[2m > [22m[2museProjectAssetVisualState[2m > [22m[2mnever lets a late response for a previous asset replace the current thumbnail
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/core/useProjectAssetVisualState.test.tsx[2m > [22m[2museProjectAssetVisualState[2m > [22m[2mnever lets a late response for a previous asset replace the current thumbnail
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/core/useProjectAssetVisualState.test.tsx[2m > [22m[2museProjectAssetVisualState[2m > [22m[2mnever lets a late response for a previous asset replace the current thumbnail
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/core/useProjectAssetVisualState.test.tsx[2m > [22m[2museProjectAssetVisualState[2m > [22m[2mnever lets a late response for a previous asset replace the current thumbnail
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/core/useProjectAssetVisualState.test.tsx[2m > [22m[2museProjectAssetVisualState[2m > [22m[2mnever lets a late response for a previous asset replace the current thumbnail
+[22m[39mThe current testing environment is not configured to support act(...)
+
+[90mstderr[2m | src/core/useProjectAssetVisualState.test.tsx[2m > [22m[2museProjectAssetVisualState[2m > [22m[2mnever lets a late response for a previous asset replace the current thumbnail
+[22m[39mThe current testing environment is not configured to support act(...)
+
+ [32m✓[39m src/core/useProjectAssetVisualState.test.tsx [2m([22m[2m1 test[22m[2m)[22m[32m 29[2mms[22m[39m
+(node:823456) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/architecture-metrics.test.mjs [2m([22m[2m2 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+(node:823485) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/passageAuthoring.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+(node:823515) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/nodeEngine.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+(node:823544) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/ipc/parityService.test.ts [2m([22m[2m21 tests[22m[2m)[22m[32m 14[2mms[22m[39m
+(node:823573) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/shortcuts.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+(node:823603) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/security-contract.test.mjs [2m([22m[2m6 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+(node:823632) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/surfaceRegistry.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+(node:823661) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/validation/liveValidationController.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+(node:823694) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/ipc/emulatorService.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 11[2mms[22m[39m
+(node:823723) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/scenePersistence.save.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+(node:823752) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/diagnostics.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+(node:823782) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/sgdkLogicDiagnostics.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+(node:823811) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/ipc/sceneService.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+(node:823844) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/ui-layout-oracle.test.mjs [2m([22m[2m4 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+(node:823874) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/ipc/projectWatcherService.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+(node:823911) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/inputCommands.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+(node:823940) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/scenePersistence.draft.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+(node:823970) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/workspaceLayout.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+(node:823999) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/buildProvenance.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+(node:824032) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/ruleSummary.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+(node:824061) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/tools/assetBrowserModel.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+(node:824090) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/editorEntityFactory.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+(node:824117) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/productMetrics.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+(node:824147) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/components/tools/vramViewer.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+(node:824176) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/sceneWorkspaceContext.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+(node:824210) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/assetInstantiation.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:824241) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/tauri-version-alignment.test.mjs [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:824270) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/sceneWorldModel.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:824299) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/assetVisualState.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:824329) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/importedEntityContext.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:824358) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/creatorWorkflow.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:824387) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/nodeEngine.recovered.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:824415) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/sceneAssetHealth.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:824446) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/sceneConstraints.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:824474) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/keyColorTransparency.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:824504) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/entityDisplay.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+(node:824541) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [2m[90m↓[39m[22m src/core/validateUpstreamWindows.test.ts [2m([22m[2m2 tests[22m[2m | [22m[33m2 skipped[39m[2m)[22m
+
+[2m Test Files [22m [1m[32m75 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (76)[39m
+[2m      Tests [22m [1m[32m702 passed[39m[22m[2m | [22m[33m6 skipped[39m[90m (708)[39m
+[2m   Start at [22m 04:16:35
+[2m   Duration [22m 95.70s[2m (transform 3.06s, setup 492ms, import 6.49s, tests 34.47s, environment 41.99s)[22m
+

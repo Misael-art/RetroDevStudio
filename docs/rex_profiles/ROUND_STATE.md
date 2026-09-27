@@ -221,6 +221,79 @@ e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
 
+- 2026-09-27 (integrador, **PASSO 5 — Pernas 2 e 4 fechadas: a barra edita o
+  recurso aPLib real e o que ela escreve roda no desempacotador do jogo**), esta
+  célula é o checkpoint e fecha o passo 5 do briefing. **HEAD de partida:**
+  `94bfa81` (o checkpoint das pernas 1 e 3) com a varredura de capacidade ainda não
+  commitada. **Commits desta célula:** `7c65cd5`
+  (varredura de capacidade), `ce6ed3c` (cenário WebDriver), `8f2f3f1` (execução
+  no core).
+  **O que abriu a perna 2 foi uma morte, não uma escolha.** As pernas 1 e 3
+  pinaram o pixel `(53, 0, 4)` com índice **0**; a barra não digita índice 0.
+  Iterar 1..15 sobre esse pixel no navegador recusou os 15 (`excessive_output`,
+  939–942 B contra o slot de 938 B) — `e2e-run2-becodo-que-motivou-a-varredura.log`.
+  Em vez de trocar de alvo por opinião, `7c65cd5` mediu o espaço com o codificador
+  do próprio produto nos **4** recursos aPLib da ROM (75 325 ms, 10 770 tentativas):
+  dois deles (`0x2e4d4`, `0x2f65a`) não aceitam **nenhuma** edição de 1 pixel que a
+  barra expresse, e nem contando o índice 0 há piso abaixo do slot (4 540 > 4 485;
+  7 439 > 7 420). Sobram `0x2e12a` (folga 1 B) e `0x2cd94` (folga 0). Dentro de
+  `0x2e12a`, o tile 53 tem exatamente dois pares cabíveis — `[[7,5],[7,7]] → idx 4`,
+  ambos a 938 B, o teto — e essa lista está pinada no teste do lib.
+  **Perna 2 (`ce6ed3c`, cenário `rex-aplib-byor-effect`):** a interface chama
+  `rexResourceList` → `rexResourcePreview` → `rexResourceApplyEdit` (no-op com zero
+  edições e depois com a edição medida) → reabre a cópia no mesmo painel. Conferido
+  em bytes, não em screenshot: hash anunciado == SHA da cópia no disco, cópia do
+  tamanho da ROM, **800** bytes distintos todos dentro de `[0x2e12a, +938)`, **0**
+  fora do slot, **163** recursos preservados, BPS reaplicado sobre ROM íntegra
+  reproduzindo o hash da cópia, e a prévia da cópia com pixels-sha próprio
+  (`a6a4b603…` → `b469458…`). Verde duas rodadas (run3 07:00:50Z, run4 07:03:22Z);
+  os dois relatórios viajam no pacote e a reconciliação é reproduzível: 62 campos
+  idênticos, exatamente um diferente — o texto livre que editei entre as corridas.
+  A guarda anti-descarte-silencioso está exercida pela barra (linha 8 → aviso +
+  fila vazia asserida).
+  **Achado que refutou a premissa da minha própria perna 2:** o painel **não**
+  recusa índice 0 — `CompressedResourcePanel.tsx:273` faz
+  `setPaintIndex(Number(v) || 1)` e reescreve 0 para 1 antes de `editRejectReason`
+  (linhas 40–42), que reserva 0 como transparente. Medido: digitar 0 deixa `"1"` no
+  `value` do DOM e o desfecho é byte a byte o do índice 1 explícito; o índice 0 real
+  custou 937 B nas pernas 1 e 3, contra os 942 B alegados pela sonda. **Registrado,
+  não corrigido** — mudar a semântica de paleta da UI é decisão do operador. O
+  cenário tem duas asserções que apodrecem se a UI passar a expressar o 0 (hash
+  pinado `69389ec2…`) ou se o clamp mudar de valor.
+  **Perna 4 (`8f2f3f1`, `rex06_hamoopig_aplib_edicao_da_barra_executa_no_core`):**
+  o artefato da barra, executado. O teste refaz a chamada com os quatro campos que
+  a barra enviou e **obriga** o hash da cópia a ser `80249128…` antes de emular;
+  três corridas frescas (power-on) sob Genesis Plus GX v1.7.4 `46a5521`, 180 frames
+  do mesmo script. Coordenadas **previstas antes de executar** pela geometria chunky
+  (`cx*8+5, cy*8+7` nas células (35,16) e (26,25) do tile 53) = as duas observadas.
+  **Medido:** determinismo original-vs-original **0**; **232** pixels alterados em
+  **116** frames (59..179, menos 60/61/62/66/67), **2 por frame**, agregando em
+  `[[213,207],[285,135]]`; **0** fora dos retângulos das células; no checkpoint 129
+  exatamente as mesmas duas colocações. Os frames 59/69/129/179 da ROM íntegra
+  reproduzem byte a byte os hashes de
+  `rex-evidence-2026-09-10/backend-hamoopig/checkpoint-rgba-hashes.json` (arquivo
+  de 2026-09-12, anterior a esta frente), e os PPM base desta célula são os mesmos
+  bytes da perna 3. **Não atribuído e por isso registrado como limite:** a perna 3
+  viu 119 frames/238 pixels e esta vê 116/232; o que muda é a posição do pixel
+  dentro do tile, e nenhum mecanismo foi medido para os frames 62/66/67.
+  **Evidência promovida:** `data/rex_profiles/integrator/aplib/evidence/`
+  `2026-09-27-passo5-perna2-barra/` — manifesto com 11 artefatos conferidos por
+  SHA-256 no disco (2 relatórios, 3 logs E2E, JSON do core, JSON da varredura, 4
+  logs de gates), ROM/cópia/BPS/core/binário sob teste amarrados por hash, e os
+  PPM **não** versionados por serem derivados de ROM comercial.
+  **Gates desta árvore:** `cargo fmt --check` rc=0; `cargo clippy --lib --
+  -D warnings` rc=0; `cargo test --lib` **706 passed / 0 failed / 63 ignored**
+  rc=0; os dois aceites ignorados `1 passed` cada (sweep 75,43 s; perna 4 12,24 s);
+  `check:tree`/`lint`/`tsc --noEmit` rc=0; `npm test` **702 passed / 0 failed / 6
+  skipped** (os 6 skips são de toolchain ausente, reconciliados no manifesto; o
+  invariante é 702/0); `host:certify` **READY**.
+  **Matriz:** linha aPLib **mantida `blocked`**, mesmo com a condição declarada do
+  bloqueio (execução do recurso modificado pelo desempacotador do jogo) agora
+  alcançada — promoção de maturidade é vetada pela ordem do operador. As quatro
+  pernas do passo 5 estão na mesa para decisão. **Bloqueio:** nenhum externo.
+  **Próximo:** passo 2/7 em paralelo — CI registrado por SHA no HEAD publicado e o
+  E2E do contrato novo; sem merge, sem release.
+
 - 2026-09-27 (integrador, **PASSO 5 — o recurso real BYOR editado pela frente do
   produto, Pernas 1 e 3 fechadas, perna 2 aberta**), esta célula é o checkpoint.
   **HEAD de partida:** `7aeb3fa` + o teste da perna 1 ainda não commitado.

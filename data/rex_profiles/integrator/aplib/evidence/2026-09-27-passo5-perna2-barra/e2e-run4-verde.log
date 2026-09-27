@@ -1,0 +1,16 @@
+npm notice run retrodev-studio@0.1.0 test:e2e:desktop
+npm notice run node scripts/e2e-tauri-build-run.mjs --scenario rex-aplib-byor-effect --skip-build --app src-tauri/target-test/debug/retro-dev-studio
+[RDS preflight host]
+  SGDK real: OK (/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/sgdk via SGDK_ROOT)
+  tauri-driver: OK (/home/misael/.cargo/bin/tauri-driver)
+  WebDriver nativo: OK (/usr/sbin/WebKitWebDriver)
+  Ready: SIM
+== Starting tauri-driver ==
+Error serving connection: hyper::Error(User(Service), client error (Connect)
+
+Caused by:
+    0: tcp connect error
+    1: Connection refused (os error 111))
+[rex-aplib-byor-effect] relatório=/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-aplib-byor-effect-2026-09-27T07-03-22-519Z-report.json
+[rex-aplib-byor-effect] {"romSha":"558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9","recurso":"0x2e12a","alvo_aplicado":"53,7,5->4","recusas":14,"bytes_diferentes":800,"copia":"80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce","patch":"58ae4f0b5eb81ebb88579741738a473f144369dfeb1723aad9c8bb0c731331b0","preservados":163,"guarda_aviso":"linha 8 fora do tile: use um valor inteiro de 0 a 7. A fila ","indice_0_no_campo":"1","indice_0_sonda":"recusado","indice_0_copia":"excessive_output: edição do recurso em 0x2e12a não cabe no s","indice_1_explicito":"excessive_output: edição do recurso em 0x2e12a não cabe no s"}
+EXIT=0

@@ -1,0 +1,93 @@
+{
+ "schema": "rex-aplib-byor-effect/v1",
+ "etapa": "passo 5 perna 2 — recurso real aPLib editado pela interface",
+ "rom": {
+  "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+  "sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9"
+ },
+ "recurso": {
+  "stream_offset": "0x2e12a",
+  "codec_anunciado_pela_barra": "2e12a|0x2e12a — aplib · 100 tiles (stream 938 B)",
+  "slot_bytes": 938,
+  "plain_bytes": 3200,
+  "tiles_recurso": 100,
+  "aplib_na_lista": 4,
+  "verificados_na_lista": 164,
+  "verificados_reaberto": 164
+ },
+ "edicoes": {
+  "pixel_das_pernas_1_e_3": {
+   "tile": 53,
+   "row": 0,
+   "col": 4,
+   "indice_original": 5
+  },
+  "indices_digitados_no_pixel_do_pin": 14,
+  "alvo_aplicado_pela_barra": {
+   "tile": 53,
+   "row": 7,
+   "col": 5,
+   "indice": 4
+  }
+ },
+ "recusas_excessive_output": {
+  "1": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "2": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "3": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "4": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 939 bytes de stream, orçamento de 938",
+  "6": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "7": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "8": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "9": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "10": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "11": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "12": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "13": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "14": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+  "15": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938"
+ },
+ "guarda_anti_descarte_silencioso": {
+  "aviso": "linha 8 fora do tile: use um valor inteiro de 0 a 7. A fila atual foi preservada.",
+  "fila_ficou_vazia": true
+ },
+ "achado_indice_0_inexpressavel_pela_barra": {
+  "premissa": "o pin das pernas 1 e 3 é índice 0 (transparente), que editRejectReason reserva e o campo 'índice' não deixa digitar",
+  "mecanismo": "CompressedResourcePanel.tsx: setPaintIndex(Number(event.target.value) || 1) reescreve 0 para 1 antes de queueEdit",
+  "sonda": {
+   "enfileirada": ""
+  },
+  "valor_no_campo_apos_digitar_0": "1",
+  "desfecho_da_aplicacao": {
+   "kind": "recusado",
+   "sha": null,
+   "texto": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+   "completo": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938"
+  },
+  "hash_da_copia_pinada_pernas_1_e_3": "69389ec2b400220c7a069e4c36326ca3c26d81e85ff0ab81bf798dc9ae4038ac",
+  "desfecho_indice_1_explicito": {
+   "kind": "recusado",
+   "sha": null,
+   "texto": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938",
+   "completo": "excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938"
+  },
+  "prova": "desfecho \"excessive_output: edição do recurso em 0x2e12a não cabe no slot comprovado: aPLib encode: 3200 bytes de plain precisam de 942 bytes de stream, orçamento de 938\"; índice 0 coube no slot nas pernas 1 e 3 (937/938 B), logo o byte enviado não foi 0",
+  "status": "registrado como achado, NÃO corrigido — semântica de paleta da UI é decisão do operador"
+ },
+ "saida": {
+  "copia_path": "/home/misael/.retrodev/decomp_work/extract/558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9/edits/rex-aplib-modified-80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce.bin",
+  "copia_sha256": "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce",
+  "patch_bps_path": "/home/misael/.retrodev/decomp_work/extract/558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9/edits/rex-aplib-patch-58ae4f0b5eb81ebb88579741738a473f144369dfeb1723aad9c8bb0c731331b0.bps",
+  "patch_bps_sha256": "58ae4f0b5eb81ebb88579741738a473f144369dfeb1723aad9c8bb0c731331b0",
+  "preservados": 163,
+  "bytes_diferentes_na_copia": 800,
+  "bytes_fora_do_slot": 0,
+  "patch_reaplicado_sha256": "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce",
+  "preview_sha_original": "pixels a6a4b603d8ceb03e…",
+  "preview_sha_copia": "pixels b469458fa51d5106…"
+ },
+ "limites": [
+  "prova o caminho da barra neste recurso, nesta ROM e nesta edição: não prova o resto dos 4 recursos aPLib nem o jogo inteiro",
+  "o índice aplicável pela barra NÃO é o das pernas 1 e 3 (0 é reescrito para 1 pelo campo de índice); o efeito em tela desta edição específica não foi executado no core",
+  "BYOR não é dependência provisionável: este cenário não roda no CI"
+ ]
+}
