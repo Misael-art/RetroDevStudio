@@ -247,3 +247,53 @@ fica verde sem a ROM.
 missão desta rodada veta promoção de maturidade, merge e release. As células
 seguem `blocked`/`fixture`, e a evidência acima fica registrada como evidência,
 não como estado de célula.
+
+## 9. Adendo do integrador (2026-09-27) — a cadeia §2 **não comporta edição**, e a prova muda de recurso
+
+Mesma convenção do §8: as seções acima ficam como registro do estado em que
+abriram. O que segue é medida nova, com caminho e commit, e **contradiz o plano**
+de usar a cadeia `0x21b5c / 0x21b44 / 0x21b4c` como alvo da prova de reinserção.
+
+**Por quê:** o slot de reinserção de um recurso é o tamanho do stream que a
+toolchain produziu, e a transação canônica recusa escrever além dele (a política
+é `needs_space` → `excessive_output`; expansão de ROM e realocação de ponteiros
+estão vetadas nesta rodada). Medido no recurso do §2 (`0x21b44`, 500 tiles,
+plain 16 000 B, slot **4 485 B**): o re-encode do plain **sem nenhuma edição** já
+custa **4 544 B** — 59 B acima do slot. Não existe edição que caiba ali, nem a
+nula. Registro completo em
+`src-tauri/src/tools/reverse/decomp/rex_resources.rs::byor_aplib_registra_capacidade_de_reinsercao_no_tileset_visivel`
+(`0ef7a66`):
+
+| TileSet | plain | slot | re-encode sem edição | cabe? |
+|---|---|---|---|---|
+| `0x270de` (font_08x08, 96 tiles) | 3 072 | 609 | 609 | sim, mas **0** `TiledImage` o aponta: se aparece em tela é por outro caminho (texto/sprite), e aí a posição prevista não sai de um tilemap |
+| `0x21b20` (100 tiles, cadeia `0x21b38`) | 3 200 | 938 | **937** | **sim, com 1 B de folga** |
+| `0x21b44` (500 tiles, cadeia do §2) | 16 000 | 4 485 | 4 544 | não |
+| `0x21b68` (543 tiles, cadeia `0x21b80`) | 17 376 | 7 420 | 7 442 | não |
+
+**Como foi medido:** censo das cadeias em
+`scripts/rex_profiles/integrator/aplib/survey_tiledimage_refs.py` (`832b558`),
+que reusa o `token_dump.desmonta` do aceite do decoder (nada de segundo
+desempacotador), varre headers `compression == 1` com o 68000 endereçando par, e
+lê o `TiledImage` exatamente como o SGDK 2.11 empacota (`{u32 palette; u32
+tileset; u32 tilemap}`). Dos 31 headers com `compression == 1`, **4** fecham no
+comprimento anunciado; os três que aparecem na tabela acima são apontados por
+exatamente um `TiledImage` cada, e o do `font_08x08` por nenhum.
+
+**Alvo escolhido por varredura, não por preferência** (`a31aecd`,
+`byor_varre_as_edicoes_de_pixel_que_cabem_no_slot`): sobre o `0x21b20`, de
+**61 128** edições de 1 pixel candidatas (tile de célula única, sem flip, índices
+de cores diferentes), **30 662** cabem no slot de 938 B; a mais barata custa
+932 B. A edição pinada para a prova de tela é **stream `0x2e12a`, tile 53, pixel
+do tile (4,0), índice 5→0** (byte 1 698 `0x55`→`0x05`, custo 937 B), e as células
+`(35,16)` e `(26,25)` do TileMap 40×28 dessa cadeia preveem exatamente os pixels
+de tela **(284,128)** e **(212,200)**, com a paleta `0x2cbc8` indo de `0x0468` a
+`0x0000`.
+
+**O que isso muda na §6, passo 4:** a identificação e o decode dessa cadeia já
+estavam pinados; a *correspondência de 95,90 %* continua sendo uma propriedade da
+cadeia `0x21b44` (ela cobre o plano inteiro do frame), e nada neste adendo a
+refuta. O que muda é o **recurso editável da prova de reinserção**, porque
+espaço é condição de existência da escrita. Consequência prática para o passo 5:
+a edição provada não altera o plano inteiro — altera dois pixels, e é isso que o
+comparador de quadro tem que prever antes de executar.

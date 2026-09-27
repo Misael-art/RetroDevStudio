@@ -216,6 +216,77 @@ e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
 
+- 2026-09-27 (integrador, **PASSO 4 — o alvo BYOR reconfirmado e a edição-alvo
+  escolhida por medida; PASSO 2 e PASSO 6 registrados**), esta célula é o
+  checkpoint. **HEAD de partida:** `d0a3426`, sobre os commits da mesma ordem
+  (`48562b7` passo 1, `56faf0d`/`41a05b6`/`c631a1f` passo 3, `0ef7a66`, `97208e1`).
+  **Alterações não commitadas antes deste entry:** `rex_resources.rs` (varredura +
+  pin) e `scripts/rex_profiles/integrator/aplib/survey_tiledimage_refs.py` (novo).
+  **Hipótese testada:** o bloqueio registrado no passo 6 anterior ("nenhuma edição
+  do TileSet visível cabe: 4 544 > 4 485") é escolha de recurso, não limite da
+  rodada — medido em todas as cadeias em vez de aceito.
+  **Instrumento:** o censo das cadeias TiledImage reusa o
+  `token_dump.desmonta` do aceite do decoder em vez de reimplementar um segundo
+  desempacotador (`832b558`); a ROM comercial continua fora do repositório e o
+  script exige `--pin-sha256`. **O que ele mediu nesta ROM** (917 504 B,
+  `558bea6c…`): 31 headers com `compression == 1`, dos quais **4** o
+  desempacotador fecha no comprimento anunciado — `0x21b20` (100 tiles, stream
+  `0x2e12a` 938 B, plain 3 200 B), `0x21b44` (500/4 485/16 000), `0x21b68`
+  (543/7 420/17 376), `0x270de` (96/609/3 072). Cada um dos três primeiros é
+  apontado por **exatamente um** `TiledImage` (`0x21b38`, `0x21b5c`, `0x21b80`);
+  o `0x270de` — o do `font_08x08`, pinado na suíte como artefato da toolchain —
+  é apontado por **zero**, o que é a razão estrutural pela qual a descoberta não
+  o apresenta como recurso editável.
+  **Evidência a favor (o que decidiu):** a varredura de edições de 1 pixel
+  (`byor_varre_as_edicoes_de_pixel_que_cabem_no_slot`, `a31aecd`, 135,94 s) testou
+  **61 128** edições candidatas do `0x21b20` e **30 662 cabem** no slot de 938 B
+  (mais barata: 932 B). A edição pinada
+  (`byor_aplib_pina_a_edicao_de_pixel_que_cabe_e_eh_observada_em_tela`, 0,09 s) é
+  tile 53, pixel do tile (4,0), índice 5→0, byte 1 698 `0x55`→`0x05`, e
+  **re-codifica em 937 B** — 1 B de folga dentro do slot, o stream vizinho
+  começando em `0x2e4d4` intacto (a fronteira é asserção). As duas células do tile
+  são `(35,16)` e `(26,25)`, com hflip, vflip e banco de paleta todos `0`, logo as
+  posições previstas em tela são **(284,128)** e **(212,200)**, e as cores da
+  paleta `0x2cbc8` são `0x0468` → `0x0000` — 34× a tolerância ±4/canal do
+  comparador da perna A. **Por que o pixel é observado e não inferido:** os dois
+  retângulos das células (`x 280..287, y 128..135` e `x 208..215, y 200..207`)
+  estão inteiros dentro dos 2 938 pixels residuais que a perna A atribuiu a
+  oclusão total nesse checkpoint (evidências citadas por SHA no próprio teste:
+  `dbdc122:docs/rex_profiles/lz4w/VISIBLE-RESOURCE-EVIDENCE.md` =
+  `ac850f420f1fd8f6d1d3aa46e1f0c11badbe9b8cbbf55d889e9f58b252c8f0c8` e
+  `dbdc122:data/rex_profiles/lz4w/residual-attribution-cp129.json` =
+  `febb6d0edded4b9e206145ead7abe5a3258de8f15067b588eda7354b5fb02ed5`).
+  **Evidência contra / limites honestos:** a pin não executa o jogo — re-derivada
+  a comparação de quadro, ela vale como *escolha de alvo com custo congelado*, e a
+  reexecução da atribuição é tarefa do passo 5, não alegação desta célula; o
+  plain, o slot, as colocações e o custo de 937 B viraram asserções para que
+  mexer neles seja decisão registrada e não drift.
+  **PASSO 6 (limites) encerrado sem tocar o encoder:** nenhum dos dois
+  orçamentos (`max_stream`, `max_work`) foi alterado, o benchmark congelado
+  (`PINOS`) e o registro de capacidade de 2026-09-26 continuam os mesmos números,
+  e não houve expansão de ROM nem realocação de ponteiros — a folga veio de
+  escolher outro recurso real, que é exatamente o que a ordem autorizava.
+  **PASSO 2 (CI registrado por SHA, sem usar verde de HEAD anterior):** em
+  `d0a3426` o workflow `CI` (run 865, id `36295381790`) fechou **success** nos dois
+  jobs (`linux-validate`, `validate`); `Desktop E2E` (run 748, id
+  `36295381781`) fechou **failure** em `desktop-smoke`, cenário `reference_goal`.
+  Não atribuído a este trabalho por duas linhas independentes: a asserção que cai
+  (`scripts/e2e-tauri-build-run.mjs:5253`) está fora de todo o diff da rodada, e o
+  mesmo passo estourou orçamento de tempo em corridas disparadas por commit
+  **só-documentação** (`36250323843`; também em `135bda2`/`d0744b0`). Registrado em
+  vez de escondido; nenhum `--no-verify`, nenhuma nova corrida para mascarar.
+  **Gates desta árvore:** `cargo test --lib` **706 passed / 0 failed / 59
+  ignored**; `cargo clippy --lib -- -D warnings` limpo; `cargo fmt --check` OK.
+  **Matriz:** linha aPLib **não promovida** — a célula "Recurso real" continua
+  `blocked` até existir execução do recurso modificado pelo desempacotador do jogo;
+  missão veta merge, release e promoção de maturidade.
+  **Próximo comando:** passo 5 pelo produto — abrir a ROM, selecionar o recurso do
+  stream `0x2e12a`, pré-visualizar, aplicar a edição pinada, salvar e reabrir,
+  exportar BPS, reaplicar sobre cópia íntegra e **executar**, comparando
+  original×original, no-op e modificado com estado e entradas iguais; o oráculo
+  decisivo é o desempacotador do próprio jogo sob o core, não os dois oráculos de
+  host. Fixar ROM, core e app exercitados. **Bloqueio:** nenhum externo.
+
 - 2026-09-27 (integrador, **PASSO 3 — aPLib na transação canônica e na fronteira
   de produto, preservando LZ4W**), esta célula é o checkpoint.
   **HEAD de partida:** `48562b7` (passo 1, gate de paridade endurecido) sobre
