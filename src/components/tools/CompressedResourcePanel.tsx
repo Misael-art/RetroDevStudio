@@ -44,10 +44,11 @@ function editRejectReason(candidate: RexPixelEdit, numTiles: number | null): str
 }
 
 /**
- * Painel de recursos comprimidos LZ4W (REX, Experimental). Prévia chunky,
- * edição por pixel com transação canônica (identidade, dependentes, patch
- * BPS) e proveniência por hashes. Nenhuma detecção automática: os recursos
- * vêm de verificação estrutural assistida por header.
+ * Painel de recursos comprimidos LZ4W e aPLib (REX, Experimental). Prévia
+ * chunky, edição por pixel com transação canônica (identidade, dependentes,
+ * patch BPS) e proveniência por hashes. Zero detecção automática: os recursos
+ * vêm de verificação estrutural assistida por header, e o codec exibido é o que
+ * o header verificou — a UI não escolhe decoder nem encoder por suposição.
  */
 type LogLevel = "info" | "warn" | "error" | "success";
 
@@ -104,8 +105,12 @@ export function CompressedResourcePanel({
       const [sha, list] = await rexResourceList(romPath);
       setRomSha(sha);
       setResources(list);
+      // Contagem por codec real: o escopo verificado não pode ser atribuído a
+      // um codec que não é o dos recursos listados.
+      const lz4w = list.filter((r) => r.codec === "lz4w").length;
+      const aplib = list.filter((r) => r.codec === "aplib").length;
       setAnalyzedScope(
-        `Recursos LZ4W estruturalmente verificados nesta ROM: ${list.length}; preservação garantida apenas para este conjunto.`
+        `Recursos comprimidos estruturalmente verificados nesta ROM: ${list.length} (LZ4W ${lz4w}, aPLib ${aplib}); preservação garantida apenas para este conjunto.`
       );
       if (logMessage) logMessage("info", `REX recursos: ${list.length} verificados (escopo declarado no painel).`);
     } catch (cause) {
@@ -181,14 +186,21 @@ export function CompressedResourcePanel({
   return (
     <div className="flex flex-col gap-3" data-testid="rex-resource-panel">
       <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[11px] text-[#a6adc8]">
-        <p className="font-semibold text-[#f9e2af]">Recursos comprimidos LZ4W — Experimental</p>
+        <p className="font-semibold text-[#f9e2af]">
+          Recursos comprimidos LZ4W e aPLib — Experimental
+        </p>
         <p>
           Verificação estrutural assistida por header TileSet do SGDK (não é
-          detecção automática). Edição passa por transação canônica: identidade
+          detecção automática); o codec de cada recurso vem do header verificado
+          e é exibido na lista. Edição passa por transação canônica: identidade
           da ROM, espaço comprovado, dependentes verificados no produto, patch
           BPS exportado e re-aplicado com hash exato. Sem expansão de ROM.
         </p>
-        {analyzedScope && <p className="mt-1 text-[10px] text-[#6c7086]">{analyzedScope}</p>}
+        {analyzedScope && (
+          <p className="mt-1 text-[10px] text-[#6c7086]" data-testid="rex-resource-scope">
+            {analyzedScope}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -231,7 +243,8 @@ export function CompressedResourcePanel({
             <option value="">selecione…</option>
             {resources.map((resource) => (
               <option key={resource.stream_offset} value={resource.stream_offset.toString(16)}>
-                0x{resource.stream_offset.toString(16)} — {resource.num_tiles} tiles (stream {resource.stream_len} B)
+                0x{resource.stream_offset.toString(16)} — {resource.codec} ·{" "}
+                {resource.num_tiles} tiles (stream {resource.stream_len} B)
               </option>
             ))}
           </select>
@@ -302,6 +315,7 @@ export function CompressedResourcePanel({
         <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[11px] text-[#a6adc8]" data-testid="rex-resource-result">
           <p>
             desfecho: <span className="font-semibold text-[#f9e2af]">{result.outcome}</span>
+            {" "}· codec {result.codec}
             {result.modified_rom_sha256 && (
               <>
                 {" "}· ROM modificada {result.modified_rom_sha256.slice(0, 16)}…

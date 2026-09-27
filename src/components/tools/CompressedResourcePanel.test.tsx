@@ -21,6 +21,18 @@ const SUMMARY = {
   num_tiles: 9,
   data_len: 288,
   stream_len: 144,
+  codec: "lz4w",
+};
+
+/// aPLib verificado na mesma ROM: os números são os da fixture autoral
+/// `noisy_runs_16k` (stream de 1 366 B do oráculo sobre 512 tiles).
+const SUMMARY_APLIB = {
+  header_offset: 0x4000,
+  stream_offset: 0x4008,
+  num_tiles: 512,
+  data_len: 16384,
+  stream_len: 1366,
+  codec: "aplib",
 };
 
 const PREVIEW = {
@@ -31,6 +43,7 @@ const PREVIEW = {
   patch_bps_sha256: null,
   patch_bps_path: null,
   stream_offset: 0xc8cc8,
+  codec: "lz4w",
   stream_written: null,
   original_stream_len: 144,
   verified_preserved: null,
@@ -289,5 +302,73 @@ describe("CompressedResourcePanel", () => {
       );
     }
     expect(mocked.rexResourceApplyEdit).not.toHaveBeenCalled();
+  });
+
+  /** O painel não escolhe codec por suposição: o rótulo da lista, a contagem do
+   *  escopo e o desfecho carregam o codec que o header verificado declarou — uma
+   *  ROM mista não pode aparecer como se todos os recursos fossem LZ4W. */
+  it("rom mista: lista, escopo e desfecho declaram o codec verificado de cada recurso", async () => {
+    mocked.rexResourceList.mockResolvedValue(["aa".repeat(32), [SUMMARY, SUMMARY_APLIB]]);
+    mocked.rexResourcePreview.mockResolvedValue({
+      ...PREVIEW,
+      stream_offset: 0x4008,
+      codec: "aplib",
+      original_stream_len: 1366,
+    });
+    mocked.rexResourceApplyEdit.mockResolvedValue({
+      ...PREVIEW,
+      stream_offset: 0x4008,
+      codec: "aplib",
+      outcome: "applied",
+      original_stream_len: 1366,
+      stream_written: 1364,
+      verified_preserved: 2,
+      modified_rom_sha256: "dd".repeat(32),
+      modified_rom_path: "/edits/rex-aplib-modified-dd.bin",
+      patch_bps_sha256: "ee".repeat(32),
+      patch_bps_path: "/edits/rex-aplib-patch-ee.bps",
+    });
+    await act(async () => {
+      root.render(<CompressedResourcePanel />);
+      await flush();
+    });
+    const input = findByTestId(container, "rex-resource-rom-input") as HTMLInputElement;
+    await act(async () => {
+      typeValue(input, "/roms/mista.bin");
+      await flush();
+    });
+    await act(async () => {
+      findByTestId(container, "rex-resource-verify").click();
+      await flush();
+      await flush();
+    });
+    const labels = [
+      ...findByTestId(container, "rex-resource-select").querySelectorAll("option"),
+    ].map((o) => o.textContent ?? "");
+    expect(labels.find((t) => t.includes("0xc8cc8"))).toContain("lz4w");
+    const etiquetaAplib = labels.find((t) => t.includes("0x4008"));
+    expect(etiquetaAplib).toContain("aplib");
+    // O regex do E2E continua válido para os dois codecs: o slot é lido do rótulo.
+    expect(etiquetaAplib).toMatch(/stream (\d+) B/);
+    expect(findByTestId(container, "rex-resource-scope").textContent).toContain(
+      "(LZ4W 1, aPLib 1)"
+    );
+
+    const select = findByTestId(container, "rex-resource-select") as HTMLSelectElement;
+    await act(async () => {
+      select.value = "4008";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await flush();
+    });
+    expect(mocked.rexResourcePreview).toHaveBeenCalledWith("/roms/mista.bin", 0x4008);
+    await act(async () => {
+      findByTestId(container, "rex-resource-apply").click();
+      await flush();
+      await flush();
+    });
+    const resultText = findByTestId(container, "rex-resource-result").textContent ?? "";
+    expect(resultText).toContain("codec aplib");
+    expect(resultText).toContain("rex-aplib-patch-ee.bps");
   });
 });

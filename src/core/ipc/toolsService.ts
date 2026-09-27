@@ -887,6 +887,8 @@ export interface RexResourceSummary {
   num_tiles: number;
   data_len: number;
   stream_len: number;
+  /** Codec lido do header verificado: "lz4w" | "aplib". */
+  codec: string;
 }
 
 export interface RexPixelEdit {
@@ -904,6 +906,8 @@ export interface RexResourceResult {
   patch_bps_sha256: string | null;
   patch_bps_path: string | null;
   stream_offset: number;
+  /** Codec do recurso efetivamente processado: "lz4w" | "aplib". */
+  codec: string;
   stream_written: number | null;
   original_stream_len: number;
   verified_preserved: number | null;
