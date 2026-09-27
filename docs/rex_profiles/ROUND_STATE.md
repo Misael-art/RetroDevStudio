@@ -65,11 +65,13 @@ da agente B em `codex/rex-b-codecs`, hash agregado `3a9d7e9e…` recomputado da
 árvore de B, os 9 goldens byte-idênticos entre os dois namespaces) e a ordem de
 aceite estão em `APLIB_TILEDIMAGE_PROXIMA_PROVA_2026-09-26.md`, com adendo datado
 registrando o que a frente executou. A célula "Recurso real" continua `blocked`
-por dois motivos separados: a perna 2 (WebDriver pela barra) está aberta, e a ordem
-do operador veta promoção de maturidade — o que já existe nela, com números e
-evidência por hash, está em
-`data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna3-core/` e no
-checkpoint do passo 5 abaixo.
+por decisão de missão, não por falta de perna: as quatro pernas do passo 5 estão
+fechadas em 2026-09-27 (escrita pela transação, edição pela barra, execução do
+artefato da barra pelo desempacotador do jogo e capacidade medida dos quatro
+streams), e a ordem do operador veta promoção de maturidade — o mérito de mudar o
+status é decisão pendente, não alegação desta célula. Números e evidência por hash
+em `data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna3-core/` e
+`.../2026-09-27-passo5-perna2-barra/`, e nos checkpoints do passo 5 abaixo.
 
 Estado do produto (medido, não alegado): `aplib_decode` + `AplibLimits` em
 `src-tauri/src/tools/reverse/decomp/rex_aplib.rs` (variante SGDK **raw sem header
@@ -291,8 +293,19 @@ e `codecs/` (B) do CONTRACTS v1.
   bloqueio (execução do recurso modificado pelo desempacotador do jogo) agora
   alcançada — promoção de maturidade é vetada pela ordem do operador. As quatro
   pernas do passo 5 estão na mesa para decisão. **Bloqueio:** nenhum externo.
-  **Próximo:** passo 2/7 em paralelo — CI registrado por SHA no HEAD publicado e o
-  E2E do contrato novo; sem merge, sem release.
+  **Push e CI registrados por SHA:** `94bfa81..f633e07` em
+  `codex/rex-integrator-aplib-decode` (fast-forward, 0 atrás / 4 à frente).
+  Consulta **pontual** em `f633e07dbb6bf4ad67ce3f4d829df626bdd069c9`: workflow `CI`
+  → `run: success` (`validate` success, `linux-validate` success); workflow
+  `Desktop E2E` → `run: success` (`desktop-smoke` success). Run ids `36303792634`
+  e `36303792614`. Os dois aceites `#[ignore]` e o cenário `rex-aplib-byor-effect`
+  **não** estão nesse verde: consomem BYOR, que não é dependência provisionável —
+  o CI cobre o contrato, não esta ROM. SHAs anteriores já verdes na mesma branch
+  (`4a389ff`, `cb8557c`, `94bfa81`, `a31aecd`) permanecem registrados; o commit
+  puramente documental desta célula não altera código de produto, de UI ou de
+  teste, então o verde aplicável ao código testado é o de `f633e07`. **Próximo:**
+  nada aberto nesta frente — passo 2 e passo 7 do briefing fechados aqui; ficam
+  com o operador a promoção da célula APLIB e a semântica do índice 0 na UI.
 
 - 2026-09-27 (integrador, **PASSO 5 — o recurso real BYOR editado pela frente do
   produto, Pernas 1 e 3 fechadas, perna 2 aberta**), esta célula é o checkpoint.

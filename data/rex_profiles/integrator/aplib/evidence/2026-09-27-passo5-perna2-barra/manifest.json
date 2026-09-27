@@ -12,7 +12,8 @@
    "execucao_no_core_perna_4": "8f2f3f1"
   },
   "commits_das_pernas_anteriores": { "perna_1": "5880a22", "perna_3": "d43fdde" },
-  "uncommitted_at_promotion": [
+  "push": "este pacote e os dois checkpoints de docs entraram em `f633e07`, enviado sobre `94bfa81` (fast-forward, 0 atrás) sem alterar código de produto, de UI ou de teste; o CI consultado nesse SHA está registrado no checkpoint do passo 5 em `docs/rex_profiles/ROUND_STATE.md`",
+  "fora_da_arvore_enquanto_os_testes_rodaram": [
    "data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna2-barra/* (novo pacote)",
    "docs/rex_profiles/ROUND_STATE.md (checkpoint do passo 5 inteiro)",
    "docs/06_AI_MEMORY_BANK.md (checkpoint de fim de sessão)"
