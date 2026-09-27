@@ -2,19 +2,21 @@
 //!
 //! Identificação estrutural **assistida e rotulada**: um header TileSet do
 //! SGDK (`{u16 compression; u16 numTile; u32 *tiles}`) declara o codec e o
-//! tamanho exato esperado (`numTile * 32`); o stream decodifica com o
-//! dicionário = prefixo da ROM antes do stream. Não é detecção automática
-//! geral e não assume mapeamento linear entre bytes decodificados e offsets
-//! da ROM.
+//! tamanho exato esperado (`numTile * 32`), e o codec declarado é o contrato
+//! efetivamente usado no decode — LZ4W com dicionário = prefixo da ROM antes do
+//! stream, aPLib raw com o histórico do próprio stream, que se autodelimita no
+//! EOD. Nenhum caminho escolhe decoder ou encoder por suposição. Não é detecção
+//! automática geral e não assume mapeamento linear entre bytes decodificados e
+//! offsets da ROM.
 //!
-//! A reinserção canônica é uma **transação** (`reinsert_transaction`): só
-//! produz cópia modificada se identidade da ROM, evidência do recurso,
-//! limites de espaço e preservação de dependentes passarem. A verificação de
-//! dependentes cobre o conjunto analisável declarado (todos os recursos
-//! LZ4W estruturalmente verificados desta ROM) — os limites estão no
-//! resultado, nunca apresentados como equivalência global do jogo.
+//! A reinserção canônica é uma **transação** (`reinsert_transaction`,
+//! `reinsert_transaction_aplib`): só produz cópia modificada se identidade da
+//! ROM, evidência do recurso, limites de espaço e preservação de dependentes
+//! passarem. A verificação de dependentes cobre o conjunto analisável declarado
+//! no resultado (recursos verificados dos dois codecs nesta ROM) — os limites
+//! estão no resultado, nunca apresentados como equivalência global do jogo.
 
-use super::rex_aplib::{aplib_decode, AplibLimits};
+use super::rex_aplib::{aplib_decode, aplib_encode, AplibEncodeLimits, AplibLimits};
 use super::rex_codecs::{lz4w_decode_with_dictionary, CodecError, Lz4wLimits};
 
 /// Codec declarado por um header TileSet do SGDK.
@@ -23,6 +25,19 @@ pub enum TilesetCompression {
     None,
     Aplib,
     Lz4w,
+}
+
+impl TilesetCompression {
+    /// Rótulo estável do codec REAL de um recurso verificado: aparece na UI e no
+    /// nome dos artefatos, para nenhum caminho (nem teste, nem operador) ter que
+    /// pressupor o codec a partir do offset.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TilesetCompression::None => "none",
+            TilesetCompression::Aplib => "aplib",
+            TilesetCompression::Lz4w => "lz4w",
+        }
+    }
 }
 
 /// Candidato estrutural de recurso tileset na ROM.
@@ -235,116 +250,325 @@ pub fn verify_lz4w_resource_set(
     })
 }
 
-/// Pedido de reinserção canônica.
-pub struct ReinsertRequest<'a> {
-    pub rom: &'a [u8],
-    /// SHA-256 esperado da ROM base (identidade obrigatória).
-    pub expected_rom_sha256: &'a str,
-    pub resource: &'a VerifiedLz4wResource,
-    pub edited_data: &'a [u8],
+/// Limites da transação canônica sobre uma ROM que pode misturar os dois
+/// codecs. O agrupamento é por contrato, não por escolha: cada recurso
+/// verificado carrega o seu, então nenhum caminho seleciona decoder/encoder
+/// por suposição sobre o header.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TransactionLimits {
+    pub lz4w: Lz4wLimits,
+    pub aplib_decode: AplibLimits,
+    pub aplib_encode: AplibEncodeLimits,
 }
 
-/// Resultado de reinserção aplicada.
+/// Recurso verificado dos dois codecs suportados pela transação.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecursoVerificado {
+    Lz4w(VerifiedLz4wResource),
+    Aplib(VerifiedAplibResource),
+}
+
+impl RecursoVerificado {
+    pub fn candidate(&self) -> &TilesetCandidate {
+        match self {
+            Self::Lz4w(r) => &r.candidate,
+            Self::Aplib(r) => &r.candidate,
+        }
+    }
+    pub fn decoded(&self) -> &[u8] {
+        match self {
+            Self::Lz4w(r) => &r.decoded,
+            Self::Aplib(r) => &r.decoded,
+        }
+    }
+    pub fn bytes_consumed(&self) -> usize {
+        match self {
+            Self::Lz4w(r) => r.bytes_consumed,
+            Self::Aplib(r) => r.bytes_consumed,
+        }
+    }
+}
+
+/// Conjunto verificado dos dois codecs, base da verificação de dependentes
+/// quando a ROM misturar LZ4W e aPLib.
 #[derive(Debug)]
-pub struct ReinsertApplied {
-    pub modified_rom: Vec<u8>,
-    pub modified_rom_sha256: String,
-    /// Patch BPS gerado pelo pipeline canônico (`tools::patch_studio`).
-    pub patch_bps: Vec<u8>,
-    pub patch_bps_sha256: String,
-    pub stream_written: usize,
-    /// Espaço original do stream (limite comprovadamente disponível).
-    pub original_stream_len: usize,
-    /// Quantos recursos verificados foram conferidos como preservados.
-    pub verified_preserved: usize,
-    /// Limites declarados do conjunto analisado.
+pub struct ConjuntoVerificado {
+    pub resources: Vec<RecursoVerificado>,
+    /// Candidatos estruturais dos codecs suportados (denominador declarado).
+    pub candidates: usize,
+    pub lz4w_candidates: usize,
+    pub aplib_candidates: usize,
     pub analyzed_scope: String,
 }
 
-/// Desfecho da transação: no-op explícito ou aplicação com patch.
-#[derive(Debug)]
-pub enum ReinsertOutcome {
-    /// Dados editados iguais aos verificados: nada é escrito, nem padding.
-    NoOp,
-    Applied(ReinsertApplied),
+/// Verifica todos os candidatos LZ4W **e** aPLib da ROM. Streams de codecs
+/// diferentes também não podem se sobrepor: se o fim de um alcança o início do
+/// outro, a edição deixa de ter um dono único para aqueles bytes.
+pub fn verify_resource_set(
+    rom: &[u8],
+    limits: &TransactionLimits,
+) -> Result<ConjuntoVerificado, CodecError> {
+    let candidatos = scan_tileset_headers(rom);
+    let lz4w_count = candidatos
+        .iter()
+        .filter(|c| c.compression == TilesetCompression::Lz4w)
+        .count();
+    let aplib_count = candidatos
+        .iter()
+        .filter(|c| c.compression == TilesetCompression::Aplib)
+        .count();
+    let mut resources = Vec::new();
+    for candidate in &candidatos {
+        let verificado = match candidate.compression {
+            TilesetCompression::Lz4w => verify_lz4w_resource(rom, candidate, &limits.lz4w)
+                .ok()
+                .map(RecursoVerificado::Lz4w),
+            TilesetCompression::Aplib => {
+                verify_aplib_resource(rom, candidate, &limits.aplib_decode)
+                    .ok()
+                    .map(RecursoVerificado::Aplib)
+            }
+            TilesetCompression::None => None,
+        };
+        if let Some(recurso) = verificado {
+            resources.push(recurso);
+        }
+    }
+    let mut sorted: Vec<&RecursoVerificado> = resources.iter().collect();
+    sorted.sort_by_key(|r| r.candidate().stream_offset);
+    for pair in sorted.windows(2) {
+        let fim = pair[0].candidate().stream_offset + pair[0].bytes_consumed();
+        if fim > pair[1].candidate().stream_offset {
+            return Err(CodecError::new(
+                "invalid_reference",
+                format!(
+                    "streams verificados sobrepostos em {:#x}..{:#x} e {:#x}",
+                    pair[0].candidate().stream_offset,
+                    fim,
+                    pair[1].candidate().stream_offset
+                ),
+            ));
+        }
+    }
+    let analyzed_scope = format!(
+        "recursos estruturalmente verificados nesta ROM: {}/{} candidatos \
+         (LZ4W {}/{} de LZ4W, aPLib {}/{} de aPLib); preservação garantida \
+         apenas para este conjunto, não para o jogo inteiro",
+        resources.len(),
+        lz4w_count + aplib_count,
+        resources
+            .iter()
+            .filter(|r| matches!(r, RecursoVerificado::Lz4w(_)))
+            .count(),
+        lz4w_count,
+        resources
+            .iter()
+            .filter(|r| matches!(r, RecursoVerificado::Aplib(_)))
+            .count(),
+        aplib_count
+    );
+    Ok(ConjuntoVerificado {
+        resources,
+        candidates: lz4w_count + aplib_count,
+        lz4w_candidates: lz4w_count,
+        aplib_candidates: aplib_count,
+        analyzed_scope,
+    })
 }
 
-/// Transação canônica de reinserção (CONTRATOS §5):
-/// 1. identidade da ROM (SHA-256 conferido);
-/// 2. evidência do recurso re-verificada contra ESTA ROM;
-/// 3. tamanhos e intervalos (sem overflow, sem expansão);
-/// 4. contexto de dicionário fixado (prefixo da ROM antes do stream);
-/// 5. escrita em cópia preservando os bytes originais além do novo stream
-///    (padding intocado);
-/// 6. dependências verificadas no produto sobre o conjunto analisável
-///    (nenhum outro recurso verificado pode mudar de decode);
-/// 7. patch BPS exportado pelo pipeline canônico e re-aplicado à base com
-///    hash exato da cópia modificada.
-pub fn reinsert_transaction(
-    request: &ReinsertRequest<'_>,
-    limits: &Lz4wLimits,
+/// O mesmo recurso, visto pela transação: o dispatch do contrato de
+/// desempacotamento mora aqui, um ponto, e é dirigido pelo tipo do recurso já
+/// verificado — nunca por suposição sobre a ROM.
+enum RecursoEditavel<'a> {
+    Lz4w(&'a VerifiedLz4wResource),
+    Aplib(&'a VerifiedAplibResource),
+}
+
+impl<'a> RecursoEditavel<'a> {
+    fn de(recurso: &'a RecursoVerificado) -> Self {
+        match recurso {
+            RecursoVerificado::Lz4w(r) => Self::Lz4w(r),
+            RecursoVerificado::Aplib(r) => Self::Aplib(r),
+        }
+    }
+
+    fn candidate(&self) -> &TilesetCandidate {
+        match self {
+            Self::Lz4w(r) => &r.candidate,
+            Self::Aplib(r) => &r.candidate,
+        }
+    }
+
+    fn decoded(&self) -> &[u8] {
+        match self {
+            Self::Lz4w(r) => &r.decoded,
+            Self::Aplib(r) => &r.decoded,
+        }
+    }
+
+    fn bytes_consumed(&self) -> usize {
+        match self {
+            Self::Lz4w(r) => r.bytes_consumed,
+            Self::Aplib(r) => r.bytes_consumed,
+        }
+    }
+
+    /// Desempacota `stream` no contexto desta `rom`: o LZ4W usa o prefixo da
+    /// ROM antes do próprio stream como dicionário (contrato dependente de
+    /// contexto); o aPLib raw é autônomo e se autodelimita pelo EOD.
+    fn desempacotar(
+        &self,
+        stream: &[u8],
+        rom: &[u8],
+        limits: &TransactionLimits,
+    ) -> Result<(Vec<u8>, usize), CodecError> {
+        match self {
+            Self::Lz4w(_) => {
+                let d = lz4w_decode_with_dictionary(
+                    stream,
+                    Some(&rom[..self.candidate().stream_offset]),
+                    &limits.lz4w,
+                )?;
+                Ok((d.data, d.bytes_consumed))
+            }
+            Self::Aplib(_) => {
+                let d = aplib_decode(stream, &limits.aplib_decode)?;
+                Ok((d.data, d.bytes_consumed))
+            }
+        }
+    }
+
+    /// Recodifica a edição dentro do espaço comprovado e confere ida e volta
+    /// no mesmo contexto em que o recurso vive.
+    fn recodificar_no_espaco(
+        &self,
+        editado: &[u8],
+        rom: &[u8],
+        espaco: usize,
+        limits: &TransactionLimits,
+    ) -> Result<Vec<u8>, CodecError> {
+        let start = self.candidate().stream_offset;
+        let novo = match self {
+            Self::Lz4w(_) => {
+                let index = super::rex_codecs::Lz4wDictionaryIndex::build(&rom[..start])?;
+                let (stream, _estrategia) =
+                    super::rex_codecs::lz4w_encode_with_dictionary_index_fitting(
+                        editado,
+                        Some(&index),
+                        espaco,
+                    )?;
+                stream
+            }
+            Self::Aplib(_) => {
+                let orcamento = AplibEncodeLimits {
+                    max_stream: espaco,
+                    max_work: limits.aplib_encode.max_work,
+                };
+                aplib_encode(editado, &orcamento).map_err(|e| {
+                    if e.code == "needs_space" {
+                        CodecError::new(
+                            "excessive_output",
+                            format!(
+                                "edição do recurso em {start:#x} não cabe no slot comprovado: {}",
+                                e.detail
+                            ),
+                        )
+                    } else {
+                        e
+                    }
+                })?
+            }
+        };
+        let (devolvido, _consumido) = self.desempacotar(&novo, rom, limits)?;
+        if devolvido != editado {
+            let first_diff = devolvido
+                .iter()
+                .zip(editado.iter())
+                .position(|(a, b)| a != b)
+                .unwrap_or_else(|| devolvido.len().min(editado.len()));
+            return Err(CodecError::new(
+                "invalid_reference",
+                format!(
+                    "o stream re-codificado não decodifica para a edição (primeiro byte divergente em {first_diff})"
+                ),
+            ));
+        }
+        Ok(novo)
+    }
+}
+
+/// Desfecho da transação canônica compartilhada pelos dois codecs. A sequência
+/// de guardas é: identidade da ROM; evidência do recurso re-verificada contra
+/// ESTA ROM; tamanhos; no-op explícito; re-codificação respeitando o espaço
+/// comprovado; ida e volta no contexto real; escrita em cópia com os bytes
+/// externos ao slot intactos e verificação de dependentes sobre o conjunto
+/// analisável (dos dois codecs); patch BPS e re-aplicação com hash exato.
+///
+/// Os contratos não são unificados: o que é compartilhado é a sequência de
+/// guardas. A diferença LZ4W/aPLib vive em `RecursoEditavel`, e nenhuma
+/// validação específica do LZ4W foi removida para generalizar a API.
+fn transacao_canonica(
+    recurso: RecursoEditavel<'_>,
+    rom: &[u8],
+    expected_rom_sha256: &str,
+    edited_data: &[u8],
+    limits: &TransactionLimits,
 ) -> Result<ReinsertOutcome, CodecError> {
-    let rom = request.rom;
     // 1. Identidade da ROM.
     let actual_sha = super::rom_library::sha256_hex(rom);
-    if actual_sha != request.expected_rom_sha256 {
+    if actual_sha != expected_rom_sha256 {
         return Err(CodecError::new(
             "rom_identity_mismatch",
             format!(
                 "ROM base mudou: esperado {}, atual {actual_sha}",
-                request.expected_rom_sha256
+                expected_rom_sha256
             ),
         ));
     }
-    // 2. Evidência do recurso contra esta ROM.
-    let start = request.resource.candidate.stream_offset;
+    let start = recurso.candidate().stream_offset;
+    // 2. Evidência do recurso contra esta ROM, com o contrato do próprio codec.
     let stream = rom
         .get(start..)
         .ok_or_else(|| CodecError::new("invalid_reference", "stream fora da ROM"))?;
-    let redecode = lz4w_decode_with_dictionary(stream, Some(&rom[..start]), limits)?;
-    if redecode.data != request.resource.decoded
-        || redecode.bytes_consumed != request.resource.bytes_consumed
-    {
+    let (redecodificado, consumido) = recurso.desempacotar(stream, rom, limits)?;
+    if redecodificado != recurso.decoded() || consumido != recurso.bytes_consumed() {
         return Err(CodecError::new(
             "evidence_mismatch",
             "evidência do recurso não corresponde aos bytes desta ROM",
         ));
     }
     // 3. Tamanhos.
-    if request.edited_data.len() != request.resource.candidate.expected_len {
+    if edited_data.len() != recurso.candidate().expected_len {
         return Err(CodecError::new(
             "overflow",
             format!(
                 "dados editados têm {} bytes; esperado {}",
-                request.edited_data.len(),
-                request.resource.candidate.expected_len
+                edited_data.len(),
+                recurso.candidate().expected_len
             ),
         ));
     }
     // No-op explícito: nada é escrito, padding preservado.
-    if request.edited_data == request.resource.decoded {
+    if edited_data == recurso.decoded() {
         return Ok(ReinsertOutcome::NoOp);
     }
-    // Conjunto analisável (para dependências) antes de qualquer escrita.
-    let set = verify_lz4w_resource_set(rom, limits)?;
+    // Conjunto analisável (para dependentes) antes de qualquer escrita.
+    let set = verify_resource_set(rom, limits)?;
     let edited_index = set
         .resources
         .iter()
-        .position(|r| r.candidate == request.resource.candidate)
+        .position(|r| r.candidate() == recurso.candidate())
         .ok_or_else(|| {
             CodecError::new(
                 "evidence_mismatch",
                 "recurso não pertence ao conjunto verificado desta ROM",
             )
         })?;
-    // 4. Re-codificação com o dicionário fixado e limite de espaço.
-    let original_stream_len = request.resource.bytes_consumed;
-    let index = super::rex_codecs::Lz4wDictionaryIndex::build(&rom[..start])?;
-    let (new_stream, _estrategia) = super::rex_codecs::lz4w_encode_with_dictionary_index_fitting(
-        request.edited_data,
-        Some(&index),
-        original_stream_len,
-    )?;
+    // 4. Re-codificação com o espaço comprovadamente disponível + 5. ida e volta
+    // no contexto real.
+    let original_stream_len = recurso.bytes_consumed();
+    let new_stream =
+        recurso.recodificar_no_espaco(edited_data, rom, original_stream_len, limits)?;
     if new_stream.len() > original_stream_len {
         return Err(CodecError::new(
             "excessive_output",
@@ -354,43 +578,22 @@ pub fn reinsert_transaction(
             ),
         ));
     }
-    // 5. Verificação de IDA E VOLTA no contexto real: o novo stream, com o
-    // mesmo dicionário, DEVE decodificar exatamente para os dados editados.
-    {
-        let recheck = lz4w_decode_with_dictionary(&new_stream, Some(&rom[..start]), limits)?;
-        if recheck.data != request.edited_data {
-            let first_diff = recheck
-                .data
-                .iter()
-                .zip(request.edited_data.iter())
-                .position(|(a, b)| a != b)
-                .unwrap_or_else(|| recheck.data.len().min(request.edited_data.len()));
-            return Err(CodecError::new(
-                "invalid_reference",
-                format!(
-                    "o stream re-codificado não decodifica para a edição (primeiro byte divergente em {first_diff})"
-                ),
-            ));
-        }
-    }
     // 6. Escrita em cópia: só o novo stream; bytes originais além dele
     //    permanecem (padding e possíveis referências de dependentes).
     let mut modified = rom.to_vec();
     modified[start..start + new_stream.len()].copy_from_slice(&new_stream);
-    let _end = start + original_stream_len;
-    // 6. Dependências verificadas no produto sobre o conjunto analisável.
+    // 6. Dependentes verificados no produto sobre o conjunto analisável.
     let mut verified_preserved = 0usize;
     for (index, other) in set.resources.iter().enumerate() {
         if index == edited_index {
             continue;
         }
-        let other_start = other.candidate.stream_offset;
-        let decoded = lz4w_decode_with_dictionary(
-            &modified[other_start..],
-            Some(&modified[..other_start]),
-            limits,
-        )?;
-        if decoded.data != other.decoded {
+        let other_start = other.candidate().stream_offset;
+        let outra_stream = modified
+            .get(other_start..)
+            .ok_or_else(|| CodecError::new("invalid_reference", "stream fora da ROM"))?;
+        let decoded = RecursoEditavel::de(other).desempacotar(outra_stream, &modified, limits)?;
+        if decoded.0 != other.decoded() {
             return Err(CodecError::new(
                 "dependent_modified",
                 format!(
@@ -430,6 +633,86 @@ pub fn reinsert_transaction(
         verified_preserved,
         analyzed_scope: set.analyzed_scope,
     }))
+}
+
+/// Pedido de reinserção canônica LZ4W.
+pub struct ReinsertRequest<'a> {
+    pub rom: &'a [u8],
+    /// SHA-256 esperado da ROM base (identidade obrigatória).
+    pub expected_rom_sha256: &'a str,
+    pub resource: &'a VerifiedLz4wResource,
+    pub edited_data: &'a [u8],
+}
+
+/// Resultado de reinserção aplicada.
+#[derive(Debug)]
+pub struct ReinsertApplied {
+    pub modified_rom: Vec<u8>,
+    pub modified_rom_sha256: String,
+    /// Patch BPS gerado pelo pipeline canônico (`tools::patch_studio`).
+    pub patch_bps: Vec<u8>,
+    pub patch_bps_sha256: String,
+    pub stream_written: usize,
+    /// Espaço original do stream (limite comprovadamente disponível).
+    pub original_stream_len: usize,
+    /// Quantos recursos verificados foram conferidos como preservados.
+    pub verified_preserved: usize,
+    /// Limites declarados do conjunto analisado.
+    pub analyzed_scope: String,
+}
+
+/// Desfecho da transação: no-op explícito ou aplicação com patch.
+#[derive(Debug)]
+pub enum ReinsertOutcome {
+    /// Dados editados iguais aos verificados: nada é escrito, nem padding.
+    NoOp,
+    Applied(ReinsertApplied),
+}
+
+/// Reinserção canônica de um recurso LZ4W (CONTRATOS §5).
+///
+/// Assinatura inalterada: delega na transação compartilhada com os limites do
+/// seu próprio contrato. Ver `transacao_canonica` para as sete guardas.
+pub fn reinsert_transaction(
+    request: &ReinsertRequest<'_>,
+    limits: &Lz4wLimits,
+) -> Result<ReinsertOutcome, CodecError> {
+    let limites = TransactionLimits {
+        lz4w: *limits,
+        ..Default::default()
+    };
+    transacao_canonica(
+        RecursoEditavel::Lz4w(request.resource),
+        request.rom,
+        request.expected_rom_sha256,
+        request.edited_data,
+        &limites,
+    )
+}
+
+/// Pedido de reinserção canônica de um recurso APLIB verificado.
+pub struct ReinsertRequestAplib<'a> {
+    pub rom: &'a [u8],
+    /// SHA-256 esperado da ROM base (identidade obrigatória).
+    pub expected_rom_sha256: &'a str,
+    pub resource: &'a VerifiedAplibResource,
+    pub edited_data: &'a [u8],
+}
+
+/// Reinserção canônica de um recurso APLIB: as mesmas sete guardas do LZ4W, com
+/// o contrato aPLib (stream autônomo, sem dicionário de prefixo) aplicado na
+/// re-verificação, na re-codificação e nos dependentes.
+pub fn reinsert_transaction_aplib(
+    request: &ReinsertRequestAplib<'_>,
+    limits: &TransactionLimits,
+) -> Result<ReinsertOutcome, CodecError> {
+    transacao_canonica(
+        RecursoEditavel::Aplib(request.resource),
+        request.rom,
+        request.expected_rom_sha256,
+        request.edited_data,
+        limits,
+    )
 }
 
 /// Contrato único de endereçamento de pixel em tiles MD 4bpp **chunky**
@@ -522,6 +805,8 @@ pub struct ResourceSummary {
     pub num_tiles: u32,
     pub data_len: u32,
     pub stream_len: u32,
+    /// Codec verificado do recurso (`lz4w` | `aplib`), lido do header.
+    pub codec: String,
 }
 
 /// Prévia PNG chunky (4x) dos tiles decodificados, com 16 tiles por linha.
@@ -568,23 +853,24 @@ pub fn render_resource_png(data: &[u8]) -> Result<(Vec<u8>, u32, u32, String), C
     Ok((png_bytes, width as u32, height as u32, pixels_sha256))
 }
 
-/// Lista os recursos LZ4W verificados de uma ROM (por conteúdo), com o
-/// SHA-256 da ROM lida (identidade para a UI).
+/// Lista os recursos verificados de uma ROM (por conteúdo), LZ4W e aPLib, cada
+/// um com o codec lido do próprio header, com o SHA-256 da ROM (identidade para
+/// a UI).
 pub fn list_resources(rom_path: &str) -> Result<(String, Vec<ResourceSummary>), String> {
     let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
     let sha = super::rom_library::sha256_hex(&rom);
-    let limits = Lz4wLimits::default();
-    let set = verify_lz4w_resource_set(&rom, &limits)
+    let set = verify_resource_set(&rom, &TransactionLimits::default())
         .map_err(|e| format!("falha ao verificar recursos: {e}"))?;
     let summaries = set
         .resources
         .iter()
         .map(|r| ResourceSummary {
-            header_offset: r.candidate.header_offset as u64,
-            stream_offset: r.candidate.stream_offset as u64,
-            num_tiles: r.candidate.num_tiles as u32,
-            data_len: r.candidate.expected_len as u32,
-            stream_len: r.bytes_consumed as u32,
+            header_offset: r.candidate().header_offset as u64,
+            stream_offset: r.candidate().stream_offset as u64,
+            num_tiles: r.candidate().num_tiles as u32,
+            data_len: r.candidate().expected_len as u32,
+            stream_len: r.bytes_consumed() as u32,
+            codec: r.candidate().compression.as_str().to_string(),
         })
         .collect();
     Ok((sha, summaries))
@@ -610,6 +896,8 @@ pub struct ResourceEditResult {
     pub patch_bps_sha256: Option<String>,
     pub patch_bps_path: Option<String>,
     pub stream_offset: u64,
+    /// Codec do recurso sobre o qual a prévia/edição/incidência rodou.
+    pub codec: String,
     pub stream_written: Option<u32>,
     pub original_stream_len: u32,
     pub verified_preserved: Option<usize>,
@@ -621,20 +909,20 @@ pub struct ResourceEditResult {
     pub preview_data_url: Option<String>,
 }
 
-/// Prévia somente leitura de um recurso verificado (sem transação).
+/// Prévia somente leitura de um recurso verificado (sem transação), LZ4W ou
+/// aPLib.
 pub fn preview_resource(rom_path: &str, stream_offset: u64) -> Result<ResourceEditResult, String> {
     let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
     let rom_sha = super::rom_library::sha256_hex(&rom);
-    let limits = Lz4wLimits::default();
-    let set = verify_lz4w_resource_set(&rom, &limits)
+    let set = verify_resource_set(&rom, &TransactionLimits::default())
         .map_err(|e| format!("falha ao verificar recursos: {e}"))?;
     let resource = set
         .resources
         .iter()
-        .find(|r| r.candidate.stream_offset as u64 == stream_offset)
+        .find(|r| r.candidate().stream_offset as u64 == stream_offset)
         .ok_or_else(|| format!("recurso {stream_offset:#x} não verificado nesta ROM"))?;
     let (preview_png, pw, ph, pixels_sha) =
-        render_resource_png(&resource.decoded).map_err(|e| format!("{}: {}", e.code, e.detail))?;
+        render_resource_png(resource.decoded()).map_err(|e| format!("{}: {}", e.code, e.detail))?;
     let preview_data_url = format!("data:image/png;base64,{}", {
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
         BASE64.encode(&preview_png)
@@ -647,8 +935,9 @@ pub fn preview_resource(rom_path: &str, stream_offset: u64) -> Result<ResourceEd
         patch_bps_sha256: None,
         patch_bps_path: None,
         stream_offset,
+        codec: resource.candidate().compression.as_str().to_string(),
         stream_written: None,
-        original_stream_len: resource.bytes_consumed as u32,
+        original_stream_len: resource.bytes_consumed() as u32,
         verified_preserved: None,
         analyzed_scope: set.analyzed_scope,
         preview_png_sha256: Some(super::rom_library::sha256_hex(&preview_png)),
@@ -670,18 +959,24 @@ pub fn apply_resource_edit(
     use super::extract::{canonical_dir_under, write_file_immutable};
     let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
     let rom_sha = super::rom_library::sha256_hex(&rom);
-    let limits = Lz4wLimits::default();
-    let set = verify_lz4w_resource_set(&rom, &limits)
+    let limits = TransactionLimits::default();
+    let ConjuntoVerificado {
+        resources,
+        analyzed_scope,
+        ..
+    } = verify_resource_set(&rom, &limits)
         .map_err(|e| format!("falha ao verificar recursos: {e}"))?;
-    let resource = set
-        .resources
+    let resource = resources
         .iter()
-        .find(|r| r.candidate.stream_offset as u64 == stream_offset)
+        .find(|r| r.candidate().stream_offset as u64 == stream_offset)
         .ok_or_else(|| format!("recurso {stream_offset:#x} não verificado nesta ROM"))?;
-    let mut edited = resource.decoded.clone();
+    let codec = resource.candidate().compression.as_str();
+    let original_stream_len = resource.bytes_consumed() as u32;
+    let verificados = resource.decoded().to_vec();
+    let mut edited = verificados.clone();
     for edit in edits {
         let tile = edit.tile as usize;
-        if tile >= resource.candidate.num_tiles {
+        if tile >= resource.candidate().num_tiles {
             return Err(format!("tile {} fora do recurso", edit.tile));
         }
         // Contrato chunky único (md_write_pixel_index): preserva o outro
@@ -695,18 +990,32 @@ pub fn apply_resource_edit(
         )
         .map_err(|e| format!("{}: {}", e.code, e.detail))?;
     }
-    let outcome = reinsert_transaction(
-        &ReinsertRequest {
-            rom: &rom,
-            expected_rom_sha256,
-            resource,
-            edited_data: &edited,
-        },
-        &limits,
-    )
+    // O dispatch é pelo recurso verificado, nunca por suposição: cada variante
+    // carrega o próprio contrato de histórico (dicionário = prefixo da ROM no
+    // LZ4W, stream autônomo no aPLib raw).
+    let outcome = match resource {
+        RecursoVerificado::Lz4w(r) => reinsert_transaction(
+            &ReinsertRequest {
+                rom: &rom,
+                expected_rom_sha256,
+                resource: r,
+                edited_data: &edited,
+            },
+            &limits.lz4w,
+        ),
+        RecursoVerificado::Aplib(r) => reinsert_transaction_aplib(
+            &ReinsertRequestAplib {
+                rom: &rom,
+                expected_rom_sha256,
+                resource: r,
+                edited_data: &edited,
+            },
+            &limits,
+        ),
+    }
     .map_err(|e| format!("{}: {}", e.code, e.detail))?;
     let (preview_png, pw, ph, pixels_sha) = render_resource_png(if edits.is_empty() {
-        &resource.decoded
+        &verificados
     } else {
         &edited
     })
@@ -724,10 +1033,11 @@ pub fn apply_resource_edit(
             patch_bps_sha256: None,
             patch_bps_path: None,
             stream_offset,
+            codec: codec.to_string(),
             stream_written: None,
-            original_stream_len: resource.bytes_consumed as u32,
+            original_stream_len,
             verified_preserved: None,
-            analyzed_scope: set.analyzed_scope,
+            analyzed_scope,
             preview_png_sha256: Some(super::rom_library::sha256_hex(&preview_png)),
             preview_pixels_sha256: Some(pixels_sha),
             preview_width: Some(pw),
@@ -739,8 +1049,10 @@ pub fn apply_resource_edit(
                 &super::rom_library::decomp_work_dir(),
                 &["extract", &rom_sha, "edits"],
             )?;
+            // Nome do artefato carrega o codec efetivamente editado: um dump
+            // `rex-aplib-*` não pode ser confundido com um do tronco LZ4W.
             let modified_path = edit_dir.join(format!(
-                "rex-lz4w-modified-{}.bin",
+                "rex-{codec}-modified-{}.bin",
                 applied.modified_rom_sha256
             ));
             write_file_immutable(
@@ -748,8 +1060,10 @@ pub fn apply_resource_edit(
                 &applied.modified_rom,
                 &applied.modified_rom_sha256,
             )?;
-            let patch_path =
-                edit_dir.join(format!("rex-lz4w-patch-{}.bps", applied.patch_bps_sha256));
+            let patch_path = edit_dir.join(format!(
+                "rex-{codec}-patch-{}.bps",
+                applied.patch_bps_sha256
+            ));
             write_file_immutable(&patch_path, &applied.patch_bps, &applied.patch_bps_sha256)?;
             Ok(ResourceEditResult {
                 outcome: "applied".into(),
@@ -759,6 +1073,7 @@ pub fn apply_resource_edit(
                 patch_bps_sha256: Some(applied.patch_bps_sha256),
                 patch_bps_path: Some(patch_path.to_string_lossy().into_owned()),
                 stream_offset,
+                codec: codec.to_string(),
                 stream_written: Some(applied.stream_written as u32),
                 original_stream_len: applied.original_stream_len as u32,
                 verified_preserved: Some(applied.verified_preserved),
@@ -1020,6 +1335,537 @@ mod tests {
         let r1 = set.resources[0].clone();
         let r2 = set.resources[1].clone();
         (rom, r1, r2)
+    }
+
+    /// Cabeçalho TileSet SGDK: `compression`, `numTile`, ponteiro MD linear.
+    fn cabecalho_tileset(compression: u16, num_tiles: u16, ptr: u32) -> Vec<u8> {
+        let mut h = vec![0u8; 8];
+        h[0..2].copy_from_slice(&compression.to_be_bytes());
+        h[2..4].copy_from_slice(&num_tiles.to_be_bytes());
+        h[4..8].copy_from_slice(&ptr.to_be_bytes());
+        h
+    }
+
+    /// LZ4W de `num_tiles` tiles cujo plain começa com `prefixo` e depois o
+    /// intercala com pseudo-aleatório, empacotado com o prefixo da ROM como
+    /// dicionário. O prefixo ir no BLOCO 0 é o que torna a dependência real:
+    /// para o primeiro bloco não há fonte mais próxima dentro do próprio plain,
+    /// então o encoder é obrigado a referenciar o dicionário.
+    fn lz4w_recurso(rom: &mut Vec<u8>, num_tiles: u16, prefixo: &[u8]) {
+        // O dicionário LZ4W é o prefixo da ROM até o stream e precisa de
+        // comprimento par (endereçamento por words), como em ROM real.
+        if !rom.len().is_multiple_of(2) {
+            rom.push(0);
+        }
+        let mut dados: Vec<u8> = Vec::with_capacity(num_tiles as usize * 32);
+        let mut x: u32 = 0x9e3779b9;
+        while dados.len() < num_tiles as usize * 32 {
+            if !prefixo.is_empty() && (dados.len() / prefixo.len()).is_multiple_of(2) {
+                dados.extend_from_slice(prefixo);
+            } else {
+                x = x.wrapping_mul(1664525).wrapping_add(1013904223);
+                dados.extend_from_slice(&((x >> 16) as u16).to_be_bytes());
+            }
+        }
+        let ptr = (rom.len() + 8) as u32;
+        rom.extend_from_slice(&cabecalho_tileset(2, num_tiles, ptr));
+        let stream =
+            lz4w_encode_with_dictionary(&dados, Some(&rom[..ptr as usize])).expect("encode lz4w");
+        rom.extend_from_slice(&stream);
+    }
+
+    /// Recurso APLIB das ROMs mistas: o stream **do oráculo apj** sobre o plain
+    /// `noisy_runs_16k` (1 366 B sobre 16 384 B = 512 tiles), lido da fixture
+    /// pinada por SHA. A escolha é medida, não arbitrária: sobre `tile_like`
+    /// (41 B de slot) qualquer edição de 1 pixel custa +3 B, então o encoder do
+    /// produto não tem espaço comprovado para reinserir — ver o registro de
+    /// capacidade em `docs/rex_profiles/ROUND_STATE.md`. `noisy_runs_16k` deixa
+    /// 2 B de folga (o produto comprime o plain em 1 364 B) e tem ao menos uma
+    /// edição de 1 pixel de custo zero (tile 64, linha 3, coluna 4: índice
+    /// 11 → 15, stream de 1 364 B), que é a edição usada aqui.
+    const SHA_STREAM_NOISY: &str =
+        "74e388e91d77e898d1d50a1e5423333e792a018e70566de52884b140e40594b8";
+    const NOISY: &str = "plain/noisy_runs_16k.apj.ap";
+    const APLIB_TILES: u16 = 512;
+    /// Edição de 1 pixel comprovadamente neutra em tamanho (stream re-codificado
+    /// de 1 364 B dentro do slot de 1 366 B).
+    const EDICAO_NEUTRA: (u32, u32, u32, u8) = (64, 3, 4, 15);
+
+    fn aplib_stream() -> Vec<u8> {
+        vetor_aplib(NOISY, SHA_STREAM_NOISY)
+    }
+
+    fn aplib_plain() -> Vec<u8> {
+        let stream = aplib_stream();
+        let dec = aplib_decode(&stream, &AplibLimits::default()).expect("decode do pino");
+        assert_eq!(dec.data.len(), APLIB_TILES as usize * 32);
+        dec.data
+    }
+
+    /// ROM mista com DOIS LZ4W e, depois deles, um recurso APLIB. A ordem é o
+    /// ponto: o dicionário de um LZ4W é o prefixo da ROM antes do seu stream,
+    /// então nenhum dos dois depende dos bytes do stream aPLib. É o caso em que
+    /// editar o aPLib tem que acontecer e preservar os LZ4W.
+    fn rom_mista_isolada() -> (Vec<u8>, VerifiedAplibResource) {
+        rom_mista_isolada_com(&aplib_stream(), APLIB_TILES)
+    }
+
+    /// Mesmo corpo, com o stream aPLib e o número de tiles escolhidos pelo
+    /// teste: permite montar um slot apertado (`tile_like`, 41 B) sem duplicar a
+    /// arquitetura da fixture.
+    fn rom_mista_isolada_com(stream: &[u8], num_tiles: u16) -> (Vec<u8>, VerifiedAplibResource) {
+        let mut rom: Vec<u8> = (0..256u32).map(|i| (i * 7 + 3) as u8).collect();
+        lz4w_recurso(&mut rom, 16, &[]);
+        let semente = rom[0..32].to_vec();
+        lz4w_recurso(&mut rom, 12, &semente);
+        if !rom.len().is_multiple_of(2) {
+            rom.push(0);
+        }
+        let ptr = (rom.len() as u32) + 8;
+        rom.extend_from_slice(&cabecalho_tileset(1, num_tiles, ptr));
+        rom.extend_from_slice(stream);
+        rom.extend_from_slice(&[0xA5u8; 8]);
+        let candidato = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.compression == TilesetCompression::Aplib)
+            .expect("header APLIB não apareceu no scan");
+        let recurso =
+            verify_aplib_resource(&rom, &candidato, &AplibLimits::default()).expect("verificar");
+        (rom, recurso)
+    }
+
+    /// Mesma ROM, ordem invertida: o stream APLIB aparece ANTES de um LZ4W cujo
+    /// plain contém blocos copiados do próprio stream aPLib, de modo que o
+    /// dicionário desse LZ4W inclui os bytes que a edição reescreve. Aqui a
+    /// transação tem que recusar, não produzir uma ROM onde um tileset
+    /// legítimo muda de decode.
+    fn rom_mista_dependente() -> (Vec<u8>, VerifiedAplibResource, VerifiedLz4wResource) {
+        let mut rom: Vec<u8> = (0..64u32).map(|i| (i * 11 + 5) as u8).collect();
+        let stream = aplib_stream();
+        let ptr = (rom.len() as u32) + 8;
+        rom.extend_from_slice(&cabecalho_tileset(1, APLIB_TILES, ptr));
+        rom.extend_from_slice(&stream);
+        // O plain do LZ4W referencia os bytes do stream aPLib já escrita na ROM.
+        // A semente é a CAUDA do stream, não a cabeça: a edição começa no tile 64
+        // (offset 2 048 de 16 384 de plain), então os primeiros ~170 B do stream
+        // re-codificado permanecem idênticos e uma semente ali não criaria
+        // dependência real. Na cauda, além de divergir, a referência fica perto
+        // do stream LZ4W (offset de dicionário pequeno).
+        let inicio_aplib = ptr as usize;
+        let fim_aplib = inicio_aplib + stream.len();
+        let semente = rom[fim_aplib - 128..fim_aplib].to_vec();
+        lz4w_recurso(&mut rom, 24, &semente);
+        let candidato = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.compression == TilesetCompression::Aplib)
+            .expect("header APLIB não apareceu no scan");
+        let recurso =
+            verify_aplib_resource(&rom, &candidato, &AplibLimits::default()).expect("verificar");
+        let set = verify_lz4w_resource_set(&rom, &Lz4wLimits::default()).expect("conjunto lz4w");
+        assert_eq!(set.resources.len(), 1, "esperava um LZ4W dependente");
+        (rom, recurso, set.resources[0].clone())
+    }
+
+    /// O conjunto verificado do produto tem que reconhecer os dois codecs da
+    /// mesma ROM sem nenhum deles ser escolhido por suposição: cada recurso
+    /// carries o próprio contrato de dicionário.
+    #[test]
+    fn conjunto_verificado_reconhece_lz4w_e_aplib_na_mesma_rom() {
+        let (rom, _aplib) = rom_mista_isolada();
+        let set = verify_resource_set(&rom, &TransactionLimits::default()).expect("conjunto");
+        let lz4w = set
+            .resources
+            .iter()
+            .filter(|r| matches!(r, RecursoVerificado::Lz4w(_)))
+            .count();
+        let aplib = set
+            .resources
+            .iter()
+            .filter(|r| matches!(r, RecursoVerificado::Aplib(_)))
+            .count();
+        assert_eq!((lz4w, aplib), (2, 1), "conjunto: {set:?}");
+        for recurso in &set.resources {
+            assert_eq!(
+                recurso.decoded().len(),
+                recurso.candidate().expected_len,
+                "{recurso:?}: decode não bate com o tamanho declarado pelo header"
+            );
+        }
+    }
+
+    /// Edição de 1 pixel num TileSet APLIB real, pela transação canônica: sai
+    /// Applied, o stream cabe no slot comprovado, os LZ4W da mesma ROM
+    /// preservam o decode, e os bytes fora do slot não mudam.
+    #[test]
+    fn reinsert_aplib_edita_tile_e_preserva_lz4w_na_mesma_rom() {
+        let (rom, recurso) = rom_mista_isolada();
+        let sha = super::super::rom_library::sha256_hex(&rom);
+        let mut editado = recurso.decoded.clone();
+        let (tile, row, col, indice) = EDICAO_NEUTRA;
+        md_write_pixel_index(
+            &mut editado,
+            tile as usize,
+            row as usize,
+            col as usize,
+            indice,
+        )
+        .expect("editar pixel");
+        let outcome = reinsert_transaction_aplib(
+            &ReinsertRequestAplib {
+                rom: &rom,
+                expected_rom_sha256: &sha,
+                resource: &recurso,
+                edited_data: &editado,
+            },
+            &TransactionLimits::default(),
+        )
+        .unwrap_or_else(|e| panic!("transação recusada: {e}"));
+        let aplicado = match outcome {
+            ReinsertOutcome::Applied(a) => a,
+            ReinsertOutcome::NoOp => panic!("edição real não pode resultar em no-op"),
+        };
+        assert_eq!(
+            recurso.bytes_consumed, 1366,
+            "o slot comprovado é o stream do oráculo apj pino da fixture"
+        );
+        assert!(
+            aplicado.stream_written < aplicado.original_stream_len,
+            "stream de {} deveria caber com folga no slot de {}",
+            aplicado.stream_written,
+            aplicado.original_stream_len
+        );
+        assert_eq!(aplicado.verified_preserved, 2, "os dois LZ4W preservados");
+        assert_eq!(aplicado.modified_rom.len(), rom.len(), "ROM expandiu");
+        let fim = recurso.candidate.stream_offset + aplicado.original_stream_len;
+        assert_eq!(
+            aplicado.modified_rom[fim..],
+            rom[fim..],
+            "bytes além do slot mudaram"
+        );
+
+        // O decoder do produto, relido da ROM modificada e sem dicionário, tem
+        // que devolver exatamente a edição — a prova ida-e-volta no contexto real.
+        let reconvertido = verify_aplib_resource(
+            &aplicado.modified_rom,
+            &recurso.candidate,
+            &AplibLimits::default(),
+        )
+        .expect("re-verificação na ROM modificada");
+        assert_eq!(reconvertido.decoded, editado);
+        assert_eq!(
+            reconvertido.bytes_consumed, aplicado.stream_written,
+            "o EOD do novo stream não delimita o slot escrito"
+        );
+        let sentinela = recurso.candidate.stream_offset + aplicado.original_stream_len;
+        assert_eq!(
+            &aplicado.modified_rom[sentinela..sentinela + 8],
+            &[0xA5u8; 8],
+            "a folga entre o novo stream e o bloco vizinho foi sobrescrita"
+        );
+
+        // O recurso editado é o único que muda: os LZ4W da ROM modificada
+        // decodificam como antes.
+        let set_antes = verify_lz4w_resource_set(&rom, &Lz4wLimits::default()).unwrap();
+        let set_depois =
+            verify_lz4w_resource_set(&aplicado.modified_rom, &Lz4wLimits::default()).unwrap();
+        assert_eq!(set_antes.resources, set_depois.resources);
+    }
+
+    /// Falta de espaço é recusada com os três números na mensagem — a UI e o
+    /// operador decidem a próxima edição a partir deles, não de um "falhou".
+    ///
+    /// O slot apertado é `tile_like` (41 B de stream pino do oráculo sobre 8 192 B
+    /// de plain). A recusa aqui é medida, não fabricada: o encoder do produto
+    /// produz 41 B sobre o plain original (paridade exata com o oráculo) e a
+    /// menor edição de 1 pixel já custa 44 B, então nenhum recurso com slot de
+    /// 41 B tem espaço comprovado para reinserir. Ver o registro de capacidade em
+    /// `docs/rex_profiles/ROUND_STATE.md`.
+    #[test]
+    fn reinsert_aplib_recusa_edicao_que_nao_cabe_no_slot() {
+        let stream = vetor_aplib(TILE_LIKE, SHA_STREAM_TILE_LIKE);
+        let (rom, recurso) = rom_mista_isolada_com(&stream, TILE_LIKE_TILES);
+        let sha = super::super::rom_library::sha256_hex(&rom);
+        assert_eq!(
+            recurso.bytes_consumed, 41,
+            "o slot comprovado é o stream pino de tile_like"
+        );
+        let mut editado = recurso.decoded.clone();
+        let (tile, row, col, indice) = EDICAO_NEUTRA;
+        md_write_pixel_index(
+            &mut editado,
+            tile as usize,
+            row as usize,
+            col as usize,
+            indice,
+        )
+        .expect("editar pixel");
+        let erro = reinsert_transaction_aplib(
+            &ReinsertRequestAplib {
+                rom: &rom,
+                expected_rom_sha256: &sha,
+                resource: &recurso,
+                edited_data: &editado,
+            },
+            &TransactionLimits::default(),
+        )
+        .expect_err("edição que não cabe no slot não pode ser aceita");
+        assert_eq!(erro.code, "excessive_output", "{erro}");
+        for numero in [
+            recurso.bytes_consumed.to_string(),
+            editado.len().to_string(),
+        ] {
+            assert!(
+                erro.detail.contains(&numero),
+                "{erro} sem o número {numero}"
+            );
+        }
+        // O ROM modificado não existe nesta via: a recusa é antes de qualquer
+        // escrita, então nenhum byte pode ter mudado.
+        assert_eq!(
+            super::super::rom_library::sha256_hex(&rom),
+            sha,
+            "a ROM de entrada foi mutada por uma transação recusada"
+        );
+    }
+
+    /// O guarda-cross-codec: editar o aPLib mudaria o decode de um LZ4W cujo
+    /// dicionário contém os bytes do stream. A transação recusa antes de
+    /// materializar qualquer ROM, e diz qual recurso seria afetado.
+    #[test]
+    fn reinsert_aplib_recusa_edicao_que_mudaria_lz4w_dependente() {
+        let (rom, recurso, dependente) = rom_mista_dependente();
+        let sha = super::super::rom_library::sha256_hex(&rom);
+        let mut editado = recurso.decoded.clone();
+        let (tile, row, col, indice) = EDICAO_NEUTRA;
+        md_write_pixel_index(
+            &mut editado,
+            tile as usize,
+            row as usize,
+            col as usize,
+            indice,
+        )
+        .expect("editar pixel");
+        let erro = reinsert_transaction_aplib(
+            &ReinsertRequestAplib {
+                rom: &rom,
+                expected_rom_sha256: &sha,
+                resource: &recurso,
+                edited_data: &editado,
+            },
+            &TransactionLimits::default(),
+        )
+        .expect_err("edição com dependente LZ4W não pode ser aceita");
+        assert_eq!(erro.code, "dependent_modified", "{erro}");
+        assert!(
+            erro.detail
+                .contains(&format!("{:#x}", dependente.candidate.stream_offset)),
+            "{erro}: mensagem não aponta o recurso dependente em {:#x}",
+            dependente.candidate.stream_offset
+        );
+    }
+
+    /// No-op aPLib é explícito, como no LZ4W: dados editados iguais aos
+    /// verificados não escrevem nada, nem padding.
+    #[test]
+    fn reinsert_aplib_noop_nao_escreve_nada() {
+        let (rom, recurso) = rom_mista_isolada();
+        let sha = super::super::rom_library::sha256_hex(&rom);
+        let outcome = reinsert_transaction_aplib(
+            &ReinsertRequestAplib {
+                rom: &rom,
+                expected_rom_sha256: &sha,
+                resource: &recurso,
+                edited_data: &recurso.decoded,
+            },
+            &TransactionLimits::default(),
+        )
+        .expect("no-op");
+        assert!(matches!(outcome, ReinsertOutcome::NoOp), "{outcome:?}");
+    }
+
+    /// A interface chega ao aPLib pela MESMA fronteira do LZ4W
+    /// (`list_resources` → `preview_resource` → `apply_resource_edit`): o recurso
+    /// é achado por conteúdo, o codec listado é o que o header verificou, a
+    /// transação é despachada pelo recurso verificado (nunca por suposição) e os
+    /// artefatos materializados saem nomeados pelo codec efetivo, com o SHA que
+    /// o produto declarou. Este é o tronco que o passo 5 exercita pelo WebDriver.
+    #[test]
+    fn ui_edite_recurso_aplib_pela_mesma_fronteira_do_lz4w() {
+        let (rom, recurso) = rom_mista_isolada();
+        let sha = super::super::rom_library::sha256_hex(&rom);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("relogio")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rds-rex-aplib-ui-{stamp}"));
+        std::fs::create_dir_all(&dir).expect("diretorio temporario");
+        // Os artefatos da transação vão para `decomp_work_dir()`, que é o
+        // catálogo canônico do produto; aqui ele é isolado no diretório temporário
+        // para o teste não escrever no $HOME.
+        std::env::set_var("RDS_DECOMP_WORK", &dir);
+        let caminho = dir.join("mista.bin");
+        std::fs::write(&caminho, &rom).expect("escrever rom");
+        let caminho = caminho.to_str().expect("utf8");
+
+        let (sha_listado, listados) = list_resources(caminho).expect("listar recursos");
+        assert_eq!(sha_listado, sha, "identidade da ROM lida divergiu");
+        let codecs: Vec<&str> = listados.iter().map(|r| r.codec.as_str()).collect();
+        assert_eq!(
+            codecs,
+            vec!["lz4w", "lz4w", "aplib"],
+            "a lista deveria trazer os três recursos verificados com o codec do header"
+        );
+        let pino = &listados[2];
+        assert_eq!(pino.stream_offset, recurso.candidate.stream_offset as u64);
+        assert_eq!(pino.num_tiles, APLIB_TILES as u32);
+        assert_eq!(pino.data_len, (APLIB_TILES as usize * 32) as u32);
+        assert_eq!(pino.stream_len, 1366, "slot comprovado do stream pino");
+
+        let previa = preview_resource(caminho, pino.stream_offset).expect("prévia aPLib");
+        assert_eq!(previa.outcome, "preview");
+        assert_eq!(previa.codec, "aplib", "prévia rotulada com outro codec");
+        assert_eq!(previa.original_stream_len, 1366);
+        assert_eq!(previa.stream_written, None, "prévia não pode escrever");
+        assert_eq!(previa.modified_rom_path, None);
+        assert!(
+            previa.preview_pixels_sha256.as_deref().unwrap_or("").len() == 64,
+            "prévia sem hash de pixels: {previa:?}"
+        );
+        assert_eq!(
+            (previa.preview_width, previa.preview_height),
+            (Some(128), Some((APLIB_TILES as u32 / 16) * 8)),
+            "geometria da prévia não corresponde ao decode"
+        );
+
+        let (tile, row, col, indice) = EDICAO_NEUTRA;
+        let aplicada = apply_resource_edit(
+            caminho,
+            pino.stream_offset,
+            &[PixelEdit {
+                tile,
+                row,
+                col,
+                index: indice,
+            }],
+            &sha,
+        )
+        .expect("edição aPLib pela fronteira da UI");
+        assert_eq!(aplicada.outcome, "applied", "{aplicada:?}");
+        assert_eq!(aplicada.codec, "aplib", "despacho por codec errado");
+        assert_eq!(aplicada.original_stream_len, 1366);
+        assert_eq!(
+            aplicada.stream_written,
+            Some(1364),
+            "o stream re-codificado precisa ser medido na resposta"
+        );
+        assert_eq!(
+            aplicada.verified_preserved,
+            Some(2),
+            "os dois LZ4W da mesma ROM têm que ser preservados"
+        );
+        assert!(
+            aplicada.analyzed_scope.contains("3/3"),
+            "escopo não declara o conjunto verificado: {}",
+            aplicada.analyzed_scope
+        );
+
+        // Proveniência: os caminhos devolvidos existem, pertencem ao codec
+        // efetivo e carregam exatamente os SHA-256 que o produto declarou.
+        let copia = aplicada
+            .modified_rom_path
+            .clone()
+            .expect("cópia modificada");
+        assert!(copia.contains("rex-aplib-modified-"), "nome: {copia}");
+        let bytes_copia = std::fs::read(&copia).expect("ler cópia");
+        assert_eq!(bytes_copia.len(), rom.len(), "a cópia expandiu");
+        assert_eq!(
+            super::super::rom_library::sha256_hex(&bytes_copia),
+            aplicada.modified_rom_sha256.expect("sha da cópia")
+        );
+        let patch = aplicada.patch_bps_path.clone().expect("patch BPS");
+        assert!(patch.contains("rex-aplib-patch-"), "nome: {patch}");
+        assert_eq!(
+            super::super::rom_library::sha256_hex(&std::fs::read(&patch).expect("ler patch")),
+            aplicada.patch_bps_sha256.expect("sha do patch")
+        );
+
+        // A ROM original no disco não mudou: a edição só existe na cópia
+        // endereçada por hash + patch.
+        assert_eq!(std::fs::read(caminho).expect("reler rom"), rom);
+        // Relendo a cópia pelo MESMO caminho de UI, a prévia do produto é a
+        // edição aplicada (ida-e-volta pela fronteira da interface).
+        let previa_modificada =
+            preview_resource(&copia, pino.stream_offset).expect("prévia editada");
+        assert_eq!(
+            previa_modificada.preview_pixels_sha256, aplicada.preview_pixels_sha256,
+            "a prévia da ROM modificada não bate com a prévia declarada pela edição"
+        );
+        assert_ne!(
+            previa_modificada.preview_pixels_sha256, previa.preview_pixels_sha256,
+            "a edição não mudou a prévia: nada foi pintado"
+        );
+        std::env::remove_var("RDS_DECOMP_WORK");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Identidade e evidência são guardadas antes de qualquer escrita, no caminho
+    /// aPLib igual no LZ4W: ROM com SHA divergido e recurso que não pertence à
+    ///quela ROM não produzem patch.
+    #[test]
+    fn reinsert_aplib_exige_identidade_de_rom_e_evidencia_deste_tronco() {
+        let (rom, recurso) = rom_mista_isolada();
+        let (tile, row, col, indice) = EDICAO_NEUTRA;
+        let mut editado = recurso.decoded.clone();
+        md_write_pixel_index(
+            &mut editado,
+            tile as usize,
+            row as usize,
+            col as usize,
+            indice,
+        )
+        .expect("editar pixel");
+
+        let erro = reinsert_transaction_aplib(
+            &ReinsertRequestAplib {
+                rom: &rom,
+                expected_rom_sha256: &"0".repeat(64),
+                resource: &recurso,
+                edited_data: &editado,
+            },
+            &TransactionLimits::default(),
+        )
+        .expect_err("SHA divergido é identidade quebrada");
+        assert_eq!(erro.code, "rom_identity_mismatch", "{erro}");
+
+        // Caso real de evidência stale: a primeira transação aplicada produz uma
+        // ROM onde o stream daquele recurso já são OUTROS bytes. Reaplicar com a
+        // evidência em memória (pré-edição) contra a ROM nova tem que recusar —
+        // nunca reescrever o slot com base num decode que não existe mais ali.
+        let aplicada = reinsert_transaction_aplib(
+            &ReinsertRequestAplib {
+                rom: &rom,
+                expected_rom_sha256: &super::super::rom_library::sha256_hex(&rom),
+                resource: &recurso,
+                edited_data: &editado,
+            },
+            &TransactionLimits::default(),
+        )
+        .expect("primeira aplicação");
+        let ReinsertOutcome::Applied(modificado) = aplicada else {
+            panic!("edição real não pode resultar em no-op");
+        };
+        let sha_modificado = modificado.modified_rom_sha256.clone();
+        let erro = reinsert_transaction_aplib(
+            &ReinsertRequestAplib {
+                rom: &modificado.modified_rom,
+                expected_rom_sha256: &sha_modificado,
+                resource: &recurso,
+                edited_data: &recurso.decoded,
+            },
+            &TransactionLimits::default(),
+        )
+        .expect_err("evidência de outra versão da ROM não pode ser aceita");
+        assert_eq!(erro.code, "evidence_mismatch", "{erro}");
     }
 
     /// A fronteira de intervalo é da transação, não da UI: o painel descarta
