@@ -17,6 +17,7 @@
 //    Non reutiliza as fórmulas dos perfis: esperado e observado veñen de camiños
 //    de derivación distintos.
 
+pub mod conv;
 pub mod fixture;
 pub mod json;
 pub mod sha256;

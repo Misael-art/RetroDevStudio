@@ -25,8 +25,11 @@ fn cada_stream_de_fixture_reproduce_o_sha_pinado() {
     let set = vectors::load();
     for p in &set.profiles {
         let size = usize::try_from(p.fixture.rom_size).expect("rom_size razoable");
-        let computed =
-            fixture::fixture_sha(fixture::seed_base(&p.name), size, fixture::block_size(&p.name));
+        let computed = fixture::fixture_sha(
+            fixture::seed_base(&p.name),
+            size,
+            fixture::block_size(&p.name),
+        );
         assert_eq!(
             computed, p.fixture.sha256,
             "o PRNG reimplementado non reproduce a fixture pinada de {}",
@@ -121,7 +124,7 @@ fn o_motor_de_referencia_coincide_cos_negativos_de_rexiaon() {
 /// simulación de táboa de páxinas (SSF2).
 enum Reference {
     Table(Table),
-    Ssf2(Ssf2Engine),
+    Ssf2(Box<Ssf2Engine>),
 }
 
 impl Reference {
@@ -135,7 +138,7 @@ impl Reference {
             .unwrap_or_else(|| set.profile(profile).fixture.rom_size);
         if profile == "md-ssf2" {
             let banks = state.bank_pairs().unwrap_or_default();
-            return Reference::Ssf2(Ssf2Engine::new(rom_size, &banks));
+            return Reference::Ssf2(Box::new(Ssf2Engine::new(rom_size, &banks)));
         }
         Reference::Table(windows_engine::table_for(profile, rom_size))
     }

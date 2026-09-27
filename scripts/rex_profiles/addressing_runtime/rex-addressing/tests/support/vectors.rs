@@ -11,8 +11,7 @@
 
 use super::json::Json;
 
-pub const VECTORS_SHA256: &str =
-    "da09b5b2e84aeac4a95ee02fa6cc8fb6e77aa6a43ecce77a010d3082d741e048";
+pub const VECTORS_SHA256: &str = "da09b5b2e84aeac4a95ee02fa6cc8fb6e77aa6a43ecce77a010d3082d741e048";
 pub const CONTRACT_VERSION: u64 = 1;
 
 /// Estado tal como o trae o vector, sen clasificar: os negativos inclúen
@@ -41,10 +40,7 @@ pub struct RawState {
 
 impl RawState {
     pub fn value(&self, key: &str) -> Option<&RawValue> {
-        self.entries
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v)
+        self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
     }
 
     pub fn rom_size(&self) -> Option<u64> {
@@ -200,6 +196,18 @@ pub struct ProfileVectors {
     pub ssf2_pinned: Vec<Ssf2Pinned>,
 }
 
+impl ProfileVectors {
+    /// Casos de `invert` cuxo `rom_offset` é un token non enteiro: non son
+    /// traducibles ao `u32` do contrato (a frontada do tipo xa os impide), así
+    /// que o test déiveis contar en vez de simularos.
+    pub fn invert_non_integer_offset_count(&self) -> usize {
+        self.invert
+            .iter()
+            .filter(|c| matches!(c.rom_offset, RawValue::Text(_) | RawValue::NonInteger(_)))
+            .count()
+    }
+}
+
 pub struct VectorSet {
     pub contract_version: u64,
     pub profiles: Vec<ProfileVectors>,
@@ -288,7 +296,10 @@ fn load_profile(name: &str, node: &Json) -> ProfileVectors {
     let fixture_node = node.get("fixture").expect("fixture");
     let fixture = Fixture {
         sha256: text(fixture_node, "sha256"),
-        rom_size: fixture_node.get("rom_size").and_then(Json::as_u64).expect("rom_size"),
+        rom_size: fixture_node
+            .get("rom_size")
+            .and_then(Json::as_u64)
+            .expect("rom_size"),
     };
 
     let translate = seq(node, "translate")
@@ -383,12 +394,12 @@ fn load_profile(name: &str, node: &Json) -> ProfileVectors {
                     })
                     .expect("length"),
                 state: state_of(c),
-                rom_short_by: c
-                    .get("rom_short_by")
-                    .and_then(Json::as_u64)
-                    .unwrap_or(0),
+                rom_short_by: c.get("rom_short_by").and_then(Json::as_u64).unwrap_or(0),
                 segments,
-                expect_error: c.get("expect_error").and_then(Json::as_str).map(str::to_string),
+                expect_error: c
+                    .get("expect_error")
+                    .and_then(Json::as_str)
+                    .map(str::to_string),
             }
         })
         .collect();
@@ -481,7 +492,10 @@ fn seq<'a>(node: &'a Json, key: &str) -> &'a [Json] {
 }
 
 fn text_of(node: &Json) -> String {
-    node.get("name").and_then(Json::as_str).unwrap_or("?").to_string()
+    node.get("name")
+        .and_then(Json::as_str)
+        .unwrap_or("?")
+        .to_string()
 }
 
 fn text(node: &Json, key: &str) -> String {
@@ -551,8 +565,7 @@ fn state_of(case: &Json) -> RawState {
                                     .map(|(bk, bv)| (bk.clone(), raw_value(bv)))
                                     .collect(),
                             );
-                            out.entries
-                                .push((k.clone(), RawValue::Structure));
+                            out.entries.push((k.clone(), RawValue::Structure));
                         }
                         other => out.entries.push((k.clone(), raw_value(other))),
                     }

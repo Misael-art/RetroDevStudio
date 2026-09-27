@@ -15,7 +15,10 @@ pub const LOROM_BLOCK: usize = 32768;
 /// Semente inicial dun bloque: `(seedBase ^ imul(i+1, 0x9e3779b9))`, con 0
 /// substituído por 0x9e3779b9 (como publica o spec dos vectores).
 fn block_seed(seed_base: u32, block_index: usize) -> u32 {
-    let mixed = seed_base ^ (block_index as u32).wrapping_add(1).wrapping_mul(0x9e37_79b9);
+    let mixed = seed_base
+        ^ (block_index as u32)
+            .wrapping_add(1)
+            .wrapping_mul(0x9e37_79b9);
     if mixed == 0 {
         0x9e37_79b9
     } else {
