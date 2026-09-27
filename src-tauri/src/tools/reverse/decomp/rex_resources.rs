@@ -1598,6 +1598,331 @@ mod tests {
         }
     }
 
+    /// Varredura de **edição que cabe**: para cada pixel em tela de um TileSet
+    /// real, quanto custa re-codificar o plain com aquele índice trocado, contra
+    /// o slot que a ROM dá. Instrumento de escolha, não aceite — roda `#[ignore]`
+    /// e não publica bytes.
+    ///
+    /// Rodar: `cargo test --lib byor_varre -- --ignored --nocapture`
+    ///
+    /// Existe porque a prova de tela precisa de uma edição que caiba. O TileSet
+    /// visível da cadeia 40x28 (0x21b44) não comporta nem o re-encode sem
+    /// edição, então a escolha tem que sair de medida, não de preferência. Os
+    /// critérios estruturais vêm do censo das cadeias
+    /// (`scripts/rex_profiles/integrator/aplib/survey_tiledimage_refs.py`): só
+    /// entram tiles referenciados por exatamente UMA célula, sem flip e sem
+    /// banco, porque isso é o que dá uma posição prevista em tela; e só entram
+    /// índices cuja palavra de paleta difere, porque edição invisível não prova
+    /// nada.
+    #[test]
+    #[ignore = "varredura BYOR: requer ROM local com SHA esperado"]
+    fn byor_varre_as_edicoes_de_pixel_que_cabem_no_slot() {
+        const SHA_ROM: &str = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+        // TileSet de 100 tiles com 1 byte de folga (slot 938, natural 937) e
+        // TiledImage próprio em 0x21b38 → paleta 0x21b32, TileMap 0x21b28.
+        const HEADER: usize = 0x21b20;
+        const TILEDIMAGE: usize = 0x21b38;
+        let (rom, sha) = hamoopig_rom().expect("ROM BYOR ausente: a medida exige o arquivo");
+        assert_eq!(sha, SHA_ROM, "identidade da ROM BYOR divergente");
+
+        let candidato = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.header_offset == HEADER)
+            .expect("header do TileSet varrido não apareceu no scan");
+        let verificado = verify_aplib_resource(&rom, &candidato, &AplibLimits::default())
+            .expect("recurso sumiu");
+        let plain = &verificado.decoded;
+        let slot = verificado.bytes_consumed;
+        let natural = aplib_encode(plain, &AplibEncodeLimits::default()).expect("natural");
+        println!(
+            "recurso {HEADER:#x}: plain {} B | slot {slot} B | natural {} B | folga {} B",
+            plain.len(),
+            natural.len(),
+            slot as isize - natural.len() as isize,
+        );
+
+        // ---- a cadeia, lida do ROM (não de anotação): TiledImage empacotado
+        // {palette*, tileset*, tilemap*}.
+        assert_eq!(
+            u32_be(&rom, TILEDIMAGE + 4) as usize,
+            HEADER,
+            "o TiledImage não aponta o TileSet varrido"
+        );
+        let (palette_ptr, tilemap_ptr) = (
+            u32_be(&rom, TILEDIMAGE) as usize,
+            u32_be(&rom, TILEDIMAGE + 8) as usize,
+        );
+        let pal_data = u32_be(&rom, palette_ptr + 2) as usize;
+        let cor = |idx: usize| u16_be(&rom, pal_data + idx * 2);
+        let (w, h) = (
+            usize::from(u16_be(&rom, tilemap_ptr + 2)),
+            usize::from(u16_be(&rom, tilemap_ptr + 4)),
+        );
+        let mapa = aplib_decode(
+            &rom[u32_be(&rom, tilemap_ptr + 6) as usize..],
+            &AplibLimits::default(),
+        )
+        .expect("TileMap da cadeia");
+        assert_eq!(mapa.data.len(), w * h * 2, "tilemap {w}x{h}");
+
+        // Tile → TODAS as células (com flip e banco), porque a prova exige
+        // enumerar cada lugar onde o tile aparece: uma edição num tile
+        // multi-célula muda a tela em todos eles, e a previsão tem que cobri-los.
+        let mut por_tile: std::collections::BTreeMap<usize, Vec<(usize, usize, bool, bool)>> =
+            Default::default();
+        for i in 0..(w * h) {
+            let e = u16_be(&mapa.data, i * 2);
+            por_tile.entry(usize::from(e & 0x7ff)).or_default().push((
+                i % w,
+                i / w,
+                e >> 11 & 1 == 1,
+                e >> 12 & 1 == 1,
+            ));
+        }
+        // `RDS_APLIB_SWEEP_TILES` restringe a varredura a tiles concretos
+        // (medição dirigida: os tiles que o censo de pixels prova estarem em
+        // tela); sem a variável, varre os de célula única sem flip.
+        let alvo: Vec<usize> = match std::env::var("RDS_APLIB_SWEEP_TILES") {
+            Ok(v) => v
+                .split(',')
+                .map(|s| s.trim().parse::<usize>().expect("tile inválido"))
+                .collect(),
+            Err(_) => por_tile
+                .iter()
+                .filter(|(_, c)| c.len() == 1 && !c[0].2 && !c[0].3)
+                .map(|(t, _)| *t)
+                .collect(),
+        };
+        println!(
+            "tilemap {w}x{h}: {} tiles referenciados, {} na varredura",
+            por_tile.len(),
+            alvo.len()
+        );
+
+        // ---- a varredura: byte a byte dos tiles-alvo, nibble alto (coluna
+        // par) e baixo (coluna ímpar), para cada índice novo de cor diferente.
+        let mut testados = 0usize;
+        let mut cabem: Vec<(usize, usize, usize, usize, usize, usize, String)> = Vec::new();
+        for &tile in &alvo {
+            for byte_em_tile in 0..32usize {
+                let byte = tile * 32 + byte_em_tile;
+                let linha_pixel = byte_em_tile / 4;
+                for (mascara, desloc, coluna_pixel_base) in
+                    [(0x0fu8, 0usize, 1usize), (0xf0u8, 4, 0usize)]
+                {
+                    let original = usize::from((plain[byte] & mascara) >> desloc);
+                    for novo in 0..16usize {
+                        if novo == original || cor(novo) == cor(original) {
+                            continue;
+                        }
+                        let coluna_pixel = (byte_em_tile % 4) * 2 + coluna_pixel_base;
+                        let mut editado = plain.clone();
+                        editado[byte] = (plain[byte] & !mascara) | ((novo as u8) << desloc);
+                        assert_eq!(
+                            editado
+                                .iter()
+                                .zip(plain.iter())
+                                .filter(|(a, b)| a != b)
+                                .count(),
+                            1
+                        );
+                        testados += 1;
+                        let r = aplib_encode(
+                            &editado,
+                            &AplibEncodeLimits {
+                                max_stream: slot,
+                                ..Default::default()
+                            },
+                        );
+                        if let Ok(s) = r {
+                            let celulas = por_tile[&tile]
+                                .iter()
+                                .map(|(a, b, hf, vf)| {
+                                    format!(
+                                        "({},{}){}{} → pixel de tela ({},{})",
+                                        a,
+                                        b,
+                                        if *hf { "H" } else { "" },
+                                        if *vf { "V" } else { "" },
+                                        a * 8 + coluna_pixel,
+                                        b * 8 + linha_pixel
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" | ");
+                            cabem.push((
+                                s.len(),
+                                tile,
+                                coluna_pixel,
+                                linha_pixel,
+                                original,
+                                novo,
+                                celulas,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        cabem.sort();
+        println!(
+            "varredura: {testados} edições de 1 pixel candidatas | {} cabem no slot de {slot} B",
+            cabem.len()
+        );
+        for (len, tile, cp, lp, orig, novo, celulas) in cabem.iter().take(12) {
+            println!(
+                "  CABE {len} B: tile {tile} pixel do tile ({cp},{lp}) índice {orig}→{novo} | \
+                 cores {:#06x}→{:#06x} | {celulas}",
+                cor(*orig),
+                cor(*novo)
+            );
+        }
+    }
+
+    /// A edição escolhida para a prova de tela, pinada com os números que a
+    /// justificam. Diferente do registro de capacidade do TileSet visível (que
+    /// não comporta nem o re-encode sem edição): este recurso **comporta**, e a
+    /// escolha não é preferência — saiu da varredura acima cruzada com a
+    /// evidência de quadro da perna A.
+    ///
+    /// Por que este pixel: o TileSet `0x21b20` é o recurso cuja paleta (`0x2cbc8`)
+    /// a perna A usou para atribuir 100% dos 2 938 pixels residuais do
+    /// `checkpoint-129` (captura determinista, Genesis Plus GX v1.7.4 `46a5521`,
+    /// sequência REX-00) a oclusão total — ou seja, são pixels observados em tela
+    /// que pertencem a ESTE recurso, não ao fundo. As duas evidências são
+    /// citadas por SHA, não copiadas para este arquivo:
+    /// `dbdc122:docs/rex_profiles/lz4w/VISIBLE-RESOURCE-EVIDENCE.md` =
+    /// `ac850f420f1fd8f6d1d3aa46e1f0c11badbe9b8cbbf55d889e9f58b252c8f0c8`,
+    /// `dbdc122:data/rex_profiles/lz4w/residual-attribution-cp129.json` =
+    /// `febb6d0edded4b9e206145ead7abe5a3258de8f15067b588eda7354b5fb02ed5`. Os
+    /// dois retângulos das células deste tile estão **inteiros** dentro do
+    /// conjunto de pixels residuais daquele JSON (`x 280..287, y 128..135` no
+    /// cluster 4 e `x 208..215, y 200..207` no cluster 0), então o pixel editado
+    /// é observado, não inferido — e a re-execuição da comparação é tarefa do
+    /// passo 5, não alegação desta pin.
+    #[test]
+    #[ignore = "edição-alvo BYOR aPLib: requer ROM local com SHA esperado"]
+    fn byor_aplib_pina_a_edicao_de_pixel_que_cabe_e_eh_observada_em_tela() {
+        const SHA_ROM: &str = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+        const HEADER: usize = 0x21b20;
+        const TILEDIMAGE: usize = 0x21b38;
+        const TILE: usize = 53;
+        const COLUNA_PIXEL: usize = 4;
+        const LINHA_PIXEL: usize = 0;
+        const INDICE_ORIGINAL: usize = 5;
+        const INDICE_NOVO: usize = 0;
+        let (rom, sha) = hamoopig_rom().expect("ROM BYOR ausente: a prova exige o arquivo");
+        assert_eq!(sha, SHA_ROM, "identidade da ROM BYOR divergente");
+
+        // ---- recurso e slot.
+        let candidato = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.header_offset == HEADER)
+            .expect("TileSet 0x21b20 sumiu do scan estrutural");
+        let verificado = verify_aplib_resource(&rom, &candidato, &AplibLimits::default())
+            .expect("recurso sumiu");
+        let plain = &verificado.decoded;
+        let slot = verificado.bytes_consumed;
+        assert_eq!((plain.len(), slot), (3200, 938), "recurso/slot mudaram");
+        assert_eq!(candidato.stream_offset, 0x2e12a);
+        // O bloco vizinho encosta: 0x2e12a + 938 = 0x2e4d4, que é o `data` do
+        // TileSet visível. Escrever mais de 938 bytes esmagaria outro recurso.
+        assert_eq!(candidato.stream_offset + slot, 0x2e4d4, "fronteira do slot");
+
+        // ---- a cadeia lida da ROM: TiledImage → paleta e TileMap.
+        assert_eq!(u32_be(&rom, TILEDIMAGE + 4) as usize, HEADER);
+        let (palette_ptr, tilemap_ptr) = (
+            u32_be(&rom, TILEDIMAGE) as usize,
+            u32_be(&rom, TILEDIMAGE + 8) as usize,
+        );
+        let pal_data = u32_be(&rom, palette_ptr + 2) as usize;
+        assert_eq!(
+            pal_data, 0x2cbc8,
+            "a paleta é a da tabela de oclusão atribuída"
+        );
+        let cor = |idx: usize| u16_be(&rom, pal_data + idx * 2);
+        // As duas cores da edição, e por que elas são distinguíveis no quadro:
+        // 5 = 0x0468 → (137,102,68) em canle8; 0 = preto. O comparador da perna A
+        // trabalha com tolerância ±4 por canal, então a distância é ~34× o ruído.
+        assert_eq!((cor(INDICE_ORIGINAL), cor(INDICE_NOVO)), (0x0468, 0x0000));
+        let (w, h) = (
+            usize::from(u16_be(&rom, tilemap_ptr + 2)),
+            usize::from(u16_be(&rom, tilemap_ptr + 4)),
+        );
+        assert_eq!((w, h), (40, 28));
+        let mapa = aplib_decode(
+            &rom[u32_be(&rom, tilemap_ptr + 6) as usize..],
+            &AplibLimits::default(),
+        )
+        .expect("TileMap da cadeia");
+
+        // ---- TODAS as células que usam o tile, com flip e banco: a previsão de
+        // tela tem que cobrir cada uma delas.
+        let celulas: Vec<(usize, usize, u16)> = (0..w * h)
+            .map(|i| (i % w, i / w, u16_be(&mapa.data, i * 2)))
+            .filter(|(_, _, e)| usize::from(e & 0x7ff) == TILE)
+            .collect();
+        assert_eq!(
+            celulas,
+            vec![(35, 16, 0x0035), (26, 25, 0x0035)],
+            "as colocações/flags do tile {TILE} mudaram — a previsão de tela precisa ser re-derivada"
+        );
+        for (_, _, e) in &celulas {
+            assert_eq!(e >> 11 & 1, 0, "hflip moveria o pixel");
+            assert_eq!(e >> 12 & 1, 0, "vflip moveria o pixel");
+            assert_eq!(e >> 13 & 3, 0, "banco de paleta diferente mudaria a cor");
+        }
+        let previstos: Vec<(usize, usize)> = celulas
+            .iter()
+            .map(|(c, l, _)| (c * 8 + COLUNA_PIXEL, l * 8 + LINHA_PIXEL))
+            .collect();
+        assert_eq!(previstos, vec![(284, 128), (212, 200)]);
+
+        // ---- a edição: um byte, um nibble, exatamente um pixel por colocação.
+        let byte = TILE * 32 + LINHA_PIXEL * 4 + COLUNA_PIXEL / 2;
+        assert_eq!(byte, 1698);
+        assert_eq!(
+            plain[byte], 0x55,
+            "o tile {TILE} é sólido de índice 5; se deixou de ser, a previsão de 2 pixels cai"
+        );
+        let mut editado = plain.clone();
+        editado[byte] = (plain[byte] & 0x0f) | ((INDICE_NOVO as u8) << 4); // 0x55 -> 0x05
+        assert_eq!(
+            editado
+                .iter()
+                .zip(plain.iter())
+                .filter(|(a, b)| a != b)
+                .count(),
+            1,
+            "a prova exige edição de exatamente um byte"
+        );
+
+        // ---- capacidade: cabe no slot com 1 byte de folga, e o que cabe tem que
+        // ser lido de volta pelo decoder do produto consumindo o stream inteiro.
+        let novo = aplib_encode(
+            &editado,
+            &AplibEncodeLimits {
+                max_stream: slot,
+                ..Default::default()
+            },
+        )
+        .expect("a edição escolhida deixou de caber no slot");
+        assert_eq!(
+            novo.len(),
+            937,
+            "custo congelado da edição (slot 938): mexer aqui é decisão registrada"
+        );
+        let lido = aplib_decode(&novo, &AplibLimits::default())
+            .expect("o produto não relê o próprio stream");
+        assert_eq!(lido.data, editado, "ida e volta não bate");
+        assert_eq!(lido.bytes_consumed, novo.len(), "leu além do EOD");
+
+        // Não-regressão da transação: o stream encurtado deixa 1 byte do stream
+        // antigo no slot (é a regra de escrita — só os `novo.len()` bytes primeiros
+        // são reescritos), e o bloco vizinho continua intacto.
+        assert!(novo.len() < slot, "sem folga não há escrita em slot fixo");
+    }
+
     /// Censo dos headers aPLib que o produto verifica nesta ROM, com o custo do
     /// conjunto completo (`verify_resource_set`, que é o caminho da UI).
     #[test]
