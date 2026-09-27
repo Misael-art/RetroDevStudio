@@ -1283,6 +1283,130 @@ mod tests {
         assert!(0x2d534 + tilemap.bytes_consumed < candidato.stream_offset);
     }
 
+    // ---- Alvo da transação de edição na ROM comercial (passo 4 da ordem de
+    // aceite). Toda constante aqui foi relida dos bytes desta ROM nesta data,
+    // com o decoder em espelho do script versionado
+    // `scripts/rex_profiles/integrator/aplib/audit_aplib_candidates.py` (que
+    // abre conferindo os 9 goldens pinados), e não copiada de documento.
+
+    /// `Palette` SGDK em `0x21b56`: `{u16 numColor; u32 *data}` (packed, data em
+    /// +2) → 16 words em `0x2cbe8`. Os dois índices da edição-alvo têm que
+    /// diferir aqui, senão a prova de tela não vale nada.
+    const BYOR_SHA_PALETE_16W: &str =
+        "4ee0d60ef2de539c81e5d037e77376386b1b70b381dcc38d663b093c0c39ea60";
+
+    /// `font_08x08` embutido do SGDK 2.11: o MESMO stream de 609 B aparece na
+    /// fixture autoral (header `0x59d14` / stream `0x5f2ec`) e nesta ROM
+    /// (`0x270de` / `0x2cd94`), byte a byte, produzindo o mesmo plain de 3 072 B.
+    /// É recurso legítimo da toolchain, não material comercial escolhido à mão:
+    /// por isso serve de segunda evidência de decode no produto.
+    const BYOR_SHA_STREAM_FONT: &str =
+        "e9b88ab50ad575f340a6c31cb12cdf3d666577a8fc1eeeb88b083be3c36b1256";
+    const BYOR_SHA_PLAIN_FONT: &str =
+        "20ee7dcc463262ad2172344b567496b66e8cea3dd9cb1d27b8ff0f736bb26f29";
+
+    fn u16_be(rom: &[u8], at: usize) -> u16 {
+        u16::from_be_bytes([rom[at], rom[at + 1]])
+    }
+
+    fn u32_be(rom: &[u8], at: usize) -> u32 {
+        u32::from_be_bytes([rom[at], rom[at + 1], rom[at + 2], rom[at + 3]])
+    }
+
+    /// Re-lê a cadeia estrutural do TiledImage visível direto dos bytes da ROM
+    /// (nada aqui vem de tabela de documento), confere o TileMap e o `font_08x08`
+    /// da toolchain, e mede as fronteiras: os streams encostam uns nos outros,
+    /// então o orçamento de reinserção de um recurso é o próprio tamanho dele.
+    #[test]
+    #[ignore = "aceite BYOR aPLib: requer ROM local com SHA esperado; rodar com --ignored"]
+    fn byor_aplib_re_le_a_cadeia_do_tiledimage_e_pina_o_font_da_toolchain() {
+        const SHA_ROM: &str = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+        let (rom, sha) = hamoopig_rom().expect("ROM BYOR ausente: o aceite exige o arquivo");
+        assert_eq!(sha, SHA_ROM, "identidade da ROM BYOR divergente");
+
+        // (a) TiledImage em 0x21b5c = {palette*, tileset*, tilemap*}, três u32.
+        assert_eq!(u32_be(&rom, 0x21b5c), 0x21b56, "ponteiro da paleta");
+        assert_eq!(u32_be(&rom, 0x21b60), 0x21b44, "ponteiro do tileset");
+        assert_eq!(u32_be(&rom, 0x21b64), 0x21b4c, "ponteiro do tilemap");
+
+        // (b) TileSet: compression=1 (aPLib raw), 500 tiles, dados em 0x2e4d4.
+        assert_eq!(u16_be(&rom, 0x21b44), 1);
+        assert_eq!(u16_be(&rom, 0x21b46), 500);
+        assert_eq!(u32_be(&rom, 0x21b48), 0x2e4d4);
+
+        // (c) TileMap: {u16 compression; u16 w; u16 h; u32 data} = 40x28 em
+        // 0x2d534. Não é header TileSet, então passa pelo decoder direto — o EOD
+        // é o que delimita — e produz as 1 120 entradas de 2 bytes.
+        assert_eq!(u16_be(&rom, 0x21b4c), 1);
+        assert_eq!(u16_be(&rom, 0x21b4e), 40);
+        assert_eq!(u16_be(&rom, 0x21b50), 28);
+        assert_eq!(u32_be(&rom, 0x21b52), 0x2d534);
+        let tilemap =
+            aplib_decode(&rom[0x2d534..], &AplibLimits::default()).expect("TileMap APLIB");
+        assert_eq!(tilemap.bytes_consumed, 1196);
+        assert_eq!(tilemap.data.len(), 40 * 28 * 2);
+
+        // (d) Palette: numColor=16 com data packed em +2 → 0x2cbe8.
+        assert_eq!(u16_be(&rom, 0x21b56), 16);
+        assert_eq!(u32_be(&rom, 0x21b58), 0x2cbe8);
+        let paleta = &rom[0x2cbe8..0x2cbe8 + 32];
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(paleta),
+            BYOR_SHA_PALETE_16W,
+            "a paleta do plano visível mudou de identidade"
+        );
+        // Os dois índices da edição-alvo (ver o teste de capacidade): 2 = preto,
+        // 14 = branco. Se a palavra for a mesma, a edição não apareceria em tela.
+        assert_eq!(u16_be(paleta, 2 * 2), 0x0000);
+        assert_eq!(u16_be(paleta, 14 * 2), 0x0eee);
+        assert_ne!(u16_be(paleta, 2 * 2), u16_be(paleta, 14 * 2));
+
+        // (e) font_08x08 da toolchain: header estrutural, verificação pelo
+        // produto e identidade do stream E do plain.
+        let candidato = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.header_offset == 0x270de)
+            .expect("header TileSet do font 0x270de não apareceu no scan");
+        assert_eq!(candidato.compression, TilesetCompression::Aplib);
+        assert_eq!(candidato.num_tiles, 96);
+        assert_eq!(candidato.stream_offset, 0x2cd94);
+        assert_eq!(candidato.expected_len, 96 * 32);
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(&rom[0x2cd94..0x2cd94 + 609]),
+            BYOR_SHA_STREAM_FONT,
+            "o stream do font não é o byte-idêntico ao da fixture autoral"
+        );
+        let font = verify_aplib_resource(&rom, &candidato, &AplibLimits::default())
+            .expect("o produto recusou o font_08x08 real");
+        assert_eq!(font.bytes_consumed, 609);
+        assert_eq!(font.decoded.len(), 3072);
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(&font.decoded),
+            BYOR_SHA_PLAIN_FONT,
+            "decode do font divergiu do par medido na fixture autoral"
+        );
+
+        // (f) Fronteiras encostadas: o stream do TileMap termina exatamente onde
+        // começa o TileMap do SEGUNDO TiledImage (0x21b70 → 0x2d9e0). Não há
+        // folga entre blocos, então o orçamento de cada recurso é o próprio
+        // `bytes_consumed` — que é também o que a transação usa.
+        assert_eq!(0x2d534 + tilemap.bytes_consumed, 0x2d9e0);
+        assert_eq!(u16_be(&rom, 0x21b70), 1, "compression do segundo TileMap");
+        assert_eq!(u32_be(&rom, 0x21b76), 0x2d9e0);
+        // E o stream do TileSet visível tem UMA byte de folga antes do próximo
+        // TileSet verificado (`0x21b68 → 0x2f65a`): orçamento folgado não existe
+        // nesta ROM.
+        let ts_visivel = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.header_offset == 0x21b44)
+            .expect("header TileSet 0x21b44 não apareceu no scan");
+        let tileset = verify_aplib_resource(&rom, &ts_visivel, &AplibLimits::default())
+            .expect("TileSet visível");
+        assert_eq!(tileset.bytes_consumed, 4485);
+        assert_eq!(u32_be(&rom, 0x21b6c), 0x2f65a);
+        assert_eq!(0x2e4d4 + tileset.bytes_consumed + 1, 0x2f65a);
+    }
+
     fn hamoopig_rom() -> Option<(Vec<u8>, String)> {
         let path = std::env::var("RDS_HAMOOPIG_ROM").unwrap_or_else(|_| {
             "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin"
@@ -1291,6 +1415,247 @@ mod tests {
         let rom = std::fs::read(path).ok()?;
         let sha = super::super::rom_library::sha256_hex(&rom);
         Some((rom, sha))
+    }
+
+    /// O que a transação consegue fazer num recurso real: re-codifica o plain
+    /// do TileSet visível (a) sem edição e (b) com a edição de UM pixel que a
+    /// prova de tela vai usar, contra o orçamento que a própria ROM dá
+    /// (`bytes_consumed`, porque os blocos encostam uns nos outros — medido no
+    /// aceite anterior). Os comprimentos são um registro de capacidade: servem
+    /// para detectar regressão do encoder e para não descobrir no meio do fluxo
+    /// pela interface que a edição não cabe.
+    ///
+    /// A edição-alvo é a menor discriminação possível no plano: tile 1, linha 3,
+    /// coluna 5, índice 2 → 14 (preto → branco na paleta pinada). O tile 1 é
+    /// referenciado por exatamente UMA célula do tilemap 40x28, sem flip, sem
+    /// prioridade e no banco 0, então a posição prevista em tela é
+    /// x = 24*8 = 192, y = 1*8 = 8 (retângulo 192..199 x 8..15). Tudo isso é
+    /// conferido abaixo a partir do plain decodificado pelo produto, não de
+    /// anotação.
+    #[test]
+    #[ignore = "registro de capacidade BYOR aPLib: requer ROM local com SHA esperado"]
+    fn byor_aplib_registra_capacidade_de_reinsercao_no_tileset_visivel() {
+        const SHA_ROM: &str = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+        const SHA_TILESET: &str =
+            "dd7affc3971a73840b84b028c0f41372b49c52df3f4f29d09885c59e83b80f5f";
+        const SHA_TILEMAP: &str =
+            "c196aa5ba9b29a440b2680afb000795cebee242346503fb2342fd11ee5a704f1";
+        let (rom, sha) = hamoopig_rom().expect("ROM BYOR ausente: o aceite exige o arquivo");
+        assert_eq!(sha, SHA_ROM, "identidade da ROM BYOR divergente");
+
+        let candidato = scan_tileset_headers(&rom)
+            .into_iter()
+            .find(|c| c.header_offset == 0x21b44)
+            .expect("header TileSet 0x21b44 não apareceu no scan estrutural");
+        let verificado = verify_aplib_resource(&rom, &candidato, &AplibLimits::default())
+            .expect("o decoder do produto recusou o TileSet real");
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(&verificado.decoded),
+            SHA_TILESET
+        );
+        let plain = &verificado.decoded;
+        let orcamento = verificado.bytes_consumed;
+
+        // ---- a edição-alvo: um byte do tile 1, mudando um pixel de 2 para 14.
+        // Chunky packed-nibble 4bpp: byte = linha*4 + coluna/2, nibble ALTO para
+        // coluna par. Linha 3, coluna 5 → byte 14 do tile, nibble baixo.
+        let byte_editado = 1 * 32 + 3 * 4 + 5 / 2;
+        assert_eq!(plain[byte_editado] & 0x0f, 2, "índice original do pixel");
+        assert_eq!(plain[byte_editado] >> 4, 2, "pixel vizinho não pode mudar");
+        let mut editado = plain.clone();
+        editado[byte_editado] = (plain[byte_editado] & 0xf0) | 0x0e; // 2 -> 14
+        assert_eq!(
+            plain
+                .iter()
+                .zip(editado.iter())
+                .filter(|(a, b)| a != b)
+                .count(),
+            1,
+            "a prova exige edição de exatamente um byte"
+        );
+
+        // ---- posição prevista em tela, medida do tilemap real.
+        let tilemap =
+            aplib_decode(&rom[0x2d534..], &AplibLimits::default()).expect("TileMap APLIB");
+        assert_eq!(
+            crate::core::rom_mastering::sha256_hex(&tilemap.data),
+            SHA_TILEMAP
+        );
+        let mut celulas = Vec::new();
+        for i in 0..(40 * 28) {
+            let e = u16_be(&tilemap.data, i * 2);
+            if usize::from(e & 0x7ff) == 1 {
+                celulas.push((i % 40, i / 40, e));
+            }
+        }
+        assert_eq!(celulas.len(), 1, "o tile 1 tem que aparecer uma vez");
+        let (coluna, linha, entrada) = celulas[0];
+        assert_eq!(entrada & 0x7ff, 1);
+        assert_eq!(entrada >> 11 & 1, 0, "hflip mudaria a posição do pixel");
+        assert_eq!(entrada >> 12 & 1, 0, "vflip mudaria a posição do pixel");
+        assert_eq!(entrada >> 13 & 3, 0, "banco de paleta");
+        let (x, y) = (coluna * 8 + 5, linha * 8 + 3);
+        println!(
+            "edição-alvo: byte {byte_editado} do tile 1; célula ({coluna},{linha}) \
+                  -> pixel de tela ({x},{y}); orçamento do stream {orcamento} B"
+        );
+
+        // ---- capacidade. `usize::MAX` mostra o que o encoder produz por
+        // natureza; o orçamento mostra o que entra no slot.
+        let solto =
+            aplib_encode(plain, &AplibEncodeLimits::default()).expect("encode sem orçamento");
+        let no_slot = aplib_encode(
+            plain,
+            &AplibEncodeLimits {
+                max_stream: orcamento,
+                ..Default::default()
+            },
+        );
+        let editado_slot = aplib_encode(
+            &editado,
+            &AplibEncodeLimits {
+                max_stream: orcamento,
+                ..Default::default()
+            },
+        );
+        // A recusa é estruturada e cita plain, stream e orçamento, senão quem
+        // está na interface não sabe o que falta.
+        for (nome, resultado, stream) in [
+            ("plain intacto", &no_slot, solto.len()),
+            ("plain editado", &editado_slot, 4550),
+        ] {
+            let erro = resultado
+                .as_ref()
+                .expect_err(&format!("{nome} não pode caber num slot de {orcamento} B"));
+            assert_eq!(erro.code, "needs_space", "{nome}: {erro}");
+            assert!(
+                erro.detail.contains(&format!("{} bytes de stream", stream))
+                    && erro.detail.contains(&format!("orçamento de {orcamento}")),
+                "{nome}: recusa sem os dois números: {}",
+                erro.detail
+            );
+            println!("{nome}: {erro}");
+        }
+        // ---- Tabela de capacidade dos quatro TileSets aPLib verificados nesta
+        // ROM: o slot é o tamanho do stream que a toolchain produziu. Um
+        // encoder que não iguala o do build não consegue re-inserir nada, nem
+        // sem edição — por isso a linha é medida antes de escolher edição. O
+        // `assert_eq!` no final é o registro congelado: mexer no encoder tem
+        // que quebrá-lo e a quebra tem que ser deliberada.
+        println!("--- capacidade por recurso (stream do produto vs slot real) ---");
+        let mut tabela = Vec::new();
+        for header in [0x270deusize, 0x21b20, 0x21b44, 0x21b68] {
+            let c = scan_tileset_headers(&rom)
+                .into_iter()
+                .find(|x| x.header_offset == header)
+                .expect("candidato conhecido sumiu do scan");
+            let r =
+                verify_aplib_resource(&rom, &c, &AplibLimits::default()).expect("recurso sumiu");
+            let natural = aplib_encode(&r.decoded, &AplibEncodeLimits::default())
+                .expect("encoder do produto recusou o próprio plain");
+            println!(
+                "header {header:#x}: plain {} B | slot {} B | produto {} B | folga {} B | {}",
+                r.decoded.len(),
+                r.bytes_consumed,
+                natural.len(),
+                r.bytes_consumed as isize - natural.len() as isize,
+                if natural.len() <= r.bytes_consumed {
+                    "CABE"
+                } else {
+                    "NÃO CABE"
+                }
+            );
+            tabela.push((header, r.decoded.len(), r.bytes_consumed, natural.len()));
+        }
+        assert_eq!(
+            tabela,
+            [
+                (0x270de, 3072, 609, 609),
+                (0x21b20, 3200, 938, 937),
+                (0x21b44, 16000, 4485, 4544),
+                (0x21b68, 17376, 7420, 7442),
+            ],
+            "registro de capacidade aPLib em ROM comercial: (header, plain, slot, \
+             stream do produto). Dois recursos não comportam nem o re-encode sem \
+             edição — o visível fica 59 B acima do slot, e é o alvo da prova de tela"
+        );
+
+        // Não caber é fato de ESPAÇO, não de stream inválido: os dois streams
+        // (plain intacto e editado), medidos sem orçamento, têm que voltar byte a
+        // byte pelo decoder do produto consumindo o stream inteiro. Se isso
+        // falhar, a conclusão "não coube" não vale nada.
+        let editado_solto = aplib_encode(&editado, &AplibEncodeLimits::default())
+            .expect("a edição de 1 byte não é representável pelo formato?");
+        assert_eq!(editado_solto.len(), 4550, "custo da edição medida");
+        for (nome, stream, esperado) in [
+            ("plain intacto", &solto, plain.as_slice()),
+            ("plain com a edição", &editado_solto, editado.as_slice()),
+        ] {
+            let d = aplib_decode(stream, &AplibLimits::default())
+                .unwrap_or_else(|e| panic!("{nome}: o próprio produto não relê seu stream: {e}"));
+            assert_eq!(d.bytes_consumed, stream.len(), "{nome}: lê além do EOD");
+            assert_eq!(d.data, esperado, "{nome}: ida e volta não bate");
+        }
+    }
+
+    /// Censo dos headers aPLib que o produto verifica nesta ROM, com o custo do
+    /// conjunto completo (`verify_resource_set`, que é o caminho da UI).
+    #[test]
+    #[ignore = "censo BYOR: requer ROM local com SHA esperado"]
+    fn byor_aplib_censa_os_headers_verificaveis_e_o_custo_do_conjunto() {
+        const SHA_ROM: &str = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+        let (rom, sha) = hamoopig_rom().expect("ROM BYOR ausente: o aceite exige o arquivo");
+        assert_eq!(sha, SHA_ROM, "identidade da ROM BYOR divergente");
+
+        let candidatos = scan_tileset_headers(&rom);
+        let aplib: Vec<_> = candidatos
+            .iter()
+            .filter(|c| c.compression == TilesetCompression::Aplib)
+            .collect();
+        let mut verificados = 0usize;
+        for c in &aplib {
+            match verify_aplib_resource(&rom, c, &AplibLimits::default()) {
+                Ok(r) => {
+                    verificados += 1;
+                    println!(
+                        "aPLib verificado: header {:#x} → stream {:#x}, {} tiles, \
+                         plain {} B, consumo {} B",
+                        c.header_offset,
+                        c.stream_offset,
+                        c.num_tiles,
+                        r.decoded.len(),
+                        r.bytes_consumed
+                    );
+                }
+                Err(e) => println!(
+                    "aPLib recusado: header {:#x} → {:#x}: {}",
+                    c.header_offset, c.stream_offset, e.code
+                ),
+            }
+        }
+        println!(
+            "censo: {} headers aPLib candidatos, {} verificados; {} LZ4W candidatos",
+            aplib.len(),
+            verificados,
+            candidatos
+                .iter()
+                .filter(|c| c.compression == TilesetCompression::Lz4w)
+                .count()
+        );
+        assert!(
+            verificados >= 4,
+            "os quatro tilesets conhecidos têm que verificar"
+        );
+
+        let inicio = std::time::Instant::now();
+        let conjunto =
+            verify_resource_set(&rom, &TransactionLimits::default()).expect("conjunto da ROM");
+        println!(
+            "verify_resource_set: {} recursos em {:?} — {}",
+            conjunto.resources.len(),
+            inicio.elapsed(),
+            conjunto.analyzed_scope
+        );
     }
 
     /// ROM sintética com dois recursos LZ4W dependentes: R2 é empacotado com
