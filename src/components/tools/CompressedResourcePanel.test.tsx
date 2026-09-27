@@ -8,6 +8,8 @@ vi.mock("../../core/ipc/toolsService", () => ({
   rexResourceList: vi.fn(),
   rexResourcePreview: vi.fn(),
   rexResourceApplyEdit: vi.fn(),
+  rexResourceContext: vi.fn(),
+  rexResourceContextHit: vi.fn(),
 }));
 
 const mocked = vi.mocked(service);
@@ -539,5 +541,194 @@ describe("CompressedResourcePanel", () => {
     const resultText = findByTestId(container, "rex-resource-result").textContent ?? "";
     expect(resultText).toContain("codec aplib");
     expect(resultText).toContain("rex-aplib-patch-ee.bps");
+  });
+
+  /** Contexto + transação: a seleção feita na camada composta tem que chegar à
+   *  fila canônica pelo PIXEL DE FONTE que o núcleo resolveu, com o SHA que a
+   *  lista verificou. É isto que torna a edição contextual utilizável em vez de
+   *  um relatório ao lado do editor. */
+  const CONTEXTO_PEQUENO = {
+    rom_sha256: "aa".repeat(32),
+    rom_len: 393216,
+    escopo: "escopo do tronco",
+    limite_trabalho: { max_pixels_por_camada: 2048 * 2048 },
+    imagens: [
+      {
+        struct_offset: 0x25780,
+        proveniencia: "verificada" as const,
+        conferido: ["os três ponteiros do struct `Image` foram seguidos"],
+        nao_prova: ["uma estrutura válida não prova que o jogo carregue ou exiba o recurso"],
+        paleta: {
+          header_offset: 0x2cbc8,
+          stream_offset: 0x2cbd0,
+          codec: "none",
+          plain_len: 128,
+          stream_len: 128,
+          plain_sha256: "33".repeat(32),
+        },
+        tileset: {
+          header_offset: 0x25788,
+          stream_offset: 0xc8cc8,
+          codec: "aplib",
+          plain_len: 288,
+          stream_len: 144,
+          plain_sha256: "11".repeat(32),
+        },
+        tilemap: {
+          header_offset: 0x25790,
+          stream_offset: 0x2579a,
+          codec: "aplib",
+          plain_len: 8,
+          stream_len: 6,
+          plain_sha256: "44".repeat(32),
+        },
+        mapa: {
+          cols: 2,
+          rows: 2,
+          largura_px: 16,
+          altura_px: 16,
+          celulas: [
+            { indice: 0, col: 0, row: 0, tile: 1, hflip: false, vflip: false, banco: 0, prioridade: false },
+            { indice: 1, col: 1, row: 0, tile: 0, hflip: false, vflip: false, banco: 0, prioridade: false },
+            { indice: 2, col: 0, row: 1, tile: 0, hflip: false, vflip: false, banco: 0, prioridade: false },
+            { indice: 3, col: 1, row: 1, tile: 1, hflip: true, vflip: false, banco: 0, prioridade: false },
+          ],
+          ocorrencias_por_tile: [
+            { tile: 0, celulas: [1, 2] },
+            { tile: 1, celulas: [0, 3] },
+          ],
+          tiles_sem_uso: [],
+          escopo: "ocorrências contadas só dentro deste mapa verificado (4 células)",
+        },
+        camada: {
+          largura_px: 16,
+          altura_px: 16,
+          pixels_sha256: "55".repeat(32),
+          png_data_url: "data:image/png;base64,BBB",
+          recusada: null,
+        },
+      },
+    ],
+    sem_vinculo: [],
+    recusados: [],
+  };
+
+  const CLIQUE_PEQUENO = {
+    rom_sha256: "aa".repeat(32),
+    struct_offset: 0x25780,
+    x: 15,
+    y: 15,
+    celula: { indice: 3, col: 1, row: 1, tile: 1, hflip: true, vflip: false, banco: 0, prioridade: false },
+    fonte: { tile: 1, linha: 5, coluna: 6, indice: 11 },
+    ocorrencias: [
+      { indice: 0, col: 0, row: 0, tile: 1, hflip: false, vflip: false, banco: 0, prioridade: false },
+      { indice: 3, col: 1, row: 1, tile: 1, hflip: true, vflip: false, banco: 0, prioridade: false },
+    ],
+  };
+
+  async function painelComContextoCarregado(rom = "/roms/mista.bin") {
+    mocked.rexResourceList.mockResolvedValue(["aa".repeat(32), [SUMMARY, SUMMARY_APLIB]]);
+    mocked.rexResourcePreview.mockResolvedValue(PREVIEW);
+    mocked.rexResourceContext.mockResolvedValue(CONTEXTO_PEQUENO);
+    await act(async () => {
+      root.render(<CompressedResourcePanel />);
+      await flush();
+    });
+    const input = findByTestId(container, "rex-resource-rom-input") as HTMLInputElement;
+    await act(async () => {
+      typeValue(input, rom);
+      await flush();
+    });
+    await act(async () => {
+      findByTestId(container, "rex-resource-verify").click();
+      await flush();
+      await flush();
+    });
+    const select = findByTestId(container, "rex-resource-select") as HTMLSelectElement;
+    await act(async () => {
+      select.value = "c8cc8";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findByTestId(container, "rex-context-load").click();
+      await flush();
+      await flush();
+    });
+  }
+
+  it("seleção na camada composta entra na fila canônica pelo pixel de fonte", async () => {
+    await painelComContextoCarregado();
+    expect(mocked.rexResourceContext).toHaveBeenCalledWith("/roms/mista.bin");
+    const camada = findByTestId(container, "rex-context-layer") as HTMLImageElement;
+    camada.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 32,
+      height: 32,
+      right: 32,
+      bottom: 32,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    await campo("rex-resource-paint-index", "3");
+    mocked.rexResourceContextHit.mockResolvedValue(CLIQUE_PEQUENO);
+    await act(async () => {
+      camada.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 31, clientY: 31 }));
+      await flush();
+      await flush();
+    });
+    // (31,31) num retângulo 32x32 de uma camada 16x16 == pixel natural (15,15).
+    expect(mocked.rexResourceContextHit).toHaveBeenCalledWith("/roms/mista.bin", 0x25780, 15, 15);
+    expect(findByTestId(container, "rex-context-occurrences").textContent).toContain(
+      "2 ocorrências neste mapa verificado"
+    );
+
+    await act(async () => {
+      findByTestId(container, "rex-context-queue-edit").click();
+      await flush();
+    });
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+    expect(await aplicarESobFila()).toEqual([{ tile: 1, row: 5, col: 6, index: 3 }]);
+  });
+
+  it("recurso selecionado que não é o TileSet da imagem não deixa editar em silêncio", async () => {
+    await painelComContextoCarregado("/roms/mista.bin");
+    const select = findByTestId(container, "rex-resource-select") as HTMLSelectElement;
+    await act(async () => {
+      select.value = "4008";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await flush();
+    });
+    const camada = findByTestId(container, "rex-context-layer") as HTMLImageElement;
+    camada.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 16,
+      height: 16,
+      right: 16,
+      bottom: 16,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    mocked.rexResourceContextHit.mockResolvedValue(CLIQUE_PEQUENO);
+    await act(async () => {
+      camada.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 15, clientY: 15 }));
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findByTestId(container, "rex-context-queue-edit").click();
+      await flush();
+    });
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(
+      /^nenhuma edição/
+    );
+    expect(mocked.rexResourceApplyEdit).not.toHaveBeenCalled();
+    expect(findByTestId(container, "rex-context-notice").textContent).toContain("0xc8cc8");
   });
 });

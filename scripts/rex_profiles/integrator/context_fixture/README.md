@@ -158,8 +158,67 @@ de teste):
   recomposta **exatamente** as 4 posições previstas — nem uma a mais, nem uma a
   menos.
 - Duração por etapa (diagnóstico, não alegação): descobrir + conferir estruturas
-  ~0,4 ms, compor camada ~6,6 ms, clique/projeção ~0,1 ms, compartilhamento
-  ~0,2 ms; total do aceite de leitura ~8,4 s, do de edição ~17,4 s.
+  ~0,4 ms, compor camada ~6,7 ms, clique/projeção ~0,1 ms, compartilhamento
+  ~0,2 ms, superfície do contexto ~988 ms. Total dos três testes ignorados
+  **1,20 s** (`cargo test ... --ignored`, medido 2026-09-27).
+
+### O custo que os testes encontraram (e como ficou)
+
+A perna de contexto levou **42,65 s** na primeira execução. Não é o modelo: é
+`localizar_cadeias_imagem`, que para cada janela de 2 bytes consultava por
+`Vec::contains` as listas de candidatos — 196 mil janelas × 3 383 candidatos de
+paleta. Trocando as três listas por `HashSet` (mesma definição, custo de consulta
+diferente), a varredura caiu para **~92 ms** e `contexto_da_rom`, para
+**~206 ms** na ROM inteira de 384 KB:
+
+| etapa (384 KB, perfil dev) | antes | depois |
+|---|---|---|
+| `localizar_cadeias_imagem` | 8,32 s | 92 ms |
+| `contexto_da_rom` (passada completa) | 8,45 s | 206 ms |
+| aceite de leitura (3 testes `--ignored`) | 51,3 s | 1,20 s |
+
+Duas coisas prendem isso no lugar, sem depender de relógio:
+`localizacao_de_cadeia_nao_depende_da_ordem_nem_de_duplicatas_dos_candidatos`
+(que é o invariante que o `HashSet` preserva) e a sonda `#[ignore]`
+`sonda_de_custo_da_descoberta_na_fixture`, que imprime a duração de cada fase.
+Asserção de wall-clock seria flaky e não foi escrita.
+
+## Superfície publicada (IPC somente leitura) e UI contextual
+
+`rex_resource_context(rom_path)` devolve `ContextoRom`; `rex_resource_context_hit`
+devolve a resolução de um pixel da camada. Nenhum dos dois escreve: a escrita
+continua sendo `rex_resource_apply_edit`, que exige `expected_rom_sha256` — a UI
+passa o `rom_sha256` que o próprio contexto publicou, e é assim que "revalidar
+identidade ao editar" deixa de ser intenção.
+
+O que a superfície publica, com a classe de proveniência de cada vínculo:
+
+- identidade dos três recursos de cada imagem (header, stream, codec lido do
+  header, `plain_len`, `stream_len` **medido** no decode, SHA-256 do plano);
+- o que foi conferido (`conferido`) e o que isso **não** prova (`nao_prova`),
+  incluindo que a prévia é camada reconstruída e não framebuffer;
+- geometria do mapa, célula por célula (tile, flips, banco, prioridade) e as
+  ocorrências agrupadas por tile, com escopo explícito do mapa;
+- o que foi **recusado**: recurso verificado sem ponteiro (`sem_vinculo`) e trinca
+  que não verifica (`recusados`) — nada desaparece em silêncio;
+- camada acima do orçamento (`max_pixels_por_camada`, padrão 2048×2048): recusa a
+  prévia com o motivo e mantém células, ocorrências e identidade publicados.
+
+Na frente, `RexImageContextPanel` mostra a camada composta com zoom inteiro
+(1/2/3/4/6/8) e `image-rendering: pixelated`, destaca a célula clicada e as
+irmãs, e nomeia o tile de origem no sheet do TileSet. A UI **não** sabe
+geometria: converte o ponteiro em pixel natural (`ponteiroParaPixel`, que desfaz
+zoom inteiro, `max-width` e escala de página pela razão dos retângulos) e pergunta
+ao núcleo. Enfileirar uma edição exige que o recurso selecionado seja o TileSet
+da imagem; se não for, a frente recusa e a fila não muda. Não existe controle de
+"editar só esta ocorrência" — sem duplicar e realocar tile, isso seria
+destrutivo.
+
+Prova de frente (36 testes em 3 arquivos, com mutação conferida): remover o
+guard de sequência faz cair "clique obsoleto"; enfileirar pelo pixel de tela em
+vez do de fonte faz cair as duas pernas de edição; arredondar em vez de recusar a
+borda faz cair as três pernas de geometria; e tirar o reset por troca de ROM faz
+cair "trocar de ROM descarta contexto, seleção e pedidos exibidos".
 
 ### O aceite pode falhar? (conferência por mutação)
 

@@ -948,3 +948,140 @@ export function rexResourceApplyEdit(
     expectedRomSha256,
   });
 }
+
+// ---------------------------------------------------------------------------
+// REX contexto de imagem (somente leitura) — contrato v1, Experimental
+//
+// Espelha `rex_context.rs`. Nada aqui escreve: a edição continua sendo
+// `rexResourceApplyEdit`, que revalida a identidade da ROM. A UI não envia
+// geometria nenhuma — dimensões, células, flips e ocorrências vêm do núcleo,
+// e o clique é resolvido por ele a partir do pixel natural da camada.
+// ---------------------------------------------------------------------------
+
+/** De onde veio um vínculo. `assistida` o núcleo nunca autodeclara. */
+export type RexProveniencia = "verificada" | "assistida" | "desconhecida";
+
+/** Identidade lida da ROM: offset, codec do header e SHA do conteúdo decodificado. */
+export interface RexIdentidadeRecurso {
+  header_offset: number;
+  stream_offset: number;
+  codec: string;
+  plain_len: number;
+  stream_len: number;
+  plain_sha256: string;
+}
+
+/** Uma célula do TileMap, já decomposta como o VDP a lê. */
+export interface RexCelula {
+  indice: number;
+  col: number;
+  row: number;
+  tile: number;
+  hflip: boolean;
+  vflip: boolean;
+  banco: number;
+  prioridade: boolean;
+}
+
+export interface RexOcorrenciasTile {
+  tile: number;
+  celulas: number[];
+}
+
+export interface RexMapaPublicado {
+  cols: number;
+  rows: number;
+  largura_px: number;
+  altura_px: number;
+  celulas: RexCelula[];
+  ocorrencias_por_tile: RexOcorrenciasTile[];
+  tiles_sem_uso: number[];
+  /** Até onde a contagem de ocorrências vale: um mapa, nunca a ROM. */
+  escopo: string;
+}
+
+export interface RexCamadaPublicada {
+  largura_px: number;
+  altura_px: number;
+  pixels_sha256: string | null;
+  png_data_url: string | null;
+  /** Por que a prévia não está aqui, quando não está. */
+  recusada: string | null;
+}
+
+export interface RexContextoImagem {
+  struct_offset: number;
+  proveniencia: RexProveniencia;
+  /** O que foi conferido — sem isto, "verificada" seria rótulo vazio. */
+  conferido: string[];
+  /** O que a verificação acima não prova. */
+  nao_prova: string[];
+  paleta: RexIdentidadeRecurso;
+  tileset: RexIdentidadeRecurso;
+  tilemap: RexIdentidadeRecurso;
+  mapa: RexMapaPublicado;
+  camada: RexCamadaPublicada;
+}
+
+/** Recurso verificado por decode que nenhum ponteiro `Image` alcança. */
+export interface RexRecursoSemVinculo {
+  tipo: string;
+  proveniencia: RexProveniencia;
+  motivo: string;
+  identidade: RexIdentidadeRecurso;
+}
+
+/** Trinca que parece um struct `Image` mas cujo alvo não verifica. */
+export interface RexVinculoRecusado {
+  struct_offset: number;
+  proveniencia: RexProveniencia;
+  codigo: string;
+  motivo: string;
+}
+
+export interface RexContextoRom {
+  rom_sha256: string;
+  rom_len: number;
+  escopo: string;
+  limite_trabalho: { max_pixels_por_camada: number };
+  imagens: RexContextoImagem[];
+  sem_vinculo: RexRecursoSemVinculo[];
+  recusados: RexVinculoRecusado[];
+}
+
+/** Pixel do TileSet que alimenta o ponto clicado da camada, já sem flip. */
+export interface RexPixelDaFonte {
+  tile: number;
+  linha: number;
+  coluna: number;
+  indice: number;
+}
+
+export interface RexResolucaoClique {
+  rom_sha256: string;
+  struct_offset: number;
+  x: number;
+  y: number;
+  celula: RexCelula;
+  fonte: RexPixelDaFonte;
+  /** Irmãs da célula no **deste** mapa verificado. */
+  ocorrencias: RexCelula[];
+}
+
+export function rexResourceContext(romPath: string): Promise<RexContextoRom> {
+  return invoke<RexContextoRom>("rex_resource_context", { romPath });
+}
+
+export function rexResourceContextHit(
+  romPath: string,
+  structOffset: number,
+  x: number,
+  y: number
+): Promise<RexResolucaoClique> {
+  return invoke<RexResolucaoClique>("rex_resource_context_hit", {
+    romPath,
+    structOffset,
+    x,
+    y,
+  });
+}

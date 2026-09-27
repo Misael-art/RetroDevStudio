@@ -7,10 +7,11 @@ import {
   type RexResourceResult,
   type RexResourceSummary,
 } from "../../core/ipc/toolsService";
+import { RexImageContextPanel } from "./RexImageContextPanel";
+import { PALETTE_ENTRIES, TILE_PX, TILESET_PER_ROW } from "./rexLayerGeometry";
 
-const TILE = 8;
-const PER_ROW = 16;
-const PALETTE_ENTRIES = 16;
+const TILE = TILE_PX;
+const PER_ROW = TILESET_PER_ROW;
 
 function parseOffset(value: string): number | null {
   const trimmed = value.trim().replace(/^0x/i, "");
@@ -231,6 +232,25 @@ export function CompressedResourcePanel({
     []
   );
 
+  /** Prévia do recurso atualmente selecionado, para o painel de contexto
+   *  destacar o tile de origem. Sem prévia do recurso certo, não há sheet. */
+  const sheetPreview = useMemo(() => {
+    if (
+      !preview ||
+      preview.stream_offset !== selected ||
+      preview.preview_data_url == null ||
+      preview.preview_width == null ||
+      preview.preview_height == null
+    ) {
+      return null;
+    }
+    return {
+      data_url: preview.preview_data_url,
+      largura_px: preview.preview_width,
+      altura_px: preview.preview_height,
+    };
+  }, [preview, selected]);
+
   return (
     <div className="flex flex-col gap-3" data-testid="rex-resource-panel">
       <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[11px] text-[#a6adc8]">
@@ -304,6 +324,15 @@ export function CompressedResourcePanel({
           </select>
         </label>
       )}
+
+      <RexImageContextPanel
+        romPath={romPath}
+        romSha={romSha}
+        tilesetSelecionado={selected}
+        sheetPreview={sheetPreview}
+        onQueuePaint={queuePaint}
+        logMessage={logMessage}
+      />
 
       {preview?.preview_data_url && (
         <div className="flex flex-col gap-2">
