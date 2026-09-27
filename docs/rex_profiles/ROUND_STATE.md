@@ -410,9 +410,31 @@ e `codecs/` (B) do CONTRACTS v1.
   **success** (`desktop-smoke`), run `36315702070`. O que esse verde **não** cobre
   continua sendo os dois aceites `#[ignore]` e o cenário `rex-aplib-byor-effect`,
   que consomem BYOR — BYOR não é dependência provisionável, então o CI atesta o
-  contrato, não esta ROM. O commit que registra este parágrafo é só texto e não
-  recebeu consulta própria: o verde aplicável à árvore testada é o de `9a4335f`, e
-  pontas só de texto já observaram verde antes (`19c880f`, run `36305001760`).
+  contrato, não esta ROM. Este parágrafo foi escrito no commit só de texto
+  `3326228`, então ficou sem consulta própria (precedente: `19c880f`, run
+  `36305001760`). **Revisado em 2026-09-27 a pedido do operador:** o HEAD final
+  `9e63adc` foi consultado pontualmente, e a consulta está registrada abaixo.
+
+  **Consulta pontual do HEAD final `9e63adcc756d6de8db5a11c0adc06b68ae8807d2`.**
+  `git push origin codex/rex-integrator-aplib-decode` → fast-forward
+  `9a4335f..9e63adc` (2 commits de texto: `3326228`, `9e63adc`; nenhum código de
+  produto ou de teste nesse intervalo). Checks vinculados ao SHA, lidos em
+  `GET /repos/Misael-art/RetroDevStudio/commits/9e63adcc…/check-runs`:
+  `validate` → **completed / success** (job `108614432239`, 20m56s) e
+  `linux-validate` → **completed / success** (job `108614432149`, 12m40s); run
+  `36317340061`, encerrado 2026-09-27T12:17:25Z
+  (`https://github.com/Misael-art/RetroDevStudio/actions/runs/36317340061`).
+  `Desktop E2E` **não** existe nesse SHA, e isso não é falha nem PASS emprestado:
+  o workflow filtra por caminhos (`.github/workflows/desktop-e2e.yml` →
+  `src/**`, `src-tauri/**`, `scripts/e2e-tauri-build-run.mjs`,
+  `scripts/build.mjs`, `package.json`, `package-lock.json`) e `9e63adc` tocou só
+  `docs/06_AI_MEMORY_BANK.md`, `docs/rex_profiles/ROUND_STATE.md` e o
+  `manifest.json` do pacote. **Regra terminal adotada:** esta é a última consulta
+  de CI da rodada; o commit que registra esta célula é só texto e, por construção,
+  não recebe consulta própria — o contrário implicaria uma consulta por commit de
+  registro, ao infinito. Nenhum observador ficou de pé: o único `gh run watch`
+  desta sessão terminou sozinho e `ps -eo args | grep 'gh run'` não retorna
+  processo vivo.
 
   **Limites, parte da célula.** Continua **um** dos **4** recursos aPLib de **uma**
   ROM BYOR; `0x2e4d4`/`0x2f65a` ineditáveis em 1 pixel nos dois domínios; execução
