@@ -12,7 +12,9 @@
 //! Non existe o "offset 0 como sinal de erro".
 
 pub mod error;
+mod md_common;
 pub mod md_linear;
+pub mod md_ssf2;
 pub mod region;
 pub mod state;
 
