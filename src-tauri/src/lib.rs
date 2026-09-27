@@ -2468,6 +2468,36 @@ async fn rex_resource_preview(
     .await
 }
 
+/// Contexto somente leitura de uma ROM: vínculos `Image` → paleta/TileSet/
+/// TileMap verificados por ponteiro seguido, com identidade (SHA-256 do decode),
+/// dimensões, prévia da camada composta e ocorrências de cada tile **deste
+/// mapa**. Nada aqui escreve: a edição continua sendo `rex_resource_apply_edit`,
+/// que revalida a identidade da ROM antes de tocar em qualquer byte.
+#[tauri::command]
+async fn rex_resource_context(
+    rom_path: String,
+) -> Result<tools::reverse::decomp::rex_context::ContextoRom, String> {
+    run_heavy_result_command("rex_resource_context", move || {
+        tools::reverse::decomp::rex_context::contexto_da_rom_path(&rom_path)
+    })
+    .await
+}
+
+/// Clique na camada composta, resolvido pelo núcleo: célula, flips, banco, pixel
+/// da fonte (tile/linha/coluna/índice) e as células irmãs do mesmo tile.
+#[tauri::command]
+async fn rex_resource_context_hit(
+    rom_path: String,
+    struct_offset: u64,
+    x: u64,
+    y: u64,
+) -> Result<tools::reverse::decomp::rex_context::ResolucaoClique, String> {
+    run_heavy_result_command("rex_resource_context_hit", move || {
+        tools::reverse::decomp::rex_context::contexto_clique_path(&rom_path, struct_offset, x, y)
+    })
+    .await
+}
+
 #[tauri::command]
 async fn rex_resource_apply_edit(
     rom_path: String,
@@ -5129,6 +5159,8 @@ pub fn run() {
             rex_inspection_edit_sonic_tiles,
             rex_resource_list,
             rex_resource_preview,
+            rex_resource_context,
+            rex_resource_context_hit,
             rex_resource_apply_edit,
             list_project_assets,
             read_project_asset_bytes,

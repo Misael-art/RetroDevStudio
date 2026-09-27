@@ -20,7 +20,11 @@
 
 use super::rex_aplib::{aplib_decode, AplibLimits};
 use super::rex_codecs::CodecError;
-use super::rex_resources::{md_color_word_to_rgb, md_read_pixel_index, HeaderCompression};
+use super::rex_resources::{
+    md_color_word_to_rgb, md_read_pixel_index, scan_tileset_headers, verify_resource_set,
+    HeaderCompression, RecursoVerificado, TransactionLimits,
+};
+use super::rom_library::sha256_hex;
 
 /// Cabeçalho TileMap do SGDK: `{u16 compression; u16 w; u16 h; u32 *data}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +277,13 @@ pub fn localizar_cadeias_imagem(
     if rom.len() < 12 {
         return out;
     }
+    // Conjunto, não lista linear: uma ROM de 384 KB tem ~196 mil janelas e
+    // milhares de candidatos de paleta. Com `Vec::contains` dentro do laço a
+    // varredura custou 40 s na fixture (medido); com hash custa milissegundos,
+    // pela mesma definição.
+    let paletas = std::collections::HashSet::<usize>::from_iter(paletas.iter().copied());
+    let tilesets = std::collections::HashSet::<usize>::from_iter(tilesets.iter().copied());
+    let tilemaps = std::collections::HashSet::<usize>::from_iter(tilemaps.iter().copied());
     for struct_offset in (0..=rom.len() - 12).step_by(2) {
         let palette_header = u32_be(rom, struct_offset) as usize;
         let tileset_header = u32_be(rom, struct_offset + 4) as usize;
@@ -563,6 +574,705 @@ pub fn compor_camada(
         height,
         rgba,
     })
+}
+
+// ======================= publicação para o IPC (somente leitura) =============
+//
+// Tipos daqui são o contrato do comando `rex_resource_context`. Eles não sabem
+// nada de interface: só publicam o que as funções acima já conferiram, com a
+// identidade de cada recurso (offset + codec lido do header + SHA-256 do
+// conteúdo decodificado) para que nenhuma etapa posterior precise pressupor o
+// que viu.
+
+/// De onde veio um vínculo — as três classes que o briefing exige que sejam
+/// rotuladas no contexto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Proveniencia {
+    /// O ponteiro existe no artefato, foi seguido, e o recurso alcançado
+    /// decodifica para o tamanho que o próprio header declara.
+    Verificada,
+    /// Vínculo declarado de fora do artefato (caminho do operador). O núcleo
+    /// **nunca autodeclara** esta classe: ela existe para a UI poder rotular uma
+    /// hipótese do usuário sem confundí-la com evidência — e uma edição assim
+    /// continua passando pela transação, que revalida a identidade da ROM.
+    Assistida,
+    /// Nada no ROM sustenta o vínculo. Aqui isso **recusa** a associação em vez
+    /// de adivinhar por proximidade de arquivo ou por tamanho.
+    Desconhecida,
+}
+
+/// Orçamento de trabalho de uma montagem de contexto: o teto do que o núcleo
+/// aceita calcular por pedido, em vez de estourar memória ou travar a UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LimiteTrabalho {
+    /// Camadas maiores que isto continuam com células, ocorrências e identidade
+    /// publicados; só a prévia é recusada, com o motivo no lugar.
+    pub max_pixels_por_camada: usize,
+}
+
+impl Default for LimiteTrabalho {
+    fn default() -> Self {
+        // 2048x2048 pixels = 16 MiB de RGBA por camada. Um TileMap 4096x1024
+        // células do VDP não cabe aqui, e o contexto dele ainda é útil.
+        Self {
+            max_pixels_por_camada: 2048 * 2048,
+        }
+    }
+}
+
+/// Identidade verificada de um recurso: onde está, como foi lido e qual é o
+/// conteúdo. `stream_len` é o consumo **medido** no decode, não o que o header
+/// declara; `plain_sha256` é o que a transação de escrita vai reencontrar.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct IdentidadeRecurso {
+    pub header_offset: u64,
+    pub stream_offset: u64,
+    pub codec: String,
+    pub plain_len: u64,
+    pub stream_len: u64,
+    pub plain_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CelulaPublicada {
+    /// Índice linear na ordem do VDP (linha primeiro).
+    pub indice: u32,
+    pub col: u32,
+    pub row: u32,
+    pub tile: u32,
+    pub hflip: bool,
+    pub vflip: bool,
+    pub banco: u8,
+    pub prioridade: bool,
+}
+
+/// Todas as células deste mapa que usam um mesmo tile.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct OcorrenciasTile {
+    pub tile: u32,
+    /// Índices lineares, na ordem do mapa.
+    pub celulas: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct MapaPublicado {
+    pub cols: u32,
+    pub rows: u32,
+    pub largura_px: u32,
+    pub altura_px: u32,
+    pub celulas: Vec<CelulaPublicada>,
+    pub ocorrencias_por_tile: Vec<OcorrenciasTile>,
+    /// Tiles do TileSet que nenhuma célula deste mapa usa.
+    pub tiles_sem_uso: Vec<u32>,
+    /// Até onde a contagem vale: sempre um mapa específico, nunca a ROM.
+    pub escopo: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CamadaPublicada {
+    pub largura_px: u32,
+    pub altura_px: u32,
+    pub pixels_sha256: Option<String>,
+    pub png_data_url: Option<String>,
+    /// Por que a prévia não está aqui, quando não está.
+    pub recusada: Option<String>,
+}
+
+/// Uma imagem composta por vínculo verificado.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ContextoImagem {
+    pub struct_offset: u64,
+    pub proveniencia: Proveniencia,
+    /// O que foi conferido, em frases legíveis. Uma classe `Verificada` sem
+    /// esta lista seria um rótulo vazio.
+    pub conferido: Vec<String>,
+    /// O que a verificação acima **não** prova.
+    pub nao_prova: Vec<String>,
+    pub paleta: IdentidadeRecurso,
+    pub tileset: IdentidadeRecurso,
+    pub tilemap: IdentidadeRecurso,
+    pub mapa: MapaPublicado,
+    pub camada: CamadaPublicada,
+}
+
+/// Recurso verificado que nenhum ponteiro alcança: identidade conferida,
+/// associação não.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RecursoSemVinculo {
+    pub tipo: &'static str,
+    pub proveniencia: Proveniencia,
+    pub motivo: String,
+    pub identidade: IdentidadeRecurso,
+}
+
+/// Trinca que parece um struct `Image`, mas whose algum alvo não verifica.
+/// Registrada em vez de sumir: prévia vazia sem explicação é o pior estado
+/// possível para quem edita.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct VinculoRecusado {
+    pub struct_offset: u64,
+    pub proveniencia: Proveniencia,
+    pub codigo: String,
+    pub motivo: String,
+}
+
+/// Resposta do comando de contexto.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ContextoRom {
+    pub rom_sha256: String,
+    pub rom_len: u64,
+    /// Escopo da varredura de recursos, como o tronco o mede.
+    pub escopo: String,
+    pub limite_trabalho: LimiteTrabalho,
+    pub imagens: Vec<ContextoImagem>,
+    pub sem_vinculo: Vec<RecursoSemVinculo>,
+    pub recusados: Vec<VinculoRecusado>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PixelDaFontePublicado {
+    pub tile: u32,
+    pub linha: u32,
+    pub coluna: u32,
+    /// Índice de paleta 0..=15 lido do tile decodificado.
+    pub indice: u8,
+}
+
+/// Clique resolvido pelo núcleo: a UI converte o ponteiro em coordenada da
+/// imagem e não decide geometria nenhuma.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ResolucaoClique {
+    pub rom_sha256: String,
+    pub struct_offset: u64,
+    pub x: u32,
+    pub y: u32,
+    pub celula: CelulaPublicada,
+    pub fonte: PixelDaFontePublicado,
+    /// Irmãs da mesma célula no **deste** mapa verificado.
+    pub ocorrencias: Vec<CelulaPublicada>,
+}
+
+fn plain_das_words(words: &[u16]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(words.len() * 2);
+    for w in words {
+        out.extend_from_slice(&w.to_be_bytes());
+    }
+    out
+}
+
+fn identidade_tileset(recurso: &RecursoVerificado) -> IdentidadeRecurso {
+    let candidata = recurso.candidate();
+    IdentidadeRecurso {
+        header_offset: candidata.header_offset as u64,
+        stream_offset: candidata.stream_offset as u64,
+        codec: candidata.compression.as_str().to_string(),
+        plain_len: recurso.decoded().len() as u64,
+        stream_len: recurso.bytes_consumed() as u64,
+        plain_sha256: sha256_hex(recurso.decoded()),
+    }
+}
+
+fn identidade_tilemap(mapa: &VerifiedTilemap) -> IdentidadeRecurso {
+    let plain = plain_das_words(&mapa.cells);
+    IdentidadeRecurso {
+        header_offset: mapa.candidate.header_offset as u64,
+        stream_offset: mapa.candidate.stream_offset as u64,
+        codec: mapa.candidate.compression.as_str().to_string(),
+        plain_len: plain.len() as u64,
+        stream_len: mapa.bytes_consumed as u64,
+        plain_sha256: sha256_hex(&plain),
+    }
+}
+
+fn identidade_palette(paleta: &VerifiedPalette) -> IdentidadeRecurso {
+    IdentidadeRecurso {
+        header_offset: paleta.candidate.header_offset as u64,
+        stream_offset: paleta.candidate.stream_offset as u64,
+        // O header `Palette` do rescomp não tem campo de compressão: os bytes do
+        // ROM são os literais das palavras 68k.
+        codec: HeaderCompression::None.as_str().to_string(),
+        plain_len: paleta.bytes_consumed as u64,
+        stream_len: paleta.bytes_consumed as u64,
+        plain_sha256: sha256_hex(&plain_das_words(&paleta.words)),
+    }
+}
+
+fn celula_publicada(indice: usize, celula: &Celula) -> CelulaPublicada {
+    CelulaPublicada {
+        indice: indice as u32,
+        col: celula.col as u32,
+        row: celula.row as u32,
+        tile: celula.tile as u32,
+        hflip: celula.hflip,
+        vflip: celula.vflip,
+        banco: celula.bank,
+        prioridade: celula.priority,
+    }
+}
+
+/// O que um vínculo `Verificado` não prova — sempre publicado junto, para a
+/// afirmação viajar com a sua fronteira.
+fn nao_prova_do_vinculo() -> Vec<String> {
+    vec![
+        "Verificado prova que os bytes existem e se associam assim no ROM. Não \
+         prova que o jogo carregue ou exiba este recurso, nem em que tela."
+            .to_string(),
+        "Nada aqui foi observado no VDP: símbolo do linker, carregamento em \
+         runtime e uso real do ponteiro continuam fora desta prova."
+            .to_string(),
+        "A prévia é a camada reconstruída, não o framebuffer completo: oclusão \
+         por sprites, janela e o bit de prioridade (BG contra sprites) não são \
+         modelados, e um índice de tile na faixa de sistema do VDP pode ser \
+         numericamente válido sem vir deste TileSet."
+            .to_string(),
+    ]
+}
+
+fn png_da_camada(camada: &CamadaComposta) -> Result<Vec<u8>, CodecError> {
+    let image = image::RgbaImage::from_raw(
+        camada.width as u32,
+        camada.height as u32,
+        camada.rgba.clone(),
+    )
+    .ok_or_else(|| {
+        CodecError::new(
+            "overflow",
+            format!(
+                "camada {}x{} não coube no codificador PNG",
+                camada.width, camada.height
+            ),
+        )
+    })?;
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|e| {
+            CodecError::new(
+                "invalid_reference",
+                format!("falha ao codificar a prévia PNG: {e}"),
+            )
+        })?;
+    Ok(png)
+}
+
+/// Tudo que o produto descobre sozinho numa ROM, numa passada.
+struct Descoberta {
+    recursos: Vec<RecursoVerificado>,
+    /// Escopo medido pelo tronco de recursos.
+    escopo: String,
+    paletas: Vec<PaletteCandidate>,
+    mapas: Vec<VerifiedTilemap>,
+    cadeias: Vec<CadeiaImagem>,
+}
+
+fn descobrir(rom: &[u8], transacao: &TransactionLimits) -> Result<Descoberta, CodecError> {
+    let set = verify_resource_set(rom, transacao)?;
+    let mapas = scan_tilemap_headers(rom)
+        .iter()
+        .filter_map(|c| verificar_tilemap(rom, c, &transacao.aplib_decode).ok())
+        .collect::<Vec<_>>();
+    let paletas = scan_palette_headers(rom);
+    let cadeias = localizar_cadeias_imagem(
+        rom,
+        &paletas.iter().map(|c| c.header_offset).collect::<Vec<_>>(),
+        &scan_tileset_headers(rom)
+            .iter()
+            .map(|c| c.header_offset)
+            .collect::<Vec<_>>(),
+        &mapas
+            .iter()
+            .map(|m| m.candidate.header_offset)
+            .collect::<Vec<_>>(),
+    );
+    Ok(Descoberta {
+        recursos: set.resources,
+        escopo: set.analyzed_scope,
+        paletas,
+        mapas,
+        cadeias,
+    })
+}
+
+impl Descoberta {
+    /// A cadeia verificada num offset de struct, ou a recusa estruturada.
+    fn cadeia(&self, struct_offset: usize) -> Result<&CadeiaImagem, CodecError> {
+        self.cadeias
+            .iter()
+            .find(|c| c.struct_offset == struct_offset)
+            .ok_or_else(|| {
+                CodecError::new(
+                    "invalid_reference",
+                    format!(
+                        "{:#x} não é um vínculo verificado nesta ROM: os três ponteiros não \
+                         alcançam, na ordem do struct `Image`, uma paleta, um TileSet e um \
+                         TileMap que decodifiquem",
+                        struct_offset
+                    ),
+                )
+            })
+    }
+}
+
+/// Contexto de uma única cadeia `Image`, resolvido a partir dos bytes.
+fn contexto_da_cadeia(
+    rom: &[u8],
+    cadeia: &CadeiaImagem,
+    descoberta: &Descoberta,
+    trabalho: &LimiteTrabalho,
+) -> Result<ContextoImagem, CodecError> {
+    let recurso = descoberta
+        .recursos
+        .iter()
+        .find(|r| r.candidate().header_offset == cadeia.tileset_header)
+        .ok_or_else(|| {
+            CodecError::new(
+                "invalid_reference",
+                format!(
+                    "o TileSet em {:#x} apontado por {:#x} não verifica nesta ROM: codec sem \
+                     decoder nesta frente, tamanho declarado divergente ou stream sobreposto",
+                    cadeia.tileset_header, cadeia.struct_offset
+                ),
+            )
+        })?;
+    let mapa = descoberta
+        .mapas
+        .iter()
+        .find(|m| m.candidate.header_offset == cadeia.tilemap_header)
+        .ok_or_else(|| {
+            CodecError::new(
+                "invalid_reference",
+                format!(
+                    "o TileMap em {:#x} apontado por {:#x} não decodifica para o tamanho que o \
+                     próprio header declara",
+                    cadeia.tilemap_header, cadeia.struct_offset
+                ),
+            )
+        })?;
+    let candidata = descoberta
+        .paletas
+        .iter()
+        .find(|c| c.header_offset == cadeia.palette_header)
+        .ok_or_else(|| {
+            CodecError::new(
+                "invalid_reference",
+                format!(
+                    "a paleta em {:#x} apontada por {:#x} declara um stream que não cabe na ROM",
+                    cadeia.palette_header, cadeia.struct_offset
+                ),
+            )
+        })?;
+    let paleta = verificar_palette(rom, candidata)?;
+
+    let celulas = celulas_do_mapa(mapa)?;
+    let publicados: Vec<CelulaPublicada> = celulas
+        .iter()
+        .enumerate()
+        .map(|(i, c)| celula_publicada(i, c))
+        .collect();
+
+    let mut por_tile: std::collections::BTreeMap<usize, Vec<u32>> =
+        std::collections::BTreeMap::new();
+    for (i, c) in celulas.iter().enumerate() {
+        por_tile.entry(c.tile).or_default().push(i as u32);
+    }
+    let ocorrencias_por_tile = por_tile
+        .iter()
+        .map(|(tile, idx)| OcorrenciasTile {
+            tile: *tile as u32,
+            celulas: idx.clone(),
+        })
+        .collect();
+    let num_tiles = recurso.decoded().len() / 32;
+    let tiles_sem_uso = (0..num_tiles)
+        .filter(|t| !por_tile.contains_key(t))
+        .map(|t| t as u32)
+        .collect();
+
+    let (largura_px, altura_px) = (mapa.candidate.w * TILE_PX, mapa.candidate.h * TILE_PX);
+    let pixels = largura_px.checked_mul(altura_px).ok_or_else(|| {
+        CodecError::new(
+            "overflow",
+            format!(
+                "o TileMap em {:#x} tem dimensões que não cabem em usize",
+                mapa.candidate.header_offset
+            ),
+        )
+    })?;
+    let camada = if pixels > trabalho.max_pixels_por_camada {
+        CamadaPublicada {
+            largura_px: largura_px as u32,
+            altura_px: altura_px as u32,
+            pixels_sha256: None,
+            png_data_url: None,
+            recusada: Some(format!(
+                "prévia da camada recusada: {largura_px}x{altura_px} = {pixels} pixels passam o \
+                 orçamento de trabalho de {} pixels por camada. Células, ocorrências e \
+                 identidade continuam publicados.",
+                trabalho.max_pixels_por_camada
+            )),
+        }
+    } else {
+        let composta = compor_camada(recurso.decoded(), mapa, &paleta)?;
+        let png = png_da_camada(&composta)?;
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        CamadaPublicada {
+            largura_px: composta.width as u32,
+            altura_px: composta.height as u32,
+            pixels_sha256: Some(sha256_hex(&composta.rgba)),
+            png_data_url: Some(format!("data:image/png;base64,{}", BASE64.encode(&png))),
+            recusada: None,
+        }
+    };
+
+    let conferido = vec![
+        format!(
+            "Struct `Image` em {:#x}: os três ponteiros — paleta {:#x}, tileset {:#x}, tilemap \
+             {:#x}, nesta ordem — foram seguidos até headers candidatos. Nada foi associado por \
+             proximidade de arquivo nem por tamanho.",
+            cadeia.struct_offset,
+            cadeia.palette_header,
+            cadeia.tileset_header,
+            cadeia.tilemap_header
+        ),
+        format!(
+            "TileSet em {:#x} decodifica com o codec lido do header ({}) para exatamente {} \
+             bytes = {} tiles de 32 bytes.",
+            cadeia.tileset_header,
+            recurso.candidate().compression.as_str(),
+            recurso.decoded().len(),
+            num_tiles
+        ),
+        format!(
+            "TileMap em {:#x} decodifica ({}) para exatamente {} bytes = {}x{} células \
+             ({}x{} pixels), na ordem do VDP.",
+            cadeia.tilemap_header,
+            mapa.candidate.compression.as_str(),
+            mapa.cells.len() * 2,
+            mapa.candidate.w,
+            mapa.candidate.h,
+            largura_px,
+            altura_px
+        ),
+        format!(
+            "Palette em {:#x} tem {} bytes literais na ROM = {} cores ({} banco(s)); o rescomp \
+             não comprime paleta.",
+            cadeia.palette_header,
+            paleta.bytes_consumed,
+            paleta.words.len(),
+            paleta.words.len() / 16
+        ),
+    ];
+
+    Ok(ContextoImagem {
+        struct_offset: cadeia.struct_offset as u64,
+        proveniencia: Proveniencia::Verificada,
+        conferido,
+        nao_prova: nao_prova_do_vinculo(),
+        paleta: identidade_palette(&paleta),
+        tileset: identidade_tileset(recurso),
+        tilemap: identidade_tilemap(mapa),
+        mapa: MapaPublicado {
+            cols: mapa.candidate.w as u32,
+            rows: mapa.candidate.h as u32,
+            largura_px: largura_px as u32,
+            altura_px: altura_px as u32,
+            celulas: publicados,
+            ocorrencias_por_tile,
+            tiles_sem_uso,
+            escopo: format!(
+                "ocorrências contadas só dentro deste mapa verificado (TileMap em {:#x}, {} \
+                 células); outros mapas da ROM não entram nesta contagem",
+                cadeia.tilemap_header,
+                celulas.len()
+            ),
+        },
+        camada,
+    })
+}
+
+/// Monta o contexto de uma ROM a partir dos bytes dela.
+///
+/// Autoridade é só o ROM: nada aqui recebe offset, dimensão ou coordenada de
+/// quem chama como pressuposto — o que vem de fora é orçamento de trabalho e o
+/// conjunto de limites da transação.
+pub fn contexto_da_rom(
+    rom: &[u8],
+    transacao: &TransactionLimits,
+    trabalho: &LimiteTrabalho,
+) -> Result<ContextoRom, CodecError> {
+    let descoberta = descobrir(rom, transacao)?;
+    let mut imagens = Vec::new();
+    let mut recusados = Vec::new();
+    for cadeia in &descoberta.cadeias {
+        match contexto_da_cadeia(rom, cadeia, &descoberta, trabalho) {
+            Ok(contexto) => imagens.push(contexto),
+            Err(erro) => recusados.push(VinculoRecusado {
+                struct_offset: cadeia.struct_offset as u64,
+                proveniencia: Proveniencia::Desconhecida,
+                codigo: erro.code.to_string(),
+                motivo: format!(
+                    "vínculo em {:#x} recusado: {}",
+                    cadeia.struct_offset, erro.detail
+                ),
+            }),
+        }
+    }
+
+    let vinculados = imagens
+        .iter()
+        .flat_map(|i| {
+            [
+                i.paleta.header_offset as usize,
+                i.tileset.header_offset as usize,
+                i.tilemap.header_offset as usize,
+            ]
+        })
+        .collect::<Vec<_>>();
+    let motivo = "verificado por decode, mas nenhum ponteiro de struct `Image` alcança este \
+                  header nesta ROM"
+        .to_string();
+    let mut sem_vinculo = Vec::new();
+    for recurso in &descoberta.recursos {
+        if !vinculados.contains(&recurso.candidate().header_offset) {
+            sem_vinculo.push(RecursoSemVinculo {
+                tipo: "tileset",
+                proveniencia: Proveniencia::Desconhecida,
+                motivo: motivo.clone(),
+                identidade: identidade_tileset(recurso),
+            });
+        }
+    }
+    for mapa in &descoberta.mapas {
+        if !vinculados.contains(&mapa.candidate.header_offset) {
+            sem_vinculo.push(RecursoSemVinculo {
+                tipo: "tilemap",
+                proveniencia: Proveniencia::Desconhecida,
+                motivo: motivo.clone(),
+                identidade: identidade_tilemap(mapa),
+            });
+        }
+    }
+    // Paletas candidatas ficam de fora de `sem_vinculo` de propósito: sem campo
+    // de compressão, a única verificação possível nelas é "cabe na ROM", que é
+    // já o critério do próprio scan — publicá-las diria "verificado" sem nada
+    // além disso.
+
+    Ok(ContextoRom {
+        rom_sha256: sha256_hex(rom),
+        rom_len: rom.len() as u64,
+        escopo: descoberta.escopo.clone(),
+        limite_trabalho: *trabalho,
+        imagens,
+        sem_vinculo,
+        recusados,
+    })
+}
+
+/// Resolve um clique na camada composta. Núcleo decide célula, flips e pixel da
+/// fonte; quem chama só entrega a coordenada da imagem.
+pub fn contexto_clique(
+    rom: &[u8],
+    struct_offset: u64,
+    x: usize,
+    y: usize,
+    transacao: &TransactionLimits,
+) -> Result<ResolucaoClique, CodecError> {
+    let descoberta = descobrir(rom, transacao)?;
+    let struct_offset_usize = usize::try_from(struct_offset).map_err(|_| {
+        CodecError::new(
+            "invalid_reference",
+            format!("offset de struct {struct_offset} não cabe nesta ROM"),
+        )
+    })?;
+    let cadeia = descoberta.cadeia(struct_offset_usize)?;
+    let recurso = descoberta
+        .recursos
+        .iter()
+        .find(|r| r.candidate().header_offset == cadeia.tileset_header)
+        .ok_or_else(|| {
+            CodecError::new(
+                "invalid_reference",
+                format!(
+                    "vínculo em {:#x} não tem TileSet verificado: nada a resolver",
+                    cadeia.struct_offset
+                ),
+            )
+        })?;
+    let mapa = descoberta
+        .mapas
+        .iter()
+        .find(|m| m.candidate.header_offset == cadeia.tilemap_header)
+        .expect("`cadeia` só devolve mapa verificado");
+    let celula = celula_em(mapa, x, y)?;
+    let fonte = celula.fonte_do_ponto(PontoDaCamada { x, y })?;
+    let indice = md_read_pixel_index(recurso.decoded(), fonte.tile, fonte.row, fonte.col)?;
+    let ocorrencias = ocorrencias_do_tile(mapa, celula.tile)?
+        .iter()
+        // O índice linear vem do próprio mapa: `ocorrencias_do_tile` preserva
+        // a ordem das células.
+        .map(|c| {
+            let indice_linear = c.row * mapa.candidate.w + c.col;
+            celula_publicada(indice_linear, c)
+        })
+        .collect();
+    let indice_linear = celula.row * mapa.candidate.w + celula.col;
+    Ok(ResolucaoClique {
+        rom_sha256: sha256_hex(rom),
+        struct_offset,
+        x: x as u32,
+        y: y as u32,
+        celula: celula_publicada(indice_linear, &celula),
+        fonte: PixelDaFontePublicado {
+            tile: fonte.tile as u32,
+            linha: fonte.row as u32,
+            coluna: fonte.col as u32,
+            indice,
+        },
+        ocorrencias,
+    })
+}
+
+/// Contexto pelo caminho do arquivo. A identidade vem sempre da releitura dos
+/// bytes, nunca de uma prévia em cache.
+pub fn contexto_da_rom_path(rom_path: &str) -> Result<ContextoRom, String> {
+    let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
+    contexto_da_rom(
+        &rom,
+        &TransactionLimits::default(),
+        &LimiteTrabalho::default(),
+    )
+    .map_err(|e| format!("{}: {}", e.code, e.detail))
+}
+
+/// Clique resolvido pelo caminho do arquivo — a fronteira onde um `u64` vindo
+/// do wire vira coordenada, e onde ele é validado em vez de truncado.
+pub fn contexto_clique_path(
+    rom_path: &str,
+    struct_offset: u64,
+    x: u64,
+    y: u64,
+) -> Result<ResolucaoClique, String> {
+    let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+        return Err(format!(
+            "invalid_reference: clique ({x},{y}) não é coordenada de camada"
+        ));
+    };
+    let rom = std::fs::read(rom_path).map_err(|e| format!("falha ao ler ROM: {e}"))?;
+    contexto_clique(&rom, struct_offset, x, y, &TransactionLimits::default())
+        .map_err(|e| format!("{}: {}", e.code, e.detail))
 }
 
 #[cfg(test)]
@@ -1265,6 +1975,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn localizacao_de_cadeia_nao_depende_da_ordem_nem_de_duplicatas_dos_candidatos() {
+        // A varredura interna usa conjunto de candidatos. O contrato que isso
+        // tem que preservar: a lista de entrada é um conjunto de headers, com
+        // qualquer ordem e com repetições.
+        let palavras: Vec<u16> = (0..48u16).collect();
+        let rom = rom_com_cadeia(&palavras, &celulas_3x2(), 3, 2);
+        let (paletas, tilesets, tilemaps) = cabecalos_descobertos(&rom);
+        let esperado = localizar_cadeias_imagem(&rom, &paletas, &tilesets, &tilemaps);
+        assert!(!esperado.is_empty(), "a fixture do teste perdeu a cadeia");
+        let embaralhado = |lista: &[usize]| {
+            let mut v = lista.to_vec();
+            v.reverse();
+            v.extend(lista.iter().copied());
+            v
+        };
+        assert_eq!(
+            localizar_cadeias_imagem(
+                &rom,
+                &embaralhado(&paletas),
+                &embaralhado(&tilesets),
+                &embaralhado(&tilemaps)
+            ),
+            esperado,
+            "ordem ou duplicata de candidato não pode mudar o vínculo encontrado"
+        );
+    }
+
     /// ROM sintética com um header `Palette` em `HEADER` e as cores em
     /// `STREAM`.
     fn rom_com_palette(palavras: &[u16]) -> Vec<u8> {
@@ -1312,6 +2050,435 @@ mod tests {
         assert_eq!(erro.code, "invalid_reference", "desfecho: {erro:?}");
     }
 
+    // ==================== montagem do contexto (superfície do IPC) ==========
+    //
+    // O que o produto publica e como rotula. As ROMs aqui são sintéticas, mas
+    // **verificáveis de ponta a ponta**: os streams saem do encoder do produto e
+    // entram pelo mesmo `verify_resource_set`/`verificar_tilemap` que o IPC usa,
+    // então nenhum teste deste bloco precisa passar offset ou dimensão por fora.
+
+    /// Layout devolvido junto com a ROM para os testes poderem citar offsets.
+    struct RomCadeia {
+        rom: Vec<u8>,
+        /// Stream aPLib do TileSet: `[tileset_stream, +tileset_stream_len)`.
+        tileset_stream: usize,
+        tileset_stream_len: usize,
+    }
+
+    fn alinhado(mut at: usize) -> usize {
+        if at % 2 != 0 {
+            at += 1;
+        }
+        at
+    }
+
+    /// ROM com uma cadeia `Image` cujos **três** recursos verificam: TileSet e
+    /// TileMap comprimidos aPLib, paleta literal (como o rescomp emite).
+    fn rom_de_cadeia(tiles: &[u8], palavras: &[u16], celulas: &[u16], w: u16, h: u16) -> RomCadeia {
+        let stream_ts = aplib_encode(tiles, &AplibEncodeLimits::default()).expect("encode tiles");
+        let stream_tm = aplib_encode(&plain_de_words(celulas), &AplibEncodeLimits::default())
+            .expect("encode mapa");
+        let ts_stream = TS_STREAM;
+        let tm_stream = alinhado(ts_stream + stream_ts.len());
+        let pal_stream = alinhado(tm_stream + stream_tm.len());
+        let mut rom = vec![0u8; pal_stream + palavras.len() * 2 + 64];
+        // O header do TileSet é escrito à mão (não por `escreve_header_tileset`):
+        // aqui o stream é comprimido, então a área que cabe na ROM é a do
+        // codificado, não a dos 512 bytes planos.
+        rom[TS_HDR..TS_HDR + 2].copy_from_slice(&1u16.to_be_bytes());
+        rom[TS_HDR + 2..TS_HDR + 4].copy_from_slice(&((tiles.len() / 32) as u16).to_be_bytes());
+        rom[TS_HDR + 4..TS_HDR + 8].copy_from_slice(&(ts_stream as u32).to_be_bytes());
+        rom[ts_stream..ts_stream + stream_ts.len()].copy_from_slice(&stream_ts);
+        escreve_header_tilemap(&mut rom, TM_HDR, tm_stream, w, h, &stream_tm);
+        escreve_header_palette(&mut rom, PAL_HDR, pal_stream, palavras);
+        for (k, ptr) in [PAL_HDR, TS_HDR, TM_HDR].iter().enumerate() {
+            let at = IMG + k * 4;
+            rom[at..at + 4].copy_from_slice(&(*ptr as u32).to_be_bytes());
+        }
+        // Trinca-fantasma do fixture: um struct na ordem certa cujo "TileMap" é
+        // o header do TileSet. Não passa em `localizar_cadeias_imagem` e tem que
+        // continuar fora do contexto.
+        let at = IMG + 0x20;
+        for (k, ptr) in [PAL_HDR, TS_HDR, TS_HDR].iter().enumerate() {
+            rom[at + k * 4..at + k * 4 + 4].copy_from_slice(&(*ptr as u32).to_be_bytes());
+        }
+        RomCadeia {
+            rom,
+            tileset_stream: ts_stream,
+            tileset_stream_len: stream_ts.len(),
+        }
+    }
+
+    /// Acrescenta um TileSet verificado que **nenhum** ponteiro alcança.
+    fn acrescenta_tileset_sem_vinculo(rom: &mut Vec<u8>, tiles: &[u8]) -> usize {
+        let dados = aplib_encode(tiles, &AplibEncodeLimits::default()).expect("encode extra");
+        let header = alinhado(rom.len());
+        let stream = header + 8;
+        rom.resize(stream + dados.len() + 64, 0);
+        rom[header..header + 2].copy_from_slice(&1u16.to_be_bytes());
+        rom[header + 2..header + 4].copy_from_slice(&((tiles.len() / 32) as u16).to_be_bytes());
+        rom[header + 4..header + 8].copy_from_slice(&(stream as u32).to_be_bytes());
+        rom[stream..stream + dados.len()].copy_from_slice(&dados);
+        header
+    }
+
+    fn contexto_de(rom: &[u8]) -> ContextoRom {
+        contexto_da_rom(
+            rom,
+            &TransactionLimits::default(),
+            &LimiteTrabalho::default(),
+        )
+        .expect("contexto montado a partir só da ROM")
+    }
+
+    #[test]
+    fn contexto_rotula_o_vinculo_como_verificado_e_diz_o_que_foi_conferido() {
+        let fixture = rom_de_cadeia(
+            &tiles_autorais(NUM_TILES),
+            &paleta_autoral(4),
+            &CELULAS,
+            3,
+            2,
+        );
+        let ctx = contexto_de(&fixture.rom);
+
+        assert_eq!(ctx.rom_sha256, sha256_hex(&fixture.rom));
+        assert_eq!(ctx.rom_len, fixture.rom.len() as u64);
+        assert_eq!(
+            ctx.imagens.len(),
+            1,
+            "só a trinca cujo ponteiro segue: {:?}",
+            ctx.imagens
+                .iter()
+                .map(|i| i.struct_offset)
+                .collect::<Vec<_>>()
+        );
+        let imagem = &ctx.imagens[0];
+        assert_eq!(imagem.struct_offset, IMG as u64);
+        assert_eq!(imagem.proveniencia, Proveniencia::Verificada);
+
+        // "Verificada" sem dizer o quê é rótulo vazio: a lista tem que nomear os
+        // três ponteiros e o decode conferido de cada recurso.
+        let conferido = imagem.conferido.join("\n");
+        for alvo in [IMG, PAL_HDR, TS_HDR, TM_HDR] {
+            assert!(
+                conferido.contains(&format!("{alvo:#x}")),
+                "conferido não nomeia {alvo:#x}:\n{conferido}"
+            );
+        }
+        assert!(conferido.contains("ponteiro"), "\n{conferido}");
+        assert!(conferido.contains("decod"), "\n{conferido}");
+        for fato in ["512", "128", "24x16", "3x2"] {
+            assert!(
+                conferido.contains(fato),
+                "conferido tem que citar o tamanho/geometria {fato}:\n{conferido}"
+            );
+        }
+
+        // E o que a estrutura NÃO prova, dito em vez de inferido pelo leitor.
+        let nao_prova = imagem.nao_prova.join("\n");
+        assert!(nao_prova.contains("carreg"), "\n{nao_prova}");
+        assert!(nao_prova.contains("exib"), "\n{nao_prova}");
+    }
+
+    #[test]
+    fn contexto_da_identidade_de_cada_recurso_lida_da_rom_e_nao_de_parametro() {
+        let tiles = tiles_autorais(NUM_TILES);
+        let palavras = paleta_autoral(4);
+        let fixture = rom_de_cadeia(&tiles, &palavras, &CELULAS, 3, 2);
+        let imagem = &contexto_de(&fixture.rom).imagens[0];
+
+        assert_eq!(imagem.tileset.header_offset, TS_HDR as u64);
+        assert_eq!(imagem.tileset.stream_offset, fixture.tileset_stream as u64);
+        assert_eq!(imagem.tileset.codec, "aplib", "codec lido do header");
+        assert_eq!(imagem.tileset.plain_len, (NUM_TILES * 32) as u64);
+        assert_eq!(imagem.tileset.plain_sha256, sha256_hex(&tiles));
+        assert_eq!(
+            imagem.tileset.stream_len, fixture.tileset_stream_len as u64,
+            "consumo medido no decode, não declarado pelo header"
+        );
+
+        assert_eq!(imagem.tilemap.header_offset, TM_HDR as u64);
+        assert_eq!(imagem.tilemap.plain_len, 12);
+        assert_eq!(
+            imagem.tilemap.plain_sha256,
+            sha256_hex(&plain_de_words(&CELULAS))
+        );
+
+        // A paleta não tem campo de compressão no rescomp: os bytes do ROM são
+        // os literais, então stream e plain coincidem.
+        assert_eq!(imagem.paleta.header_offset, PAL_HDR as u64);
+        assert_eq!(imagem.paleta.codec, "none");
+        assert_eq!(imagem.paleta.plain_len, 128, "64 cores em 4 bancos");
+        assert_eq!(
+            imagem.paleta.stream_len, imagem.paleta.plain_len,
+            "paleta é literal no ROM"
+        );
+        assert_eq!(
+            imagem.paleta.plain_sha256,
+            sha256_hex(&plain_de_words(&palavras))
+        );
+    }
+
+    #[test]
+    fn contexto_publica_ocorrencias_conhecidas_so_do_mapa_verificado() {
+        let fixture = rom_de_cadeia(
+            &tiles_autorais(NUM_TILES),
+            &paleta_autoral(4),
+            &CELULAS,
+            3,
+            2,
+        );
+        let mapa = &contexto_de(&fixture.rom).imagens[0].mapa;
+
+        assert_eq!((mapa.cols, mapa.rows), (3, 2));
+        assert_eq!((mapa.largura_px, mapa.altura_px), (24, 16));
+        assert_eq!(mapa.celulas.len(), 6);
+        assert_eq!(mapa.celulas[1].tile, 2);
+        assert!(mapa.celulas[1].vflip && !mapa.celulas[1].hflip);
+        assert_eq!(mapa.celulas[3].tile, 0);
+        assert!(mapa.celulas[3].hflip && mapa.celulas[3].prioridade);
+        assert_eq!(mapa.celulas[5].banco, 3);
+
+        let compartilhado = mapa
+            .ocorrencias_por_tile
+            .iter()
+            .find(|o| o.tile == 2)
+            .expect("tile 2 tem ocorrências");
+        assert_eq!(
+            compartilhado.celulas,
+            vec![0, 1],
+            "índices lineares na ordem do mapa"
+        );
+
+        // Contagem conferida: nenhuma célula se perde nem se duplica.
+        let total: usize = mapa
+            .ocorrencias_por_tile
+            .iter()
+            .map(|o| o.celulas.len())
+            .sum();
+        assert_eq!(total, mapa.celulas.len());
+        assert_eq!(
+            mapa.ocorrencias_por_tile.len() + mapa.tiles_sem_uso.len(),
+            NUM_TILES,
+            "cada tile do TileSet ou tem ocorrências ou está listado como sem uso"
+        );
+        assert!(mapa.tiles_sem_uso.contains(&15));
+        assert!(!mapa.tiles_sem_uso.contains(&2));
+
+        // O escopo publicado limita a afirmação ao mapa conferido.
+        assert!(mapa.escopo.contains("deste mapa"), "{}", mapa.escopo);
+        assert!(mapa.escopo.contains(&format!("{TM_HDR:#x}")));
+    }
+
+    #[test]
+    fn nucleo_resolve_o_clique_da_camada_em_celula_flip_e_pixel_da_fonte() {
+        let fixture = rom_de_cadeia(
+            &tiles_autorais(NUM_TILES),
+            &paleta_autoral(4),
+            &CELULAS,
+            3,
+            2,
+        );
+        let limites = TransactionLimits::default();
+
+        // (11,3): célula (1,0), word 0x1002 = tile 2 com vflip. O pixel da fonte
+        // (linha 4, coluna 3) aparece espelhado na linha: y = 7-4 = 3.
+        let resposta =
+            contexto_clique(&fixture.rom, IMG as u64, 11, 3, &limites).expect("clique na célula 1");
+        assert_eq!(resposta.rom_sha256, sha256_hex(&fixture.rom));
+        assert_eq!(resposta.struct_offset, IMG as u64);
+        assert_eq!((resposta.celula.col, resposta.celula.row), (1, 0));
+        assert_eq!(resposta.celula.tile, 2);
+        assert!(resposta.celula.vflip && !resposta.celula.hflip);
+        assert_eq!(
+            (
+                resposta.fonte.tile,
+                resposta.fonte.linha,
+                resposta.fonte.coluna
+            ),
+            (2, 4, 3),
+            "a projeção inversa é do núcleo, não da UI"
+        );
+        assert_eq!(resposta.fonte.indice, indice_autoral(2, 4, 3));
+        assert_eq!(
+            resposta.ocorrencias.len(),
+            2,
+            "o tile 2 tem duas células aqui"
+        );
+        assert_eq!(
+            resposta
+                .ocorrencias
+                .iter()
+                .map(|c| (c.col, c.row))
+                .collect::<Vec<_>>(),
+            vec![(0, 0), (1, 0)]
+        );
+
+        // Sem flip: o mesmo pixel da fonte cai na posição direta.
+        let direto = contexto_clique(&fixture.rom, IMG as u64, 3, 4, &limites).expect("célula 0");
+        assert_eq!(
+            (direto.fonte.tile, direto.fonte.linha, direto.fonte.coluna),
+            (2, 4, 3)
+        );
+        assert_eq!(direto.ocorrencias, resposta.ocorrencias);
+    }
+
+    #[test]
+    fn clique_fora_da_geometria_ou_fora_de_um_vinculo_e_recusado() {
+        let fixture = rom_de_cadeia(
+            &tiles_autorais(NUM_TILES),
+            &paleta_autoral(4),
+            &CELULAS,
+            3,
+            2,
+        );
+        let limites = TransactionLimits::default();
+
+        for (x, y) in [(24usize, 0usize), (0, 16), (9999, 9999)] {
+            let erro = contexto_clique(&fixture.rom, IMG as u64, x, y, &limites)
+                .expect_err("fora do mapa");
+            assert_eq!(erro.code, "invalid_reference", "{erro:?}");
+            assert!(
+                erro.detail.contains("24") && erro.detail.contains("16"),
+                "a recusa tem que dar a geometria real: {}",
+                erro.detail
+            );
+        }
+
+        // A trinca-fantasma existe em bytes mas não é vínculo: recusar em vez de
+        // atender o clique como se fosse.
+        let erro = contexto_clique(&fixture.rom, (IMG + 0x20) as u64, 0, 0, &limites)
+            .expect_err("struct sem ponteiro verificado");
+        assert_eq!(erro.code, "invalid_reference", "{erro:?}");
+        assert!(
+            erro.detail.contains(&format!("{:#x}", IMG + 0x20)),
+            "{}",
+            erro.detail
+        );
+    }
+
+    #[test]
+    fn camada_acima_do_orcamento_recusa_a_previsao_sem_perder_o_contexto() {
+        let celulas: Vec<u16> = (0..64).map(|i| (i % NUM_TILES) as u16).collect();
+        let fixture = rom_de_cadeia(
+            &tiles_autorais(NUM_TILES),
+            &paleta_autoral(4),
+            &celulas,
+            8,
+            8,
+        );
+
+        let apertado = contexto_da_rom(
+            &fixture.rom,
+            &TransactionLimits::default(),
+            &LimiteTrabalho {
+                max_pixels_por_camada: 1_000,
+            },
+        )
+        .expect("orçamento estourado não é erro do contexto");
+        let camada = &apertado.imagens[0].camada;
+        assert_eq!(
+            (camada.largura_px, camada.altura_px),
+            (64, 64),
+            "a geometria é publicada de qualquer forma"
+        );
+        assert!(camada.png_data_url.is_none() && camada.pixels_sha256.is_none());
+        let motivo = camada
+            .recusada
+            .as_deref()
+            .expect("dizer por que não preview");
+        assert!(
+            motivo.contains("4096") && motivo.contains("1000"),
+            "motivo: {motivo}"
+        );
+        assert_eq!(apertado.imagens[0].mapa.celulas.len(), 64);
+        assert_eq!(apertado.limite_trabalho.max_pixels_por_camada, 1_000);
+
+        let com_previsa = contexto_de(&fixture.rom);
+        let ok = &com_previsa.imagens[0].camada;
+        assert_eq!(ok.recusada, None);
+        let data_url = ok.png_data_url.as_deref().expect("png");
+        assert!(data_url.starts_with("data:image/png;base64,"));
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+        let png = BASE64
+            .decode(data_url.rsplit(',').next().expect("payload"))
+            .expect("base64");
+        assert_eq!(&png[..8], [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+        assert_eq!(ok.pixels_sha256.as_deref().map(str::len), Some(64));
+    }
+
+    #[test]
+    fn recurso_verificado_sem_ponteiro_e_publicado_como_vinculo_desconhecido() {
+        let tiles = tiles_autorais(NUM_TILES);
+        let mut fixture = rom_de_cadeia(&tiles, &paleta_autoral(4), &CELULAS, 3, 2);
+        let extra = acrescenta_tileset_sem_vinculo(&mut fixture.rom, &tiles);
+        let ctx = contexto_de(&fixture.rom);
+
+        assert_eq!(ctx.imagens.len(), 1, "tileset extra não vira imagem");
+        let sem_vinculo = ctx
+            .sem_vinculo
+            .iter()
+            .find(|r| r.identidade.header_offset == extra as u64)
+            .expect("publicado como não vinculado");
+        assert_eq!(sem_vinculo.proveniencia, Proveniencia::Desconhecida);
+        assert_eq!(sem_vinculo.tipo, "tileset");
+        assert_eq!(sem_vinculo.identidade.plain_sha256, sha256_hex(&tiles));
+        assert!(
+            sem_vinculo.motivo.contains("ponteiro"),
+            "{}",
+            sem_vinculo.motivo
+        );
+        for hdr in [TS_HDR, TM_HDR, PAL_HDR] {
+            assert!(
+                !ctx.sem_vinculo
+                    .iter()
+                    .any(|r| r.identidade.header_offset == hdr as u64),
+                "{hdr:#x} está vinculado a uma imagem"
+            );
+        }
+    }
+
+    #[test]
+    fn contexto_relido_do_arquivo_revalida_a_identidade_e_vinculo_que_nao_verifica_e_registrado() {
+        let dir = std::env::temp_dir().join(format!("rds-rex-contexto-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir temporário");
+        let caminho = dir.join("rom.bin");
+
+        let tiles = tiles_autorais(NUM_TILES);
+        let fixture = rom_de_cadeia(&tiles, &paleta_autoral(4), &CELULAS, 3, 2);
+        std::fs::write(&caminho, &fixture.rom).expect("escrever ROM");
+        let primeiro =
+            contexto_da_rom_path(caminho.to_str().expect("utf-8")).expect("contexto pelo caminho");
+        assert_eq!(primeiro.rom_sha256, sha256_hex(&fixture.rom));
+        assert_eq!(primeiro.imagens.len(), 1);
+
+        // O header passa a declarar um codec para o qual esta frente não tem
+        // decoder: o vínculo deixa de verificar. Tem que aparecer como recusa,
+        // não sumir em silêncio, e a identidade da ROM tem que mudar.
+        let mut adulterado = fixture.rom.clone();
+        adulterado[TS_HDR + 1] = 0;
+        std::fs::write(&caminho, &adulterado).expect("regravar ROM");
+        let depois =
+            contexto_da_rom_path(caminho.to_str().expect("utf-8")).expect("contexto pelo caminho");
+        assert_ne!(
+            depois.rom_sha256, primeiro.rom_sha256,
+            "identidade trocada teria que ser visível"
+        );
+        assert!(depois.imagens.is_empty(), "vínculo não pode sobreviver");
+        let recusado = depois
+            .recusados
+            .iter()
+            .find(|r| r.struct_offset == IMG as u64)
+            .expect("recusa registrada, não silenciada");
+        assert!(
+            recusado.motivo.contains(&format!("{IMG:#x}")),
+            "{}",
+            recusado.motivo
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     // ============================================ ACEITE na fixture autoral ==
     //
     // A fixture é uma ROM compilada pelo SGDK/rescomp 2.11 pinado a partir de
@@ -1328,14 +2495,14 @@ mod tests {
     const FIXTURE_SCHEMA: &str = "rex-context-aplib-fixture-ground-truth/v1";
 
     /// Tudo que o produto localiza sozinho numa ROM compilada.
-    struct Descoberta {
+    struct DescobertaDoAceite {
         recursos: Vec<RecursoVerificado>,
         mapas: Vec<VerifiedTilemap>,
         candidatos_de_paleta: Vec<PaletteCandidate>,
         cadeias: Vec<CadeiaImagem>,
     }
 
-    fn descobrir(rom: &[u8]) -> Descoberta {
+    fn descobrir_do_aceite(rom: &[u8]) -> DescobertaDoAceite {
         let limites = AplibLimits::default();
         let conjunto = verify_resource_set(rom, &TransactionLimits::default())
             .expect("conjunto de recursos verificados");
@@ -1360,7 +2527,7 @@ mod tests {
                 .map(|m| m.candidate.header_offset)
                 .collect::<Vec<_>>(),
         );
-        Descoberta {
+        DescobertaDoAceite {
             recursos: conjunto.resources,
             mapas,
             candidatos_de_paleta,
@@ -1368,7 +2535,7 @@ mod tests {
         }
     }
 
-    impl Descoberta {
+    impl DescobertaDoAceite {
         fn recurso(&self, header: usize) -> &RecursoVerificado {
             self.recursos
                 .iter()
@@ -1401,7 +2568,7 @@ mod tests {
     }
 
     /// A cadeia que aponta para o mapa autoral: única, por ponteiro conferido.
-    fn cadeia_do_mapa<'a>(d: &'a Descoberta, mapa: &VerifiedTilemap) -> &'a CadeiaImagem {
+    fn cadeia_do_mapa<'a>(d: &'a DescobertaDoAceite, mapa: &VerifiedTilemap) -> &'a CadeiaImagem {
         let achadas: Vec<&CadeiaImagem> = d
             .cadeias
             .iter()
@@ -1418,7 +2585,11 @@ mod tests {
         achadas[0]
     }
 
-    fn paleta_da_cadeia(rom: &[u8], d: &Descoberta, cadeia: &CadeiaImagem) -> VerifiedPalette {
+    fn paleta_da_cadeia(
+        rom: &[u8],
+        d: &DescobertaDoAceite,
+        cadeia: &CadeiaImagem,
+    ) -> VerifiedPalette {
         let candidato = d
             .candidatos_de_paleta
             .iter()
@@ -1623,7 +2794,7 @@ mod tests {
     #[test]
     #[ignore = "aceite de fixture autoral: requer ROM compilada; rodar com --ignored"]
     fn fixture_aplib_descobre_a_cadeia_compoe_a_camada_e_preve_o_impacto() {
-        let (_caminho, rom, _sha, manifesto) = fixture();
+        let (_caminho, rom, sha, manifesto) = fixture();
         let inicio = std::time::Instant::now();
         let mut etapas: Vec<(&str, std::time::Duration)> = Vec::new();
         let marcar = |etapa: &'static str,
@@ -1633,7 +2804,7 @@ mod tests {
         };
 
         // (1) Descoberta pelo caminho canônico: varredura + decode + ponteiro.
-        let d = descobrir(&rom);
+        let d = descobrir_do_aceite(&rom);
         let mut agora = std::time::Instant::now();
         marcar("descobrir", &agora, &mut etapas);
         agora = std::time::Instant::now();
@@ -1870,6 +3041,124 @@ mod tests {
             erro.detail
         );
 
+        // (7) A superfície publicada para o IPC, sobre a ROM real: mesma
+        //     descoberta, agora como contexto — identidade, vínculo, prévia e
+        //     clique resolvidos pelo núcleo.
+        let agora = std::time::Instant::now();
+        let contexto = contexto_da_rom(
+            &rom,
+            &TransactionLimits::default(),
+            &LimiteTrabalho::default(),
+        )
+        .expect("contexto montado só a partir dos bytes da fixture");
+        assert_eq!(contexto.rom_sha256, sha, "identidade da ROM publicada");
+        assert_eq!(contexto.rom_len, rom.len() as u64);
+        assert_eq!(
+            contexto.imagens.len(),
+            1,
+            "uma cadeia `Image` na fixture; publicada: {:?}",
+            contexto
+                .imagens
+                .iter()
+                .map(|i| (i.struct_offset, i.tilemap.header_offset))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            contexto.recusados.is_empty(),
+            "nada deveria recusar na fixture: {:?}",
+            contexto.recusados
+        );
+        let publicada = &contexto.imagens[0];
+        assert_eq!(publicada.proveniencia, Proveniencia::Verificada);
+        assert_eq!(publicada.struct_offset, cadeia.struct_offset as u64);
+        assert_eq!(
+            (
+                publicada.paleta.header_offset,
+                publicada.tileset.header_offset,
+                publicada.tilemap.header_offset
+            ),
+            (
+                cadeia.palette_header as u64,
+                cadeia.tileset_header as u64,
+                cadeia.tilemap_header as u64
+            ),
+            "os três vínculos publicados têm que ser os descobertos"
+        );
+        assert_eq!(
+            publicada.tileset.plain_sha256,
+            super::super::rom_library::sha256_hex(tileset.decoded())
+        );
+        assert_eq!(
+            (publicada.mapa.cols, publicada.mapa.rows),
+            (mapa.candidate.w as u32, mapa.candidate.h as u32)
+        );
+        // O ghost é mapa verificado sem ponteiro: aparece como sem vínculo em
+        // vez de sumir da resposta.
+        assert!(
+            contexto.sem_vinculo.iter().any(|r| {
+                r.tipo == "tilemap"
+                    && r.identidade.header_offset == ghost.candidate.header_offset as u64
+                    && r.proveniencia == Proveniencia::Desconhecida
+            }),
+            "ghost sem vínculo não foi publicado: {:?}",
+            contexto
+                .sem_vinculo
+                .iter()
+                .map(|r| (r.tipo, r.identidade.header_offset))
+                .collect::<Vec<_>>()
+        );
+        // A prévia publicada cobre exatamente os bytes conferidos contra o
+        // oráculo externo na etapa (3).
+        assert_eq!(publicada.camada.recusada, None);
+        assert_eq!(
+            publicada.camada.pixels_sha256.as_deref(),
+            Some(super::super::rom_library::sha256_hex(&camada.rgba).as_str()),
+            "o hash publicado não é o da camada conferida pixel a pixel"
+        );
+        let compartilhado_publicado = publicada
+            .mapa
+            .ocorrencias_por_tile
+            .iter()
+            .find(|o| o.tile == t_fonte as u32)
+            .expect("tile compartilhado no contexto");
+        assert_eq!(
+            compartilhado_publicado.celulas.len(),
+            numero_do(edicao, "ocorrencias_no_mapa_verificado") as usize
+        );
+        // Cada uma das quatro posições previstas, resolvida pelo núcleo a partir
+        // só do offset do struct: cai no mesmo pixel da fonte e no mesmo índice.
+        for (x, y) in &previstas {
+            let resposta = contexto_clique(
+                &rom,
+                publicada.struct_offset,
+                *x,
+                *y,
+                &TransactionLimits::default(),
+            )
+            .unwrap_or_else(|e| panic!("clique ({x},{y}) pela superfície: {}", e.detail));
+            assert_eq!(
+                (
+                    resposta.fonte.tile,
+                    resposta.fonte.linha,
+                    resposta.fonte.coluna
+                ),
+                (t_fonte as u32, r_fonte as u32, c_fonte as u32),
+                "clique ({x},{y})"
+            );
+            assert_eq!(
+                resposta.fonte.indice,
+                numero_do(fonte, "de") as u8,
+                "índice de paleta sob o cursor diverge do autoral em ({x},{y})"
+            );
+            assert_eq!(resposta.rom_sha256, sha);
+            assert_eq!(
+                resposta.ocorrencias.len(),
+                compartilhado_publicado.celulas.len(),
+                "a resposta do clique tem que levar as irmãs do tile"
+            );
+        }
+        marcar("superfície do contexto", &agora, &mut etapas);
+
         for (etapa, duracao) in &etapas {
             eprintln!("[rex-ctx-aceite] etapa {etapa}: {duracao:?}");
         }
@@ -1883,10 +3172,101 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "sonda de custo: requer ROM compilada; rodar com --ignored"]
+    fn sonda_de_custo_da_descoberta_na_fixture() {
+        let (_caminho, rom, _sha, _manifesto) = fixture();
+        let t = std::time::Instant::now;
+        let inicio = t();
+        let candidatos_tilemap = scan_tilemap_headers(&rom);
+        eprintln!(
+            "[rex-ctx-custo] scan_tilemap_headers: {:?} ({} candidatos)",
+            inicio.elapsed(),
+            candidatos_tilemap.len()
+        );
+        let inicio = t();
+        let candidatos_tileset = scan_tileset_headers(&rom);
+        eprintln!(
+            "[rex-ctx-custo] scan_tileset_headers: {:?} ({} candidatos)",
+            inicio.elapsed(),
+            candidatos_tileset.len()
+        );
+        let inicio = t();
+        let paletas = scan_palette_headers(&rom);
+        eprintln!(
+            "[rex-ctx-custo] scan_palette_headers: {:?} ({} candidatos)",
+            inicio.elapsed(),
+            paletas.len()
+        );
+        let inicio = t();
+        let set = verify_resource_set(&rom, &TransactionLimits::default()).expect("set");
+        eprintln!(
+            "[rex-ctx-custo] verify_resource_set: {:?} ({} verificados de {})",
+            inicio.elapsed(),
+            set.resources.len(),
+            set.candidates
+        );
+        let limites = AplibLimits::default();
+        let inicio = t();
+        let mut decodificados = 0usize;
+        let mapas: Vec<VerifiedTilemap> = candidatos_tilemap
+            .iter()
+            .filter(|c| c.compression == HeaderCompression::Aplib)
+            .filter_map(|c| {
+                let r = verificar_tilemap(&rom, c, &limites);
+                if r.is_ok() {
+                    decodificados += 1;
+                }
+                r.ok()
+            })
+            .collect();
+        eprintln!(
+            "[rex-ctx-custo] verificar tilemaps: {:?} ({} verificados, {} decodes tentados)",
+            inicio.elapsed(),
+            mapas.len(),
+            decodificados
+        );
+        let inicio = t();
+        let cadeias = localizar_cadeias_imagem(
+            &rom,
+            &paletas.iter().map(|c| c.header_offset).collect::<Vec<_>>(),
+            &candidatos_tileset
+                .iter()
+                .map(|c| c.header_offset)
+                .collect::<Vec<_>>(),
+            &mapas
+                .iter()
+                .map(|m| m.candidate.header_offset)
+                .collect::<Vec<_>>(),
+        );
+        eprintln!(
+            "[rex-ctx-custo] localizar_cadeias_imagem: {:?} ({} cadeias)",
+            inicio.elapsed(),
+            cadeias.len()
+        );
+        let trabalho = LimiteTrabalho::default();
+        for cadeia in &cadeias {
+            let descoberta = descobrir(&rom, &TransactionLimits::default()).expect("descoberta");
+            let inicio = t();
+            contexto_da_cadeia(&rom, cadeia, &descoberta, &trabalho).expect("contexto");
+            eprintln!(
+                "[rex-ctx-custo] contexto_da_cadeia em {:#x}: {:?}",
+                cadeia.struct_offset,
+                inicio.elapsed()
+            );
+        }
+        let inicio = t();
+        contexto_da_rom(&rom, &TransactionLimits::default(), &trabalho).expect("contexto");
+        eprintln!(
+            "[rex-ctx-custo] contexto_da_rom (passada completa): {:?}",
+            inicio.elapsed()
+        );
+    }
+
+    #[test]
     #[ignore = "aceite de fixture autoral: requer ROM compilada; rodar com --ignored"]
     fn fixture_aplib_edita_pela_transacao_canonica_e_o_diff_e_exatamente_o_previsto() {
         let (caminho, rom, sha, manifesto) = fixture();
-        let d = descobrir(&rom);
+        let d = descobrir_do_aceite(&rom);
         let mapa = d.mapa_de(
             numero_do(campo_do(&manifesto, "map"), "cols") as usize,
             numero_do(campo_do(&manifesto, "map"), "rows") as usize,
@@ -1963,7 +3343,7 @@ mod tests {
 
         // Reabertura pelo caminho canônico: a ROM editada continua parseável e
         // só o byte do pixel de origem mudou.
-        let d_novo = descobrir(&rom_novo);
+        let d_novo = descobrir_do_aceite(&rom_novo);
         let mapa_novo = d_novo.mapa_de(
             numero_do(campo_do(&manifesto, "map"), "cols") as usize,
             numero_do(campo_do(&manifesto, "map"), "rows") as usize,
