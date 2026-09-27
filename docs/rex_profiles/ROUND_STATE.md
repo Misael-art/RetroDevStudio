@@ -1,9 +1,14 @@
 # Estado da rodada REX — perfis de endereçamento e codecs
 
 Registro vivo do integrador. Matriz honesta por capacidade: `blocked`,
-`fixture` (prova sintética autoral) ou `verified` (evidência registrada em
-`data/rex_profiles/*/evidence/`). Nada aqui é badge único verde; cada célula
+`fixture` (prova sintética autoral) ou `verified` (evidência registrada — pacote em
+`data/rex_profiles/*/evidence/`, conjunto pinado com SHA por arquivo, ou
+teste/script versionado que a refaz). Nada aqui é badge único verde; cada célula
 cita a evidência ou o bloqueio exato. Contratos: `CONTRACTS.md` (v1).
+
+**A matriz mede capacidade técnica, não maturidade de produto.** Uma célula
+`verified` não promove nada: o rótulo de produto continua `Experimental`, com os
+limites de cobertura da própria célula e as provas herdadas valendo.
 
 ## Regras de execução e job pesado (dono: integrador)
 
@@ -36,7 +41,7 @@ recuperada; estados separados.
 
 | Codec | Variante fixada | Vetores+holdout | decode vs ref | encode vs ref | Negativos | Recurso real |
 |---|---|---|---|---|---|---|
-| aPLib | blocked | fixture (PR #79, agente B) | blocked | blocked | blocked | blocked |
+| aPLib | verified (variante **raw do SGDK 2.11, sem header `"AP\0"`**, fixada no produto e arbitrada por dois decodificadores de referência independentes; a questão de fundo sobre namespace canônico segue registrada em (b) abaixo) | verified (pino próprio do integrador em `data/rex_profiles/integrator/aplib/vectors/`: 49 arquivos com SHA + hash agregado `3a9d7e9e…`, mais 2 discriminadores em `.../discriminating/`; a cópia da agente A **não** foi adotada) | verified (perna 1 da paridade §4: `aplib_decode` do produto sobre o stream de cada um dos **dois** oráculos — `apultra` exemplar `64be2a7a…` (origem declarada commit `8f340057…`) e `apj.jar` SGDK v2.11 `2d8cdc63…` — nos 8 plains, e nos 9 goldens com `bytes_consumed` exato; **não** alegado pelo desempacotador 68000 real, que hoje só existe para LZ4W) | verified (perna 2 da paridade §4: os dois oráculos devolvem o plain pinado a partir do stream que o **produto** codificou — gate **16 executados / 16 aprovados / 0 divergentes**; mesa de tokens idêntica à dos oráculos em 7 das 8 mesas; **ótimo não alegado** — em `noisy_runs_16k` o produto emite 1 364 B contra 1 205 B dos dois oráculos, e a mesa explica em números: +433 B de `match-10` comprando 272 B de literais e rep-matches) | verified (os 7 negativos recusados cada um pelo código estruturado que o define, `work_limit`, `excessive_output` sem estourar saída, `overflow` por gamma2 sem fim, e `verify_aplib_resource` recusando tamanho declarado divergente e header de outro codec) | **verified no perfil demonstrado** (HAMOOPIG `558bea6c…`, recurso `0x2e12a` da lista real, edição de 1 pixel registrada e aplicada pela barra, reinserção em slot **sem expansão** com 0 bytes fora dele, BPS reaplicado sobre a base reproduzindo o hash da cópia e efeito em tela nas 2 posições previstas pelo desempacotador do próprio jogo — ver as duas packages em `data/rex_profiles/integrator/aplib/evidence/` e o checkpoint abaixo; **não** verificado para os outros 3 recursos aPLib da ROM, para o resto do acervo, nem para o app distribuído) |
 | LZ4W SGDK | verified (SGDK MIT, prev-block + self-contained) | fixture (golden autorais) | verified (desempacotador 68000 oficial sob MAME + lz4w.jar nas duas direções) | verified (o 68000 reproduz byte a byte cada stream dos casos medidos — **pelos dois caminhos do encoder**: entrada DP-first e caminho de escrita com orçamento de espaço; 14 casos em r15) | verified (truncated/invalid-reference/overflow/excessive-output/work-limit/dicionário/fronteira 16384-16385-16386) | verified (corpus HAMOOPIG, ver cadeia) |
 | Nemesis | blocked | fixture (PR #79, vetores nemcmp) | blocked | blocked | blocked | blocked |
 | Kosinski | blocked | blocked | blocked | blocked | blocked | blocked |
@@ -58,20 +63,32 @@ roda no console. Evidência, derivação do teto e limites em `LZ4W_68K_ORACLE.m
 33 testes de LZ4W na suíte do lib + aceites ignoráveis (bench congelado, piso,
 aceite BYOR e aceite do fixture).
 
-aPLib — **decoder em Rust canônico existe e aceita os vetores pinados; nada
-promovido nesta matriz**. O consolidado do que existia antes da frente (evidência
-TiledImage da agente A em `codex/rex-a-addressing`, pacote de contrato e vetores
-da agente B em `codex/rex-b-codecs`, hash agregado `3a9d7e9e…` recomputado da
-árvore de B, os 9 goldens byte-idênticos entre os dois namespaces) e a ordem de
-aceite estão em `APLIB_TILEDIMAGE_PROXIMA_PROVA_2026-09-26.md`, com adendo datado
-registrando o que a frente executou. A célula "Recurso real" continua `blocked`
-por decisão de missão, não por falta de perna: as quatro pernas do passo 5 estão
-fechadas em 2026-09-27 (escrita pela transação, edição pela barra, execução do
-artefato da barra pelo desempacotador do jogo e capacidade medida dos quatro
-streams), e a ordem do operador veta promoção de maturidade — o mérito de mudar o
-status é decisão pendente, não alegação desta célula. Números e evidência por hash
-em `data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna3-core/` e
+aPLib — **linha corrigida em 2026-09-27 por ordem do operador: as células refletem
+capacidade técnica medida, e a maturidade do produto continua `Experimental`.** O
+que estava atrasado nesta linha era o registro, não o código. O consolidado do que
+existia antes da frente (evidência TiledImage da agente A em `codex/rex-a-addressing`,
+pacote de contrato e vetores da agente B em `codex/rex-b-codecs`, hash agregado
+`3a9d7e9e…` recomputado da árvore de B, os 9 goldens byte-idênticos entre os dois
+namespaces) e a ordem de aceite estão em `APLIB_TILEDIMAGE_PROXIMA_PROVA_2026-09-26.md`,
+com adendo datado registrando o que a frente executou. A célula "Recurso real" está
+agora `verified` **no perfil demonstrado**, com o critério atendido ponto a ponto e
+cada número conferível no pacote: ROM HAMOOPIG com identidade fixada (`558bea6c…`
+reconfirmado no disco antes e depois de cada corrida), recurso `0x2e12a` vindo da
+lista real (não do fixture), edição de 1 pixel registrada (`(53,7,5) → 4`),
+reinserção **sem expansão** (cópia do tamanho da ROM, 800 bytes distintos, 0 fora
+de `[0x2e12a, +938)`), BPS reaplicado sobre a base reproduzindo o hash exato da
+cópia, e efeito em tela nas 2 posições previstas pela geometria chunky, executado
+pelo desempacotador do próprio jogo. Evidência por hash em
+`data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna3-core/` e
 `.../2026-09-27-passo5-perna2-barra/`, e nos checkpoints do passo 5 abaixo.
+
+Limites desta célula, parte do que ela afirma (não são nota de rodapé): é **um**
+dos **4** recursos aPLib da ROM; `0x2e4d4` e `0x2f65a` não aceitam nenhuma edição
+de 1 pixel (nenhum piso cabe no slot, mesmo contando índice 0: 4 540 > 4 485 e
+7 439 > 7 420), `0x2e12a` tem folga de 1 B e `0x2cd94` folga 0; prova de execução é
+sob o core do harness (Genesis Plus GX v1.7.4 `46a5521`), não em hardware nem no
+app distribuído; e "editável" não é "compreendido" — a classe do alvo segue
+desconhecida.
 
 Estado do produto (medido, não alegado): `aplib_decode` + `AplibLimits` em
 `src-tauri/src/tools/reverse/decomp/rex_aplib.rs` (variante SGDK **raw sem header
@@ -79,7 +96,7 @@ Estado do produto (medido, não alegado): `aplib_decode` + `AplibLimits` em
 goldens com `bytes_consumed` exato (o discriminante `g08`), os 7 negativos com o
 erro estruturado próprio e os 3 limites de política (`work_limit`,
 `excessive_output`, `overflow` por gamma2 sem fim); `verify_aplib_resource` em
-`rex_resources.rs:148` liga o codec à cadeia de recurso (recusa `compression !=
+`rex_resources.rs` liga o codec à cadeia de recurso (recusa `compression !=
 Aplib`, exige `expected_len`, decodifica **sem dicionário**) com 3 testes
 sintéticos, e a via LZ4W continua recusando header APLIB (teste
 `verify_lz4w_resource_continua_recusando_header_aplib`) — os dois codecs não se
@@ -114,13 +131,14 @@ Repetido por perna independente em JS
 correspondência por pixel continuam medidos só em JS pela agente A), não é
 identificação automática (os dois endereços vêm do header lido, e identificação é
 capacidade separada de decode), e a paridade bidirecional do CONTRACTS §4 está
-fechada nas duas pernas (registro abaixo). Reinserção em slot, porém, ainda
-**não**: `reinsert` em `rex_resources.rs` é caminho exclusivo de LZ4W, então
-nenhum recurso APLIB da ROM é "editável sem expansão" pelo produto hoje. Ligar o
-encoder a essa via é o próximo passo de frente, e continua sem autorização para
-expandir ROM nem realocar ponteiros. Promoção de maturidade fica com o operador;
-a célula acima permanece `blocked` por decisão de missão, não por falta deste
-registro.
+fechada nas duas pernas (registro abaixo). **Correção de registro (2026-09-27):**
+este parágrafo dizia "reinserção em slot ainda não: `reinsert` é caminho exclusivo
+de LZ4W". Isso foi superado pelo passo 3 e pelo passo 5 da mesma frente — o
+tronco `reinsert_aplib_*` existe, a transação canônica é uma só e opera nos
+recursos aPLib reais (5 testes no lib + as duas pernas BYOR), e o que ela escreve
+foi executado pelo desempacotador do jogo. Continuam **sem** autorização e **sem**
+implementação: expansão de ROM e realocação de ponteiros. Promoção de maturidade
+não é o que esta linha declara: o produto segue `Experimental`.
 
 Encoder aPLib em Rust canônico (2026-09-26, frente do integrador).
 `aplib_encode(data, &AplibEncodeLimits { max_stream, max_work })` na variante
@@ -169,13 +187,21 @@ aponta FAIL é a comparação de hash. Ou seja, o que fecha a prova não é o c�
 saída do oráculo, nem ele ter devolvido alguns bytes. **O que continua não alegado**:
 optimalidade (não houve comparação exaustiva com parse ótimo, e o `111` economiza
 2 bits mas não chega a encolher stream em `ABCDA` nem em `01 00 02` — ele estoura
-o tag e cobra um tag extra), desempacotamento dos streams do produto pelo
-desempacotador 68000 real sob MAME (esse oráculo só existe para LZ4W hoje),
-reinserção em slot e reconstrução de TiledImage dentro do produto.
+o tag e cobra um tag extra) e o desempacotamento dos streams do produto pelo
+**oráculo 68000 montado sob MAME**, que hoje só existe para LZ4W. A reinserção em
+slot saiu desta lista em 2026-09-27: existe o tronco `reinsert_aplib_*` (5 testes)
+e o artefato que a barra escreveu é desempacotado pelo código do **próprio jogo**
+sob o core do harness (Genesis Plus GX v1.7.4 `46a5521`) — oráculo do jogo, não o
+montador do SGDK sob MAME; a distinção é do escopo da célula, não uma nota.
+Reconstrução de TiledImage dentro do produto segue não alegada.
 
 Duas divergências continuam registradas em vez de resolvidas por alegação: (a) a
-linha aPLib desta matriz diz `variant-fixed: blocked` enquanto o `manifest.json`
-de B diz `"variant-fixed": "verified"`; (b) o próprio CONTRACTS v1 é inconsistente
+linha aPLib desta matriz dizia `variant-fixed: blocked` enquanto o `manifest.json`
+de B diz `"variant-fixed": "verified"`; em 2026-09-27 a linha foi corrigida para o
+que **a evidência do integrador** mede (variante raw, arbitrada por dois
+decodificadores independentes), o que remove a contradição de status mas **não**
+adjudica a questão de fundo — qual namespace é canônico e com qual contrato;
+(b) o próprio CONTRACTS v1 é inconsistente
 sobre o caminho — §1 pede `data/rex_profiles/<kind>/<profile_id>/`, o que dá
 `codec/aplib/` (foi o que B publicou), enquanto a cláusula de propriedade declara
 `data/rex_profiles/codecs/` para B (foi onde A copiou os goldens). Resolver é
@@ -222,6 +248,66 @@ produto. Evidência do integrador vive em namespace próprio
 e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
+
+- 2026-09-27 (integrador, **ENTREGA 1 do briefing do operador — a linha aPLib da
+  matriz deixou de atrasar o código**), célula de correção de registro. **HEAD de
+  partida:** `19c880f`. **Ordem recebida:** "Separe capacidade técnica de
+  maturidade do produto. Mantenha Experimental, limites de cobertura e provas
+  herdadas. Não deixe 'blocked por decisão de missão' quando o critério foi
+  atendido. Revise também as demais células aPLib: atualize somente as que possuem
+  evidência específica. Preserve o histórico."
+  **O que estava errado e por que era errado:** a linha aPLib da matriz dizia
+  `blocked` em 5 das 6 células, e o texto do estado corrente afirmava duas coisas
+  **falsas contra o código desta árvore** — que `reinsert` em `rex_resources.rs` é
+  caminho exclusivo de LZ4W e que "nenhum recurso APLIB da ROM é editável sem
+  expansão pelo produto hoje". As duas foram superadas pelo passo 3 (`reinsert_*`
+  + os 5 testes `reinsert_aplib_*` + `ui_edite_recurso_aplib_pela_mesma_fronteira_do_lz4w`)
+  e pelo passo 5 (as 4 pernas, checkpoints abaixo). Ou seja: o bloqueio registrado
+  era o do *registro*, não o da frente.
+  **Célula por célula, com o critério:** `Variante fixada` → verified (raw do SGDK
+  2.11 sem header `"AP\0"`, arbitrada por dois decodificadores independentes; a
+  divergência de fundo sobre namespace canônico **não** foi adjudicada e segue
+  registrada como (a)/(b) no estado corrente). `Vetores+holdout` → verified no
+  pino **do integrador** (49 arquivos + 2 discriminadores, SHA por arquivo e hash
+  agregado `3a9d7e9e…`; a cópia da agente A não foi adotada — antes a célula
+  apontava para o pacote de B, que é outra árvore). `decode vs ref` → verified
+  pela perna 1 da paridade §4 (8 plains × 2 oráculos + 9 goldens com
+  `bytes_consumed` exato), com a negativa explícita de que o oráculo 68000 montado
+  sob MAME continua só existente para LZ4W. `encode vs ref` → verified pela perna 2
+  (gate 16/16/0) e pela mesa de tokens (7 de 8 mesas idênticas às dos oráculos),
+  com **ótimo não alegado** e a oitava mesa divergente quantificada (1 364 B
+  contra 1 205 B; +433 B de `match-10` comprando 272 B). `Negativos` → verified
+  (os 7 negativos pelo código estruturado próprio + `work_limit` +
+  `excessive_output` + `overflow` por gamma2 + `verify_aplib_resource` recusando
+  tamanho divergente e header de outro codec). `Recurso real` → **verified no
+  perfil demonstrado**, critério do operador atendido ponto a ponto: identidade
+  fixada (ROM `558bea6c80c76ec3…` reconfirmada no corpus intacto), recurso
+  `0x2e12a` vindo da **lista real** (não do fixture; header TileSet `0x21b20`,
+  100 tiles, plain 3 200 B, slot 938 B), edição registrada (`(53,7,5)`: índice
+  5 → 4), reinserção **sem expansão** (cópia de 917 504 B = tamanho da ROM, 800
+  bytes distintos na faixa `[0x2e18f, 0x2e4d2]`, **0** fora do slot, 163 recursos
+  preservados), BPS `58ae4f0b…` reaplicado sobre a base reproduzindo o hash exato
+  da cópia `80249128…`, e efeito em tela nas **2 posições previstas**
+  (`[[213,207],[285,135]]`) executado pelo desempacotador do próprio jogo.
+  **Limites que são parte da célula, não rodapé:** 1 dos 4 recursos aPLib da ROM;
+  `0x2e4d4` e `0x2f65a` não aceitam nenhuma edição de 1 pixel (4 540 > 4 485 e
+  7 439 > 7 420, mesmo contando índice 0); `0x2e12a` tem folga de 1 B e `0x2cd94`
+  folga 0, e o alvo aplicado está no **teto** (938 B), não no piso; execução sob
+  core de harness, não hardware nem app distribuído; "editável" ≠ "compreendido".
+  **Maturidade:** nada promovido — o rótulo de produto continua `Experimental` (a
+  própria UI o declara no cabeçalho do painel), e a legenda da matriz agora diz
+  explicitamente que célula `verified` mede capacidade técnica, não maturidade.
+  **Histórico preservado:** os checkpointes anteriores (passos 1 a 5, incluindo as
+  células que escreveram "linha aPLib **mantida `blocked`**" na data em que isso
+  era a ordem vigente) **não foram reescritos**; a correção vive nesta célula e no
+  estado corrente. **Um achado registrado aqui deixa de ser decisão pendente na
+  próxima célula:** o índice 0 inexpressável pela barra foi corrigido por ordem
+  expressa do operador (entrega 2), e as asserções do cenário que preservavam o
+  defeito foram substituídas por regressões.
+  **Gates desta célula:** correção documental; nenhum arquivo de produto, UI,
+  teste ou evidência alterado. `npm run check:tree` rc=0. O verde aplicável ao
+  código desta árvore continua sendo o de `f633e07` (CI `success` + Desktop E2E
+  `success`, registrado na célula anterior).
 
 - 2026-09-27 (integrador, **PASSO 5 — Pernas 2 e 4 fechadas: a barra edita o
   recurso aPLib real e o que ela escreve roda no desempacotador do jogo**), esta
