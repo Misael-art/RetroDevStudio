@@ -9343,10 +9343,20 @@ async function runRexAplibByorEffectScenario(sessionId) {
       setter.call(select, '${offsetHex}');
       select.dispatchEvent(new Event('change', { bubbles: true }));
       return true;`);
+    // Esperar o `<img>` da prévia NÃO fecha a janela: React desmonta o bloco
+    // inteiro (prévia + campo de índice) ao iniciar a re-decodagem, então a
+    // sondagem pode ver ainda o canvas do estado anterior e passar cedo. Foi o
+    // que derrubou a corrida de 2026-09-27 às 10:34Z (07:34 local) com "campo
+    // paint-index ausente". A condição assentada é a que o usuário vê: o campo
+    // montado e botão aplicar habilitado (`disabled={busy || selected == null}`),
+    // ou seja `busy === false` com a prévia presente.
     await waitFor(
-      async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-canvas"]'));`),
+      async () => executeScript(sessionId, `
+        const inp = document.querySelector('${panel} [data-testid="rex-resource-paint-index"]');
+        const btn = document.querySelector('${panel} [data-testid="rex-resource-apply"]');
+        return Boolean(inp) && Boolean(btn) && btn.disabled === false;`),
       30000,
-      `prévia chunky do recurso ${offsetHex} não apareceu.`,
+      `prévia chunky do recurso ${offsetHex} não assentou (campo de índice ausente ou botão aplicar travado).`,
       250
     );
     await pause(1500);
@@ -9445,18 +9455,35 @@ async function runRexAplibByorEffectScenario(sessionId) {
   // Desfecho de uma aplicação pela barra: `aplicado` com o hash anunciado ou
   // `recusado` com o texto do erro estruturado do núcleo. Interpretação fora do
   // predicado: `waitFor` engole exceções e as transformaria em timeout.
-  const desfechoAplicacao = async (rotulo) => waitFor(
-    async () => {
-      const texto = await textOf("rex-resource-result");
-      if (texto.includes("applied")) return { aplicado: texto };
-      const erro = await textOf("rex-resource-error");
-      if (erro) return { recusado: erro };
-      return false;
-    },
-    60000,
-    `a transação não devolveu desfecho para ${rotulo}. DOM: ${await dumpFila()}`,
-    250
-  );
+  //
+  // O orçamento é medido, não chutado: cada desfecho registra os ms decorridos,
+  // porque um timeout estourado sem número não distingue "a barra quebrou" de
+  // "a transação é lenta neste host". Ela re-verifica os 205 candidatos da ROM,
+  // re-codifica o recurso, escreve a cópia de 917 504 B e o BPS: na primeira
+  // corrida com binário recém-compilado (2026-09-27, 10:52Z) isso estourou os
+  // 60 s antigos no §6b, com a edição já na fila e sem erro no painel.
+  const duracoesAplicacao = [];
+  const desfechoAplicacao = async (rotulo) => {
+    const inicio = Date.now();
+    let bruto;
+    try {
+      bruto = await waitFor(
+        async () => {
+          const texto = await textOf("rex-resource-result");
+          if (texto.includes("applied")) return { aplicado: texto };
+          const erro = await textOf("rex-resource-error");
+          if (erro) return { recusado: erro };
+          return false;
+        },
+        180000,
+        `a transação não devolveu desfecho para ${rotulo}. DOM: ${await dumpFila()}`,
+        250
+      );
+    } finally {
+      duracoesAplicacao.push({ rotulo, ms: Date.now() - inicio });
+    }
+    return bruto;
+  };
   const aplicarEdicao = async (pixel, indice, rotulo) => {
     await selectResource(STREAM_HEX);
     await setPanelInput("rex-resource-edit-tile", pixel.tile);
@@ -9678,6 +9705,7 @@ async function runRexAplibByorEffectScenario(sessionId) {
         },
         recusas_excessive_output: recusas,
         guarda_anti_descarte_silencioso: recusasDoPainel,
+        duracoes_aplicacao: duracoesAplicacao,
         regressao_indice_0_expressavel_pela_barra: {
           dominio: "índice de paleta de pixel no 4bpp: 0..15, sendo 0 o que o VDP lê como transparente no plano de tiles (não é edição de cor RGB da paleta)",
           conserto: "CompressedResourcePanel.tsx guarda o TEXTO do campo (useState(\"1\")) e valida por paintIndexRejectReason: vazio, não número, não inteiro e fora de 0..15 têm queixa própria e nada entra na fila no lugar de outra cor; o min=1 e o Number(value) || 1 que reescreviam 0 para 1 saíram",
@@ -9710,6 +9738,7 @@ async function runRexAplibByorEffectScenario(sessionId) {
         },
         limites: [
           "prova o caminho da barra neste recurso, nesta ROM e nesta edição: não prova o resto dos 4 recursos aPLib nem o jogo inteiro",
+          "orçamento de desfecho por aplicação é 180 s medidos em duracoes_aplicacao: a transação re-verifica os 205 candidatos da ROM, re-codifica o recurso, escreve a cópia de 917 504 B e o BPS. A corrida de 2026-09-27 10:52Z, com binário recém-compilado, passou por 5a, 5b e os 14 índices de 6a e estourou os 60 s antigos no §6b sem erro no painel e com a edição na fila; a barra não foi alterada por isso e a corrida seguinte mede as durações",
           "a barra agora aplica o índice 0 das pernas 1 e 3 e produz byte a byte a cópia 69389ec2… que a perna 3 executou no core: o efeito em tela desta edição está provado por identidade de artefato, não por uma corrida nova desta cópia pela barra",
           "o bit a bit da edição (nibble do pixel, demais pixels intactos) é conferido no lib contra o plain re-decodificado, não aqui: a barra não expõe o desempacotamento",
           "BYOR não é dependência provisionável: este cenário não roda no CI",
@@ -9735,6 +9764,7 @@ async function runRexAplibByorEffectScenario(sessionId) {
     indice_0_sonda: desfechoSonda.kind,
     indice_0_copia: desfechoSonda.sha ?? desfechoSonda.texto.slice(0, 60),
     indice_1_a_15_todos_recusados: Object.keys(recusas).length === 14,
+    aplicacoes_ms: duracoesAplicacao.map((d) => d.ms),
   })}`);
 }
 
