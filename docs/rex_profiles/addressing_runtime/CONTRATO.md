@@ -97,7 +97,7 @@ pub enum Translate {
   devolvese un só sería un invento. Exemplos pinados: `md-linear` 512KB → 8
   aliases; `snes-lorom` offset 0 → 8 aliases; `md-ssf2` 4MB con bancos en
   identidade → bijectivo (1 alias).
-  `rom_offset` (ou fóra das áreas de ExHiROM) → `Vec` **baleiro**,
+  `rom_offset >= rom_size` (ou fóra das áreas de ExHiROM) → `Vec` **baleiro**,
   que é resposta válida, non erro.
 - Propiedade obrigatória (testada): para todo alias devolto,
   `translate(alias) == Rom{offset == rom_offset}`. E completitude no dominio
