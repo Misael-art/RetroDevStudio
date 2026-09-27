@@ -26213,8 +26213,11 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
     /// escreveu a cópia de SHA-256
     /// 80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce com o
     /// patch BPS reaplicando esse mesmo hash. A perna 3 (`rex05_...` acima) rodou
-    /// no core uma edição DIFERENTE, 5→0, a única que cabe naquele pixel e que a
-    /// barra não sabe expressar; ela não alcança o artefato da interface. Este
+    /// no core uma edição DIFERENTE, 5→0 — a única que cabe naquele pixel e, à
+    /// época deste teste, a que a barra não sabia expressar (o campo de índice
+    /// reescrevia 0 para 1; corrigido depois, e hoje a sonda 5b do cenário
+    /// `rex-aplib-byor-effect` produz ela mesma a cópia 69389ec2… dessa edição).
+    /// Este
     /// teste fecha a cadeia: a cópia sai de `apply_resource_edit` com os mesmos
     /// quatro campos que o painel mandou, tem seu hash conferido contra o que a
     /// barra anunciou ANTES de qualquer frame rodar, e é essa cópia que entra no
@@ -26536,8 +26539,13 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 "limites": "Prova o efeito em tela do artefato que a BARRA escreveu, executado \
                             pelo desempacotador do próprio jogo sob o core do harness da lib. Não \
                             prova o app distribuído, nem o resto dos recursos aPLib, nem hardware \
-                            real; o índice 0 continua inexpressável pela interface (achado \
-                            registrado na perna 2)."
+                            real. O índice 0 das pernas 1 e 3, que a interface não sabia \
+                            expressar quando este teste foi escrito, passou a ser expressável \
+                            (regressão na sonda 5b do cenário `rex-aplib-byor-effect`): a barra \
+                            escreve lá, de um dígito, a cópia 69389ec2… que a perna 3 já tinha \
+                            executado no core — o efeito em tela daquele artefato está provado \
+                            por identidade de bytes, não por uma corrida nova desta edição pela \
+                            barra."
             }),
         );
 

@@ -2313,17 +2313,19 @@ mod tests {
 
     /// O que a BARRA consegue re-inserir nesta ROM, medido com o codificador do
     /// produto. Para cada recurso aPLib verificado: o custo do plain intacto e o
-    /// custo de cada edição de um pixel amostrada, separados entre os índices que
-    /// o painel sabe expressar (1..15) e o índice 0, que `editRejectReason`
-    /// reserva como transparente e o campo de índice reescreve para 1.
+    /// custo de cada edição de um pixel amostrada, no domínio inteiro de índice que
+    /// o painel expressa (0..15 — desde 2026-09-27 o 0 é digitável, antes o campo
+    /// reescrevia 0 para 1). O piso e a contagem "sem o índice 0" continuam na
+    /// tabela: são o registro do que a barra alcançava com o defeito, e é contra
+    /// eles que se vê o que o conserto acrescentou.
     ///
     /// Existe porque a perna 2 do passo 5 descobriu pela barra que nenhuma edição
     /// no pixel pinado das pernas 1 e 3 cabe (3 200 bytes de plain precisam de
     /// 939..942 de stream contra um slot de 938), enquanto o pin 5→0 coube em
     /// 937. Em vez de escolher o próximo alvo por opinião, a varredura responde
     /// com o piso do encoder por recurso — e respondeu que no MESMO tile
-    /// observado (53) duas edições de um pixel com índice da barra cabem, ambas
-    /// em 938 B. O controle de calibração está no mesmo teste: o pin 5→0 tem que
+    /// observado (53) duas edições de um pixel com índice 1..15 cabem, ambas em
+    /// 938 B. O controle de calibração está no mesmo teste: o pin 5→0 tem que
     /// continuar custando 937 B, senão foram os números novos que estão errados
     /// e não a barra.
     ///
@@ -2385,11 +2387,19 @@ mod tests {
                 alvos.push((tile, 0, 0));
                 alvos.push((tile, 0, 4));
             }
+            // O tile do pin entra pelas duas vias (varredura completa dos 64 pixels
+            // e amostra genérica de (0,0)/(0,4) por tile). Sem dedupe, `pixels_amostrados`,
+            // `tentativas` e as contagens de cabíveis mediriam a amostragem em vez do
+            // espaço de edições — e a dupla conta aparece agora que o índice 0 do pixel
+            // (53,0,4) cabe no slot.
+            alvos.sort_unstable();
+            alvos.dedup();
 
             let mut tentativas = 0usize;
-            let mut piso_barra = usize::MAX; // menor custo com índice 1..15
-            let mut piso_tudo = usize::MAX; // incluíndo o índice 0
+            let mut piso_barra = usize::MAX; // o domínio que o painel expressa: 0..15
+            let mut piso_sem_indice_0 = usize::MAX; // o que a barra alcançava com o defeito
             let mut cabiveis_barra = 0usize;
+            let mut cabiveis_sem_indice_0 = 0usize;
             let mut nao_medido = None;
             if base.is_err() {
                 nao_medido = Some(format!(
@@ -2426,17 +2436,21 @@ mod tests {
                                 usize::MAX
                             }
                         };
-                        piso_tudo = piso_tudo.min(custo);
+                        piso_barra = piso_barra.min(custo);
+                        let cabe = custo <= slot;
+                        if cabe {
+                            cabiveis_barra += 1;
+                            couberam.push(serde_json::json!({
+                                "recurso": format!("{:#x}", candidato.stream_offset),
+                                "slot": slot, "tile": tile, "linha": row, "coluna": col,
+                                "indice_original": original, "indice_novo": indice,
+                                "custo": custo,
+                            }));
+                        }
                         if indice >= 1 {
-                            piso_barra = piso_barra.min(custo);
-                            if custo <= slot {
-                                cabiveis_barra += 1;
-                                couberam.push(serde_json::json!({
-                                    "recurso": format!("{:#x}", candidato.stream_offset),
-                                    "slot": slot, "tile": tile, "linha": row, "coluna": col,
-                                    "indice_original": original, "indice_novo": indice,
-                                    "custo": custo,
-                                }));
+                            piso_sem_indice_0 = piso_sem_indice_0.min(custo);
+                            if cabe {
+                                cabiveis_sem_indice_0 += 1;
                             }
                         }
                     }
@@ -2458,8 +2472,9 @@ mod tests {
                 "pixels_amostrados": alvos.len(),
                 "tentativas": tentativas,
                 "piso_indices_da_barra": (piso_barra != usize::MAX).then_some(piso_barra),
-                "piso_incluindo_indice_0": (piso_tudo != usize::MAX).then_some(piso_tudo),
+                "piso_sem_indice_0": (piso_sem_indice_0 != usize::MAX).then_some(piso_sem_indice_0),
                 "cabiveis_na_barra": cabiveis_barra,
+                "cabiveis_sem_indice_0": cabiveis_sem_indice_0,
                 "nao_medido": nao_medido,
             }));
         }
@@ -2473,14 +2488,16 @@ mod tests {
             .expect("o recurso do pin sumiu da varredura");
 
         let tabela = serde_json::json!({
-            "schema": "rex-aplib-capacidade-da-barra/v1",
+            "schema": "rex-aplib-capacidade-da-barra/v2",
             "rom_sha256": sha,
             "recursos": linhas,
             "couberam_na_barra": couberam,
             "duracao_ms": inicio.elapsed().as_millis(),
-            "leitura": "piso_indices_da_barra > slot_bytes significa nenhuma edição de 1 pixel que o \
-                       painel consiga expressar cabe no slot; piso_incluindo_indice_0 é o mesmo piso \
-                       contando o índice 0, que só o backend aceita",
+            "leitura": "piso_indices_da_barra > slot_bytes significa nenhuma edição de 1 pixel do \
+                       domínio que o painel expressa (0..15) cabe no slot; piso_sem_indice_0 e \
+                       cabiveis_sem_indice_0 são o mesmo cálculo restrito a 1..15, ou seja, o que \
+                       a barra alcançava enquanto o campo de índice reescrevia 0 para 1 \
+                       (consertado em 2026-09-27)",
         });
         println!(
             "{}",
@@ -2513,27 +2530,41 @@ mod tests {
                 .len(),
             CUSTO_DO_PIN_5_PARA_0,
             "o índice 0 do pixel pinado deixou de custar {CUSTO_DO_PIN_5_PARA_0} B: o encoder mudou e \
-             a conclusão sobre os índices 1..15 não vale mais"
+             os pisos abaixo não descrevem mais a interface"
         );
-        // ---- o que a varredura responde, pinado como registro de capacidade:
-        // no pixel das pernas 1 e 3 nenhuma edição da barra cabe, e no mesmo tile
-        // observado há exatamente duas que cabem, ambas encostando no slot.
-        assert!(
-            pin["cabiveis_na_barra"].as_u64().expect("contagem") > 0,
-            "nenhuma edição de um pixel com índice da barra cabe no recurso do pin: a perna 2 \
-             ficaria sem alvo nesta ROM"
-        );
-        let no_pixel_do_pin = couberam.iter().filter(|c| {
-            c["recurso"] == serde_json::json!("0x2e12a")
-                && c["tile"].as_u64() == Some(TILE_DO_PIN as u64)
-                && c["linha"].as_u64() == Some(LINHA_DO_PIN as u64)
-                && c["coluna"].as_u64() == Some(COLUNA_DO_PIN as u64)
-        });
+        // ---- o que a varredura responde, pinado como registro de capacidade: no
+        // pixel das pernas 1 e 3 cabe exatamente uma edição do domínio da barra —
+        // o índice 0, que o painel passou a digitar — e nenhuma das outras 14 com
+        // índice 1..15. No tile observado 53 as duas edições 1..15 que cabem
+        // continuam sendo o alvo da perna 2, encostadas no teto do slot.
+        let pin_cabiveis: Vec<u64> = couberam
+            .iter()
+            .filter(|c| {
+                c["recurso"] == serde_json::json!("0x2e12a")
+                    && c["tile"].as_u64() == Some(TILE_DO_PIN as u64)
+                    && c["linha"].as_u64() == Some(LINHA_DO_PIN as u64)
+                    && c["coluna"].as_u64() == Some(COLUNA_DO_PIN as u64)
+            })
+            .map(|c| c["indice_novo"].as_u64().expect("índice novo"))
+            .collect();
         assert_eq!(
-            no_pixel_do_pin.count(),
-            0,
-            "o pixel pinado (53,0,4) voltou a ter edição expressável pela barra: o cenário WebDriver \
-             `rex-aplib-byor-effect` precisa ser reescrito"
+            pin_cabiveis,
+            vec![0],
+            "o pixel pinado (53,{LINHA_DO_PIN},{COLUNA_DO_PIN}) deixou de ter exatamente uma \
+             edição cabível (o índice 0): o cenário WebDriver `rex-aplib-byor-effect` mede esse \
+             pixel e assina a cópia que ele produz"
+        );
+        assert_eq!(
+            pin["cabiveis_sem_indice_0"].as_u64().expect("contagem"),
+            couberam
+                .iter()
+                .filter(|c| {
+                    c["recurso"] == serde_json::json!("0x2e12a")
+                        && c["indice_novo"].as_u64().expect("índice") >= 1
+                })
+                .count() as u64,
+            "a contagem restrita a 1..15 não bate com a lista: o registro do que a barra alcançava \
+             antes do conserto do índice 0 tem que continuar conferível"
         );
         let mut no_tile_observado: Vec<[u64; 3]> = couberam
             .iter()
@@ -2552,9 +2583,10 @@ mod tests {
         no_tile_observado.sort_unstable();
         assert_eq!(
             no_tile_observado,
-            vec![[7, 5, 938], [7, 7, 938]],
-            "as edições da barra que cabem no tile observado 53 mudaram: o alvo da perna 2 é o \
-             primeiro par desta lista"
+            vec![[0, 4, 937], [7, 5, 938], [7, 7, 938]],
+            "as edições de um pixel do domínio da barra que cabem no tile observado 53 mudaram: o \
+             alvo aplicado pela perna 2 é o primeiro par com índice 1..15, e [0,4,937] é a edição \
+             das pernas 1 e 3 que o índice 0 consertado passou a permitir digitar"
         );
     }
 
@@ -3535,6 +3567,82 @@ mod tests {
         assert_eq!(tiles, before);
         md_write_pixel_index(&mut tiles, 0, 0, 1, 2).unwrap();
         assert_eq!(tiles, before);
+    }
+
+    /// O índice 0 é um valor do domínio 4bpp (é o índice que o VDP lê como
+    /// transparente no plano de tiles), não um sentinela de "sem cor". As pernas
+    /// 1 e 3 do passo 5 pinaram edições em 0 e a barra não sabia expressá-las;
+    /// este pino existe para os dois lados não regredirem: escrever 0 preserva o
+    /// nibble irmão e os demais bytes, e o stream aPLib re-codificado devolve o
+    /// 0 exatamente na posição escolhida.
+    #[test]
+    fn indice_0_e_do_dominio_4bpp_ate_o_stream_aplib() {
+        // (a) chunky, nas duas metades do byte, com vizinhos não-zero para a
+        // preservação ser mensurável.
+        let mut tiles = vec![0u8; 64];
+        tiles[0] = 0x5A; // (0,0)=5 e (0,1)=A
+        tiles[1] = 0xA5; // (0,2)=A e (0,3)=5
+        md_write_pixel_index(&mut tiles, 0, 0, 0, 0).unwrap();
+        assert_eq!(
+            tiles[0], 0x0A,
+            "zero na coluna par mexeu no nibble baixo do mesmo byte"
+        );
+        md_write_pixel_index(&mut tiles, 0, 0, 3, 0).unwrap();
+        assert_eq!(
+            tiles[1], 0xA0,
+            "zero na coluna ímpar mexeu no nibble alto do mesmo byte"
+        );
+        assert_eq!(md_read_pixel_index(&tiles, 0, 0, 0).unwrap(), 0);
+        assert_eq!(md_read_pixel_index(&tiles, 0, 0, 3).unwrap(), 0);
+        assert_eq!(md_read_pixel_index(&tiles, 0, 0, 1).unwrap(), 0x0A);
+        assert_eq!(md_read_pixel_index(&tiles, 0, 0, 2).unwrap(), 0x0A);
+        // Nenhum outro byte do recurso de 2 tiles mudou.
+        let tocados: Vec<usize> = tiles
+            .iter()
+            .enumerate()
+            .skip(2)
+            .filter(|(_, byte)| **byte != 0)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(
+            tocados,
+            Vec::<usize>::new(),
+            "a edição de 2 pixels mexeu em bytes além dos dois do próprio pixel"
+        );
+
+        // (b) codec: sobre o plain autoral, a edição em 0 sobrevive a
+        // re-codificação + decode e não vaza para nenhum outro pixel.
+        let plain = aplib_plain();
+        let (tile, row, col) = (64usize, 3usize, 4usize);
+        let original = md_read_pixel_index(&plain, tile, row, col).unwrap();
+        assert_ne!(
+            original, 0,
+            "o pixel pinado precisa de um índice não-zero para a edição ser real"
+        );
+        let mut editado = plain.clone();
+        md_write_pixel_index(&mut editado, tile, row, col, 0).unwrap();
+        let deslocados: Vec<usize> = (0..plain.len())
+            .filter(|i| plain[*i] != editado[*i])
+            .collect();
+        assert_eq!(
+            deslocados,
+            vec![tile * 32 + row * 4 + col / 2],
+            "a edição de 1 pixel tem que tocar exatamente 1 byte"
+        );
+        let stream = aplib_encode(&editado, &AplibEncodeLimits::default())
+            .expect("re-codificar o plain com índice 0");
+        let dec = aplib_decode(&stream, &AplibLimits::default()).expect("decode do stream");
+        assert_eq!(dec.data, editado, "round-trip não devolveu o plain editado");
+        assert_eq!(
+            md_read_pixel_index(&dec.data, tile, row, col).unwrap(),
+            0,
+            "o índice 0 não sobreviveu ao codec"
+        );
+        assert_eq!(
+            md_read_pixel_index(&dec.data, tile, row, col + 1).unwrap(),
+            md_read_pixel_index(&plain, tile, row, col + 1).unwrap(),
+            "o pixel irmão mudou junto"
+        );
     }
 
     /// Prévia chunky: comparação independente de pixels (segunda
