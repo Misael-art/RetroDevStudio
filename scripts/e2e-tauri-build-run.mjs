@@ -9271,6 +9271,20 @@ async function runRexLz4wFixtureEffectScenario(sessionId) {
   const FIXTURE_HEADER_OFFSET = 95464;
   const FIXTURE_SLOT_BYTES = 444;
   const FIXTURE_STREAM_OFFSET_HEX = "5f988";
+  // Segundo recurso real do fixture, medido direto no arquivo (não no produto):
+  // o TileSet aPLib do `font_08x08` que o SGDK 2.11 embute e comprime com aPLib.
+  // Não é ruído do scan — os 609 B do stream são byte a byte os mesmos do
+  // recurso 0x2cd94 da ROM BYOR HAMOOPIG (sha256 do stream
+  // e9b88ab5…), e o plain de 3 072 B (96 glifos 8x8, nibbles só em
+  // {0x0,0xF,0xF0,0xFF}) tem sha256 20ee7dcc…. Verificável por
+  // `python3 scripts/rex_profiles/integrator/aplib/audit_aplib_candidates.py`.
+  const FIXTURE_FONT_HEADER = 0x59d14;
+  const FIXTURE_FONT_STREAM_HEX = "5f2ec";
+  const FIXTURE_FONT_STREAM_OFFSET = 0x5f2ec;
+  const FIXTURE_FONT_TILES = 96;
+  const FIXTURE_FONT_STREAM_BYTES = 609;
+  const FIXTURE_FONT_STREAM_SHA256 =
+    "e9b88ab50ad575f340a6c31cb12cdf3d666577a8fc1eeeb88b083be3c36b1256";
   const SETTLE_FRAMES = 60;
   const steps = [];
   const record = (step, claim, observed) => {
@@ -9499,7 +9513,35 @@ async function runRexLz4wFixtureEffectScenario(sessionId) {
   }
   const target = resourceOptions.find((o) => o.value === FIXTURE_STREAM_OFFSET_HEX);
   if (!target) fail(`produto não listou o recurso do fixture (${FIXTURE_STREAM_OFFSET_HEX}); opções: ${JSON.stringify(resourceOptions)}`);
-  if (resourceOptions.length !== 1) fail(`fixture deveria ter exatamente 1 recurso LZ4W; produto achou ${resourceOptions.length}: ${JSON.stringify(resourceOptions)}`);
+  // O contrato da lista é por codec, porque a verificação deixou de ser
+  // exclusiva de LZ4W: exatamente 1 TileSet LZ4W (o plantado pelo fonte) e
+  // exatamente 1 TileSet aPLib (o font_08x08 do SGDK, real e conferido no
+  // arquivo abaixo). "1 opção no total" não era uma propriedade do fixture —
+  // era uma consequência do pipeline só ter um codec.
+  const porCodec = (codec) => resourceOptions.filter((o) => (o.label ?? "").includes(`— ${codec} ·`));
+  const lz4wOptions = porCodec("lz4w");
+  const aplibOptions = porCodec("aplib");
+  if (lz4wOptions.length !== 1 || aplibOptions.length !== 1 || resourceOptions.length !== 2) {
+    fail(
+      `fixture deveria ter 1 recurso LZ4W + 1 aPLib; produto listou ` +
+        `LZ4W=${lz4wOptions.length}, aPLib=${aplibOptions.length}, total=${resourceOptions.length}: ` +
+        JSON.stringify(resourceOptions)
+    );
+  }
+  if (romBytes.readUInt16BE(FIXTURE_FONT_HEADER) !== 1) fail("fixture perdeu o header aPLib do font (compression=1)");
+  if (romBytes.readUInt16BE(FIXTURE_FONT_HEADER + 2) !== FIXTURE_FONT_TILES) fail("font_08x08 perdeu numTile=96");
+  if (romBytes.readUInt32BE(FIXTURE_FONT_HEADER + 4) !== FIXTURE_FONT_STREAM_OFFSET) {
+    fail(`ponteiro do font (${romBytes.readUInt32BE(FIXTURE_FONT_HEADER + 4).toString(16)}) não bate com 0x${FIXTURE_FONT_STREAM_HEX}`);
+  }
+  const fonteStream = romBytes.subarray(FIXTURE_FONT_STREAM_OFFSET, FIXTURE_FONT_STREAM_OFFSET + FIXTURE_FONT_STREAM_BYTES);
+  if (sha(fonteStream) !== FIXTURE_FONT_STREAM_SHA256) {
+    fail(`stream aPLib do font não é o byte do SGDK medido: ${sha(fonteStream)}`);
+  }
+  const fonte = aplibOptions[0];
+  if (fonte.value !== FIXTURE_FONT_STREAM_HEX) fail(`recurso aPLib listado não é o font do SGDK: ${JSON.stringify(fonte)}`);
+  if (!(fonte.label ?? "").includes(`${FIXTURE_FONT_TILES} tiles`) || !(fonte.label ?? "").includes(`stream ${FIXTURE_FONT_STREAM_BYTES} B`)) {
+    fail(`rótulo do font não declara os números medidos (96 tiles, stream 609 B): ${fonte.label}`);
+  }
   const streamLenMatch = (target.label ?? "").match(/stream (\d+) B/);
   if (!streamLenMatch || Number(streamLenMatch[1]) !== FIXTURE_SLOT_BYTES) {
     fail(`slot do stream divergiu do receituário (${FIXTURE_SLOT_BYTES} B): ${target.label}`);
@@ -9510,9 +9552,12 @@ async function runRexLz4wFixtureEffectScenario(sessionId) {
   if (pixelsSha !== expectedOriginalPixelsSha.slice(0, 16)) {
     fail(`prévia do produto não é o fonte autoral recomputado: ui=${pixelsSha} esperado=${expectedOriginalPixelsSha.slice(0, 16)}`);
   }
-  record(2, "descoberta + decode pela UI: recurso único, slot conferido pelo header, prévia == fonte recomposto", {
+  record(2, "descoberta + decode pela UI: um recurso por codec, slot conferido pelo header, prévia == fonte recomposto", {
     resourceOptions, headerOffset: FIXTURE_HEADER_OFFSET, streamOffset: FIXTURE_STREAM_OFFSET_HEX,
     slotBytes: Number(streamLenMatch[1]), pixelsSha,
+    font: { headerOffset: FIXTURE_FONT_HEADER, streamOffset: FIXTURE_FONT_STREAM_HEX,
+            streamBytes: FIXTURE_FONT_STREAM_BYTES, streamSha256: sha(fonteStream),
+            tiles: FIXTURE_FONT_TILES, label: fonte.label },
   });
 
   // NO-OP honesto pela mesma transação (zero edições não é sucesso fabricado).
