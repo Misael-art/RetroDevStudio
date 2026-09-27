@@ -204,7 +204,7 @@
    "id": "2",
    "quando": "10:45Z",
    "build": "mesmo binário da corrida 1",
-   "resultado": "VERDE, 23 passos: valor_no_campo 0, desfecho aplicado, cópia 69389ec2… conferida em disco, 14 recusas, 5 recusas de guarda, alvo 5→4 com 80249128…",
+   "resultado": "VERDE: 23 marcadores de passo no log (1-3, 4, 5a×5, 5b, 6a×14, 7) e o resumo impresso ao fim traz indice_0_no_campo \"0\", indice_0_sonda \"aplicado\" e indice_0_copia 69389ec2b400220c — cópia conferida em disco, 14 recusas, 5 recusas de guarda, alvo 5→4 com 80249128…. A linha E2E_RC=0 do wrapper só está registrada no log da corrida 4.",
    "relatorio": "rex-aplib-byor-effect-relatorio-run2.json"
   },
   {
@@ -226,6 +226,7 @@
   "npm_run_lint": "rc=0",
   "npx_tsc_noEmit": "rc=0",
   "npm_test": "706 passed, 0 failed, 6 skipped (arquivo do painel: 10 testes; invariante anterior 702, +4 = as regressões do índice 0)",
+  "invo_cargo": "src-tauri/.cargo/config.toml fixa target-dir=target-test RELATIVO ao diretório de invocação: cd src-tauri && cargo ... cai em src-tauri/target-test, enquanto a forma da raiz (cargo ... --manifest-path src-tauri/Cargo.toml) cai em src-tauri/target — medido com cargo metadata nos dois diretórios. O log gate-cargo-test.log (os 707 testes) mostra target-test/debug/deps/app_lib-716403bf8cac2e87, o mesmo binário deste manifesto em binario_sob_teste.harness_de_teste, então essa corrida é a de src-tauri; os logs de fmt e clippy não imprimem caminho e a forma exata dessas duas invocações não é decidível pela evidência promovida (o que muda é o diretório de alvo, não o veredito).",
   "cargo_fmt_check": "rc=0",
   "cargo_clippy_D_warnings": "rc=0 (rodado em src-tauri)",
   "cargo_test_lib": "707 passed, 0 failed, 63 ignored (invariante anterior 706, +1 = o pino do índice 0 no codec)",

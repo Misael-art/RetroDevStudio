@@ -343,15 +343,19 @@ e `codecs/` (B) do CONTRACTS v1.
   re-decodagem — a sondagem pode ver o canvas do estado anterior e passar cedo.
   (2) 10:45Z, mesmo binário, com `selectResource` esperando a condição assentada
   (campo de índice montado **e** botão aplicar habilitado, ou seja `busy === false`)
-  e com marcadores de passo: **verde, 23 passos** — `valor_no_campo = "0"`, desfecho
-  aplicado, cópia `69389ec2…` conferida em disco, 14 recusas, 5 recusas de guarda,
+  e com marcadores de passo: **verde** — 23 marcadores no log (`1-3`, `4`, `5a`×5,
+  `5b`, `6a`×14, `7`) e o resumo impresso ao fim traz `indice_0_no_campo: "0"`,
+  `indice_0_sonda: "aplicado"` e `indice_0_copia: "69389ec2b400220c"`; a linha
+  `E2E_RC=0` do wrapper só está no log da corrida (4). Cópia `69389ec2…` conferida
+  em disco, 14 recusas, 5 recusas de guarda,
   alvo 5→4 com `80249128…`. (3) 10:52Z, build completo novo: passou 5a, **5b** e os
   14 índices de 6a e morreu no orçamento de 60 s do desfecho em §6b, com a edição já
   na fila, sem erro no painel e sem desfecho. (4) 10:58Z, mesmo binário da (3) e
   orçamento por aplicação medido: **verde**, `E2E_RC=0`, com as durações registradas
   no relatório — **7 621 ms** para o apply do índice 0, **272–327 ms** para cada uma
-  das 14 recusas e **7 400 ms** para o apply do alvo 5→4. As três últimas cópias e o
-  BPS são as mesmas das corridas do passo 5 (`69389ec2…`, `80249128…`, `58ae4f0b…`),
+  das 14 recusas e **7 400 ms** para o apply do alvo 5→4. A cópia do índice 0, a
+  cópia do alvo e o BPS do alvo são os mesmos das corridas do passo 5
+  (`69389ec2…`, `80249128…`, `58ae4f0b…`),
   781/800 bytes distintos, 0 fora do slot, 163 preservados.
   **O que isso ainda não explica:** a corrida (3) estourou 60 s num passo que custa
   ~7,4 s — não foi lentidão sistemática nem a barreira do orçamento sendo atingida
@@ -359,16 +363,23 @@ e `codecs/` (B) do CONTRACTS v1.
   então é diagnóstico, não produto: cada desfecho agora carrega sua duração e o
   orçamento subiu para 180 s, então a próxima ocorrência é medida em vez de virar
   timeout cego. Um `rc=101` no meio da série de gates foi erro de invoco meu
-  (`cargo` rodado fora de `src-tauri`, sem `--manifest-path`: "could not find
-  Cargo.toml"), não falha de código.
+  (`cargo` rodado na raiz do repositório, sem `--manifest-path`: "could not find
+  Cargo.toml"), não falha de código; a distinção entre as duas formas de invocar o
+  `cargo` fica registrada na célula `Gates` abaixo.
 
   **Efeito em tela.** A perna 3 já executou a cópia `69389ec2…` no desempacotador
   do próprio jogo (2 pixels por frame em 119 frames, coordenadas `[[212,200],
-  [284,128]]`) e as duas pernas de core foram reexecutadas hoje às 10:29Z (07:29
-  local) — `rex05`
-  (edição do backend) e `rex06` (cópia da barra, `80249128…`, 232 pixels / 116
-  frames nas posições previstas). O que esta célula fecha é a identidade: a barra
-  produz **byte a byte** o artefato que o núcleo rodou. A asserção nibble a nibble
+  [284,128]]`), e as duas pernas de core foram reexecutadas hoje às 10:29Z (07:29
+  local): `rex05` (edição do backend) e `rex06` (cópia da barra, `80249128…`, 232
+  pixels em 116 frames nas posições previstas). Os dois relatórios promovidos
+  registram `core.sha256 = 07c10476…` (Genesis Plus GX v1.7.4 `46a5521`), que é o
+  mesmo `core_sob_teste` do manifesto, então a identidade do core executado é
+  conferível no pacote e não só na descrição. O que esta célula fecha é a
+  **identidade do artefato**: a barra produz byte a byte o que o núcleo rodou. A
+  amarração ao binário de teste que produziu os relatórios vive em
+  `binario_sob_teste.harness_de_teste` (`app_lib-716403bf8cac2e87`, citado pelos
+  logs de `--ignored`); o relatório `rex05` em si não registra esse caminho, o que
+  fica declarado como limite do pacote. A asserção nibble a nibble
   da edição de índice 0 vive no lib (`indice_0_e_do_dominio_4bpp_ate_o_stream_aplib`:
   `0x5A → 0x0A` no nibble baixo, `0xA5 → 0xA0` no alto, vizinhos intactos, e o
   índice 0 sobrevivendo a re-codificação + decode no fixture autoral).
@@ -376,12 +387,19 @@ e `codecs/` (B) do CONTRACTS v1.
   **Gates desta árvore.** `npm run check:tree` rc=0 · `npm run lint` rc=0 ·
   `npx tsc --noEmit` rc=0 · `npm test` → **706 passed, 0 failed, 6 skipped**
   (invariante anterior 702; **+4** = as quatro regressões do painel, arquivo com
-  10 testes) · `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` rc=0 ·
-  `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` rc=0 ·
-  `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture` →
-  **707 passed, 0 failed, 63 ignored** (invariante anterior
-  706; **+1** = o pino do índice 0 no codec). Os logs promovidos são os das
-  reexecuções corretas, descritos acima.
+  10 testes) · `cargo fmt -- --check` rc=0 · `cargo clippy -- -D warnings` rc=0 ·
+  `cd src-tauri && cargo test --lib -- --nocapture` → **707 passed, 0 failed,
+  63 ignored** (invariante anterior 706; **+1** = o pino do índice 0 no codec).
+  Sobre a forma de invocar o `cargo`: `src-tauri/.cargo/config.toml` define
+  `target-dir = "target-test"` **relativo ao diretório de invocação**, e a forma
+  canônica da raiz (`cargo … --manifest-path src-tauri/Cargo.toml`) cai em
+  `src-tauri/target` — medido com `cargo metadata` nos dois diretórios. O log que
+  carrega os **707 testes** mostra `target-test/debug/deps/app_lib-716403bf8cac2e87`,
+  o binário amarrado no manifesto como `harness_de_teste`, então aquela corrida é
+  a rodada dentro de `src-tauri`. Os logs de `fmt` e `clippy` não imprimem caminho:
+  a forma exata dessas duas invocações não é decidível pela evidência promovida, e o
+  que distingue as duas formas é o diretório de alvo, não o veredito. Os logs
+  promovidos são os das reexecuções corretas, descritas acima.
 
   **Push e CI registrados por SHA.** `git fetch` + `git push origin
   codex/rex-integrator-aplib-decode` → fast-forward `19c880f..9a4335f` (0 atrás, 6
