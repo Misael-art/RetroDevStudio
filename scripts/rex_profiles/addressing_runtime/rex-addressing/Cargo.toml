@@ -1,0 +1,17 @@
+[package]
+name = "rex-addressing"
+version = "0.1.0"
+edition = "2021"
+description = "Biblioteca de enderezamento de ROMs (MD linear, MD SSF2, SNES LoROM/HiROM/ExHiROM): tradución, inversión con aliases, lecturas segmentadas e erros estruturados. Experimental."
+license = "UNLICENSED"
+publish = false
+
+# Sen dependencias: o paquete debe poder compilar e testear sen rede e sen
+# tocar o Cargo.lock do produto.
+[dependencies]
+
+[dev-dependencies]
+
+[lib]
+name = "rex_addressing"
+path = "src/lib.rs"
