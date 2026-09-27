@@ -193,6 +193,7 @@ legível.
 | prévia | verified | `render_resource_png` chunky 4x no produto com pixels SHA-256 e comparação independente; exibida na aba "Recursos comprimidos" |
 | edição | verified (via UI) | formulário pixel (tile/linha/coluna/índice) + transação canônica; no-op com zero edições pela mesma UI |
 | encode | verified (com benchmark de capacidade congelado) | re-codificação com dicionário dentro do espaço original; busca de candidatos do dicionário e da saída **mesclada por proximidade** (mesmo teto de 128, mesma janela, mesmo lazy) levou o fixture de 448→**444 B, byte a byte o stream do `rescomp`** e o corpus de `folga_base` somada −13 188→**−9 156 B** (158 melhoraram, **0** pioraram, 2 empataram). Medida pela especificação congelada `scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md` com split de validação `índice % 5`; needs_space honesto nos demais; 159/160 recursos preservados na transação. **Capacidade real medida, não prometida**: com esse ganho continua havendo **1/160** recurso com folga não negativa (`0xc8cc8`, +2 B) e a bateria amostral (24 bits/recurso) só encontra bit cabível ali — a edição canônica de 1 pixel custa 146 B contra slot de 144 B. *(número de r4; a célula termina em r7 abaixo com 7/160)*. Causa e leitura em `LZ4W_ENCODER_444_VS_448_2026-09-26.md` §4.1; evidência `data/rex_profiles/integrator/lz4w-recompress/evidence/2026-09-26-r{1,2,3,4-final-pin}/` (r1 = linha de base pinada em `656bdc9f…`, r4 = pino final `bee8524f…`). **Piso medido (emenda §9, rodada r5):** um DP de custo explícito validado contra busca exaustiva (1 165 entradas) dá stream menor que o produto em **160/160** recursos do corpus — soma **9 394 B**, mediana 56 B, máximo 150 B, **zero empates e zero perdas**; no fixture autoral o piso é exatamente os 444 B que o produto já emite (gap 0, e o `rescomp` do SGDK também está ali). Consequência: **125/160** recursos teriam o plain não-editado cabendo no slot contra o parse ótimo (hoje 1), e a folga agregada do corpus passaria de −9 156 B para **+238 B** (o déficit agregado desaparece, mas a sobra não é uniforme: 35 recursos continuariam sem caber). Isso é margem de *parsing*, medida no plain sem edição, decodificada pelo decoder do produto (161/161) — não é editabilidade provada nem replay 68k feito; evidência em `data/rex_profiles/integrator/lz4w-recompress/evidence/2026-09-26-r5-floor-dump/` e leitura em `LZ4W_ENCODER_444_VS_448_2026-09-26.md` §6. **INCREMENTO INTEGRADO (rodada r7, pino `6044135b…`, commits `cde88cc`+`8a22689`):** o DP de custo explícito entrou no produto e a medição foi **refeita no pino final** (`.../evidence/2026-09-26-r7-final-pin/`). Antes/depois r5→r7 no benchmark congelado, recurso a recurso: **160 melhoram, 1 empata, 0 pioram**; gap sobre o piso **9 394 → 3 602 B (−5 792, 61,7 % fechado)**; folga somada S-B **−9 156 → −3 364 B**; recursos com folga não negativa **1 → 7**; `ja_cabe` **2 → 8** com **6 transições para a frente e nenhuma para trás**; bateria §4-edita `cabe` **2 → 20** e `needs_space` **523 → 505** com a coluna no-op intacta em 119; coube na amostragem de ajuste **1 → 5** e na de validação **0 → 1** (o split de validação nunca serviu de sintonia). Consequência operacional no recurso real: a edição canônica de `0xc8cc8` passou de 146 B (estourava o slot de 144) para **144 B, cabendo no próprio slot**, lida byte a byte pelo desempacotador 68000 oficial (`lz4w-68k/evidence/2026-09-26-r15`, caso `i40`) — sem expansão de ROM e sem tocar vizinhos. **Achado que mudou o desenho — pegada de escrita ≠ comprimento:** o guloso é parse *local* e a DP é *re-parse global*; como o dicionário de um recurso é o prefixo que o antecede na ROM, a pegada larga da DP altera dependentes. Com "DP sempre que coubesse", a varredura de `0xc8cc8` caiu de `fit=4 aplicados=4` (HEAD) para `fit=60 aplicados=56` — 4 recusadas por `dependent_modified`, não por tamanho. Por isso a transação escreve por **orçamento de espaço** (`..._index_fitting`: guloso se já cabe, DP como resgate) e só o *benchmark* mede DP-first: onde o guloso cabia o produto escreve os mesmos bytes de antes (provado em `i41`, SHA `2776ec2c…` idêntico ao do pino só-guloso); onde não cabia, ganha o resgate. **Teto do incremento (não chamar de ótimo):** 3/161 recursos atingem o *comprimento* do piso e **0/161** emitem os *bytes* do piso, porque o modelo de piso ignora o teto de 128 candidatos por posição que o produto aplica; provado é "≤ guloso em 161/161, estritamente menor em 160". **E 'editável' não é 'compreendido':** `0xc8cc8` continua `BLOQUEADO` quanto ao que representa — a medição afirma comprimento e decodificabilidade, não semântica de tile/paleta |
+| transação canônica no aPLib, na mesma ROM do LZ4W (passo 3) | verified (fixture autoral aPLib + rom mista sintética) | `verify_resource_set` verifica os candidatos dos **dois** codecs e recusa sobreposição cross-codec; `transacao_canonica` é uma só (identidade → evidência → tamanhos → no-op → re-codificação no espaço comprovado → ida-e-volta → cópia + dependentes → BPS com hash exato) e o contrato de histórico viaja com o recurso verificado (`RecursoEditavel`), nunca escolhido por suposição: LZ4W usa dicionário = prefixo da ROM, aPLib raw usa o próprio stream até o EOD. Nenhuma validação LZ4W foi removida; `verify_lz4w_resource_set` segue existindo e os testes dele seguem verdes. A fronteira de produto (`list_resources` → `preview_resource` → `apply_resource_edit`) agora rotula e despacha pelo codec do header: `ui_edite_recurso_aplib_pela_mesma_fronteira_do_lz4w` abre a ROM mista, acha `["lz4w","lz4w","aplib"]`, edita 1 pixel do aPLib (tile 64, 3, 4 → 15), escreve `rex-aplib-modified-*`/`rex-aplib-patch-*` com os SHA declarados conferidos no disco, preserva os **2** LZ4W e re-prévia da cópia bate com a prévia da edição. **Medido, não assumido (ver checkpoint 2026-09-27): slot de `tile_like` tem paridade exata (41 B) e o menor custo de edição de 1 pixel é +3 B, então nenhum recurso com slot assim tem espaço comprovado; a fixture de edição usa `noisy_runs_16k` (1 366 B de folga 2 B → escreve 1 364 B)** |
 | reinserção em cópia + patch | verified | transação no produto: identidade SHA, dependente recusado (0x91a00 dependente de 0x8ff8e), cópia + BPS exportado e re-aplicado à base com hash exato |
 | efeito observado no jogo | **BLOQUEADO — classe do alvo desconhecida** | **Retratação (2026-09-26)**: a leitura "9 paletas × 16 cores" e o mecanismo "transparência tornada opaca" eram hipóteses sem evidência de consumidor — retirados do estado corrente (preservados no histórico do Memory Bank). O "efeito" anterior era ruído: o resume do loop vivo entre runs dessincronizava os frames comparados. **Sonda causal** (no E2E): com ROM/core/estado/inputs idênticos (run_frames determinístico), **nenhuma diferença foi medida** em WRAM/VRAM entre original e modificado em 900 frames (controle original/original também idêntico, o que valida determinismo e metodologia). **Precisão (2026-09-26, ETAPA C): isso não prova que o recurso não seja descompactado** — a sonda só alcança as regiões que o core expõe (`emulator_read_memory` regiões 2/3; CRAM e o destino/chamada do desempacotador ficam `missing`). Ausência de diferença observada ≠ ausência de carregamento. Consumidor não provado; **edição semântica deste recurso permanece BLOQUEADA**. Evidências de bytes: intervalo alterado [30,31), byte 30 0x00→0xF0 (pixel (0,7,4), a única edição que coube com o encoder corrigido; needs_space honesto nas demais). **Defeitos corrigidos nesta rodada**: (1) tiles são chunky (nibble empacotado), não planar — golden literal `12 34 56 78`→1..8; (2) o encoder emitia matches longos não-ROM com offset acima do que o 68000 lê para trás (janela do codificador restaurada a 0x4000 por estratégia; o teto **do formato** medido no hardware é 16385 e o decoder agora aceita até ele — `LZ4W_68K_ORACLE.md`); (3) o preview em grade lia a faixa linearmente e escondia edições fora do tile 0/linha 0; (4) verificação de ida-e-volta dentro da transação. Canvas do app == framebuffer do core comprovado como capacidade separada (subimagem 256×192 ou 320×224 conforme o estado). Varredura dos 18 recursos com tiles em tela: fit=0 no orçamento do tile 0 (needs_space honesto) |
 | efeito demonstrado em **fixture autoral** (ETAPA D) | verified (mecanismo) | ROM Mega Drive autoral construída aqui (`scripts/rex_profiles/integrator/lz4w_fixture/`, SGDK 2.11, `TILESET ... LZ4W NONE`, SHA da ROM `159298eb…`), onde a cadeia de consumo é conhecida **por construção** (`unpackTileSet` -> `VDP_loadTileSet` -> `VDP_fillTileMapRectInc`, tile `t` numa única célula `(t%4, t/4)`). O aceite `--ignored` percorre a cadeia real do produto: decode == fonte recomposta; no-op honesto; **linha de base medida antes da busca** (`slot(rescomp)=444B` vs `re-codificação do plain não-editado=448B`, folga `-4B`); edição de 1 pixel **prevista antes de qualquer emulação** (`tile 0, row 5, col 7 -> idx 15`, re-encode 440B **dentro** do slot de 444B) aplicada pela transação canônica; ROM modificada reaberta e re-decodificada == plain planejado; coordenada de tela prevista `(7,5)` e prévia renderizada (SHA dos pixels/PNG). O stream **escrito pelo produto** desempacota no 68000 oficial: `data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r13/runs/runF` (`i30` rescomp, `i31` produto) ambos `68k == jar == esperado` em 512B. **Discriminante negativa preservada**: no fixture **sem** plantio, varredura exaustiva dos 15.360 candidatos de 1 pixel deu `0 cabem` (`.../lz4w-fixture/evidence/2026-09-26/fixture-acceptance-exhaustive-before-plant.log`). **Por que o plantio é necessário e isso não é trapaça**: o LZ4W casa **words de 16 bits**, não pixels; uma edição de 1 pixel só encurta o stream se tornar dois words adjacentes idênticos. O gap de codificador foi medido duas vezes (444/448 e 378/380) e **não** foi escondido: o porte do DP ótimo de `LZ4W.java` foi implementado, ficou verde no suíte e **piorou** (382B vs 380B) — revertido em vez de entregue; um DP fiel precisa de estado `(posição x literais pendentes mod 15)` porque o custo de 1 palavra/token ignora o chunk de 15 literais. Limite honesto: prova de **mecanismo**, não de cobertura de alvos reais; a tela do app foi capturada por emulação na ETAPA E (ver linha seguinte) |
@@ -214,6 +215,87 @@ produto. Evidência do integrador vive em namespace próprio
 e `codecs/` (B) do CONTRACTS v1.
 
 ## Histórico da rodada
+
+- 2026-09-27 (integrador, **PASSO 3 — aPLib na transação canônica e na fronteira
+  de produto, preservando LZ4W**), esta célula é o checkpoint.
+  **HEAD de partida:** `48562b7` (passo 1, gate de paridade endurecido) sobre
+  `4a389ff`/`cb8557c`/`290c8ec`. **Alterações não commitadas antes deste entry:**
+  `rex_resources.rs` (transação), `CompressedResourcePanel.tsx` +
+  `toolsService.ts` + teste do painel (UI). **Hipótese de trabalho:** a
+  reinserção do aPLib não pede arquitetura nova — pede que a sequência de guardas
+  existente aceite um segundo *contrato de histórico*, e que a UI deixe de
+  pressupor LZ4W.
+  **O que foi implementado:** `TransactionLimits` (três orçamentos: decode/encode
+  aPLib + LZ4W), `RecursoVerificado` (enum que carrega o recurso verificado e o
+  próprio contrato), `verify_resource_set` (varre candidatos dos dois codecs,
+  ignora quem falha na verificação e **recusa sobreposição cross-codec** com
+  `invalid_reference`), `RecursoEditavel::{desempacotar, recodificar_no_espaco}`,
+  `transacao_canonica` (as sete guardas em uma só sequência) e
+  `reinsert_transaction_aplib`; `reinsert_transaction` (LZ4W) foi **redirecionada
+  para a mesma função** sem perder nenhuma validação própria — o corpo LZ4W de
+  162 linhas deixou de ser duplicado, mas `verify_lz4w_resource_set`, o dicionário
+  de comprimento par, o índice de dicionário e o encaixe por orçamento de espaço
+  continuam no caminho dele e são exercitados pelos testes originais.
+  **Duas mudanças de semântica registradas explicitamente** (não absorvidas em
+  silêncio): (1) `verified_preserved` agora conta sobre o **conjunto dos dois
+  codecs**, então um `preservados N` vindo de ROM mista não é comparável
+  byte-a-byte com o mesmo número de antes; (2) `analyzed_scope` passou a declarar
+  o denominador por codec (`3/3 candidatos (LZ4W 2/2 de LZ4W, aPLib 1/1 de
+  aPLib)`), e a asserção pré-exigente `contains("2/2")` do tronco LZ4W continua
+  válida por construção desse texto.
+  **Capacidade medida, com números (foi o que decidiu a fixture):** o encoder do
+  produto sobre `tile_like` empata o oráculo em **41 B**, mas a menor edição de 1
+  pixel custa **+3 B** (44 > 41) — ou seja, *nenhuma* edição cabe num slot de 41
+  B, e isso é propriedade do codec sobre esse plain, não defeito do encoder.
+  `pseudo_random_8k` empata em 294 B com delta mínimo **+1**. `noisy_runs_16k` é
+  o único dos três com folga medida: oráculo **1 366 B**, produto **1 364 B**
+  (2 B de folga) e existe edição de 1 pixel de custo **zero** (tile 64, linha 3,
+  coluna 4, índice 11 → 15 → re-codifica em 1 364 B). A fixture de edição usa
+  esses números; a de recusa usa o slot apertado de 41 B e exige que a mensagem
+  carregue `41` e `8192`. Os três números saem da regeneração das mesas e do gate
+  de paridade reexecutado nesta célula (`.../oracle_encode_parity.py
+  src-tauri/target-test/analysis/aplib` → **esperado 16 | executado 16 | aprovado
+  16 | divergente 0**, rc=0, com os dois oráculos independentes).
+  **Evidência discriminante:** os cinco testes do tronco aPLib
+  (`reinsert_aplib_*`) e o novo da fronteira de produto
+  (`ui_edite_recurso_aplib_pela_mesma_fronteira_do_lz4w`) passam; os três
+  negativos cobertos são `excessive_output` (não cabe), `dependent_modified`
+  (LZ4W cujo dicionário contém a cauda do stream aPLib muda de decode) e
+  `rom_identity_mismatch`/`evidence_mismatch` (evidência velha reaplicada contra
+  a ROM já modificada). **Prova de que o teste do barra não é decorativo:** com a
+  variante aPLib de `verify_resource_set` mutada para `None`, **6** testes falham
+  (o da UI, os quatro do tronco e o do conjunto), incluindo o da fronteira com
+  `a lista deveria trazer os três recursos verificados` — o mutante foi revertido
+  e o suíte reexecutado. No painel, o mutante correspondente (escopo voltando a
+  dizer "Recursos LZ4W …") derruba exatamente a asserção `(LZ4W 1, aPLib 1)`.
+  **Achado de fixture que custou duas iterações e está registrado:** a semente de
+  dependência cross-codec precisa vir da **cauda** do stream aPLib. Com a cabeça
+  (32 B) a transação era aceita, porque a edição começa no tile 64 (offset 2 048
+  de 16 384) e os primeiros ~170 B do stream re-codificado permanecem idênticos —
+  ou seja, o guarda existia mas o fixture não exercitava dependência real.
+  **Gates executados:** `cargo fmt -- --check` rc=0; `cargo clippy -- -D warnings`
+  rc=0 (a primeira corrida falhou com 5 lints `doc list item without indentation`
+  da minha própria doc-string numerada — corrigidos, não allowanceados);
+  `cargo test --lib` **706 passed / 0 failed / 54 ignored** (699 no pino anterior
+  da mesma frente + os 7 testes desta barra: 1 de conjunto, 5 do tronco aPLib, 1
+  da fronteira de produto); `npm run check:tree`
+  rc=0; `npx tsc --noEmit` rc=0; `npm run lint` (eslint `--max-warnings=0`) rc=0;
+  `npm test` **702 passed / 6 skipped (708)**. Delta reconciliado com o número
+  anterior registrado aqui (699/705): **+3**, sendo 2 do `6351f15` (os dois testes
+  do aviso de descarte, abertos depois daquele registro) e 1 deste checkpoint
+  (painel de ROM mista).
+  **Contra-evidência / não provado:** nada aqui toca o alvo comercial. O passo 4
+  (reconfirmar `0x2e4d4`/`0x2d534`/paleta no manifesto atual, derivando de novo)
+  e o passo 5 (fluxo completo pelo app + execução com o desempacotador do jogo)
+  seguem abertos; o E2E canônico do fixture e o aceite BYOR **não foram
+  reexecutados nesta célula** e precisam ser rodados antes de qualquer alegação de
+  entrega da UI. A ETAPA E continua aceita **apenas** no escopo do fixture
+  autoral LZ4W. **Próximos comandos:** `npm run build:debug` e o cenário E2E do
+  fixture (a UI mudou e precisa ser reexecutada antes de qualquer alegação sobre
+  ela), consulta pontual do CI no SHA publicado, e o passo 4 (reconfirmar os
+  offsets e a identidade no manifesto atual, derivando de novo).
+  **Bloqueio:** nenhum externo. Merge, release e promoção de maturidade seguem
+  fora desta missão por ordem do operador.
 
 - 2026-09-26 (integrador, **PASSO 5 — aPLib em Rust canônico: decoder, arbitragem
   por oráculo externo e aceite BYOR**), esta célula é o checkpoint.
