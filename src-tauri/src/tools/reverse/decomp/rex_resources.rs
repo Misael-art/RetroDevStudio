@@ -2311,6 +2311,253 @@ mod tests {
         );
     }
 
+    /// O que a BARRA consegue re-inserir nesta ROM, medido com o codificador do
+    /// produto. Para cada recurso aPLib verificado: o custo do plain intacto e o
+    /// custo de cada edição de um pixel amostrada, separados entre os índices que
+    /// o painel sabe expressar (1..15) e o índice 0, que `editRejectReason`
+    /// reserva como transparente e o campo de índice reescreve para 1.
+    ///
+    /// Existe porque a perna 2 do passo 5 descobriu pela barra que nenhuma edição
+    /// no pixel pinado das pernas 1 e 3 cabe (3 200 bytes de plain precisam de
+    /// 939..942 de stream contra um slot de 938), enquanto o pin 5→0 coube em
+    /// 937. Em vez de escolher o próximo alvo por opinião, a varredura responde
+    /// com o piso do encoder por recurso — e respondeu que no MESMO tile
+    /// observado (53) duas edições de um pixel com índice da barra cabem, ambas
+    /// em 938 B. O controle de calibração está no mesmo teste: o pin 5→0 tem que
+    /// continuar custando 937 B, senão foram os números novos que estão errados
+    /// e não a barra.
+    ///
+    /// Amostragem declarada, não exaustiva: no recurso do pin o tile 53 é varrido
+    /// inteiro (64 pixels) e os demais tiles contribuem com dois pixels; nos
+    /// recursos grandes um salto de tile reduz o custo quadrático do encoder.
+    /// Recurso cujo plain intacto não re-encodea dentro dos limites registrados
+    /// é marcado como não medido — sem piso, não há folga que se possa afirmar.
+    #[test]
+    #[ignore = "varredura de capacidade BYOR: requer ROM local e minutos de encoder"]
+    fn byor_aplib_varre_edicoes_de_um_pixel_que_a_barra_sabe_expressar() {
+        const SHA_ROM: &str = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+        const RECURSO_DO_PIN: usize = 0x2e12a;
+        const TILE_DO_PIN: usize = 53;
+        const LINHA_DO_PIN: usize = 0;
+        const COLUNA_DO_PIN: usize = 4;
+        const CUSTO_DO_PIN_5_PARA_0: usize = 937;
+        let (rom, sha) = hamoopig_rom().expect("ROM BYOR ausente: a medição exige o arquivo");
+        assert_eq!(sha, SHA_ROM, "identidade da ROM BYOR divergente");
+
+        let inicio = std::time::Instant::now();
+        let orcamento = std::time::Duration::from_secs(240);
+        let mut linhas: Vec<serde_json::Value> = Vec::new();
+        let mut couberam: Vec<serde_json::Value> = Vec::new();
+        let mut varridos = 0usize;
+        let mut plain_do_pin: Option<Vec<u8>> = None;
+
+        for candidato in scan_tileset_headers(&rom)
+            .iter()
+            .filter(|c| c.compression == TilesetCompression::Aplib)
+        {
+            let Ok(verificado) = verify_aplib_resource(&rom, candidato, &AplibLimits::default())
+            else {
+                continue;
+            };
+            varridos += 1;
+            let plain = verificado.decoded;
+            if candidato.stream_offset == RECURSO_DO_PIN {
+                plain_do_pin = Some(plain.clone());
+            }
+            let slot = verificado.bytes_consumed;
+            let custo_limite = |dados: &[u8]| -> Result<usize, String> {
+                aplib_encode(dados, &AplibEncodeLimits::default())
+                    .map(|s| s.len())
+                    .map_err(|e| e.code.to_string())
+            };
+            let base = custo_limite(&plain);
+
+            let mut alvos: Vec<(usize, usize, usize)> = Vec::new();
+            if candidato.stream_offset == RECURSO_DO_PIN {
+                for row in 0..8 {
+                    for col in 0..8 {
+                        alvos.push((TILE_DO_PIN, row, col));
+                    }
+                }
+            }
+            let salto_tile = if plain.len() >= 8_000 { 8 } else { 1 };
+            for tile in (0..(plain.len() / 32)).step_by(salto_tile) {
+                alvos.push((tile, 0, 0));
+                alvos.push((tile, 0, 4));
+            }
+
+            let mut tentativas = 0usize;
+            let mut piso_barra = usize::MAX; // menor custo com índice 1..15
+            let mut piso_tudo = usize::MAX; // incluíndo o índice 0
+            let mut cabiveis_barra = 0usize;
+            let mut nao_medido = None;
+            if base.is_err() {
+                nao_medido = Some(format!(
+                    "plain intacto não re-encodea ({}), então não há piso afirmável por edição",
+                    base.as_ref().err().expect("ramo acima")
+                ));
+            } else {
+                for &(tile, row, col) in &alvos {
+                    let original = usize::from(
+                        md_read_pixel_index(&plain, tile, row, col).expect("pixel no recurso"),
+                    );
+                    for indice in 0..=15usize {
+                        if indice == original {
+                            continue;
+                        }
+                        if inicio.elapsed() > orcamento {
+                            nao_medido = Some(format!(
+                                "orçamento de {}s estourado na tentativa {}",
+                                orcamento.as_secs(),
+                                tentativas
+                            ));
+                            break;
+                        }
+                        let mut editado = plain.clone();
+                        md_write_pixel_index(&mut editado, tile, row, col, indice as u8)
+                            .expect("edição dentro do recurso");
+                        tentativas += 1;
+                        let custo = match custo_limite(&editado) {
+                            Ok(c) => c,
+                            Err(codigo) => {
+                                nao_medido = Some(format!(
+                                    "encoder recusou ({tile},{row},{col}) → {indice}: {codigo}"
+                                ));
+                                usize::MAX
+                            }
+                        };
+                        piso_tudo = piso_tudo.min(custo);
+                        if indice >= 1 {
+                            piso_barra = piso_barra.min(custo);
+                            if custo <= slot {
+                                cabiveis_barra += 1;
+                                couberam.push(serde_json::json!({
+                                    "recurso": format!("{:#x}", candidato.stream_offset),
+                                    "slot": slot, "tile": tile, "linha": row, "coluna": col,
+                                    "indice_original": original, "indice_novo": indice,
+                                    "custo": custo,
+                                }));
+                            }
+                        }
+                    }
+                    if nao_medido.is_some() {
+                        break;
+                    }
+                }
+            }
+
+            linhas.push(serde_json::json!({
+                "header": format!("{:#x}", candidato.header_offset),
+                "recurso": format!("{:#x}", candidato.stream_offset),
+                "tiles": plain.len() / 32,
+                "plain_bytes": plain.len(),
+                "slot_bytes": slot,
+                "custo_plain_intacto": base.clone().ok(),
+                "erro_plain_intacto": base.clone().err(),
+                "folga_base": base.as_ref().map(|c| slot.saturating_sub(*c)).unwrap_or(0),
+                "pixels_amostrados": alvos.len(),
+                "tentativas": tentativas,
+                "piso_indices_da_barra": (piso_barra != usize::MAX).then_some(piso_barra),
+                "piso_incluindo_indice_0": (piso_tudo != usize::MAX).then_some(piso_tudo),
+                "cabiveis_na_barra": cabiveis_barra,
+                "nao_medido": nao_medido,
+            }));
+        }
+
+        // ---- a tabela sai ANTES das asserções: uma asserção que falha tem que
+        // deixar os números que a derrubaram em pé, senão a medição vira opinião.
+        assert_eq!(varridos, 4, "os quatro aPLib verificados da ROM");
+        let pin = linhas
+            .iter()
+            .find(|l| l["recurso"] == serde_json::json!("0x2e12a"))
+            .expect("o recurso do pin sumiu da varredura");
+
+        let tabela = serde_json::json!({
+            "schema": "rex-aplib-capacidade-da-barra/v1",
+            "rom_sha256": sha,
+            "recursos": linhas,
+            "couberam_na_barra": couberam,
+            "duracao_ms": inicio.elapsed().as_millis(),
+            "leitura": "piso_indices_da_barra > slot_bytes significa nenhuma edição de 1 pixel que o \
+                       painel consiga expressar cabe no slot; piso_incluindo_indice_0 é o mesmo piso \
+                       contando o índice 0, que só o backend aceita",
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&tabela).expect("tabela JSON")
+        );
+        if let Ok(dir) = std::env::var("RDS_REX_APLIB_SWEEP_OUT") {
+            let dir = std::path::Path::new(&dir);
+            assert!(
+                dir.is_absolute(),
+                "RDS_REX_APLIB_SWEEP_OUT tem de ser absoluto"
+            );
+            std::fs::create_dir_all(dir).expect("criar RDS_REX_APLIB_SWEEP_OUT");
+            std::fs::write(
+                dir.join("aplib-capacidade-da-barra.json"),
+                serde_json::to_vec_pretty(&tabela).expect("JSON"),
+            )
+            .expect("escrever tabela");
+        }
+
+        // ---- controle de calibração, medido na edição pinada e não no piso da
+        // varredura: o pin das pernas 1 e 3 (tile 53, pixel (4,0), 5→0) tem que
+        // continuar custando 937 B. Sem ele, um "não cabe" na barra poderia ser
+        // defeito do encoder e não fato sobre a interface.
+        let mut plain_pin = plain_do_pin.expect("o recurso do pin foi varrido");
+        md_write_pixel_index(&mut plain_pin, TILE_DO_PIN, LINHA_DO_PIN, COLUNA_DO_PIN, 0)
+            .expect("pixel do pin dentro do recurso");
+        assert_eq!(
+            aplib_encode(&plain_pin, &AplibEncodeLimits::default())
+                .expect("re-encode do pin")
+                .len(),
+            CUSTO_DO_PIN_5_PARA_0,
+            "o índice 0 do pixel pinado deixou de custar {CUSTO_DO_PIN_5_PARA_0} B: o encoder mudou e \
+             a conclusão sobre os índices 1..15 não vale mais"
+        );
+        // ---- o que a varredura responde, pinado como registro de capacidade:
+        // no pixel das pernas 1 e 3 nenhuma edição da barra cabe, e no mesmo tile
+        // observado há exatamente duas que cabem, ambas encostando no slot.
+        assert!(
+            pin["cabiveis_na_barra"].as_u64().expect("contagem") > 0,
+            "nenhuma edição de um pixel com índice da barra cabe no recurso do pin: a perna 2 \
+             ficaria sem alvo nesta ROM"
+        );
+        let no_pixel_do_pin = couberam.iter().filter(|c| {
+            c["recurso"] == serde_json::json!("0x2e12a")
+                && c["tile"].as_u64() == Some(TILE_DO_PIN as u64)
+                && c["linha"].as_u64() == Some(LINHA_DO_PIN as u64)
+                && c["coluna"].as_u64() == Some(COLUNA_DO_PIN as u64)
+        });
+        assert_eq!(
+            no_pixel_do_pin.count(),
+            0,
+            "o pixel pinado (53,0,4) voltou a ter edição expressável pela barra: o cenário WebDriver \
+             `rex-aplib-byor-effect` precisa ser reescrito"
+        );
+        let mut no_tile_observado: Vec<[u64; 3]> = couberam
+            .iter()
+            .filter(|c| {
+                c["recurso"] == serde_json::json!("0x2e12a")
+                    && c["tile"].as_u64() == Some(TILE_DO_PIN as u64)
+            })
+            .map(|c| {
+                [
+                    c["linha"].as_u64().expect("linha"),
+                    c["coluna"].as_u64().expect("coluna"),
+                    c["custo"].as_u64().expect("custo"),
+                ]
+            })
+            .collect();
+        no_tile_observado.sort_unstable();
+        assert_eq!(
+            no_tile_observado,
+            vec![[7, 5, 938], [7, 7, 938]],
+            "as edições da barra que cabem no tile observado 53 mudaram: o alvo da perna 2 é o \
+             primeiro par desta lista"
+        );
+    }
+
     /// ROM sintética com dois recursos LZ4W dependentes: R2 é empacotado com
     /// os bytes de R1 no dicionário, então editar R1 quebraria R2.
     fn synthetic_rom() -> (Vec<u8>, VerifiedLz4wResource, VerifiedLz4wResource) {
