@@ -476,6 +476,7 @@ function parseArgs(argv) {
           "rex-lz4w-effect",
           "rex-lz4w-fixture-effect",
           "rex-aplib-byor-effect",
+          "rex-context-fixture-effect",
           "inspection-preview-unavailable",
           "logic-recovery",
           "logic-recovery-branch",
@@ -9768,6 +9769,1224 @@ async function runRexAplibByorEffectScenario(sessionId) {
   })}`);
 }
 
+// PASSO 7 — o contexto da imagem provado PELA INTERFACE, na fixture autoral.
+//
+// De onde vem cada expectativa: três arquivos autorais — `ground_truth.json`
+// (schema rex-context-aplib-fixture-ground-truth/v1: constantes de autoria +
+// semântica do rescomp 2.11 lida em tools/rescomp/src,
+// `derived_from_compiled_rom: false`), `fixture-build-report.json` (schema
+// rex-context-aplib-fixture-build/v1: offsets conferidos contra symbol.txt) e
+// `external-verify.json` (schema rex-context-aplib-external-verify/v1: decode e
+// round-trip feitos por apj.jar do SGDK 2.11, com o SHA da ferramenta pino, sem
+// passar pelo produto). Nada aqui lê o produto para descobrir o esperado; o
+// produto é comparado contra o que o autor registrou. O SHA da ROM é pino deste
+// cenário, e a auto-consistência das receitas (flip → posição de tela, decode
+// externo → plain autoral, consumo do oráculo → array linkado) é conferida antes
+// de qualquer clique, de modo que uma receita editada à mão sem recalcular as
+// posições derrube a corrida em vez de convencê-la.
+//
+// Pernas, na ordem que o briefing pinou: localizar a imagem pelo produto →
+// clicar as quatro ocorrências com flip → confirmar o mesmo pixel de fonte →
+// editar uma vez → prever e observar exatamente as quatro posições →
+// salvar/reabrir → BPS re-aplicado com hash exato. Os negativos obrigatórios
+// (ghost sem vínculo, referência inválida recusada, tile fora do conjunto,
+// identidade trocada no leitura E na escrita, resposta obsoleta, troca de ROM)
+// são medidos aqui, não delegados aos testes de unidade.
+async function runRexContextFixtureEffectScenario(sessionId) {
+  const FIXTURE_ROM_SHA256 =
+    "705b72eb848fadf11cdefd4302ef8c6751d005bd1c762918aea3b0860b20da86";
+  const BYOR_ROM_SHA256 =
+    "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+  const BYOR_STREAM_HEX = "2e12a";
+  const BYOR_SLOT_BYTES = 938;
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const hex = (n) => `0x${n.toString(16)}`;
+  const passo = (rotulo) => console.log(`[rex-context-e2e] passo ${rotulo}`);
+  const steps = [];
+  const record = (step, claim, observed) => {
+    steps.push({ step, claim, observed });
+    console.log(`[rex-context-e2e] ${step}: ${claim} -> ${JSON.stringify(observed)}`);
+  };
+  const t0 = Date.now();
+  const duracoes = [];
+  const cronometrar = async (rotulo, fn) => {
+    const inicio = Date.now();
+    const saida = await fn();
+    duracoes.push({ etapa: rotulo, ms: Date.now() - inicio });
+    return saida;
+  };
+
+  // ---- 0: receitas autorais lidas do disco, com a identidade conferida.
+  const fixtureRomPath = process.env.RDS_REX_CTX_FIXTURE_ROM ?? "";
+  if (!fixtureRomPath || !(await pathExists(fixtureRomPath))) {
+    fail(
+      "RDS_REX_CTX_FIXTURE_ROM deve apontar para a ROM da fixture autoral de contexto "
+      + "(reconstruível com scripts/rex_profiles/integrator/context_fixture/build-fixture.sh); "
+      + "nenhuma ROM é criada pelo E2E."
+    );
+  }
+  const romBytes = await readFile(fixtureRomPath);
+  const romSha = sha256(romBytes);
+  if (romSha !== FIXTURE_ROM_SHA256) fail(`fixture inesperada: ${romSha} != ${FIXTURE_ROM_SHA256}`);
+
+  const outDir = path.dirname(path.resolve(fixtureRomPath));
+  const truthPath = process.env.RDS_REX_CTX_FIXTURE_TRUTH
+    ?? path.join(outDir, "..", "ground_truth.json");
+  const reportPath = process.env.RDS_REX_CTX_FIXTURE_REPORT
+    ?? path.join(outDir, "..", "..", "fixture-build-report.json");
+  const extPath = process.env.RDS_REX_CTX_FIXTURE_EXTERNAL
+    ?? path.join(outDir, "..", "..", "external-verify.json");
+  if (
+    !(await pathExists(truthPath)) || !(await pathExists(reportPath))
+    || !(await pathExists(extPath))
+  ) {
+    fail(
+      `faltam as receitas autorais (truth=${truthPath}, report=${reportPath}, externo=${extPath}): `
+      + "o esperado deste cenário nasce delas, não do produto."
+    );
+  }
+  const manifesto = JSON.parse(await readFile(truthPath, "utf8"));
+  const receita = JSON.parse(await readFile(reportPath, "utf8"));
+  const externo = JSON.parse(await readFile(extPath, "utf8"));
+  if (manifesto.schema !== "rex-context-aplib-fixture-ground-truth/v1") {
+    fail(`manifesto de outra receita: ${manifesto.schema}`);
+  }
+  if (receita.schema !== "rex-context-aplib-fixture-build/v1") {
+    fail(`relatório de build de outra receita: ${receita.schema}`);
+  }
+  if (manifesto.derived_from_compiled_rom !== false || !manifesto.authored_fixture) {
+    fail("o manifesto deixou de ser autoral/anterior à compilação; a expectativa perderia o vínculo.");
+  }
+  if (receita.rom_sha256 !== romSha) {
+    fail(`o relatório de build não descreve esta ROM: ${receita.rom_sha256} != ${romSha}`);
+  }
+  if (Number(receita.rom_len) !== romBytes.length) fail("rom_len do relatório diverge do arquivo.");
+
+  // Offsets do artefato, lidos da receita conferida contra symbol.txt.
+  const TS_HDR = Number(receita.resources.tileset_aplib.header_offset);
+  const TS_STREAM = Number(receita.resources.tileset_aplib.stream_offset);
+  const TM_HDR = Number(receita.resources.tilemap_ctx_map_aplib.header_offset);
+  const TM_STREAM = Number(receita.resources.tilemap_ctx_map_aplib.stream_offset);
+  const GHOST_HDR = Number(receita.resources.tilemap_ctx_ghost_aplib.header_offset);
+  const GHOST_STREAM = Number(receita.resources.tilemap_ctx_ghost_aplib.stream_offset);
+  const PAL_HDR = Number(receita.resources.palette.header_offset);
+  const PAL_STREAM = Number(receita.resources.palette.stream_offset);
+  const IMG_STRUCT = Number(receita.associacoes.verificada_por_ponteiro.endereco);
+  // `data_size` de symbol.txt é a extensão do ARRAY linkado; o stream aPLib pode
+  // terminar antes e o rescomp completar o array com zeros. O que a barra anuncia
+  // como slot é o consumo medido no decode, então a expectativa dele vem do
+  // oráculo externo (apj.jar, SHA pino abaixo) e não da tabela de símbolos.
+  const TS_ARRAY = Number(receita.symbol_crosscheck.tileset.data_size);
+  const TS_SLOT = Number(externo.stream_sizes?.tileset?.aplib);
+  if (
+    TS_HDR !== Number(receita.associacoes.verificada_por_ponteiro.campos.tileset)
+    || TM_HDR !== Number(receita.associacoes.verificada_por_ponteiro.campos.tilemap)
+    || PAL_HDR !== Number(receita.associacoes.verificada_por_ponteiro.campos.palette)
+  ) {
+    fail("a trinca do struct não bate com os headers dos recursos: receita inconsistente.");
+  }
+
+  // Terceira receita autoral: a decodificação feita por apj.jar (ferramenta do
+  // SGDK 2.11), portanto independente do produto. Ela amarra o esperado
+  // pré-compilação ao artefato compilado e fornece o comprimento real do stream,
+  // que é o que a barra anuncia como slot.
+  if (externo.schema !== "rex-context-aplib-external-verify/v1") {
+    fail(`validação externa de outra receita: ${externo.schema}`);
+  }
+  if (externo.rom_sha256 !== romSha) {
+    fail(`a validação externa descreve outra ROM: ${externo.rom_sha256} != ${romSha}`);
+  }
+  if (externo.independente_do_produto !== true) {
+    fail("a validação externa não se declara independente do produto.");
+  }
+  if (!/apj\.jar/.test(externo.oracle?.tool ?? "") || !/^[0-9a-f]{64}$/.test(externo.oracle?.sha256 ?? "")) {
+    fail(`oráculo externo sem ferramenta/SHA imutável: ${JSON.stringify(externo.oracle)}`);
+  }
+  if (externo.render_pixels_sha256 !== manifesto.composed_layer.pixels_sha256) {
+    fail(
+      `oráculo externo e manifesto divergem sobre a camada autoral: `
+      + `${externo.render_pixels_sha256} != ${manifesto.composed_layer.pixels_sha256}`
+    );
+  }
+  for (const [nome, chave] of [["tileset", "tileset"], ["map", "map"], ["ghost", "ghost"]]) {
+    const esperado = manifesto[nome].plain_sha256;
+    if (externo.decoded_sha256?.[nome] !== esperado) {
+      fail(`decode externo de ${nome} não bate com o plain autoral: ${externo.decoded_sha256?.[nome]} != ${esperado}`);
+    }
+  }
+  const posicoesExternas = (externo.edicao?.posicoes_mudadas ?? [])
+    .map((p) => `${p[0]},${p[1]}`);
+  const posicoesManifesto = manifesto.edicao_canonica.posicoes_de_tela_previstas
+    .map((p) => `${p.x},${p.y}`);
+  if (posicoesExternas.join(" ") !== posicoesManifesto.join(" ")) {
+    fail(
+      `as posições do oráculo externo ${JSON.stringify(posicoesExternas)} não são as do `
+      + `manifesto ${JSON.stringify(posicoesManifesto)}.`
+    );
+  }
+  // Comprimento do stream medido pelo oráculo: cabe no array linkado e o
+  // excedente é zero de preenchimento. Se algum byte do excedente fosse vivo, o
+  // slot anunciado pela barra estaria invadindo o vizinho e o cenário parava.
+  const conferidos = [
+    {
+      nome: "tileset", stream: TS_STREAM, array: TS_ARRAY, medido: TS_SLOT,
+    },
+    {
+      nome: "map", stream: TM_STREAM, array: Number(receita.symbol_crosscheck.ctx_map.data_size),
+      medido: Number(externo.stream_sizes?.map?.aplib),
+    },
+    {
+      nome: "ghost", stream: GHOST_STREAM, array: Number(receita.symbol_crosscheck.ctx_ghost.data_size),
+      medido: Number(externo.stream_sizes?.ghost?.aplib),
+    },
+  ];
+  const fendasDeSlot = [];
+  for (const r of conferidos) {
+    if (!Number.isInteger(r.medido) || r.medido <= 0) fail(`medida externa do stream ${r.nome} ausente: ${r.medido}`);
+    if (r.medido > r.array) {
+      fail(`o stream ${r.nome} medido (${r.medido} B) é maior que o array linkado (${r.array} B).`);
+    }
+    const vivo = romBytes
+      .subarray(r.stream + r.medido, r.stream + r.array)
+      .findIndex((b) => b !== 0);
+    if (vivo !== -1) {
+      fail(`o stream ${r.nome} tem byte vivo fora do consumo medido, em +${r.medido + vivo}.`);
+    }
+    if (r.array !== r.medido) fendasDeSlot.push({ recurso: r.nome, array: r.array, medido: r.medido });
+  }
+
+  const cols = Number(manifesto.map.cols);
+  const rows = Number(manifesto.map.rows);
+  const LARGURA = cols * 8;
+  const ALTURA = rows * 8;
+  const NUM_TILES = Number(manifesto.tileset.num_tile);
+  const FONTE = manifesto.edicao_canonica.pixel_fonte; // {tile,row,col,de,para}
+  const EDITE = {
+    tile: Number(FONTE.tile),
+    row: Number(FONTE.row),
+    col: Number(FONTE.col),
+    de: Number(FONTE.de),
+    para: Number(FONTE.para),
+  };
+  if (EDITE.de === EDITE.para) fail("a edição canônica não mudaria índice nenhum.");
+
+  // ---- 0b: auto-consistência do manifesto (flip → posição de tela).
+  const plain = Buffer.from(manifesto.tileset.plain_hex, "hex");
+  if (plain.length !== Number(manifesto.tileset.plain_bytes)) fail("tileset plain_hex com tamanho trocado.");
+  const indiceDoPixel = (tile, row, col) => {
+    const byte = plain[tile * 32 + row * 4 + Math.floor(col / 2)];
+    return col % 2 === 0 ? byte >> 4 : byte & 0x0f;
+  };
+  if (indiceDoPixel(EDITE.tile, EDITE.row, EDITE.col) !== EDITE.de) {
+    fail(
+      `o manifesto diz que a fonte (${EDITE.tile},${EDITE.row},${EDITE.col}) vale ${EDITE.de}, `
+      + `mas o plain autoral vale ${indiceDoPixel(EDITE.tile, EDITE.row, EDITE.col)}.`
+    );
+  }
+  const rgb8 = manifesto.palette.rgb8;
+  const celulas = manifesto.map.cells_table;
+  const ocorrenciasDoTile = celulas.filter((c) => Number(c.tile) === EDITE.tile);
+  const posicoesCalculadas = ocorrenciasDoTile.map((c) => {
+    const v = c.flip === "V" || c.flip === "B";
+    const h = c.flip === "H" || c.flip === "B";
+    const r = v ? 8 - 1 - EDITE.row : EDITE.row;
+    const k = h ? 8 - 1 - EDITE.col : EDITE.col;
+    return { x: Number(c.col) * 8 + k, y: Number(c.row) * 8 + r, flip: c.flip, indice: Number(c.row) * cols + Number(c.col) };
+  });
+  const posicoesDoManifesto = manifesto.edicao_canonica.posicoes_de_tela_previstas
+    .map((p) => `${p.x},${p.y}`);
+  const calculadas = posicoesCalculadas.map((p) => `${p.x},${p.y}`);
+  if (posicoesDoManifesto.join(" ") !== calculadas.join(" ")) {
+    fail(
+      `o manifesto está internamente inconsistente: posições previstas ${JSON.stringify(posicoesDoManifesto)} `
+      + `!= recalculadas dos flips ${JSON.stringify(calculadas)}`
+    );
+  }
+  if (Number(manifesto.edicao_canonica.ocorrencias_no_mapa_verificado) !== posicoesCalculadas.length) {
+    fail("contagem de ocorrências do manifesto não bate com a cells_table.");
+  }
+  record(
+    "0",
+    "receitas autorais lidas e auto-consistentes (symbol.txt + oráculo externo apj.jar + flips recalculados)",
+    {
+      rom_sha: romSha.slice(0, 16),
+      oraculo_sha: externo.oracle.sha256.slice(0, 16),
+      struct: hex(IMG_STRUCT),
+      tileset_stream: hex(TS_STREAM),
+      tileset_slot_oraculo: TS_SLOT,
+      tileset_array_simbolo: TS_ARRAY,
+      preenchimento_nonzero: fendasDeSlot,
+      tilemap_stream: hex(TM_STREAM),
+      ghost_stream: hex(GHOST_STREAM),
+      ocorrencias: posicoesCalculadas.length,
+      posicoes: calculadas,
+    }
+  );
+
+  const camadaEsperada = (edite) => {
+    const out = Buffer.alloc(LARGURA * ALTURA * 4);
+    for (const c of celulas) {
+      const v = c.flip === "V" || c.flip === "B";
+      const h = c.flip === "H" || c.flip === "B";
+      const banco = Number(c.bank);
+      for (let r = 0; r < 8; r += 1) {
+        for (let k = 0; k < 8; k += 1) {
+          const rs = v ? 7 - r : r;
+          const ks = h ? 7 - k : k;
+          let idx = indiceDoPixel(Number(c.tile), rs, ks);
+          if (edite && Number(c.tile) === edite.tile && rs === edite.row && ks === edite.col) {
+            idx = edite.para;
+          }
+          const o = ((Number(c.row) * 8 + r) * LARGURA + Number(c.col) * 8 + k) * 4;
+          if (idx === 0) {
+            out[o] = 0; out[o + 1] = 0; out[o + 2] = 0; out[o + 3] = 0;
+          } else {
+            const cor = rgb8[banco][idx];
+            out[o] = cor[0]; out[o + 1] = cor[1]; out[o + 2] = cor[2]; out[o + 3] = 255;
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const camadaIntacta = camadaEsperada(null);
+  const camadaEditada = camadaEsperada(EDITE);
+  // O SHA esperado do manifesto tem que bater com o que ESTAS funções recompoem:
+  // é o que prova que a recomposição do cenário é a mesma camada autoral, e não
+  // uma segunda opinião sobre ela.
+  //
+  // Canal: o oráculo externo (`verify-external.py`, que lê o PNG autoral) e o
+  // aceite do núcleo (`camada_esperada`, rex_context.rs) hashizam o packed **RGB**
+  // de 3 bytes por pixel. Aqui a comparação com o canvas da interface é RGBA
+  // pixel a pixel, então o alpha continua conferido — o sha só amarra o cores.
+  const pixelsShaDoManifesto = manifesto.composed_layer.pixels_sha256;
+  const pixelsShaEmRgb = (rgba) => {
+    const rgb = Buffer.alloc((rgba.length / 4) * 3);
+    for (let p = 0, o = 0; p < rgba.length; p += 4, o += 3) {
+      rgb[o] = rgba[p];
+      rgb[o + 1] = rgba[p + 1];
+      rgb[o + 2] = rgba[p + 2];
+    }
+    return sha256(rgb);
+  };
+  if (pixelsShaEmRgb(camadaIntacta) !== pixelsShaDoManifesto) {
+    fail(
+      `a recomposição do cenário não reproduz o esperado autoral: `
+      + `${pixelsShaEmRgb(camadaIntacta)} != ${pixelsShaDoManifesto}`
+    );
+  }
+
+  // ---- 1: abrir a barra e verificar a fixture.
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  const panel = '[data-testid="rex-resource-panel"]';
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'))
+      || Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`),
+    30000,
+    "a barra não montou nenhuma superfície de recursos.",
+    250
+  );
+  if (!(await executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`))) {
+    await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+  }
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`),
+    15000,
+    "o painel de recursos comprimidos não abriu.",
+    250
+  );
+
+  const contextoDom = () => executeScript(sessionId, `
+    const q = (id) => document.querySelector('${panel} [data-testid="' + id + '"]');
+    return JSON.stringify({
+      erro: q('rex-context-error')?.textContent ?? null,
+      aviso: q('rex-context-notice')?.textContent ?? null,
+      vazio: q('rex-context-empty')?.textContent ?? null,
+      camada: q('rex-context-layer') ? {
+        natural: [q('rex-context-layer').naturalWidth, q('rex-context-layer').naturalHeight],
+        style: [q('rex-context-layer').style.width, q('rex-context-layer').style.height, q('rex-context-layer').style.imageRendering],
+      } : null,
+      imagens: Array.from(document.querySelectorAll('${panel} [data-testid="rex-context-image-select"] option'))
+        .map((o) => o.getAttribute('value') + '|' + o.textContent.trim()),
+      semVinculo: q('rex-context-unlinked')?.innerText ?? null,
+      recusados: q('rex-context-refused-links')?.innerText ?? null,
+      painelDeRecursos: {
+        sha: q('rex-resource-rom-sha')?.textContent ?? null,
+        fila: q('rex-resource-edit-count')?.textContent ?? null,
+        resultado: q('rex-resource-result')?.textContent ?? null,
+        erro: q('rex-resource-error')?.textContent ?? null,
+        aviso: q('rex-resource-notice')?.textContent ?? null,
+      },
+    });`);
+  const dumpContexto = async () => {
+    try {
+      return await contextoDom();
+    } catch (cause) {
+      return `dump indisponível: ${String(cause).slice(0, 160)}`;
+    }
+  };
+  const normaliza = (s) => String(s).replace(/\s+/g, " ").trim();
+  const textoDe = async (testId) => normaliza(
+    (await executeScript(sessionId, `
+      const el = document.querySelector('${panel} [data-testid="${testId}"]');
+      return el ? (el.innerText || el.textContent || '') : 'AUSENTE';`)) || ""
+  );
+  const setPanelInput = async (testId, value) => {
+    const r = await executeScript(sessionId, `
+      const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      if (!input) {
+        return 'AUSENTE::' + Array.from(document.querySelectorAll('[data-testid]'))
+          .map((e) => e.getAttribute('data-testid')).join(',');
+      }
+      const proto = input.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, ${JSON.stringify(String(value))});
+      input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+      return true;`);
+    if (typeof r === "string" && r.startsWith("AUSENTE::")) {
+      fail(`campo ${testId} não está montado (valor ${JSON.stringify(String(value))}); testids: ${r.slice(9)}`);
+    }
+    return r;
+  };
+  const selecionarRecurso = async (offsetHex) => {
+    await setPanelInput("rex-resource-select", offsetHex);
+    await waitFor(
+      async () => executeScript(sessionId, `
+        const inp = document.querySelector('${panel} [data-testid="rex-resource-paint-index"]');
+        const btn = document.querySelector('${panel} [data-testid="rex-resource-apply"]');
+        return Boolean(inp) && Boolean(btn) && btn.disabled === false;`),
+      30000,
+      `prévia do recurso ${offsetHex} não assentou (campo de índice ausente ou botão travado).`,
+      250
+    );
+    await pause(800);
+    return textoDe("rex-resource-pixels-sha");
+  };
+  const verificarRom = async (caminho, shaEsperado) => {
+    await setPanelInput("rex-resource-rom-input", caminho);
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+    await waitFor(
+      async () => (await textoDe("rex-resource-rom-sha")).includes(shaEsperado.slice(0, 16)),
+      60000,
+      `a ROM ${caminho} não reabriu com a identidade ${shaEsperado.slice(0, 16)}… no painel. DOM: ${await dumpContexto()}`,
+      250
+    );
+    return textoDe("rex-resource-rom-sha");
+  };
+
+  passo("1: verificar a fixture e localizar o TileSet aPLib na lista");
+  await verificarRom(fixtureRomPath, romSha);
+  const etiquetas = await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  const alvoLista = etiquetas.filter((l) => l.startsWith(`${TS_STREAM.toString(16)}|`));
+  if (alvoLista.length !== 1) {
+    fail(`o TileSet autoral ${hex(TS_STREAM)} aparece ${alvoLista.length}x na lista verificada: ${JSON.stringify(alvoLista)}`);
+  }
+  if (!/aplib/i.test(alvoLista[0])) fail(`a barra não declarou o codec aPLib do recurso: "${alvoLista[0]}"`);
+  if (!alvoLista[0].includes(`stream ${TS_SLOT} B`)) {
+    fail(
+      `o consumo medido pelo oráculo externo (${TS_SLOT} B, array linkado ${TS_ARRAY} B) `
+      + `não é o que a barra anunciou: "${alvoLista[0]}"`
+    );
+  }
+  if (!alvoLista[0].includes(`${NUM_TILES} tiles`)) {
+    fail(`contagem de tiles diverge do manifesto (${NUM_TILES}): "${alvoLista[0]}"`);
+  }
+  const aplibListados = etiquetas.filter((l) => /aplib/i.test(l)).length;
+  const totalListado = etiquetas.filter((l) => !l.startsWith("|")).length;
+  record("1", "recurso da imagem localizado na lista verificada pela barra", {
+    etiqueta: alvoLista[0], aplib: aplibListados, total: totalListado,
+  });
+  const previewShaIntacta = await selecionarRecurso(TS_STREAM.toString(16));
+  if (!/^pixels [0-9a-f]{16}/.test(previewShaIntacta)) fail(`prévia do tileset sem sha: "${previewShaIntacta}"`);
+
+  // ---- 2: contexto carregado PELO CLIQUE NA BARRA.
+  passo("2: carregar o contexto pela interface");
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  await waitFor(
+    async () => (await textoDe("rex-context-geometry")).startsWith("camada"),
+    60000,
+    `o contexto não montou pela interface. DOM: ${await dumpContexto()}`,
+    250
+  );
+  const geometria = await textoDe("rex-context-geometry");
+  const tilesSemUso = [];
+  {
+    const usados = new Set(celulas.map((c) => Number(c.tile)));
+    for (let t = 0; t < NUM_TILES; t += 1) if (!usados.has(t)) tilesSemUso.push(hex(t));
+  }
+  const geometriaEsperada = normaliza(
+    `camada ${LARGURA}x${ALTURA} px · ${cols}x${rows} células · tiles sem uso neste mapa: ${tilesSemUso.join(", ")}`
+  );
+  if (geometria !== geometriaEsperada) {
+    fail(`geometria publicada diverge do manifesto:\n  UI:      "${geometria}"\n  esperado: "${geometriaEsperada}"`);
+  }
+  const proveniencia = await textoDe("rex-context-provenance");
+  const obrigamNaProveniencia = [
+    `vínculo verificada · paleta ${hex(PAL_STREAM)} · TileSet ${hex(TS_STREAM)} · TileMap ${hex(TM_STREAM)}`,
+    `Struct \`Image\` em ${hex(IMG_STRUCT)}`,
+    `paleta ${hex(PAL_HDR)}, tileset ${hex(TS_HDR)}, tilemap ${hex(TM_HDR)}, nesta ordem`,
+    `TileSet em ${hex(TS_HDR)} decodifica com o codec lido do header (aplib) para exatamente ${plain.length} bytes = ${NUM_TILES} tiles de 32 bytes`,
+    `TileMap em ${hex(TM_HDR)} decodifica (aplib) para exatamente ${celulas.length * 2} bytes = ${cols}x${rows} células (${LARGURA}x${ALTURA} pixels)`,
+    `Palette em ${hex(PAL_HDR)} tem ${Number(manifesto.palette.plain_bytes)} bytes literais na ROM = ${Number(manifesto.palette.num_color)} cores (${Number(manifesto.palette.banks)} banco(s))`,
+    "Não prova:",
+    "Não prova que o jogo carregue ou exiba este recurso",
+    "Nada aqui foi observado no VDP",
+    "A prévia é a camada reconstruída, não o framebuffer completo: oclusão por sprites, janela e o bit de prioridade",
+  ];
+  for (const trecho of obrigamNaProveniencia) {
+    if (!proveniencia.includes(normaliza(trecho))) {
+      fail(`a procedência exibida não diz \`${trecho}\`:\n${proveniencia}`);
+    }
+  }
+  const rotuloDeImagens = await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-context-image-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  if (rotuloDeImagens.length !== 1) {
+    fail(
+      `a fixture autoral tem uma cadeia verificada por ponteiro; a interface mostrou ${rotuloDeImagens.length}: `
+      + `${JSON.stringify(rotuloDeImagens)}`
+    );
+  }
+  if (!rotuloDeImagens[0].startsWith(`${hex(IMG_STRUCT)}|`) || !/verificada/.test(rotuloDeImagens[0])
+    || !rotuloDeImagens[0].includes(`${LARGURA}x${ALTURA} px`)
+    || !rotuloDeImagens[0].includes(`${cols}x${rows} células`)) {
+    fail(`rótulo da imagem diverge da receita: "${rotuloDeImagens[0]}"`);
+  }
+  const semVinculoTexto = await textoDe("rex-context-unlinked");
+  if (!semVinculoTexto.includes(`tilemap ${hex(GHOST_STREAM)}`)) {
+    fail(`o ghost ${hex(GHOST_STREAM)} não aparece como recurso verificado sem vínculo: "${semVinculoTexto}"`);
+  }
+  if (!semVinculoTexto.includes("nenhum ponteiro de struct `Image` alcança este header")) {
+    fail(`a lista sem vínculo não explica o porquê: "${semVinculoTexto}"`);
+  }
+  if (!semVinculoTexto.includes(`tilemap ${hex(GHOST_STREAM)} (aplib, ${Number(manifesto.ghost.plain_bytes)} B)`)) {
+    fail(
+      `a linha do ghost não publica codec e tamanho decodificados (${Number(manifesto.ghost.plain_bytes)} B): `
+      + `"${semVinculoTexto}"`
+    );
+  }
+  for (const vinculado of [PAL_STREAM, TS_STREAM, TM_STREAM]) {
+    if (semVinculoTexto.includes(hex(vinculado))) {
+      fail(`recurso vinculado apareceu em sem_vinculo: ${hex(vinculado)}`);
+    }
+  }
+  const recusadosTexto = await textoDe("rex-context-refused-links");
+  const domContexto = JSON.parse(await contextoDom());
+  if (domContexto.erro) fail(`o contexto carregou com erro: ${domContexto.erro}`);
+  if (domContexto.vazio) fail(`havendo imagem verificada, a interface mostrou o estado vazio: ${domContexto.vazio}`);
+  if (recusadosTexto !== "AUSENTE") {
+    for (const rotulo of rotuloDeImagens) {
+      if (recusadosTexto.includes(rotulo.split("|")[0])) {
+        fail(`um vínculo recusado também aparece como imagem: ${rotulo}`);
+      }
+    }
+  }
+  record("2", "contexto montado pela interface com identidade, vínculos e limites", {
+    imagem: rotuloDeImagens[0],
+    geometria,
+    recusados: recusadosTexto === "AUSENTE" ? 0 : recusadosTexto.slice(0, 120),
+    semVinculo: semVinculoTexto.slice(0, 160),
+  });
+
+  // ---- 3: a camada que a interface mostra É a camada autoral, pixel a pixel.
+  passo("3: ler os pixels da camada pelo WebView e comparar com o esperado autoral");
+  const leCamada = async () => {
+    const r = await executeScript(sessionId, `
+      const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+      if (!img) return 'SEM_CAMADA';
+      if (!img.complete || !img.naturalWidth) return 'NAO_CARREGOU';
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0);
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      let bin = '';
+      for (let i = 0; i < d.length; i += 1) bin += String.fromCharCode(d[i]);
+      return JSON.stringify({ w: c.width, h: c.height, b64: btoa(bin) });`);
+    if (typeof r !== "string" || r === "SEM_CAMADA" || r === "NAO_CARREGOU") {
+      fail(`não foi possível ler a camada composta (${r}); DOM: ${await dumpContexto()}`);
+    }
+    const parsed = JSON.parse(r);
+    if (parsed.w !== LARGURA || parsed.h !== ALTURA) {
+      fail(`a camada exibida tem ${parsed.w}x${parsed.h}, o manifesto diz ${LARGURA}x${ALTURA}`);
+    }
+    return Buffer.from(parsed.b64, "base64");
+  };
+  const camadaDaUI = await cronometrar("leitura da camada intacta (canvas)", leCamada);
+  if (camadaDaUI.length !== LARGURA * ALTURA * 4) fail(`bytes lidos do canvas: ${camadaDaUI.length}`);
+  // Dois níveis, cada um pegando uma classe de engano diferente: o sha RGB é o
+  // vínculo com o oráculo autoral; a comparação RGBA byte a byte é o que prova o
+  // alpha (índice 0 transparente), que o sha em RGB não enxerga.
+  const divergentesRGBA = [];
+  for (let p = 0; p < camadaIntacta.length; p += 4) {
+    if (camadaIntacta[p] !== camadaDaUI[p] || camadaIntacta[p + 1] !== camadaDaUI[p + 1]
+      || camadaIntacta[p + 2] !== camadaDaUI[p + 2] || camadaIntacta[p + 3] !== camadaDaUI[p + 3]) {
+      divergentesRGBA.push(p / 4);
+    }
+  }
+  if (divergentesRGBA.length > 0) {
+    fail(
+      `a prévia composta pela interface não é a camada autoral pixel a pixel (RGBA): `
+      + `${divergentesRGBA.length} divergente(s), primeiros ${JSON.stringify(divergentesRGBA.slice(0, 8))}`
+    );
+  }
+  const shaCamadaUI = pixelsShaEmRgb(camadaDaUI);
+  if (shaCamadaUI !== pixelsShaDoManifesto) {
+    fail(
+      `a camada lida da interface bate com a recomposição local mas não com o oráculo: `
+      + `${shaCamadaUI} != ${pixelsShaDoManifesto}`
+    );
+  }
+  record("3", "RGBA lido do <img> == camada autoral pixel a pixel, e sha RGB == oráculo", {
+    pixels_sha_rgb: shaCamadaUI.slice(0, 16), bytes: camadaDaUI.length,
+  });
+
+  // ---- 4: zoom inteiro, pixels nítidos e a escala da página não mudam a resolução.
+  passo("4: zoom 4x e verificação de nitidez");
+  await setPanelInput("rex-context-zoom", "4");
+  const estiloDaCamada = await executeScript(sessionId, `
+    const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+    return JSON.stringify({
+      style: [img.style.width, img.style.height, img.style.imageRendering],
+      rect: (function () { const r = img.getBoundingClientRect(); return [r.width, r.height]; })(),
+    });`);
+  const estilo = JSON.parse(estiloDaCamada);
+  if (estilo.style[0] !== `${LARGURA * 4}px` || estilo.style[1] !== `${ALTURA * 4}px`) {
+    fail(`zoom 4 não produziu ${LARGURA * 4}px de largura: ${JSON.stringify(estilo.style)}`);
+  }
+  if (estilo.style[2] !== "pixelated") {
+    fail(`a camada não está nitida em zoom inteiro (image-rendering=${estilo.style[2]}).`);
+  }
+  if (Math.abs(estilo.rect[0] - LARGURA * 4) > 1) {
+    fail(`layout divergiu do zoom pedido: rect ${JSON.stringify(estilo.rect)}`);
+  }
+
+  // ---- 5: os quatro cliques previstos, com o núcleo resolvendo a geometria.
+  const rotuloDeFlip = { B: "H e V", H: "H", V: "V", "": "nenhum" };
+  const cliqueNaCamada = async (x, y) => {
+    const r = await executeScript(sessionId, `
+      const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+      if (!img) return 'SEM_CAMADA';
+      img.scrollIntoView({ block: 'center', inline: 'center' });
+      const rect = img.getBoundingClientRect();
+      if (!(rect.width > 0) || !(rect.height > 0)) return 'SEM_LAYOUT';
+      const clientX = rect.left + (${x} + 0.5) * (rect.width / ${LARGURA});
+      const clientY = rect.top + (${y} + 0.5) * (rect.height / ${ALTURA});
+      img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX, clientY, view: window }));
+      return JSON.stringify({ rect: [rect.left, rect.top, rect.width, rect.height], alvo: [clientX, clientY] });`);
+    if (typeof r !== "string" || r === "SEM_CAMADA" || r === "SEM_LAYOUT") {
+      fail(`clique em (${x},${y}) não alcançou a camada: ${r}`);
+    }
+    return JSON.parse(r);
+  };
+  const hitEsperado = (oc, pos) => normaliza(
+    `célula (${oc.col}, ${oc.row}) · índice ${oc.row * cols + oc.col} · tile ${oc.tile} · `
+    + `flips ${rotuloDeFlip[oc.flip]} · banco ${oc.bank} · prioridade ${Number(oc.prio) ? "sim" : "não"} · `
+    + `local na célula (${pos.x - oc.col * 8}, ${pos.y - oc.row * 8}) · `
+    + `tile de origem ${EDITE.tile}, linha ${EDITE.row}, coluna ${EDITE.col} · índice atual ${EDITE.de}`
+  );
+  const evidenciasDeClique = [];
+  for (let i = 0; i < posicoesCalculadas.length; i += 1) {
+    const pos = posicoesCalculadas[i];
+    const oc = celulas.find((c) => Number(c.row) * cols + Number(c.col) === pos.indice);
+    passo(`5.${i + 1}: clique em (${pos.x},${pos.y}) — célula (${oc.col},${oc.row}) flip ${JSON.stringify(oc.flip)}`);
+    await cliqueNaCamada(pos.x, pos.y);
+    const hit = await waitFor(
+      async () => {
+        const t = await textoDe("rex-context-hit");
+        return t === hitEsperado(oc, pos) ? t : false;
+      },
+      20000,
+      `o clique ${i + 1} em (${pos.x},${pos.y}) não resolveu como o manifesto prevê. `
+      + `Último texto: ${await textoDe("rex-context-hit")}\nEsperado: ${hitEsperado(oc, pos)}\nDOM: ${await dumpContexto()}`,
+      200
+    );
+    const occ = await textoDe("rex-context-occurrences");
+    if (!occ.startsWith(`${posicoesCalculadas.length} ocorrências neste mapa verificado`)) {
+      fail(`a contagem não anunciou o escopo do mapa verificado: "${occ}"`);
+    }
+    if (!occ.includes(`TileMap em ${hex(TM_HDR)}`) || !occ.includes("outros mapas da ROM não entram nesta contagem")) {
+      fail(`o escopo da contagem está incompleto: "${occ}"`);
+    }
+    const impacto = await textoDe("rex-context-impact");
+    if (!impacto.includes(`muda as ${posicoesCalculadas.length} ocorrências deste mapa`)
+      || !impacto.includes("nenhuma ocorrência isolada é editável")
+      || !impacto.includes("duplicar e realocar o tile")) {
+      fail(`a previsão de impacto não diz que a ocorrência isolada não é editável: "${impacto}"`);
+    }
+    const geometriaDosDelimitadores = JSON.parse(await executeScript(sessionId, `
+      const q = (sel) => Array.from(document.querySelectorAll('${panel} [data-testid="' + sel + '"]'))
+        .map((e) => [parseInt(e.style.left, 10), parseInt(e.style.top, 10), parseInt(e.style.width, 10)].join(','));
+      return JSON.stringify({
+        ocorrencias: q('rex-context-occurrence'),
+        celula: q('rex-context-cell-highlight'),
+        tile: q('rex-context-tile-highlight'),
+      });`));
+    const passoZoom = 8 * 4;
+    const esperadoOcorrencias = posicoesCalculadas
+      .map((p) => celulas.find((c) => Number(c.row) * cols + Number(c.col) === p.indice))
+      .map((c) => `${Number(c.col) * passoZoom},${Number(c.row) * passoZoom},${passoZoom}`)
+      .sort();
+    if (geometriaDosDelimitadores.ocorrencias.slice().sort().join(" ") !== esperadoOcorrencias.join(" ")) {
+      fail(
+        `os delimitadores de ocorrência não são as ${posicoesCalculadas.length} células do manifesto: `
+        + `${JSON.stringify(geometriaDosDelimitadores.ocorrencias)} != ${JSON.stringify(esperadoOcorrencias)}`
+      );
+    }
+    if (geometriaDosDelimitadores.celula.length !== 1
+      || geometriaDosDelimitadores.celula[0]
+        !== `${Number(oc.col) * passoZoom},${Number(oc.row) * passoZoom},${passoZoom}`) {
+      fail(`a célula clicada não foi destacada: ${JSON.stringify(geometriaDosDelimitadores.celula)}`);
+    }
+    const tileX = (EDITE.tile % 16) * passoZoom;
+    const tileY = Math.floor(EDITE.tile / 16) * passoZoom;
+    if (geometriaDosDelimitadores.tile.length !== 1
+      || geometriaDosDelimitadores.tile[0] !== `${tileX},${tileY},${passoZoom}`) {
+      fail(
+        `o tile de origem não foi destacado na folha do TileSet (${EDITE.tile} → ${tileX},${tileY}): `
+        + `${JSON.stringify(geometriaDosDelimitadores.tile)}`
+      );
+    }
+    evidenciasDeClique.push({
+      posicao: [pos.x, pos.y],
+      celula: [Number(oc.col), Number(oc.row)],
+      flip: rotuloDeFlip[oc.flip],
+      hit,
+      ocorrencias: geometriaDosDelimitadores.ocorrencias.length,
+    });
+  }
+  record("5", "os quatro cliques resolvem o MESMO pixel de fonte, com flips e delimitadores conferidos", {
+    fonte: `tile ${EDITE.tile}, linha ${EDITE.row}, coluna ${EDITE.col}, índice atual ${EDITE.de}`,
+    hits: evidenciasDeClique.map((e) => `${e.posicao} ← ${e.flip}`),
+    todos_mesmo_fonte: new Set(evidenciasDeClique.map((e) => e.hit.split(" · tile de origem ")[1])).size === 1,
+  });
+
+  // ---- 6: borda, escala de página e clique fora — o núcleo resolve, a UI não decide.
+  passo("6: escala da página (zoom 0.75) e clique fora da camada");
+  await executeScript(sessionId, `document.body.style.zoom = '0.75'; return true;`);
+  const posZero = posicoesCalculadas[0];
+  const ocZero = celulas.find((c) => Number(c.row) * cols + Number(c.col) === posZero.indice);
+  await cliqueNaCamada(posZero.x, posZero.y);
+  await waitFor(
+    async () => (await textoDe("rex-context-hit")) === hitEsperado(ocZero, posZero),
+    20000,
+    `com a página em 0.75, o clique em (${posZero.x},${posZero.y}) não resolveu a mesma célula. `
+    + `UI: ${await textoDe("rex-context-hit")}`,
+    200
+  );
+  record("6a", "clique com escala de página 0.75 resolve igual", { escala: 0.75, posicao: [posZero.x, posZero.y] });
+  await executeScript(sessionId, `document.body.style.zoom = ''; return true;`);
+  await pause(150);
+
+  await cliqueNaCamada(LARGURA - 1, ALTURA - 1);
+  const ultimoHit = await textoDe("rex-context-hit");
+  await cliqueNaCamada(999, 999);
+  const avisoFora = await waitFor(
+    async () => {
+      const t = await textoDe("rex-context-notice");
+      return t.startsWith("clique fora da camada") ? t : false;
+    },
+    10000,
+    `um clique fora da camada não foi recusado em voz alta. DOM: ${await dumpContexto()}`,
+    200
+  );
+  if (!avisoFora.includes(`${LARGURA}x${ALTURA} px`) || !avisoFora.includes("seleção anterior foi mantida")) {
+    fail(`a recusa de clique fora não diz o que aconteceu: "${avisoFora}"`);
+  }
+  if ((await textoDe("rex-context-hit")) !== ultimoHit) {
+    fail("o clique inválido trocou a seleção exibida, apesar de dizer o contrário.");
+  }
+  record("6b", "clique fora da camada: recusado com motivo e seleção preservada", { aviso: avisoFora.slice(0, 90) });
+
+  // ---- 6c: dois cliques no mesmo tick — a última resposta vence, nada se mistura.
+  const ultimoGanha = posicoesCalculadas[posicoesCalculadas.length - 1];
+  const ocUltimo = celulas.find((c) => Number(c.row) * cols + Number(c.col) === ultimoGanha.indice);
+  await executeScript(sessionId, `
+    const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+    img.scrollIntoView({ block: 'center', inline: 'center' });
+    const rect = img.getBoundingClientRect();
+    const at = (x, y) => img.dispatchEvent(new MouseEvent('click', {
+      bubbles: true, cancelable: true, view: window,
+      clientX: rect.left + (x + 0.5) * (rect.width / ${LARGURA}),
+      clientY: rect.top + (y + 0.5) * (rect.height / ${ALTURA}),
+    }));
+    at(${posicoesCalculadas[0].x}, ${posicoesCalculadas[0].y});
+    at(${ultimoGanha.x}, ${ultimoGanha.y});
+    return true;`);
+  await waitFor(
+    async () => (await textoDe("rex-context-hit")) === hitEsperado(ocUltimo, ultimoGanha),
+    20000,
+    `dois cliques em sequência não terminaram na segunda seleção. UI: ${await textoDe("rex-context-hit")}`,
+    200
+  );
+  record("6c", "dois pedidos no mesmo tick: a resposta exibida é a última, sem mistura", {
+    exibida: hitEsperado(ocUltimo, ultimoGanha).slice(0, 40),
+  });
+
+  // ---- 7: editar UMA vez, pelo pixel de fonte que o núcleo apontou.
+  passo("7: enfileirar a edição no pixel de origem e aplicar pela transação canônica");
+  await setPanelInput("rex-resource-paint-index", String(EDITE.para));
+  // Campos do formulário em valores DECOY: se a barra enfileirasse o formulário em
+  // vez do pixel que o núcleo apontou, a perna 9 (diff de exatamente quatro
+  // posições previstas) pegaria — aqui a fila só pode nascer do clique.
+  await setPanelInput("rex-resource-edit-tile", String((EDITE.tile + 1) % NUM_TILES));
+  await setPanelInput("rex-resource-edit-row", String((EDITE.row + 1) % 8));
+  await setPanelInput("rex-resource-edit-col", String((EDITE.col + 1) % 8));
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-queue-edit");
+  await waitFor(
+    async () => /^1 edição/.test(await textoDe("rex-resource-edit-count")),
+    10000,
+    `a edição do pixel de origem não entrou na fila. DOM: ${await dumpContexto()}`,
+    200
+  );
+  const avisoFila = await textoDe("rex-resource-notice");
+  if (avisoFila !== "AUSENTE") {
+    fail(`enfileirar pelo contexto produziu aviso de recusa: "${avisoFila}"`);
+  }
+  const inicioAplicacao = Date.now();
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const resultado = await waitFor(
+    async () => {
+      const t = await textoDe("rex-resource-result");
+      return t.includes("desfecho:") && t !== "AUSENTE" ? t : false;
+    },
+    180000,
+    "a transação não publicou desfecho no painel.",
+    250
+  );
+  duracoes.push({ etapa: "apply pela barra (contexto → transação)", ms: Date.now() - inicioAplicacao });
+  if (!resultado.includes("applied")) {
+    fail(`desfecho diferente de applied: "${resultado.slice(0, 300)}"; erro: ${await textoDe("rex-resource-error")}`);
+  }
+  if (!resultado.includes("codec aplib")) fail(`o desfecho não declara o codec: "${resultado.slice(0, 200)}"`);
+  const modifiedPath = resultado.match(/cópia: (\S+)/)?.[1];
+  const patchPath = resultado.match(/patch: (\S+)/)?.[1];
+  if (!modifiedPath || !patchPath) fail(`proveniência ausente no desfecho: ${resultado.slice(0, 300)}`);
+  const copyBytes = await readFile(modifiedPath);
+  const modifiedSha = sha256(copyBytes);
+  const patchSha = sha256(await readFile(patchPath));
+  if (!resultado.includes(`ROM modificada ${modifiedSha.slice(0, 16)}`)) {
+    fail(`a barra anunciou outro hash para a cópia em disco: "${resultado.slice(0, 200)}" != ${modifiedSha}`);
+  }
+  record("7", "edição única enfileirada pelo pixel de fonte e aplicada pela transação", {
+    copia: modifiedSha.slice(0, 16), patch: patchSha.slice(0, 16),
+    apply_ms: Date.now() - inicioAplicacao,
+  });
+
+  // ---- 8: o que foi escrito em disco, conferido byte a byte.
+  passo("8: bytes da cópia no disco");
+  if (copyBytes.length !== romBytes.length) {
+    fail(`a cópia expandiu a ROM: ${copyBytes.length} != ${romBytes.length}`);
+  }
+  const deslocados = [];
+  for (let i = 0; i < copyBytes.length; i += 1) {
+    if (copyBytes[i] !== romBytes[i]) deslocados.push(i);
+  }
+  if (deslocados.length === 0) fail("a cópia é idêntica à fixture: nada foi escrito.");
+  const foraDoSlot = deslocados.filter((i) => i < TS_STREAM || i >= TS_STREAM + TS_SLOT);
+  if (foraDoSlot.length > 0) {
+    fail(`fora do slot do tileset [${hex(TS_STREAM)}, +${TS_SLOT}): ${JSON.stringify(foraDoSlot.slice(0, 8))}`);
+  }
+  // Quantos bytes o encoder moveu é propriedade do encoder, não da transação: a
+  // guarda aqui é a contenção (acima) e o efeito semântico, que a perna 9 mede
+  // pixel a pixel na camada reaberta. O contador vai para o relatório para que a
+  // divergência entre dois runs seja visível sem reexecutar o cenário.
+  record("8", "escrita confina ao slot do tileset; a ROM não expandiu", {
+    deslocados: deslocados.length,
+    primeiro: hex(deslocados[0]),
+    ultimo: hex(deslocados[deslocados.length - 1]),
+    dentro_do_slot: true,
+  });
+
+  // ---- 9: reabrir a cópia pelo MESMO pipeline e verificar o impacto previsto.
+  passo("9: reabrir a cópia, recarregar o contexto e comparar as camadas");
+  await verificarRom(modifiedPath, modifiedSha);
+  const etiquetasReaberto = await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  if (etiquetasReaberto.filter((l) => !l.startsWith("|")).length !== totalListado) {
+    fail(`reabrir a cópia mudou o conjunto verificado: ${JSON.stringify(etiquetasReaberto.length)}`);
+  }
+  const previewShaModificada = await selecionarRecurso(TS_STREAM.toString(16));
+  if (previewShaModificada === previewShaIntacta) {
+    fail(`a prévia do tileset não mudou na cópia (${previewShaModificada}): a edição não persistiu no artefato.`);
+  }
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  await waitFor(
+    async () => (await textoDe("rex-context-geometry")) === geometriaEsperada,
+    60000,
+    `o contexto da cópia não refez a mesma geometria: ${await textoDe("rex-context-geometry")}`,
+    250
+  );
+  const reaberto = await cronometrar("leitura da camada editada (canvas)", leCamada);
+  for (let i = 0; i < posicoesCalculadas.length; i += 1) {
+    const pos = posicoesCalculadas[i];
+    const oc = celulas.find((c) => Number(c.row) * cols + Number(c.col) === pos.indice);
+    await cliqueNaCamada(pos.x, pos.y);
+    await waitFor(
+      async () => (await textoDe("rex-context-hit")) === hitEsperado(oc, pos).replace(`índice atual ${EDITE.de}`, `índice atual ${EDITE.para}`),
+      20000,
+      `reaberta a cópia, o clique ${i + 1} em (${pos.x},${pos.y}) não mostra o índice editado ${EDITE.para}: `
+      + `${await textoDe("rex-context-hit")}`,
+      200
+    );
+  }
+  const diffPixels = [];
+  for (let p = 0; p < camadaIntacta.length; p += 4) {
+    if (camadaIntacta[p] !== reaberto[p] || camadaIntacta[p + 1] !== reaberto[p + 1]
+      || camadaIntacta[p + 2] !== reaberto[p + 2] || camadaIntacta[p + 3] !== reaberto[p + 3]) {
+      diffPixels.push([p / 4 % LARGURA, Math.floor(p / 4 / LARGURA)]);
+    }
+  }
+  const previstas = posicoesCalculadas.map((p) => `${p.x},${p.y}`).sort().join(" ");
+  const observadas = diffPixels.map(([x, y]) => `${x},${y}`).sort().join(" ");
+  if (observadas !== previstas) {
+    fail(
+      `a edição mudou a camada em ${diffPixels.length} posição(s); o manifesto prevê exatamente `
+      + `${posicoesCalculadas.length} [${previstas}] e observou [${observadas}]`
+    );
+  }
+  if (sha256(reaberto) !== sha256(camadaEditada)) {
+    fail(
+      `a camada após a edição não é a recomposição autoral editada: `
+      + `${sha256(reaberto)} != ${sha256(camadaEditada)}`
+    );
+  }
+  record("9", "impacto observado == impacto previsto: exatamente as quatro posições, e só elas", {
+    posicoes: observadas, bytes_da_copia: modifiedSha.slice(0, 16),
+    previa_tileset: [previewShaIntacta, previewShaModificada],
+  });
+
+  // ---- 10: identidade trocada na LEITURA (o contexto vem de outra ROM que a verificada).
+  passo("10: contexto de outra ROM com recursos verificados em uma — recusa em voz alta");
+  await setPanelInput("rex-resource-rom-input", fixtureRomPath); // sem re-verificar
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  const erroIdentidade = await waitFor(
+    async () => {
+      const t = await textoDe("rex-context-error");
+      return t.includes("identidade divergente") ? t : false;
+    },
+    30000,
+    `a troca silenciosa de ROM no contexto não foi recusada. DOM: ${await dumpContexto()}`,
+    250
+  );
+  if (!erroIdentidade.includes(romSha.slice(0, 16)) || !erroIdentidade.includes(modifiedSha.slice(0, 16))) {
+    fail(`a recusa de identidade não nomeia as duas ROMs: "${erroIdentidade}"`);
+  }
+  if (!erroIdentidade.includes("Nenhum contexto é exibido")) {
+    fail(`a recusa não diz que nada é exibido: "${erroIdentidade}"`);
+  }
+  const domTrocado = JSON.parse(await contextoDom());
+  if (domTrocado.imagens.length !== 0 || domTrocado.camada !== null) {
+    fail(`com identidade divergente a interface ainda exibiu contexto: ${JSON.stringify(domTrocado).slice(0, 200)}`);
+  }
+  record("10", "identidade trocada na leitura: recusada, com as duas ROMs nomeadas e nada exibido", {
+    erro: erroIdentidade.slice(0, 120),
+  });
+
+  // ---- 11: identidade trocada na ESCRITA (a transação é a guarda final).
+  passo("11: edição em fila com a ROM trocada — a transação recusa");
+  await verificarRom(fixtureRomPath, romSha);
+  await selecionarRecurso(TS_STREAM.toString(16));
+  await setPanelInput("rex-resource-paint-index", String(EDITE.para));
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  await waitFor(
+    async () => (await textoDe("rex-context-geometry")) === geometriaEsperada,
+    60000,
+    "o contexto da fixture íntegra não recarregou para a perna de escrita.",
+    250
+  );
+  await cliqueNaCamada(posicoesCalculadas[2].x, posicoesCalculadas[2].y);
+  await waitFor(
+    async () => (await textoDe("rex-context-hit")).includes(`índice atual ${EDITE.de}`),
+    20000,
+    "o clique não resolveu antes da perna de escrita.",
+    200
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-queue-edit");
+  await waitFor(
+    async () => /^1 edição/.test(await textoDe("rex-resource-edit-count")),
+    10000,
+    "a edição não entrou na fila para a perna de escrita.",
+    200
+  );
+  // A ROM do campo passa a ser a BYOR sem re-verificar: a fila é da fixture.
+  const byorPath = process.env.RDS_REX_RESOURCE_ROM
+    ?? path.join(repoRoot, "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin");
+  if (!(await pathExists(byorPath))) {
+    fail(`ROM BYOR ausente em ${byorPath}: a perna de identidade na escrita precisa dela.`);
+  }
+  const byorBytes = await readFile(byorPath);
+  const byorSha = sha256(byorBytes);
+  if (byorSha !== BYOR_ROM_SHA256) fail(`ROM BYOR inesperada: ${byorSha}`);
+  await setPanelInput("rex-resource-rom-input", byorPath);
+  // Estado do botão e das três superfícies de retorno ANTES e DEPOIS do clique:
+  // sem isto, um timeout na recusa não diz se o clique não chegou, se a chamada
+  // está em voo ou se a recusa apareceu em outra superfície.
+  const estadoDaEscrita = async (rotulo) => {
+    const botao = await executeScript(sessionId, `
+      const b = document.querySelector('${panel} [data-testid="rex-resource-apply"]');
+      if (!b) return 'BOTAO_AUSENTE';
+      const r = b.getBoundingClientRect();
+      return JSON.stringify({
+        desabilitado: b.disabled,
+        rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+        visivel: r.width > 0 && r.height > 0,
+      });`);
+    const superficies = {
+      erro: await textoDe("rex-resource-error"),
+      aviso: await textoDe("rex-resource-notice"),
+      resultado: await textoDe("rex-resource-result"),
+      fila: await textoDe("rex-resource-edit-count"),
+      sha: await textoDe("rex-resource-rom-sha"),
+    };
+    console.log(`[rex-context-e2e] 11/${rotulo}: botão=${botao} superfícies=${JSON.stringify(superficies)}`);
+    return superficies;
+  };
+  await estadoDaEscrita("antes-do-clique");
+  const inicioRecusa = Date.now();
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  await pause(1500);
+  const depoisDoClique = await estadoDaEscrita("1,5s-apos-o-clique");
+  const erroEscrita = await waitFor(
+    async () => {
+      const t = await textoDe("rex-resource-error");
+      if (t.includes("rom_identity_mismatch")) return t;
+      if (t !== "AUSENTE" && t.length > 0) fail(`a recusa veio com outro código: "${t}"`);
+      return false;
+    },
+    90000,
+    `a transação não recusou a edição com a ROM trocada. DOM: ${await dumpContexto()}`,
+    250
+  );
+  const msRecusa = Date.now() - inicioRecusa;
+  // A guarda de identidade corre antes de qualquer varredura, então a recusa é
+  // imediata mesmo numa ROM grande: se ela voltar a depender do scan completo,
+  // esta asserção cai e o custo volta a ser visível.
+  if (!depoisDoClique.erro.includes("rom_identity_mismatch")) {
+    fail(
+      `a recusa de identidade não chegou em 1,5 s numa ROM de ${byorBytes.length} B `
+      + `(custo ${msRecusa} ms) — a varredura voltou a preceder a guarda.`
+    );
+  }
+  if ((await textoDe("rex-resource-result")) !== "AUSENTE") {
+    fail("mesmo recusada, a barra publicou um desfecho de escrita.");
+  }
+  const byorDepois = await readFile(byorPath);
+  if (sha256(byorDepois) !== byorSha) fail("a recusa escreveu na ROM BYOR.");
+  record("11", "identidade trocada na escrita: rom_identity_mismatch, zero artefato, corpus intacto", {
+    erro: erroEscrita.slice(0, 120),
+  });
+
+  // ---- 12: tile fora do conjunto — a guarda do painel explica e preserva a fila.
+  passo("12: tile fora do conjunto não entra na fila no lugar de outro");
+  await setPanelInput("rex-resource-rom-input", fixtureRomPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => (await textoDe("rex-resource-rom-sha")).includes(romSha.slice(0, 16)),
+    60000, "a fixture não voltou a verificar-se depois da perna de escrita.", 250
+  );
+  await selecionarRecurso(TS_STREAM.toString(16));
+  const filaAntes = await textoDe("rex-resource-edit-count");
+  if (!/^nenhuma edição/.test(filaAntes)) {
+    fail(`re-verificar a ROM deveria esvaziar a fila, e ela está em "${filaAntes}".`);
+  }
+  await setPanelInput("rex-resource-paint-index", String(EDITE.para));
+  await setPanelInput("rex-resource-edit-tile", String(NUM_TILES));
+  await setPanelInput("rex-resource-edit-row", String(EDITE.row));
+  await setPanelInput("rex-resource-edit-col", String(EDITE.col));
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  const avisoTileFora = await waitFor(
+    async () => {
+      const t = await textoDe("rex-resource-notice");
+      return t.includes(`tile ${NUM_TILES}`) ? t : false;
+    },
+    10000,
+    `a barra aceitou tile ${NUM_TILES} fora do conjunto verificado. DOM: ${await dumpContexto()}`,
+    200
+  );
+  if (!avisoTileFora.includes(`são ${NUM_TILES} tile(s), numerados de 0 a ${NUM_TILES - 1}`)) {
+    fail(`a recusa não disse o domínio do recurso: "${avisoTileFora}"`);
+  }
+  if (!/^nenhuma edição/.test(await textoDe("rex-resource-edit-count"))) {
+    fail(`a entrada inválida entrou na fila: ${await textoDe("rex-resource-edit-count")}`);
+  }
+  record("12", "tile fora do conjunto: recusa explicada, fila intacta", { aviso: avisoTileFora.slice(0, 90) });
+
+  // ---- 13: BPS exportado pela barra re-aplicado a uma cópia íntegra.
+  passo("13: BPS re-aplicado com hash exato");
+  const baseCopy = path.join(validationDir, "rex-context-base-copy.bin");
+  const patchApplied = path.join(validationDir, "rex-context-patch-applied.bin");
+  await writeFile(baseCopy, romBytes);
+  const reapplied = await executeScript(sessionId, `
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    return await invoke('patch_apply_bps', { romPath: ${JSON.stringify(baseCopy)}, patchPath: ${JSON.stringify(patchPath)}, outputPath: ${JSON.stringify(patchApplied)} });`);
+  if (!reapplied || reapplied.ok !== true) fail(`patch_apply_bps falhou: ${JSON.stringify(reapplied)}`);
+  const appliedSha = sha256(await readFile(patchApplied));
+  if (appliedSha !== modifiedSha) {
+    fail(`BPS da barra re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
+  }
+  record("13", "BPS materializado pela barra reproduz a cópia exata", {
+    patch: patchSha.slice(0, 16), aplicado: appliedSha.slice(0, 16),
+  });
+
+  // ---- 14: o caso BYOR — contexto pela interface, com a camada declarada
+  // camada reconstruída (nunca framebuffer) e contagem sempre por mapa.
+  passo("14: BYOR — contexto pela interface e honestidade da prévia");
+  await setPanelInput("rex-resource-rom-input", byorPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => (await textoDe("rex-resource-rom-sha")).includes(byorSha.slice(0, 16)),
+    90000, "a ROM BYOR não verificou no painel.", 250
+  );
+  const etiquetasByor = await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  const alvoByor = etiquetasByor.filter((l) => l.startsWith(`${BYOR_STREAM_HEX}|`));
+  if (alvoByor.length !== 1 || !/aplib/i.test(alvoByor[0])
+    || !alvoByor[0].includes(`stream ${BYOR_SLOT_BYTES} B`)) {
+    fail(`o recurso aPLib BYOR já comprovado mudou de forma na lista: ${JSON.stringify(alvoByor)}`);
+  }
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  await waitFor(
+    async () => {
+      const d = JSON.parse(await contextoDom());
+      return d.erro === null && (d.imagens.length > 0 || d.vazio !== null || d.camada !== null);
+    },
+    120000,
+    `o contexto BYOR não assentou. DOM: ${await dumpContexto()}`,
+    500
+  );
+  const domByor = JSON.parse(await contextoDom());
+  if (domByor.erro) fail(`contexto BYOR com erro: ${domByor.erro}`);
+  let byorHonestidade = "sem imagem verificada: estado vazio exibido";
+  if (domByor.camada) {
+    const provByor = await textoDe("rex-context-provenance");
+    if (!provByor.includes("framebuffer completo") || !provByor.includes("oclusão")) {
+      fail(`no BYOR a prévia composta foi exibida sem dizer que não é o framebuffer:\n${provByor}`);
+    }
+    byorHonestidade = "camada reconstruída exibida com a oclusão declarada como não modelada";
+    const geomByor = await textoDe("rex-context-geometry");
+    if (!geomByor.startsWith("camada ")) fail(`geometria BYOR ausente: "${geomByor}"`);
+    const d0 = JSON.parse(await executeScript(sessionId, `
+      const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+      const rect = img.getBoundingClientRect();
+      img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+        clientX: rect.left + 0.5 * (rect.width / img.naturalWidth),
+        clientY: rect.top + 0.5 * (rect.height / img.naturalHeight) }));
+      return JSON.stringify([img.naturalWidth, img.naturalHeight]);`));
+    const contagem = await waitFor(
+      async () => {
+        const t = await textoDe("rex-context-occurrences");
+        return t.includes("ocorrências neste mapa verificado") ? t : false;
+      },
+      20000,
+      `clique no BYOR sem contagem escopada por mapa. hit=${await textoDe("rex-context-hit")}`,
+      250
+    );
+    record("14b", "clique no BYOR resolve e conta por mapa verificado", {
+      natural: d0, contagem: contagem.slice(0, 120),
+    });
+  } else {
+    if (!domByor.vazio) fail("contexto BYOR sem camada e sem estado vazio: tela em branco.");
+    if (domByor.imagens.length !== 0) {
+      fail(`o BYOR anunciou ${domByor.imagens.length} imagem(ns) sem camada composta: estado incoerente.`);
+    }
+  }
+  record("14", "caso BYOR aberto pelo produto, com a prévia declarada como camada reconstruída", {
+    recurso: alvoByor[0],
+    imagens: domByor.imagens.length,
+    sem_vinculo: domByor.semVinculo ? domByor.semVinculo.slice(0, 80) : null,
+    recusados: domByor.recusados ? domByor.recusados.slice(0, 80) : null,
+    honestidade: byorHonestidade,
+  });
+
+  // ---- fechamento: relatório independente do log falado.
+  const reportPathOut = path.join(
+    validationDir,
+    `rex-context-fixture-effect-${artifactTimestamp()}-report.json`
+  );
+  await writeFile(
+    reportPathOut,
+    JSON.stringify(
+      {
+        schema: "rex-context-fixture-effect/v1",
+        etapa: "passo 7 — contexto da imagem provado pela interface",
+        fixture: {
+          rom: { path: fixtureRomPath, sha256: romSha },
+          manifesto: { path: truthPath, schema: manifesto.schema },
+          receita: { path: reportPath, schema: receita.schema },
+          externo: {
+            path: extPath, schema: externo.schema, ferramenta: externo.oracle.tool,
+            sha256: externo.oracle.sha256,
+          },
+          offsets: {
+            struct: hex(IMG_STRUCT),
+            palette: { header: hex(PAL_HDR), stream: hex(PAL_STREAM) },
+            tileset: { header: hex(TS_HDR), stream: hex(TS_STREAM), slot: TS_SLOT, array_simbolico: TS_ARRAY },
+            tilemap: { header: hex(TM_HDR), stream: hex(TM_STREAM) },
+            ghost: { header: hex(GHOST_HDR), stream: hex(GHOST_STREAM) },
+          },
+          camada_esperada_sha256_rgb: pixelsShaDoManifesto,
+          camada_lida_do_webview_sha256_rgb: shaCamadaUI,
+          camada_divergencias_rgba: divergentesRGBA.length,
+        },
+        edicao: {
+          fonte: EDITE,
+          ocorrencias_previstas: posicoesCalculadas.length,
+          posicoes_previstas: posicoesCalculadas.map((p) => [p.x, p.y]),
+          posicoes_observadas: diffPixels,
+          bytes_fora_do_slot: foraDoSlot.length,
+          bytes_alterados: deslocados.length,
+          byte_alterado_em: hex(deslocados[0]),
+          copia_sha256: modifiedSha,
+          patch_sha256: patchSha,
+          bps_reaplicado_sha256: appliedSha,
+          previa_tileset: { intacta: previewShaIntacta, editada: previewShaModificada },
+        },
+        cliques: evidenciasDeClique,
+        negativos: {
+          ghost_sem_vinculo: semVinculoTexto.slice(0, 200),
+          recusados: recusadosTexto === "AUSENTE" ? "nenhum" : recusadosTexto.slice(0, 200),
+          clique_fora_da_camada: avisoFora,
+          resposta_obsoleta: "dois pedidos no mesmo tick: a última resposta é a exibida",
+          identidade_trocada_leitura: erroIdentidade.slice(0, 200),
+          identidade_trocada_escrita: erroEscrita.slice(0, 200),
+          tile_fora_do_conjunto: avisoTileFora.slice(0, 200),
+          troca_de_rom: "contexto descartado ao trocar o caminho (pernas 10/11)",
+        },
+        byor: {
+          rom_sha256: byorSha,
+          recurso: alvoByor[0],
+          honestidade_da_previa: byorHonestidade,
+        },
+        duracoes: {
+          total_ms: Date.now() - t0,
+          etapas: duracoes,
+        },
+        passos: steps,
+      },
+      null,
+      2
+    )
+  );
+  console.log(`[rex-context-e2e] relatório=${reportPathOut}`);
+  console.log(`[rex-context-e2e] ${JSON.stringify({
+    camada_ui_igual_esperada: shaCamadaUI === pixelsShaDoManifesto,
+    cliques: evidenciasDeClique.length,
+    ocorrencias: posicoesCalculadas.length,
+    posicoes_alteradas: diffPixels.length,
+    bytes_alterados: deslocados.length,
+    copia: modifiedSha.slice(0, 16),
+    patch: patchSha.slice(0, 16),
+    bps_reaplicado: appliedSha === modifiedSha,
+    total_ms: Date.now() - t0,
+  })}`);
+}
+
 function ppmFromRgba(frame) {
   const { bytes, width } = frame;
   const height = Math.floor(bytes.length / 4 / width);
@@ -11566,6 +12785,12 @@ async function main() {
     if (options.scenario === "rex-aplib-byor-effect") {
       currentE2eRunContext.appPath = options.app;
       await runRexAplibByorEffectScenario(sessionId);
+      return;
+    }
+
+    if (options.scenario === "rex-context-fixture-effect") {
+      currentE2eRunContext.appPath = options.app;
+      await runRexContextFixtureEffectScenario(sessionId);
       return;
     }
 
