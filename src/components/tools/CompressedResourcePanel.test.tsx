@@ -239,6 +239,12 @@ describe("CompressedResourcePanel", () => {
     });
   }
 
+  /** O aviso só existe quando há queixa: sem `rex-resource-notice` montado, a
+   *  resposta vazia é a asserção de que nada foi recusado. */
+  function aviso(): string {
+    return container.querySelector("[data-testid='rex-resource-notice']")?.textContent ?? "";
+  }
+
   it("tile fora do recurso: avisa, preserva a fila válida e não envia o inválido", async () => {
     const log = vi.fn();
     await painelComRecursoSelecionado(log);
@@ -303,6 +309,169 @@ describe("CompressedResourcePanel", () => {
     }
     expect(mocked.rexResourceApplyEdit).not.toHaveBeenCalled();
   });
+
+  /** O índice 0 pertence ao domínio 4bpp: é o índice de paleta que o VDP trata
+   *  como transparente, não uma cor editável da paleta. O campo reescrevia 0 em
+   *  1 (`setPaintIndex(Number(v) || 1)`), então as pernas 1 e 3 do passo 5 —
+   *  pinadas em índice 0 — eram inexpressáveis pela barra. Estas regressões
+   *  pinam o domínio 0..15 e a ausência de substituição silenciosa. */
+  async function enfileira(tile: string, row: string, col: string, indice: string) {
+    await campo("rex-resource-edit-tile", tile);
+    await campo("rex-resource-edit-row", row);
+    await campo("rex-resource-edit-col", col);
+    await campo("rex-resource-paint-index", indice);
+    await act(async () => {
+      findByTestId(container, "rex-resource-add-edit").click();
+      await flush();
+    });
+  }
+
+  async function aplicarESobFila() {
+    mocked.rexResourceApplyEdit.mockResolvedValue({ ...PREVIEW, outcome: "applied" });
+    await act(async () => {
+      findByTestId(container, "rex-resource-apply").click();
+      await flush();
+      await flush();
+    });
+    const chamadas = mocked.rexResourceApplyEdit.mock.calls;
+    return chamadas[chamadas.length - 1]?.[2];
+  }
+
+  it("digitar índice 0 mantém 0 no campo e a transação recebe índice 0", async () => {
+    await painelComRecursoSelecionado();
+    await enfileira("0", "1", "2", "0");
+    expect(
+      (findByTestId(container, "rex-resource-paint-index") as HTMLInputElement).value
+    ).toBe("0");
+    expect(aviso()).toBe("");
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+    expect(await aplicarESobFila()).toEqual([{ tile: 0, row: 1, col: 2, index: 0 }]);
+  });
+
+  it("entrada de índice inválida diz o motivo e não entra na fila no lugar de outra cor", async () => {
+    await painelComRecursoSelecionado();
+    await enfileira("0", "1", "2", "0"); // estado válido já em fila
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+    for (const [valor, motivo] of [
+      ["", "vazio"],
+      ["1.5", "não é um inteiro"],
+      ["-1", "fora da paleta"],
+      ["16", "fora da paleta"],
+    ] as const) {
+      await campo("rex-resource-paint-index", valor);
+      await act(async () => {
+        findByTestId(container, "rex-resource-add-edit").click();
+        await flush();
+      });
+      const texto = aviso();
+      expect(texto, `entrada "${valor}"`).toContain(motivo);
+      expect(texto).toContain("de 0 a 15");
+      expect(texto).toContain("A fila atual foi preservada");
+      expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(
+        /^1 edição/
+      );
+      // a edição em fila continua sendo o 0 legítimo, não o que foi digitado
+      expect(await aplicarESobFila()).toEqual([{ tile: 0, row: 1, col: 2, index: 0 }]);
+      await campo("rex-resource-paint-index", "0");
+    }
+    // texto não-numérico: um `<input type=number>` devolve "" ao navegador, então
+    // o painel tem que recusar por uma das duas razões, nunca pintar uma cor.
+    await campo("rex-resource-paint-index", "abc");
+    await act(async () => {
+      findByTestId(container, "rex-resource-add-edit").click();
+      await flush();
+    });
+    expect(aviso()).toContain("de 0 a 15");
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+    // fronteira superior do domínio continua expressável
+    await enfileira("1", "0", "0", "15");
+    expect(aviso()).toBe("");
+    expect(await aplicarESobFila()).toEqual([
+      { tile: 0, row: 1, col: 2, index: 0 },
+      { tile: 1, row: 0, col: 0, index: 15 },
+    ]);
+  });
+
+  it("pintura por clique usa o índice do campo, inclusive 0, e recusa campo inválido", async () => {
+    await painelComRecursoSelecionado();
+    const canvas = findByTestId(container, "rex-resource-canvas") as HTMLImageElement;
+    // A prévia natural é 128x32; o painel escala para a caixa do elemento.
+    canvas.getBoundingClientRect = () => ({
+      left: 0,
+      top: 0,
+      width: 512,
+      height: 128,
+      right: 512,
+      bottom: 128,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    await campo("rex-resource-paint-index", "0");
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 4, clientY: 4 }));
+      await flush();
+    });
+    expect(aviso()).toBe("");
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+    // (4,4) na caixa 512x128 == pixel natural (1,1) == tile 0, linha 1, coluna 1
+    expect(await aplicarESobFila()).toEqual([{ tile: 0, row: 1, col: 1, index: 0 }]);
+
+    await campo("rex-resource-paint-index", "");
+    await act(async () => {
+      canvas.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, clientX: 20, clientY: 20 })
+      );
+      await flush();
+    });
+    expect(aviso()).toContain("vazio");
+    // nada foi pintado no lugar: a única edição em fila segue sendo o índice 0
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+    expect(await aplicarESobFila()).toEqual([{ tile: 0, row: 1, col: 1, index: 0 }]);
+  });
+
+  it("índice 0 sobrevive a desfazer (re-editar o pixel), reabrir o recurso e ao no-op", async () => {
+    await painelComRecursoSelecionado();
+    await enfileira("0", "1", "2", "0");
+    expect(await aplicarESobFila()).toEqual([{ tile: 0, row: 1, col: 2, index: 0 }]);
+
+    // desfazer = reenfileirar o mesmo pixel com o índice original: uma entrada,
+    // não duas, e o valor novo é o que vai para a transação.
+    await enfileira("0", "1", "2", "5");
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(/^1 edição/);
+    expect(await aplicarESobFila()).toEqual([{ tile: 0, row: 1, col: 2, index: 5 }]);
+
+    // reabrir o recurso limpa a fila (o núcleo re-verifica a cópia) e o campo
+    // volta a aceitar 0 depois disso.
+    await enfileira("0", "1", "2", "0");
+    const select = findByTestId(container, "rex-resource-select") as HTMLSelectElement;
+    await act(async () => {
+      select.value = "c8cc8";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await flush();
+    });
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(
+      /^nenhuma edição/
+    );
+    await enfileira("3", "7", "7", "0");
+    expect(await aplicarESobFila()).toEqual([{ tile: 3, row: 7, col: 7, index: 0 }]);
+
+    // no-op honesto: campo em 0 e fila vazia (reabrir o recurso esvazia a fila)
+    // não mandam edição nenhuma para o núcleo.
+    await act(async () => {
+      select.value = "c8cc8";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await flush();
+    });
+    await campo("rex-resource-paint-index", "0");
+    expect(findByTestId(container, "rex-resource-edit-count").textContent).toMatch(
+      /^nenhuma edição/
+    );
+    expect(await aplicarESobFila()).toEqual([]);
+  });
+
 
   /** O painel não escolhe codec por suposição: o rótulo da lista, a contagem do
    *  escopo e o desfecho carregam o codec que o header verificado declarou — uma

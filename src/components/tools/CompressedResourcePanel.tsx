@@ -10,6 +10,7 @@ import {
 
 const TILE = 8;
 const PER_ROW = 16;
+const PALETTE_ENTRIES = 16;
 
 function parseOffset(value: string): number | null {
   const trimmed = value.trim().replace(/^0x/i, "");
@@ -37,9 +38,28 @@ function editRejectReason(candidate: RexPixelEdit, numTiles: number | null): str
       return `${nome} ${valor} fora do tile: use um valor inteiro de 0 a ${TILE - 1}. A fila atual foi preservada.`;
     }
   }
-  if (!Number.isInteger(index) || index < 1 || index >= PER_ROW) {
-    return `índice ${index} fora da paleta: use um inteiro de 1 a ${PER_ROW - 1} (o índice 0 é transparente). A fila atual foi preservada.`;
+  if (!Number.isInteger(index) || index < 0 || index >= PALETTE_ENTRIES) {
+    return `índice ${index} fora da paleta: use um inteiro de 0 a ${PALETTE_ENTRIES - 1}. A fila atual foi preservada.`;
   }
+  return null;
+}
+
+/** Por que o texto do campo de índice não expressa um índice do 4bpp, ou `null`.
+ *  O campo guarda o TEXTO digitado de propósito: com `Number(v) || 1` o 0 — um
+ *  índice legítimo, o que o VDP trata como transparente — virava 1 em silêncio,
+ *  e uma entrada sem sentido virava alguma cor. Cada forma inválida tem queixa
+ *  própria e nada entra na fila no lugar de outra coisa. */
+function paintIndexRejectReason(text: string): string | null {
+  const dominio =
+    `use um inteiro de 0 a ${PALETTE_ENTRIES - 1}. O índice 0 é o que o VDP lê como ` +
+    `transparente; mudar o índice de um pixel não edita a cor RGB de nenhuma entrada ` +
+    `da paleta. A fila atual foi preservada.`;
+  const trimmed = text.trim();
+  if (trimmed === "") return `campo de índice vazio: ${dominio}`;
+  const valor = Number(trimmed);
+  if (!Number.isFinite(valor)) return `índice "${trimmed}" não é um número: ${dominio}`;
+  if (!Number.isInteger(valor)) return `índice ${trimmed} não é um inteiro: ${dominio}`;
+  if (valor < 0 || valor >= PALETTE_ENTRIES) return `índice ${valor} fora da paleta: ${dominio}`;
   return null;
 }
 
@@ -49,6 +69,13 @@ function editRejectReason(candidate: RexPixelEdit, numTiles: number | null): str
  * patch BPS) e proveniência por hashes. Zero detecção automática: os recursos
  * vêm de verificação estrutural assistida por header, e o codec exibido é o que
  * o header verificou — a UI não escolhe decoder nem encoder por suposição.
+ *
+ * O "índice" é o índice de paleta de UM PIXEL do plano de tiles (4bpp, 0..15),
+ * não uma cor: nenhuma entrada RGB da paleta é tocada por esta edição. O índice
+ * 0 faz parte do domínio e é o que o VDP lê como transparente no plano — pixel
+ * com índice 0 mostra o que está atrás dele (backdrop / plano B), não "preto".
+ * Por isso ele é digitável aqui: recusá-lo deixaria inexpressável metade do que
+ * o formato sabe representar.
  */
 type LogLevel = "info" | "warn" | "error" | "success";
 
@@ -65,7 +92,7 @@ export function CompressedResourcePanel({
   const [preview, setPreview] = useState<RexResourceResult | null>(null);
   const [result, setResult] = useState<RexResourceResult | null>(null);
   const [edits, setEdits] = useState<RexPixelEdit[]>([]);
-  const [paintIndex, setPaintIndex] = useState(1);
+  const [paintIndex, setPaintIndex] = useState("1");
   const [editTile, setEditTile] = useState(0);
   const [editRow, setEditRow] = useState(0);
   const [editCol, setEditCol] = useState(0);
@@ -73,13 +100,20 @@ export function CompressedResourcePanel({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  const recusar = useCallback(
+    (reason: string) => {
+      setNotice(reason);
+      logMessage?.("warn", `REX edição não entrou na fila: ${reason}`);
+    },
+    [logMessage]
+  );
+
   const queueEdit = useCallback(
     (candidate: RexPixelEdit) => {
       const summary = resources.find((r) => r.stream_offset === selected);
       const reason = editRejectReason(candidate, summary ? summary.num_tiles : null);
       if (reason) {
-        setNotice(reason);
-        logMessage?.("warn", `REX edição não entrou na fila: ${reason}`);
+        recusar(reason);
         return;
       }
       setNotice(null);
@@ -90,7 +124,21 @@ export function CompressedResourcePanel({
         candidate,
       ]);
     },
-    [resources, selected, logMessage]
+    [resources, selected, recusar]
+  );
+
+  /** Formulário e clique na prévia passam por aqui, então os dois obedecem ao
+   *  mesmo domínio de índice. */
+  const queuePaint = useCallback(
+    (pixel: { tile: number; row: number; col: number }) => {
+      const motivo = paintIndexRejectReason(paintIndex);
+      if (motivo) {
+        recusar(motivo);
+        return;
+      }
+      queueEdit({ ...pixel, index: Number(paintIndex.trim()) });
+    },
+    [paintIndex, queueEdit, recusar]
   );
 
   const verify = useCallback(async () => {
@@ -152,9 +200,9 @@ export function CompressedResourcePanel({
       const tileRow = Math.floor(py / TILE);
       const tileCol = Math.floor(px / TILE);
       const tile = tileRow * PER_ROW + tileCol;
-      queueEdit({ tile, row: Math.floor(py) % TILE, col: Math.floor(px) % TILE, index: paintIndex });
+      queuePaint({ tile, row: Math.floor(py) % TILE, col: Math.floor(px) % TILE });
     },
-    [preview, selected, paintIndex, queueEdit]
+    [preview, selected, queuePaint]
   );
 
   const apply = useCallback(async () => {
@@ -195,6 +243,12 @@ export function CompressedResourcePanel({
           e é exibido na lista. Edição passa por transação canônica: identidade
           da ROM, espaço comprovado, dependentes verificados no produto, patch
           BPS exportado e re-aplicado com hash exato. Sem expansão de ROM.
+        </p>
+        <p>
+          O campo “índice” é o índice de paleta de um pixel do plano de tiles
+          (4bpp, inteiros de 0 a 15) — não uma cor: esta edição não toca no RGB
+          de nenhuma entrada da paleta. O índice 0 é um valor do domínio e é o
+          que o VDP lê como transparente no plano, então ele é digitável aqui.
         </p>
         {analyzedScope && (
           <p className="mt-1 text-[10px] text-[#6c7086]" data-testid="rex-resource-scope">
@@ -267,10 +321,10 @@ export function CompressedResourcePanel({
               índice
               <input
                 type="number"
-                min={1}
-                max={15}
+                min={0}
+                max={PALETTE_ENTRIES - 1}
                 value={paintIndex}
-                onChange={(event) => setPaintIndex(Number(event.target.value) || 1)}
+                onChange={(event) => setPaintIndex(event.target.value)}
                 data-testid="rex-resource-paint-index"
                 className="w-14 rounded border border-[#313244] bg-[#11111b] px-1 py-0.5 text-[#cdd6f4]"
               />
@@ -290,9 +344,7 @@ export function CompressedResourcePanel({
               <button
                 type="button"
                 data-testid="rex-resource-add-edit"
-                onClick={() =>
-                  queueEdit({ tile: editTile, row: editRow, col: editCol, index: paintIndex })
-                }
+                onClick={() => queuePaint({ tile: editTile, row: editRow, col: editCol })}
                 className="rounded border border-[#89b4fa] bg-[#89b4fa]/10 px-2 py-0.5 text-[#89b4fa]"
               >
                 Adicionar edição
