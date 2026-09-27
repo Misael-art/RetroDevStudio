@@ -65,14 +65,8 @@ fn record_extraction_error(result: &mut ExtractionResult, message: impl Into<Str
 }
 
 fn md_color_to_rgb(word: u16) -> RgbColor {
-    let r = ((word & 0x000E) >> 1) as u8;
-    let g = ((word & 0x00E0) >> 5) as u8;
-    let b = ((word & 0x0E00) >> 9) as u8;
-    RgbColor {
-        r: r * 36,
-        g: g * 36,
-        b: b * 36,
-    }
+    let [r, g, b] = reverse::decomp::rex_resources::md_color_word_to_rgb(word);
+    RgbColor { r, g, b }
 }
 
 fn decode_tile(data: &[u8]) -> Vec<u8> {

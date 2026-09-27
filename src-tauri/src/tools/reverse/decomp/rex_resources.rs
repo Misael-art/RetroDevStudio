@@ -19,23 +19,40 @@
 use super::rex_aplib::{aplib_decode, aplib_encode, AplibEncodeLimits, AplibLimits};
 use super::rex_codecs::{lz4w_decode_with_dictionary, CodecError, Lz4wLimits};
 
-/// Codec declarado por um header TileSet do SGDK.
+/// Codec declarado pelo campo `compression` de um header de recurso do SGDK.
+///
+/// TileSet e TileMap compartilham o mesmo enum do rescomp
+/// (`tools/rescomp/src/sgdk/tool/Basics.Compression`) e o mesmo valor gravado
+/// no ROM (`ordinal()-1`), então um tipo serve aos dois header em vez de um
+/// espelho por tipo de recurso.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TilesetCompression {
+pub enum HeaderCompression {
     None,
     Aplib,
     Lz4w,
 }
 
-impl TilesetCompression {
+impl HeaderCompression {
+    /// Valor do campo `compression` no ROM: é `ordinal()-1` do enum do rescomp
+    /// (`Basics.Compression`), então 3+ não existe em artefato SGDK e não é
+    /// candidato. Um único lugar interpreta o campo para TileSet e TileMap.
+    pub fn from_field(value: u16) -> Option<Self> {
+        match value {
+            0 => Some(Self::None),
+            1 => Some(Self::Aplib),
+            2 => Some(Self::Lz4w),
+            _ => None,
+        }
+    }
+
     /// Rótulo estável do codec REAL de um recurso verificado: aparece na UI e no
     /// nome dos artefatos, para nenhum caminho (nem teste, nem operador) ter que
     /// pressupor o codec a partir do offset.
     pub fn as_str(&self) -> &'static str {
         match self {
-            TilesetCompression::None => "none",
-            TilesetCompression::Aplib => "aplib",
-            TilesetCompression::Lz4w => "lz4w",
+            HeaderCompression::None => "none",
+            HeaderCompression::Aplib => "aplib",
+            HeaderCompression::Lz4w => "lz4w",
         }
     }
 }
@@ -45,7 +62,7 @@ impl TilesetCompression {
 pub struct TilesetCandidate {
     /// Offset do header TileSet na ROM.
     pub header_offset: usize,
-    pub compression: TilesetCompression,
+    pub compression: HeaderCompression,
     pub num_tiles: usize,
     /// Offset do stream (ponteiro do header, endereçamento MD linear).
     pub stream_offset: usize,
@@ -57,7 +74,10 @@ fn parse_tileset_header(rom: &[u8], header_offset: usize) -> Option<TilesetCandi
     if header_offset + 8 > rom.len() {
         return None;
     }
-    let compression = u16::from_be_bytes([rom[header_offset], rom[header_offset + 1]]);
+    let compression = HeaderCompression::from_field(u16::from_be_bytes([
+        rom[header_offset],
+        rom[header_offset + 1],
+    ]))?;
     let num_tiles = u16::from_be_bytes([rom[header_offset + 2], rom[header_offset + 3]]) as usize;
     let ptr = u32::from_be_bytes([
         rom[header_offset + 4],
@@ -65,12 +85,6 @@ fn parse_tileset_header(rom: &[u8], header_offset: usize) -> Option<TilesetCandi
         rom[header_offset + 6],
         rom[header_offset + 7],
     ]) as usize;
-    let compression = match compression {
-        0 => TilesetCompression::None,
-        1 => TilesetCompression::Aplib,
-        2 => TilesetCompression::Lz4w,
-        _ => return None,
-    };
     if num_tiles == 0 || num_tiles > 2048 || ptr == 0 || ptr >= rom.len() || !ptr.is_multiple_of(2)
     {
         return None;
@@ -117,7 +131,7 @@ pub fn verify_lz4w_resource(
     candidate: &TilesetCandidate,
     limits: &Lz4wLimits,
 ) -> Result<VerifiedLz4wResource, CodecError> {
-    if candidate.compression != TilesetCompression::Lz4w {
+    if candidate.compression != HeaderCompression::Lz4w {
         return Err(CodecError::new(
             "invalid_reference",
             "verificação LZ4W exige header com compression=2",
@@ -165,7 +179,7 @@ pub fn verify_aplib_resource(
     candidate: &TilesetCandidate,
     limits: &AplibLimits,
 ) -> Result<VerifiedAplibResource, CodecError> {
-    if candidate.compression != TilesetCompression::Aplib {
+    if candidate.compression != HeaderCompression::Aplib {
         return Err(CodecError::new(
             "invalid_reference",
             "verificação aPLib exige header com compression=1",
@@ -211,11 +225,11 @@ pub fn verify_lz4w_resource_set(
     let candidates = scan_tileset_headers(rom);
     let lz4w_count = candidates
         .iter()
-        .filter(|c| c.compression == TilesetCompression::Lz4w)
+        .filter(|c| c.compression == HeaderCompression::Lz4w)
         .count();
     let mut resources = Vec::new();
     for candidate in &candidates {
-        if candidate.compression != TilesetCompression::Lz4w {
+        if candidate.compression != HeaderCompression::Lz4w {
             continue;
         }
         if let Ok(resource) = verify_lz4w_resource(rom, candidate, limits) {
@@ -311,24 +325,22 @@ pub fn verify_resource_set(
     let candidatos = scan_tileset_headers(rom);
     let lz4w_count = candidatos
         .iter()
-        .filter(|c| c.compression == TilesetCompression::Lz4w)
+        .filter(|c| c.compression == HeaderCompression::Lz4w)
         .count();
     let aplib_count = candidatos
         .iter()
-        .filter(|c| c.compression == TilesetCompression::Aplib)
+        .filter(|c| c.compression == HeaderCompression::Aplib)
         .count();
     let mut resources = Vec::new();
     for candidate in &candidatos {
         let verificado = match candidate.compression {
-            TilesetCompression::Lz4w => verify_lz4w_resource(rom, candidate, &limits.lz4w)
+            HeaderCompression::Lz4w => verify_lz4w_resource(rom, candidate, &limits.lz4w)
                 .ok()
                 .map(RecursoVerificado::Lz4w),
-            TilesetCompression::Aplib => {
-                verify_aplib_resource(rom, candidate, &limits.aplib_decode)
-                    .ok()
-                    .map(RecursoVerificado::Aplib)
-            }
-            TilesetCompression::None => None,
+            HeaderCompression::Aplib => verify_aplib_resource(rom, candidate, &limits.aplib_decode)
+                .ok()
+                .map(RecursoVerificado::Aplib),
+            HeaderCompression::None => None,
         };
         if let Some(recurso) = verificado {
             resources.push(recurso);
@@ -732,6 +744,21 @@ pub fn md_pixel_location(tile: usize, row: usize, col: usize) -> Result<(usize, 
     Ok((offset, col.is_multiple_of(2)))
 }
 
+/// Converte uma palavra de cor do VDP (`xxxBBBxGGGxRRRx`, 3 bits por canal)
+/// para RGB8 em escala cheia.
+///
+/// `(v << 5) | (v << 2) | (v >> 1)` == `round(v * 255 / 7)`: branco (7) chega
+/// em 255, não em 252. É a única conversão de cor do produto — o extrator de
+/// ativos delega aqui para que paleta extraída e camada composta não diverjam.
+pub fn md_color_word_to_rgb(word: u16) -> [u8; 3] {
+    let canal = |v: u16| ((u32::from(v) * 255 + 3) / 7) as u8;
+    [
+        canal((word >> 1) & 0x7),
+        canal((word >> 5) & 0x7),
+        canal((word >> 9) & 0x7),
+    ]
+}
+
 /// Lê o índice (0..15) de um pixel no formato chunky.
 pub fn md_read_pixel_index(
     data: &[u8],
@@ -1094,6 +1121,23 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    #[test]
+    fn palavra_de_cor_do_vdp_vira_rgb_na_escala_cheia() {
+        // Formato `xxxBBBxGGGxRRRx`. A escala é round(v*255/7), a mesma do core
+        // Libretro: com v=7 o canal tem que chegar em 255, não em 252 (o
+        // extrator de ativos usava v*36 e dava branco sub-escala).
+        assert_eq!(md_color_word_to_rgb(0x0000), [0, 0, 0]);
+        assert_eq!(md_color_word_to_rgb(0x0EEE), [255, 255, 255]);
+        assert_eq!(md_color_word_to_rgb(0x0002), [36, 0, 0], "vermelho 1");
+        assert_eq!(md_color_word_to_rgb(0x0020), [0, 36, 0], "verde 1");
+        assert_eq!(md_color_word_to_rgb(0x0200), [0, 0, 36], "azul 1");
+        assert_eq!(
+            md_color_word_to_rgb(0x0400),
+            [0, 0, 73],
+            "azul 2: um bit a menos que 0x0E00"
+        );
+        assert_eq!(md_color_word_to_rgb(0x0E88), [146, 146, 255]);
+    }
     /// Stream aPLib real de oráculo, lido da fixture autoral versionada e
     /// conferido contra o SHA-256 pinado no `manifest.tsv` dos vetores.
     /// Ausência é falha de teste, não skip.
@@ -1145,7 +1189,7 @@ mod tests {
         let rom = rom_aplib_sintetica(TILE_LIKE_TILES);
         let candidato = scan_tileset_headers(&rom)
             .into_iter()
-            .find(|c| c.header_offset == 0 && c.compression == TilesetCompression::Aplib)
+            .find(|c| c.header_offset == 0 && c.compression == HeaderCompression::Aplib)
             .expect("header TileSet APLIB em 0 não foi scanneado");
         assert_eq!(candidato.stream_offset, 16);
         assert_eq!(candidato.num_tiles, TILE_LIKE_TILES as usize);
@@ -1177,7 +1221,7 @@ mod tests {
         let rom = rom_aplib_sintetica(TILE_LIKE_TILES - 1);
         let candidato = TilesetCandidate {
             header_offset: 0,
-            compression: TilesetCompression::Aplib,
+            compression: HeaderCompression::Aplib,
             num_tiles: (TILE_LIKE_TILES - 1) as usize,
             stream_offset: 16,
             expected_len: TILE_LIKE_LEN - 32,
@@ -1191,7 +1235,7 @@ mod tests {
         rom_lz4w[1] = 2; // compression=2 (LZ4W) no mesmo header
         let candidato_aplib = TilesetCandidate {
             header_offset: 0,
-            compression: TilesetCompression::Lz4w,
+            compression: HeaderCompression::Lz4w,
             num_tiles: TILE_LIKE_TILES as usize,
             stream_offset: 16,
             expected_len: TILE_LIKE_LEN,
@@ -1209,7 +1253,7 @@ mod tests {
         let rom = rom_aplib_sintetica(TILE_LIKE_TILES);
         let candidato = TilesetCandidate {
             header_offset: 0,
-            compression: TilesetCompression::Aplib,
+            compression: HeaderCompression::Aplib,
             num_tiles: TILE_LIKE_TILES as usize,
             stream_offset: 16,
             expected_len: TILE_LIKE_LEN,
@@ -1248,7 +1292,7 @@ mod tests {
             .into_iter()
             .find(|c| c.header_offset == 0x21b44)
             .expect("header TileSet 0x21b44 não apareceu no scan estrutural");
-        assert_eq!(candidato.compression, TilesetCompression::Aplib);
+        assert_eq!(candidato.compression, HeaderCompression::Aplib);
         assert_eq!(candidato.num_tiles, 500);
         assert_eq!(candidato.stream_offset, 0x2e4d4);
         assert_eq!(candidato.expected_len, 16000);
@@ -1367,7 +1411,7 @@ mod tests {
             .into_iter()
             .find(|c| c.header_offset == 0x270de)
             .expect("header TileSet do font 0x270de não apareceu no scan");
-        assert_eq!(candidato.compression, TilesetCompression::Aplib);
+        assert_eq!(candidato.compression, HeaderCompression::Aplib);
         assert_eq!(candidato.num_tiles, 96);
         assert_eq!(candidato.stream_offset, 0x2cd94);
         assert_eq!(candidato.expected_len, 96 * 32);
@@ -2263,7 +2307,7 @@ mod tests {
         let candidatos = scan_tileset_headers(&rom);
         let aplib: Vec<_> = candidatos
             .iter()
-            .filter(|c| c.compression == TilesetCompression::Aplib)
+            .filter(|c| c.compression == HeaderCompression::Aplib)
             .collect();
         let mut verificados = 0usize;
         for c in &aplib {
@@ -2292,7 +2336,7 @@ mod tests {
             verificados,
             candidatos
                 .iter()
-                .filter(|c| c.compression == TilesetCompression::Lz4w)
+                .filter(|c| c.compression == HeaderCompression::Lz4w)
                 .count()
         );
         assert!(
@@ -2355,7 +2399,7 @@ mod tests {
 
         for candidato in scan_tileset_headers(&rom)
             .iter()
-            .filter(|c| c.compression == TilesetCompression::Aplib)
+            .filter(|c| c.compression == HeaderCompression::Aplib)
         {
             let Ok(verificado) = verify_aplib_resource(&rom, candidato, &AplibLimits::default())
             else {
@@ -2724,7 +2768,7 @@ mod tests {
         rom.extend_from_slice(&[0xA5u8; 8]);
         let candidato = scan_tileset_headers(&rom)
             .into_iter()
-            .find(|c| c.compression == TilesetCompression::Aplib)
+            .find(|c| c.compression == HeaderCompression::Aplib)
             .expect("header APLIB não apareceu no scan");
         let recurso =
             verify_aplib_resource(&rom, &candidato, &AplibLimits::default()).expect("verificar");
@@ -2754,7 +2798,7 @@ mod tests {
         lz4w_recurso(&mut rom, 24, &semente);
         let candidato = scan_tileset_headers(&rom)
             .into_iter()
-            .find(|c| c.compression == TilesetCompression::Aplib)
+            .find(|c| c.compression == HeaderCompression::Aplib)
             .expect("header APLIB não apareceu no scan");
         let recurso =
             verify_aplib_resource(&rom, &candidato, &AplibLimits::default()).expect("verificar");

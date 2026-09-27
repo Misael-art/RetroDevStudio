@@ -120,9 +120,58 @@ mede (`fixture-build-report.json` e `external-verify.json`).
 produto tem que localizar TileSet/TileMap/Paleta/`Image` pelo caminho canônico
 de descoberta e descobrir offsets sozinho. Nenhuma linha do núcleo lê o
 manifesto; se passar a ler, a associação deixa de ser verificada e passa a ser
-contrabando. Esta ponta (modelo de mapa no núcleo, prévia composta na interface e
-prova discriminante) é a que vem agora — o fixture existe para que ela tenha
-com o que ser conferida.
+contrabando. O aceite abaixo é o que fiscaliza essa fronteira: ele lê o
+manifesto, o núcleo só lê a ROM.
+
+## Aceite no produto (por descoberta canônica)
+
+Os dois testes vivem em `src-tauri/src/tools/reverse/decomp/rex_context.rs` e
+são `#[ignore]` porque exigem a ROM compilada localmente:
+
+```bash
+cd src-tauri
+RDS_REX_CTX_FIXTURE_ROM=$PWD/target-test/validation/rex-context-fixture/project/out/rom.bin \
+  cargo test --lib rex_context::tests::fixture -- --ignored --nocapture --test-threads=1
+```
+
+Eles pinam o SHA do ROM antes de qualquer coisa (`705b72eb…`), descobrem as
+estruturas por varredura + decode + ponteiro seguido (nenhum offset vem do
+manifesto) e conferem, na ordem do briefing: reconstrução da camada → clique em
+célula com flip → pixel de origem → previsão das ocorrências afetadas → edição
+pela transação canônica. A escrita é a mesma do produto: `apply_resource_edit`,
+com o índice de paleta 0 expressável e sem segundo encoder nem fluxo paralelo.
+
+Medido em 2026-09-27, ROM `705b72eb…`, perfil `dev` (debuginfo 0, sem otimização
+de teste):
+
+- 2 recursos aPLib verificados de 12 candidatos de TileSet (2/16 do total de
+  LZ4W + aPLib); 2 TileMaps verificados (`15x9` e o ghost `8x16`), ambos com
+  codec lido do header; **1** cadeia `Image` — e nenhuma cadeia aponta para o
+  ghost, exatamente como o `symbol.txt`/linker registram.
+- Camada composta 120x72 byte a byte igual ao esperado autoral, com o SHA do
+  esperado recomposto pelo teste batendo com `composed_layer.pixels_sha256`
+  (`7dc94b02…`) — ou seja, o esperado do teste é o do oráculo, não um eco.
+- Os 4 cliques das posições previstas devolvem `(tile 2, linha 4, coluna 7)`;
+  `ocorrencias_do_tile(2)` devolve as mesmas 4 células com os mesmos flips.
+- Edição canônica: desfecho `applied`, 1 byte alterado no tileset (o do pixel),
+  mapa e paleta re-descobertos idênticos, BPS materializado, e o diff da camada
+  recomposta **exatamente** as 4 posições previstas — nem uma a mais, nem uma a
+  menos.
+- Duração por etapa (diagnóstico, não alegação): descobrir + conferir estruturas
+  ~0,4 ms, compor camada ~6,6 ms, clique/projeção ~0,1 ms, compartilhamento
+  ~0,2 ms; total do aceite de leitura ~8,4 s, do de edição ~17,4 s.
+
+### O aceite pode falhar? (conferência por mutação)
+
+Passar na primeira execução não prova nada por si. Cada afirmação foi mutada e o
+aceite morreu na perna certa, com o baseline verde antes e depois:
+
+| mutação | o que quebra | mensagem |
+|---|---|---|
+| leitura da fonte também espelhada (flip duplo em `compor_camada`) | reconstrução da camada | "a prévia composta divergiu do esperado autoral (flip, banco ou transparência)" |
+| `fonte_do_ponto` sem flip | clique em célula flipada | "clique em (0,3) não atingiu o pixel da fonte previsto" |
+| escala de cor `v*36` (a convenção antiga) | paleta | "cor do banco 0 índice 2: a escala do produto divergiu do fixture" |
+| `md_write_pixel_index` com paridade de nibble trocada | edição | desfecho `noop` em vez de `applied` |
 
 ## Limites declarados
 
@@ -146,6 +195,10 @@ com o que ser conferida.
   índices 0 e 5 ali significam o padrão sólido do VDP, não `t0`/`t5` do tileset.
   Numericamente idênticos. O fixture **expõe** o ambiguo; resolvê-lo exigiria
   observação de VRAM, que não está nesta rodada.
+- **Só há um tipo de associação composta no SDK pinado.** `inc/vdp_bg.h` declara
+  `Image = { Palette*, TileSet*, TileMap* }`; `TiledImage` **não existe** no
+  SGDK 2.11 (0 ocorrências em `inc/`). Portanto "cadeia" aqui é esse struct e
+  nada mais — inventar um segundo formato de vínculo seria inventar o SDK.
 - O perfil vale para **este** toolchain pinado (rescomp.jar `502a4670…`,
   apj.jar `2d8cdc63…`, libmd.a `ef904a37…`). Não generalize para outras ROMs nem
   para outra versão do SGDK sem reconstruir e re-medir.
