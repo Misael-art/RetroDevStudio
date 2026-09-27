@@ -1,0 +1,17 @@
+{
+  "id": "kosinski-runtime-fixtures",
+  "kind": "codec-runtime",
+  "contract": "docs/rex_profiles/kosinski_runtime/CONTRACT.md (v1)",
+  "provenance": "authored-fixture (missão frente B, 2026-09-27); nenhuma ROM/BYOR",
+  "vectors": [
+    {
+      "name": "overlap_echo",
+      "stream_sha256": "ffde8de70ee9a51823cc9ce07a9062c684ab606a7e5aa4c237b98c582c2b7a53",
+      "expected_sha256": "7b346904f63cc07f1d8cc2d88d7dae08a3f088a0e4159d5214c27a6571a51eb4",
+      "expected_text": "XXXX (4 bytes)",
+      "bytes_consumed": 8,
+      "meaning": "copia sobreposta com eco byte a byte (separado dist=1 len=3) + terminator; espera derivada do CONTRATO, nao do decoder",
+      "crosschecks": "espelho strict do perfil (kos_mirror.py strict=True) reproduz b'XXXX' consumed=8; paridade com oraculo koscmp -x registrada em REPORT.md (comando differential-vs-koscmp.sh)"
+    }
+  ]
+}

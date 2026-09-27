@@ -1,0 +1,9 @@
+[package]
+name = "rex-kosinski"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Decodificador Kosinski (variante base, nao-modular) com limites e erros estruturados — pacote REX autonomo, pronto para adaptacao ao contrato de codecs do produto"
+publish = false
+
+[dependencies]
