@@ -4,6 +4,10 @@
 //! Pacote autonomo da frente REX: sem dependencia de Tauri, sem dependencias
 //! externas, sem leitura de filesystem na logica de decode.
 
+pub mod encode;
+
+pub use encode::{encode, EncError, KosEncoded};
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum KosError {
     /// EOF no meio de descritor/token, ou fluxo exaurido sem terminator.
