@@ -139,6 +139,33 @@ pub struct SpriteAnimation {
     pub frames: Vec<u32>,
     pub frame_time: u32,
     pub looping: bool,
+    /// Tabela de runtime MUGEN (perfil `mugen.character.v1`), quando a animacao veio de
+    /// um AIR. `Err` = dados do modelo fora do que o runtime representa: bloqueia o build.
+    pub mugen: Option<Result<MugenAnimTable, String>>,
+}
+
+/// Animacao dirigida pelo runtime gerado (`compiler/mugen_runtime.rs`) em vez da
+/// auto-animacao da SGDK: tempo por frame, `Loopstart`, flip/offset por frame e caixas.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MugenAnimTable {
+    /// Ticks por frame; 0 = parado (tempo `-1` do AIR).
+    pub timers: Vec<u8>,
+    pub loop_start: u32,
+    pub frames: Vec<MugenFrameRuntime>,
+    /// Eixo comum dentro da celula e tamanho da celula (px), para o flip em torno do eixo.
+    pub anchor: (i32, i32),
+    pub cell: (u32, u32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MugenFrameRuntime {
+    pub dx: i32,
+    pub dy: i32,
+    pub hflip: bool,
+    pub vflip: bool,
+    /// Caixas relativas ao eixo: `[x1, y1, x2, y2]`.
+    pub clsn1: Vec<[i32; 4]>,
+    pub clsn2: Vec<[i32; 4]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -410,6 +437,10 @@ pub enum LogicBoolExpr {
     Literal(bool),
     /// Corpo com fisica apoiado (pousou neste quadro). `var_name` = variavel do sprite.
     Grounded {
+        var_name: String,
+    },
+    /// A animacao atual do sprite terminou a primeira passagem (MUGEN `AnimTime = 0`).
+    SpriteAnimDone {
         var_name: String,
     },
     Input {
@@ -854,10 +885,84 @@ fn sprite_animations(project_fps: u32, sprite: &SpriteComponent) -> Vec<SpriteAn
             frames: normalized_frames(animation),
             frame_time: animation_frame_time(project_fps, animation.fps),
             looping: animation.looping,
+            mugen: mugen_anim_table(sprite, animation),
         })
         .collect::<Vec<_>>();
     animations.sort_by(|left, right| left.name.cmp(&right.name));
     animations
+}
+
+/// Tabela MUGEN a partir do modelo do produto (`frame_durations`, `mugen_frames`,
+/// `loop_start`). O modelo e a fonte: editar esses campos muda a ROM.
+fn mugen_anim_table(
+    sprite: &SpriteComponent,
+    animation: &AnimationDef,
+) -> Option<Result<MugenAnimTable, String>> {
+    let mugen_frames = animation.mugen_frames.as_ref()?;
+    let build = || -> Result<MugenAnimTable, String> {
+        let durations = animation
+            .frame_durations
+            .as_ref()
+            .ok_or("animacao MUGEN sem frame_durations")?;
+        let n = animation.frames.len();
+        if durations.len() != n || mugen_frames.len() != n {
+            return Err(format!(
+                "frames ({n}), frame_durations ({}) e mugen_frames ({}) com tamanhos diferentes",
+                durations.len(),
+                mugen_frames.len()
+            ));
+        }
+        if n == 0 || n > 255 {
+            return Err(format!("{n} frames (1..=255)"));
+        }
+        let timers = durations
+            .iter()
+            .map(|d| match *d {
+                -1 => Ok(0u8),
+                1..=255 => Ok(*d as u8),
+                other => Err(format!("duracao {other} fora de -1 ou 1..=255")),
+            })
+            .collect::<Result<Vec<u8>, String>>()?;
+        let loop_start = animation.loop_start.unwrap_or(0);
+        if loop_start as usize >= n {
+            return Err(format!("loop_start {loop_start} >= {n} frames"));
+        }
+        let pivot = sprite
+            .pivot
+            .as_ref()
+            .ok_or("sprite MUGEN sem pivot (eixo comum)")?;
+        let boxes = |list: &[crate::ugdm::components::MugenCollisionBox]| {
+            list.iter()
+                .map(|b| [b.x1, b.y1, b.x2, b.y2])
+                .collect::<Vec<_>>()
+        };
+        let frames = mugen_frames
+            .iter()
+            .map(|f| {
+                let flags = f.flags.join("").to_ascii_uppercase();
+                let axis = f
+                    .axis
+                    .clone()
+                    .unwrap_or(crate::ugdm::components::Pivot { x: 0, y: 0 });
+                MugenFrameRuntime {
+                    dx: axis.x,
+                    dy: axis.y,
+                    hflip: flags.contains('H'),
+                    vflip: flags.contains('V'),
+                    clsn1: boxes(&f.clsn1),
+                    clsn2: boxes(&f.clsn2),
+                }
+            })
+            .collect();
+        Ok(MugenAnimTable {
+            timers,
+            loop_start,
+            frames,
+            anchor: (pivot.x, pivot.y),
+            cell: (sprite.frame_width, sprite.frame_height),
+        })
+    };
+    Some(build())
 }
 
 fn default_animation(project_fps: u32, sprite: &SpriteComponent) -> Option<SpriteAnimation> {
@@ -2439,6 +2544,23 @@ fn build_bool_expr_from_node(
                 unsupported_tokens: parsed.unsupported_tokens,
             })
         }
+        "sprite_anim_done" => {
+            let target = param_string(node, "target")?;
+            Some(
+                match runtime_entities
+                    .get(&target)
+                    .and_then(|runtime| runtime.sprite.as_ref())
+                {
+                    Some(sprite) => LogicBoolExpr::SpriteAnimDone {
+                        var_name: sprite.var_name.clone(),
+                    },
+                    None => LogicBoolExpr::Unsupported {
+                        node_id: node.id.clone(),
+                        reason: format!("sprite_anim_done: '{target}' nao tem sprite"),
+                    },
+                },
+            )
+        }
         "condition_overlap" => {
             let left = runtime_entities
                 .get(&param_string(node, "a")?)?
@@ -2590,6 +2712,7 @@ fn collect_unsupported_from_bool(
         }
         LogicBoolExpr::Literal(_)
         | LogicBoolExpr::Grounded { .. }
+        | LogicBoolExpr::SpriteAnimDone { .. }
         | LogicBoolExpr::Input { .. }
         | LogicBoolExpr::InputCommand { .. }
         | LogicBoolExpr::Overlap { .. } => {}
