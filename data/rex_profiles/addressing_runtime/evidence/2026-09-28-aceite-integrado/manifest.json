@@ -59,6 +59,11 @@
       "sha256": "97f60747a05cde52c4727b46c5788e5357288ece6a57a54f4bc5a0bbe4500412",
       "linhas": 11,
       "nota": "barra de frontend de AGENTS.md executada no HEAD final desta perna (`1f30467`): `npm run lint` rc=0, `npx tsc --noEmit` rc=0 e `npm test` rc=0 con 79 ficheiros verdes + 1 saltado e **749 pasados / 6 saltados (755)**. Janela 2026-09-28T12:18:14Z–12:20:26Z, despois do último commit de docs; ningún ficheiro de frontend se modificou nesta perna — a execución é a proba de que a promoción do paquete e a rolda de aceite non regrediron a barra."
+    },
+    "ci-consulta-ebfa8ea.log": {
+      "sha256": "01120079ea70c70dd3816b0da8d7866dadc9eabf0dc6bb559bc9c166910a82b8",
+      "linhas": 14,
+      "nota": "Consultas pontuais do rollup CI por SHA no push da rolda de aceite (ebfa8ea): 8 tentativas sen runs rexistrados, despois rollup do attempt orixinal (CI=success; Desktop E2E=failure cun timeout de 15274 ms sobre orzamento de 15000 ms no paso reference_goal, 'esgotamento de tempo, nao um defeito confirmado') e ROLLUP TERMINAL da reexecución do job fallido no mesmo SHA (15:10Z): desktop-smoke=success. Veredicto por SHA: ebfa8ea verde nas duas pernas; ningún código de produto mudou entre a falla e a reexecución. Non converte retroactivamente en aprobado ningún SHA anterior."
     }
   },
   "como_conferir": "npm run crates:gates; npm run check:tree; cd src-tauri && cargo test --lib && cargo clippy --lib -- -D warnings && cargo fmt -- --check; CARGO_TARGET_DIR=target/crates-gates cargo run --offline --manifest-path crates/rex-addressing/Cargo.toml --example resource_report; sha256sum crates/rex-addressing/vectors/acceptance-v1.json; git diff --stat 0e5f804:scripts/rex_profiles/addressing_runtime/rex-addressing HEAD:crates/rex-addressing"

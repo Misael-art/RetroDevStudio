@@ -1,0 +1,14 @@
+CONSULTA PONTUAL CI — SHA ebfa8ea (empurrado 2026-09-28T14:31:55Z)
+SHA completo: ebfa8eaaf72a572f51a8d749d30eedd567a3d0c7
+[2026-09-28T14:33:55Z] tentativa 1: sen runs rexistrados ainda
+[2026-09-28T14:35:56Z] tentativa 2: sen runs rexistrados ainda
+[2026-09-28T14:37:56Z] tentativa 3: sen runs rexistrados ainda
+[2026-09-28T14:39:57Z] tentativa 4: sen runs rexistrados ainda
+[2026-09-28T14:41:57Z] tentativa 5: sen runs rexistrados ainda
+[2026-09-28T14:43:58Z] tentativa 6: sen runs rexistrados ainda
+[2026-09-28T14:45:58Z] tentativa 7: sen runs rexistrados ainda
+[2026-09-28T14:47:59Z] tentativa 8: sen runs rexistrados ainda
+[2026-09-28T14:55:34Z] consulta pontual (rollup terminal, attempt orixinal): CI=success (run 36436619506); Desktop E2E=failure (run 36436619429) — scenario reference_goal=failure, timeout 15274ms contra orzamento 15000ms ('esgotamento de tempo, nao um defeito confirmado'). smoke_md=success, demais skipped.
+[2026-09-28T14:56:39Z] reexecución pontual do job fallido (gh run rerun --failed) no mesmo SHA ebfa8ea; sen aprobación retroativa doutros SHA.
+[2026-09-28T15:06:50Z] consulta: desktop-smoke in_progress. Entre a556e86 (E2E verde) e ebfa8ea houbo cambios de produto aditivos (rex_addressing.rs + comando IPC); a falla é no paso gameplay de tilemap, alleo ao adaptador novo, con marxe de 274ms sobre o orzamento.
+[2026-09-28T15:10Z] ROLLUP TERMINAL da reexecución (run 36436619429, attempt 2, mesmo SHA ebfa8ea): desktop-smoke=success, workflow=success. A falla anterior (reference_goal, 15274ms sobre orzamento de 15000ms) atribúese a esgotamento de tempo no límite no runner Windows, non a un defecto introducido por ebfa8ea; ningún código de produto mudou entre a-execución e a reexecución. CI(workflow CI)=success xa estaba medido. Veredicto por SHA: ebfa8ea verde nas duas pernas.
