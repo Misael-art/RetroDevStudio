@@ -64,13 +64,21 @@ Distinctos e não misturáveis (exigência da missão):
 
 - Stream começa na **primeira palavra de descritor** (2 bytes LE), sem
   cabeçalho nem comprimento declarado.
-- **EARLY FETCH espelhado:** quando o 16.º bit de um descritor é emitido e o
-  token em curso **ainda precisa de bits** (token atravessa a fronteira, caso
-  m10) **ou existe token posterior**, a palavra do **próximo** descritor é
-  escrita **imediatamente após a palavra corrente**, ANTES dos bytes de dados
-  do token em curso; os bits do token atravessado continuam no novo
-  descritor (bit0 primeiro). Se o token que completa no 16.º bit é o
-  terminador, nada mais é escrito além dos seus bytes `00 F0 00`.
+- **EARLY FETCH espelhado:** quando o 16.º bit de um descritor é emitido e
+  qualquer byte se segue — dados do token em curso, token posterior **ou os
+  3 bytes do próprio terminador** — a palavra do **próximo** descritor é
+  escrita **imediatamente após a palavra corrente**, ANTES desses bytes; os
+  bits do token atravessado continuam no novo descritor (bit0 primeiro).
+  **Retificação medida (2026-09-27, sessão de encoding):** a redação anterior
+  dizia que, se o terminador completasse no 16.º bit, nada mais seria escrito
+  além de `00 F0 00`. Refutado por medição: o decoder dispara o fetch no pop
+  do 16.º bit **incondicionalmente** (`lib.rs`, `next_bit`); plain de 14
+  literais (`A..N`) gerava `FF BF + 14B + 00 F0 00` e dava `Truncated`.
+  Regra correta: quando o 2.º bit do terminador é o 16.º, a stream termina em
+  `[palavra-placeholder 00 00][00 F0 00]` (21 bytes), e
+  `bytes_consumed == len`. Âncora contrastante: 15 literais — 1.º bit do
+  terminador no 16.º — mantém `FF 7F + 15B + 01 00 + 00 F0 00` (caso m10-like
+  inalterado). A stream mínima de 5 bytes (plain vazio) não toca a fronteira.
 - **Terminador sempre nos últimos 3 bytes da stream, sem padding**
   (política emissor: `00 F0 00` final; o `CONTRACT.md` §3 registra padding
   `00`/`5a` opcional do oráculo — o produto não o emite nem o exige).
