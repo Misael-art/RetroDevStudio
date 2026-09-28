@@ -234,8 +234,9 @@ chamador. A imaxe transmitese como `&[u8]` (non un tipo `RomImage` novo): un
 | 8 | `fmt`, `clippy -D warnings`, tests rápidos separados dos caros | informe final (saída literal alí) |
 | 9 | Semántica de `read` auditada perfil por perfil (tres conceptos separados, rexións non-ROM nunca omitidas) | `tests/read_semantics_audit.rs` (5 tests) |
 | 10 | Clasificación **validado / política conservadora / non suportado** dos cinco perfis | `CLASSIFICACION.md` |
-| 11 | Capa de recursos: procedencia, recusa do parcial, límites e frontira única | `tests/resource_reader.rs` (15 tests) sobre `src/resource.rs` |
+| 11 | Capa de recursos: procedencia, recusa do parcial, límites e frontira única | `tests/resource_reader.rs` (14 tests propios + autocomprobación da fixture) sobre `src/resource.rs` |
 | 12 | Oráculo independente da capa de recursos (contido que identifica banco e offset) | `tests/support/banked.rs` |
+| 13 | Batería discriminante da capa: 11 lecturas + 12 recusas, tres derivacións e control anti-degeneración | `tests/resource_fixtures.rs` (10 tests propios + autocomprobación da fixture) |
 
 **Desviación rexistrada da propia táboa.** Este contrato anunciaba
 `tests/oracle.rs`, `tests/limits.rs` e `tests/exhaustive.rs` como ficheiros. Non
@@ -322,10 +323,49 @@ estado fixo e unha serie de remapeos responden a preguntas diferentes.
 ### 12.5 O que **non** fai a capa
 
 - Non abre ficheiros nin coñece rutas: a imaxe entra como `&[u8]`.
-- **Non compute o SHA-256** da imaxe. Valida a forma da atestación e devólvena
+- **Non calcula o SHA-256** da imaxe. Valida a forma da atestación e devólvena
   na saída; comparar o digest contra o contido real é traballo do adaptador, que
   é quen ten o arquivo. Facerlo no núcleo pagaría un hash por cada recurso
   observado, e fixar ese límite tamén é parte do contrato
   (`tests/resource_reader.rs::a_verificacion_de_contido_e_perna_do_adaptador_non_do_nucleo`).
 - Non deduce bancos nin perfil, e non modela chips especiais: herda os límites
   de §10 tal cal.
+
+### 12.6 Como se proba a capa (etapa 3)
+
+`tests/resource_fixtures.rs` é a batería discriminante: **11 casos de lectura**
+e **12 de recusa** sobre os cinco perfis, cuxas expectativas teñen tres
+derivacións que non son a implementación baixo proba.
+
+1. Os segmentos esperados están escritos a man desde as especificacións pinadas
+   (`docs/rex_profiles/addressing/*.md`): fronteira do espello, porta da xanela
+   SSF2, fim de banco LoROM/ExHiROM de metade alta, grupo contiguo `40-7D` de
+   HiROM e a **descontinuidade** da área 2 modular (`offset` que **baixa** ao
+   pasar do banco `3F` ao `40`, que ten que saír como dous segmentos).
+2. O contido de cada byte vén de `tests/support/banked.rs::byte_at`, función
+   pechada do desprazamento físico: a batería recomponse byte a byte desde a
+   procedencia e compárase con iso, non cunha segunda saída da biblioteca.
+3. `o_motor_de_xanelas_declarativas_confirma_los_offsets_da_bateria` volve
+   calcular cada offset co matcher declarativo de xanelas de bsnes
+   (`tests/support/windows_engine.rs`) e coa táboa de páxinas de GPGX para SSF2.
+
+Que a terceira fonte exista non é decorativo: na primeira execución da batería
+fallou en tres casos, e en **todos** produto e motor declarativo coincidían
+contra a miña deriva a man (LoROM tira A15 dentro da páxina: `$00-3D/80-BD`
+`$8100` é offset `$100`, non `$8100`; ExHiROM área 2 é `mod half2`). Iso é o que
+se procura dun oráculo: que dica cando o equivocado é quen escribe o test.
+
+As oito probas exixidas están nomeadas en tests, non só afirmadas:
+`a_bateria_de_lecturas_validas_coincide_co_derivado_a_man`,
+`a_bateria_de_recusas_devolve_codigo_rexion_e_procedencia`,
+`os_alias_acada_os_mesmos_bytes_por_dous_camiños_distintos`,
+`a_escrita_de_banco_ss2_non_move_as_xanelas_non_escritas`,
+`o_mesmo_enderezo_loxico_dá_bytes_distintos_segundo_o_estado`,
+`dous_instancias_de_estado_non_se_influen`,
+`ningunha_chave_de_chip_especial_abre_un_camino_en_snes` e
+`exhirom_fóra_do_contrato_falla_por_estado_non_por_rango`.
+
+`a_bateria_non_e_vacia_e_discrimina` é o control anti-degeneración: exixe que os
+cinco perfis teñan lectura **e** recusa representadas, e que cada corredor
+cambie se o desprazamento se move un byte ou un banco de 512 KB. Se un caso
+deixase de discriminar, o test falla aínda que a biblioteca estivese ben.
