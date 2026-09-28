@@ -1689,3 +1689,67 @@ com ferramenta externa (koscmp) continua fora da suíte ordinária, no script do
 comercial e corpus BYOR seguem fora da árvore e fora dos gates. **Sem merge, sem
 release, sem promoção de maturidade.**
 
+### 2026-09-28 — integración da fronte A ao produto (`backend integrado`) e rolda de aceite
+
+**Subida de degrau, medida e con non-vacuidade.** `crates/rex-addressing` deixou de ser
+só biblioteca con gates propios: entrou en `src-tauri/Cargo.toml` como
+`rex-addressing = { path = "../crates/rex-addressing" }` (sen workspace na raiz;
+`Cargo.lock` de 495 a 496 entradas `[[package]]`, a nova **sen** campo `source` e cero
+crates externos), o adaptador vive en
+`src-tauri/src/tools/reverse/decomp/rex_addressing.rs` (SHA `7bd75ea9…`, sen cambios
+desde a integración) e o comando Tauri `rex_addressing_read_snapshot` está rexistrado
+en `generate_handler!`. O contrato do adaptador é decisión do integrador: serialización
+no adaptador (o crate segue libre de Tauri/serde), erros estruturados
+`InspectionError { code, message, retryable }` sen aplanar falhas do núcleo, perfil e
+estado explícitos sen autodeección, identidade da ROM conferida no límite de acceso a
+bytes (`rex_read_rom` + `platform::identify_md`, literal `rom_identity_mismatch`), e
+só a lectura con snapshot fixo nos dous perfís MD exposta — `read_sequence`, as
+escritas e os tres perfís SNES declarados como non expostos no rexistro
+(`crates/registry.json`, `maturidade: backend-integrado`). Medido 08:14Z–09:25Z:
+**17 probas do adaptador / 0 falhas**, suite `cargo test --lib` **754 / 0 / 66**
+(base 737 + 17), gates rc=0. Non-vacuidade: RED observado (16 fallos antes da
+implementación) e tres controles de mutación (garda de identidade, procedencia do
+segmento, aplanamento de erros) mataron 1/2/8 testes con restauración conferida por
+SHA. Fluxo de usuario segue `blocked`: ningún chamador da interface usa o comando e
+non hai pantalla de enderezamento.
+
+**Rolda de aceite (segunda perna do día).** `git ls-remote` deu `0e5f804` en
+`codex/rex-rust-addressing` — cinco commits mais recentes ca pin `30cb311` xa
+integrado (15 vectores en `vectors/acceptance-v1.json`, SHA `54ba2b6e…a216` pinada
+dentro de `tests/acceptance.rs`, esperado dun oráculo independente: táboa `boards.bml`
+de bsnes + modelo GPGX; rexenerar o JSON require `REX_ACEITE_ESCRIBIR=1` con
+`--ignored`, que non se executou). Entraron un a un: dous que tocaban o crate
+reescritos de `scripts/…/rex-addressing/` a `crates/rex-addressing/` conservando
+autor, data e mensaxe, tres de solos `docs/` por `cherry-pick -x`. **Achado sobre o
+mi propio traballo, non de A:** a promoción `9f83d15` deixara
+`examples/resource_report.rs` na ruta vella (o paquete graduado ás 08:14Z non tiña
+exemplo e `clippy --all-targets` nunca o lintaba) e catro ligazóns relativas do README
+do paquete apuntaban tres niveis por riba da raíz. Reparado en `daefb43` (blob
+idéntico `7f9a8f5b…`, 0 ligazóns rotas, receitas `cd …` e `CONTRATO.md` §0.1
+corrixidos; a evidencia histórica co worktree de A mantense tal cal). Re-medido
+11:44Z–12:02Z: gates do paquete **138 executados / 0 falhas / 10 ignorados** en 17
+targets (reproducindo exactamente os números de A), exemplo rc=0 desde a localización
+nova (resumo `27bebc7b…`), `cargo test --lib` **754 / 0 / 66** con `CARGO_RC=0`
+directo (a primeira captura pipesouse a `tail -30` e o seu rc era o de `tail`;
+conservouse como `captura-defectuosa-rc-do-pipeline-e-tail30.log`), e barra de
+frontend no HEAD final `1f30467` 12:18Z–12:20Z con rc=0 nos tres (`npm test` **749
+pasados / 6 saltados / 755**). Evidencia en
+`data/rex_profiles/addressing_runtime/evidence/2026-09-28-aceite-integrado/`
+(manifesto autocomprobado: 7 artefactos listados, 7 presentes, 0 diverxencias).
+**O que a rolda non prova:** os vectores gradúan `read_resource`/`read_sequence`,
+superficies que o adaptador non expón — non son evidencia do adaptador nin suben
+ningún degrau.
+
+**Estado aberto desta fronte.** Licenza: `rex-addressing` entra no inventario como
+`source: workspace` co `license: UNLICENSED` que o paquete xa declaraba; **escoller
+licenza é decisión do operador**, non se fixo por suposición. Fronte B: o paquete
+`rex-kosinski` ten empacotamento e gates propios (tip `6a2218e`, 52 fixtures con
+SHA-256 dentro do crate), pero a perna seguinte — chamadas reais de decode/encode polo
+backend adaptadas ao contrato de codecs existente (`CodecError { code, detail }`,
+preservando decodificar/codificar/reinserir como operacións distintas; o exemplo de
+edición en contedor non substitúe a transación canónica) — aínda non executou. Nada
+deste día é merge, release nin promoción de maturidade; ambos os paquetes seguen
+`Experimental`. Deuda coñecida e allea, rexistrada como fallo sen tocar: `cargo clippy
+--all-targets -- -D warnings` do produto dá rc=101 con 45 lints en código de proba
+alleo (0 en `rex_addressing.rs`) e `npm run security:audit` dá rc=1 por
+`EALLOWSCRIPTS` (config do host anterior; ningún ficheiro npm se modificou).
