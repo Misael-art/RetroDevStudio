@@ -106,6 +106,23 @@ describe("check:tree e o diretorio crates/", () => {
     expect(resultado.saida).toContain("solto.txt");
   });
 
+  it("reprova manifesto declarado com separadores de Windows, em qualquer plataforma", () => {
+    const root = novaRaiz();
+    escrever(
+      root,
+      "crates/registry.json",
+      registro([{ nome: "rex-exemplo", manifesto: "crates\\rex-exemplo\\Cargo.toml" }]),
+    );
+    escrever(root, "crates/rex-exemplo/Cargo.toml", "[package]\n");
+
+    // No Linux este teste ja reprova antes da correcao; no Windows o `path.normalize`
+    // das duas margens convergia para barra invertida e a declaracao torta era
+    // aceita em silencio, o que calava a checagem so no SO onde ela importa.
+    const resultado = executarCheckTree(root);
+    expect(resultado.rc).not.toBe(0);
+    expect(resultado.saida).toContain("esperado crates/rex-exemplo/Cargo.toml");
+  });
+
   it("mantem as verificacoes anteriores: raiz estranha reprova, .github e data seguem aceitos", () => {
     const root = novaRaiz();
     escrever(root, ".github/workflows/ci.yml", "name: CI\n");
@@ -138,5 +155,24 @@ describe("check:tree e o diretorio crates/", () => {
     expect(lista(ps1, "$allowedDirs")).toEqual(lista(cjs, "allowedDirs"));
     expect(lista(ps1, "$ignoreDirs")).toEqual(lista(cjs, "ignoreDirs"));
     expect(lista(ps1, "$cratesFiles")).toEqual(lista(cjs, "cratesFilesPermitidos"));
+  });
+
+  it("os caminhos que a gate imprime sao literais POSIX nas duas implementacoes", () => {
+    const cjs = fs.readFileSync(checkTreeScript, "utf8");
+    const ps1 = fs.readFileSync(path.join(scriptsDir, "check-tree.ps1"), "utf8");
+
+    // evidencia da CI de 2026-09-28 (run 36373219732, job validate, SHA a556e86):
+    // o .cjs renderizou "crates\registry.json" no Windows enquanto o .ps1 sempre
+    // emite "crates/registry.json" — duas implementacoes da mesma gate, duas
+    // saidas. path.join serve para tocar o disco, nao para compor mensagem.
+    expect(cjs).not.toMatch(/const (REGISTRO_CRATES|manifestoEsperado)\s*=\s*path\.join/);
+    expect(cjs).toContain('const REGISTRO_CRATES = "crates/registry.json";');
+    expect(cjs).toContain("const manifestoEsperado = `crates/${nome}/Cargo.toml`;");
+    expect(ps1).toContain('$esperado = "crates/$nome/Cargo.toml"');
+
+    // O mesmo veredicto em qualquer SO exige comparacao literal nas duas fontes:
+    // normalizar o manifesto declarado fazia a checagem morder so em um platform.
+    expect(cjs).not.toMatch(/path\.normalize\(\s*pacote\.manifesto\s*\)/);
+    expect(ps1).not.toMatch(/\$pacote\.manifesto\s+-replace/);
   });
 });

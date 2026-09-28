@@ -73,9 +73,12 @@ if (Test-Path $cratesDir) {
                         continue
                     }
                     $names += $nome
-                    $manifesto = Join-Path $cratesDir (Join-Path $nome "Cargo.toml")
+                    # Caminho canonico do pacote: o mesmo literal POSIX no .cjs.
                     $esperado = "crates/$nome/Cargo.toml"
-                    if ($pacote.manifesto -and (($pacote.manifesto -replace '\\', '/') -ne $esperado)) {
+                    $manifesto = Join-Path $cratesDir (Join-Path $nome "Cargo.toml")
+                    # Comparacao literal, sem normalizar: o veredicto nao pode
+                    # depender do SO onde a gate roda.
+                    if ($pacote.manifesto -and ($pacote.manifesto -ne $esperado)) {
                         $problems += "crates/registry.json: pacote $nome declara manifesto $($pacote.manifesto); esperado $esperado."
                     }
                     if (-not (Test-Path $manifesto)) {

@@ -44,7 +44,9 @@ const ignoreDirs = [
 // Unicos arquivos soltos aceitos dentro de crates/. O registro e a unica fonte
 // da lista de pacotes; o README documenta o conteiner, nao substitui registro.
 const cratesFilesPermitidos = ["registry.json", "README.md"];
-const REGISTRO_CRATES = path.join("crates", "registry.json");
+// Caminho exibido: literal POSIX. path.join renderizaria "crates\\registry.json"
+// no Windows e as duas implementacoes da mesma gate divergiriam na propria saida.
+const REGISTRO_CRATES = "crates/registry.json";
 
 function falha(mensagens) {
   console.error("ERRO: Estrutura fora de docs/08_TREE_ARCHITECTURE.md:");
@@ -121,8 +123,11 @@ if (fs.existsSync(cratesDir)) {
 
       // O manifesto e sempre crates/<nome>/Cargo.toml: um registro que aponta
       // para fora de crates/ deixaria de ser um registro de modulos.
-      const manifestoEsperado = path.join("crates", nome, "Cargo.toml");
-      if (pacote.manifesto && path.normalize(pacote.manifesto) !== manifestoEsperado) {
+      const manifestoEsperado = `crates/${nome}/Cargo.toml`;
+      // Comparacao literal, sem path.normalize: normalizar fazia as duas margens
+      // convergirem em barras no Windows, de modo que a checagem so reprovasse no
+      // Linux — o veredicto mudaria conforme o SO que roda a gate.
+      if (pacote.manifesto && pacote.manifesto !== manifestoEsperado) {
         problemas.push(
           `${REGISTRO_CRATES}: pacote "${nome}" declara manifesto ${pacote.manifesto}; esperado ${manifestoEsperado}.`,
         );
