@@ -155,11 +155,22 @@ chamador. A imaxe transmitese como `&[u8]` (non un tipo `RomImage` novo): un
   cubrir varios bancos). LoROM **nunca** emenda (o byte seguinte a `$xxFFFF` é a
   metade baixa doutro dispositivo). MD: corta por xanela de 512KB (SSF2) ou por
   espello (linear).
-- `cpu_address + length - 1 > 0xFFFFFF` → `OutOfRange` **antes** de calquera
-  reserva de memoria.
+- Fronteira do barramento: **os tres perfis SNES** rexeitan
+  `cpu_address + length - 1 > 0xFFFFFF` con `Err(OutOfRange)` **antes** de
+  calquera reserva. **Os dous perfis MD** comproban á porta só
+  `cpu_address > 0xFFFFFF` e `length < 1`; se o percorrido sae da xanela do
+  cartucho devolven `Ok(...)` pechada cun `Segment::Invalid(Unsupported)` (ou
+  `DeviceNoBacking`). En ningún caso se reserva memoria proporcional ao
+  `length` (§9), que era o que unía os dous comportamentos nunha soa frase.
+  Fixado por `tests/read_semantics_audit.rs::a_fronteira_do_barramento_usa_dous_canais_distintos`
+  e explicado en `CLASSIFICACION.md` §8.
 - Imaxe ROM máis curta que `rom_size` declarado → segmento `Invalid(OutOfRange)`
   no trecho faltante, co prefixo válido devolto; **sen clamp**.
 - Rexión non-ROM → `DeviceNoBacking` (clasifica, non inventa bytes de WRAM/IO).
+  Propiedade probada nos cinco perfis: ningún segmento vai baleiro, ningún
+  segmento clasificador vai no medio, e se a lectura devolve menos bytes dos
+  pedidos o último segmento di por que
+  (`tests/read_semantics_audit.rs::ningunha_rexion_non_rom_se_omite_en_silencio`).
 
 ## 8. SSF2: estado inicial e transicións de rexistradores
 
@@ -221,6 +232,8 @@ chamador. A imaxe transmitese como `&[u8]` (non un tipo `RomImage` novo): un
 | 6 | Controis discriminativos (mutación → FAIL → reverter → PASS) | `docs/rex_profiles/addressing_runtime/MUTATION-CONTROLS.md` con saída literal |
 | 7 | BYOR separado, identidade exacta, ficheiro ausente ≠ PASS; ExHiROM só-fixture | `tests/byor.rs` (`#[ignore]`) |
 | 8 | `fmt`, `clippy -D warnings`, tests rápidos separados dos caros | informe final (saída literal alí) |
+| 9 | Semántica de `read` auditada perfil por perfil (tres conceptos separados, rexións non-ROM nunca omitidas) | `tests/read_semantics_audit.rs` (5 tests) |
+| 10 | Clasificación **validado / política conservadora / non suportado** dos cinco perfis | `CLASSIFICACION.md` |
 
 **Desviación rexistrada da propia táboa.** Este contrato anunciaba
 `tests/oracle.rs`, `tests/limits.rs` e `tests/exhaustive.rs` como ficheiros. Non
