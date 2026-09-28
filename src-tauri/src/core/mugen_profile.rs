@@ -427,8 +427,8 @@ pub(crate) fn wire_behavior_v1(
         match anim_key.filter(|k| animations.contains_key(k)) {
             Some(key) => {
                 let id = format!("state_{}_anim", st.state_no);
-                w.nodes.push(node(&id, "sprite_anim", &format!("Anim {key}"), 640, y,
-                    serde_json::json!({ "target": entity_id, "anim": key })));
+                w.nodes.push(node(&id, "set_animation_state", &format!("Anim {key}"), 640, y,
+                    serde_json::json!({ "target": entity_id, "state": key })));
                 w.edges.push(edge(&format!("e_{id}"), &state_id(st.state_no), "exec", &id, "exec"));
                 w.report.push(serde_json::json!({ "item": format!("statedef:{}", st.state_no), "source": st.source,
                     "fidelity": "direct", "target": state_id(st.state_no),
@@ -623,11 +623,11 @@ pub(crate) fn wire_behavior_v1(
                 let id = format!("{tid}_enter_anim");
                 w.nodes.push(node(
                     &id,
-                    "sprite_anim",
+                    "set_animation_state",
                     &format!("Enter {key}"),
                     1120,
                     y,
-                    serde_json::json!({ "target": entity_id, "anim": key }),
+                    serde_json::json!({ "target": entity_id, "state": key }),
                 ));
                 w.edges
                     .push(edge(&format!("e_{id}"), &tid, "matched", &id, "exec"));
@@ -814,6 +814,330 @@ mod tests {
             c.contains("rds_anim_done_spr_probe()"),
             "AnimTime = 0 usa a flag do runtime"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ------------------------------------------------------------------
+    // Prova real: SGDK oficial + core Libretro. Ignorada na suite normal.
+    // cargo test --manifest-path src-tauri/Cargo.toml --lib mugen_probe_real -- --ignored --nocapture --test-threads=1
+    // ------------------------------------------------------------------
+
+    use std::collections::HashMap;
+
+    use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+    use crate::core::project_mgr::save_scene;
+    use crate::core::rom_mastering::sha256_hex as sha;
+    use crate::emulator::frame_buffer::framebuffer_to_rgba;
+    use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+
+    fn elf32_symbols(elf: &[u8]) -> HashMap<String, u32> {
+        let r16 = |o: usize| u16::from_be_bytes([elf[o], elf[o + 1]]);
+        let r32 = |o: usize| u32::from_be_bytes([elf[o], elf[o + 1], elf[o + 2], elf[o + 3]]);
+        assert!(
+            &elf[0..4] == b"\x7fELF" && elf[4] == 1 && elf[5] == 2,
+            "ELF32 big-endian"
+        );
+        let (sh_off, sh_size, sh_count) = (r32(32) as usize, r16(46) as usize, r16(48) as usize);
+        let mut out = HashMap::new();
+        for index in 0..sh_count {
+            let section = sh_off + index * sh_size;
+            if r32(section + 4) != 2 {
+                continue;
+            }
+            let (table, size) = (r32(section + 16) as usize, r32(section + 20) as usize);
+            let strtab = sh_off + r32(section + 24) as usize * sh_size;
+            let strings = r32(strtab + 16) as usize;
+            let mut cursor = table;
+            while cursor + 16 <= table + size {
+                let name = r32(cursor) as usize;
+                if name > 0 {
+                    let start = strings + name;
+                    let len = elf[start..].iter().position(|b| *b == 0).unwrap_or(0);
+                    out.insert(
+                        String::from_utf8_lossy(&elf[start..start + len]).to_string(),
+                        r32(cursor + 4),
+                    );
+                }
+                cursor += 16;
+            }
+        }
+        out
+    }
+
+    fn build(project: &Path) -> (PathBuf, String, HashMap<String, u32>) {
+        let env = BuildEnvironment::detect();
+        assert!(
+            env.sgdk_root
+                .as_ref()
+                .is_some_and(|r| r.join("makefile.gen").is_file())
+                && env.sgdk_make_program.is_some(),
+            "SGDK oficial nao detectado; esta prova nao aceita toolchain falso"
+        );
+        let result = run_build_with_environment(project, &env, |_| {});
+        assert!(
+            result.ok,
+            "build falhou: {:?}",
+            result.log.iter().rev().take(25).collect::<Vec<_>>()
+        );
+        let rom = PathBuf::from(&result.rom_path);
+        let rom = if rom.is_absolute() {
+            rom
+        } else {
+            project.join(rom)
+        };
+        let elf = fs::read(project.join("build/megadrive/out/rom.out")).expect("rom.out");
+        (
+            rom.clone(),
+            sha(&fs::read(&rom).unwrap()),
+            elf32_symbols(&elf),
+        )
+    }
+
+    fn read_u16(emu: &EmulatorCore, addr: u32) -> u16 {
+        let (d, _) = emu
+            .read_memory(2, (addr & 0xFFFF) as usize, 2)
+            .expect("WRAM");
+        u16::from_le_bytes([d[0], d[1]])
+    }
+
+    /// Classifica o quadro exibido pelos marcadores de pixel da fixture (eixo em 102,120).
+    fn classify(emu: &EmulatorCore) -> &'static str {
+        let (raw, size, format) = emu.get_framebuffer().expect("fb");
+        let fb = framebuffer_to_rgba(&raw, size, format);
+        let w = fb.width as usize;
+        let px = |x: usize, y: usize| {
+            let i = (y * w + x) * 4;
+            (fb.rgba[i], fb.rgba[i + 1], fb.rgba[i + 2])
+        };
+        let is = |(r, g, b): (u8, u8, u8), want: &str| {
+            let (hi, lo) = (|v: u8| v > 160, |v: u8| v < 90);
+            match want {
+                "red" => hi(r) && lo(g) && lo(b),
+                "green" => lo(r) && hi(g) && lo(b),
+                "blue" => lo(r) && lo(g) && hi(b),
+                "white" => hi(r) && hi(g) && hi(b),
+                "yellow" => hi(r) && hi(g) && lo(b),
+                _ => false,
+            }
+        };
+        let colored = |p| {
+            ["red", "green", "blue", "white", "yellow"]
+                .iter()
+                .any(|c| is(p, c))
+        };
+        if is(px(100, 110), "yellow") && is(px(110, 103), "white") {
+            "punch1"
+        } else if is(px(103, 110), "red") && is(px(95, 105), "white") && !colored(px(100, 110)) {
+            "punch0_hflip"
+        } else if is(px(100, 110), "red") && is(px(108, 105), "white") {
+            "punch0"
+        } else if is(px(100, 110), "red") && is(px(110, 118), "green") && !colored(px(108, 105)) {
+            "idle0"
+        } else if is(px(100, 110), "red") && is(px(110, 118), "blue") {
+            "idle1"
+        } else {
+            "?"
+        }
+    }
+
+    struct Run {
+        rom_sha256: String,
+        idle: Vec<&'static str>,
+        after_press: Vec<&'static str>,
+        clsn1: Vec<u16>,
+    }
+
+    fn run(emu: &mut EmulatorCore, rom: &Path, symbols: &HashMap<String, u32>) -> Run {
+        emu.load_rom(rom).expect("load");
+        emu.set_joypad(JoypadState::default()).unwrap();
+        for _ in 0..60 {
+            emu.run_frame().unwrap();
+        }
+        let mut idle = Vec::new();
+        for _ in 0..42 {
+            emu.run_frame().unwrap();
+            idle.push(classify(emu));
+        }
+        let clsn_addr = symbols["rds_mugen_spr_probe_clsn1"];
+        let (mut after, mut clsn1) = (Vec::new(), Vec::new());
+        emu.set_joypad(JoypadState {
+            y: true,
+            ..JoypadState::default()
+        })
+        .unwrap(); // A do Mega Drive
+        for i in 0..50 {
+            if i == 2 {
+                emu.set_joypad(JoypadState::default()).unwrap();
+            }
+            emu.run_frame().unwrap();
+            after.push(classify(emu));
+            clsn1.push(read_u16(emu, clsn_addr));
+        }
+        Run {
+            rom_sha256: sha(&fs::read(rom).unwrap()),
+            idle,
+            after_press: after,
+            clsn1,
+        }
+    }
+
+    fn runs_of(seq: &[&'static str]) -> Vec<(&'static str, usize)> {
+        let mut out: Vec<(&'static str, usize)> = Vec::new();
+        for s in seq {
+            match out.last_mut() {
+                Some((l, n)) if l == s => *n += 1,
+                _ => out.push((s, 1)),
+            }
+        }
+        out
+    }
+
+    /// Sequencia prevista a partir do 1o quadro de soco, derivada do AIR (nao do runtime).
+    fn expected_punch(frame1_ticks: usize) -> Vec<(&'static str, usize)> {
+        // p0 3, p1 N, p0 com flip H 4, ultimo frame (sprite 0,0 = idle0) 2 + idle frame 0 por 5, idle1 9
+        vec![
+            ("punch0", 3),
+            ("punch1", frame1_ticks),
+            ("punch0_hflip", 4),
+            ("idle0", 2 + 5),
+            ("idle1", 9),
+        ]
+    }
+
+    #[ignore]
+    #[test]
+    fn mugen_probe_real_build_run_edit_and_effect() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("target-test/validation/rex-mugen/run-{stamp}"));
+        fs::create_dir_all(&out).unwrap();
+        let prediction = serde_json::json!({
+            "registered_before_execution": true,
+            "axis_screen": [102, 120],
+            "idle_cycle": [["idle0", 5], ["idle1", 9]],
+            "punch_original": expected_punch(6),
+            "punch_edited_frame1_12": expected_punch(12),
+            "clsn1_active_frames": {"original": 6, "edited": 12},
+            "pixel_markers": {
+                "idle0": "vermelho (100,110), verde (110,118)", "idle1": "azul (110,118)",
+                "punch0": "punho branco a direita (108,105)", "punch1": "corpo amarelo (100,110) por offset +2, punho (110,103)",
+                "punch0_hflip": "punho branco a esquerda do eixo (95,105), corpo em (103,110)"
+            }
+        });
+        let (root, project_a) = import_probe("real");
+        let (rom_a, sha_a, sym_a) = build(&project_a);
+        // Edicao no modelo do RetroDev: frame 1 do soco 6 -> 12 ticks; salvar e reabrir.
+        let project_b = root.join("project_b");
+        std::process::Command::new("cp")
+            .arg("-r")
+            .arg(&project_a)
+            .arg(&project_b)
+            .status()
+            .unwrap();
+        let _ = fs::remove_dir_all(project_b.join("build"));
+        let mut scene = load_scene(&project_b, DEFAULT_ENTRY_SCENE).unwrap();
+        {
+            let sprite = scene
+                .entities
+                .iter_mut()
+                .find(|e| e.entity_id == "probe")
+                .unwrap()
+                .components
+                .sprite
+                .as_mut()
+                .unwrap();
+            let punch = sprite.animations.get_mut("action_200").unwrap();
+            punch.frame_durations.as_mut().unwrap()[1] = 12;
+            punch.mugen_frames.as_mut().unwrap()[1].duration = 12;
+        }
+        save_scene(&project_b, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+        let reopened = load_scene(&project_b, DEFAULT_ENTRY_SCENE).unwrap();
+        let punch = &reopened
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "probe")
+            .unwrap()
+            .components
+            .sprite
+            .as_ref()
+            .unwrap()
+            .animations["action_200"];
+        assert_eq!(
+            punch.frame_durations.as_deref(),
+            Some(&[3, 12, 4, 2][..]),
+            "salvar/reabrir preserva a edicao"
+        );
+        assert_eq!(punch.loop_start, Some(1));
+        let (rom_b, sha_b, sym_b) = build(&project_b);
+        assert_ne!(sha_a, sha_b, "a edicao muda a ROM");
+        fs::copy(&rom_a, out.join("probe-original.rom")).unwrap();
+        fs::copy(&rom_b, out.join("probe-edited-f1-12.rom")).unwrap();
+
+        let mut emu = EmulatorCore::new(None);
+        let ra = run(&mut emu, &rom_a, &sym_a);
+        let rb = run(&mut emu, &rom_b, &sym_b);
+        let punch_runs = |r: &Run| {
+            let start = r
+                .after_press
+                .iter()
+                .position(|l| l.starts_with("punch"))
+                .expect("soco nunca apareceu");
+            (start, runs_of(&r.after_press[start..]))
+        };
+        let (pa, runs_a) = punch_runs(&ra);
+        let (pb, runs_b) = punch_runs(&rb);
+        let idle_a = runs_of(&ra.idle);
+        println!("idle A: {idle_a:?}");
+        println!("A: inicio {pa} {runs_a:?}\nB: inicio {pb} {runs_b:?}");
+        println!("clsn1 A {:?}\nclsn1 B {:?}", ra.clsn1, rb.clsn1);
+        let report = serde_json::json!({
+            "prediction": prediction,
+            "roms": {"original": sha_a, "edited_frame1_12": sha_b},
+            "loaded_rom_sha256": {"original": ra.rom_sha256, "edited": rb.rom_sha256},
+            "observed": {
+                "idle_runs_original": idle_a.iter().map(|(l, n)| serde_json::json!([l, n])).collect::<Vec<_>>(),
+                "press_to_punch_frames": {"original": pa, "edited": pb},
+                "punch_runs_original": runs_a.iter().map(|(l, n)| serde_json::json!([l, n])).collect::<Vec<_>>(),
+                "punch_runs_edited": runs_b.iter().map(|(l, n)| serde_json::json!([l, n])).collect::<Vec<_>>(),
+                "clsn1_original": ra.clsn1, "clsn1_edited": rb.clsn1,
+            },
+            "layer": "tecnica: import pelo caminho do produto + build SGDK + core direto; sem UI/teclado",
+        });
+        fs::write(
+            out.join("report.json"),
+            serde_json::to_string_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        println!("relatorio: {}", out.join("report.json").display());
+        // Ciclo do idle (sem Loopstart): 5 + 9 repetindo (primeira corrida pode estar truncada).
+        for w in idle_a.windows(2).skip(1) {
+            let expected = match w[0].0 {
+                "idle0" => ("idle1", 9),
+                _ => ("idle0", 5),
+            };
+            if w[1] != *idle_a.last().unwrap() {
+                assert_eq!(w[1], expected, "ciclo do idle: {idle_a:?}");
+            }
+        }
+        let prefix = |runs: &[(&'static str, usize)], n: usize| {
+            runs.iter().take(n).cloned().collect::<Vec<_>>()
+        };
+        assert_eq!(prefix(&runs_a, 5), expected_punch(6), "original");
+        assert_eq!(prefix(&runs_b, 5), expected_punch(12), "editada");
+        // Controles: cada ROM falha a expectativa da outra (ROM antiga / edicao nao aplicada).
+        assert_ne!(prefix(&runs_a, 5), expected_punch(12));
+        assert_ne!(prefix(&runs_b, 5), expected_punch(6));
+        assert_ne!(
+            (ra.rom_sha256.clone(), ra.after_press.clone()),
+            (rb.rom_sha256.clone(), rb.after_press.clone())
+        );
+        // Clsn1: janela ativa com a duracao do frame 1 (medida na RAM, mesma fonte = tick).
+        let active = |v: &[u16]| v.iter().filter(|c| **c == 1).count();
+        assert_eq!((active(&ra.clsn1), active(&rb.clsn1)), (6, 12));
+        emu.stop().ok();
         let _ = fs::remove_dir_all(root);
     }
 }
