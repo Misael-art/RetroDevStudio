@@ -2876,6 +2876,7 @@ dependencies = [
  "image",
  "libloading 0.8.9",
  "rex-addressing",
+ "rex-gameplay",
  "rex-kosinski",
  "serde",
  "serde_json",
@@ -2888,6 +2889,10 @@ dependencies = [
 
 [[package]]
 name = "rex-addressing"
+version = "0.1.0"
+
+[[package]]
+name = "rex-gameplay"
 version = "0.1.0"
 
 [[package]]
