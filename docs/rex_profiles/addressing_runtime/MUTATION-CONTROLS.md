@@ -11,9 +11,16 @@ evidencia nada; aquí queda o output literal de cada fallo.
 2. Applícase **unha** mutación nun único sitio do `src/` (nunca máis dun).
 3. Ródase a batería (`cargo test --offline`, debug, `CARGO_TARGET_DIR=/tmp/rex-a2-target`)
    e guárdase o output literal do fallo.
-4. Desfírase c`git checkout -- <ficheiro>` e vólvese rodar: **72 passed, 0 failed, 1 ignored**.
+4. Desfírase c`git checkout -- <ficheiro>` e vólvese rodar: **72 passed, 0 failed,
+   1 ignored**.
 
-Ningunha mutación chegou a `HEAD`; a árbore final é a do commit `6f3194e`.
+As sete execucións deste ficheiro rodáronse sobre a árbore de `6f3194e`, cando a
+batería rápida tiña 72 probes. Despois engadíronse os 4 doc-tests de `src/lib.rs`
+e os 8 probes `#[ignore]` de `tests/byor.rs`; na árbore final o mesmo comando dá
+**76 passed, 0 failed, 9 ignored** (verificado en `ef5ab1a`, §"Reprodución" abaixo).
+
+Ningunha mutación chegou a `HEAD`: cada `git diff` posterior ao revert estivo
+baleiro, e os commits listados en `git log` non conteñen ningunha das sixaturas.
 
 ## Índice
 
@@ -180,8 +187,27 @@ cd /home/misael/RDS-REX-A2-RUST-ADDR/scripts/rex_profiles/addressing_runtime/rex
 sed -i 's/if !half2.is_power_of_two() {/if false \&\& !half2.is_power_of_two() {/' src/snes_exhirom.rs
 CARGO_TARGET_DIR=/tmp/rex-a2-target cargo test --offline        # → FAIL co output de arriba
 git checkout -- src/snes_exhirom.rs
-CARGO_TARGET_DIR=/tmp/rex-a2-target cargo test --offline        # → 72 passed, 0 failed, 1 ignored
+CARGO_TARGET_DIR=/tmp/rex-a2-target cargo test --offline        # → verde: 72/0/1 na árbore de 6f3194e
+                                                                #    76/0/9 na árbore final (ef5ab1a)
 ```
 
 Rodados con `timeout` explícito no caso M2b: sen a garda a execución cuelga, e
 eso forma parte do resultado, non un defecto do procedimiento.
+
+## Re-verificación na árbore entregada
+
+M3 volveu aplicarse e desfacerse sobre `HEAD` (`ef5ab1a`), coa batería xa
+ampliada con BYOR e doc-tests. Saída literal do fallo:
+
+```
+thread 'snes_exhirom_concorda_cos_vectores_pinados_e_co_motor_de_referencia' panicked at tests/differential.rs:238:13:
+snes-exhirom / rom_size 7MB: half2=3MB nao e potencia de 2 (pad 0xFF a 8MB registrado): agardábase Unsupported, perfil devolve Rom { offset: 4227072 }
+test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out
+```
+
+E despois de `git checkout -- src/snes_exhirom.rs`, co `git diff` baleiro:
+
+```
+76 passed; 0 failed; 9 ignored   (doce binarios: 0 + 8 ignored + 7 + 5 + 1 ignored
+                                  + 6 + 13 + 15 + 13 + 11 + 2 + 4 doc-tests)
+```
