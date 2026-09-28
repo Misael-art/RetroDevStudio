@@ -1,6 +1,6 @@
 //! Estado do mapper tal e como o entrega a capa chamante.
 //!
-//! É deliberadamente **não** tipado forte: `MapperState` é o rexistro do que
+//! É deliberadamente **non** tipado forte: `MapperState` é o rexistro do que
 //! viu a frontada (JSON dun manifest, TOML de axuste, entrada de UI), e o
 //! contrato pide que cada perfil *rexeite* o que non coñeza con erros
 //! estruturados, non que o parser adiviñe. Por iso un `rom_size` pode chegar
@@ -22,7 +22,7 @@ pub enum Value {
     Uint(u64),
     /// Enteiro negativo: sempre inválido como tamaño, banco ou offset.
     Int(i64),
-    /// Número con fracción ou expoñente (ex.: `1.5`). Non se convierte:
+    /// Número con fracción ou expoñente (ex.: `1.5`). Non se converte:
     /// calquera conversión sería inventar.
     NonInteger(String),
     Text(String),
