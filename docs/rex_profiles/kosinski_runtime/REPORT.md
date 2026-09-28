@@ -400,10 +400,13 @@ apenas testes, fixtures e documentação mudaram.
 - Os helpers de caminho de TODOS os testes normais agora derivam do próprio
   pacote (`env!("CARGO_MANIFEST_DIR")/fixtures/...`): nenhum caminho
   absoluto, nenhuma ferramenta local oculta, nenhum arquivo não rastreado.
-- **Prova de relocabilidade (executada):** cópia isolada de
+- **Prova de relocabilidade (executada duas vezes):** (a) cópia isolada de
   `crates/rex-kosinski` para `/tmp/rex-kos-relocate` sem `target/` e sem a
   árvore `data/` ao lado → `cargo test --locked` **51/51 verdes**
-  (22 contract + 16 encode + 8 edit + 2 fixtures + 3 mutations).
+  (22 contract + 16 encode + 8 edit + 2 fixtures + 3 mutations); (b) extração
+  via `git archive HEAD crates/rex-kosinski` (somente o rastreado no commit)
+  para `/tmp/rex-arch` → **51 verdes, 0 falhas** — ou seja, o que entra no
+  VCS é suficiente; nenhum arquivo local não rastreado é necessário.
 - **Prova de não-vacuidade do pino (executada):** no mesmo cópia isolada, um
   byte de `fixtures/kosinski/golden/m01_literals.kos` foi invertido →
   `cada_fixture_bate_o_sha_pinado` **FALHOU** apontando exatamente o arquivo
@@ -450,8 +453,8 @@ mantido. Os demais itens da missão seguiram e fecharam (14.1, 14.2, 14.4,
 
 ### 14.4 Auditoria `cargo package --list` (sem publicar)
 
-Executado com `--allow-dirty` na árvore de trabalho (não publicado — `publish
-= false` intocado): **69 arquivos** — `Cargo.toml`/`.orig`, `Cargo.lock`,
+Executado na árvore limpa **após o commit** da rodada (não publicado —
+`publish = false` intocado): **68 arquivos** — `Cargo.toml`/`.orig`, `Cargo.lock`,
 `src/{lib,encode,edit}.rs`, `tests/{contract,encode,edit,fixtures,mutations}.rs`,
 `examples/{decode,encode,edit_cycle}.rs`, `fixtures/` (52 bins + PROVENANCE.md)
 e `.cargo_vcs_info.json`. **Não aparece**: `target/`, nada de `data/`,
