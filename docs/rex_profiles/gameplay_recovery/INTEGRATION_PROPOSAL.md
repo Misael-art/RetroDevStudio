@@ -65,3 +65,56 @@ Nova linha "regra de gameplay (contador+limiar+estado)": `biblioteca-implementad
 e `gates-proprios-aprovados` com as evidências do relatório; **não** promover a
 `backend-integrado` antes dos comandos existirem, nem a `fluxo-do-usuario-comprovado`
 antes do E2E pela interface.
+
+## 5. Checksum SGDK no patch — decisão do integrador (política NÃO alterada)
+
+Hoje o patch só reescreve `0x18E` quando a base tem soma MD aditiva válida. As ROMs do
+pipeline usam o XOR SGDK (`rom_mastering::sgdk_checksum`), então a ROM patcheada sai com
+`inspect_rom_mastering → mismatch` (evidência na rodada 2).
+
+Opções:
+
+- **A (recomendada):** quando `sgdk_checksum(base) == gravado`, recalcular o XOR SGDK na
+  saída, com `0x18E..0x190` como faixa autorizada declarada. Com isso, patch =
+  recompilação SGDK byte a byte (já verificado no teste).
+- **B:** manter o campo como está e expor `checksum_status: "stale_sgdk"` no DTO, com a
+  UI avisando.
+
+Com a opção A, a função precisa vir do produto (`rom_mastering`), porque a crate não
+depende dele. O adaptador calcularia o valor e passaria à crate como faixa autorizada.
+É uma mudança pequena no meu território, que só faço após o OK.
+
+## 6. Localização no produto
+
+Qualquer comando de "localizar" deve usar `rex_gameplay::locate` (lista candidatos e
+quase-casos) ou `locate_unique` (recusa com 0 ou >1). A UI deve mostrar a lista e exigir
+que o usuário escolha. Nunca pegar `candidates[0]`.
+
+## 7. Expectativas para o E2E pela interface (dono: integrador)
+
+Valores medidos na camada técnica (core direto), com builds reprodutíveis do template
+`reference_platformer`, projeto "Rex Gate":
+
+| Passo | Expectativa |
+|---|---|
+| localizar na ROM original (`86c4e90d…4f7e`) | 1 candidato: entrada `0x000946`, saída `0x000970` |
+| recuperar | operador `>=`, limiar 6, faixa editável `[-127, 128]`, 9 nós (inclui `external_call` com `understood=false`) |
+| editar limiar 12 → salvar → reabrir | `threshold=12`; os mappings continuam iguais; um grafo adulterado é recusado |
+| reconstruir por patch | SHA `4030ec74…b1db`, `changed=[0x961]` (checksum: ver §5) |
+| reconstruir por regeneração | mesmo SHA do patch |
+| executar, segurando Right a partir de `score=0` | a original abre em score 6; a editada em **12**; `spr_player_x` preso em 36 enquanto `score < 12` |
+| controle de ROM antiga | executar a original com a expectativa "abre em 12" tem de **falhar** |
+
+O E2E precisa registrar o SHA da ROM carregada no core. Assim, uma resposta ou imagem
+antiga reutilizada é detectada.
+
+## 8. Revisão do adaptador
+
+Quando os comandos Tauri existirem, eu reviso o adaptador (somente leitura, comentários no
+PR do integrador). Pontos que vou conferir:
+
+- saída distinta e inexistente;
+- SHA da base obrigatório;
+- `locate_unique` ou lista, sem escolha implícita;
+- execução fora do thread principal;
+- DTO com `limitations` e `understood=false` visível.
