@@ -169,10 +169,10 @@ batería do repositorio non mira, e o aceite é quen as gradúa.
 * A **proposta do adaptador** (`ADAPTACION.md`) segue sen publicar pola súa parte:
   as cinco preguntas de sinatura de `ADAPTACION.md` §6 (nome do comando IPC,
   codificación de `MapperState` na petición, onde se pone o `Limits` real,
-  que facese cunha recusa con procedencia parcial, e se a resposta leva `bytes`
+  que se fai cunha recusa con procedencia parcial, e se a resposta leva `bytes`
   ou `bytes_sha256` ou ambos) están **abertas**. Nada desta rolda asume unha
   resposta.
-* A revisión da súa implementação, cando exista, graduarase contra este mesmo
+* A revisión da súa implementación, cando exista, graduarase contra este mesmo
   ficheiro de vectores; non se toca ningún ficheiro del.
 * Qeda **pendente e registrado**: `cargo test --release --offline --test
   no_panic_sweep` (as gardas `run >= 1` son `debug_assert!` e non se emiten en
