@@ -1,0 +1,11 @@
+CONSULTA PONTUAL CI — SHA 7d46dc36570e100676ccc73d999cf1f749ed1dba (empurrado 2026-09-28T15:22Z). Segmentos curtos nun único log, sen monitor permanente; só vale o rollup terminal deste SHA.
+[2026-09-28T15:29:00Z] tentativa 1: [{"conclusion":"","name":"Desktop E2E","status":"in_progress"},{"conclusion":"","name":"CI","status":"in_progress"}]
+[2026-09-28T15:31:01Z] tentativa 2: [{"conclusion":"","name":"Desktop E2E","status":"in_progress"},{"conclusion":"","name":"CI","status":"in_progress"}]
+[2026-09-28T15:33:02Z] tentativa 3: [{"conclusion":"","name":"Desktop E2E","status":"in_progress"},{"conclusion":"","name":"CI","status":"in_progress"}]
+[2026-09-28T15:35:03Z] tentativa 4: [{"conclusion":"","name":"Desktop E2E","status":"in_progress"},{"conclusion":"","name":"CI","status":"in_progress"}]
+[2026-09-28T15:37:03Z] tentativa 5: [{"conclusion":"","name":"Desktop E2E","status":"in_progress"},{"conclusion":"","name":"CI","status":"in_progress"}]
+[2026-09-28T15:39:04Z] tentativa 6: [{"conclusion":"","name":"Desktop E2E","status":"in_progress"},{"conclusion":"","name":"CI","status":"in_progress"}]
+[2026-09-28T15:41:05Z] tentativa 7: [{"conclusion":"","name":"Desktop E2E","status":"in_progress"},{"conclusion":"","name":"CI","status":"in_progress"}]
+[2026-09-28T15:43:06Z] tentativa 8: [{"conclusion":"","name":"CI","status":"in_progress"},{"conclusion":"success","name":"Desktop E2E","status":"completed"}]
+[2026-09-28T15:45:07Z] tentativa 9: [{"conclusion":"success","name":"Desktop E2E","status":"completed"},{"conclusion":"success","name":"CI","status":"completed"}]
+ROLLUP_TERMINAL
