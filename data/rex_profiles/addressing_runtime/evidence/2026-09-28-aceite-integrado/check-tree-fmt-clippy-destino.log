@@ -1,0 +1,12 @@
+INICIO 2026-09-28T11:53:43Z
+npm notice run retrodev-studio@0.1.0 check:tree
+npm notice run node scripts/check-tree.cjs
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+CHECK_TREE_RC=0
+FMT_RC=0
+MARCA_FMT 2026-09-28T11:53:44Z
+    Checking rex-addressing v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/crates/rex-addressing)
+    Checking retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.25s
+CLIPPY_RC=0
+MARCA_CLIPPY 2026-09-28T11:53:58Z
