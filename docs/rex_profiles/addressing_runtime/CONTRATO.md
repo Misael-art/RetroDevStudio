@@ -28,6 +28,24 @@ chips especiais (DSP/SA1/SuperFX/CX4/SVP), e non ten UI.
 Se o integrador prefira outra localización, o paquete non ten dependencias de
 ruta: mover e `cargo test` seguen sendo válidos.
 
+### 0.1 Resolución do integrador (2026-09-28)
+
+O conflito resolveuse na dirección da directiva, e executámoo quen posúe as
+ferramentas compartidas: `crates/`
+está agora declarado en `docs/08_TREE_ARCHITECTURE.md` cun rexistro explícito
+(`crates/registry.json`, schema `rex-crate-registry/v1`) que `scripts/check-tree.cjs`
+e `scripts/check-tree.ps1` consumen: directorio non declarado reprova, paquete
+declarado sen `Cargo.toml` reprova. Os dous pasos pedidos executáronse: o
+paquete moveuse para `crates/rex-addressing/`, rexistrouse, e os tres gates
+proprios (`fmt --check`, `clippy --all-targets -D warnings`, `test --locked`)
+correron na localización nova con `CARGO_TARGET_DIR` fóra da árbore rastreada.
+
+Non se crea `Cargo.toml` de workspace na raíz, e nada no produto consume aínda
+o paquete: o nivel acadado é `gates-proprios-aprovados`, non
+`backend-integrado`. Os rexistros de comandos históricos desta entrega (que se
+executaron no worktree do axente A) mantéñense tal cales: evidencia pasada non
+se reescribe.
+
 ## 1. Identidade e versión
 
 | Concepto | Valor |

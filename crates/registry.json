@@ -33,6 +33,34 @@
         "comparacao_externa": "scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh"
       },
       "byor": "nenhum teste ordinario do pacote depende de ROM comercial; a comparacao com koscmp fica no script de perfil, fora da suite"
+    },
+    {
+      "nome": "rex-addressing",
+      "manifesto": "crates/rex-addressing/Cargo.toml",
+      "descricao": "Perfis de endereçamento MD linear / MD SSF2 / SNES LoROM / HiROM / ExHiROM (frente A): leitura com limites, erros estruturados e escritas puras. Biblioteca standalone: o produto nao a consome ainda.",
+      "maturidade": "gates-proprios-aprovados",
+      "propriedade": "agente A (PR #82); registro, manifests e a promocao de localizacao sao do integrador",
+      "origem": "17 commits 9b27941..57e51d3 (pin revisado 57e51d3), aplicados por cherry-pick -x; movido de scripts/rex_profiles/addressing_runtime/rex-addressing para crates/rex-addressing pelo integrador, conforme a promocao que o CONTRATO.md do proprio perfil pedia",
+      "perfil": {
+        "contrato": "docs/rex_profiles/addressing_runtime/CONTRATO.md",
+        "classificacao": "docs/rex_profiles/addressing_runtime/CLASSIFICACION.md",
+        "controles_de_mutacao": "docs/rex_profiles/addressing_runtime/MUTATION-CONTROLS.md",
+        "relatorio": "docs/rex_profiles/addressing_runtime/RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md",
+        "vetores": "crates/rex-addressing/vectors/ (dentro do pacote: o pacote e relocavel)"
+      },
+      "byor": "nenhum teste ordinario depende de ROM: os 8 testes BYOR e o preimage exaustivo vao marcados #[ignore] e no corren no gate; a segunda referencia e declarativa e vive no proprio pacote (tests/support/windows_engine.rs)",
+      "maturidade_data": "2026-09-28",
+      "gates": {
+        "medidos_em": "2026-09-28T02:58Z, branch codex/rex-integrator-crates-registry, xa na localización nova crates/rex-addressing",
+        "fmt": "OK",
+        "clippy_all_targets": "OK",
+        "test_locked": "OK — 81 executados (77 en 10 targets + 4 doc-tests), 0 falhas, 9 ignorados (8 BYOR + preimage exaustivo)",
+        "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/",
+        "cargo_target_dir": "target/crates-gates"
+      },
+      "relocable": "si — os vectores pinados (vectors/rust-vectors-v1.json, sha proxectada no harness_selfcheck) viven dentro do paquete; a diferenza de rex-kosinski, non depende de data/ externamente",
+      "achado_de_revisao": "15 chamadas .expect() en produción (md_linear 4, md_ssf2 4, snes_exhirom 3, snes_hirom 2, snes_lorom 2), cada unha xustificada por validación previa; a cobertura de 'nunca panica' con entradas adversarias non aleatorias non esta no gate ordinario (o preimage exaustivo vai #[ignore]). Devolto ao axente A como pendencia, non corrixido por aqui.",
+      "nao_alega": "nada de integracao ao produto: sem dependencia por path em src-tauri, sem adaptador, sem chamada real pelo backend, sem fluxo pela interface."
     }
   ]
 }

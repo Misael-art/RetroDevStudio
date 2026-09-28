@@ -12,15 +12,17 @@ contrato formal e os límites están en
 a evidencia da rolda, en
 [`RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md`](../../../../docs/rex_profiles/addressing_runtime/RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md).
 
-## Por que está aquí e non en `crates/`
+## Localización: `crates/rex-addressing/`
 
-`scripts/check-tree.cjs` non permite un directorio `crates/` na raíz do
-proxecto, e o contrato da rolda prohíbeme alterar a árbore nin os scripts
-compartidos. O paquete vive polo tanto en
-`scripts/rex_profiles/addressing_runtime/rex-addressing/` como **paso 1 dunha
-promoción en dous pasos**: o integrador move o directorio a `crates/rex-addressing/`
-e actualiza `check-tree.cjs` cando o decida. Nada do código depende da súa
-localización (cero dependencias externas, ni sequera de dev).
+Na entrega orixinal (PR #82) o paquete vivía en
+`scripts/rex_profiles/addressing_runtime/rex-addressing/`, porque
+`scripts/check-tree.cjs` aínda non permitía `crates/` na raíz e o contrato da
+rola non deixaba ao agente alterar a árbore nin os scripts compartidos. A
+promoción que o propio contrato pedía foi executada polo integrador o
+2026-09-28: `crates/` formalizouse en `docs/08_TREE_ARCHITECTURE.md` cun
+rexistro explícito (`crates/registry.json`) e o paquete moveuse para
+`crates/rex-addressing/`. Nada do código depende da súa localización (cero
+dependencias externas, ni sequera de dev).
 
 ## API
 
@@ -58,7 +60,7 @@ Tres regras que non se poden romper ao consumir a librería:
 ## Validacións
 
 ```bash
-cd scripts/rex_profiles/addressing_runtime/rex-addressing
+cd crates/rex-addressing
 export CARGO_TARGET_DIR=/tmp/rex-a2-target   # nunca o target compartido do produto
 
 cargo fmt -- --check
