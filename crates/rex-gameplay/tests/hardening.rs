@@ -259,3 +259,41 @@ fn opaque_call_is_preserved_by_patch_and_not_attributed_to_the_rule() {
     assert_eq!(effect.state_write, Some((0xE0FF_0062, 1)));
     assert_eq!(effect.call, Some((0xB10C, 1, 0)));
 }
+
+// ---------------------------------------------------------------- revisao (rodada 3)
+
+/// `open_graph` valida so a consistencia INTERNA do grafo. Uma falsificacao coerente
+/// (mapping + parametro alterados juntos) reabre; o vinculo com a ROM so e cobrado
+/// na reconstrucao (SHA e bytes da base). Por isso a reabertura no produto deve
+/// passar pela verificacao contra a base, nao so por `open_graph`.
+#[test]
+fn consistent_forgery_reopens_but_is_refused_against_the_base() {
+    let (rom, rec) = original();
+    let mut forged = rec.graph_json.clone();
+    for (from, to) in [
+        ("\"value\": 1,", "\"value\": 2,"),
+        ("\"bytes\": \"7601\"", "\"bytes\": \"7602\""),
+        (
+            "\"mnemonic\": \"MOVEQ #1,D3\"",
+            "\"mnemonic\": \"MOVEQ #2,D3\"",
+        ),
+    ] {
+        assert_eq!(forged.matches(from).count(), 1, "{from}");
+        forged = forged.replacen(from, to, 1);
+    }
+    let imm = forged.find("\"bytes\": \"7602\"").unwrap();
+    let at = imm + forged[imm..].find("\"imm\": 1").unwrap();
+    forged.replace_range(at..at + "\"imm\": 1".len(), "\"imm\": 2");
+    let opened = open_graph(&forged).expect("falsificacao coerente reabre");
+    assert_eq!(opened.rule.set.value, 2);
+    let sha = sha256_hex(&rom);
+    for err in [
+        patch_threshold(&rom, &sha, &opened).unwrap_err(),
+        regenerate_from_graph(&rom, &sha, &opened).unwrap_err(),
+    ] {
+        assert!(
+            err.contains("0x000CAE") && err.contains("recusado"),
+            "{err}"
+        );
+    }
+}

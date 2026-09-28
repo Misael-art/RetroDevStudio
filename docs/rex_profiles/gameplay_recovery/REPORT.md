@@ -56,7 +56,7 @@ reeleva e recusa adulteração).
 | Caminho | SHA-256 | Observação |
 |---|---|---|
 | base `original_t6` | `86c4e90d…4f7e` | |
-| **patch** (`patch_moveq_immediate`) | `4030ec74…b1db` | muda só `0x000961` (5→13, `K = T - 1`) |
+| **patch** (`patch_moveq_immediate`) | `4030ec74…b1db` | muda só `0x000961` (`0x05→0x0B`, `K = T - 1 = 11`; corrigido na rodada 3: o valor `13` anterior era a saída octal do `cmp -l`) |
 | **regeneração a partir do grafo** | `4030ec74…b1db` | verificada igual ao patch, não presumida |
 | no-op (regenerar grafo não editado) | `86c4e90d…4f7e` | = base |
 | recompilação SGDK com limiar 12 | `06fe310e…104f` | oráculo independente |
@@ -176,8 +176,9 @@ Na ROM real: regenerar = `4030ec74…b1db` = patch; método `regenerate_region_f
 - **Na regra:** `evaluate` devolve a chamada como evento `(alvo, arg imediato, ponteiro)`, e
   não como efeito sobre a memória.
 - **Ponto de observação da equivalência:** a WRAM é lida depois de quadros completos. Isso
-  inclui o callee e o resto do jogo. A alegação vale só para contador e `goal_open`, cujos
-  escritores absolutos (`0x954`, `0x96A`, `0xCB0`) estão todos na região. Não se alegam os
+  inclui o callee e o resto do jogo. A alegação vale só para contador e `goal_open`: todas as suas
+  escritas **por endereço absoluto** (`0x954`, `0x96A`, `0xCB0`) estão na região. Escritas
+  indiretas não estão cobertas; o alcance está em `ADAPTER_REVIEW.md` §4. Não se alegam os
   efeitos do callee, registradores, CCR, VDP ou som.
 
 ### 8.5 Checksum (pipeline real)
@@ -228,3 +229,22 @@ Comando da prova real:
 ```
 CARGO_TARGET_DIR=$PWD/target cargo test --manifest-path src-tauri/Cargo.toml --lib rex_gameplay -- --include-ignored --nocapture --test-threads=1
 ```
+
+---
+
+## 9. Rodada 3 — fechamento funcional (apoio à integração)
+
+Não houve expansão do reconhecedor: `crates/rex-gameplay/src` não mudou desde `4163c47`.
+Mudaram só testes e documentos.
+
+| Item | Onde | Resultado |
+|---|---|---|
+| reprodução mínima do checksum | `CHECKSUM_REPRO.md` e `tests/checksum_repro.rs` (sem SGDK) | a base XOR-válida fica com `0x18E` desatualizado; o controle com soma MD é atualizado. A contradição se explica: "válido" = válido pela soma MD, a única convenção que o patcher conhece |
+| revisão do adaptador e da serialização | `ADAPTER_REVIEW.md` §1–3 | o canônico tem só a rodada 1; a reabertura não vincula o grafo à ROM (teste `consistent_forgery_*`); recomendações para o IPC |
+| escritores de contador/estado | `ADAPTER_REVIEW.md` §4 | 7 referências absolutas; as 3 escritas estão na região; escritas indiretas (boot/`.bss`, callee) não estão cobertas |
+| contador deslocado | `ADAPTER_REVIEW.md` §5 | **continua sem prova retida**; nenhuma nova amostra |
+| correção | §4 deste relatório | `0x961`: `0x05→0x0B` (e não 13) |
+
+**Gates:** crate com 26 testes (6 unit + 10 perfil + 8 endurecimento + 2 checksum) e clippy
+`--all-targets` limpo. A prova real **não** foi reexecutada: nada do adaptador nem do
+reconhecedor mudou.

@@ -49,8 +49,9 @@ valor não nulo). Comparação **assinada de 32 bits**; `K` é o `MOVEQ` estendi
 ## Partes não compreendidas (explícitas)
 
 - Equivalência observada na WRAM após quadros completos: inclui o callee e o resto do
-  jogo. A alegação cobre só contador e estado, cujos escritores absolutos estão dentro
-  da região.
+  jogo. A alegação cobre só contador e estado: todas as suas escritas por endereço
+  absoluto estão na região. Escritas indiretas (boot/`.bss`, `memset`, callee) não estão
+  cobertas. Flags, registradores, CCR e efeitos do callee não são medidos no core.
 - `JSR T` é **opaco**: alvo e argumentos são registrados (`rom_external_call`,
   `understood: false`); o corpo não é recuperado; D0/D1/A0/A1/CCR passam a
   desconhecidos após a chamada (ABI m68k-elf-gcc).
@@ -72,6 +73,11 @@ Cada nó leva `semantic_origin: "recovered_from_rom"` e `source_mappings`
 **Reabrir** remonta as instruções mapeadas, delimita e eleva de novo e exige que o
 grafo reconstruído coincida com o salvo (exceto rótulos, posição e o limiar
 editado). Operação, parâmetro, conexão ou mapping adulterados são recusados.
+
+**Limite:** a reabertura verifica só a consistência **interna** do grafo. Uma falsificação
+coerente (mapping e parâmetro alterados juntos) reabre; o vínculo com a ROM é cobrado na
+reconstrução (SHA e bytes da base). Uma reabertura exibida como "recuperada da ROM" deve
+verificar a base.
 
 ## Edição permitida
 
