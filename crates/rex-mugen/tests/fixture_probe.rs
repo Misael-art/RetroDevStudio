@@ -40,6 +40,11 @@ fn check_committed(name: &str, f: fixture::Files) {
 }
 
 #[test]
+fn committed_warden_is_reproducible() {
+    check_committed("warden", fixture::warden());
+}
+
+#[test]
 fn committed_sentinel_is_reproducible() {
     check_committed("sentinel", fixture::sentinel());
 }

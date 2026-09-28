@@ -330,3 +330,101 @@ Clsn1: 1\n Clsn1[0] = 4, -28, 20, -24\n\
         sff,
     }
 }
+
+/// Terceira amostra autoral ("Warden"), desenhada DEPOIS do 2o congelamento
+/// (`data/rex_profiles/mugen_sgdk/evidence/2026-09-28-warden/FREEZE.md`).
+///
+/// Previsao registrada antes da execucao:
+/// * sprites 16x32, eixo (8,32); celula 16x32; entidade em (96,96) -> eixo (104,128);
+/// * W0 corpo verde, W1 corpo azul com marca branca 4x4 no canto superior esquerdo,
+///   W2 corpo amarelo;
+/// * idle (action 0): W0 2 ticks, `Loopstart`, W1 3 ticks -> depois do 1o ciclo so W1;
+/// * golpe (action 300): W2 com flip HV 2 ticks (desenhado abaixo do eixo: y 128..159),
+///   W1 4, W0 2, `Loopstart` no 3o frame; `AnimTime = 0` no tick 8 -> volta ao estado 0;
+/// * volta ao idle: W0 2 + (W0 2 do fim do golpe) = W0 por 4, depois W1 parado;
+/// * comando `a` ligado por um ChangeState DENTRO do statedef 0 (nao no -1);
+/// * tudo classificado `direct` (5 cores, sem blend, sem sprite ausente).
+pub fn warden() -> Files {
+    let mut pal = vec![[0u8, 0, 0]; 256];
+    pal[1] = [0, 255, 0];
+    pal[2] = [0, 0, 255];
+    pal[3] = [255, 255, 0];
+    pal[4] = [255, 255, 255];
+    pal[5] = [255, 0, 0];
+    let (w, h) = (16usize, 32usize);
+    let fig = |c: u8, mark: bool| {
+        let mut px = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 4..12 {
+                px[y * w + x] = c;
+            }
+        }
+        for x in 0..w {
+            px[(h - 1) * w + x] = 5;
+        }
+        if mark {
+            for y in 0..4 {
+                for x in 0..4 {
+                    px[y * w + x] = 4;
+                }
+            }
+        }
+        px
+    };
+    let (w0, w1, w2) = (fig(1, false), fig(2, true), fig(3, false));
+    let sff = sff_v1(&[
+        Image {
+            group: 0,
+            image: 0,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels: &w0,
+            palette: Some(&pal),
+            same_palette: false,
+            link: None,
+        },
+        Image {
+            group: 0,
+            image: 1,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels: &w1,
+            palette: Some(&pal),
+            same_palette: true,
+            link: None,
+        },
+        Image {
+            group: 300,
+            image: 0,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels: &w2,
+            palette: Some(&pal),
+            same_palette: true,
+            link: None,
+        },
+    ]);
+    let def = "[Info]\nname = \"Warden\"\n\n[Files]\ncmd = warden.cmd\ncns = warden.cns\nsprite = warden.sff\nanim = warden.air\n".to_string();
+    let air = "[Begin Action 0]\n0,0, 0,0, 2\nLoopstart\n0,1, 0,0, 3\n\n\
+[Begin Action 300]\n300,0, 0,0, 2, HV\n0,1, 0,0, 4\nLoopstart\n0,0, 0,0, 2\n"
+        .to_string();
+    let cmd = "[Command]\nname = \"a\"\ncommand = a\ntime = 1\n\n[Statedef -1]\n".to_string();
+    let cns = "[Statedef 0]\ntype = S\nanim = 0\n\n\
+[State 0, Go]\ntype = ChangeState\nvalue = 300\ntrigger1 = command = \"a\"\n\n\
+[Statedef 300]\ntype = S\nanim = 300\n\n\
+[State 300, End]\ntype = ChangeState\nvalue = 0\ntrigger1 = AnimTime = 0\n"
+        .to_string();
+    Files {
+        def,
+        air,
+        cmd,
+        cns,
+        sff,
+    }
+}
