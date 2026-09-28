@@ -250,11 +250,13 @@ chamador. A imaxe transmitese como `&[u8]` (non un tipo `RomImage` novo): un
 | 6 | Controis discriminativos (mutación → FAIL → reverter → PASS) | `docs/rex_profiles/addressing_runtime/MUTATION-CONTROLS.md` con saída literal |
 | 7 | BYOR separado, identidade exacta, ficheiro ausente ≠ PASS; ExHiROM só-fixture | `tests/byor.rs` (`#[ignore]`) |
 | 8 | `fmt`, `clippy -D warnings`, tests rápidos separados dos caros | informe final (saída literal alí) |
-| 9 | Semántica de `read` auditada perfil por perfil (tres conceptos separados, rexións non-ROM nunca omitidas) | `tests/read_semantics_audit.rs` (5 tests) |
+| 9 | Semántica de `read` auditada perfil por perfil (tres conceptos separados, rexións non-ROM nunca omitidas) | `tests/read_semantics_audit.rs` (5 tests propios; 6 executados coa autocomprobación da fixture) |
 | 10 | Clasificación **validado / política conservadora / non suportado** dos cinco perfis | `CLASSIFICACION.md` |
 | 11 | Capa de recursos: procedencia, recusa do parcial, límites e frontira única | `tests/resource_reader.rs` (14 tests propios + autocomprobación da fixture) sobre `src/resource.rs` |
 | 12 | Oráculo independente da capa de recursos (contido que identifica banco e offset) | `tests/support/banked.rs` |
-| 13 | Batería discriminante da capa: 11 lecturas + 12 recusas, tres derivacións e control anti-degeneración | `tests/resource_fixtures.rs` (10 tests propios + autocomprobación da fixture) |
+| 13 | Batería discriminante da capa: 11 lecturas + 12 recusas, tres derivacións e control anti-degeneración | `tests/resource_fixtures.rs` (10 tests propios; 11 executados coa autocomprobación da fixture) |
+| 14 | Exemplo consumidor **fora da app**: informe determinístico, autoverificado e con hash pinábel | `examples/resource_report.rs` (`cargo run --example resource_report`), saída literal e lectura en `EXEMPLO-CONSUMIDOR.md` |
+| 15 | Proposta exacta de adaptación ao produto, **sen aplicar**, con preguntas de asinatura | `ADAPTACION.md` (ruta do `Cargo.toml`, adaptador, bytes normalizados, DTO, IPC, límites e `nao_alega`) |
 
 **Desviación rexistrada da propia táboa.** Este contrato anunciaba
 `tests/oracle.rs`, `tests/limits.rs` e `tests/exhaustive.rs` como ficheiros. Non

@@ -57,6 +57,71 @@ Tres regras que non se poden romper ao consumir a librería:
    (`Invalid(OutOfRange)`, corte de corrida, `DeviceNoBacking`); nunca bytes
    inventados.
 
+## Capa de lectura de recursos (`rex_addressing::resource`)
+
+Dúas operacións, ambas puras (sen filesystem, sen hash, sen estado global):
+
+```rust
+use rex_addressing::resource::{
+    read_resource, read_sequence, ImageIdentity, Limits, Profile, ResourceRequest,
+    SequenceRequest, Step,
+};
+use rex_addressing::MapperState;
+
+let rom: Vec<u8> = /* bytes normalizados da imaxe, verificados polo adaptador */;
+let image = ImageIdentity {
+    origin: "fixture:md-linear-1mb".to_string(),   // orixe inmutable, obrigatorio
+    sha256_hex: "…64 hex minúsculas…".to_string(),  // hash DA imaxe entregada
+    byte_len: rom.len() as u64,
+};
+let informe = read_resource(&ResourceRequest {
+    profile: Profile::MdLinear,
+    image,
+    state: &MapperState::rom_size(0x10_0000),
+    cpu_address: 0x00_0100,
+    length: 16,
+    limits: Limits::DEFAULT,
+}, &rom)?;
+// informe.bytes, informe.segments (cada un con cpu_address/cpu_len/rom_offset/
+// region/state), informe.profile, informe.contract_version, informe.state
+```
+
+`read_sequence(&SequenceRequest { profile, image, initial_state, limits, steps }, &rom)`
+é a **operación distinta** para lecturas que dependen de bancos: `Step::WriteRegister`
+aplica a escrita sobre un estado novo (nunca muta o prestado) e o `Step::Read`
+seguinte xa ve o banco novo. `SequenceRead { final_state, reads, writes_applied }`.
+
+Erros: `ResourceError { code, detail, address, region, segments }` con `code` en
+`bad-attestation | bad-state | invalid-range | incompatible-size | limit-exceeded |
+non-rom-region | ambiguous`. `Display` imprime o código como primeiro token, así que
+sobrevive a un `Result<T, String>`. Unha recusa nunca devolve datos parciais
+disfrazados de éxito: os `segments` que veñen co erro son os percorridos **antes**
+de deterse, renumerados desde 0.
+
+Tres invariantes que un consumidor externo pode comprobar el mesmo:
+
+1. `bytes` é a concatenación, en orde de `index`, do corredor físico
+   `[rom_offset, rom_offset + cpu_len)` de cada segmento. A procedencia
+   reconstrúe a saída byte a byte sen volver chamala.
+2. `cpu_address`, secuencia lóxica e `rom_offset` son conceptos distintos: as
+   xanelas **non** teñen continuidade inventada, e un enderezo non-ROM do bus
+   recústase (`non-rom-region`), non se salta en silencio.
+3. Dous `MapperState` distintos sobre o mesmo `cpu_address` dan bytes distintos;
+   a capa non deduce mapas nin perfís — o chamador elíeos.
+
+Exemplo executábel, con informe determinístico e autoverificación:
+
+```bash
+cargo run --offline --example resource_report          # 13 lecturas + 14 recusas
+```
+
+Saída literal, `sha256` do informe e como lelo:
+[`docs/rex_profiles/addressing_runtime/EXEMPLO-CONSUMIDOR.md`](../../../../docs/rex_profiles/addressing_runtime/EXEMPLO-CONSUMIDOR.md).
+A proposta de adaptación ao produto (ruta do `Cargo.toml`, adaptador, DTO, IPC,
+límites) está en
+[`ADAPTACION.md`](../../../../docs/rex_profiles/addressing_runtime/ADAPTACION.md)
+e **agarda asinatura do integrador**: non está aplicada.
+
 ## Validacións
 
 ```bash
@@ -65,8 +130,39 @@ export CARGO_TARGET_DIR=/tmp/rex-a2-target   # nunca o target compartido do prod
 
 cargo fmt -- --check
 cargo clippy --offline --all-targets -- -D warnings
-cargo test --offline                         # batería rápida: 72 + 4 doc-tests
+cargo test --offline                         # batería rápida: ver descomposición abaixo
+cargo run --offline --example resource_report  # exemplo consumidor, determinístico
 ```
+
+Reconto **medido** nesta rolda (non de memoria; recontable con
+`cargo test --offline 2>&1 | grep 'test result'`): **119 executados, 0 fallos, 9
+ignorados** (8 BYOR + preimage exaustivo). Descomposición por target, que suma
+xustamente 119:
+
+| target | executados |
+|---|---|
+| `unittests src/lib.rs` | 0 |
+| `byor` | 1 (+8 `#[ignore]`) |
+| `differential` | 8 |
+| `harness_selfcheck` | 6 |
+| `inversion` | 1 (+1 `#[ignore]`) |
+| `md_linear_rules` | 7 |
+| `md_ssf2_rules` | 14 |
+| `read_semantics_audit` | 6 |
+| `resource_fixtures` | 11 |
+| `resource_reader` | 15 |
+| `snes_exhirom_rules` | 16 |
+| `snes_hirom_rules` | 14 |
+| `snes_lorom_rules` | 12 |
+| `ssf2_writes` | 3 |
+| doc-tests | 5 |
+
+Os targets `resource_fixtures` (11) e `resource_reader` (15) son 10 e 14 tests
+propios **máis** a autocomprobación da fixture compartida. Esa autocomprobación
+(`tests/support/banked.rs`, `a_fixture_non_e_degenerada_incluso_antes_de_lectura`)
+compílase en **13** binarios porque os 13 inclúen `mod support;`, así que os 119
+contan a mesma comprobación 13 veces. Está dito explicitamente en
+`docs/…/CLASSIFICACION.md` §9 para que o reconto non pareza maior do que é.
 
 As dúas baterías caras/dependentes do host van `#[ignore]` e **non** se executan
 coa anterior:

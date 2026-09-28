@@ -168,7 +168,7 @@ erro con `unsupported`, non con bytes.
 - **A**: `translate` ten tres clases e o erro nunca é `offset = 0`; `read` devolve
   corredores continuos de offset, non bytes; `invert` devolve aliases, non un
   enderezo canónico; toda a aritmética é `u32`/`u64` explícita sen `unwrap` en
-  `src/` (`CONTRATO.md` §9) — probado polo barreiro exhaustivo `#[ignore]` de
+  `src/` (`CONTRATO.md` §9) — probado polo barrido exhaustivo `#[ignore]` de
   `tests/inversion.rs` (16,7 M de enderezos por perfil).
 - **B**: **ningún perfil detecta o seu propio mapa**. Quen elixe `md_linear` ou
   `snes_hirom` é a capa chamante; o tamaño e o banner non deciden. `corpus-identification`
@@ -252,14 +252,14 @@ decisión do integrador, non se aplica aquí unilateralmente.
 | `snes-hirom` | 5 | 3 | BBRAM, SDD-1, CX4 en modo HiROM | non (corpus) |
 | `snes-exhirom` | 4 | 3 | 7MB e área 2 non binaria, > 8MB | non (corpus) |
 
-Recontos executados nesta rolda (non de memoria): 565 entradas nos vectores
+Recontos feitos executando (non de memoria): 565 entradas nos vectores
 pinados (105/133/106/103/118 por perfil, incluídas as 60 mostras de inversión
 verificadas de cada un), 151 casos de tradución dos cales 123 graduados contra a
 referencia independente, **119 tests verdes, 0 fallos, 9 `#[ignore]`**
-(8 BYOR + 1 barreiro exhaustivo).
+(8 BYOR + 1 barrido exhaustivo).
 
 Reconciliación co log (`cargo test --offline`, 15 targets), para que se poida
-verificar sen relying on a narración:
+verificar sen fiarse da narración:
 
 | Target | Verdes | Notas |
 |---|---|---|
@@ -267,7 +267,7 @@ verificar sen relying on a narración:
 | `byor` | 1 | + 8 `#[ignore]` (corpus externo) |
 | `differential` | 8 | vectores pinados |
 | `harness_selfcheck` | 6 | |
-| `inversion` | 1 | + 1 `#[ignore]` (barreiro exhaustivo) |
+| `inversion` | 1 | + 1 `#[ignore]` (barrido exhaustivo) |
 | `md_linear_rules` / `md_ssf2_rules` | 7 / 14 | |
 | `read_semantics_audit` | 6 | etapa 1 |
 | `resource_reader` | 15 | etapa 2 (14 propios + autocomprobación) |
@@ -277,7 +277,7 @@ verificar sen relying on a narración:
 | doc-tests | 5 | 4 de `lib.rs` + 1 de `resource.rs` |
 
 Equivalencia co 81 da rolda anterior: 77 tests xa existentes + 13 execucións da
-autocomprobación de non-dexeneración da fixture `tests/support/banked.rs` (unha
+autocomprobación de non-degeneración da fixture `tests/support/banked.rs` (unha
 por cada un dos 13 binarios de test de integración que a inclúen) + 14 da capa de
 recursos + 10 da súa batería + 5 doc-tests = **119**. Esas 13 **son** repetición
 dun mesmo check en 13 contextos; contan como evidencia en cada binario pero non
