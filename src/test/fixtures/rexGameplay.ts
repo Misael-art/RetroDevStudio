@@ -1,4 +1,7 @@
-import type { GameplayRecoverResponse } from "../../core/ipc/toolsService";
+import type {
+  GameplayRebuildResponse,
+  GameplayRecoverResponse,
+} from "../../core/ipc/toolsService";
 
 /**
  * Fixture: o grafo que devolve `rex_gameplay_recover` sobre a ROM autoral do
@@ -478,6 +481,29 @@ export function respostaRecuperar(
     threshold_range: [Number(params.threshold_min), Number(params.threshold_max)],
     graph_json: GRAFO_REAL,
     limitations: LIMITACIONES,
+    ...sobreescritura,
+  };
+}
+
+/**
+ * Respostas de `rex_gameplay_rebuild` para as probas de interface. Os `changed_offsets`
+ * e `authorized_ranges` son os que o crate produce sobre esta ROM autoral (inmediato
+ * do MOVEQ en 0x961, rexistrouse en `rex_gameplay.rs::ipc_rebuild_patch_e_regeneracion_coinciden`);
+ * `input_sha256` e `output_sha256` son o eco do núcleo — a interface só os mostra, non os
+ * calcula — polo que os valores reais de cada corrida van no log de evidencia de ETAPA 5.
+ */
+export function respostaRebuild(
+  sobreescritura: Partial<GameplayRebuildResponse> = {}
+): GameplayRebuildResponse {
+  return {
+    request_id: "rebuild-fixture",
+    method: "patch_moveq_immediate",
+    input_sha256: "4149f7b2eb0c5975f97f59be6b44766decc286930d57bba673414205b753589e",
+    output_sha256: "8d4c1e07f6b9a3d5c2e14f70a6b3d9c8e5f201b7a4d63c98e0b5f27a1d34c690",
+    output_path: "/roms/goal_original_t6.bin.limiar-4.patch.bin",
+    changed_offsets: [0x961],
+    authorized_ranges: [[0x946, 0x970]],
+    checksum_updated: true,
     ...sobreescritura,
   };
 }

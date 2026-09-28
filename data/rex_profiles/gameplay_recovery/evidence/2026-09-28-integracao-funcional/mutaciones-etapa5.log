@@ -1,0 +1,13 @@
+# mutaciones-etapa5 · 2026-09-28T20:54Z
+# escena=519c5799f4064d2f26c15de892981ab8085df193c1b1cbd721aa8c15930d29b8 painel=dc00028aaed177c23ef4a88b7d9f1f6a9ebbf80f54e4a68bbd57a85669221ab1
+## prepararXeracion (rexGameplayScene.ts)
+M1 rc=1 [Tests  4 failed | 38 passed (42)]
+M2 rc=1 [Tests  2 failed | 40 passed (42)]
+M3 rc=1 [Tests  1 failed | 41 passed (42)]
+## superficie de xeración (RexGameplayRulePanel.tsx)
+M4 rc=1 [Tests  1 failed | 41 passed (42)]
+M5 rc=1 [Tests  1 failed | 41 passed (42)]
+M6 rc=1 [Tests  1 failed | 41 passed (42)]
+M7 rc=1 [Tests  1 failed | 41 passed (42)]
+M8 rc=1 [Tests  1 failed | 41 passed (42)]
+RESTAURACION_OK scene=519c5799f4064d2f26c15de892981ab8085df193c1b1cbd721aa8c15930d29b8 panel=dc00028aaed177c23ef4a88b7d9f1f6a9ebbf80f54e4a68bbd57a85669221ab1

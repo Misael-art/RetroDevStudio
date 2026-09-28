@@ -3,6 +3,7 @@ import {
   REGRA_RECUPERADA_VERSION,
   construirRegraRecuperada,
   lerRegraRecuperada,
+  prepararXeracion,
   regraEditadaNoGrafo,
   revalidarIdentidade,
   type RegraRecuperada,
@@ -238,5 +239,70 @@ describe("regraEditadaNoGrafo — o grafo que devolve edit_threshold substitúe 
     const r = regraEditadaNoGrafo(gardada, JSON.stringify(doc));
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.motivo).toMatch(/identidade/);
+  });
+});
+
+describe("prepararXeracion — a petición para rexenerar a copia modificada (ETAPA 5)", () => {
+  function preparar(
+    cambio: { romPath?: string; method?: "patch" | "regenerate" | string } = {},
+    regra?: RegraRecuperada
+  ) {
+    const base = regra ?? esperarConstruida();
+    return prepararXeracion(
+      base,
+      cambio.romPath ?? "/roms/goal_original_t6.bin",
+      (cambio.method ?? "patch") as "patch" | "regenerate",
+      "xer-1"
+    );
+  }
+
+  function request(cambio = {}) {
+    const r = preparar(cambio);
+    if (!r.ok) throw new Error(`preparar recusou: ${r.motivo}`);
+    return r.request;
+  }
+
+  it("leva a base da barra, a identidade gardada no bloque e o grafo verbatim", () => {
+    const p = request();
+    expect(p).toEqual({
+      request_id: "xer-1",
+      base_path: "/roms/goal_original_t6.bin",
+      expected_sha256:
+        "4149f7b2eb0c5975f97f59be6b44766decc286930d57bba673414205b753589e",
+      graph_json: GRAFO_REAL,
+      output_path: "/roms/goal_original_t6.bin.limiar-6.patch.bin",
+      method: "patch",
+    });
+  });
+
+  it("a saida derivada nunca coincide co caminho da base", () => {
+    for (const method of ["patch", "regenerate"] as const) {
+      const p = request({ method });
+      expect(p.output_path).not.toBe(p.base_path);
+      expect(p.output_path.startsWith(p.base_path)).toBe(true);
+    }
+  });
+
+  it("di NoOp cando o limiar gardado e o da ROM, para que a copia se venda como control", () => {
+    const r = preparar();
+    if (!r.ok) throw new Error(r.motivo);
+    expect(r.noop).toBe(true);
+    const editada = regraEditadaNoGrafo(esperarConstruida(), grafoConLimiar(4));
+    if (!editada.ok) throw new Error(editada.motivo);
+    const xa = preparar({}, editada.regra);
+    if (!xa.ok) throw new Error(xa.motivo);
+    expect(xa.noop).toBe(false);
+    expect(xa.request.output_path).toContain("limiar-4");
+  });
+
+  it("recusa xerar sen ROM na barra e recusa un metodo descoñecido", () => {
+    expect(preparar({ romPath: "   " }).ok).toBe(false);
+    if (!preparar({ romPath: "  " }).ok)
+      expect(preparar({ romPath: "  " }) && true).toBe(true);
+    const senRom = preparar({ romPath: "   " });
+    if (!senRom.ok) expect(senRom.motivo).toMatch(/ROM na barra/);
+    const metodo = preparar({ method: "recompila-todo" });
+    expect(metodo.ok).toBe(false);
+    if (!metodo.ok) expect(metodo.motivo).toMatch(/patch|regenerate/);
   });
 });

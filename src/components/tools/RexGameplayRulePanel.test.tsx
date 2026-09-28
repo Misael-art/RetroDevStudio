@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RexGameplayRulePanel, type RexGameplayPersistencia } from "./RexGameplayRulePanel";
-import { GRAFO_REAL, LIMITACIONES, respostaRecuperar } from "../../test/fixtures/rexGameplay";
+import { GRAFO_REAL, LIMITACIONES, respostaRecuperar, respostaRebuild } from "../../test/fixtures/rexGameplay";
 import { construirRegraRecuperada, type RegraRecuperada } from "../../core/nodegraph/rexGameplayScene";
 
 const mocks = vi.hoisted(() => ({
@@ -59,6 +59,27 @@ async function click(testid: string) {
   const element = byTestId(testid);
   if (!(element instanceof HTMLButtonElement)) throw new Error(`sen boton: ${testid}`);
   await act(async () => element.click());
+}
+
+/** Escritura nun control controlado de React: valor nativo + evento `input`. */
+async function setText(testid: string, value: string) {
+  const element = byTestId(testid);
+  if (!(element instanceof HTMLInputElement)) throw new Error(`sen input: ${testid}`);
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(element, value);
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+async function selectOption(testid: string, value: string) {
+  const element = byTestId(testid);
+  if (!(element instanceof HTMLSelectElement)) throw new Error(`sen select: ${testid}`);
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+  await act(async () => {
+    setter?.call(element, value);
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 
 function persisticia(overrides: Partial<RexGameplayPersistencia> = {}): RexGameplayPersistencia {
@@ -206,5 +227,172 @@ describe("RexGameplayRulePanel — reabrir desde a escena", () => {
     await render(<RexGameplayRulePanel romPath="/roms/outra.bin" persistencia={persistencia} />);
     expect(byTestId("rex-gameplay-source")?.textContent).toMatch(/escena/);
     expect(byTestId("rex-gameplay-identity")?.textContent).toMatch(/non revalidada/);
+  });
+});
+
+function grafoConLimiar(limiar: number): string {
+  const doc = JSON.parse(GRAFO_REAL);
+  const compare = doc.nodes.find((n: { type: string }) => n.type === "rom_counter_compare");
+  compare.params.threshold = limiar;
+  return JSON.stringify(doc);
+}
+
+describe("RexGameplayRulePanel — xerar a copia modificada (ETAPA 5)", () => {
+  /** Recupera a regra da ROM da barra e deixa o painel en estado editable. */
+  async function recuperarEEditar(limiar?: number) {
+    mocks.rexGameplayRecover.mockResolvedValue(respostaRecuperar());
+    await render(<RexGameplayRulePanel romPath={ROM} persistencia={persisticia()} />);
+    await click("rex-gameplay-recover");
+    if (limiar !== undefined) {
+      mocks.rexGameplayEditThreshold.mockResolvedValue({
+        request_id: "edit",
+        graph_json: grafoConLimiar(limiar),
+      });
+      await setText("rex-gameplay-threshold", String(limiar));
+      await click("rex-gameplay-apply-threshold");
+    }
+  }
+
+  it("pide confirmacion antes de escribir e chama ao nucleo só despois", async () => {
+    await recuperarEEditar(4);
+    mocks.rexGameplayRebuild.mockResolvedValue(respostaRebuild());
+
+    await click("rex-gameplay-generate");
+    expect(mocks.rexGameplayRebuild).not.toHaveBeenCalled();
+    expect(byTestId("rex-gameplay-generate-confirm")).not.toBeNull();
+
+    await click("rex-gameplay-generate-confirm");
+    expect(mocks.rexGameplayRebuild).toHaveBeenCalledTimes(1);
+    const pedido = mocks.rexGameplayRebuild.mock.calls[0][0];
+    expect(pedido).toEqual({
+      request_id: expect.stringMatching(/^rex-gameplay-xer-/),
+      base_path: ROM,
+      expected_sha256: SHA,
+      graph_json: grafoConLimiar(4),
+      output_path: "/roms/goal_original_t6.bin.limiar-4.patch.bin",
+      method: "patch",
+    });
+  });
+
+  it("cancelar pecha a confirmacion sen chamar ao nucleo", async () => {
+    await recuperarEEditar(4);
+    await click("rex-gameplay-generate");
+    await click("rex-gameplay-generate-cancel");
+    expect(mocks.rexGameplayRebuild).not.toHaveBeenCalled();
+    expect(byTestId("rex-gameplay-generate-confirm")).toBeNull();
+  });
+
+  it("mostra a evidencia da copia: hashes, offsets, rangos, checksum e a orixinal intacta", async () => {
+    await recuperarEEditar(4);
+    mocks.rexGameplayRebuild.mockResolvedValue(respostaRebuild());
+    await click("rex-gameplay-generate");
+    await click("rex-gameplay-generate-confirm");
+
+    const resultado = byTestId("rex-gameplay-rebuild-result")?.textContent ?? "";
+    expect(resultado).toContain(SHA.slice(0, 12));
+    expect(resultado).toContain(
+      "8d4c1e07f6b9a3d5c2e14f70a6b3d9c8e5f201b7a4d63c98e0b5f27a1d34c690".slice(0, 12)
+    );
+    expect(resultado).toMatch(/0x000961/);
+    expect(resultado).toMatch(/0x000946\.\.0x000970/);
+    expect(resultado).toMatch(/checksum/i);
+    expect(resultado).toContain("patch_moveq_immediate");
+    expect(byTestId("rex-gameplay-original-intact")?.textContent).toContain(ROM);
+  });
+
+  it("distingue aplicar o inmediato, remontar a rexión e compilar o proxecto", async () => {
+    await recuperarEEditar(4);
+    mocks.rexGameplayRebuild.mockResolvedValue(
+      respostaRebuild({
+        method: "regenerate_region_from_graph",
+        output_path: "/roms/goal_original_t6.bin.limiar-4.regenerate.bin",
+      })
+    );
+
+    await selectOption("rex-gameplay-method", "regenerate");
+    await click("rex-gameplay-generate");
+    expect(byTestId("rex-gameplay-generate-preview")?.textContent).toMatch(
+      /goal_original_t6\.bin\.limiar-4\.regenerate\.bin/
+    );
+    await click("rex-gameplay-generate-confirm");
+    expect(mocks.rexGameplayRebuild.mock.calls[0][0].method).toBe("regenerate");
+
+    const explicacion = byTestId("rex-gameplay-method-note")?.textContent ?? "";
+    expect(explicacion).toMatch(/compila|compilaci/i);
+    expect(explicacion).toMatch(/ningún|fluxo canónico/);
+  });
+
+  it("cando o limiar gardado e o da ROM presenta a copia como control, non como edicion", async () => {
+    await recuperarEEditar();
+    mocks.rexGameplayRebuild.mockResolvedValue(respostaRebuild({ output_path: `${ROM}.limiar-6.patch.bin` }));
+    await click("rex-gameplay-generate");
+    expect(byTestId("rex-gameplay-generate-preview")?.textContent).toMatch(/control|NoOp/);
+  });
+
+  it("sen identidade confirmada coa ROM da barra non se xera", async () => {
+    await render(
+      <RexGameplayRulePanel romPath={ROM} persistencia={persisticia({ gardada: regraGardada() })} />
+    );
+    const boton = byTestId("rex-gameplay-generate");
+    expect(boton).not.toBeNull();
+    expect(boton?.hasAttribute("disabled")).toBe(true);
+    expect(byTestId("rex-gameplay-generate-blocked")?.textContent).toMatch(/identidade/);
+    await click("rex-gameplay-generate");
+    expect(mocks.rexGameplayRebuild).not.toHaveBeenCalled();
+  });
+
+  it("unha ROM nova na barra antes de confirmar invalida a confirmacion pendente", async () => {
+    mocks.rexGameplayScan.mockResolvedValue({
+      request_id: "revalidate",
+      rom_sha256: SHA,
+      candidates: [],
+      ambiguous: true,
+    });
+    const persistencia = persisticia({ gardada: regraGardada() });
+    await render(<RexGameplayRulePanel romPath={ROM} persistencia={persistencia} />);
+    await click("rex-gameplay-revalidate");
+    await click("rex-gameplay-generate");
+    expect(byTestId("rex-gameplay-generate-confirm")).not.toBeNull();
+
+    // Troca a ROM da barra co bloque da escena intacto: a regra segue visible,
+    // pero a confirmación pendente apuntaba a outra base e ten que desaparecer.
+    await render(<RexGameplayRulePanel romPath="/roms/outra.bin" persistencia={persistencia} />);
+    expect(byTestId("rex-gameplay-source")?.textContent).toMatch(/escena/);
+    expect(byTestId("rex-gameplay-generate-confirm")).toBeNull();
+    expect(byTestId("rex-gameplay-generate-preview")).toBeNull();
+    expect(mocks.rexGameplayRebuild).not.toHaveBeenCalled();
+  });
+
+  it("o nucleo falla: a pantalla di o motivo e non inventa unha copia", async () => {
+    await recuperarEEditar(4);
+    mocks.rexGameplayRebuild.mockRejectedValue({
+      code: "output_exists",
+      message: "saida xa existe; escolha outro caminho",
+      retryable: false,
+    });
+    await click("rex-gameplay-generate");
+    await click("rex-gameplay-generate-confirm");
+    expect(byTestId("rex-gameplay-error")?.textContent).toMatch(/output_exists/);
+    expect(byTestId("rex-gameplay-rebuild-result")).toBeNull();
+  });
+
+  it("se o nucleo informa unha base cuxo SHA non bate co gardado, non se vende como xeracion", async () => {
+    await recuperarEEditar(4);
+    mocks.rexGameplayRebuild.mockResolvedValue(respostaRebuild({ input_sha256: "0".repeat(64) }));
+    await click("rex-gameplay-generate");
+    await click("rex-gameplay-generate-confirm");
+    expect(byTestId("rex-gameplay-error")?.textContent).toMatch(/identidade|SHA/);
+    expect(byTestId("rex-gameplay-rebuild-result")).toBeNull();
+  });
+
+  it("se o nucleo escribe noutro caminho do pedido, a pantalla dino en vez de mostrar o seu", async () => {
+    await recuperarEEditar(4);
+    mocks.rexGameplayRebuild.mockResolvedValue(
+      respostaRebuild({ output_path: "/roms/por-acidente.bin" })
+    );
+    await click("rex-gameplay-generate");
+    await click("rex-gameplay-generate-confirm");
+    expect(byTestId("rex-gameplay-error")?.textContent).toMatch(/caminho|output_path/);
+    expect(byTestId("rex-gameplay-rebuild-result")).toBeNull();
   });
 });

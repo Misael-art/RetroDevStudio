@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   rexGameplayEditThreshold,
+  rexGameplayRebuild,
   rexGameplayRecover,
   rexGameplayScan,
+  type GameplayRebuildRequest,
+  type GameplayRebuildResponse,
   type GameplayRecoverResponse,
   type GameplayScanCandidate,
 } from "../../core/ipc/toolsService";
@@ -14,6 +17,7 @@ import {
 import {
   construirRegraRecuperada,
   lerRegraRecuperada,
+  prepararXeracion,
   regraEditadaNoGrafo,
   revalidarIdentidade,
   type RegraRecuperada,
@@ -59,6 +63,25 @@ type Fonte = {
 
 type EstadoGardado = { entidade: string; persistido: boolean };
 
+type MetodoXeracion = "patch" | "regenerate";
+
+type ConfirmacionXeracion = { request: GameplayRebuildRequest; noop: boolean; base: string };
+
+type Xeracion = { resposta: GameplayRebuildResponse; base: string };
+
+function hexRom(offset: number): string {
+  return `0x${offset.toString(16).padStart(6, "0")}`;
+}
+
+function listaOffsets(offsets: number[]): string {
+  const mostrados = offsets.slice(0, 24).map(hexRom).join(", ");
+  return offsets.length > 24 ? `${mostrados}, +${offsets.length - 24} máis` : mostrados;
+}
+
+function listasFaixas(faixase: [number, number][]): string {
+  return faixase.map(([inicio, fin]) => `${hexRom(inicio)}..${hexRom(fin)}`).join(", ");
+}
+
 /**
  * Recuperacion delimitada de unha regra de gameplay (REX, Experimental).
  *
@@ -99,9 +122,12 @@ export function RexGameplayRulePanel({
   const [gardado, setGardado] = useState<EstadoGardado | null>(null);
   const [thresholdText, setThresholdText] = useState("");
   const [thresholdMsg, setThresholdMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"scan" | "recover" | "edit" | "save" | "revalidate" | null>(
-    null
-  );
+  const [metodo, setMetodo] = useState<MetodoXeracion>("patch");
+  const [confirmacion, setConfirmacion] = useState<ConfirmacionXeracion | null>(null);
+  const [xeracion, setXeracion] = useState<Xeracion | null>(null);
+  const [busy, setBusy] = useState<
+    "scan" | "recover" | "edit" | "save" | "revalidate" | "rebuild" | null
+  >(null);
   const [erro, setErro] = useState<string | null>(null);
 
   const seq = useRef(0);
@@ -138,6 +164,8 @@ export function RexGameplayRulePanel({
     setErro(null);
     setThresholdMsg(null);
     setGardado(null);
+    setConfirmacion(null);
+    setXeracion(null);
     if (gardadaBruta === null) {
       setFonte(null);
       setRecusada(null);
@@ -356,6 +384,89 @@ export function RexGameplayRulePanel({
 
   const regra: GameplayRegra | null = fonte?.proxeccion ?? null;
 
+  /**
+   * Xeración da copia (ETAPA 5). O painel non escribe nada por sua conta:
+   * `prepararXeracion` monta a petición (base = ROM da barra, identidade e
+   * grafo = bloque gardado, saída = caminho novo derivado da base) e a
+   * escritura só se fai despois dun paso de confirmacion visible. Antes diso,
+   * a identidade ten que estar revalidada na sesión: sen esa comprobación a
+   * base podería ser outra ROM e a pantalla chamarille copia "modificada" a
+   * que non ven da que se mostra.
+   */
+  const podeXerar = fonte !== null && romPath.trim().length > 0 && identidadeConfirmada;
+  const motivoNonXerar =
+    fonte === null
+      ? "non hai regra recuperada que xerar"
+      : romPath.trim().length === 0
+        ? "non hai ROM na barra: sen base non se pode xerar unha copia"
+        : "identidade non revalidada: prema en Revalidar identidade antes de xerar a copia";
+
+  function prepararXeracionUI() {
+    if (!fonte || !podeXerar) return;
+    const preparada = prepararXeracion(
+      fonte.regra,
+      romPath,
+      metodo,
+      novoRequestId("rex-gameplay-xer")
+    );
+    if (!preparada.ok) {
+      setErro(`non se pode preparar a copia: ${preparada.motivo}`);
+      return;
+    }
+    setXeracion(null);
+    setErro(null);
+    setConfirmacion({
+      request: preparada.request,
+      noop: preparada.noop,
+      base: preparada.request.base_path,
+    });
+  }
+
+  async function confirmarXeracion() {
+    const pendente = confirmacion;
+    if (!pendente) return;
+    const seqPedido = (seq.current += 1);
+    const caminho = romPath;
+    setErro(null);
+    setBusy("rebuild");
+    try {
+      const resposta = await rexGameplayRebuild(pendente.request);
+      if (!asumirResposta(seqPedido, caminho)) return;
+      if (resposta.input_sha256.toLowerCase() !== pendente.request.expected_sha256.toLowerCase()) {
+        setConfirmacion(null);
+        setErro(
+          `identidade da base non bate: pedirse contra ${pendente.request.expected_sha256.slice(
+            0,
+            12
+          )}… e o núcleo leu ${resposta.input_sha256.slice(0, 12)}…; non se mostra como copia.`
+        );
+        return;
+      }
+      if (resposta.output_path !== pendente.request.output_path) {
+        setConfirmacion(null);
+        setErro(
+          `o núcleo escribiu noutro caminho (${resposta.output_path}) que non o confirmado (${
+            pendente.request.output_path
+          }); revíselo antes de executar nada.`
+        );
+        return;
+      }
+      setConfirmacion(null);
+      setXeracion({ resposta, base: pendente.base });
+      logMessage?.(
+        "success",
+        `[REX gameplay] copia xerada por ${resposta.method}: ${resposta.output_path}. A base non se tocou.`
+      );
+    } catch (cause) {
+      if (seqPedido === seq.current) {
+        setConfirmacion(null);
+        setErro(`a copia non se xerou: ${erroEstruturado(cause)}`);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div
       data-testid="rex-gameplay-rule-panel"
@@ -562,6 +673,112 @@ export function RexGameplayRulePanel({
               ))}
             </ul>
           </div>
+        </div>
+      )}
+
+      {regra && fonte && (
+        <div className="rounded bg-[#11111b] p-2 space-y-2 text-[10px] text-[#cdd6f4]">
+          <div className="font-semibold text-[#a6e3a1]">
+            Copia modificada (fluxo canónico de escrita)
+          </div>
+          <div data-testid="rex-gameplay-method-note" className="text-[#b7b0cf]">
+            <code>patch</code> reescribe só o byte inmediato do MOVEQ do limiar (máis o checksum
+            do cabecallo, se a base o tiña valido); <code>regenerate</code> remonta todas as
+            instrucións rexistradas no grafo nos seus offsets orixinais. Ningún dos dous compila
+            o proxecto: iso segue o fluxo canónico de build (SGDK), que esta pantalla non
+            substitúe.
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1 text-[#94a3b8]">
+              método
+              <select
+                data-testid="rex-gameplay-method"
+                value={metodo}
+                onChange={(e) => setMetodo(e.target.value as MetodoXeracion)}
+                className="rounded border border-[#313244] bg-[#0f172a] px-1 py-1 text-[#cdd6f4]"
+              >
+                <option value="patch">patch — só o inmediato do limiar</option>
+                <option value="regenerate">regenerate — remonta a rexión desde o grafo</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              data-testid="rex-gameplay-generate"
+              onClick={prepararXeracionUI}
+              disabled={!podeXerar || busy !== null}
+              className="rounded border border-[#a6e3a1]/50 px-2 py-1 text-[#a6e3a1] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy === "rebuild" ? "Xerando..." : "Xerar copia modificada"}
+            </button>
+          </div>
+          {!podeXerar && (
+            <p data-testid="rex-gameplay-generate-blocked" className="text-[#f9e2af]">
+              Sen xeración: {motivoNonXerar}.
+            </p>
+          )}
+
+          {confirmacion && (
+            <div className="rounded border border-[#f9e2af]/50 p-2">
+              <div data-testid="rex-gameplay-generate-preview" className="text-[#f9e2af]">
+                Confirmación antes de escribir: vaise crear{" "}
+                <code>{confirmacion.request.output_path}</code> a partir de{" "}
+                <code>{confirmacion.base}</code> con <code>{confirmacion.request.method}</code>.{" "}
+                {confirmacion.noop
+                  ? "O limiar do bloque aínda é o da ROM: esta copia é un control (NoOp), byte a byte igual á base, non unha edición."
+                  : `Edición: limiar ${fonte.regra.threshold_recovered} → ${fonte.regra.threshold_current}. A ROM orixinal non se modifica; o núcleo recusa escribir sobre ela.`}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  data-testid="rex-gameplay-generate-confirm"
+                  onClick={() => void confirmarXeracion()}
+                  disabled={busy !== null}
+                  className="rounded bg-[#a6e3a1] px-2 py-1 font-semibold text-[#1e1e2e] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Confirmar e escribir a copia
+                </button>
+                <button
+                  type="button"
+                  data-testid="rex-gameplay-generate-cancel"
+                  onClick={() => setConfirmacion(null)}
+                  disabled={busy !== null}
+                  className="rounded border border-[#6c7086] px-2 py-1 text-[#b7b0cf] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {xeracion && (
+            <>
+              <div
+                data-testid="rex-gameplay-rebuild-result"
+                className="rounded border border-[#a6e3a1]/40 p-2 font-mono"
+              >
+                <div>método executado no núcleo: {xeracion.resposta.method}</div>
+                <div>SHA-256 da base lida: {xeracion.resposta.input_sha256}</div>
+                <div>SHA-256 da copia: {xeracion.resposta.output_sha256}</div>
+                <div>caminho escrito: {xeracion.resposta.output_path}</div>
+                <div>
+                  offsets que mudaron ({xeracion.resposta.changed_offsets.length}):{" "}
+                  {listaOffsets(xeracion.resposta.changed_offsets)}
+                </div>
+                <div>faixas autorizadas: {listasFaixas(xeracion.resposta.authorized_ranges)}</div>
+                <div>
+                  checksum do cabecallo:{" "}
+                  {xeracion.resposta.checksum_updated
+                    ? "recalculado e escrito (a base o tiña valido)"
+                    : "sen tocar (a base non o tiña valido)"}
+                </div>
+              </div>
+              <p data-testid="rex-gameplay-original-intact" className="text-[#a6e3a1]">
+                A ROM orixinal <code>{xeracion.base}</code> non se escribiu: o núcleo informa que
+                a base lida segue tendo o SHA-256 gardado na escena e todo o escrito está no novo
+                ficheiro. Para velo executado, cargue a copia no emulador polo fluxo canonico.
+              </p>
+            </>
+          )}
         </div>
       )}
 

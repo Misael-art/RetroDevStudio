@@ -1,4 +1,4 @@
-import type { GameplayRecoverResponse } from "../ipc/toolsService";
+import type { GameplayRebuildRequest, GameplayRecoverResponse } from "../ipc/toolsService";
 import type { RecoveredRule } from "../ipc/sceneService";
 import {
   REX_GAMEPLAY_PROFILE_ID,
@@ -29,6 +29,10 @@ export type ResultadoConstruir =
 
 export type ResultadoLeitura =
   | { ok: true; regra: RegraRecuperada; proxeccion: GameplayRegra }
+  | { ok: false; motivo: string };
+
+export type ResultadoPrepararXeracion =
+  | { ok: true; request: GameplayRebuildRequest; noop: boolean }
   | { ok: false; motivo: string };
 
 const SHA_RE = /^[0-9a-f]{64}$/;
@@ -278,4 +282,42 @@ export function regraEditadaNoGrafo(
     graph_json: graphJsonNovo,
     threshold_current: proxeccion.regra.limiar,
   });
+}
+
+/**
+ * Monta a petición para `rex_gameplay_rebuild` a partir do bloque gardado e da
+ * ROM que a barra ten aberta. `base_path` é sempre o caminho da barra, mentres
+ * que `expected_sha256` e `graph_json` veñen do bloque: se a barra apuntar a
+ * outra ROM, o núcleo recusa por identidade antes de escribir nada. A saída é
+ * sempre un ficheiro **novo** derivado do da base — o perfil nunca toca a
+ * ROM-orixinal — e `noop` indica que o limiar do bloque aínda é o da ROM, polo
+ * que a copia serve como control e non como edición.
+ */
+export function prepararXeracion(
+  gardada: RegraRecuperada,
+  romDaBarra: string,
+  method: string,
+  requestId: string
+): ResultadoPrepararXeracion {
+  const base = romDaBarra.trim();
+  if (base.length === 0) {
+    return recusado("non hai ROM na barra: non se xera unha copia sen base");
+  }
+  if (method !== "patch" && method !== "regenerate") {
+    return recusado(
+      `metodo '${method}' descoñecido: só se soporte patch (o inmediato) ou regenerate (remontar a rexión)`
+    );
+  }
+  return {
+    ok: true,
+    noop: gardada.threshold_current === gardada.threshold_recovered,
+    request: {
+      request_id: requestId,
+      base_path: base,
+      expected_sha256: gardada.rom_sha256,
+      graph_json: gardada.graph_json,
+      output_path: `${base}.limiar-${gardada.threshold_current}.${method}.bin`,
+      method,
+    },
+  };
 }
