@@ -42,6 +42,16 @@ fn md_ssf2_concorda_cos_vectores_pinados_e_co_motor_de_referencia() {
     });
 }
 
+#[test]
+fn snes_lorom_concorda_cos_vectores_pinados_e_co_motor_de_referencia() {
+    run(&ProfileImpl {
+        id: "snes-lorom",
+        translate: rex_addressing::snes_lorom::translate,
+        invert: rex_addressing::snes_lorom::invert,
+        read: rex_addressing::snes_lorom::read,
+    });
+}
+
 /// As 12 secuencias pináronse contra `rom_size = 0x800000` **fixo** no xerador
 /// (`export-vectors.mjs`), non contra o tamaño da fixture de `md-ssf2`, que é
 /// 4MB. Polo tanto as sondas sobardan a imaxe de fixture e só se pode comparar
@@ -507,8 +517,10 @@ fn state_is_modelable(profile: &str, state: &RawState) -> bool {
             return false;
         }
     }
+    // Só `md-ssf2` coñece `banks` como estado; nos demais perfis esa clave é un
+    // rexeitamento de política que o motor de xanelas non modela.
     state
         .entries
         .iter()
-        .all(|(k, _)| k == "rom_size" || k == "banks")
+        .all(|(k, _)| k == "rom_size" || (k == "banks" && profile == "md-ssf2"))
 }
