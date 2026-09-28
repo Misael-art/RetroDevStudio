@@ -427,20 +427,24 @@ fn oracle_cross_check(impl_: &ProfileImpl, pv: &ProfileVectors) {
             cpu_address: c.cpu_address,
             state: c.state.clone(),
         })
-        .chain(
-            pv.negatives
-                .iter()
-                .filter(|c| state_is_modelable(impl_.id, &c.state))
-                .map(|c| RefCase {
-                    name: c.name.clone(),
-                    cpu_address: c.cpu_address,
-                    state: c.state.clone(),
-                }),
-        )
+        .chain(pv.negatives.iter().map(|c| RefCase {
+            name: c.name.clone(),
+            cpu_address: c.cpu_address,
+            state: c.state.clone(),
+        }))
         .collect();
+    let todos = cases.clone();
     cases.retain(|c| {
         c.cpu_address > windows_engine::BUS_LIMIT || state_is_modelable(impl_.id, &c.state)
     });
+    let sen_modelo: Vec<&RefCase> = todos
+        .iter()
+        .filter(|t| {
+            !cases
+                .iter()
+                .any(|k| k.name == t.name && k.cpu_address == t.cpu_address)
+        })
+        .collect();
     let mut graded = 0usize;
     for c in &cases {
         let state = conv::to_mapper_state(&c.state);
@@ -481,8 +485,19 @@ fn oracle_cross_check(impl_: &ProfileImpl, pv: &ProfileVectors) {
         impl_.id,
         pv.translate.len()
     );
+    println!(
+        "{}: referencia independente — {graded} casos graduados, {} sen modelo ({} )",
+        impl_.id,
+        sen_modelo.len(),
+        sen_modelo
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 }
 
+#[derive(Clone)]
 struct RefCase {
     name: String,
     cpu_address: u64,
