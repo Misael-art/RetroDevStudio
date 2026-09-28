@@ -1,7 +1,7 @@
 {
   "schema": "rex-crate-integration/v1",
   "descricao": "Evidencia da integración ao backend do pacote rex-addressing (frente A): dependencia por path, adaptador, comando Tauri real e gates medidos no destino. Promove o nivel de gates-proprios-aprovados a backend-integrado.",
-  "quando_utc": "medición entre 2026-09-28T08:14Z e 2026-09-28T09:25Z (UTC)",
+  "quando_utc": "medición entre 2026-09-28T08:14Z e 09:25Z (UTC); as seis re-execucións obligadas pola purga de /tmp entre 10:57Z e 11:01Z",
   "quem": "integrador da rodada REX (non o axente A)",
   "branch": "codex/rex-integrator-crates-registry",
   "ferramenta": "cargo/rustc 1.97.0 via rust-toolchain.toml da raiz (CARGO_TARGET_DIR=target), npm run check:tree, npm run lint, npx tsc --noEmit, npm test (vitest), node v26.8.1 para a verificacion independente da fixture",
@@ -215,5 +215,6 @@
     }
   },
   "como_conferir": "npm run crates:gates (os tres gates dos dous paquetes rexistrados); npm run check:tree; npm test; cd src-tauri && cargo test --lib -- --nocapture e cargo clippy --lib -- -D warnings; node data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/verificacion-independente-fixture.mjs; git log --oneline --graph cde721c..8a28909 para ver os cherry-picks; grep -n 'rex_addressing' src-tauri/src/lib.rs para ver o comando rexistrado.",
-  "nota_de_proceso": "/tmp purgouse nesta sesión entre a medición e a promoción da evidencia. Os 17 artefactos anteriores xa estaban copiados cando ocorreu a purga (entran neste commit como ficheiros do repositorio). As seis medicións posteriores (clippy da barra, clippy --all-targets, cargo audit, npm security:audit, host:diagnose, security:licenses) volveron executarse escribindo directamente nesta carpeta, polo que os seus rc=0/rc=1 están nos propios ficheiros e non dependen da narración. Ningún número desta acta se copia doutro sitio."
+  "nota_de_proceso": "/tmp purgouse nesta sesión entre a medición e a promoción da evidencia. Os 17 artefactos anteriores xa estaban copiados cando ocorreu a purga (entran neste commit como ficheiros do repositorio). As seis medicións posteriores (clippy da barra, clippy --all-targets, cargo audit, npm security:audit, host:diagnose, security:licenses) volveron executarse escribindo directamente nesta carpeta, polo que os seus rc=0/rc=1 están nos propios ficheiros e non dependen da narración. Ningún número desta acta se copia doutro sitio.",
+  "autocomprobacion": "reconferido o 2026-09-28T11:25Z: 23 artefactos listados, 23 presentes no directorio, SHA-256 e conto de liñas conferidos ficheiro a ficheiro, 0 diverxencias"
 }

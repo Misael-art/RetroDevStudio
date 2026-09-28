@@ -22,7 +22,10 @@ limites de cobertura da própria célula e as provas herdadas valendo.
   nunca escrevem no ledger comum nem em arquivos de IPC/UI/manifests comuns.
 - Não matar processos alheios; não limpar corpus; corpus é somente leitura
   para A/B (caminho canônico `data/canonical-local-2026-09-21/corpus/`).
-- Janela atual: (preenchida pelo integrador ao reservar/executar).
+- Janela atual: o integrador usou a xanela 2026-09-28T08:14Z–09:25Z (UTC) para
+  os gates da entrega A e 10:57Z–11:01Z para as re-execucións que a limpeza de
+  `/tmp` obrigar a refazer. Nada pesado queda executando; non hai monitores de
+  CI vivos nin jobs de A ou B iniciados por esta sesión.
 
 ## Matriz de endereçamento (propriedade: agente A)
 
@@ -36,6 +39,16 @@ limites de cobertura da própria célula e as provas herdadas valendo.
 
 Endereçamento não implica codecs da plataforma nem compilação de lógica
 recuperada; estados separados.
+
+Nota do integrador (2026-09-28), sen reescribir ningunha célula desta matriz
+que sexa propiedade da agente A: o que se midiu nesta ronda é que o pacote
+`crates/rex-addressing` ten gates propios aprobados (**127 executados / 0
+fallos / 9 ignorados**) e está **exposto no backend real** só para lectura con
+snapshot fixo nos dous perfis MD (`rex_addressing_read_snapshot`);
+`read_sequence`, as escritas e os tres perfis SNES segúan sen exposición. A
+cámara correcta para iso é a matriz de `crates/` abaixo e `crates/registry.json`
+— que miden capacidade do paquete e do adaptador, non a cobertura por perfil
+que A rexistra aquí.
 
 ## Matriz de codecs (propriedade: agente B; LZ4W integrado pelo integrador)
 
@@ -232,7 +245,7 @@ não implica o seguinte. Uma biblioteca compilar e passar nos gates próprios n�
 | Pacote | biblioteca implementada | gates próprios aprovados | backend integrado | fluxo do usuário comprovado |
 |---|---|---|---|---|
 | `crates/rex-kosinski` (frente B) | verified (decodificador Kosinski base não-modular, 179 linhas, contrato v1 em `docs/rex_profiles/kosinski_runtime/CONTRACT.md`; entrega `3fea06e`+`1af7017`, pino revisto `0b752b7`, aplicada por `cherry-pick -x`) | **verified** — `npm run crates:gates` medido 2026-09-28T02:48Z: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **25 executados / 0 falhas / 0 ignorados** (22 contract + 3 mutations). Log + manifesto com SHA em `data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/`. Achado devolvido à B: os testes leem fixtures **fora** do pacote (`data/rex_profiles/codec/kosinski`, importado pelo integrador no mesmo pino — 27 linhas de `manifest.tsv` conferidas, 0 divergências, agregado `ea866df7…` reproduzido); o pacote não é relocável sozinho. O contrato do encoder (`0b752b7`) e o WIP `encode.rs` ficaram de fora desta entrega | **blocked** — sem `rex-kosinski` em `src-tauri/Cargo.toml`, sem adaptador, sem chamada real pelo backend | **blocked** — nada no produto usa este pacote |
-| `crates/rex-addressing` (frente A) | verified (5 perfis MD linear/SSF2 e SNES LoROM/HiROM/ExHiROM; 17 commits `9b27941..57e51d3`, PR #82, `cherry-pick -x` sem conflitos; movido de `scripts/rex_profiles/addressing_runtime/` para `crates/rex-addressing` — promoção que o `CONTRATO.md` do próprio perfil registrava como pendente do integrador) | **verified** — gates medidos 2026-09-28T02:58Z já na localização nova: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **81 executados / 0 falhas / 9 ignorados** (77 em 10 targets + 4 doc-tests). Log + manifesto em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/`. Os 9 ignorados são os BYOR (8) e a preimage exaustiva (1): o gate ordinário não depende de ROM. Pacote **relocável** — vectors pinados dentro dele. Achados devolvidos à A: 15 `.expect()` de produção cujo invariante não tem varredura adversária no gate, e o README anunciar 72 quando a suite integrada executa 77 | **blocked** — sem path dependency em `src-tauri`, sem adaptador, sem chamada real pelo backend | **blocked** |
+| `crates/rex-addressing` (frente A) | verified (5 perfis MD linear/SSF2 e SNES LoROM/HiROM/ExHiROM; 17 commits `9b27941..57e51d3`, PR #82, `cherry-pick -x` sem conflitos; movido de `scripts/rex_profiles/addressing_runtime/` para `crates/rex-addressing` — promoção que o `CONTRATO.md` do próprio perfil registrava como pendente do integrador. A entrega mais recente de A também entrou: 7 commits `58a06dd..30cb311` (PR #83, etapas 2–5 — capa de leitura de recursos com procedência, bateria discriminante, exemplo consumidor e varredura *nunca panica*), por `cherry-pick -x` como `cde721c..8a28909`, com pino conferido por fetch pontual antes de integrar) | **verified** — primeira medição 2026-09-28T02:58Z já na localização nova (`fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **81 executados / 0 falhas / 9 ignorados**) e re-medida 2026-09-28T08:14Z depois dos cherry-picks das etapas 2–5: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **127 executados / 0 falhas / 9 ignorados**. Logs + manifestos em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/` e `.../2026-09-28-backend-integrado/`. Os 9 ignorados são os BYOR (8) e a preimage exaustiva (1): o gate ordinário não depende de ROM. Pacote **relocável** — vectors pinados dentro dele. Achado devolvido à A (15 `.expect()` sem varredura adversária) está **fechado** pela própria etapa 5: `tests/no_panic_sweep.rs`, 277 610 chamadas determinísticas nos cinco perfis mais a capa de recursos | **verified** — chamado pelo backend real e medido: `rex-addressing = { path = "../crates/rex-addressing" }` em `src-tauri/Cargo.toml` (sem workspace na raiz; `Cargo.lock` +5 linhas, uma entrada `[[package]]` **sem** `source` e zero crates externos novos), adaptador em `src-tauri/src/tools/reverse/decomp/rex_addressing.rs` e comando Tauri `rex_addressing_read_snapshot` registrado em `generate_handler!` (SHA do adaptador `7bd75ea9…`). **17 testes do adaptador, 0 falhas**; suite completa `cargo test --lib`: **754 / 0 / 66 ignorados** (737 era a base sem o adaptador), `clippy --lib -D warnings` rc=0, `fmt --check` rc=0, `check:tree`/`lint`/`tsc --noEmit`/`npm test` todos rc=0. Não-vacuidade: RED observado (16 fallos antes da implementação) e três controles de mutação (garda de identidade, procedência do segmento, achatamento de erros) matando 1/2/8 testes, com restauração conferida por SHA. **Exposto apenas a leitura com snapshot fixo nos perfis MD**; `read_sequence`, as escritas e os perfis SNES ficam declarados como não expostos no registro. Log + manifesto por arquivo em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/` | **blocked** — nenhum chamador da interface usa `rex_addressing_read_snapshot` e não existe tela de endereçamento; as únicas imagens lidas são fixtures autoriais do próprio adaptador, sem corpus BYOR no gate |
 
 Regras desta matriz: o registro canônico é `crates/registry.json` (schema
 `rex-crate-registry/v1`), consumido por `npm run check:tree` e por
@@ -284,15 +297,100 @@ e `codecs/` (B) do CONTRACTS v1.
 Emenda 2026-09-28: duas **bibliotecas standalone** dessas frentes passaram a
 existir neste tronco — `crates/rex-kosinski` e `crates/rex-addressing`,
 registradas em `crates/registry.json` e com gates próprios medidos (ver a
-matriz de `crates/` acima). Isso é degrau de biblioteca, **não** integração:
-nada no produto consome os dois pacotes, nenhuma linha de
-`src-tauri/src/tools/reverse/decomp/` foi tocada por essa entrega. O trabalho
-em curso de cada frente segue no worktree dela e não foi integrado: a A tem
-WIP de leitura de recursos (`tests/resource_reader.rs`, `tests/support/banked.rs`)
-e a B tem WIP de encoder (`src/encode.rs`). O produto segue com os codecs que
-já tinha.
+matriz de `crates/` acima). Isso é degrau de biblioteca, **não** integração.
+Emenda da emenda (2026-09-28, rodada de integração da frente A): essa frase já
+não vale para os dois. `crates/rex-addressing` **foi integrada ao backend** —
+path dependency em `src-tauri/Cargo.toml`, adaptador em
+`src-tauri/src/tools/reverse/decomp/rex_addressing.rs` e comando Tauri
+`rex_addressing_read_snapshot` com 17 testes próprios; a linha de
+`src-tauri/src/tools/reverse/decomp/` foi tocada por essa entrega (o adaptador,
+`mod.rs`, `lib.rs`, `Cargo.toml`/`Cargo.lock`). Continuar **não** valendo para
+`crates/rex-kosinski`, que segue sem consumidora no produto, e o degrau
+`fluxo do usuário comprovado` segue bloqueado para ambos: nada na interface
+chama o comando. O WIP de leitura de recursos da agente A que antes estava no
+worktree dela entrou nesta rodada (`58a06dd..30cb311`, etapa 2 em diante); o
+WIP de encoder da B (`src/encode.rs`) continua fora, no worktree dela. O
+produto segue com os codecs que já tinha.
 
 ## Histórico da rodada
+
+- 2026-09-28 (integrador, **rodada de integración da frente A — `crates/rex-addressing`
+  sobe de `gates propios aprobados` a `backend integrado`, e só a ese degrau**),
+  esta célula é o checkpoint. **HEAD de partida:** `8a28909`. **Ordem recebida:**
+  "GO para retomar a integración. ORDEM 1. A — endereçamento + lector de recursos.
+  2. B — decoder/encoder Kosinski. Integre e valide unha frente por vez na súa
+  branch de integración. Sen merge de PR, release ou promoción de maturidade", coa
+  división de responsabilidade que reserva ao integrador "o contrato do adaptador,
+  manifests/lockfiles compartidos, rexistro dos módulos, backend e IPC" e deixa
+  "os arquivos internos dos propios paquetes" en mans de A e B. As decisións de
+  contrato xa autorizadas executáronse tal cal: o crate segue sen Tauri e sen
+  serde (a serialización fica no adaptador, coas convencións actuais do produto),
+  os erros internos viran erros estruturados "preserve código e detalles úteis,
+  sen transformar toda falla en texto xenérico", perfil e estado do mapper son
+  explícitos ("non autodetectar perfil silenciosamente"), "a primeira integración
+  pode expoñer apenas o snapshot fixo, declarando a outra como aínda non exposta",
+  "a identidade da ROM é verificada na fronteira de acceso aos bytes" e "retorne
+  bytes e proveniência dos segmentos efectivamente lidos". **Usouse a entrega mais
+  recente de A, incluidas as súas dependencias:** fetch pontual antes de integrar
+  conferiu que o tip de `codex/rex-rust-recursos` (PR #83) seguía en `30cb311`, e
+  os 7 commits `58a06dd..30cb311` entraron por `cherry-pick -x` como
+  `cde721c..8a28909`; non se integrou "só a biblioteca antiga" — a capa de lectura
+  de recursos con procedencia (etapa 2), a batería discriminante (etapa 3), o
+  exemplo consumidor (etapa 4) e a varredura *nunca panica* (etapa 5) van todos na
+  branch. **Commits desta célula:** `16e22e9` (path dependency + adaptador +
+  comando Tauri), `b2f6d45` (23 artefactos de evidencia con SHA por arquivo) e
+  esta célula (rexistro + matriz). **Medido, non narrado:** gates do pacote
+  `fmt`/`clippy --all-targets`/`test --locked` rc=0 con **127 executados / 0 fallos
+  / 9 ignorados** (a carreira de 02:58Z dava 81 antes das etapas 2–5); adaptador
+  con **17 probas / 0 fallos**; `cargo test --lib` **754 / 0 / 66 ignorados**
+  (754 − 17 = 737, a base previa); `cargo clippy -- -D warnings` rc=0;
+  `cargo fmt --check` rc=0 (a primeira carreira deu FMT_RC=1 con 3 diffs no
+  ficheiro novo, rexistrado co fallo); `check:tree`, `eslint`, `tsc --noEmit` e
+  `npm test` (**749 / 0 / 6 saltados**, 79 ficheiros verdes + 1 saltado) todos
+  rc=0; `npm run host:diagnose` rc=0 con `status: ready` e fingerprint `60249508…`
+  inalterado; `cargo audit` rc=0 con 496 dependencias e os mesmos 8 avisos
+  permitidos. **Non-vacuidade:** RED observado antes de implementar (16 fallos) e
+  tres mutacións da capa de adaptador — garda de identidade anulada (mata 1),
+  `rom_offset` substituído polo enderezo do bus (mata 2), erros do núcleo achatados
+  nun código xenérico (mata 8) — con restauración conferida por SHA e M1
+  re-executada despois do reparo de hixiene. **Un achado propio, corrixido con
+  TDD:** as probas do adaptador deixaban 512 KiB–1 MiB por test en `/tmp` (143
+  directorios contados a medio camiño). Escribiuse primeiro a proba que fallaba
+  («a fixture temporal descártase ao saír do alcance», log do fallo con camiño
+  literal) e despois o garda; re-execución: antes=160 / depois=160 directorios,
+  cero filtracións novas. **O que a entrega di do produto:** `Cargo.lock` pasa de
+  495 a 496 entradas `[[package]]`, só o crate local sen campo `source` (cero
+  dependencias externas novas), e `rex-addressing` entra no inventario de licenzas
+  como `source: workspace` co `license: UNLICENSED` que o paquete xa declaraba —
+  non se escolleu ningunha licencia por suposición. **O que NON se alega:**
+  `fluxo do usuario comprobado` segue bloqueado (ningún chamador da interface usa
+  `rex_addressing_read_snapshot`, non hai pantalla de endereçamento); non se
+  alega descuberta de recursos nin lectura sobre xogos reais (as únicas imaxes
+  lidas son fixtures autoriais, cero corpus BYOR no gate); `read_sequence`, as
+  escritas puras e os tres perfís SNES quedan declarados como non expostos, e a
+  negativa non é un oco de implementación: é a fronteira de identidade do produto
+  (`rex_read_rom` + `platform::identify_md`) que só dá fe en imaxes Mega Drive.
+  **Dous fallos rexistrados como fallos:** `cargo clippy --all-targets -- -D
+  warnings` dá rc=101 con 45 lints en código de proba alleo (`rex_context.rs` 18,
+  `rex_aplib.rs` 8, `rex_resources.rs` 5, `project_mgr.rs` 5, `rex_codecs.rs` 4,
+  1 en cada un de `logic_recovery.rs`, `holdout.rs`, `graphics_discovery.rs`,
+  `lib.rs`, `build_orch.rs`; **0 en `rex_addressing.rs`**) — non se tocou esa
+  deuda, que non é desta entrega nin da barra do proxecto; e
+  `npm run security:audit` dá rc=1 por `EALLOWSCRIPTS`, config do host anterior e
+  allea (ningún ficheiro npm se modificou nesta entrega). **Achado de proceso:** `/tmp`
+  purgouse a metade da rodada; os 17 artefactos xa estaban copiados no repositorio
+  cando ocorreu e as seis medicións posteriores volveron executarse escribindo
+  directo no directorio de evidencia. **Pendente para a seguinte perna (frente B):**
+  o empacotamento que se lle pedía a B está feito por ela mesma no seu branch
+  (tip `6a2218e`: 52 fixtures con SHA-256 dentro do pacote, `fixtures/PROVENANCE.md`
+  e o reconto do package list conferido con `git archive`); o que fica aberto é a
+  **licenza**, que é decisión do operador, non do integrador. Integrar B exige
+  adaptar limites e erros ao contrato de codecs existente
+  (`CodecError { code, detail }`), preservando a distinción entre decodificar,
+  codificar e reinserir; o exemplo de edición en contedor non substitúe a
+  transacción canónica. **Nada aquí é merge nin release:** os commits entraron un
+  a un con `cherry-pick -x` e `crates/rex-addressing` segue `Experimental`.
+
 
 - 2026-09-28 (integrador, **rodada `crates/` — a árvore formalizada e duas
   bibliotecas standalone integradas uma por vez, sem promover nenhuma a

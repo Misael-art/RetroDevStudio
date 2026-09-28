@@ -37,10 +37,10 @@
     {
       "nome": "rex-addressing",
       "manifesto": "crates/rex-addressing/Cargo.toml",
-      "descricao": "Perfis de endereçamento MD linear / MD SSF2 / SNES LoROM / HiROM / ExHiROM (frente A): leitura com limites, erros estruturados e escritas puras. Biblioteca standalone: o produto nao a consome ainda.",
-      "maturidade": "gates-proprios-aprovados",
+      "descricao": "Perfis de endereçamento MD linear / MD SSF2 / SNES LoROM / HiROM / ExHiROM (frente A): leitura com limites, erros estruturados e escritas puras. O produto xa a consume: src-tauri/Cargo.toml ten dependencia por path e o adaptador src-tauri/src/tools/reverse/decomp/rex_addressing.rs publica a lectura con snapshot fixo a través do comando Tauri rex_addressing_read_snapshot. Exposto: perfis md-linear e md-ssf2, só lectura. Non exposto: lectura con transicións de banco (read_sequence), escritas, os tres perfis SNES (a fronteira de identidade do produto só da fe en imaxes Mega Drive).",
+      "maturidade": "backend-integrado",
       "propriedade": "agente A (PR #82); registro, manifests e a promocao de localizacao sao do integrador",
-      "origem": "17 commits 9b27941..57e51d3 (pin revisado 57e51d3), aplicados por cherry-pick -x; movido de scripts/rex_profiles/addressing_runtime/rex-addressing para crates/rex-addressing pelo integrador, conforme a promocao que o CONTRATO.md do proprio perfil pedia",
+      "origem": "17 commits 9b27941..57e51d3 (pin revisado 57e51d3, PR #82, branch codex/rex-rust-addressing), aplicados por cherry-pick -x; movido de scripts/rex_profiles/addressing_runtime/rex-addressing para crates/rex-addressing pelo integrador, conforme a promocao que o CONTRATO.md do proprio perfil pedia. Depois, 7 commits 58a06dd..30cb311 (pin 30cb311, PR #83, branch codex/rex-rust-recursos: etapas 2-5 — capa de lectura de recursos con procedencia, bateria discriminante, exemplo consumidor e varredura 'nunca panica'), tambem por cherry-pick -x; o fetch puntual anterior a integracion confirmou que 30cb311 seguia ser o tip, polo que a entrega mas recente de A entra por completo, incluidas as suas dependencias.",
       "perfil": {
         "contrato": "docs/rex_profiles/addressing_runtime/CONTRATO.md",
         "classificacao": "docs/rex_profiles/addressing_runtime/CLASSIFICACION.md",
@@ -51,16 +51,26 @@
       "byor": "nenhum teste ordinario depende de ROM: os 8 testes BYOR e o preimage exaustivo vao marcados #[ignore] e no corren no gate; a segunda referencia e declarativa e vive no proprio pacote (tests/support/windows_engine.rs)",
       "maturidade_data": "2026-09-28",
       "gates": {
-        "medidos_em": "2026-09-28T02:58Z, branch codex/rex-integrator-crates-registry, xa na localización nova crates/rex-addressing",
-        "fmt": "OK",
-        "clippy_all_targets": "OK",
-        "test_locked": "OK — 81 executados (77 en 10 targets + 4 doc-tests), 0 falhas, 9 ignorados (8 BYOR + preimage exaustivo)",
-        "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/",
+        "medidos_em": "2026-09-28T08:14Z UTC (re-executados despois dos cherry-picks das etapas 2-5) e 2026-09-28T02:58Z UTC (promoción de localización), branch codex/rex-integrator-crates-registry, na localización crates/rex-addressing",
+        "fmt": "OK nas duas carreiras",
+        "clippy_all_targets": "OK nas duas carreiras",
+        "test_locked": "OK — 127 executados, 0 falhas, 9 ignorados (8 BYOR + preimage exaustivo); na carreira de 02:58Z eran 81 (77 + 4 doc-tests), antes das etapas 2-5. Rexistrei o número medido, non o anunciado no README do paquete.",
+        "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/ e data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/",
         "cargo_target_dir": "target/crates-gates"
       },
+      "integracion_backend": {
+        "medida_em": "2026-09-28T09:05Z..09:25Z UTC, branch codex/rex-integrator-crates-registry",
+        "dependencia": "src-tauri/Cargo.toml: rex-addressing = { path = \"../crates/rex-addressing\" }. Sen workspace na raiz; Cargo.lock gaña só o paquete local (entrada sen campo source) e cero crates externos novos.",
+        "adaptador": "src-tauri/src/tools/reverse/decomp/rex_addressing.rs — DTOs snake_case con deny_unknown_fields, binario en base64 + SHA-256 lateral, erros do nucleo convertidos no InspectionError do produto conservando codigo e detalle, identidade da ROM conferida na fronteira de acceso aos bytes (rex_read_rom + platform::identify_md), procedencia por segmento e limites do núcleo devolvidos na resposta.",
+        "chamada_real": "comando Tauri rex_addressing_read_snapshot en src-tauri/src/lib.rs, rexistrado en generate_handler! e executado fora do fio principal con run_heavy_command_off_main_thread.",
+        "testes_do_adaptador": "17 (un por capacidade declarada: bytes + procedencia, estado por segmento, cambio de banco que move a xanela, rexión non-ROM, limite do barramento, lonxitude 0, perfil descoñecido, SNES non exposto, faltas e excesos de rom_size, chave de banco non remapeábel, identidade divergente, preservacion do detalle, base64 + SHA-256 + limites, fixture conxelada polo hash pinado, descarte da fixture temporal)",
+        "controles_de_mutacao": "M1 garda de identidade anulada, M2 rom_offset substituido polo enderezo do bus, M3 erros do nucleo achatados en codigo xenérico — cada un matou as pruebas esperadas (1 / 2 / 8) e a árbore restaurouse por hash; M1 re-executado tras o reparo de hixiene con igual resultado.",
+        "gates_no_destino": "cargo test --lib: 754 executados, 0 falhas, 66 ignorados, rc=0 (a base sen o adaptador era 737; 754 - 17 = 737). cargo clippy --lib -- -D warnings: rc=0. cargo fmt --check: rc=0. npm run check:tree: rc=0. npm run lint: rc=0. npx tsc --noEmit: rc=0. npm test: 749 executados, 0 falhas, 6 saltados (755) en 79 ficheiros verdes + 1 saltado, rc=0.",
+        "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/"
+      },
       "relocable": "si — os vectores pinados (vectors/rust-vectors-v1.json, sha proxectada no harness_selfcheck) viven dentro do paquete; a diferenza de rex-kosinski, non depende de data/ externamente",
-      "achado_de_revisao": "15 chamadas .expect() en produción (md_linear 4, md_ssf2 4, snes_exhirom 3, snes_hirom 2, snes_lorom 2), cada unha xustificada por validación previa; a cobertura de 'nunca panica' con entradas adversarias non aleatorias non esta no gate ordinario (o preimage exaustivo vai #[ignore]). Devolto ao axente A como pendencia, non corrixido por aqui.",
-      "nao_alega": "nada de integracao ao produto: sem dependencia por path em src-tauri, sem adaptador, sem chamada real pelo backend, sem fluxo pela interface."
+      "achado_de_revisao": "15 chamadas .expect() en produción (md_linear 4, md_ssf2 4, snes_exhirom 3, snes_hirom 2, snes_lorom 2), cada unha xustificada por validación previa; a cobertura de 'nunca panica' con entradas adversarias non aleatorias non está no gate ordinario (o preimage exaustivo vai #[ignore]). Devolto ao axente A como pendencia e PECHADO por el na etapa 5 (upstream cae6b58, nesta branch como 6453cd4): tests/no_panic_sweep.rs con 277 610 chamadas determinísticas sobre estados e enderezaos hostís dos cinco perfís máis a capa de recursos, cun chan de chamadas derivado do dominio para que a varredura non poida quedar vacía.",
+      "nao_alega": "non se alega fluxo-do-usuario-comprovado: ningún chamador da interface usa o comando rex_addressing_read_snapshot e non hai pantalla de endereçamento. Non se alega descuberta de recursos nin lectura sobre xogos reais: a unica chamada probada usa imaxes autorais deste adaptador, cero corpus BYOR no gate. Non se expoñen as escritas puras nin a lectura con transicións de banco (read_sequence), que seguen existentes no nucleo sen adaptador. Non se autodetecta perfil: quen chama declara perfil e estado, e os tres perfís SNES receben profile_not_exposed porque a fronteira de identidade do produto so da fe en imaxes Mega Drive."
     }
   ]
 }
