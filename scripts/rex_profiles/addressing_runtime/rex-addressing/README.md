@@ -132,14 +132,22 @@ cargo test --offline                         # batería rápida: ver descomposic
 cargo run --offline --example resource_report  # exemplo consumidor, determinístico
 ```
 
-Reconto **medido** nesta rolda (non de memoria; recontable con
-`cargo test --offline 2>&1 | grep 'test result'`): **127 executados, 0 fallos, 9
-ignorados** (8 BYOR + preimage exaustivo). Descomposición por target, que suma
-xustamente 127:
+Reconto **medido** (non de memoria; recontable con
+`cargo test --offline 2>&1 | grep 'test result'`) e **coa árbore na que se
+tomou cada número**:
+
+|Árbore medida|executados|fallos|`#[ignore]`|filas de resultado|
+|---|---|---|---|---|
+|`30cb311` (rolda dos recursos, entregada)|127|0|9|16 (15 targets + doc-tests)|
+|árbore de traballo desta rolda: `30cb311` + `tests/acceptance.rs` + `vectors/acceptance-v1.json` + `src/snes_exhirom.rs` (mensaxe do `.expect()`)|**138**|**0**|**10**|17 (16 binarios + doc-tests)|
+
+O delta é exacto: o aceite achega 11 probes executados e 1 `#[ignore]` (o seu
+xerador). Descomposición por target da árbore actual, que suma 138 (doc-tests incluídos):
 
 | target | executados |
 |---|---|
 | `unittests src/lib.rs` | 0 |
+| `acceptance` | 11 (+1 `#[ignore]`) |
 | `byor` | 1 (+8 `#[ignore]`) |
 | `differential` | 8 |
 | `harness_selfcheck` | 6 |
@@ -159,12 +167,18 @@ xustamente 127:
 Os targets `resource_fixtures` (11) e `resource_reader` (15) son 10 e 14 tests
 propios **máis** a autocomprobación da fixture compartida. Esa autocomprobación
 (`tests/support/banked.rs`, `a_fixture_non_e_degenerada_incluso_antes_de_lectura`)
-compílase en **13** dos 14 binarios de integración porque eses 13 inclúen
-`mod support;`, así que os 127 contan a mesma comprobación 13 veces.
-`no_panic_sweep` é o decimocuarto e **non** a inclúe: os seus 8 probes son propios
+compílase en **14** dos 15 binarios de integración porque eses 14 inclúen
+`mod support;`, así que os 138 contan a mesma comprobación 14 veces.
+`no_panic_sweep` é o decimoquinto e **non** a inclúe: os seus 8 probes son propios
 (varredura adversaria determinística; ver `docs/…/MUTATION-CONTROLS.md`, R1). Está
 dito explicitamente en `docs/…/CLASSIFICACION.md` §9 para que o reconto non pareza
 maior do que é.
+
+O aceite engade **unha copia máis** desa autocomprobación (`acceptance` tamén
+inclúe `mod support;`), e por iso a súa contribución real non son 11 probes
+novos de código de produción senón 11 expectativas derivadas por un oráculo
+independente; os seus vectores están pinados por SHA-256 en
+`vectors/acceptance-v1.json` (`54ba2b6e…a216`).
 
 As dúas baterías caras/dependentes do host van `#[ignore]` e **non** se executan
 coa anterior. Executáronse aparte nesta rolda: o preimage exaustivo en 8.22 s

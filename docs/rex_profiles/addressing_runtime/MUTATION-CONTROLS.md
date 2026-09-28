@@ -394,3 +394,108 @@ Para R2 e R3 o mesmo patrón con `bank_value(window, state)` → `bank_value(win
 e `(window + 1) * u64::from(WINDOW_SIZE)` → `(window + 2) * …`, en `src/md_ssf2.rs`.
 R1 require o binario de varredura: `cargo test --offline --test no_panic_sweep`.
 
+## Rolda do aceite (R5–R8)
+
+Os catro controles anteriores gradúan as probes do produto. Os desta rolda
+gradúan **`tests/acceptance.rs`**: o oráculo independente e os vectores
+publicados en `vectors/acceptance-v1.json` teñen que rexeitar as mesmas
+alteracións, ou o aceite non vale como evidencia para o adaptador.
+
+Medido na árbore de traballo de `30cb311` máis os ficheiros desta rolda (`src/snes_exhirom.rs`,
+`src/md_common.rs`, `src/md_ssf2.rs`, `src/region.rs`, `src/state.rs` e
+`tests/support/mod.rs` modificados; `tests/acceptance.rs` e
+`vectors/acceptance-v1.json` novos), na rama `codex/rex-rust-addressing` — a
+mesma das roldas M1–M6 e R1–R4, que é a rama aberta na PR #82. Batería completa nesta árbore:
+**138 passed, 0 failed, 10 ignored** — o delta fronte a 127/0/9 é exactamente
+os 11 probes aceptados do aceite máis o seu xerador `#[ignore]`. Cada execución
+baixo mutación usou `--test acceptance` (agás R8, que rodou a suite enteira).
+
+| ID | Simula | Sitio mutado | Detección |
+|----|--------|--------------|-----------|
+| R5 | o límite de corredores non se aplica | `src/resource.rs:464` (`segments.len() >= max_segments` → `>`) | 1 probe: `todos_os_vectores_de_aceite_gradan_pola_api_publica` (A5d) |
+| R6 | a identidade de xanela pérdese cando `banks` non nomea a xanela | `src/md_ssf2.rs:117` (`unwrap_or(u64::from(window))` → `unwrap_or(0)`) | 3 probes: gradación (A2), `as_dúas_instancias…` (A7b), `un_vector_alterado…` |
+| R7 | unha imaxe curta clasifícase como rexión non-ROM | `src/resource.rs:504` (`OutOfRange => IncompatibleSize` → `NonRomRegion`) | 1 probe: gradación (A5e) + a lista de códigos pinada |
+| R8 | a forma do díxito xa non se valida (maiúsculas admitidas) | `src/resource.rs:381` (engadir `b'A'..=b'F'` ao `matches!`) | **só** `a_capa_non_pode_verificar_o_digesto` en toda a suite |
+
+### R5 — límite de corredores
+
+```
+test todos_os_vectores_de_aceite_gradan_pola_api_publica ... FAILED
+panicked at tests/acceptance.rs:1083:21:
+assertion `left == right` failed: A5d-limite-de-segmentos: o aceite esperaba recusa
+test result: FAILED. 10 passed; 1 failed; 1 ignored
+```
+
+O vector A5d pide 1 MB cunha `max_segments` de 1: con `>` a garda deixa pasar o
+segundo corredor e a lectura convértese en éxito. Revertido: 11/0/1.
+
+### R6 — identidade da xanela
+
+```
+test un_vector_alterado_detectase ... FAILED                     (acceptance.rs:1656)
+test todos_os_vectores_de_aceite_gradan_pola_api_publica ... FAILED
+  assertion `left == right` failed: A2-fronteira-de-xanela-ssf2: rom_offset 1  (acceptance.rs:1216)
+test as_dúas_instancias_non_comparten_estado ... FAILED
+  assertion `left == right` failed: A7b non le a identidade       (acceptance.rs:1580)
+test result: FAILED. 8 passed; 3 failed; 1 ignored
+```
+
+É o control que xustifica a imaxe de 4 MB do aceite: nunha imaxe de 2 MB,
+`5 << 19 = 0x280000` recorta pola máscara a `0x80000`, que é a identidade da
+xanela 1, e A6/A7a/A8 non poderían distinguir remapeo de identidade. Coa base
+mal, A7b (sen bancos) e A7a (banco 5) devolven o mesmo corredor e a probe de
+independencia queda vacía.
+
+### R7 — clasificación da imaxe curta
+
+```
+test todos_os_vectores_de_aceite_gradan_pola_api_publica ... FAILED
+panicked at tests/acceptance.rs:1313:5:
+assertion `left == right` failed: A5e-imaxe-curta: código de recusa (detalle:
+percorrido detido en 0x408010: ROM (32784 bytes) máis curta que rom_size declarado
+(1048576); trecho faltante a partir do offset 0x8000)
+test result: FAILED. 10 passed; 1 failed; 1 ignored
+```
+
+O código é o que consume o adaptador para decidir que lle mostra ao usuario; a
+aceptación está pinada en `a_bateria_non_e_degenerada` coa lista ordenada de
+recusas, así que calquer renomeamento tamén a move.
+
+### R8 — a forma do díxito (control exclusivo do aceite)
+
+Este é o único dos oito que **ningunha probe previa do repositorio ve**. Tras
+admitir maiúsculas en `check_attestation`, a suite enteira (138 probes) falla só
+nun punto:
+
+```
+Running tests/acceptance.rs
+test a_capa_non_pode_verificar_o_digesto ... FAILED   (acceptance.rs:1538)
+```
+
+`a_capa_non_pode_verificar_o_digesto` acepta un díxito **mentireiro pero ben
+formado** (a capa non hashexa, §12.5 do contrato) e rexeita catro mal formados:
+baleiro, 63 ceros, 64 `A` e 64 `g`. É a diferenza entre "non comprobo o contido"
+e "non comprobo a forma", e só o aceite a gradúa.
+
+### Como repetir R5–R8
+
+```bash
+cd /home/misael/RDS-REX-A2-RUST-ADDR/scripts/rex_profiles/addressing_runtime/rex-addressing
+export CARGO_TARGET_DIR=/tmp/rex-a2-target
+# R5
+perl -0pi -e 's/if segments\.len\(\) as u32 >= req\.limits\.max_segments \{/if segments.len() as u32 > req.limits.max_segments {/' src/resource.rs
+# R6
+perl -0pi -e 's/\.unwrap_or\(u64::from\(window\)\)/.unwrap_or(0)/' src/md_ssf2.rs
+# R7
+perl -0pi -e "s/ErrorCode::OutOfRange => ResourceErrorCode::IncompatibleSize,/ErrorCode::OutOfRange => ResourceErrorCode::NonRomRegion,/" src/resource.rs
+# R8
+perl -0pi -e "s/b'0'\.\.=b'9' \| b'a'\.\.=b'f'/b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F'/" src/resource.rs
+CARGO_TARGET_DIR=/tmp/rex-a2-target cargo test --offline --test acceptance
+git checkout -- src/resource.rs src/md_ssf2.rs
+CARGO_TARGET_DIR=/tmp/rex-a2-target cargo test --offline   # → 138/0/10
+```
+
+Unha mutación por vez; `git status --porcelain src/` quedou só con
+`src/snes_exhirom.rs` (a mensaxe do `.expect()`) tras cada revert, e ningunha
+mutación chegou a un commit.
+
