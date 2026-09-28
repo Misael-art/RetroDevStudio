@@ -25,6 +25,7 @@ pub mod rex_addressing;
 pub mod rex_aplib;
 pub mod rex_codecs;
 pub mod rex_context;
+pub mod rex_kosinski;
 pub mod rex_resources;
 pub mod rom_library;
 pub mod sprite_composition;

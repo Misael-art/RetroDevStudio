@@ -2542,6 +2542,52 @@ async fn rex_addressing_read_snapshot(
 }
 
 #[tauri::command]
+async fn rex_kosinski_decode(
+    request: tools::reverse::decomp::rex_kosinski::KosinskiDecodeRequest,
+) -> Result<
+    tools::reverse::decomp::rex_kosinski::KosinskiDecodeResponse,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    // Decodificación Kosinski servida pola biblioteca `crates/rex-kosinski`.
+    // Serialización e tradución de erros viven no adaptador; os limites son
+    // explícitos (sen eles, os defectos do contrato). A reinserción
+    // (`edit::reinsert`) NON se expón: segue polas transacións canónicas.
+    run_heavy_command_off_main_thread(
+        move || tools::reverse::decomp::rex_kosinski::ipc_decode(&request),
+        || {
+            Err(tools::reverse::decomp::inspection::InspectionError {
+                code: "command_interrupted".to_string(),
+                message: interrupted_command_message("rex_kosinski_decode"),
+                retryable: true,
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn rex_kosinski_encode(
+    request: tools::reverse::decomp::rex_kosinski::KosinskiEncodeRequest,
+) -> Result<
+    tools::reverse::decomp::rex_kosinski::KosinskiEncodeResponse,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    // Codificación Kosinski: operación separada da decodificación, só
+    // transforma streams. Non escribe en ningunh sitio nin toca ningunha ROM.
+    run_heavy_command_off_main_thread(
+        move || tools::reverse::decomp::rex_kosinski::ipc_encode(&request),
+        || {
+            Err(tools::reverse::decomp::inspection::InspectionError {
+                code: "command_interrupted".to_string(),
+                message: interrupted_command_message("rex_kosinski_encode"),
+                retryable: true,
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
 fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, String> {
     let trimmed = project_dir.trim();
     if trimmed.is_empty() {
@@ -5188,6 +5234,8 @@ pub fn run() {
             rex_resource_context_hit,
             rex_resource_apply_edit,
             rex_addressing_read_snapshot,
+            rex_kosinski_decode,
+            rex_kosinski_encode,
             list_project_assets,
             read_project_asset_bytes,
             open_project_source_path,
