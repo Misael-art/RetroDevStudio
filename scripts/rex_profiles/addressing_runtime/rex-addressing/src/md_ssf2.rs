@@ -303,6 +303,10 @@ pub fn read(
                 let left_in_window = (window + 1) * u64::from(WINDOW_SIZE) - cursor;
                 let run = usize::try_from((end - cursor).min(left_in_window))
                     .expect("un corredor non pode superar a xanela de 4MB");
+                debug_assert!(
+                    run >= 1,
+                    "corredor baleiro: a fórmula de offset e a anchura do espeillo non son consistentes"
+                );
                 let start = offset as usize;
                 if start + run > rom.len() {
                     // Imaxe máis curta que o declarado: devólvese o prefixo

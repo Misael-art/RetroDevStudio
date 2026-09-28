@@ -256,6 +256,10 @@ pub fn read(
                 });
                 let run = usize::try_from(remaining.min(rom_window_left(addr)).min(left_in_mirror))
                     .expect("un corredor ExHiROM vale como máximo o barramento");
+                debug_assert!(
+                    run >= 1,
+                    "corredor baleiro: a fórmula de offset e a anchura do espeillo non son consistentes"
+                );
                 let start = offset as usize;
                 if start + run > rom.len() {
                     if start < rom.len() {
