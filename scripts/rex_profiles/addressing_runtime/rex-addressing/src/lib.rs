@@ -17,6 +17,7 @@ pub mod md_linear;
 pub mod md_ssf2;
 pub mod region;
 mod snes_common;
+pub mod snes_hirom;
 pub mod snes_lorom;
 pub mod state;
 
