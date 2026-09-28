@@ -27,6 +27,9 @@ rex-addressing = { path = "../crates/rex-addressing" }
 # Adaptador Kosinski (`tools/reverse/decomp/rex_kosinski.rs`); biblioteca standalone
 # da frente B, sen Tauri nin dependencias externas.
 rex-kosinski = { path = "../crates/rex-kosinski" }
+# Recuperacion de regra de gameplay (`tools/reverse/decomp/rex_gameplay.rs`);
+# biblioteca standalone da frente de gameplay, sen Tauri nin dependencias externas.
+rex-gameplay = { path = "../crates/rex-gameplay" }
 libloading = "0.8"
 image = { version = "0.25", default-features = false, features = ["bmp", "png", "pnm", "jpeg", "gif", "webp"] }
 sevenz-rust2 = { version = "0.16", features = ["util"] }

@@ -48,6 +48,31 @@
       "byor": "nenhum teste ordinario do pacote depende de ROM comercial; a comparacao com koscmp fica no script de perfil, fora da suite"
     },
     {
+      "nome": "rex-gameplay",
+      "manifesto": "crates/rex-gameplay/Cargo.toml",
+      "descricao": "Recuperacion delimitada de unha regra de gameplay M68K (guarda de input + contador + limiar + escrita de estado + chamada externa opaca) a partir dos bytes dunha ROM Mega Drive, con grafo NodeGraph v1 editable so no limiar e reconstrucion por patch ou regeneracion sen crecemento. Perfil m68k.counter_threshold_state_gate.v1, Experimental. Contrato en crates/rex-gameplay/CONTRACT.md.",
+      "maturidade": "gates-proprios-aprovados",
+      "maturidade_data": "2026-09-28",
+      "gates": {
+        "medidos_em": "2026-09-28T17:08Z UTC no tronco do integrador, despois do cherry-pick -x (local f35ed0d)",
+        "fmt": "OK (rc=0)",
+        "clippy_all_targets": "OK (rc=0, -D warnings)",
+        "test_locked": "OK — 16 testes executados (6 lib + 10 profile), 0 fallos, 0 ignorados; numeros medidos na localizacion nova, non os anunciados pola fronte",
+        "evidencia": "docs/rex_profiles/gameplay_recovery/REPORT.md (fronte) e data/rex_profiles/gameplay_recovery/evidence/2026-09-28-prova-real/ (report.json, real-run.log, SHA256SUMS; prova real SGDK+core executada pola fronte, non re-executada por min ata a rolda de integracion)"
+      },
+      "acoplamento_declarado": "Zero dependencias externas (Cargo.lock do paquete con 7 liñas); as 3 fixtures hex vendorizan-se dentro do paquete con PROVENANCE.md; non depende de data/ externamente.",
+      "nao_alega": "non e decompilacion xeral nin descubrimento automatico de rotinas: so o perfil pechado m68k.counter_threshold_state_gate.v1, con recusa explícita fora del. A equivalencia e por conxunto declarado de estados (80/80), non universal. Non se alega fluxo do usuario: a rolda de integracion en curso publica comandos e UI como Experimental; calquera promotura de degrau queda para o operador. JSR segue opaco; vivacidade de rexistros tras a chamada non analizada.",
+      "propriedade": "frente de recuperacion de gameplay (PR #84, branch codex/rex-gameplay-recovery); registro, manifests, lib.rs, UI e harness E2E son do integrador",
+      "origem": "Commits 308fd44 (paquete + adaptador + docs + evidencia) e a63e3a3 (PROPOSTA de superficies compartidas, base a08c2c6) da PR #84. O de paquete entrou por cherry-pick -x (local f35ed0d); a PROPOSTA non se aceptou tal cal: o integrador reescribiu registry/Cargo.toml/Cargo.lock/mod.rs coas convencións actuais.",
+      "perfil": {
+        "contrato": "crates/rex-gameplay/CONTRACT.md",
+        "relatorio": "docs/rex_profiles/gameplay_recovery/REPORT.md",
+        "proposta_integracion": "docs/rex_profiles/gameplay_recovery/INTEGRATION_PROPOSAL.md",
+        "dados": "data/rex_profiles/gameplay_recovery/"
+      },
+      "byor": "a prova real usa ROM do template autoral reference_platformer compilada co pipeline canónico; cero ROM comercial; o core Libretro actua como oráculo independente sobre esa imaxe propia"
+    },
+    {
       "nome": "rex-addressing",
       "manifesto": "crates/rex-addressing/Cargo.toml",
       "descricao": "Perfis de endereçamento MD linear / MD SSF2 / SNES LoROM / HiROM / ExHiROM (frente A): leitura com limites, erros estruturados e escritas puras. O produto xa a consume: src-tauri/Cargo.toml ten dependencia por path e o adaptador src-tauri/src/tools/reverse/decomp/rex_addressing.rs publica a lectura con snapshot fixo a través do comando Tauri rex_addressing_read_snapshot. Exposto: perfis md-linear e md-ssf2, só lectura. Non exposto: lectura con transicións de banco (read_sequence), escritas, os tres perfis SNES (a fronteira de identidade do produto só da fe en imaxes Mega Drive).",
