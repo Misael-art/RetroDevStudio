@@ -14,8 +14,11 @@ função inteira e não se aplica a Sonic nem a ROM comercial nesta versão.
 | nomes de endereços (metadados, ex.: símbolos ELF) | não | **somente rótulos** (`address_label`); nunca entram na elevação |
 
 O caminho de recuperação não lê fonte C, AST, grafo autoral nem resultado esperado.
-`scan_guarded_candidates` é uma varredura estrutural da forma com guarda: produz
-**candidatos**, não prova de uso em gameplay.
+`locate` é uma varredura estrutural da forma com guarda. Ela devolve **candidatos**
+(que elevam no perfil) e **quase-casos** (mesma abertura `BTST ; BEQ`, recusados na
+elevação, com o motivo), não prova de uso em gameplay. `locate_unique` exige exatamente
+um candidato: com zero ou mais de um, recusa listando o que achou. Nunca escolhe a
+primeira ocorrência. `scan_guarded_candidates` = `locate(..).candidates`.
 
 ## Subconjunto M68000 aceito (fechado)
 
@@ -45,6 +48,9 @@ valor não nulo). Comparação **assinada de 32 bits**; `K` é o `MOVEQ` estendi
 
 ## Partes não compreendidas (explícitas)
 
+- Equivalência observada na WRAM após quadros completos: inclui o callee e o resto do
+  jogo. A alegação cobre só contador e estado, cujos escritores absolutos estão dentro
+  da região.
 - `JSR T` é **opaco**: alvo e argumentos são registrados (`rom_external_call`,
   `understood: false`); o corpo não é recuperado; D0/D1/A0/A1/CCR passam a
   desconhecidos após a chamada (ABI m68k-elf-gcc).
@@ -76,13 +82,27 @@ estratégia de crescimento; não se procura espaço livre nem se ajustam ponteir
 ## Reconstrução (dois caminhos, verificados — não presumidos — iguais)
 
 - `patch_threshold`: reescreve só o byte imediato do `MOVEQ`.
-- `regenerate_from_graph`: remonta todas as instruções do grafo nos offsets originais.
+- `regenerate_from_graph`: **emite a região a partir da regra semântica** (`emit::emit_region`).
+  - Operandos: vêm dos campos da `GateRule` do grafo aberto (bit da guarda, endereço do
+    contador, passo, limiar editado, operador/polaridade, valores e endereço de estado,
+    alvo e argumentos da chamada, saída).
+  - Do registro mapeado vêm só o **layout**: o offset de cada instrução e o tamanho `.S`/`.W`
+    de cada desvio.
+  - Da ROM-base não vem nenhum byte da região. Ela só fornece os bytes de fora da região,
+    preservados e verificados.
+  - `regeneration_plan` recusa se a semântica sem edição não reproduzir exatamente os bytes
+    mapeados, se algum offset ficar sem emissão ou se o tipo de uma instrução mudar.
+  - A ligação grafo ↔ regra é garantida na reabertura: `open_graph` reeleva e exige que os
+    nós salvos coincidam com os reconstruídos.
 
 Ambos exigem SHA-256 da base igual ao esperado **e** ao registrado no grafo, e
 bytes da região iguais aos mapeados; recusam mudança de tamanho; verificam que
 nenhum byte fora das faixas autorizadas mudou. O checksum do cabeçalho
 (`0x18E`) é atualizado como faixa autorizada declarada **somente** se a base já
-tinha checksum válido.
+tinha checksum válido **pela soma MD aditiva**. ROMs do pipeline canônico usam o checksum
+SGDK/sizebnd (XOR), que esta versão **não** atualiza. A saída do patch fica com checksum SGDK
+desatualizado e o `inspect_rom_mastering` do produto reporta `mismatch`. A mudança de política
+foi proposta ao integrador e não foi aplicada.
 
 ## Equivalência
 

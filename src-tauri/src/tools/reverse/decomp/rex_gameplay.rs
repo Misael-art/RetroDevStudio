@@ -262,6 +262,34 @@ mod tests {
         target["params"][key] = json!(value);
     }
 
+    /// Variante retida deslocada: cadeia autoral extra antes de `update_score`, com
+    /// variaveis `a_shift_*` (ordenadas antes de goal_open/reference_score). Desloca o
+    /// codigo da rotina e os enderecos de RAM sem mudar a regra dentro do perfil.
+    fn add_shift_chain(graph: &mut Value, prefix: &str) {
+        let nodes = graph["nodes"].as_array_mut().expect("nodes");
+        let at = nodes
+            .iter()
+            .position(|n| n["id"] == "update_score")
+            .expect("update_score");
+        let mut extra = vec![
+            json!({"id": "shift_update", "type": "event_update", "label": "Shift Update", "x": 0, "y": 980, "params": {}}),
+        ];
+        for i in 0..6 {
+            extra.push(json!({"id": format!("shift_set_{i}"), "type": "var_set", "label": format!("Shift {i}"), "x": 180 + 180 * i, "y": 980,
+                "params": {"var_name": format!("{prefix}_shift_{i}"), "value": 17 + i}}));
+        }
+        for (k, node) in extra.into_iter().enumerate() {
+            nodes.insert(at + k, node);
+        }
+        let edges = graph["edges"].as_array_mut().expect("edges");
+        let mut from = "shift_update".to_string();
+        for i in 0..6 {
+            let to = format!("shift_set_{i}");
+            edges.push(json!({"id": format!("shift_edge_{i}"), "fromNode": from, "fromPort": "exec", "toNode": to, "toPort": "exec"}));
+            from = to;
+        }
+    }
+
     /// WRAM do core: palavras de 16 bits em ordem nativa (LE) -> big-endian 68K.
     fn read_long(emu: &EmulatorCore, addr: u32) -> u32 {
         let (data, _) = emu
@@ -382,6 +410,23 @@ mod tests {
             set_node_param(g, "score_add", "b", 3);
             set_node_param(g, "score_threshold", "b", 37);
         });
+        // Variante retida deslocada (preparada DEPOIS do congelamento do reconhecedor,
+        // ver data/rex_profiles/gameplay_recovery/evidence/2026-09-28-rodada2/FREEZE.md).
+        let shifted = build_variant(&base, "gate-shifted", |g| {
+            add_shift_chain(g, "a");
+            set_node_param(g, "score_add", "b", 2);
+            set_node_param(g, "score_threshold", "b", 20);
+        });
+        fs::copy(&shifted.rom, out.join("shifted-step2-t20.rom")).unwrap();
+        // 2a variante deslocada (mesmo reconhecedor congelado): a 1a so deslocou codigo e
+        // goal_open; o GCC alocou `a_shift_*` depois do contador. Nomes `z_shift_*`,
+        // passo 4, limiar 30.
+        let shifted_z = build_variant(&base, "gate-shifted-z", |g| {
+            add_shift_chain(g, "z");
+            set_node_param(g, "score_add", "b", 4);
+            set_node_param(g, "score_threshold", "b", 30);
+        });
+        fs::copy(&shifted_z.rom, out.join("shifted-z-step4-t30.rom")).unwrap();
         fs::copy(&original.rom, out.join("original-t6.rom")).unwrap();
         fs::copy(&sgdk12.rom, out.join("sgdk-rebuilt-t12.rom")).unwrap();
         fs::copy(&blind.rom, out.join("blind-step3-t37.rom")).unwrap();
@@ -391,16 +436,17 @@ mod tests {
                 "original_t6": original.sha256,
                 "sgdk_rebuilt_t12": sgdk12.sha256,
                 "blind_step3_t37": blind.sha256,
+                "shifted_step2_t20": shifted.sha256,
+                "shifted_z_step4_t30": shifted_z.sha256,
             }),
         );
 
         // 2. Localizacao: varredura estrutural (sem simbolos), depois validada por simbolos.
         let score = original.symbols["logic_var_reference_score"];
         let open = original.symbols["logic_var_goal_open"];
-        let candidates = rex_gameplay::scan_guarded_candidates(&original.bytes);
-        println!("candidatos (original): {candidates:?}");
-        assert_eq!(candidates.len(), 1, "exatamente um candidato com guarda");
-        let cand = candidates[0].clone();
+        // O produto nunca escolhe a primeira ocorrencia: `locate_unique` recusa 0 ou >1.
+        let cand = rex_gameplay::locate_unique(&original.bytes).expect("candidato unico");
+        println!("candidato (original): {cand:?}");
         assert_eq!(cand.counter_addr, score, "contador validado pelo simbolo");
         let hints = Hints {
             address_names: [
@@ -464,46 +510,86 @@ mod tests {
             }),
         );
 
-        // 3. Variante cega.
-        let blind_cands = rex_gameplay::scan_guarded_candidates(&blind.bytes);
-        println!("candidatos (cega): {blind_cands:?}");
-        assert_eq!(blind_cands.len(), 1);
-        let blind_rec = rex_gameplay::recover(
-            &blind.bytes,
-            blind_cands[0].entry,
-            &[blind_cands[0].exit],
-            &Hints::default(),
-        )
-        .expect("blind recover");
-        let blind_step = blind_rec.rule.counter_add.as_ref().map(|a| a.step);
-        assert_eq!(
-            (blind_step, blind_rec.rule.compare.threshold),
-            (Some(3), 37),
-            "variante cega: passo e limiar recuperados batem com a fonte (validacao)"
-        );
-        assert_eq!(
-            blind_rec.rule.compare.counter_addr,
-            blind.symbols["logic_var_reference_score"]
-        );
-        report.insert(
-            "blind_holdout".into(),
+        // 3. Variantes retidas: cega (constantes) e deslocada (codigo + RAM + constantes).
+        //    Esperados vem da fonte/simbolos, so para validacao depois da recuperacao.
+        let mut holdouts = serde_json::Map::new();
+        let mut holdout_rules = Vec::new();
+        for (label, built, step, threshold) in [
+            ("blind_step3_t37", &blind, 3u8, 37i64),
+            ("shifted_step2_t20", &shifted, 2u8, 20i64),
+            ("shifted_z_step4_t30", &shifted_z, 4u8, 30i64),
+        ] {
+            let location = rex_gameplay::locate(&built.bytes);
+            let cand = rex_gameplay::locate_unique(&built.bytes)
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
+            let rec =
+                rex_gameplay::recover(&built.bytes, cand.entry, &[cand.exit], &Hints::default())
+                    .unwrap_or_else(|e| panic!("{label}: {e}"));
+            let got_step = rec.rule.counter_add.as_ref().map(|a| a.step);
+            let (score_sym, open_sym) = (
+                built.symbols["logic_var_reference_score"],
+                built.symbols["logic_var_goal_open"],
+            );
+            let ok = got_step == Some(step)
+                && rec.rule.compare.threshold == threshold
+                && rec.rule.compare.counter_addr == score_sym
+                && rec.rule.set.state_addr == open_sym;
+            holdouts.insert(label.into(), json!({
+                "entry": format!("0x{:06X}", cand.entry), "exit": format!("0x{:06X}", cand.exit),
+                "blocks": rec.region.blocks,
+                "step": got_step, "threshold": rec.rule.compare.threshold,
+                "operator": rec.rule.compare.operator.symbol(),
+                "counter_addr": format!("0x{:08X}", rec.rule.compare.counter_addr),
+                "state_addr": format!("0x{:08X}", rec.rule.set.state_addr),
+                "rejected_near_misses": location.rejected.len(),
+                "matches_source": ok,
+            }));
+            println!("{label}: {}", holdouts[label]);
+            assert!(ok, "{label}: recuperacao diverge da fonte (validacao)");
+            holdout_rules.push((label, built, rec.rule.clone()));
+        }
+        let displacement = |r: &rex_gameplay::lift::GateRule| {
             json!({
-                "entry": format!("0x{:06X}", blind_cands[0].entry),
-                "exit": format!("0x{:06X}", blind_cands[0].exit),
-                "step": blind_step, "threshold": blind_rec.rule.compare.threshold,
-                "operator": blind_rec.rule.compare.operator.symbol(),
-            }),
+                "entry_delta": r.guard.as_ref().unwrap().at[0] as i64 - cand.entry as i64,
+                "counter_addr_delta": r.compare.counter_addr as i64 - score as i64,
+                "state_addr_delta": r.set.state_addr as i64 - open as i64,
+            })
+        };
+        let (first, second) = (
+            displacement(&holdout_rules[1].2),
+            displacement(&holdout_rules[2].2),
         );
+        println!("deslocamento a_: {first}; z_: {second}");
+        holdouts.insert("displacement_shifted_a".into(), first.clone());
+        holdouts.insert("displacement_shifted_z".into(), second.clone());
+        assert_ne!(first["entry_delta"], json!(0), "a_: codigo nao deslocou");
+        // Demonstrado as cegas: codigo e goal_open deslocados. O endereco do contador
+        // NAO mudou em nenhuma das duas variantes (alocacao do GCC); essa alegacao fica
+        // fora desta prova e registrada como nao demonstrada.
+        for d in [&first, &second] {
+            assert_ne!(d["entry_delta"], json!(0), "codigo nao deslocou");
+            assert_ne!(d["state_addr_delta"], json!(0), "goal_open nao deslocou");
+        }
+        holdouts.insert(
+            "counter_ram_displacement".into(),
+            json!({"demonstrated_blind": first["counter_addr_delta"] != json!(0) || second["counter_addr_delta"] != json!(0),
+                   "note": "as duas variantes deslocadas mantiveram logic_var_reference_score em 0xE0FF0054 (layout .bss do GCC); so a fixture nao cega two_passages cobre outro endereco de contador"}),
+        );
+        report.insert("holdouts".into(), Value::Object(holdouts));
+        report.insert("recognizer_frozen".into(), json!({
+            "commit": "4163c47d6621283937bd1f91c8a12f42a65a29c4",
+            "src_tree": "9af241b325bb09d037a961da4620397680468020",
+            "record": "data/rex_profiles/gameplay_recovery/evidence/2026-09-28-rodada2/FREEZE.md",
+        }));
 
         let mut emu = EmulatorCore::new(None);
 
         // 4. Equivalencia contra o oraculo independente: a ROM original executada pelo core,
         //    com estado injetado. Latencia de input medida num controle.
         let mut equivalence = Vec::new();
-        for (label, built, recovery_rule) in [
-            ("original_t6", &original, rule.clone()),
-            ("blind_step3_t37", &blind, blind_rec.rule.clone()),
-        ] {
+        let mut equivalence_roms = vec![("original_t6", &original, rule.clone())];
+        equivalence_roms.extend(holdout_rules.iter().cloned());
+        for (label, built, recovery_rule) in equivalence_roms {
             let counter = recovery_rule.compare.counter_addr;
             let state = recovery_rule.set.state_addr;
             boot(&mut emu, &built.rom);
@@ -562,6 +648,12 @@ mod tests {
             println!("{label}: latencia={latency} casos={passed}");
         }
         report.insert("equivalence_core_oracle".into(), Value::Array(equivalence));
+        report.insert("equivalence_observation_point".into(), json!({
+            "where": "WRAM lida apos `latencia` quadros completos de run_frame (nao na saida da regiao)",
+            "includes": "todo o codigo do quadro: a regiao, o callee opaco (JSR) e o restante do jogo",
+            "claim_limited_to": "valores de contador e goal_open; os unicos escritores absolutos desses enderecos estao dentro da regiao (absolute_writers); escritas indiretas nao sao cobertas",
+            "not_claimed": "efeitos do callee, registradores e CCR na saida, VDP/som",
+        }));
 
         // 5. Edicao -> dois caminhos -> comparacao com a recompilacao SGDK.
         let edited_graph = edit_gameplay_threshold(&recovered.graph_json, 12).expect("edit");
@@ -605,6 +697,30 @@ mod tests {
                 original.bytes[0x18E],
                 original.bytes[0x18F],
             ]));
+        // Item 5: checksum pelo pipeline real (masterizacao do build_orch usa sgdk_checksum).
+        let stored = |b: &[u8]| u16::from_be_bytes([b[0x18E], b[0x18F]]);
+        let sgdk = crate::core::rom_mastering::sgdk_checksum;
+        let recomputed_equals_sgdk = {
+            let mut fixed = patched_bytes.clone();
+            if let Some(v) = sgdk(&fixed) {
+                fixed[0x18E..0x190].copy_from_slice(&v.to_be_bytes());
+            }
+            fixed == sgdk12.bytes
+        };
+        let checksum_record = json!({
+            "algorithm_pipeline": "SGDK sizebnd: XOR de todas as palavras da ROM exceto 0x18E (core::rom_mastering::sgdk_checksum, aplicado por build_orch apos o header do projeto)",
+            "algorithm_patcher": "soma MD aditiva de 0x200 ao fim; so reescrita se a base a tiver valida (contrato atual)",
+            "original": {"stored": format!("{:04X}", stored(&original.bytes)), "sgdk_xor": sgdk(&original.bytes).map(|v| format!("{v:04X}")), "md_sum": rex_gameplay::patch::md_checksum(&original.bytes).map(|v| format!("{v:04X}"))},
+            "patched": {"stored": format!("{:04X}", stored(&patched_bytes)), "sgdk_xor": sgdk(&patched_bytes).map(|v| format!("{v:04X}")), "md_sum": rex_gameplay::patch::md_checksum(&patched_bytes).map(|v| format!("{v:04X}"))},
+            "sgdk_rebuild_t12": {"stored": format!("{:04X}", stored(&sgdk12.bytes)), "sgdk_xor": sgdk(&sgdk12.bytes).map(|v| format!("{v:04X}"))},
+            "patched_mastering_status": crate::core::rom_mastering::inspect_rom_mastering(&out.join("patched-t12.rom")).map(|r| r.checksum.status).unwrap_or_else(|e| e),
+            "original_mastering_status": crate::core::rom_mastering::inspect_rom_mastering(&original.rom).map(|r| r.checksum.status).unwrap_or_else(|e| e),
+            "patched_with_sgdk_xor_recomputed_equals_sgdk_rebuild": recomputed_equals_sgdk,
+            "policy": "inalterada; atualizacao do checksum SGDK proposta ao integrador",
+            "hardware_note": "o core Libretro nao valida este campo; execucao no core nao prova compatibilidade com hardware",
+        });
+        println!("checksum: {checksum_record}");
+        report.insert("checksum".into(), checksum_record);
         let noop = rebuild_gameplay_rom(
             &original.rom,
             &original.sha256,
@@ -729,6 +845,23 @@ mod tests {
             "no mesmo quadro, original deve passar a barreira enquanto editada esta bloqueada"
         );
         report.insert("physical_diverging_frames".into(), json!(diverging));
+        // Item 6: controles planejados antes da 1a execucao (resultado registrado como
+        // veio, inclusive o que falhou) x observacoes que surgiram no diagnostico.
+        let original_x21 = orig_frames[20]["player_x"].as_i64().unwrap();
+        report.insert("controls_planned_before_execution".into(), json!([
+            {"id": "open_score_original", "expected": 6, "observed": o, "pass": o == Some(6)},
+            {"id": "open_score_edited", "expected": 12, "observed": p, "pass": p == Some(12)},
+            {"id": "noop_equals_original", "pass": runs["noop_t6"]["frames"] == runs["original_t6"]["frames"]},
+            {"id": "edited_differs_from_original (resposta antiga)", "pass": runs["patched_t12"]["frames"] != runs["original_t6"]["frames"]},
+            {"id": "edited_blocked_before_12 (x+14<=50)", "observed_max_x": edited_blocked, "pass": edited_blocked + 14 <= 50},
+            {"id": "original_crossed_x_gt_66_at_frame_21", "observed_x": original_x21, "pass": original_x21 > 66,
+             "note": "limiar numerico escolhido sem base na 1a execucao; falhou (x=66) e NAO e mais usado como gate"},
+        ]));
+        report.insert("diagnostic_observations".into(), json!([
+            {"id": "per_frame_divergence", "criterion": "mesmo quadro: original x+14>50 e editada x+14<=50", "frames": diverging,
+             "origin": "introduzido apos a 1a captura para substituir o limiar x>66; a previsao causal (limiar -> goal_open -> bloqueio) nao mudou"},
+            {"id": "checksum_0x18F", "origin": "surgiu na 1a execucao; ver `checksum`"},
+        ]));
         report.insert("effect_runs".into(), Value::Object(runs));
         report.insert(
             "layer".into(),
