@@ -226,11 +226,16 @@ Resolto **estreitando a afirmación**, non cambiando comportamento:
    `Unsupported` moito antes de que `cursor` poida pasar de `0xFFFFFFFF`. Píñase
    como defensiva para que ninguén a tome por comportamento observable:
    `a_rama_de_esesgo_do_barramento_en_md_non_e_alcanzable`.
-3. Compromiso de deseño para a capa de recursos (etapa 2, aínda non implementada
-   neste commit): **non** herda a ambigüidade. Valida a fronteira do bus ela
-   mesma antes de despachar a calquera perfil, así que os seus consumidores ven
-   un só canal de erro. Se esa capa chega e o compromiso non se cumpre, este
-   parágrafo queda como falla da rolda.
+3. Compromiso de deseño para a capa de recursos: **non** herda a ambigüidade.
+   `src/resource.rs` comproba `length < 1` e `cpu_address + length - 1 > 0xFFFFFF`
+   ela mesma, antes de despachar a calquera perfil, así que os seus consumidores
+   ven **un só canal de erro** (`InvalidRange`, con `segments` baleiro). O
+   compromiso cúmprese e píñase en
+   `tests/resource_reader.rs::a_fronteira_do_barramento_recusase_igual_en_md_e_en_snes`,
+   coa mesma forma de caso nas dúas familias (`0xFFF0 + 0x20`). Non se endureceron
+   os perfis MD para chegar a ese acordo: a diverxencia de §7 segue viva no nivel
+   de tradución; quen queira canal único chama á capa de recursos, non a
+   `md_linear::read` / `md_ssf2::read`.
 
 Un endurecemento futuro dos perfis MD (pre-check como os SNES) é posible e
 quebraría *ese* test de auditoría, non os vectores pinados: ningún caso de
@@ -250,6 +255,12 @@ decisión do integrador, non se aplica aquí unilateralmente.
 Recontos executados nesta rolda (non de memoria): 565 entradas nos vectores
 pinados (105/133/106/103/118 por perfil, incluídas as 60 mostras de inversión
 verificadas de cada un), 151 casos de tradución dos cales 123 graduados contra a
-referencia independente, **81 tests rápidos verdes, 0 fallos, 9 `#[ignore]`**
-(8 BYOR + 1 barreiro exhaustivo). A clasificación enteira é **Experimental**: non
-se promotiona ningunha palabra do roadmap.
+referencia independente, **108 tests verdes, 0 fallos, 9 `#[ignore]`**
+(8 BYOR + 1 barreiro exhaustivo). Os 108 descomponse sen maxia: os 81 da rolda
+anterior + 15 tests novos da capa de recursos
+(`tests/resource_reader.rs`) + 12 executacións da autocomprobación de que a nova
+fixture `tests/support/banked.rs` non é dexenerada, que Rust executa unha vez por
+cada un dos 12 binarios de test de integración que a empregan. Iso non é
+evidencia duplicada: é a mesma comprobación de non-dexeneración en 12 contextos
+distintos, e a súa repetición hai que contala como tal. A clasificación enteira
+é **Experimental**: non se promotiona ningunha palabra do roadmap.

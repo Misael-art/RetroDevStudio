@@ -113,6 +113,7 @@ mod md_common;
 pub mod md_linear;
 pub mod md_ssf2;
 pub mod region;
+pub mod resource;
 mod snes_common;
 pub mod snes_exhirom;
 pub mod snes_hirom;
