@@ -211,3 +211,186 @@ E despois de `git checkout -- src/snes_exhirom.rs`, co `git diff` baleiro:
 76 passed; 0 failed; 9 ignored   (doce binarios: 0 + 8 ignored + 7 + 5 + 1 ignored
                                   + 6 + 13 + 15 + 13 + 11 + 2 + 4 doc-tests)
 ```
+
+---
+
+# Rolda da capa de recursos (2026-09-28)
+
+Os seis controles anteriores mutuaban os **perfís**. Esta rolda engadiu a capa de
+lectura de recursos (`src/resource.rs`) e a súa batería, e o que se pide agora é
+que a capa **sexa discriminativa por si mesma**: que un consumidor externo, só coa
+API entregada e a procedencia devolta, note un banco equivocado, unha fronteira
+equivocada ou unha procedencia equivocada. Por eso as tres mutacións requeridas
+(R2, R3, R4) aplícanse ao `src/` e mídese canto cae das baterías de recursos, non
+só dos vectores pinados.
+
+Árbore destas execucións: `13c48ad` máis `tests/no_panic_sweep.rs` sen commitear.
+Batería nesa árbore: **127 passed, 0 failed, 9 ignored** (16 filas de resultado).
+
+## Índice da rolda
+
+| ID | Simula | Sitio mutado | Detección |
+|----|--------|--------------|-----------|
+| R1 | o invariante tras os `.expect()` é falso | `src/md_linear.rs:33` (`checked_rom_size(...)?` → `.unwrap_or(0x1_0000)`) | `tests/no_panic_sweep.rs` (3 varreduras FAILED) |
+| R2 | banco equivocado (off-by-one na resolución de xanela) | `src/md_ssf2.rs:117` (`bank_value(window, …)` → `bank_value(window + 1, …)`) | 4 + 5 + 3 probes en tres binarios |
+| R3 | fronteira de xanela equivocada (o corredor non corta) | `src/md_ssf2.rs:303` (`(window + 1) * WINDOW_SIZE` → `(window + 2) * …`) | 1 + 2 + 2 probes |
+| R4 | procedencia que mente (offset físico = enderezo lóxico) | `src/resource.rs:479` (`rom_offset: offset` → `rom_offset: cursor`) | 7 + 4 probes |
+
+Cada mutación aplicouse **nun só sitio**, e tras cada execución `git diff --stat
+src/` volveu a estar baleiro (`git checkout -- <ficheiro>`). Ningunha chegou a
+ningún commit.
+
+## R1 — varredura adversaria: que o invariante dos 15 `.expect()` se prove
+
+Este é o `achado_de_revisao` que o integrador devolveu (`crates/registry.json`):
+os `.expect()` están xustificados pero nada no gate os probaba. O control é o
+mínimo: afrouxar a validación que xustifica catro deles.
+
+```rust
+// de
+let size = state.checked_rom_size(PROFILE_ID)?;
+// para
+let size = state.checked_rom_size(PROFILE_ID).unwrap_or(0x1_0000);
+```
+
+`cargo test --offline --test no_panic_sweep` (log de 4 660 281 liñas en
+`/tmp/rex-a2-m1b.log`; extráitanse as dúas filas de resumo):
+
+```
+[md-linear] 1725576 chamadas varridas; 1553216 pánico(s); primeiros: ["md-linear :: rom_size=-0 translate 0x0 → validate_state xa aceptou o tamaño: AddressingError { code: Unsupported, detail: \"perfil md-linear: mapper_state.rom_size debe ser un enteiro >= 0, atopado Int(0)\" }", …]
+[recursos] 1720 chamadas varridas; 3 pánico(s); primeiros: ["recursos :: boa / md-linear → validate_state xa aceptou o tamaño: AddressingError { code: Unsupported, detail: \"perfil md-linear: mapper_state sen rom_size (enteiro >= 0)\" }", …]
+
+test result: FAILED. 5 passed; 3 failed; 0 ignored
+```
+
+Caen `md_linear_nin_un_panico_con_entradas_adversarias`,
+`a_validacion_md_caracteriza_o_dominio_dos_expect` e
+`a_capa_de_recursos_non_panic_ante_atestacion_e_limites_hostis`. Non é un fallo
+por coincidencia de números: o payload do pánico **é a frase que xustifica o
+invariante** (`validate_state xa aceptou o tamaño`), que en `src/md_linear.rs` só
+aparece nas catro liñas onde viven os `.expect()` (71, 95, 140, 172). Coa
+varredura na súa forma boa, o mesmo comando dá `8 passed; 0 failed`.
+
+### Endurecemento atopado ao montar R1: o gancho global de pánico
+
+A primeira versión do detector capturaba a **localización** `ficheiro:liña` cun
+`panic::set_hook` global, serializado cun mutex entre as varreduras. Funcionou
+repetidas veces en `--test no_panic_sweep` illado, pero **nunha execución de
+`cargo test --offline` completo fallou `o_detector_ve_un_panico_inxectado`**.
+Causa: `set_hook` é processual e libtest instala/restaura o seu propio gancho
+**por fío** para capturar saída; outro fío que remata a súa proba restaura o
+anterior por riba do que a varredura tiña posto. A detección (que é o invariante)
+non se rompe —`catch_unwind` sempre as capturou— pero a localización si quedaba
+sen estar dispoñible, e o output do fallo era ilexible porque a mensaxe acababa no
+buffer doutro fío.
+
+Solución aplicada: bórrase o gancho e lése o **payload** do `catch_unwind`
+(`fn mensaxe`, en `tests/no_panic_sweep.rs`). Non é un paso atrás: para os
+`.expect()` de produción o payload é a frase do invariante, e cada chamada xa leva
+a súa etiqueta reconstruible (perfil, forma do estado, enderezo, lonxitude,
+imaxe). Como efecto lateral as oito probes deixan de serializarse e o binario
+baixa de ~0.49 s a ~0.16 s.
+
+Verificación da estabilidade tras o cambio (mesma árbore, comando idéntico ao que
+fallou):
+
+```
+$ for i in 1 2 3; do CARGO_TARGET_DIR=/tmp/rex-a2-target cargo test --offline; done
+rolda 1: 16 filas de resultado, pasados=127 fallos=0 ignorados=9   (TEST=0)
+rolda 2: 16 filas de resultado, pasados=127 fallos=0 ignorados=9   (TEST=0)
+rolda 3: 16 filas de resultado, pasados=127 fallos=0 ignorados=9   (TEST=0)
+```
+
+Rexistro honesto do límite: unha interacción así non se proba que desapareceu con
+tres roldas verdes; o que se pode afirmar é que o mecanismo xa **non depende** de
+ningún estado global, así que non pode volver manifestarse do mesmo xeito.
+
+## R2 — banco equivocado: un erro silencioso que a capa de recursos ve
+
+`window_base` pide o banco da xanela **seguinte**. É a mutación máis parecida a un
+bug real de mapper: non hai erro, non hai panico, só bytes que non son.
+
+```
+tests/md_ssf2_rules.rs         →  4 failed / 14  (banco_fora_do_fin…, inversion_con_bancos…,
+                                                   reescrita_substitue_o_valor_do_banco,
+                                                   lectura_corta_por_xanela…)
+tests/resource_fixtures.rs     →  5 failed / 11
+tests/resource_reader.rs       →  3 failed / 15
+```
+
+Salientable porque a capa de recursos é a única superficie que consome un integrador externo:
+
+```
+assertion `left == right` failed: md-ssf2-4mb-xanela1-banco5: banco 5 na xanela 1 => base (5 and 7) shl 19
+  left: [(524288, 65536, 524288)]
+ right: [(524288, 65536, 2621440)]
+
+assertion `left == right` failed: só a xanela 3 se remapea
+  left: [0, 524288, 1048576, 1572864, 2097152, 2621440, 3145728, 3670016]
+ right: [0, 524288, 1048576, 1048576, 2097152, 2621440, 3145728, 3670016]
+```
+
+O primeiro é a tripla `(enderezo, lonxitude, offset_físico)` que a fixture deriva
+a man das especificacións e que o motor de xanelas declarativas confirma por
+separado; o segundo é a propiedade de que escribir un banco **non mova as outras
+sete xanelas**. `o_mesmo_enderezo_loxico_dá_bytes_distintos_segundo_o_estado` tamén
+cae, así que a recusa detecta o banco malo **polos bytes**, non pola estrutura.
+
+## R3 — fronteira equivocada: o corredor que non corta na xanela
+
+`(window + 1) * WINDOW_SIZE` → `(window + 2) * WINDOW_SIZE`: a lectura segue coa
+base da xanela actual máis alá da súa fronteira.
+
+```
+tests/resource_reader.rs:361 →
+assertion `left == right` failed: [PhysicalSegment { index: 0, cpu_address: 524280, cpu_len: 524296,
+rom_offset: 524280, … }, PhysicalSegment { index: 1, cpu_address: 1048576, cpu_len: 524544, … }]
+  left: 2
+```
+
+Léase `cpu_len: 524296`: un segmento que **proclama 524 296 bytes**, máis do que mide unha
+xanela enteira (524 288). Un consumidor que só lea a procedencia (sen tocar os bytes) xa ve que
+algo está roto, que é exactamente o criterio final da rolda. Cae ademais en
+`md_ssf2_rules` (1/14), `resource_fixtures` (2/11, incluída
+`md-ssf2-4mb-porta-xanela-0-1: un segmento por xanela, aínda con bases contiguas`)
+e `resource_reader` (2/15, co límite de segmentos).
+
+## R4 — procedencia que mente: bytes ben, orixe mal
+
+`rom_offset: offset` → `rom_offset: cursor` na construción do `PhysicalSegment`
+(`src/resource.rs:479`). Os bytes devoltos son **os correctos**; o que minte é a
+procedencia. Ningunha comparación de contido pode detectalo: só as probes que
+reconstrúen a saída desde os segmentos, e as que afirman offsets concretos.
+
+```
+tests/resource_fixtures.rs →  7 failed / 11
+assertion `left == right` failed: md-ssf2-4mb-xanela1-banco5: banco 5 na xanela 1 => base (5 and 7) shl 19
+  left: [(524288, 65536, 524288)]
+tests/resource_reader.rs   →  4 failed / 15
+assertion `left == right` failed: dous bancos remapeados á mesma base son dous segmentos distintos
+```
+
+Ademais de `a_procedencia_reconstrue_a_saida_byte_a_byte`, caen
+`ningunha_lectura_devolve_parciais_como_exitos` e
+`secuencia_de_bancos_e_unha_operacion_distinta`, e dúas probes que non miran a
+procedencia en absoluto (`os_alias_acada_os_mesmos_bytes…`, `exhirom_fóra_do_contrato…`)
+porque comparan o `rom_offset` contra o oráculo. É o control máis incómodo dos
+catro: amosa que un adaptador que só devolva `bytes` pola IPC ocultaría este defecto
+completamente, e é a razón práctica de que `ADAPTACION.md` esixa `bytes_sha256`
+**e** a lista de segmentos no DTO.
+
+## Como repetir calquera deles
+
+```bash
+cd /home/misael/RDS-REX-A2-RUST-ADDR/scripts/rex_profiles/addressing_runtime/rex-addressing
+# R4: que a procedencia mintan
+perl -0pi -e 's/rom_offset: offset,/rom_offset: cursor,/' src/resource.rs
+CARGO_TARGET_DIR=/tmp/rex-a2-target cargo test --offline --test resource_fixtures --test resource_reader
+git checkout -- src/resource.rs
+CARGO_TARGET_DIR=/tmp/rex-a2-target cargo test --offline   # → 127/0/9
+```
+
+Para R2 e R3 o mesmo patrón con `bank_value(window, state)` → `bank_value(window + 1, state)`
+e `(window + 1) * u64::from(WINDOW_SIZE)` → `(window + 2) * …`, en `src/md_ssf2.rs`.
+R1 require o binario de varredura: `cargo test --offline --test no_panic_sweep`.
+

@@ -255,11 +255,14 @@ decisión do integrador, non se aplica aquí unilateralmente.
 Recontos feitos executando (non de memoria): 565 entradas nos vectores
 pinados (105/133/106/103/118 por perfil, incluídas as 60 mostras de inversión
 verificadas de cada un), 151 casos de tradución dos cales 123 graduados contra a
-referencia independente, **119 tests verdes, 0 fallos, 9 `#[ignore]`**
-(8 BYOR + 1 barrido exhaustivo).
+referencia independente, **127 tests verdes, 0 fallos, 9 `#[ignore]`**
+(8 BYOR + 1 barrido exhaustivo). Recontado sobre a árbore de `13c48ad` máis a
+varredura adversaria; tres execucións seguidas de `cargo test --offline` deron o
+mesmo resultado (ver `MUTATION-CONTROLS.md`, §"Endurecemento atopado ao montar
+R1").
 
-Reconciliación co log (`cargo test --offline`, 15 targets), para que se poida
-verificar sen fiarse da narración:
+Reconciliación co log (`cargo test --offline`, 16 filas de resultado = 15 targets
++ doc-tests), para que se poida verificar sen fiarse da narración:
 
 | Target | Verdes | Notas |
 |---|---|---|
@@ -269,6 +272,7 @@ verificar sen fiarse da narración:
 | `harness_selfcheck` | 6 | |
 | `inversion` | 1 | + 1 `#[ignore]` (barrido exhaustivo) |
 | `md_linear_rules` / `md_ssf2_rules` | 7 / 14 | |
+| `no_panic_sweep` | 8 | etapa 5: varredura adversaria determinística dos `.expect()` |
 | `read_semantics_audit` | 6 | etapa 1 |
 | `resource_reader` | 15 | etapa 2 (14 propios + autocomprobación) |
 | `resource_fixtures` | 11 | etapa 3 (10 propios + autocomprobación) |
@@ -278,8 +282,9 @@ verificar sen fiarse da narración:
 
 Equivalencia co 81 da rolda anterior: 77 tests xa existentes + 13 execucións da
 autocomprobación de non-degeneración da fixture `tests/support/banked.rs` (unha
-por cada un dos 13 binarios de test de integración que a inclúen) + 14 da capa de
-recursos + 10 da súa batería + 5 doc-tests = **119**. Esas 13 **son** repetición
+por cada un dos 13 binarios de test de integración que a inclúen; `no_panic_sweep`
+é o decimocuarto binario e **non** a inclúe) + 14 da capa de
+recursos + 10 da súa batería + 5 doc-tests + 8 da varredura = **127**. Esas 13 **son** repetición
 dun mesmo check en 13 contextos; contan como evidencia en cada binario pero non
 son 13 probas distintas, e así se declaran. A clasificación enteira é
 **Experimental**: non se promotiona ningunha palabra do roadmap.
