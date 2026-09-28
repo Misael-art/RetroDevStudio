@@ -257,6 +257,8 @@ chamador. A imaxe transmitese como `&[u8]` (non un tipo `RomImage` novo): un
 | 13 | Batería discriminante da capa: 11 lecturas + 12 recusas, tres derivacións e control anti-degeneración | `tests/resource_fixtures.rs` (10 tests propios; 11 executados coa autocomprobación da fixture) |
 | 14 | Exemplo consumidor **fora da app**: informe determinístico, autoverificado e con hash pinábel | `examples/resource_report.rs` (`cargo run --example resource_report`), saída literal e lectura en `EXEMPLO-CONSUMIDOR.md` |
 | 15 | Proposta exacta de adaptación ao produto, **sen aplicar**, con preguntas de asinatura | `ADAPTACION.md` (ruta do `Cargo.toml`, adaptador, bytes normalizados, DTO, IPC, límites e `nao_alega`) |
+| 16 | Varredura adversaria **determinística** (non aleatoria) do invariante tras os 15 `.expect()` de produción: 277 610 chamadas, 0 panics, con chan de chamadas derivado do dominio | `tests/no_panic_sweep.rs` (8 tests: 1 control do detector + 5 varreduras de perfil + caracterización de `validate_state` + capa de recursos con 1 720 chamadas) |
+| 17 | As tres mutacións representativas que pide a rolda (banco / fronteira / procedencia), cada unha con saída literal, revert e `git diff` baleiro | `MUTATION-CONTROLS.md`, §"Rolda da capa de recursos" (R2, R3, R4; R1 é o control da varredura) |
 
 **Desviación rexistrada da propia táboa.** Este contrato anunciaba
 `tests/oracle.rs`, `tests/limits.rs` e `tests/exhaustive.rs` como ficheiros. Non
@@ -265,7 +267,7 @@ existen con eses nomes: a comparación contra a referencia vive dentro de
 viven nos `*_rules.rs` de cada perfil (porque son expectativas derivadas a man da
 sua propia especificación) e o barrido exaustivo vive en `tests/inversion.rs`
 (porque comparte o oráculo de preimage coa proba rápida). Criar os tres
-ficheiros co nomes previstos sería duplicar infrastructure de testes, así que se
+ficheiros co nomes previstos sería duplicar infraestrutura de probas, así que se
 documenta a correspondencia en vez de renomear.
 
 ## 12. Capa de lectura de recursos (`rex_addressing::resource`)

@@ -135,9 +135,9 @@ cargo run --offline --example resource_report  # exemplo consumidor, determinís
 ```
 
 Reconto **medido** nesta rolda (non de memoria; recontable con
-`cargo test --offline 2>&1 | grep 'test result'`): **119 executados, 0 fallos, 9
+`cargo test --offline 2>&1 | grep 'test result'`): **127 executados, 0 fallos, 9
 ignorados** (8 BYOR + preimage exaustivo). Descomposición por target, que suma
-xustamente 119:
+xustamente 127:
 
 | target | executados |
 |---|---|
@@ -148,6 +148,7 @@ xustamente 119:
 | `inversion` | 1 (+1 `#[ignore]`) |
 | `md_linear_rules` | 7 |
 | `md_ssf2_rules` | 14 |
+| `no_panic_sweep` | 8 |
 | `read_semantics_audit` | 6 |
 | `resource_fixtures` | 11 |
 | `resource_reader` | 15 |
@@ -160,12 +161,16 @@ xustamente 119:
 Os targets `resource_fixtures` (11) e `resource_reader` (15) son 10 e 14 tests
 propios **máis** a autocomprobación da fixture compartida. Esa autocomprobación
 (`tests/support/banked.rs`, `a_fixture_non_e_degenerada_incluso_antes_de_lectura`)
-compílase en **13** binarios porque os 13 inclúen `mod support;`, así que os 119
-contan a mesma comprobación 13 veces. Está dito explicitamente en
-`docs/…/CLASSIFICACION.md` §9 para que o reconto non pareza maior do que é.
+compílase en **13** dos 14 binarios de integración porque eses 13 inclúen
+`mod support;`, así que os 127 contan a mesma comprobación 13 veces.
+`no_panic_sweep` é o decimocuarto e **non** a inclúe: os seus 8 probes son propios
+(varredura adversaria determinística; ver `docs/…/MUTATION-CONTROLS.md`, R1). Está
+dito explicitamente en `docs/…/CLASSIFICACION.md` §9 para que o reconto non pareza
+maior do que é.
 
 As dúas baterías caras/dependentes do host van `#[ignore]` e **non** se executan
-coa anterior:
+coa anterior. Executáronse aparte nesta rolda: o preimage exaustivo en 8.22 s
+(release) e as 8 probes BYOR en 0.19 s, ambas verdes.
 
 ```bash
 # Preimage exaustivo: 0x000000-0xffffff por perfil (7 casos), ~9 s en release.
