@@ -76,3 +76,46 @@ O comando Tauri existente `import_mugen_project` (`lib.rs`) chama o mesmo
 
 Não passar de `biblioteca-implementada` / `gates-proprios-aprovados` para a crate. O importador
 continua **Experimental**. Não promover para "fluxo do usuário" antes do E2E pela interface.
+
+---
+
+## 8. Atualização — rodada de interface (commits `fe66639..6d07c39`)
+
+### 8.1 Pedidos do §4 atendidos nesta frente
+
+| Pedido | Feito em | Arquivo |
+|---|---|---|
+| 1. Falha não deixa projeto aparente | `abbdb95` | `src-tauri/src/lib.rs` (**do integrador**; commit isolado): `reserved_dir_origin` + `discard_failed_import` nas duas funções de importação |
+| 2. Aviso honesto | `abbdb95` + `ac65958` | `lib.rs` anexa `mugen_profile::summary_line`; a UI registra o resumo por personagem |
+| 3. Relatório para a UI | `ac65958` | **Sem DTO novo**: a UI lê `assets/mugen/*_import_report.json` pelos comandos existentes `list_project_assets` e `read_project_asset_bytes` |
+
+### 8.2 Arquivos compartilhados tocados nesta rodada (curadoria)
+
+| Arquivo | Mudança |
+|---|---|
+| `src-tauri/src/lib.rs` | limpeza na falha e aviso com resumo (acima) |
+| `src/App.tsx` | estado e abertura do painel após importar com perfil `mugen`/`ikemen_go`; `testId="external-import-confirm"`; automação `setNextExternalImportPath` (substitui só o diálogo nativo) e `mugenCompatibility` no `getState` |
+| `src/core/diagnostics.ts` (+ teste) | causas específicas de falha MUGEN |
+| `scripts/e2e-tauri-build-run.mjs` | cenário `mugen-import` (função isolada + registro + despacho + timeout de bootstrap); commit `6d07c39` isolado |
+| `package.json` | **não alterado**. Sugestão: `"test:e2e:desktop:mugen": "node scripts/e2e-tauri-build-run.mjs --scenario mugen-import"` |
+
+Arquivos novos desta frente:
+- `src/components/common/MugenCompatibilityPanel.tsx` (+ teste);
+- `src/core/mugenCompatibility.ts`.
+
+### 8.3 Pendências para o integrador
+
+1. **Conflito de base.** Um conflito trivial em `src-tauri/Cargo.toml` ao integrar sobre `00f9d29`:
+   manter as duas linhas de path-dep (`rex-gameplay` e `rex-mugen`).
+2. **Inspector.** Para animações com `mugen_frames`, esconder ou marcar como sem efeito o campo
+   "FPS", e expor `frame_durations`/`loop_start` editáveis, com a mesma validação que bloqueia o
+   build (−1 ou 1..255; `loop_start` menor que o número de frames).
+3. **Reabrir o painel.** Ação "Ver compatibilidade MUGEN" no Inspector da entidade importada
+   (o `inspector-imported-context` existente), que abre o mesmo `MugenCompatibilityPanel`.
+4. **Prévia antes de gravar.** `preview_mugen_import` (proposta do §5, passo 2) continua não
+   implementada: hoje o usuário entende as perdas logo **depois** de importar. Como uma falha não
+   deixa projeto, o risco é baixo.
+5. **E2E pelo teclado.** Acrescentar ao cenário `mugen-import` o soco da Probe pelo teclado real
+   (A), com a expectativa da §6.
+6. **Memory Bank.** Proposta de texto em `MEMORY_BANK_PROPOSAL.md` (esta frente não edita o
+   Memory Bank).

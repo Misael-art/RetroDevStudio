@@ -136,3 +136,110 @@ falso.
 | `npm run lint` / `npx tsc --noEmit` | ok |
 | `npm test` | não executado: nenhum arquivo de frontend mudou (`git diff a08c2c6 -- src` vazio) |
 | `npm run host:diagnose` | READY |
+
+---
+
+## 7. Rodada de interface (PR #85): importação MUGEN pela UI
+
+Commits `fe66639..6d07c39` sobre `321a7a9`. Estado de partida conferido:
+- o branch do integrador avançou de `a08c2c6` para `00f9d29` (4 commits da frente de gameplay);
+- uma simulação de merge (`git merge-tree`, sem escrita) acusa **um único conflito**, em
+  `src-tauri/Cargo.toml`: os dois lados acrescentam um path-dep no mesmo ponto, dentro do
+  commit de PROPOSTA; `registry.json` e `Cargo.lock` se mesclam sozinhos;
+- **não foi feito rebase**. Fica registrado para a curadoria.
+
+### 7.1 O que virou produto pela UI
+
+| Capacidade | Como o usuário vê |
+|---|---|
+| Importar personagem MUGEN | Assistente → "Abrir importador" → perfil "MUGEN · Experimental" → nome → "Importar Projeto Externo" |
+| Entender as perdas | **Painel "Compatibilidade da importação MUGEN"** logo após importar: personagem convertido (atlas); totais nas quatro classes em linguagem simples ("Funciona igual", "Funciona com diferença", "Precisa de ajuste seu", "Não foi convertido"); 7 categorias (sprites, animações, comandos, estados, colisões, som, stage), com "Não existe neste pacote" quando não se aplica; "O que muda no jogo" item a item, com consequência, motivo e origem; avisos com a ação sugerida; métricas (indisponível = "-"); relatório técnico bruto recolhível |
+| Resumo no console e no aviso | `[MUGEN] <id> (Experimental): N funcionam igual, N com diferença, N precisam de ajuste seu, N não convertidos (N pontes manuais no grafo)` |
+| Falha sem projeto aparente | a importação recusada remove a pasta que acabou de criar (ou devolve a pasta vazia preexistente ao estado vazio; nunca apaga conteúdo preexistente) |
+| Mensagem de falha honesta | a causa real (caminho fora do pacote, arquivo grande demais, célula acima de 248 px, SFF v2), a ação e "Nenhum projeto foi criado" |
+| Compilar e jogar | Build & Run visível, SGDK oficial, core Genesis Plus GX |
+
+### 7.2 E2E desktop pela interface (`--scenario mugen-import`)
+
+- **Binário testado**: `src-tauri/target-test/debug/retro-dev-studio`, sha256
+  `07b5af2ba3d780676871ce5fc5380e150e732e3f639449942bb430b783448573`, compilado pelo próprio
+  harness a partir do head desta rodada.
+- **Amostra**: `crates/rex-mugen/fixtures/probe`
+
+| Arquivo | sha256 |
+|---|---|
+| def | `4ced8bda…74cc` |
+| air | `e342c02f…2ec6` |
+| cmd | `cb28501b…a285` |
+| cns | `71843724…cf7f` |
+| sff | `f7313b65…e990` |
+
+| Passo (UI visível) | Resultado |
+|---|---|
+| importar pelo assistente | ok; painel abre com sprites/animações/comandos/estados = "Funciona igual", colisões = "Precisa de ajuste seu", som e stage = "Não existe neste pacote"; o preview do personagem carrega; o relatório bruto está presente; o console resume as perdas |
+| Build & Run (1) | ROM `9ac4afc8…d8a4`; no canvas do core, o corpo e o pé do personagem aparecem em (96, 96), com os dois frames do idle observados (19/19 amostras, 0 fora do padrão) |
+| editar x = 140 no Inspector → Salvar | gravado em `scenes/main.json` |
+| reiniciar o app (nova sessão) → reabrir pelo assistente | o Inspector mostra x = 140 |
+| Build & Run (2) | ROM `d95a221c…26d0` (diferente); personagem em (140, 96), idle 15/25; **posição antiga vazia** (0 amostras do personagem) |
+| negativo: pacote com `sprite = ../fora.sff` | a UI mostra "Importação MUGEN recusada por segurança: o pacote aponta para ../fora.sff, fora da pasta do personagem. Nenhum projeto foi criado." e a ação; nenhuma pasta `Mugen_Escape_*` na pasta base; o projeto ativo não muda |
+
+Substituição declarada: **só o diálogo nativo de escolha de pasta** é trocado por
+`setNextExternalImportPath`, como já é feito no `importSgdkProject` da automação. Todo o resto é
+a UI visível.
+
+Evidência: `data/rex_profiles/mugen_sgdk/evidence/2026-09-28-e2e-ui/` (relatório, 6 capturas,
+log, `SHA256SUMS`). O relatório e o log contêm caminhos absolutos do host local.
+
+### 7.3 O que continua só técnico
+
+- As sequências de animação por frame, o flip, o offset, a janela da Clsn1, a edição de
+  **durações** e o comando por botão (soco da Probe; Sentinel; Warden) continuam provados só
+  pela camada técnica (§2), com o core direto.
+- Este E2E pela UI prova a importação, as perdas, o build, o personagem visível com os dois
+  frames do idle e uma edição de **posição** persistida. **Não** exercita o comando pelo
+  teclado nem a edição de durações pela UI.
+
+### 7.4 Perdas que aparecem ao usuário (Probe e Sentinel)
+
+- **Probe**: colisões "Precisa de ajuste seu" (caixas preservadas; golpes não acertam sozinhos).
+- **Sentinel**: todas as quatro classes aparecem:
+  - paleta com diferença (2 px trocados de cor);
+  - blend opaco;
+  - animação com sprite ausente não convertida;
+  - gatilhos `Time`/`&&` e OR não convertidos, cada um como ponte manual;
+  - VelSet não ligado;
+  - estado com animação inexistente.
+
+### 7.5 Gates desta rodada
+
+| Gate | Resultado |
+|---|---|
+| `npm run check:tree` | ok |
+| `npm run lint` / `npx tsc --noEmit` | ok |
+| `npm test` | 80 arquivos passaram (1 saltado); 754 testes passaram, 6 saltados |
+| `cargo fmt --check` (src-tauri e crate) | ok |
+| `cargo clippy -- -D warnings` | ok; crate `--all-targets` ok |
+| `cargo test --lib` | 785 passaram, 0 falharam, 69 ignorados |
+| testes MUGEN com as provas reais | 28/28 |
+| crate `rex-mugen` | 12/12 |
+| E2E desktop `mugen-import` | ok (acima) |
+| `npm run host:diagnose` | READY |
+
+Achados corrigidos nesta rodada:
+- o C gerado pelo runtime MUGEN emitia `-Wunused-const-variable` no console do usuário. A prova
+  real agora falha nesse caso (foi vermelha antes da correção);
+- a falha de importação mostrava texto genérico e enganoso ("verifique os arquivos raiz").
+
+### 7.6 Limitações explícitas
+
+- **Continua Experimental.** Sem suporte geral a MUGEN, SFF v2, som, stage nem colisão lógica.
+- **Campo enganoso no Inspector.** O Inspector mostra "Animações (FPS)" para animações MUGEN, mas
+  quem manda na ROM são as durações por frame; editar esse fps **não** muda a animação MUGEN.
+  Não há campo de UI para durações por frame nem `loop_start`: a edição só é possível no
+  arquivo da cena (provada tecnicamente).
+- **Painel só na importação.** O painel abre logo após a importação; não há botão para reabri-lo
+  num projeto já importado. O relatório permanece em `assets/mugen/<id>_import_report.json`.
+- **Aviso de rascunho.** Depois da reabertura aparece o aviso "Rascunho local encontrado…
+  difere da cena aberta" (autosave do produto). Não afetou o resultado.
+- **Comando pelo teclado não coberto.** O comando pelo teclado da Probe (A → soco) não foi
+  exercitado pela UI.
