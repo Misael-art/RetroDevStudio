@@ -52,6 +52,16 @@ fn snes_lorom_concorda_cos_vectores_pinados_e_co_motor_de_referencia() {
     });
 }
 
+#[test]
+fn snes_hirom_concorda_cos_vectores_pinados_e_co_motor_de_referencia() {
+    run(&ProfileImpl {
+        id: "snes-hirom",
+        translate: rex_addressing::snes_hirom::translate,
+        invert: rex_addressing::snes_hirom::invert,
+        read: rex_addressing::snes_hirom::read,
+    });
+}
+
 /// As 12 secuencias pináronse contra `rom_size = 0x800000` **fixo** no xerador
 /// (`export-vectors.mjs`), non contra o tamaño da fixture de `md-ssf2`, que é
 /// 4MB. Polo tanto as sondas sobardan a imaxe de fixture e só se pode comparar
