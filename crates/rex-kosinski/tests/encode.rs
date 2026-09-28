@@ -10,8 +10,7 @@
 use rex_kosinski::{decode, encode, EncError, KosError};
 
 fn perfil() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../data/rex_profiles/codec/kosinski")
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/kosinski")
 }
 
 fn enc_big(plain: &[u8]) -> Vec<u8> {

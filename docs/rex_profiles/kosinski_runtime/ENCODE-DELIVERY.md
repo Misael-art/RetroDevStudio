@@ -166,3 +166,15 @@ do decodificador foi alterada (ver diffs de `2b50cab`/`f3c51f2`).
 `cargo test` do crate: **49 testes verdes** (22 contrato + 16 encode +
 8 edit + 3 mutations). `cargo fmt --check` e `cargo clippy --all-targets
 -- -D warnings`: limpos. A suíte normal não exige koscmp instalado.
+
+## 9. Addendum de empacotamento (2026-09-28, rodada 3)
+
+Esta entrega passou a ser **autocontida**: a suíte normal lê 52 fixtures
+vendorizadas em `crates/rex-kosinski/fixtures/` (SHA-pinned por
+`tests/fixtures.rs`; mapa de proveniência em `fixtures/PROVENANCE.md`) e roda
+51/51 em checkout limpo sem `data/` nem oráculo. A comparação externa continua
+lendo `data/rex_profiles/*` e **não vira PASS sem koscmp** (rc=3 SKIP). A
+licença do crate permanece **sem atribuição por suposição** — decisão
+específica documentada para o integrador. Detalhes, auditoria
+`cargo package --list` e a tabela de casos de aceite do adaptador (7 casos,
+todos em vetores existentes) estão em `REPORT.md` §14.

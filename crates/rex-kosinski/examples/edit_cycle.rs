@@ -23,7 +23,7 @@ fn lcg_bytes(seed: u32, n: usize) -> Vec<u8> {
 
 fn fixture(nome: &str) -> Vec<u8> {
     let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../data/rex_profiles/kosinski_runtime/edit")
+        .join("fixtures/runtime/edit")
         .join(nome);
     std::fs::read(&p).unwrap_or_else(|e| panic!("fixture {nome}: {e}"))
 }
