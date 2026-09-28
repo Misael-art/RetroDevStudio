@@ -1753,3 +1753,49 @@ deste día é merge, release nin promoción de maturidade; ambos os paquetes seg
 --all-targets -- -D warnings` do produto dá rc=101 con 45 lints en código de proba
 alleo (0 en `rex_addressing.rs`) e `npm run security:audit` dá rc=1 por
 `EALLOWSCRIPTS` (config do host anterior; ningún ficheiro npm se modificou).
+
+### 2026-09-28 — integración da fronte B ao produto (`backend integrado`, só ese degrau)
+
+**Que se fixo.** A perna B executou despois da A, unha entrega por vez. Primeiro
+entrou a entrega mais recente da B no crate (`0b752b7..6a2218e`, pino conferido con
+`git ls-remote` ás 14:38:34Z): encoder v1, paridade koscmp bidireccional, contedor de
+edición autoral e 52 fixtures vendorizadas con SHA-256 dentro do paquete, por
+`cherry-pick -x` con paridade byte-exata (diff = 0 bytes) e gates re-medidos **51/0/0**.
+Despois construíuse o adaptador `src-tauri/src/tools/reverse/decomp/rex_kosinski.rs`
+por TDD estrito: dous RED observados e guardados (capa codec e capa IPC, ambos E0432
+`rc=101`), GREEN **16/16** (10 capa codec + 6 capa IPC). O adaptador mapea
+`KosError`/`EncError` ao `CodecError { code, detail }` do contrato de codecs do produto
+1:1 (truncated / invalid_reference / excessive_output / work_limit / empty_input;
+stream_limit / work_limit), preserva `bytes_consumed` (contrato v1 §3: o padding
+post-terminator non se consume) e expón **dous comandos Tauri reais**, separados como
+pedía a misión: `rex_kosinski_decode` e `rex_kosinski_encode` (`run_heavy_command_
+off_main_thread`, rexistrados en `generate_handler!`). `Cargo.lock` gañou 5 liñas: só a
+entrada local `rex-kosinski` sen campo `source`, cero crates externos novos.
+**Números medidos no destino:** `cargo test --lib` **770/0/66** (base 754 + 16),
+`clippy --lib -D warnings` rc=0, `fmt --check` rc=0, `check:tree` rc=0, barra de
+frontend sen cambios (749/6/755, rc=0). Non-vacuidade: mutacións M1/M2/M3 mataron
+1/1/2 probas e a restauración conferíouse por SHA-256 do adaptador (`3b4115ab…`).
+Evidencia con manifesto autoconferido (4/4/0) en
+`data/rex_profiles/kosinski_runtime/evidence/2026-09-28-adaptador-backend/`. Commits:
+`3428b69` (adaptador + IPC), `9894e88` (evidencia), `4daefe8` (rexistro + matriz),
+`daa52da` (rollup CI de ebfa8ea).
+
+**Fronte A pechada por SHA.** O rollup CI do push `ebfa8ea` conferíose con consultas
+pontuais: `CI` success; `Desktop E2E` fallou o escenario `reference_goal` cun timeout no
+límite (15274 ms sobre orzamento de 15000 ms, 'esgotamento de tempo, nao um defeito
+confirmado'); a reexecución do job fallido **no mesmo SHA** deu success. Veredicto por
+SHA, sen aprobación retroactiva de ningunha entrega anterior. Log en
+`.../2026-09-28-aceite-integrado/ci-consulta-ebfa8ea.log`; manifesto a 8/8/0.
+
+**O que a rolda non proba.** `rex-kosinski` está en `backend-integrado`, non máis alá:
+ningunha pantalla chama os comandos (fluxo do usuario bloqueado), ningún recurso real
+BYOR se decodificou/recodificou polo produto, e o contedor `edit::build/open/reinsert`
+**non se expón** — a propia doc del di «NON transacción canónica de producción», e a
+distinción decodificar/codificar/reinserir presérvese por exclusión declarada, non por
+implementación.
+
+**Estado aberto.** Licenza dos dous crates (`UNLICENSED`, `source: workspace`) segue
+decisión do operador. O siguiente degrau para B é fluxo do usuario (UI que chame
+decode/encode) ou reinserción na transación canónica — ambos requiren decisión explícita
+do operador antes de calquera promoción.
+

@@ -333,7 +333,7 @@ Kosinski nas súas transacións canónicas.
   codificar e reinserir… Integre e valide unha frente por vez… Prossiga até os
   adaptadores testados e a entrega publicada."
   **Commits desta célula:** `3428b69` (adaptador + path dep + dous comandos
-  Tauri rexistrados) e o commit de evidencia que o segue.
+  Tauri rexistrados), `9894e88` (evidencia) e `4daefe8` (rexistro e matriz).
   **Medido:** dous RED observados antes de produción (capa codec: E0432 `rc=101`;
   capa IPC: E0432 para `ipc_decode`/`ipc_encode`, `rc=101`); GREEN **16/16** (10
   codec + 6 IPC) con esperas independentes rexistradas por B e confirmadas no
