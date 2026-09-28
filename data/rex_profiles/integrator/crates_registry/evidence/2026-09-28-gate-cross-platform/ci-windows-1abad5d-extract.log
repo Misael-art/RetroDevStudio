@@ -1,0 +1,81 @@
+# Veredito do CI no SHA do reparo — 1abad5da356781d38340344e76c47f03a08296c8
+# Consulta pontual, tres segmentos acotados (sem monitor de pe ao fim).
+# Run 36375754209 (branch codex/rex-integrator-crates-registry).
+
+## ROLLUP por check-run (linha terminal do log ci-consulta-1abad5d.log)
+linux-validate   completed success    job 108781125449
+validate         completed success    job 108781125205   <- windows-latest
+ROLLUP_TERMINAL 2026-09-28T04:22:02Z
+
+## Passos do job windows-latest (gh api repos/Misael-art/RetroDevStudio/actions/jobs/108781125205)
+inicio=2026-09-28T03:57:59Z fim=2026-09-28T04:21:14Z conclusion=success
+ 1 Set up job => success                     10 Structure check => success
+ 2 Checkout => success                       11 Frontend lint => success
+ 3 Setup Node.js => success                  12 Rust clippy => success
+ 4 Setup Rust => success                     13 Crate package gates => success
+ 5 Install frontend deps => success          14 Rust tests => success
+ 6 Dependency security audit => success      15 Frontend tests => success      <- era aqui que reprovava
+ 7 Install pinned Rust auditor => success    16 TypeScript check => success    <- antes: skipped
+ 8 Rust dependency audit => success          17 Write CI summary => success
+ 9 Rust formatting => success                18 Upload CI validation artifacts => success
+O shell do runner e PowerShell: "C:\Program Files\PowerShell\7\pwsh.EXE -command ..." (log despojado :1146).
+
+## As duas assercoes que reprovaram em a556e86, medidas no runner Windows
+log despojado do job (414437 bytes, sha256 61c7440a488dd5a938206004d614af30ba641446a49a0cb0f014073bbfba0b55):
+  :4317   scripts/check-tree-crates.test.mjs (9 tests) 570ms   [0 falhas, 0 skips]
+  :1141   > node scripts/check-tree.cjs
+  :1143   OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+  :1653   --- rex-kosinski (crates/rex-kosinski/Cargo.toml) ---   [caminho exibido em barras POSIX no Windows]
+  :1654   $ cargo fmt --manifest-path crates/rex-kosinski/Cargo.toml -- --check
+  :1655   OK: rex-kosinski fmt   ... :1659 OK: rex-kosinski clippy   ... :1712 OK: rex-kosinski test
+  :1713   --- rex-addressing (crates/rex-addressing/Cargo.toml) ---
+  :1715   OK: rex-addressing fmt ... :1719 OK: rex-addressing clippy
+Re-fetch: gh api repos/Misael-art/RetroDevStudio/actions/jobs/108781125205/logs --allow-escape-sequences
+  | sed -r 's/\x1b\[[0-9;]*[a-zA-Z]//g' > win.txt   (o byte-a-byte nao e reproduzivel: o log tem timestamps)
+
+## Contagens do runner Windows, arquivo por arquivo (mesmo log despojado)
+  :4529   Test Files  78 passed | 2 skipped (80)
+  :4530   Tests  733 passed | 22 skipped (755)
+  :3216   scripts/host-manager.test.mjs (33 tests | 5 skipped)
+  :3937   [arquivo inteiro ignorado] scripts/decomp/decomp-scripts.test.mjs (11 tests | 11 skipped)
+  :4290   [arquivo inteiro ignorado] scripts/linux-host-scripts.test.mjs (6 tests | 6 skipped)
+  22 = 5 + 11 + 6  (decomposicao fechada, nada por explicar)
+
+## Contagens locais na mesma barreira, no mesmo HEAD (npm test, rc=0)
+log limpo local (114926 bytes, sha256 dbee1ec225c4f1c6cad3ee329bd6d57482effe757189048ad032d52c984cd3b9):
+  :1620   Test Files  79 passed | 1 skipped (80)
+  :1621   Tests  749 passed | 6 skipped (755)
+  :1053   scripts/host-manager.test.mjs (33 tests)  [0 skips]
+  :1431   scripts/decomp/decomp-scripts.test.mjs (11 tests | 4 skipped)
+  :1618   [arquivo inteiro ignorado] src/core/validateUpstreamWindows.test.ts (2 tests | 2 skipped)
+  6 = 4 + 2  (decomposicao fechada)
+
+## Reconciliacao das duas margens (mesmo total 755, vereditos iguais: rc=0 / success)
+  Windows ignora e Linux executa: linux-host-scripts (6) + decomp-scripts 7 a mais (11-4) + host-manager 5 = 18
+  Linux ignora e Windows executa: validateUpstreamWindows (2)
+  Liquido: 18 - 2 = 16 = 22 skips Windows - 6 skips Linux = 749 passes Linux - 733 passes Windows  [confere]
+
+## O que este extrato prova
+- o veredito do job validate no windows-latest no SHA do reparo: success, passo a passo.
+- os 9 testes da gate cross-platform passam no proprio runner onde antes reprovavam (:4317).
+- os gates dos dois pacotes Rust passam no Windows, com caminhos exibidos em barras POSIX (:1653-:1719).
+- a divergencia de skips entre as duas plataformas e integralmente explicada por suites condicionadas ao SO,
+  item por item, e a aritmetica fecha nos dois sentidos.
+## O que NAO prova
+- nada sobre integracao ao produto, promocao de maturidade, merge ou release.
+- o Desktop E2E nao roda neste SHA: o gatilho e por filtro de caminho e este pino nao tocou os caminhos
+  vigiados (medido no round anterior; aqui so hah dois check-runs, linux-validate e validate).
+
+## APENDICE — decomposicao tambem na perna anterior (job 108773662536, SHA a556e86, o que reprovou)
+log despojado (417330 bytes, sha256 5c8782bdde34e675e7ca1511ad949c4d4081bf601336a5414d0c6279c0aa4c17):
+  :4571   Test Files  1 failed | 77 passed | 2 skipped (80)
+  :4572   Tests  2 failed | 729 passed | 22 skipped (753)
+  :3210   scripts/host-manager.test.mjs (33 tests | 5 skipped)
+  :3928   [arquivo inteiro ignorado] scripts/decomp/decomp-scripts.test.mjs (11 tests | 11 skipped)
+  :4281   [arquivo inteiro ignorado] scripts/linux-host-scripts.test.mjs (6 tests | 6 skipped)
+  22 = 5 + 11 + 6  — o MESMO conjunto de skips da perna verde: nada mudou entre as duas pernas alem dos
+  2 testes novos (753 -> 755) e das 2 falhas -> 0.
+  :4384   scripts/check-tree-crates.test.mjs (7 tests | 2 failed)  [arquivo com 7 testes, antes dos 2 novos]
+  :4524/:4537   FAIL "reprova diretorio em crates/ que nao esta no registro"   -> check-tree-crates.test.mjs:77:29
+  :4547/:4560   FAIL "reprova crates/ sem registro, em vez de tratar o diretorio como caixa livre" -> :96:29
+  :4538-:4540 / :4562-:4564   a linha apontada e em ambas `expect(resultado.saida).toContain("crates/registry.json")`

@@ -317,8 +317,9 @@ já tinha.
   `6a43c53` (pacote registrado + cadeia de fixtures fechada), os 17 commits da
   entrega A `9bec531..0a3ac83` (também `cherry-pick -x`, zero conflitos) e
   `9f83d15` (promoção de `rex-addressing` para `crates/` + registro com gates
-  medidos), `a556e86` (esta célula: matriz, checkpoints e barra medida) e
-  `882272c` (o reparo cross-platform da própria gate, achado pela CI). **Nada aqui é merge:** os dois pacotes entraram commit a commit, com
+  medidos), `a556e86` (esta célula: matriz, checkpoints e barra medida),
+  `882272c` (o reparo cross-platform da própria gate, achado pela CI) e
+  `1abad5d` (o registro do veredito por SHA). **Nada aqui é merge:** os dois pacotes entraram commit a commit, com
   autoria e mensagem preservadas, e as branches de cada frente continuam sendo o
   dono do resto do trabalho delas.
 
@@ -413,8 +414,10 @@ já tinha.
   80): `linux-validate` **success** (`:60`, `:76`), `desktop-smoke` **success**
   (`:77`) e `validate` (runner `windows-latest`) **FAILURE** (`:73`, `:78`) — o que
   reprova é o passo 15 *Frontend tests*, com **2 failed / 729 passed / 22 skipped
-  (753)** e 1 arquivo de teste falho (os totais de 753 batem com o Linux; os 22
-  skips contra 6 são as suítes que se ignoram por SO). Os passos 10 *Structure
+  (753)** e 1 arquivo de teste falho (o total 753 bate com o Linux; os 22 skips foram
+  decompostos depois, no log do próprio job — host-manager 5 + `decomp-scripts` 11 +
+  `linux-host-scripts` 6, e as duas falhas em `:77:29`/`:96:29`, no apêndice de
+  `ci-windows-1abad5d-extract.log`). Os passos 10 *Structure
   check* e 13 *Crate package gates* passaram no Windows, ou seja, os gates dos dois
   pacotes também correm lá. O extrato passo a passo está em
   `2026-09-28-gate-cross-platform/ci-windows-a556e86.log`.
@@ -438,10 +441,41 @@ já tinha.
   campo; com campo POSIX) — vereditos e caminhos iguais nos dois
   (`parity-cjs-ps1.log`). Barra do reparo: `check:tree`, `lint`, `tsc --noEmit` rc=0
   e `npm test` **749 passed / 6 skipped (755)** — os 2 a mais sobre os 747 são os
-  dois testes novos (`gates-frontend-fix.log`). **O que isso ainda não prova:** o
-  veredito do `validate` no Windows no SHA do reparo só vem da consulta pontual ao
-  push seguinte; localmente o que existe é o Linux com `path.join` já imprimindo
-  `/`, mais o espelho PowerShell.
+  dois testes novos (`gates-frontend-fix.log`).
+
+  **O veredito do Windows no SHA do reparo — medido, não inferido.** O push publicou
+  `882272c` + `1abad5d`, e a consulta em `1abad5da356781d…` foi pontual, em três
+  segmentos acotados do mesmo log
+  (`2026-09-28-gate-cross-platform/ci-consulta-1abad5d.log`, `ROLLUP_TERMINAL` às
+  2026-09-28T04:22:02Z): `linux-validate` **success** (job 108781125449) e `validate`
+  (windows-latest) **success** (job 108781125205, das 03:57:59Z às 04:21:14Z), com os
+  dezoito passos em `success` — inclusive o 10 *Structure check*, o 13 *Crate package
+  gates* e o **15 *Frontend tests***, que era justamente onde reprovava; o 16
+  *TypeScript check*, antes `skipped` por parada de fluxo, passou. No próprio runner
+  Windows a suíte da gate fecha com **9 testes, 0 falhas** (log despojado do job
+  `:4317`) e os caminhos que a ferramenta imprime são POSIX lá também: `:1653`–`:1654`
+  (`rex-kosinski`), `:1713` (`rex-addressing`), com o shell do runner sendo PowerShell
+  (`:1146`). Contagens do runner: **733 passed / 22 skipped (755)**; locais, na mesma
+  barreira, **749 passed / 6 skipped (755)**. A diferença está decomposta arquivo por
+  arquivo nas duas margens, sem sobra — os 22 são `host-manager` 5 + `decomp-scripts` 11
+  + `linux-host-scripts` 6; os 6 são `decomp-scripts` 4 + `validateUpstreamWindows` 2; e
+  o líquido 18 − 2 = 16 bate com 22 − 6 e com 749 − 733
+  (`ci-windows-1abad5d-extract.log`, cujo apêndice decompõe também a perna que reprovou:
+  os mesmos 22 skips, com as duas falhas em `:77:29` e `:96:29`). Varredura da mesma
+  classe nos demais testes de `scripts/`: nenhuma outra asserção compõe caminho esperado
+  com API de caminho, `path.sep` não aparece em testes, e as vizinhas
+  `crates-gates.test.mjs:75`/`:136` batem em literais POSIX que o próprio script imprime
+  (`crates-gates.mjs:86`, `:122`) — por isso não divergem. O exame devolveu um achado
+  para mim mesmo: `crates-gates.mjs:119-123` aceita o campo `manifesto` como declarado e
+  o recompõe com `path.join(root, ...manifesto.split("/"))`, de modo que uma declaração
+  com barras de Windows seria um único segmento — resolveria no Windows e quebraria no
+  Linux. Quem a reprova hoje é o `check:tree`, com a comparação literal agora estrita, e
+  ele roda antes no mesmo job; a checagem não foi duplicada no gate de pacotes, e a
+  dependência de ordem entre os dois passos fica registrada aqui como superfície
+  protegida. **O que isso ainda não prova:** nada sobre integração ao produto, promoção
+  de maturidade, merge ou release; e o Desktop E2E não corre neste SHA — o gatilho é por
+  filtro de caminho e o pino não toca os caminhos vigiados, o que é explicação medida,
+  não omissão.
 
   **Limites desta célula.** `crates/` é localização de **biblioteca**, não alegação
   de produto; o produto continua com os codecs que já tinha (LZ4W e aPLib na
@@ -450,6 +484,19 @@ já tinha.
   rodada, e o degrau `gates-proprios-aprovados` não autoriza ninguém a escrever
   "integrado" em documento nenhum. **Sem merge, sem release, sem promoção de
   maturidade.**
+
+  **Ordem recebida para a etapa seguinte (2026-09-28, operador).** Integrar A e B ao
+  backend, uma entrega por vez, sem merge nem release, com quatro condições explícitas:
+  (i) `rex-addressing` permanece **sem dependência de Tauri** — serialização e tradução
+  de erros vivem no **adaptador**, não na biblioteca; (ii) perfil e estado do mapper são
+  **explícitos** nesta etapa, sem autodetecção silenciosa; (iii) leitura com estado fixo
+  fica **separada** de sequências que alteram bancos; (iv) antes de subir qualquer
+  degrau, resolvem-se os contratos pendentes com A e o empacotamento com B (fixtures
+  dentro do pacote, `license` no manifesto). O degrau `backend-integrado` só é
+  declarado com chamada real comprovada pelo backend, e `fluxo-do-usuario-comprovado` só
+  com prova pela interface. Um agente novo passa a trabalhar isolado em recuperação de
+  lógica de gameplay: as superfícies compartilhadas continuam do integrador, e ele
+  entrega no próprio namespace de evidência.
 
 - 2026-09-27 (integrador, **edição contextual comprovada pela interface** — o
   resultado visível que o briefing pediu, não mais um relatório do backend),

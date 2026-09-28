@@ -1642,8 +1642,10 @@ mudou. Jobs pesados serializados, um por vez; nenhum observador de CI deixado de
 monitor, e o rollup terminal (`…/2026-09-28-barra-de-entrega/ci-consulta-a556e86.log:80`)
 dá `linux-validate` **success** (`:60`), `desktop-smoke` **success** (`:77`) e
 `validate` (windows-latest) **failure** (`:73`, `:78`) — passo 15 *Frontend tests*,
-**2 failed / 729 passed / 22 skipped (753)**; o total de 753 bate com o Linux e os 22
-skips são as suítes condicionadas a plataforma. Os passos 10 *Structure check* e 13
+**2 failed / 729 passed / 22 skipped (753)**; o total de 753 bate com o Linux, e os
+22 skips foram depois lidos no log do próprio job Windows e decompostos (host-manager 5 +
+`decomp-scripts` 11 + `linux-host-scripts` 6 — apêndice de
+`…/2026-09-28-gate-cross-platform/ci-windows-1abad5d-extract.log`). Os passos 10 *Structure check* e 13
 *Crate package gates* passaram no Windows: os gates dos dois pacotes também correm lá.
 Quem reprova são **dois testes meus** (`scripts/check-tree-crates.test.mjs:77`, `:96`)
 contra **código meu**: `scripts/check-tree.cjs:47` compunha com `path.join` o caminho
@@ -1661,8 +1663,21 @@ exatamente 1 teste; restauração conferida por SHA-256) e paridade real entre `
 `.ps1` executados com `pwsh 7.6.6` em quatro casos (`…/2026-09-28-gate-cross-platform/red-green-mutacao.log`
 e `parity-cjs-ps1.log`). Barra do reparo: `check:tree`, `lint` e `tsc --noEmit` rc=0,
 `npm test` **749 passed / 6 skipped (755)** — os 2 a mais são os dois testes novos
-(`gates-frontend-fix.log`). **Ainda não provado:** o veredito do `validate` no Windows
-no SHA do reparo, que depende da consulta pontual ao push seguinte.
+(`gates-frontend-fix.log`). **O veredito pendente chegou medido:** no SHA do reparo
+(`1abad5da356781d…`, run 36375754209) o job `validate` de `windows-latest` fechou
+**success** (job 108781125205, 03:57:59Z→04:21:14Z, dezoito passos em success), com o
+passo 15 *Frontend tests* — onde antes reprovava — e o 16 *TypeScript check* passando.
+No runner Windows a suíte da gate aparece com **9 testes e 0 falhas**; os caminhos
+impressos são POSIX lá (`crates/rex-kosinski/Cargo.toml`, `crates/rex-addressing/Cargo.toml`)
+e o shell do runner é PowerShell. Contagens: **733 passed / 22 skipped (755)** no Windows
+contra **749 / 6 (755)** local, decompostas arquivo por arquivo nas duas margens e
+reconciliadas (18 − 2 = 16 = 22 − 6 = 749 − 733). Extrato com linha por linha em
+`…/2026-09-28-gate-cross-platform/ci-windows-1abad5d-extract.log`; a varredura da mesma
+classe nos testes de `scripts/` não achou outra asserção que componha caminho com API de
+caminho — mas devolveu um item para o próprio integrador: `crates-gates.mjs:119-123` ainda
+aceita o campo `manifesto` como declarado, e quem reprova a declaração torta é o
+`check:tree`, que roda antes no mesmo job; a ordem ficou registrada em vez de a checagem
+ser duplicada. **Ainda não provado:** integração ao produto, fluxo de usuário, maturidade.
 
 **Limites que continuam sendo parte da alegação.** `crates/` é degrau de
 **biblioteca**: a rodada não torna nada "integrado", não prova fluxo de usuário e não

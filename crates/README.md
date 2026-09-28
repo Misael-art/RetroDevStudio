@@ -24,8 +24,12 @@ percorre a lista registrada.
 
 - `crates/` existe sem `registry.json`;
 - ha diretorio de primeiro nivel em `crates/` que nao esta declarado;
-- um pacote declarado nao tem `Cargo.toml` no caminho declarado (um pacote
+- um pacote declarado nao tem `Cargo.toml` no caminho canonico (um pacote
   esperado ausente reprova; nao e ignorado silenciosamente);
+- o campo opcional `manifesto` nao e exatamente `crates/<nome>/Cargo.toml`. A
+  comparacao e literal, sem API de caminho, nos dois motores (`check-tree.cjs` e
+  `check-tree.ps1`), entao o veredicto nao muda conforme o SO onde a gate roda:
+  `crates\<nome>\Cargo.toml` reprova nos dois;
 - ha arquivo solto em `crates/` fora de `registry.json` e deste `README.md`.
 
 Manutencao do registro e do responsavel pela integracao, nao dos agentes que
