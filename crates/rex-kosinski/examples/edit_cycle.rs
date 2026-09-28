@@ -40,15 +40,25 @@ fn main() {
 
     let base = fixture("base_plain.bin");
     let editado = fixture("edited_plain.bin");
-    assert_eq!(base.len(), editado.len(), "edição delimitada mantém o tamanho");
+    assert_eq!(
+        base.len(),
+        editado.len(),
+        "edição delimitada mantém o tamanho"
+    );
 
     // 1) contêiner base num slot com orçamento declarado (folga ~50%).
-    let st_base = rex_kosinski::encode(&base, big, big).expect("encode do base").stream;
+    let st_base = rex_kosinski::encode(&base, big, big)
+        .expect("encode do base")
+        .stream;
     let slot_cap = st_base.len() + st_base.len() / 2 + 16;
     let c = build(&base, slot_cap, big, big).expect("contêiner base");
     let info = open(&c, big, big).expect("open do contêiner base");
     assert_eq!(info.plain, base, "decode interno do slot base");
-    assert_eq!(info.stream_len, st_base.len(), "P1: slot fecha no terminator");
+    assert_eq!(
+        info.stream_len,
+        st_base.len(),
+        "P1: slot fecha no terminator"
+    );
 
     // 2) host autoral: vizinhos fixos antes e depois do contêiner-slot.
     let pre = lcg_bytes(0x1111_2222, 4096);
@@ -66,7 +76,11 @@ fn main() {
         reinsert(&c, &grande, big, big).err(),
         Some(EditError::StreamTooLarge)
     );
-    assert_eq!(open(&c, big, big).unwrap().plain, base, "base intacto após recusa");
+    assert_eq!(
+        open(&c, big, big).unwrap().plain,
+        base,
+        "base intacto após recusa"
+    );
 
     // 4) reinserção da edição delimitada (recompressão no MESMO slot).
     let d = reinsert(&c, &editado, big, big).expect("reinsert da edição");

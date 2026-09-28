@@ -23,6 +23,9 @@ e recusando sem escrita quando não cabe. Evidência auditável:
 - Pins do oráculo: koscmp SHA-256 `a74c9295…`, checkout mdcomp commit
   `72c6df40…`; o script ABORTA se divergirem. Toda chamada ao oráculo passa
   por `sandbox.sh` (timeout + ulimits + stdin fechado).
+- Determinismo medido em 2026-09-28: duas corridas novas do diferencial
+  produziram `differential.tsv` e `sizes.tsv` **byte-idênticos** às evidências
+  publicadas (`45e42f7f…` e `7700221f…`), rc=0 nas duas.
 
 ## 2. API pública (forma final proposta)
 
@@ -135,7 +138,9 @@ nos commits `36741a5`/`f3c51f2`):
 0214f8ff8f7361495befb1e395fab0da8b29388248719b3fb03de39e3ad8f0f0  data/rex_profiles/kosinski_runtime/encdir/sep_pair.bin
 ```
 
-Código e testes (SHA medidos na HEAD `f3c51f2` + este commit de docs):
+Código e testes (SHA medidos na HEAD `f3c51f2` + commits desta publicação;
+`edit_cycle.rs` reflete a reformatatação `cargo fmt` do commit de ETAPA 6 —
+somente quebra de linhas, nenhuma mudança de comportamento):
 
 ```
 a18fa9fec70f6aa91d42f59b2c38e491ea0c41ccb2d489d9a82dabfdc8634360  crates/rex-kosinski/src/encode.rs
@@ -144,7 +149,7 @@ a18fa9fec70f6aa91d42f59b2c38e491ea0c41ccb2d489d9a82dabfdc8634360  crates/rex-kos
 9473f8652f71b8d8195e61343f5a494a685057355564e9ec32cf03c6c6f0c67f  crates/rex-kosinski/tests/encode.rs
 f5a7c5b3d7a2fc3006482968e4f8e56089b3e024472aca717f8eda3038ce9705  crates/rex-kosinski/tests/edit.rs
 f126e874f50bcc7f26ea13210ec3ce9da00f1786a1da3dd04c63c0bf65162617  crates/rex-kosinski/examples/encode.rs
-d3d9645cd5b6f731018a1e6e3d86cbc0e4680f40cdc516ee363bfd779b1c685b  crates/rex-kosinski/examples/edit_cycle.rs
+24ebdead4ca4034dca3095e9d16ea77994d0d8c494dfe3d64d46eac23b67a27c  crates/rex-kosinski/examples/edit_cycle.rs
 8bdd2e446e842639517fdfbb7bfecf30bd64d8abc387b5f30506a19e80c90197  docs/rex_profiles/kosinski_runtime/ENCODE-CONTRACT.md
 80f53636d07727461aa7f61c8387f2d2cfd012bede375f21ad7e8cdddd2a1b17  scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh
 45e42f7f6fc698e38bc67ae8eac4a0794a61f72267b5f0b0f129381dca10cd8c  docs/rex_profiles/kosinski_runtime/evidence/differential-vs-koscmp.tsv
