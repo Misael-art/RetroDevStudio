@@ -218,7 +218,7 @@ pub(crate) fn render_decls(ast: &AstOutput) -> String {
                         .flat_map(|b| b.iter().map(|v| v.clamp(&-128, &127).to_string()))
                         .collect();
                     out.push_str(&format!(
-                        "static const s16 rds_mugen_{res}_a{ai}_f{fi}_{kind}[] = {{{}}};\n",
+                        "static const s16 rds_mugen_{res}_a{ai}_f{fi}_{kind}[] __attribute__((unused)) = {{{}}};\n",
                         vals.join(",")
                     ));
                 }

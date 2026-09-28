@@ -1049,6 +1049,21 @@ mod tests {
             "build falhou: {:?}",
             result.log.iter().rev().take(25).collect::<Vec<_>>()
         );
+        // O C gerado pelo runtime MUGEN nao pode poluir o console do usuario com avisos.
+        let runtime_warnings: Vec<&str> = result
+            .log
+            .iter()
+            .filter(|line| {
+                line.level != "info"
+                    && line.level != "success"
+                    && line.message.contains("rds_mugen")
+            })
+            .map(|line| line.message.as_str())
+            .collect();
+        assert!(
+            runtime_warnings.is_empty(),
+            "avisos do runtime MUGEN no build: {runtime_warnings:?}"
+        );
         let rom = PathBuf::from(&result.rom_path);
         let rom = if rom.is_absolute() {
             rom
