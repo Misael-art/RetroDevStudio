@@ -11,6 +11,39 @@ fn dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/probe")
 }
 
+fn check_committed(name: &str, f: fixture::Files) {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join(name);
+    let files: [(String, &[u8]); 5] = [
+        (format!("{name}.def"), f.def.as_bytes()),
+        (format!("{name}.air"), f.air.as_bytes()),
+        (format!("{name}.cmd"), f.cmd.as_bytes()),
+        (format!("{name}.cns"), f.cns.as_bytes()),
+        (format!("{name}.sff"), &f.sff),
+    ];
+    if std::env::var("REX_MUGEN_WRITE_FIXTURES").is_ok() {
+        std::fs::create_dir_all(&dir).unwrap();
+        for (file, bytes) in &files {
+            std::fs::write(dir.join(file), bytes).unwrap();
+        }
+    }
+    for (file, bytes) in &files {
+        let disk = std::fs::read(dir.join(file)).unwrap_or_else(|_| panic!("{file} ausente"));
+        assert_eq!(
+            &disk[..],
+            *bytes,
+            "{file} diverge do gerador (sha {})",
+            sha256_hex(&disk)
+        );
+    }
+}
+
+#[test]
+fn committed_sentinel_is_reproducible() {
+    check_committed("sentinel", fixture::sentinel());
+}
+
 #[test]
 fn committed_fixture_is_reproducible() {
     let f = fixture::probe();
