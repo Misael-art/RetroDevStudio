@@ -234,6 +234,8 @@ chamador. A imaxe transmitese como `&[u8]` (non un tipo `RomImage` novo): un
 | 8 | `fmt`, `clippy -D warnings`, tests rápidos separados dos caros | informe final (saída literal alí) |
 | 9 | Semántica de `read` auditada perfil por perfil (tres conceptos separados, rexións non-ROM nunca omitidas) | `tests/read_semantics_audit.rs` (5 tests) |
 | 10 | Clasificación **validado / política conservadora / non suportado** dos cinco perfis | `CLASSIFICACION.md` |
+| 11 | Capa de recursos: procedencia, recusa do parcial, límites e frontira única | `tests/resource_reader.rs` (15 tests) sobre `src/resource.rs` |
+| 12 | Oráculo independente da capa de recursos (contido que identifica banco e offset) | `tests/support/banked.rs` |
 
 **Desviación rexistrada da propia táboa.** Este contrato anunciaba
 `tests/oracle.rs`, `tests/limits.rs` e `tests/exhaustive.rs` como ficheiros. Non
@@ -244,3 +246,86 @@ sua propia especificación) e o barrido exaustivo vive en `tests/inversion.rs`
 (porque comparte o oráculo de preimage coa proba rápida). Criar os tres
 ficheiros co nomes previstos sería duplicar infrastructure de testes, así que se
 documenta a correspondencia en vez de renomear.
+
+## 12. Capa de lectura de recursos (`rex_addressing::resource`)
+
+Responde a «le este recurso neste enderezo, con esta lonxitude e este estado de
+mapper» dando **bytes, a serie física de segmentos que os produciron e onde se
+recusou**. Non descobre mapas nin identifica recursos: o perfil e o estado os
+entrega a chamante. `CONTRACT_VERSION = 1`; un consumidor debe rexeitar calquera
+outra versión antes de interpretar un campo.
+
+### 12.1 Entrada
+
+| Campo | Contrato |
+|---|---|
+| `profile` | un dos cinco (`Profile::all()`); non existe modo «auto» |
+| `image` | [`ImageIdentity`] **atestado pola frontada**: `origin` non baleiro, `sha256_hex` de 64 díxitos hex minúsculos, `byte_len` igual ao buffer entregado |
+| `state` | `&MapperState` prestado: a capa **nunca** o muta; cada segmento sae coa súa copia |
+| `cpu_address`, `length` | `length >= 1` e `cpu_address + length - 1 <= 0xFFFFFF` |
+| `limits` | `max_bytes` e `max_segments`, comprobados **antes** de reservar nada proporcional a `length` |
+
+### 12.2 Saída
+
+`ResourceRead` leva `profile`, `contract_version`, a `image` tal como entrou, o
+`state`, o par `(cpu_address, length)` pedido, `bytes` e `segments` ordenados.
+Cada [`PhysicalSegment`] distingue os tres conceptos que §2 separa:
+
+- `cpu_address` — enderezo do barramento onde empeza o corredor,
+- `rom_offset` — desprazamento físico dentro da imaxe (espellos e aliases
+  resoltos polo perfil),
+- `cpu_len` — bytes que aporta, e `state` — o estado vixente nese corredor.
+
+**Invariantes** (pinnados en `tests/resource_reader.rs`):
+
+1. `bytes.len() == length` sempre. Se o percorrido non cubre a lonxitude, é
+   `Err`, non un prefixo en `Ok`.
+2. Os `segments` son contiguos e non se solapan no espazo lóxico:
+   `segments[i].cpu_address == cpu_address + Σ cpu_len[0..i]`. A procedencia
+   reconstrúe a saída byte a byte.
+3. Dous segmentos poden compartir `rom_offset` (dous bancos remapeados á mesma
+   base) sen que se emendan: o que os separa é o enderezo lóxico.
+4. Non se inventa continuidade entre xanelas: a capa herda os cortes do perfil.
+
+### 12.3 Erros (un só canal por clase, independentemente do perfil)
+
+| `ResourceErrorCode` | Cando | `segments` |
+|---|---|---|
+| `BadAttestation` | orixe baleiro ou digest mal formado | vacío |
+| `IncompatibleSize` | `byte_len` ≠ buffer, imaxe máis curta que `rom_size`, ou percorrido que non cubriu `length` | percorrido |
+| `InvalidRange` | `length < 1` ou cruza `0xFFFFFF` | **vacío** |
+| `LimitExceeded` | `length > max_bytes` (antes de percorrer) ou máis de `max_segments` corredores | os primeiros `max_segments` |
+| `BadState` | o perfil rexeita o estado (falta `rom_size`, intervalo, claves alleas, escrita fóra da páxina) | percorrido |
+| `NonRomRegion` | o percorrido cae nunha rexión coñecida sen backing (`region: Some`) ou nunha área sen dispositivo (`region: None`) | percorrido |
+| `Ambiguous` | as fontes pinadas diverxen (metade baixa A15 en LoROM) | percorrido |
+
+A fronteira do barramento resólvese aquí **antes** de chamar a calquera perfil:
+§7 documenta que as dúas familias MD e SNES a decidían de xeito distinto, e esta
+capa non herda esa ambigüidade — os cinco perfis saen por `InvalidRange` polo
+mesmo camiño.
+
+### 12.4 Secuencia de bancos: operación distinta
+
+`read_sequence` acepta `Step::WriteRegister` e `Step::Read` intercalados, e só
+existe nos perfis con rexistradores (`Profile::has_mapper_registers()`; neste
+conxunto, `md-ssf2`). Sepárase de `read_resource` a propósito: unha lectura cun
+estado fixo e unha serie de remapeos responden a preguntas diferentes.
+
+- As escritas son as puras de §8: cada lectura ve o estado das escritas
+  anteriores, e o `final_state` é un estado novo.
+- A recusa é **total**: se un paso faila non se devolve ningunha lectura, o
+  estado prestado queda intacto, e a procedencia dos pasos xa satisfados viaxa
+  no erro (renumerada desde 0).
+- Nun perfil sen rexistradores, a negativa é previa a calquera comprobación de
+  datos: `BadState` con `segments` vacío.
+
+### 12.5 O que **non** fai a capa
+
+- Non abre ficheiros nin coñece rutas: a imaxe entra como `&[u8]`.
+- **Non compute o SHA-256** da imaxe. Valida a forma da atestación e devólvena
+  na saída; comparar o digest contra o contido real é traballo do adaptador, que
+  é quen ten o arquivo. Facerlo no núcleo pagaría un hash por cada recurso
+  observado, e fixar ese límite tamén é parte do contrato
+  (`tests/resource_reader.rs::a_verificacion_de_contido_e_perna_do_adaptador_non_do_nucleo`).
+- Non deduce bancos nin perfil, e non modela chips especiais: herda os límites
+  de §10 tal cal.

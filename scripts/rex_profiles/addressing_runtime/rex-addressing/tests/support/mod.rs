@@ -11,12 +11,15 @@
 //  - `fixture`: reprodución do PRNG xorshift32 descrito no propio ficheiro de
 //    vectores (especificación declarada, non código alleo transplantado);
 //  - `vectors`: carga + validación de versión/SHA/counts dos vectores;
+//  - `banked`: fixture autoral cuxo contido identifica banco e offset, para
+//    auditar a capa de recursos sen chamar a ela;
 //  - `windows_engine`: SEGUNDA referencia, un matcher de xanelas declarativas
 //    derivado da táboa `windows-generated.json` (extraída mecanicamente do
 //    boards.bml de bsnes) e da simulación de táboa de páxinas de GPGX para SSF2.
 //    Non reutiliza as fórmulas dos perfis: esperado e observado veñen de camiños
 //    de derivación distintos.
 
+pub mod banked;
 pub mod conv;
 pub mod fixture;
 pub mod json;
