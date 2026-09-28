@@ -122,4 +122,32 @@ describe("actionable diagnostics model", () => {
     expect(buildAreaForTarget("megadrive")).toBe("build_sgdk");
     expect(buildAreaForTarget("snes")).toBe("build_snes");
   });
+
+  it("names the real MUGEN import cause instead of a generic message", () => {
+    const escape = createFallbackDiagnostic({
+      area: "import_mugen",
+      technicalDetail:
+        "Nao foi possivel importar nenhum modelo MUGEN valido de '/tmp/pacote'. Probe: caminho '../fora.sff' sai do pacote MUGEN; recusado",
+    });
+    expect(escape.user_message).toContain("'../fora.sff'");
+    expect(escape.user_message).toContain("Nenhum projeto foi criado");
+    expect(escape.suggested_action).toContain("corrija o caminho no .def");
+    expect(escape.technical_detail).toContain("sai do pacote");
+
+    const big = createFallbackDiagnostic({
+      area: "import_mugen",
+      technicalDetail: "'/tmp/p/probe.air' tem 2000000 bytes, acima do limite de 1048576",
+    });
+    expect(big.user_message).toContain("'/tmp/p/probe.air' e maior que o limite");
+
+    const budget = createFallbackDiagnostic({
+      area: "import_mugen",
+      technicalDetail: "Conversao MUGEN recusada: plan.budget.cell_too_large (probe.sff): celula 320x24 px excede 248 px",
+    });
+    expect(budget.user_message).toContain("248 px");
+
+    const unknown = createFallbackDiagnostic({ area: "import_mugen", technicalDetail: "falha qualquer" });
+    expect(unknown.user_message).toContain("nao pode ser processada");
+  });
 });
+
