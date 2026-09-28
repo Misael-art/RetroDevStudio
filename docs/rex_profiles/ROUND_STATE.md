@@ -22,10 +22,11 @@ limites de cobertura da própria célula e as provas herdadas valendo.
   nunca escrevem no ledger comum nem em arquivos de IPC/UI/manifests comuns.
 - Não matar processos alheios; não limpar corpus; corpus é somente leitura
   para A/B (caminho canônico `data/canonical-local-2026-09-21/corpus/`).
-- Janela atual: o integrador usou a xanela 2026-09-28T08:14Z–09:25Z (UTC) para
-  os gates da entrega A e 10:57Z–11:01Z para as re-execucións que a limpeza de
-  `/tmp` obrigar a refazer. Nada pesado queda executando; non hai monitores de
-  CI vivos nin jobs de A ou B iniciados por esta sesión.
+- Janela atual: o integrador usou 2026-09-28T08:14Z–09:25Z (UTC) para os gates
+  da integración do adaptador, 10:57Z–11:01Z para as re-execucións que a
+  limpeza de `/tmp` obrigou a refazer e 11:44Z–12:02Z para os gates da rolda de
+  aceite. Nada pesado queda executando; non hai monitores de CI vivos nin jobs
+  de A ou B iniciados por esta sesión.
 
 ## Matriz de endereçamento (propriedade: agente A)
 
@@ -245,7 +246,7 @@ não implica o seguinte. Uma biblioteca compilar e passar nos gates próprios n�
 | Pacote | biblioteca implementada | gates próprios aprovados | backend integrado | fluxo do usuário comprovado |
 |---|---|---|---|---|
 | `crates/rex-kosinski` (frente B) | verified (decodificador Kosinski base não-modular, 179 linhas, contrato v1 em `docs/rex_profiles/kosinski_runtime/CONTRACT.md`; entrega `3fea06e`+`1af7017`, pino revisto `0b752b7`, aplicada por `cherry-pick -x`) | **verified** — `npm run crates:gates` medido 2026-09-28T02:48Z: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **25 executados / 0 falhas / 0 ignorados** (22 contract + 3 mutations). Log + manifesto com SHA em `data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/`. Achado devolvido à B: os testes leem fixtures **fora** do pacote (`data/rex_profiles/codec/kosinski`, importado pelo integrador no mesmo pino — 27 linhas de `manifest.tsv` conferidas, 0 divergências, agregado `ea866df7…` reproduzido); o pacote não é relocável sozinho. O contrato do encoder (`0b752b7`) e o WIP `encode.rs` ficaram de fora desta entrega | **blocked** — sem `rex-kosinski` em `src-tauri/Cargo.toml`, sem adaptador, sem chamada real pelo backend | **blocked** — nada no produto usa este pacote |
-| `crates/rex-addressing` (frente A) | verified (5 perfis MD linear/SSF2 e SNES LoROM/HiROM/ExHiROM; 17 commits `9b27941..57e51d3`, PR #82, `cherry-pick -x` sem conflitos; movido de `scripts/rex_profiles/addressing_runtime/` para `crates/rex-addressing` — promoção que o `CONTRATO.md` do próprio perfil registrava como pendente do integrador. A entrega mais recente de A também entrou: 7 commits `58a06dd..30cb311` (PR #83, etapas 2–5 — capa de leitura de recursos com procedência, bateria discriminante, exemplo consumidor e varredura *nunca panica*), por `cherry-pick -x` como `cde721c..8a28909`, com pino conferido por fetch pontual antes de integrar) | **verified** — primeira medição 2026-09-28T02:58Z já na localização nova (`fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **81 executados / 0 falhas / 9 ignorados**) e re-medida 2026-09-28T08:14Z depois dos cherry-picks das etapas 2–5: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **127 executados / 0 falhas / 9 ignorados**. Logs + manifestos em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/` e `.../2026-09-28-backend-integrado/`. Os 9 ignorados são os BYOR (8) e a preimage exaustiva (1): o gate ordinário não depende de ROM. Pacote **relocável** — vectors pinados dentro dele. Achado devolvido à A (15 `.expect()` sem varredura adversária) está **fechado** pela própria etapa 5: `tests/no_panic_sweep.rs`, 277 610 chamadas determinísticas nos cinco perfis mais a capa de recursos | **verified** — chamado pelo backend real e medido: `rex-addressing = { path = "../crates/rex-addressing" }` em `src-tauri/Cargo.toml` (sem workspace na raiz; `Cargo.lock` +5 linhas, uma entrada `[[package]]` **sem** `source` e zero crates externos novos), adaptador em `src-tauri/src/tools/reverse/decomp/rex_addressing.rs` e comando Tauri `rex_addressing_read_snapshot` registrado em `generate_handler!` (SHA do adaptador `7bd75ea9…`). **17 testes do adaptador, 0 falhas**; suite completa `cargo test --lib`: **754 / 0 / 66 ignorados** (737 era a base sem o adaptador), `clippy --lib -D warnings` rc=0, `fmt --check` rc=0, `check:tree`/`lint`/`tsc --noEmit`/`npm test` todos rc=0. Não-vacuidade: RED observado (16 fallos antes da implementação) e três controles de mutação (garda de identidade, procedência do segmento, achatamento de erros) matando 1/2/8 testes, com restauração conferida por SHA. **Exposto apenas a leitura com snapshot fixo nos perfis MD**; `read_sequence`, as escritas e os perfis SNES ficam declarados como não expostos no registro. Log + manifesto por arquivo em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/` | **blocked** — nenhum chamador da interface usa `rex_addressing_read_snapshot` e não existe tela de endereçamento; as únicas imagens lidas são fixtures autoriais do próprio adaptador, sem corpus BYOR no gate |
+| `crates/rex-addressing` (frente A) | verified (5 perfis MD linear/SSF2 e SNES LoROM/HiROM/ExHiROM; 17 commits `9b27941..57e51d3`, PR #82, `cherry-pick -x` sem conflitos; movido de `scripts/rex_profiles/addressing_runtime/` para `crates/rex-addressing` — promoção que o `CONTRATO.md` do próprio perfil registrava como pendente do integrador. A entrega mais recente de A também entrou: 7 commits `58a06dd..30cb311` (PR #83, etapas 2–5 — capa de leitura de recursos com procedência, bateria discriminante, exemplo consumidor e varredura *nunca panica*), por `cherry-pick -x` como `cde721c..8a28909`, com pino conferido por fetch pontual antes de integrar) | **verified** — primeira medição 2026-09-28T02:58Z já na localização nova (`fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **81 executados / 0 falhas / 9 ignorados**) e re-medida 2026-09-28T08:14Z depois dos cherry-picks das etapas 2–5: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **127 executados / 0 falhas / 9 ignorados**; e re-medida outra vez 2026-09-28T11:44Z depois da rolda de aceite de A (`30cb311..0e5f804`), cos tres gates OK e **138 executados / 0 falhas / 10 ignorados** en 17 targets — exactamente os números que A publicou na súa propia árbore, reproducidos neste tronco e xa con `examples/` dentro do paquete. Logs + manifestos em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/` e `.../2026-09-28-backend-integrado/`. Os ignorados são os BYOR (8), a preimage exaustiva (1) e — só na carreira de 11:44Z — o caso que rexenera o JSON de aceite baixo `REX_ACEITE_ESCRIBIR=1`, que non se executou en ningunha das tres: o gate ordinário não depende de ROM. Pacote **relocável** — os vectors pinados viven dentro del (`vectors/rust-vectors-v1.json` e `vectors/acceptance-v1.json`, SHA-256 `54ba2b6e…a216` pino dentro de `tests/acceptance.rs`). Achado devolvido à A (15 `.expect()` sem varredura adversária) está **fechado** pela própria etapa 5: `tests/no_panic_sweep.rs`, 277 610 chamadas determinísticas nos cinco perfis mais a capa de recursos | **verified** — chamado pelo backend real e medido: `rex-addressing = { path = "../crates/rex-addressing" }` em `src-tauri/Cargo.toml` (sem workspace na raiz; `Cargo.lock` +5 linhas, uma entrada `[[package]]` **sem** `source` e zero crates externos novos), adaptador em `src-tauri/src/tools/reverse/decomp/rex_addressing.rs` e comando Tauri `rex_addressing_read_snapshot` registrado em `generate_handler!` (SHA do adaptador `7bd75ea9…`). **17 testes do adaptador, 0 falhas**; suite completa `cargo test --lib`: **754 / 0 / 66 ignorados** (737 era a base sem o adaptador), `clippy --lib -D warnings` rc=0, `fmt --check` rc=0, `check:tree`/`lint`/`tsc --noEmit`/`npm test` todos rc=0. Não-vacuidade: RED observado (16 fallos antes da implementação) e três controles de mutação (garda de identidade, procedência do segmento, achatamento de erros) matando 1/2/8 testes, com restauração conferida por SHA. **Exposto apenas a leitura com snapshot fixo nos perfis MD**; `read_sequence`, as escritas e os perfis SNES ficam declarados como não expostos no registro. **A rolda de aceite de A (medida 2026-09-28T11:44Z–12:02Z) non move este degrau**: os seus 15 vectores gradúan `read_resource`/`read_sequence` contra un oráculo independente, superficies que o adaptador do produto non expón, polo que non son evidencia do adaptador. Si mudou a débeda da promoción: `examples/resource_report.rs` da etapa 4 quedara na ruta vella (o paquete graduado ás 08:14Z non tiña exemplo e `clippy --all-targets` nunca o lintaba) e catro ligazóns relativas do README do paquete apuntaban tres niveis por riba da raíz — reparado en `daefb43`, con paridade conferida ficheiro a ficheiro (42 ↔ 42, única diferenza de contido a miña nota de localización) e o exemplo executado rc=0 desde `crates/rex-addressing` (13 lecturas / 14 recusas / 7 códigos, resumo `27bebc7b…`). Log + manifesto por arquivo em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/` | **blocked** — nenhum chamador da interface usa `rex_addressing_read_snapshot` e não existe tela de endereçamento; as únicas imagens lidas são fixtures autoriais do próprio adaptador, sem corpus BYOR no gate |
 
 Regras desta matriz: o registro canônico é `crates/registry.json` (schema
 `rex-crate-registry/v1`), consumido por `npm run check:tree` e por
@@ -313,6 +314,64 @@ WIP de encoder da B (`src/encode.rs`) continua fora, no worktree dela. O
 produto segue com os codecs que já tinha.
 
 ## Histórico da rodada
+
+- 2026-09-28 (integrador, **perna `aceite-integrado` — a rolda de invariantes e
+  vectores de aceite da fronte A entra no tronco e repárase a débeda da propia
+  promoción**), esta célula é o checkpoint. **HEAD de partida:** `6c3ea0e`.
+  **Como se descubriu:** ao consultar o tip de A despois de publicar o rexistro,
+  `git ls-remote` deu `0e5f804` en `codex/rex-rust-addressing` — cinco commits
+  mais recentes ca pin `30cb311` integrado ás 08:13Z, publicados entre 11:03Z e
+  11:23Z mentres este integrador medía os gates do adaptador. **Que había:**
+  `tests/acceptance.rs` (1 783 liñas) con 15 casos en
+  `vectors/acceptance-v1.json` (18 774 B, SHA-256 `54ba2b6e…a216` pinado dentro
+  do propio test), máis `INVARIANTES.md`, `ACEITE-ADAPTADOR.md`,
+  `RELATORIO_ACEITE_ADAPTADOR_2026-09-28.md` e dúas correccións de forma. O
+  esperado non sae das fórmulas dos perfís: sae dun oráculo independente (motor
+  de xanelas declarativo, táboa `boards.bml` de bsnes con SHA `2de90492…` e
+  modelo GPGX para SSF2), e rexenerar o JSON require `REX_ACEITE_ESCRIBIR=1` con
+  `--ignored`, que non se executou. **Como entrou:** `0a371b7` e `d7e3925` tocan
+  o crate, que na árbore de A aínda vivía en
+  `scripts/rex_profiles/addressing_runtime/rex-addressing/`; aplicáronse con
+  `git show` e reescrita desa ruta a `crates/rex-addressing/`, conservando autor,
+  data e mensaxe e engadindo `(cherry picked from commit …)`. `cc8026c`,
+  `785320c` e `0e5f804` son de solos `docs/` e entraron por `cherry-pick -x` sen
+  conflitos. Locais: `10a8f5d`, `32d2e26`, `42756e2`, `d252a5f`, `aa46265`.
+  **Achado sobre o meu propio traballo (débeda da promoción, non de A):** a
+  promoción `9f83d15` moveu 41 ficheiros, pero o cherry-pick da etapa 4
+  recreara `examples/resource_report.rs` na ruta vella. O paquete graduado ás
+  08:14Z non tiña exemplo e `clippy --all-targets` nunca o lintou; e catro
+  ligazóns relativas do README do paquete (`../../../../docs/…`) apuntaban tres
+  niveis por riba da raíz desde o movemento. Reparado en `daefb43`: exemplo
+  movido (blob idéntico `7f9a8f5b…` nas dúas puntas), ligazóns revalidadas con
+  0 rotas, receitas `cd scripts/…` de `ACEITE-ADAPTADOR.md` §3 e
+  `EXEMPLO-CONSUMIDOR.md` postas a `cd crates/rex-addressing` (rompeunas a miña
+  promoción, non A) e `CONTRATO.md` §0.1 — nota miña — deixa de afirmar que nada
+  no produto consome o paquete. A narración histórica e os rexistros de comandos
+  co worktree de A (`/home/misael/RDS-REX-A2-RUST-ADDR/…`) mantéñense tal cales:
+  evidencia pasada non se reescribe. **Medido, non narrado:**
+  `npm run crates:gates` rc=0 con **rex-addressing 138 executados / 0 falhas /
+  10 ignorados en 17 targets** (exactamente os números que A publicou na súa
+  árbore, xa co exemplo dentro do paquete) e **rex-kosinski 25 / 0 / 0 sen
+  cambios**; o exemplo executado desde `crates/rex-addressing` dá rc=0 co seu
+  resumo (`13` lecturas, `14` recusas, 7 códigos, `resumo sha256=27bebc7b…`);
+  `npm run check:tree` rc=0 (o directorio vello xa non existe), `cargo fmt
+  --check` rc=0, `cargo clippy --lib -- -D warnings` rc=0 e `cargo test --lib`
+  con **754 / 0 / 66** e `CARGO_RC=0` — as 17 probas do adaptador seguen verdes
+  co crate reconstruído e o SHA do adaptador (`7bd75ea9…`) non cambiou. Paridade
+  conferida ficheiro a ficheiro: 42 ficheiros no paquete de A, 42 neste tronco,
+  cero diferenzas de nome, única diferenza de contido o README coa miña nota de
+  localización; árbore graduada `9101cfb5…`. **Un fallo meu de captura,
+  rexistrado co log:** a primeira carreira da suíte pipesouse a `tail -30`, polo
+  que o seu `TEST_LIB_RC=0` era o código de saída de `tail`; conservouse como
+  `captura-defectuosa-rc-do-pipeline-e-tail30.log` e a carreira autorizada é
+  `cargo-test-lib-pos-aceite.log`. **O que NON se alega:** os vectores de aceite
+  gradúan `read_resource`/`read_sequence`, superficies que o adaptador non
+  expón, así que non son evidencia do adaptador nin suben ningún degrau;
+  `backend-integrado` queda onde estaba, `fluxo do usuario` segue bloqueado, non
+  hai corpus BYOR no gate e non houbo merge, release nin promoción de
+  maturidade. Evidencia con manifesto e SHA por ficheiro en
+  `data/rex_profiles/addressing_runtime/evidence/2026-09-28-aceite-integrado/`
+  (autocomprobada: 6 artefactos listados, 6 presentes, 0 diverxencias).
 
 - 2026-09-28 (integrador, **rodada de integración da frente A — `crates/rex-addressing`
   sobe de `gates propios aprobados` a `backend integrado`, e só a ese degrau**),
@@ -390,6 +449,13 @@ produto segue com os codecs que já tinha.
   codificar e reinserir; o exemplo de edición en contedor non substitúe a
   transacción canónica. **Nada aquí é merge nin release:** os commits entraron un
   a un con `cherry-pick -x` e `crates/rex-addressing` segue `Experimental`.
+
+  **Emenda (12:14Z, mesma sesión):** o «entrega mais recente» que aquela célula
+  rexistraba era `30cb311`. Entre 11:03Z e 11:23Z A publicou cinco commits mais
+  en `codex/rex-rust-addressing` (`0e5f804`: rolda de invariantes e vectores de
+  aceite do adaptador), xa integrados na célula anterior desta lista. O pino
+  conferíase de forma pontual en cada integración — non había ningún monitor
+  vixiando a branch de A, e iso é o motivo polo que a emenda fai falta.
 
 
 - 2026-09-28 (integrador, **rodada `crates/` — a árvore formalizada e duas
