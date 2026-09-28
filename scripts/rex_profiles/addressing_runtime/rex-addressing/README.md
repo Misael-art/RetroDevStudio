@@ -10,7 +10,7 @@ non decodifica codecs, non ten UI, e **non afirma soporte a ningún xogo**. O
 contrato formal e os límites están en
 [`docs/rex_profiles/addressing_runtime/CONTRATO.md`](../../../../docs/rex_profiles/addressing_runtime/CONTRATO.md);
 a evidencia da rolda, en
-[`RELATORIO_ENDERAZAMENTO_RUST.md`](../../../../docs/rex_profiles/addressing_runtime/RELATORIO_ENDERAZAMENTO_RUST.md).
+[`RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md`](../../../../docs/rex_profiles/addressing_runtime/RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md).
 
 ## Por que está aquí e non en `crates/`
 
