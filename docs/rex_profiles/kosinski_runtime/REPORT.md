@@ -15,13 +15,15 @@ modo modular ou descompilação universal.
 | Artefato | Papel | SHA-256 |
 |---|---|---|
 | `crates/rex-kosinski/src/lib.rs` | decoder (decode puro, sem deps, sem Tauri, sem FS) | `7f70a772b611af68af8a8bc2bd9db4c8e6be404348ce697c2b355e3b11f156d8` |
-| `crates/rex-kosinski/tests/contract.rs` | 21 testes de contrato (goldens, plains, negativos, bordas) | `c43f4d1c394930024562ef88eac4a5daab42c60f8f3c2415548d8b38e7ac7753` |
+| `crates/rex-kosinski/tests/contract.rs` | 22 testes de contrato (goldens, plains, negativos, bordas, limites no ponto de uso) | `f5aad06afcd950d8b3d22be5d9b3b8d8750cbdfbcdb54ba3eb280385b7c9afb0` |
 | `crates/rex-kosinski/tests/mutations.rs` | 3 testes (truncamento sistemático, mutação com seed, negativo discriminativo) | `97476a1868237cdfc6fd90ea2a4d00e1d010b6f49164f1187faff24f5ca50b4c` |
 | `crates/rex-kosinski/examples/decode.rs` | CLI de modo diferencial (usado só pelo script do oráculo) | `b7d3698218d11ecc5e3af6d9dcecf5c2e3d14d05002780e2b85da1cc66e3e508` |
 | `docs/rex_profiles/kosinski_runtime/CONTRACT.md` | contrato v1 fixado ANTES da implementação | `3062965930ceeaa423d2718fe9b3a929df9d4c4ce2db51b294e66002e3b5798f` |
 | `data/rex_profiles/kosinski_runtime/overlap_echo.kos` + `.expected.bin` | fixture autoral desta frente (eco sobreposto; expectativa derivada do contrato, confirmada pelo oráculo) | stream `ffde8de70ee9a51823cc9ce07a9062c684ab606a7e5aa4c237b98c582c2b7a53`; saída `7b346904f63cc07f1d8cc2d88d7dae08a3f088a0e4159d5214c27a6571a51eb4` |
-| `scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh` | comparação externa isolada por sandbox (timeout + ulimit) | `559fb82be5816ff4286d1783d14f2a93b6691f949af7c34e3892553a87e95d9c` |
-| `docs/rex_profiles/kosinski_runtime/evidence/differential-vs-koscmp.tsv` | evidência da última execução diferencial (60 linhas) | `8087d6ee072d6dfbb9607c37897ca403138f7bb8433601f5423623ff7bfab236` |
+| `data/rex_profiles/kosinski_runtime/limite_probe.kos` + `.expected.bin` | fixture autoral da revisão (item 4: cópia larga len=256 dist=1 + terminator; exercita corte de limites durante a decodificação) | stream `bfc118ff5c2dfa9410de92387dc3152d4571a503a0532bf24ca5afade0b5b79c`; saída `77608f24da6140277bd789efec57a179b1c1e57f44045ebd2b39e3c1e7e18d42` |
+| `data/rex_profiles/kosinski_runtime/manifest.json` | manifesto exclusivo do pacote (2 vetores: overlap_echo, limite_probe) | `8005ec4547c49ea73dac80ec0eaac8997419743b9dbd158e798624a9aab4a278` |
+| `scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh` | comparação externa isolada por sandbox (timeout + ulimit); tabela auditável da revisão | `168f23cf88923de9e649867a2a11f07618a750a1a718c2554c0b8ed6814b8dac` |
+| `docs/rex_profiles/kosinski_runtime/evidence/differential-vs-koscmp.tsv` | evidência da execução diferencial auditável (39 linhas: 36 paridade + 1 contratual + 2 sondas) | `89d9eef6b6ff2d3f966eb1d254bc14159fbe8303b236ef9c1061d8fa3206c7cf` |
 
 Manifesto do pacote é exclusivo (`data/rex_profiles/kosinski_runtime/manifest.json`);
 nenhum manifesto compartilhado, `lib.rs` do produto, módulo de codec, IPC, UI,
@@ -65,8 +67,8 @@ dentro do decoder; aritmética validada antes de indexar/alocar.
 | EOF no meio de separado (faltam Low/High) | k02 → `Truncated` | ok |
 | referência antes do 1º byte escrito | k03, sonda `02 00 FF FF` → `InvalidReference` | ok |
 | dist inline além do histórico | k04 → `InvalidReference` | ok |
-| saída > max_output em stream BEM-FORMADA | k05 (512 bytes, max_out=16) → `ExcessiveOutput`; com max_out=512 → `Ok` consumed=296 | ok |
-| work_limit mínimo | orçamento 16 → `WorkLimit`; 17 → `Ok` (fronteira exata medida) | ok |
+| saída > max_output em stream BEM-FORMADA | k05 (512 bytes, max_out=16) → `ExcessiveOutput`; com max_out=512 → `Ok` consumed=296; **corte durante a cópia longa** (§9) | ok |
+| work_limit mínimo | orçamento 16 → `WorkLimit`; 17 → `Ok` (fronteira exata medida); **corte no 91º byte de uma cópia de 256** (§9) | ok |
 | limite exato de saída | teste de borda `output == max_output` | ok |
 | bytes arbitrários | ver §4 | sem pânico |
 
@@ -82,14 +84,24 @@ dentro do decoder; aritmética validada antes de indexar/alocar.
    eco, saída no limite exato, fronteira de orçamento.
 4. **Comparação com oráculo pinado (saída completa, não rc+tamanho):**
    `scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh`
-   → **60 linhas: 58 conformes, 0 divergências não-explicadas, 2 sondas de
-   defeito do oráculo** (aceita m05−1B com 8692 bytes; `0200FFFF` → rc=0,
-   0 bytes — ambos recusados estruturadamente pelo produto). Todas as
-   conformes comparam SHA-256 de bytes (goldens oráculo-vs-espera +
-   rust-vs-espera; plains reencode→decodificações duplas; `overlap_echo`;
-   k05 oráculo-vs-rust `110009dcee21620b166f3abfecb5eff7a873be729d1c2d53822e7acc5f34eb9b`).
-   TSV publicado em `evidence/` (sha §1). Repór: `bash scripts/.../differential-vs-koscmp.sh`
-   (aborta se koscmp ou o checkout mdcomp divergirem dos pins).
+   reescrito em **tabela auditável** (revisão PR #81, item 3): cada linha traz
+   `caso | categoria | entrada_sha256 | esperado | oraculo | produto |
+   veredito | justificativa`. Vereditos: **PARIDADE (36)**,
+   **DIVERGENCA-CONTRATUAL (1 = m02, NUNCA contada como paridade positiva;
+   falha se o produto deixar de recusar `Truncated` exatamente)** e
+   **SONDA-DEFEITO-NAO-COTADA (2)** — as duas sondas de defeito do oráculo
+   (aceita m05−1B com 8692 bytes > 8451 esperados; `0200FFFF` → rc=0,
+   saída vazia) são diagnóstico documentado, **não paridade**.
+   `DIVERGE` inaceitável = 0. Categorias: 9 goldens, 12 plain-encode
+   (reencode reproduz a stream publicada; produto não tem encoder —
+   declarado na linha), 12 plain-decode, 2 runtime (`overlap_echo` e
+   `limite_probe`, espera derivada da gramática do contrato), 1 k05 bem-formada
+   (`110009dcee21620b166f3abfecb5eff7a873be729d1c2d53822e7acc5f34eb9b` pinado
+   no próprio script). Aborta se koscmp ou o checkout mdcomp divergirem dos
+   pins. TSV publicado em `evidence/` (sha no apêndice A).
+   Contagem antiga (58/60 em 60 linhas) foi substituída — a reformulação
+   passou a tratar m02 como divergência contratual explícita em vez de
+   "conforme", somou `limite_probe` e unificou oráculo+produto por caso.
 5. **Expectativas independentes do decoder:** ouro = `.expected.bin`
    publicados pelo perfil REX-B (confirmados por `koscmp` em rodada anterior,
    agregado `ea866df797126230b36e27b76ca569d4fd8528d291e86fe578491998ec3d96d1`);
@@ -111,10 +123,11 @@ dentro do decoder; aritmética validada antes de indexar/alocar.
 9. **BYOR:** **não medido** — nenhuma stream Kosinski real de ROM nesta base;
    `resource-identification-in-rom` permanece `blocked`. Nenhum offset ou
    suporte de jogo foi inventado.
-10. **Gates do pacote:** `cargo fmt --check` ok; `cargo clippy --all-targets
-    -- -D warnings` sem avisos; `cargo test` **24/24 verdes SEM oráculo**
-    (21 contract + 3 mutations). A comparação com oráculo vive em comando
-    separado e documentado (§4.4), fora da suíte normal.
+10. **Gates do pacote (reexecutados após a revisão):** `cargo fmt --check` ok;
+    `cargo clippy --all-targets -- -D warnings` sem avisos; `cargo test`
+    **25/25 verdes SEM oráculo** (22 contract + 3 mutations). A comparação com
+    oráculo vive em comando separado e documentado (§4.4), fora da suíte
+    normal.
 
 ## 5. Controle de mutação EARLY→LATE FETCH (item 2)
 
@@ -148,15 +161,32 @@ mesma posição relativa, eliminar o bloco de fetch antecipado dentro de
 | Paridade com 2º descodificador 68k | **não executada** — permanece `blocked` (1 oráculo apenas) |
 | Modo modular (`-m`) | não coberto — `blocked` |
 
-## 7. Desvios e pendências registradas
+## 7. Gates abertos e pendências registradas
 
-- **`npm run check:tree` neste worktree sinaliza `crates/`** (raiz ausente de
-  `docs/08_TREE_ARCHITECTURE.md`). A missão designa explicitamente
-  `crates/rex-kosinski/`; docs canônicos pertencem ao integrador e **não foi
-  editado nada deles**. Devolução: integrador decide a linha de `crates/` na
-  árvore canônica.
+- **GATE ABERTO — `check:tree` (revisão PR #81, item 5; não enfraquecido por
+  esta frente).** Diagnóstico exato neste worktree (comando
+  `node scripts/check-tree.cjs`, código de saída **1**):
+  ```text
+  ERRO: Diretorios na raiz que nao estao em docs/08_TREE_ARCHITECTURE.md:
+    - crates
+  Diretorios permitidos na raiz: .github, data, docs, src, src-tauri, toolchains, scripts
+  ```
+  Causa: a allowlist de raízes é **literal em código** —
+  `scripts/check-tree.cjs:12`:
+  `const allowedDirs = [".github", "data", "docs", "src", "src-tauri", "toolchains", "scripts"];`
+  (o script não deriva a lista de `docs/08`; o texto é apenas mensagem).
+  **Mudança mínima proposta ao integrador** (nada aplicado por esta frente):
+  ① adicionar `"crates"` a `allowedDirs` em `scripts/check-tree.cjs:12` e
+  ② registrar a seção `crates/` (pacotes Rust autônomos fora do Tauri) em
+  `docs/08_TREE_ARCHITECTURE.md`, mantendo script e doc em acordo.
+  Alternativa de localização compatível com as regras ATUAIS (sem tocar
+  script nem doc): mover o pacote para baixo de uma raiz já permitida —
+  ex. `src-tauri/vendor/rex-kosinski/` — ao custo de insinuar acoplamento ao
+  app Tauri que o pacote não tem. A missão fixou `crates/rex-kosinski/`;
+  decisão final é do integrador.
 - Encoder Kosinski, autodescoberta em ROM, reinserção, UI: fora de escopo
-  desta entrega (missão).
+  desta entrega (missão). **Kosinski não está disponível na interface do
+  produto** — nada foi integrado.
 - O quirk `continue` (c==1) é aceito (obrigação contratual do perfil);
   implementações futuras não devem rejeitá-lo.
 - Nada foi mesclado, publicado ou promovido; suporte segue `fixture-only`
@@ -180,3 +210,116 @@ mesma posição relativa, eliminar o bloco de fetch antecipado dentro de
    original derivada do contrato medido.
 5. Reexecutar `differential-vs-koscmp.sh` em qualquer mudança de `lib.rs`
    (pins abortam a corrida se divergirem).
+
+## 9. Limites exercitados DURANTE a decodificação (revisão PR #81, item 4)
+
+Não há truncamento no final nem conferência posterior à alocação:
+
+- `max_output`: cobrado **por byte escrito**, no ponto de uso —
+  `push()` (`crates/rex-kosinski/src/lib.rs:173-179`) retorna
+  `ExcessiveOutput` quando `out.len() >= max_output` **antes** de qualquer
+  `Vec::push`; é chamado dentro do laço de cópia (`lib.rs:165-169`) e no
+  literal (`lib.rs:123`). O `Vec` jamais cresce além do teto.
+- `work_limit`: `spend()` (`lib.rs:40-46`) usa `checked_add` e recusa
+  **antes** da operação seguinte; é invocado por bit de descritor, por byte
+  lido e por byte escrito — um token `len=256` não consegue alocar 256 bytes
+  sem 256 unidades de orçamento.
+
+Prova em testes (suíte normal, sem oráculo):
+`limites_cortam_durante_a_copia_larga_nao_so_no_fim` usa a stream autoral
+`15 00 41 FF F8 FF 00 00 00` (literal `'A'` + separado `len=256, dist=1` +
+terminador): com `max_output=10` o erro vem **no meio da cópia**
+(`ExcessiveOutput` — um truncador retornaria `Ok`); com `work_limit=100` o
+orçamento corta no **91º byte copiado** (`WorkLimit` — um verificador pós-
+alocação não cortaria em meio ao token). Controle positivo sem limites
+apertados: 257×`0x41`, `bytes_consumed=9`. A mesma stream foi adicionada ao
+modo diferencial como `limite_probe`, **confirmada pelo oráculo** (paridade
+na tabela auditável). As provas anteriores seguem intactas: early-fetch
+(m09/m10 + controle §5), referências sobrepostas (m07, `overlap_echo`,
+`noisy_runs_16k`), consumo (`bytes_consumed` exato nos 9 goldens + 12
+plains), terminador (todas as streams bem-formadas; k01/k02/m02 recusados),
+padding (§4.8) e ausência de pânico (§4.6).
+
+## 10. Naturezas de verificação (revisão PR #81, item 2)
+
+- **Comparação externa com `koscmp`: EXECUTADA** — oráculo pinado, sandbox
+  com timeout, tabela auditável §4.4 (paridade=36; divergência contratual
+  esperada=1; sondas de defeito=2, não cotadas).
+- **Revisão independente por outro executor: NÃO EXECUTADA.** Isso não
+  invalida nem diminui as verificações próprias desta frente, que foram
+  executadas por inteiro: TDD com falha observada, fmt, clippy `-D warnings`,
+  25/25 testes sem oráculo, controle de mutação, truncamentos/mutações com
+  seed e a comparação externa acima. Não existe nos docs canônicos regra que
+  condicione essas verificações a autorização; a regra literal aplicável ao
+  vocabulário de entrega é `docs/09_AGENT_DEV_MODE.md` §3.2:
+  "`Validado institucionalmente`: ha evidencia canonica da rodada/host
+  institucional." — por isso esta entrega **não** usa esse rótulo; ela se
+  limita à classificação autorizada pela missão:
+  *Decodificação Kosinski verificada no contrato e corpus descritos.*
+  (Expectativas manuais vs comparação executável, item 4 do briefing
+  original: as esperas dos goldens/plains são publicas e verificaveis por
+  qualquer executor com `koscmp` pinado; a suíte `cargo test` cobre as
+  expectativas contratuais sem oráculo — uma não substitui a outra.)
+
+## 11. Licenças e proveniência (revisão PR #81, item 6)
+
+| Artefato | Papel | Licença/proveniência | Código incorporado? |
+|---|---|---|---|
+| mdcomp `koscmp` + checkout `72c6df40…` | **referência externa usada só para comparação** (executada em sandbox) | LGPL-3.0-or-later | **NÃO** — nenhum código, binário ou objeto transplantado/embutido; apenas fatos de formato medidos e citados em CONTRACT.md |
+| `crates/rex-kosinski/*` | implementação desta frente | original (esta frente), sem dependências (`Cargo.lock`: zero deps) | — |
+| `data/rex_profiles/codec/kosinski/**` (27 streams + esperas) | fixtures/vetos | **authored-fixture** sintéticas do perfil REX-B, geradas por `gen_vectors.py` autoral e confirmadas pelo oráculo; agregado `ea866df7…` | — |
+| `data/rex_profiles/kosinski_runtime/*` | fixture autoral `overlap_echo` + manifesto | autoral desta frente, expectativa derivada do contrato, confirmada pelo oráculo | — |
+| `scripts/rex_profiles/codecs/common/sandbox.sh` | isolador de oráculo (herança #79) | autoral REX | — |
+| Nenhuma ROM/comercial/BYOR foi usada | — | corpus BYOR **não medido** | — |
+
+## 12. Herança da cadeia da PR #79 (base dependente preservada)
+
+Testes e modo diferencial **exigem** estes arquivos herdados do branch base
+`codex/rex-b-codecs` (commit `9b2389d`), que esta frente não duplicou nem
+alterou:
+
+- `data/rex_profiles/codec/kosinski/{plain,golden,negative}/*.kos` e
+  `.expected.bin`/`.expected.json` — as 27 streams que `tests/contract.rs` e
+  `tests/mutations.rs` leem via caminho relativo (`perfil()`), mais as
+  esperas publicadas;
+- `data/rex_profiles/codec/kosinski/manifest.tsv` — verificação de SHAs das
+  fixtures (§6);
+- `scripts/rex_profiles/codecs/common/sandbox.sh` — `run_oracle` usado pelo
+  diferencial;
+- `docs/rex_profiles/codecs/kosinski.md` + `evidence/` do perfil — contexto
+  das pins/hashes citados.
+
+Por isso a PR mira `codex/rex-b-codecs` como base, não `main`.
+
+Reprodutibilidade medida nesta revisão: o diferencial foi executado 2× (e
+novamente 2× após a correção da justificativa no script) com as fixtures lidas
+de `data/` (fonte única) e produziu TSV **byte-idêntico** em cada par de
+corridas — SHA-256 final `89d9eef6…` nas duas últimas.
+
+## Apêndice A — comandos validados e SHA por artefato (revisão de 2026-09-27)
+
+Comando de validação (caminho real **confirmado por execução** de um CWD
+estranho; proibido orientar `git checkout` no diretório canônico ocupado
+pelo integrador):
+
+```bash
+cargo test --manifest-path /home/misael/Projects/REX-KOSINSKI-DECODER-2026-09-27/crates/rex-kosinski/Cargo.toml
+```
+
+Modo diferencial (requer koscmp pinado; usa `REX_REPO` automático do worktree):
+
+```bash
+bash /home/misael/Projects/REX-KOSINSKI-DECODER-2026-09-27/scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh
+```
+
+| Artefato | SHA-256 |
+|---|---|
+| `crates/rex-kosinski/src/lib.rs` (inalterado pela revisão — sem mudança de produção) | `7f70a772b611af68af8a8bc2bd9db4c8e6be404348ce697c2b355e3b11f156d8` |
+| `crates/rex-kosinski/tests/contract.rs` (22 testes, +`limites_cortam...`) | `f5aad06afcd950d8b3d22be5d9b3b8d8750cbdfbcdb54ba3eb280385b7c9afb0` |
+| `crates/rex-kosinski/tests/mutations.rs` | `97476a1868237cdfc6fd90ea2a4d00e1d010b6f49164f1187faff24f5ca50b4c` |
+| `crates/rex-kosinski/examples/decode.rs` | `b7d3698218d11ecc5e3af6d9dcecf5c2e3d14d05002780e2b85da1cc66e3e508` |
+| `scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh` (tabela auditável) | `168f23cf88923de9e649867a2a11f07618a750a1a718c2554c0b8ed6814b8dac` |
+| `docs/rex_profiles/kosinski_runtime/evidence/differential-vs-koscmp.tsv` (39 linhas: 36/1/2) | `89d9eef6b6ff2d3f966eb1d254bc14159fbe8303b236ef9c1061d8fa3206c7cf` |
+| `docs/rex_profiles/kosinski_runtime/CONTRACT.md` (inalterado) | `3062965930ceeaa423d2718fe9b3a929df9d4c4ce2db51b294e66002e3b5798f` |
+| commit da entrega original | `3fea06e` |
+| commit desta revisão | consultável via `git log --oneline -2` na branch (auto-referência: um commit não pode conter o próprio SHA) |

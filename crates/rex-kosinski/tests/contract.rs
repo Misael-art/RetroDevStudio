@@ -227,6 +227,39 @@ fn borda_orcamento_de_trabalho_deterministico() {
 }
 
 #[test]
+fn limites_cortam_durante_a_copia_larga_nao_so_no_fim() {
+    // Item 4 da revisao (2026-09-27): prova de enforcement NO PONTO DE USO.
+    // Stream autoral minima: 15 00 | 41('A') | FF F8 FF (separado, len=256,
+    // dist=1 — eco) | 00 00 00 (terminador via separado). Descritor 0x0015:
+    // bit0=1 literal; bit1=0,bit2=1 separado longo; bit3=0,bit4=1 segundo
+    // separado, cujo c==0 e o terminador. Um UNICO token pede 256 bytes; se o
+    // decoder truncasse a saida no final ou conferisse o orcamento depois de
+    // alocar, estes casos dariam Ok ou erro diferente.
+    let st = vec![0x15u8, 0x00, 0x41, 0xFF, 0xF8, 0xFF, 0x00, 0x00, 0x00];
+    // max_output=10: a copia comeca (1 byte de historico e valido) e e
+    // interrompida no 11o byte escrito — ExcessiveOutput em meio ao token.
+    assert_eq!(
+        decode(&st, 10, 1 << 20),
+        Err(KosError::ExcessiveOutput),
+        "corte de saida deve ocorrer byte a byte dentro da copia"
+    );
+    // work_limit=100: leitura do token consome 10 unidades; a copia escreve
+    // 1 byte por unidade — o corte cai no 91o byte copiado, ainda dentro do
+    // mesmo token (WorkLimit em meio ao token, nao depois de alocar tudo).
+    assert_eq!(
+        decode(&st, 4096, 100),
+        Err(KosError::WorkLimit),
+        "orcamento deve ser cobrado por byte escrito, durante a copia"
+    );
+    // Controle positivo: sem limites apertados, eco de len=256/dist=1 produz
+    // 257 bytes ('A' ecoado) e consome exatamente os 9 bytes (terminador no
+    // ultimo byte, sem padding).
+    let ok = decode(&st, 300, 1 << 16).expect("stream bem-formada");
+    assert_eq!(ok.output, vec![b'A'; 257]);
+    assert_eq!(ok.bytes_consumed, 9);
+}
+
+#[test]
 fn nunca_panic_em_bytes_arbitrarios() {
     // Mutacoes com seed deterministico sobre streams reais: resultado deve
     // ser coerente com o contrato (Ok com limites ou Err estruturado), SEM
