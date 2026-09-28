@@ -1,5 +1,8 @@
 //! Fixture autoral "Probe" (personagem minimo e discriminante), gerada por codigo.
 //!
+//! Todo PCX grava a paleta (valido com ou sem a flag `same_palette`); os sprites
+//! seguintes marcam `same_palette = 1`.
+//!
 //! Tudo aqui e autoral (sem conteudo de terceiros) e deterministico. `tests/fixture_probe.rs`
 //! compara a saida com `fixtures/probe/` byte a byte; `REX_MUGEN_WRITE_FIXTURES=1` regrava.
 //!
@@ -75,6 +78,7 @@ pub fn probe() -> Files {
             height: 24,
             pixels: &idle0,
             palette: Some(&pal),
+            same_palette: false,
             link: None,
         },
         Image {
@@ -85,7 +89,8 @@ pub fn probe() -> Files {
             width: 16,
             height: 24,
             pixels: &idle1,
-            palette: None,
+            palette: Some(&pal),
+            same_palette: true,
             link: None,
         },
         Image {
@@ -96,7 +101,8 @@ pub fn probe() -> Files {
             width: 24,
             height: 24,
             pixels: &punch0,
-            palette: None,
+            palette: Some(&pal),
+            same_palette: true,
             link: None,
         },
         Image {
@@ -107,7 +113,8 @@ pub fn probe() -> Files {
             width: 20,
             height: 24,
             pixels: &punch1,
-            palette: None,
+            palette: Some(&pal),
+            same_palette: true,
             link: None,
         },
     ]);

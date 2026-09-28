@@ -345,8 +345,10 @@ pub mod write {
         pub width: u16,
         pub height: u16,
         pub pixels: &'a [u8],
-        /// `None` = usa a paleta anterior (`same_palette = 1`).
+        /// Paleta gravada no fim do PCX (`None` = omitida).
         pub palette: Option<&'a [Rgb]>,
+        /// Flag `same_palette` do subcabecalho (usa a paleta do sprite anterior).
+        pub same_palette: bool,
         /// `Some(i)` = link para o subarquivo `i` (sem dados).
         pub link: Option<u16>,
     }
@@ -413,7 +415,7 @@ pub mod write {
             header[12..14].copy_from_slice(&img.group.to_le_bytes());
             header[14..16].copy_from_slice(&img.image.to_le_bytes());
             header[16..18].copy_from_slice(&img.link.unwrap_or(0).to_le_bytes());
-            header[18] = u8::from(img.palette.is_none());
+            header[18] = u8::from(img.same_palette);
             out.extend_from_slice(&header);
             out.extend_from_slice(&body);
         }
@@ -448,6 +450,7 @@ mod tests {
                 height: 3,
                 pixels: &px,
                 palette: Some(&p),
+                same_palette: false,
                 link: None,
             },
             Image {
@@ -459,6 +462,7 @@ mod tests {
                 height: 3,
                 pixels: &px,
                 palette: None,
+                same_palette: true,
                 link: Some(0),
             },
         ]);
@@ -496,6 +500,7 @@ mod tests {
                 height: 4,
                 pixels: &px,
                 palette: Some(&p),
+                same_palette: false,
                 link: None,
             },
             Image {
@@ -507,6 +512,7 @@ mod tests {
                 height: 4,
                 pixels: &px,
                 palette: None,
+                same_palette: true,
                 link: None,
             },
             Image {
@@ -518,6 +524,7 @@ mod tests {
                 height: 4,
                 pixels: &px,
                 palette: None,
+                same_palette: true,
                 link: Some(7),
             },
         ]);
