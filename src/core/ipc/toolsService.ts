@@ -850,10 +850,116 @@ export function romPatchRecoveredLogic(
   });
 }
 
+// ── Recuperacion de regra de gameplay (crates/rex-gameplay, Experimental) ────
+// DTOs espellos de `src-tauri/src/tools/reverse/decomp/rex_gameplay.rs`
+// (snake_case, `deny_unknown_fields`). Erros: InspectionError con codigo
+// estable — invalid_request, identity_mismatch, range_refused, graph_tampered,
+// profile_refused, io_error, command_interrupted.
+
+export interface GameplayAddressLabel {
+  offset: number;
+  name: string;
+}
+
+export interface GameplayScanRequest {
+  request_id: string;
+  rom_path: string;
+}
+
+export interface GameplayScanCandidate {
+  entry: number;
+  exit: number;
+  counter_addr: number;
+  threshold: number;
+}
+
+export interface GameplayScanResponse {
+  request_id: string;
+  rom_sha256: string;
+  candidates: GameplayScanCandidate[];
+  /** false so cando hai exactamente un candidato; a varredura non escolhe. */
+  ambiguous: boolean;
+}
+
+export interface GameplayRecoverRequest {
+  request_id: string;
+  rom_path: string;
+  entry: number;
+  exits: number[];
+  address_labels: GameplayAddressLabel[];
+}
+
+export interface GameplayRecoverResponse {
+  request_id: string;
+  profile_id: string;
+  rom_sha256: string;
+  entry: number;
+  exits: number[];
+  blocks: [number, number][];
+  operator: string;
+  threshold: number;
+  threshold_range: [number, number];
+  graph_json: string;
+  limitations: string[];
+}
+
+export interface GameplayEditRequest {
+  request_id: string;
+  graph_json: string;
+  threshold: number;
+}
+
+export interface GameplayEditResponse {
+  request_id: string;
+  graph_json: string;
+}
+
+export interface GameplayRebuildRequest {
+  request_id: string;
+  base_path: string;
+  expected_sha256: string;
+  graph_json: string;
+  output_path: string;
+  /** "patch" (so o inmediato) | "regenerate" (remonta a rexion). Non e build do proxecto. */
+  method: string;
+}
+
+export interface GameplayRebuildResponse {
+  request_id: string;
+  method: string;
+  input_sha256: string;
+  output_sha256: string;
+  output_path: string;
+  changed_offsets: number[];
+  authorized_ranges: [number, number][];
+  checksum_updated: boolean;
+}
+
+export function rexGameplayScan(request: GameplayScanRequest): Promise<GameplayScanResponse> {
+  return invoke<GameplayScanResponse>("rex_gameplay_scan", { request });
+}
+
+export function rexGameplayRecover(
+  request: GameplayRecoverRequest
+): Promise<GameplayRecoverResponse> {
+  return invoke<GameplayRecoverResponse>("rex_gameplay_recover", { request });
+}
+
+export function rexGameplayEditThreshold(
+  request: GameplayEditRequest
+): Promise<GameplayEditResponse> {
+  return invoke<GameplayEditResponse>("rex_gameplay_edit_threshold", { request });
+}
+
+export function rexGameplayRebuild(
+  request: GameplayRebuildRequest
+): Promise<GameplayRebuildResponse> {
+  return invoke<GameplayRebuildResponse>("rex_gameplay_rebuild", { request });
+}
+
 export function romGetXrefs(romPath: string): Promise<CodeXref[]> {
   return invoke<CodeXref[]>("rom_get_xrefs", { romPath });
 }
-
 export function romGetCallGraph(romPath: string): Promise<CallGraphEdge[]> {
   return invoke<CallGraphEdge[]>("rom_get_call_graph", { romPath });
 }

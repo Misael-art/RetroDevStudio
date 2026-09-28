@@ -17,6 +17,7 @@ import {
   romSaveAnnotations,
 } from "../../core/ipc/toolsService";
 import { ExperimentalNotice } from "./ToolNotices";
+import { RexGameplayRulePanel } from "./RexGameplayRulePanel";
 import InspectionPanel from "./InspectionPanel";
 import { CompressedResourcePanel } from "./CompressedResourcePanel";
 import ToolPathField from "./ToolPathField";
@@ -824,6 +825,9 @@ export default function ReverseWorkspace() {
 
           {activeView === "code" && (
             <>
+              <div className="mb-3">
+                <RexGameplayRulePanel romPath={romPath} logMessage={logMessage} />
+              </div>
               <div
                 data-testid="reverse-logic-recovery-card"
                 className="mb-3 rounded border border-[#cba6f7]/40 bg-[#1e1a2e] p-3"

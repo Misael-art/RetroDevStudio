@@ -47,6 +47,13 @@ export type NodeType =
   | "hardware_budget_check"
   | "rom_addq_word"
   | "rom_branch_compare_word"
+  | "rom_region_entry"
+  | "rom_input_bit_guard"
+  | "rom_counter_add"
+  | "rom_counter_compare"
+  | "rom_state_write"
+  | "rom_external_call"
+  | "rom_region_exit"
   | "bridge_unconverted_source"
   | "event_vblank"
   | "event_hblank"
@@ -192,6 +199,13 @@ export function isNodeType(value: unknown): value is NodeType {
     value === "hardware_budget_check" ||
     value === "rom_addq_word" ||
     value === "rom_branch_compare_word" ||
+    value === "rom_region_entry" ||
+    value === "rom_input_bit_guard" ||
+    value === "rom_counter_add" ||
+    value === "rom_counter_compare" ||
+    value === "rom_state_write" ||
+    value === "rom_external_call" ||
+    value === "rom_region_exit" ||
     value === "bridge_unconverted_source" ||
     value === "event_vblank" ||
     value === "event_hblank" ||
