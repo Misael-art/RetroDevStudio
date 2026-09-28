@@ -255,12 +255,31 @@ decisión do integrador, non se aplica aquí unilateralmente.
 Recontos executados nesta rolda (non de memoria): 565 entradas nos vectores
 pinados (105/133/106/103/118 por perfil, incluídas as 60 mostras de inversión
 verificadas de cada un), 151 casos de tradución dos cales 123 graduados contra a
-referencia independente, **108 tests verdes, 0 fallos, 9 `#[ignore]`**
-(8 BYOR + 1 barreiro exhaustivo). Os 108 descomponse sen maxia: os 81 da rolda
-anterior + 15 tests novos da capa de recursos
-(`tests/resource_reader.rs`) + 12 executacións da autocomprobación de que a nova
-fixture `tests/support/banked.rs` non é dexenerada, que Rust executa unha vez por
-cada un dos 12 binarios de test de integración que a empregan. Iso non é
-evidencia duplicada: é a mesma comprobación de non-dexeneración en 12 contextos
-distintos, e a súa repetición hai que contala como tal. A clasificación enteira
-é **Experimental**: non se promotiona ningunha palabra do roadmap.
+referencia independente, **119 tests verdes, 0 fallos, 9 `#[ignore]`**
+(8 BYOR + 1 barreiro exhaustivo).
+
+Reconciliación co log (`cargo test --offline`, 15 targets), para que se poida
+verificar sen relying on a narración:
+
+| Target | Verdes | Notas |
+|---|---|---|
+| `unittests src/lib.rs` | 0 | o crate non ten tests unitarios internos |
+| `byor` | 1 | + 8 `#[ignore]` (corpus externo) |
+| `differential` | 8 | vectores pinados |
+| `harness_selfcheck` | 6 | |
+| `inversion` | 1 | + 1 `#[ignore]` (barreiro exhaustivo) |
+| `md_linear_rules` / `md_ssf2_rules` | 7 / 14 | |
+| `read_semantics_audit` | 6 | etapa 1 |
+| `resource_reader` | 15 | etapa 2 (14 propios + autocomprobación) |
+| `resource_fixtures` | 11 | etapa 3 (10 propios + autocomprobación) |
+| `snes_exhirom` / `snes_hirom` / `snes_lorom` | 16 / 14 / 12 | |
+| `ssf2_writes` | 3 | |
+| doc-tests | 5 | 4 de `lib.rs` + 1 de `resource.rs` |
+
+Equivalencia co 81 da rolda anterior: 77 tests xa existentes + 13 execucións da
+autocomprobación de non-dexeneración da fixture `tests/support/banked.rs` (unha
+por cada un dos 13 binarios de test de integración que a inclúen) + 14 da capa de
+recursos + 10 da súa batería + 5 doc-tests = **119**. Esas 13 **son** repetición
+dun mesmo check en 13 contextos; contan como evidencia en cada binario pero non
+son 13 probas distintas, e así se declaran. A clasificación enteira é
+**Experimental**: non se promotiona ningunha palabra do roadmap.
