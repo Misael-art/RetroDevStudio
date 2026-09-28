@@ -10,7 +10,7 @@ lista de desexos: cada fila comprobouse lendo o chamador que precede o `expect`.
 `vectors/acceptance-v1.json` novos). Gates desa árbore: `cargo fmt -- --check`
 sen saída, `cargo clippy --all-targets -- -D warnings` con
 `Finished 'dev' profile` e **138 passed, 0 failed, 10 ignored**
-(16 filas de resultado). A varredura de 277 152 chamadas de
+(17 filas de resultado). A varredura de 277 610 chamadas de
 `tests/no_panic_sweep.rs` é **evidencia complementaria**, non o argumento: un
 `expect` que non se alcanza nos enderezos sondados tampouco está probado.
 
