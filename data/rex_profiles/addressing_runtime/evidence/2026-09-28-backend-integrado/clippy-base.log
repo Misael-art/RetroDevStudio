@@ -1,0 +1,66 @@
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Checking rex-addressing v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/crates/rex-addressing)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 35.69s
+RC=0
+Diff in /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/src/tools/reverse/decomp/rex_addressing.rs:131:
+                 "perfil '{id}' está implementado na biblioteca, pero aínda non o expón esta \
+                  chamada: a fronteira de identidade deste produto só atesta imágenes Mega Drive. \
+                  Expostos: {}",
+[31m-                PERFIS_EXPOSTOS.iter().copied().map(Profile::id).collect::<Vec<_>>().join(", ")
+(B[m[32m+                PERFIS_EXPOSTOS
+(B[m[32m+                    .iter()
+(B[m[32m+                    .copied()
+(B[m[32m+                    .map(Profile::id)
+(B[m[32m+                    .collect::<Vec<_>>()
+(B[m[32m+                    .join(", ")
+(B[m             ),
+             false,
+         ));
+Diff in /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/src/tools/reverse/decomp/rex_addressing.rs:246:
+     // arquivo é a ROM que a chamante declara. A identidade é a ORIGINAL (a que
+     // a UI pinha); a imaxe que se entrega ao núcleo é a normalizada, atestada
+     // polo digest recalculado aquí sobre o buffer real.
+[31m-    let (identity, raw) = rex_read_rom(std::path::Path::new(&req.rom_path))
+(B[m[31m-        .map_err(|e| fail("rom_read", e, true))?;
+(B[m[32m+    let (identity, raw) =
+(B[m[32m+        rex_read_rom(std::path::Path::new(&req.rom_path)).map_err(|e| fail("rom_read", e, true))?;
+(B[m     if identity.original_sha256 != req.expected_sha256 {
+         return Err(fail(
+             "rom_identity_mismatch",
+Diff in /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/src/tools/reverse/decomp/rex_addressing.rs:327:
+     /// canônico. Não é ROM comercial: o fixture é deste teste e só dele.
+     fn rom_autoral(size: usize) -> Vec<u8> {
+         assert!(size >= 0x200);
+[31m-        let mut image: Vec<u8> = (0..size as u64).map(|i| (splitmix64(i) & 0xFF) as u8).collect();
+(B[m[32m+        let mut image: Vec<u8> = (0..size as u64)
+(B[m[32m+            .map(|i| (splitmix64(i) & 0xFF) as u8)
+(B[m[32m+            .collect();
+(B[m         image[0x100..0x104].copy_from_slice(b"SEGA");
+         image
+     }
+Diff in /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/src/tools/reverse/decomp/rex_addressing.rs:337:
+     }
+ 
+     fn caminho_de_rom(tag: &str, image: &[u8]) -> String {
+[31m-        let dir = std::env::temp_dir().join(format!(
+(B[m[31m-            "rds-rex-addressing-{tag}-{}",
+(B[m[31m-            std::process::id()
+(B[m[31m-        ));
+(B[m[32m+        let dir =
+(B[m[32m+            std::env::temp_dir().join(format!("rds-rex-addressing-{tag}-{}", std::process::id()));
+(B[m         std::fs::create_dir_all(&dir).expect("dir temporário");
+         let path = dir.join("rom.bin");
+         std::fs::write(&path, image).expect("escrever ROM autoral");
+Diff in /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/src/tools/reverse/decomp/rex_addressing.rs:498:
+         let d = BASE64.decode(&depois.bytes_base64).expect("base64");
+         assert_eq!(&a[..], &image[0x00_80000..0x00_80010]);
+         assert_eq!(&d[..], &image[0x00_00000..0x00_00010]);
+[31m-        assert_ne!(a, d, "o mesmo enderezo con bancos distintos dá bytes distintos");
+(B[m[32m+        assert_ne!(
+(B[m[32m+            a, d,
+(B[m[32m+            "o mesmo enderezo con bancos distintos dá bytes distintos"
+(B[m[32m+        );
+(B[m     }
+ 
+     #[test]
+FMT_RC=1

@@ -1,0 +1,3 @@
+npm notice run retrodev-studio@0.1.0 npx
+npm notice run 'tsc' --noEmit
+RC_TSC=0

@@ -1,0 +1,219 @@
+{
+  "schema": "rex-crate-integration/v1",
+  "descricao": "Evidencia da integración ao backend do pacote rex-addressing (frente A): dependencia por path, adaptador, comando Tauri real e gates medidos no destino. Promove o nivel de gates-proprios-aprovados a backend-integrado.",
+  "quando_utc": "medición entre 2026-09-28T08:14Z e 2026-09-28T09:25Z (UTC)",
+  "quem": "integrador da rodada REX (non o axente A)",
+  "branch": "codex/rex-integrator-crates-registry",
+  "ferramenta": "cargo/rustc 1.97.0 via rust-toolchain.toml da raiz (CARGO_TARGET_DIR=target), npm run check:tree, npm run lint, npx tsc --noEmit, npm test (vitest), node v26.8.1 para a verificacion independente da fixture",
+  "objeto_da_integracao": {
+    "pacote": "crates/rex-addressing",
+    "entrega_usada": "a mas recente de A, incluidas as dependencias: tipos 58a06dd (etapa 2), f9c1913 (etapa 3), 13c48ad (etapa 4), cae6b58 (etapa 5), 981e177, dedb884, 30cb311 (actas), PR #83, branch codex/rex-rust-recursos",
+    "pin_conferido_antes_de_integrar": "fetch puntual de origin/codex/rex-rust-recursos: o tip seguia ser 30cb311, polo que non habia entrega mas nova que integrar",
+    "meio_de_integracao": "git cherry-pick -x dos 7 commits, cero conflitos; nesta branch quedan como cde721c, c1c2834, 2934249, 6453cd4, bcd2f92, b213b8c, 8a28909",
+    "dependencias_de_A_non_repetidas": "os 17 commits da PR #82 (9b27941..57e51d3) xa estaban na branch desde a promocion de localizacion; esta entrega consome o resultado, non o re-importa",
+    "fora_da_integracao": "non se tocou o worktree nin os ficheiros alleos de A; non se fixo merge da PR #83 (prohibido nesta rodada)"
+  },
+  "contrato_do_adaptador_decidido": [
+    "O crate segue sen dependencia nenhuma (Cargo.toml do paquete intacto): serde, Tauri e a serializacion viven só no adaptador.",
+    "DTOs com #[serde(rename_all = \"snake_case\", deny_unknown_fields)]; o binario viaxa en base64 con SHA-256 lateral, como xa fan os comandos de recursos do produto.",
+    "Erros internos convertidos no InspectionError { code, message, retryable } do produto, con codigo snake_case estavel e o detalle do nucleo CONSERVADO (non se achata en texto xenérico); engadese o perfil, o enderezo, a rexion non-ROM e o numero de corredores lidos antes da recusa.",
+    "Perfil e estado do mapper son explicitos na entrada. Non hai autodeteccion: un perfil valido pero non exposto (os tres SNES) recibe profile_not_exposed, non unha adivinanza por tamanho ou banner.",
+    "So se expone a lectura con snapshot fixo. A lectura con transicions de banco (read_sequence) segue no nucleo e declara-se non exposta.",
+    "A identidade da ROM conferase na fronteira de acceso aos bytes: rex_read_rom + platform::identify_md antes de percorrer, e a recusa usa a literal rom_identity_mismatch que xa emprega a transaccion canonica de edicion.",
+    "Cada segmento devolve procedencia (index, cpu_address, cpu_len, rom_offset, region, estado echoado), e a resposta leva o SHA-256 e a lonxitude da imaxe normalizada xunto coa origem 'camiño#sha256=...'.",
+    "Conversiones silenciosas prohibidas: un float JSON non enteiro convirte en Value::NonInteger e o nucleo recusa con bad_state; un array de banks recusa con mapper_state_invalid porque o contrato non ten variante de array."
+  ],
+  "adaptador": {
+    "ficheiro": "src-tauri/src/tools/reverse/decomp/rex_addressing.rs",
+    "sha256": "7bd75ea96a598623c77787410a826aa891333d117745cf9f1e84daea3eb2ef76",
+    "sha256_antes_do_reparo_de_hixiene": "7f19cfd065c83710f9e359dbad1ad753b6ffd1f83e506c6aa3d4aa8fd5716467",
+    "sha256_da_capa_de_produccion_ambas_carreiras": "38641c2dbb04d05d31c472f0384e774d23b0590c7b82b915e8558c276c1859ae (as 316 primeiras liñas; identicas antes e depois do reparo, polo que a proba de mutacions herdada segue a valer para o mesmo codigo)",
+    "rexistro": "src-tauri/src/tools/reverse/decomp/mod.rs (pub mod rex_addressing) e src-tauri/src/lib.rs (comando rex_addressing_read_snapshot + generate_handler!)",
+    "dependencia": "src-tauri/Cargo.toml: rex-addressing = { path = \"../crates/rex-addressing\" }. Cargo.lock: +5 liñas, unha entrada [[package]] sen campo source (dependencia de caminho) e cero crates externos novos.",
+    "chamada_real": "run_heavy_command_off_main_thread + generate_handler!, comprobada polo runner de testes do lib (non por inspeccion visual)."
+  },
+  "gates_do_pacote_na_branch": {
+    "cargo": "npm run crates:gates (scripts/crates-gates.mjs), CARGO_TARGET_DIR=target/crates-gates",
+    "rc": 0,
+    "rex-addressing": {
+      "fmt": "OK",
+      "clippy_all_targets": "OK",
+      "test_locked": "127 executados, 0 falhas, 9 ignorados"
+    },
+    "rex-kosinski": {
+      "test_locked": "25 executados, 0 falhas, 0 ignorados (non se tocou nesta entrega)"
+    },
+    "nota_de_contagem": "a carreira anterior medira 81 executados (77 + 4 doc-tests) antes das etapas 2-5; a diferenza (+46) son as baterias novas de A. Non se re-executou a carreira de 02:58Z, rexistrase o numero medido agora."
+  },
+  "gates_no_destino": {
+    "cargo_test_lib": {
+      "rc": 0,
+      "executados": 754,
+      "falhas": 0,
+      "ignorados": 66,
+      "conta": "754 - 17 do adaptador = 737, a base previa; a carreira previa rexistrou 753 = 737 + 16"
+    },
+    "cargo_clippy_lib_d_warnings": {
+      "rc": 0
+    },
+    "cargo_fmt_check": {
+      "rc": 0,
+      "historia": "a primeira carreira deu FMT_RC=1 (3 diffs no ficheiro novo); aplicouse cargo fmt e re-check ou con rc=0"
+    },
+    "npm_run_check_tree": {
+      "rc": 0,
+      "resultado": "OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md."
+    },
+    "npm_run_lint": {
+      "rc": 0
+    },
+    "npx_tsc_noEmit": {
+      "rc": 0
+    },
+    "npm_test": {
+      "rc": 0,
+      "testes": "749 executados, 0 falhas, 6 saltados (755)",
+      "ficheiros": "79 verdes, 1 saltado (80)"
+    },
+    "cargo_clippy_barra_oficial": {
+      "rc": 0,
+      "comando": "cargo clippy -- -D warnings (AGENTS.md e CI)"
+    },
+    "cargo_clippy_all_targets": {
+      "rc": 101,
+      "atribucion": "45 lints preexistentes en codigo de proba alleo, cero en rex_addressing.rs; non se corrixiron nesta entrega"
+    },
+    "auditorias_e_host": {
+      "cargo_audit": "rc=0 (496 dependencias, 0 vulnerabilidades, 8 avisos permitidos, 153 avisos de consulta de yank por rede)",
+      "npm_security_audit": "rc=1 EALLOWSCRIPTS (config do host, anterior e allea; ningún ficheiro npm tocado)",
+      "host_diagnostico": "rc=0, status ready, fingerprint 60249508...",
+      "security_licenses": "rc=0, npm=334 cargo=496 toolchains=15; rex-addressing entra como source=workspace / license=UNLICENSED",
+      "cargo_lock": "495 -> 496 entradas [[package]]: só o crate local, cero crates externos novos"
+    }
+  },
+  "non_vacuidade": {
+    "red_observado": "16 fallos antes de existir a implementacion (adaptador-red-16-fallos.log) e 1 fallo no test de hixiene (hixiene-red-1-fallo.log: 'a fixture temporal non se descartou: /tmp/rds-rex-addressing-descarte-2694041/rom.bin')",
+    "controles_de_mutacao": {
+      "M1_garda_de_identidade_anulada": "matou identidade_divergente_e_recusada_antes_de_qualquer_enderezamento (1)",
+      "M2_rom_offset_substituido_polo_enderezo_do_bus": "matou leitura_autoral_devolve_os_bytes_e_a_procedencia_de_cada_segmento e cambiar_o_banco_move_a_xanela_esperada (2)",
+      "M3_todos_os_erro_do_nucleo_a_codigo_xenerico": "matou 8 pruebas de codigo de recusa (8)",
+      "restauracion": "SHA-256 do ficheiro conferido tras cada mutacion (RESTAURADO_OK, tres veces, 7f19cfd0...)",
+      "reexecucion_post-hixiene": "M1 volve matar a mesma prueba coa suite de 17 (controle-m1-reexecutado.log, sha 7bd75ea9...)"
+    },
+    "fixture_conxelada": "os dous digestos pinados no test (949c4f01... para 1 MiB, 73cd2356... para 512 KiB) re-comprobados cun construtor independente en node:crypto (verificacion-independente-fixture.mjs), que reproduce byte a byte o SplitMix64 e o header SEGA",
+    "hixiene_de_temporais": "a suite deixaba 512 KiB-1 MiB por test en /tmp (143 directorios contados durante a rodada). Reparado cun garda Drop no helper de prova; reexecucion: antes=160 / depois=160 directorios, cero filtracions novas, e os residuos das carreiras anteriores foron borrados."
+  },
+  "nao_alega": [
+    "Non se alega fluxo-do-usuario-comprovado: ningún chamador da interface usa rex_addressing_read_snapshot e non hay pantalla de endereçamento.",
+    "Non se alega descuberta de recursos nin lectura sobre xogos reais: as unicas imaxes lidas son fixtures autorais deste adaptador; cero corpus BYOR no gate.",
+    "Non se expoñen as escritas puras do paquete nin a lectura con transicions de banco (read_sequence).",
+    "Non se alega paridade con motores de emulacion nesta entrega: a capa de adaptador proba o contrato do produto sobre a biblioteca, non o comportamento dun hardware real.",
+    "Non se fixo merge, release nin promocion de maturidade do produto: o paquete segue Experimental."
+  ],
+  "artefatos_promovidos": {
+    "gates-do-pacote-post-cherry-pick.log": {
+      "sha256": "fec8e3e430a124c9e3e59187382759ffc7e64f622b665b2983d454817a2d3366",
+      "linhas": 306,
+      "onde_cada_numero_esta": "bloco '--- rex-kosinski ---' (linhas 3-60) e '--- rex-addressing ---' (61-303); cada gate imprime o seu '$ cargo ...' e pecha con 'OK: <pacote> <gate>'; 'RC=0' e a ultima liña"
+    },
+    "adaptador-red-16-fallos.log": {
+      "sha256": "986fbc7b14bd91d02e3e4e84e5ef2399c777b767058a3bb6b1e207341ebca421",
+      "linhas": 61,
+      "nota": "RED observado antes de existir a implementacion: 16 fallos, 0 exitos"
+    },
+    "cargo-test-lib-base-753.log": {
+      "sha256": "cdd42e04176346a324323315111cce636dcb668ea70ccbab06fdf2676793752c",
+      "linhas": 897
+    },
+    "cargo-test-lib-final-754.log": {
+      "sha256": "56d587ac889fda864b7fc7cd77e3a46e5e2b36e1bf1b2612ad51f03e71d197e3",
+      "linhas": 900
+    },
+    "clippy-base.log": {
+      "sha256": "1af9ebb3c7c65f395b9d5d2722352deb86fcd2045e166e89acfb591611ab6b49",
+      "linhas": 66,
+      "nota": "conten RC=0 (clippy) e FMT_RC=1 (fmt --check antes de cargo fmt): rexistrase o fallo, non se borra"
+    },
+    "clippy-pos-hixiene.log": {
+      "sha256": "8a993649e363f816419e1c982eb0a7ec9a92384eb370cf5bccf6ce92041dc6c9",
+      "linhas": 3
+    },
+    "fmt-check-pos-hixiene.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "linhas": 0,
+      "nota": "cargo fmt -- --check non imprime nada cando esta verde; o rc=0 esta na acta desta carpeta"
+    },
+    "controles-de-mutacion-m1-m2-m3.log": {
+      "sha256": "dad0d692208867d46624e6e998ae77da4cb45b8fdf75b94f956173dc0f3cb381",
+      "linhas": 28
+    },
+    "controle-m1-reexecutado.log": {
+      "sha256": "530c96a12865ddf1b8851585fd769fbc23458dd6aed194fc1f1bd16957057971",
+      "linhas": 4
+    },
+    "hixiene-red-1-fallo.log": {
+      "sha256": "33387d7bc7a9e839aca7ceb9716ed59bab7327a99fdb00996ccfe847fb4aebd6",
+      "linhas": 39
+    },
+    "hixiene-green-17.log": {
+      "sha256": "51d2527938cc48b9b38d87362f22bf52fe91567a32762f5c8045f7503694951b",
+      "linhas": 25
+    },
+    "check-tree.log": {
+      "sha256": "90e3ca9ac4eafb28d6f5f8575b16498d52fd2d25f506b7bcaa784b997b5f1483",
+      "linhas": 4
+    },
+    "eslint.log": {
+      "sha256": "63f64bfea10e05347d18e9c5611e690865cbf5021d3352feb7f71e24c6c29ab2",
+      "linhas": 3
+    },
+    "tsc-noEmit.log": {
+      "sha256": "70eb53dee0346c60d30aa60566e216773dc19efa68e34273396ba9fe76b9e5e3",
+      "linhas": 3
+    },
+    "vitest.log": {
+      "sha256": "d5c450b8c697aeb8d72096b1ae3f2cb3cb0587a46da82b7ddb7649a81fbac6cd",
+      "linhas": 1627
+    },
+    "verificacion-independente-fixture.mjs": {
+      "sha256": "975e015b4d967e829cf20f146637f0d5878d5a3da82472bc8f3c349d48126dda",
+      "linhas": 32
+    },
+    "verificacion-independente-fixture.log": {
+      "sha256": "4ee2afd105f17a33bf4377c005e580cc213b7e00ab63f31e82486d2af0dc68c9",
+      "linhas": 2
+    },
+    "clippy-barra-oficial.log": {
+      "sha256": "20bc96d06fa04cfa3509226b167a4a5ed2d13e7e0d0ae1c16078b0d6008f5726",
+      "linhas": 2,
+      "nota": "comando: cargo clippy -- -D warnings (a barra de AGENTS.md e do CI, destinos por defecto). rc=0. /tmp purgouse entre a primera medición y la promoción, polo que se voltou executar sobre o mesmo árbol."
+    },
+    "clippy-all-targets-deuda-preexistente.log": {
+      "sha256": "4b4764ca6ff28fdc4f1cdd3c2a3905b8b3a1ff2b14d95a90cb87dc038b2f7932",
+      "linhas": 446,
+      "nota": "comando: cargo clippy --all-targets -- -D warnings. rc=101 con 45 lints en codigo de PROBA alleo: rex_context.rs 18, rex_aplib.rs 8, rex_resources.rs 5, project_mgr.rs 5, rex_codecs.rs 4 e 1 en logic_recovery.rs, holdout.rs, graphics_discovery.rs, lib.rs (nunha proba, non no comando novo) e build_orch.rs. Cero erros en rex_addressing.rs. Non se tocaron: a barra do proxecto non os executa e non son deste integrador."
+    },
+    "seguranza-cargo-audit.log": {
+      "sha256": "86be38a2767baa0e2fd9371c7b5df3858a773923bad2802cc9d1997060b829e0",
+      "linhas": 529,
+      "nota": "comando: cargo audit --file src-tauri/Cargo.lock. rc=0; 496 dependencias escaneadas; cero vulnerabilidades coñecidas; 8 avisos permitidos (os mesmos de antes da entrega); nesta carreira 153 avisos de 'couldn't check if the package is yanked' por non completar a consulta de rede no prazo, que non cambian o rc."
+    },
+    "seguranza-npm-audit.log": {
+      "sha256": "6fd97425ede25cb2667d84b1dd0192fe08917fbc626caee6ffa2b5d5fe3024ae",
+      "linhas": 6,
+      "nota": "comando: npm run security:audit. rc=1 con EALLOWSCRIPTS (--allow-scripts non permitido en installs de proxecto). Falla de configuración do host, anterior e allea a esta entrega: non se toca ningún ficheiro npm. Rexistrase como fallo con atribución, non se edita a config para poñelo verde."
+    },
+    "host-diagnostico.log": {
+      "sha256": "a6c6a4e2ee334ef2ace4175cac3343f6a9f4a7cd369e7b982a42e7d8101d18d8",
+      "linhas": 8,
+      "nota": "comando: npm run host:diagnose. rc=0; host-readiness.json en status 'ready'; fingerprint 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2, o mesmo que antes da entrega."
+    },
+    "licenzas-inventario.log": {
+      "sha256": "1a916c5dbde9003bd0cfda04fccfb306064a36c9e70a2250b8f1b1f06b6f369e",
+      "linhas": 5,
+      "nota": "comando: npm run security:licenses. rc=0 con npm=334, cargo=496, toolchains=15. Consecuencia real desta entrega: rex-addressing pasa a aparecer no inventario como entrada source: workspace con license: UNLICENSED (2 entradas de workspace; antes había unha soa, o propio produto). A licencia do pacote segue sendo decisión do operador, non suposición do integrador."
+    }
+  },
+  "como_conferir": "npm run crates:gates (os tres gates dos dous paquetes rexistrados); npm run check:tree; npm test; cd src-tauri && cargo test --lib -- --nocapture e cargo clippy --lib -- -D warnings; node data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/verificacion-independente-fixture.mjs; git log --oneline --graph cde721c..8a28909 para ver os cherry-picks; grep -n 'rex_addressing' src-tauri/src/lib.rs para ver o comando rexistrado.",
+  "nota_de_proceso": "/tmp purgouse nesta sesión entre a medición e a promoción da evidencia. Os 17 artefactos anteriores xa estaban copiados cando ocorreu a purga (entran neste commit como ficheiros do repositorio). As seis medicións posteriores (clippy da barra, clippy --all-targets, cargo audit, npm security:audit, host:diagnose, security:licenses) volveron executarse escribindo directamente nesta carpeta, polo que os seus rc=0/rc=1 están nos propios ficheiros e non dependen da narración. Ningún número desta acta se copia doutro sitio."
+}

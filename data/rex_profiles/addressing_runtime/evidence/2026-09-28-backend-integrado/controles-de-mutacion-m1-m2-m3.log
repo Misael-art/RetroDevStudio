@@ -1,0 +1,28 @@
+SHA_ORIXINAL=7f19cfd065c83710f9e359dbad1ad753b6ffd1f83e506c6aa3d4aa8fd5716467
+== M1: garda de identidade eliminada (if false) ==
+    test tools::reverse::decomp::rex_addressing::tests::identidade_divergente_e_recusada_antes_de_qualquer_enderezamento ... FAILED
+    test result: FAILED. 15 passed; 1 failed; 0 ignored; 0 measured; 803 filtered out; finished in 1.64s
+    error: test failed, to rerun pass `--lib`
+    RESTAURADO_OK sha256=7f19cfd065c83710f9e359dbad1ad753b6ffd1f83e506c6aa3d4aa8fd5716467
+== M2: rom_offset do segmento substituido polo enderezo do bus ==
+    test tools::reverse::decomp::rex_addressing::tests::leitura_autoral_devolve_os_bytes_e_a_procedencia_de_cada_segmento ... FAILED
+    test tools::reverse::decomp::rex_addressing::tests::cambiar_o_banco_move_a_xanela_esperada ... FAILED
+    test result: FAILED. 14 passed; 2 failed; 0 ignored; 0 measured; 803 filtered out; finished in 1.67s
+    error: test failed, to rerun pass `--lib`
+    RESTAURADO_OK sha256=7f19cfd065c83710f9e359dbad1ad753b6ffd1f83e506c6aa3d4aa8fd5716467
+== M3: todo erro do núcleo pasa a código xenérico ==
+    test tools::reverse::decomp::rex_addressing::tests::enderezo_fora_do_barramento_e_recusado ... FAILED
+    test tools::reverse::decomp::rex_addressing::tests::estado_sen_rom_size_e_recusado ... FAILED
+    test tools::reverse::decomp::rex_addressing::tests::erro_interno_preserva_codigo_e_detalle_util ... FAILED
+    test tools::reverse::decomp::rex_addressing::tests::lonxitude_cero_e_recusada_antes_de_percorrer ... FAILED
+    test tools::reverse::decomp::rex_addressing::tests::chave_de_banco_non_remapable_e_recusada ... FAILED
+    test tools::reverse::decomp::rex_addressing::tests::rexion_non_rom_e_recusada_e_non_se_inventan_bytes ... FAILED
+    test tools::reverse::decomp::rex_addressing::tests::rom_size_fora_do_intervalo_do_perfil_e_recusado ... FAILED
+    test tools::reverse::decomp::rex_addressing::tests::rom_size_que_a_imaxe_non_cobre_e_recusado ... FAILED
+    test result: FAILED. 8 passed; 8 failed; 0 ignored; 0 measured; 803 filtered out; finished in 1.63s
+    error: test failed, to rerun pass `--lib`
+    RESTAURADO_OK sha256=7f19cfd065c83710f9e359dbad1ad753b6ffd1f83e506c6aa3d4aa8fd5716467
+== CONTROL: suite coa árbore restaurada ==
+    test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 803 filtered out; finished in 2.22s
+SHA_FINAL=7f19cfd065c83710f9e359dbad1ad753b6ffd1f83e506c6aa3d4aa8fd5716467
+MUTACIONES_FIN rc=0

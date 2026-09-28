@@ -1,0 +1,8 @@
+npm notice run retrodev-studio@0.1.0 host:diagnose
+npm notice run node scripts/host-manager.mjs diagnose --profile full
+RetroDev Studio host: READY
+Host: linux/x64/biglinux
+Fingerprint: 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2
+Lock: dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377
+Report: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/host-readiness.json
+RC=0

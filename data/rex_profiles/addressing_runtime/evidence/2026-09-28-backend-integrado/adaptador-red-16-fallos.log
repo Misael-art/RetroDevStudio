@@ -1,0 +1,61 @@
+(nenhum acima = livre)
+thread 'tools::reverse::decomp::rex_addressing::tests::cada_segmento_leva_o_estado_com_que_foi_lido' (2421807) panicked at src/tools/reverse/decomp/rex_addressing.rs:208:45:
+leitura: InspectionError { code: "not_implemented", message: "o adaptador ainda não implementa a leitura", retryable: false }
+
+---- tools::reverse::decomp::rex_addressing::tests::perfil_inexistente_e_recusado_con_a_lista_exposta stdout ----
+
+thread 'tools::reverse::decomp::rex_addressing::tests::perfil_inexistente_e_recusado_con_a_lista_exposta' (2421824) panicked at src/tools/reverse/decomp/rex_addressing.rs:313:9:
+assertion `left == right` failed: InspectionError { code: "not_implemented", message: "o adaptador ainda não implementa a leitura", retryable: false }
+  left: "not_implemented"
+ right: "profile_unknown"
+
+---- tools::reverse::decomp::rex_addressing::tests::perfil_implementado_na_biblioteca_e_non_expuesto_polo_adaptador_e_recusado stdout ----
+
+thread 'tools::reverse::decomp::rex_addressing::tests::perfil_implementado_na_biblioteca_e_non_expuesto_polo_adaptador_e_recusado' (2421823) panicked at src/tools/reverse/decomp/rex_addressing.rs:330:9:
+assertion `left == right` failed: InspectionError { code: "not_implemented", message: "o adaptador ainda não implementa a leitura", retryable: false }
+  left: "not_implemented"
+ right: "profile_not_exposed"
+
+---- tools::reverse::decomp::rex_addressing::tests::a_imaxe_autoral_congelase_no_digest_pinado stdout ----
+
+thread 'tools::reverse::decomp::rex_addressing::tests::a_imaxe_autoral_congelase_no_digest_pinado' (2421806) panicked at src/tools/reverse/decomp/rex_addressing.rs:135:9:
+assertion `left == right` failed: fixture SSF2 mudou
+  left: "949c4f01ad6cbbb2f9298b7c69fa735fcfd091943af942ef5cac0c4c5b480132"
+ right: "PLACEHOLDER_SSF2"
+
+---- tools::reverse::decomp::rex_addressing::tests::rom_size_fora_do_intervalo_do_perfil_e_recusado stdout ----
+
+thread 'tools::reverse::decomp::rex_addressing::tests::rom_size_fora_do_intervalo_do_perfil_e_recusado' (2421832) panicked at src/tools/reverse/decomp/rex_addressing.rs:361:9:
+assertion `left == right` failed: InspectionError { code: "not_implemented", message: "o adaptador ainda não implementa a leitura", retryable: false }
+  left: "not_implemented"
+ right: "bad_state"
+
+---- tools::reverse::decomp::rex_addressing::tests::rom_size_que_a_imaxe_non_cobre_e_recusado stdout ----
+
+thread 'tools::reverse::decomp::rex_addressing::tests::rom_size_que_a_imaxe_non_cobre_e_recusado' (2421833) panicked at src/tools/reverse/decomp/rex_addressing.rs:392:9:
+assertion `left == right` failed: InspectionError { code: "not_implemented", message: "o adaptador ainda não implementa a leitura", retryable: false }
+  left: "not_implemented"
+ right: "incompatible_size"
+
+
+failures:
+    tools::reverse::decomp::rex_addressing::tests::a_imaxe_autoral_congelase_no_digest_pinado
+    tools::reverse::decomp::rex_addressing::tests::cada_segmento_leva_o_estado_com_que_foi_lido
+    tools::reverse::decomp::rex_addressing::tests::cambiar_o_banco_move_a_xanela_esperada
+    tools::reverse::decomp::rex_addressing::tests::chave_de_banco_non_remapable_e_recusada
+    tools::reverse::decomp::rex_addressing::tests::enderezo_fora_do_barramento_e_recusado
+    tools::reverse::decomp::rex_addressing::tests::erro_interno_preserva_codigo_e_detalle_util
+    tools::reverse::decomp::rex_addressing::tests::estado_sen_rom_size_e_recusado
+    tools::reverse::decomp::rex_addressing::tests::identidade_divergente_e_recusada_antes_de_qualquer_enderezamento
+    tools::reverse::decomp::rex_addressing::tests::leitura_autoral_devolve_os_bytes_e_a_procedencia_de_cada_segmento
+    tools::reverse::decomp::rex_addressing::tests::lonxitude_cero_e_recusada_antes_de_percorrer
+    tools::reverse::decomp::rex_addressing::tests::os_bytes_viaxan_en_base64_co_sha256_lateral
+    tools::reverse::decomp::rex_addressing::tests::perfil_implementado_na_biblioteca_e_non_expuesto_polo_adaptador_e_recusado
+    tools::reverse::decomp::rex_addressing::tests::perfil_inexistente_e_recusado_con_a_lista_exposta
+    tools::reverse::decomp::rex_addressing::tests::rexion_non_rom_e_recusada_e_non_se_inventan_bytes
+    tools::reverse::decomp::rex_addressing::tests::rom_size_fora_do_intervalo_do_perfil_e_recusado
+    tools::reverse::decomp::rex_addressing::tests::rom_size_que_a_imaxe_non_cobre_e_recusado
+
+test result: FAILED. 0 passed; 16 failed; 0 ignored; 0 measured; 803 filtered out; finished in 0.55s
+
+error: test failed, to rerun pass `--lib`
