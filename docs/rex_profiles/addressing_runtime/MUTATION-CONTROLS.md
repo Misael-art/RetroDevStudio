@@ -20,7 +20,7 @@ e os 8 probes `#[ignore]` de `tests/byor.rs`; na árbore final o mesmo comando d
 **76 passed, 0 failed, 9 ignored** (verificado en `ef5ab1a`, §"Reprodución" abaixo).
 
 Ningunha mutación chegou a `HEAD`: cada `git diff` posterior ao revert estivo
-baleiro, e os commits listados en `git log` non conteñen ningunha das sixaturas.
+baleiro, e os commits listados en `git log` non conteñen ningunha desas mutacións.
 
 ## Índice
 
