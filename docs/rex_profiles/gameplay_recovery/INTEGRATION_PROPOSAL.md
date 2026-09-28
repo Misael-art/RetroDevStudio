@@ -98,7 +98,7 @@ Valores medidos na camada técnica (core direto), com builds reprodutíveis do t
 | Passo | Expectativa |
 |---|---|
 | localizar na ROM original (`86c4e90d…4f7e`) | 1 candidato: entrada `0x000946`, saída `0x000970` |
-| recuperar | operador `>=`, limiar 6, faixa editável `[-127, 128]`, 9 nós (inclui `external_call` com `understood=false`) |
+| recuperar | operador `>=`, limiar 6, faixa editável `[-127, 128]`, 8 nós e 9 arestas (inclui `rom_external_call` com `understood=false`) |
 | editar limiar 12 → salvar → reabrir | `threshold=12`; os mappings continuam iguais; um grafo adulterado é recusado |
 | reconstruir por patch | SHA `4030ec74…b1db`, `changed=[0x961]` (checksum: ver §5) |
 | reconstruir por regeneração | mesmo SHA do patch |
