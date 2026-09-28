@@ -6725,7 +6725,11 @@ fn parse_mugen_pair_numbers(value: Option<&str>) -> Option<(i32, i32)> {
     (numbers.len() >= 2).then_some((numbers[0], numbers[1]))
 }
 
-fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingModel) -> String {
+fn imported_mugen_fighting_logic_graph(
+    entity_id: &str,
+    model: &MugenFightingModel,
+    animations: &BTreeMap<String, AnimationDef>,
+) -> (String, Vec<serde_json::Value>) {
     let mut nodes = Vec::<serde_json::Value>::new();
     let mut edges = Vec::<serde_json::Value>::new();
     nodes.push(mugen_node(
@@ -6771,22 +6775,44 @@ fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingMod
         ));
     }
 
-    for (index, state) in model.states.iter().enumerate() {
-        nodes.push(mugen_node(
-            &format!("fsm_state_{}", state.state_no),
-            "fsm_state",
-            &format!("State {}", state.state_no),
-            420,
-            80 + index as i32 * 92,
-            serde_json::json!({
-                "state_name": format!("state_{}", state.state_no),
-                "state_no": state.state_no,
-                "anim": state.params.get("anim").cloned().unwrap_or_default(),
-                "source": state.source_ref.clone(),
-                "initial": if state.state_no == 0 { 1 } else { 0 }
-            }),
-        ));
+    // Perfil mugen.character.v1: estados e ChangeState ligados de verdade ao NodeGraph.
+    let mut command_nodes = BTreeMap::new();
+    for command in &model.commands {
+        command_nodes.insert(command.display_name.clone(), format!("cmd_{}", command.id));
+        command_nodes.insert(command.id.clone(), format!("cmd_{}", command.id));
     }
+    let wired = crate::core::mugen_profile::wire_behavior_v1(
+        entity_id,
+        &model
+            .states
+            .iter()
+            .map(|state| crate::core::mugen_profile::StateView {
+                state_no: state.state_no,
+                anim: state.params.get("anim").cloned(),
+                source: state.source_ref.clone(),
+            })
+            .collect::<Vec<_>>(),
+        &model
+            .controllers
+            .iter()
+            .enumerate()
+            .map(
+                |(index, controller)| crate::core::mugen_profile::ControllerView {
+                    index,
+                    state_no: controller.state_no,
+                    kind: controller.controller_type.clone(),
+                    name: controller.name.clone(),
+                    raw_lines: controller.raw_lines.clone(),
+                    source: controller.source_ref.clone(),
+                },
+            )
+            .collect::<Vec<_>>(),
+        &command_nodes,
+        animations,
+    );
+    nodes.extend(wired.nodes);
+    edges.extend(wired.edges);
+    let mut behavior = wired.report;
 
     for (index, controller) in model.controllers.iter().enumerate() {
         let x = 760 + (index as i32 % 2) * 220;
@@ -6798,20 +6824,21 @@ fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingMod
         );
         match controller.controller_type.to_ascii_lowercase().as_str() {
             "changestate" => {
-                let target_state = mugen_controller_i32(controller, "value").unwrap_or(0);
-                nodes.push(mugen_node(
-                    &id,
-                    "fsm_transition",
-                    &format!("ChangeState {}", target_state),
-                    x,
-                    y,
-                    serde_json::json!({
-                        "target_state": format!("state_{}", target_state),
-                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
-                        "trigger": mugen_controller_trigger_summary(controller),
-                        "source": controller.source_ref.clone()
-                    }),
-                ));
+                // Ligado por wire_behavior_v1 ou recusado la (relatorio); sem no decorativo.
+                if !wired.handled.contains(&index) {
+                    nodes.push(mugen_node(
+                        &id,
+                        "bridge_unconverted_source",
+                        "ChangeState fora do perfil v1",
+                        x,
+                        y,
+                        serde_json::json!({
+                            "gap": "mugen_changestate_unsupported_trigger",
+                            "source": controller.raw_lines.join("\\n"),
+                            "state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default()
+                        }),
+                    ));
+                }
             }
             "velset" | "veladd" => {
                 nodes.push(mugen_node(
@@ -6825,6 +6852,7 @@ fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingMod
                         "vx": mugen_controller_i32(controller, "x").unwrap_or(0),
                         "vy": mugen_controller_i32(controller, "y").unwrap_or(0),
                         "mode": if controller.controller_type.eq_ignore_ascii_case("VelAdd") { "add" } else { "set" },
+                        "wired": false,
                         "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
                         "source": controller.source_ref.clone()
                     }),
@@ -6842,6 +6870,7 @@ fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingMod
                         "x": mugen_controller_i32(controller, "x").unwrap_or(0),
                         "y": mugen_controller_i32(controller, "y").unwrap_or(0),
                         "mode": if controller.controller_type.eq_ignore_ascii_case("PosAdd") { "add" } else { "set" },
+                        "wired": false,
                         "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
                         "source": controller.source_ref.clone()
                     }),
@@ -6862,6 +6891,7 @@ fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingMod
                     y,
                     serde_json::json!({
                         "sfx": sfx,
+                        "wired": false,
                         "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
                         "source": controller.source_ref.clone()
                     }),
@@ -6903,13 +6933,32 @@ fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingMod
         }
     }
 
-    serde_json::json!({
-        "version": 1,
-        "nodes": nodes,
-        "edges": edges,
-        "gaps": mugen_graph_gaps(model)
-    })
-    .to_string()
+    for controller in &model.controllers {
+        if controller
+            .controller_type
+            .eq_ignore_ascii_case("changestate")
+        {
+            continue;
+        }
+        behavior.push(serde_json::json!({
+            "item": format!("controller:{}#{}", controller.state_no.map(|s| s.to_string()).unwrap_or_else(|| "?".to_string()), controller.name),
+            "source": controller.source_ref,
+            "fidelity": "unsupported",
+            "target": serde_json::Value::Null,
+            "reason": format!("{} nao e ligado a execucao no perfil v1 (no presente so como referencia editavel)", controller.controller_type),
+            "consequence": "o efeito do controller nao acontece no jogo convertido",
+        }));
+    }
+    (
+        serde_json::json!({
+            "version": 1,
+            "nodes": nodes,
+            "edges": edges,
+            "gaps": mugen_graph_gaps(model)
+        })
+        .to_string(),
+        behavior,
+    )
 }
 
 fn mugen_node(
@@ -6975,17 +7024,6 @@ fn mugen_edge(
         "toNode": to_node,
         "toPort": to_port
     })
-}
-
-fn mugen_controller_trigger_summary(controller: &MugenStateController) -> String {
-    let mut triggers = controller
-        .params
-        .iter()
-        .filter(|(key, _)| key.starts_with("trigger"))
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>();
-    triggers.sort();
-    triggers.join("; ")
 }
 
 fn mugen_graph_gaps(model: &MugenFightingModel) -> Vec<serde_json::Value> {
@@ -7071,6 +7109,14 @@ fn import_mugen_character_candidate(
     })?;
     let anim_path = candidate.root_dir.join(anim_rel);
     let sprite_path = candidate.root_dir.join(sprite_rel);
+    // Perfil mugen.character.v1 (Experimental): AIR/SFF v1 pela crate rex-mugen, com
+    // tempos, flips, offsets e caixas por frame. Sem SFF v1 legivel, cai no caminho
+    // legado (PNGs extraidos em work/*_sff), classificado a parte no relatorio.
+    let profile = crate::core::mugen_profile::convert_character_v1(
+        &candidate.root_dir,
+        anim_rel,
+        sprite_rel,
+    )?;
     let actions = parse_mugen_air(&read_text_lossy(&anim_path)?);
     if actions.is_empty() {
         return Err(LoadError(format!(
@@ -7079,22 +7125,51 @@ fn import_mugen_character_candidate(
         )));
     }
 
-    let requested_refs = collect_mugen_action_refs(&actions);
-    let extracted_sprites = load_mugen_sprite_assets(&sprite_path, &requested_refs)?;
-    if extracted_sprites.is_empty() {
-        return Err(LoadError(format!(
-            "Nenhum sprite referenciado pelo AIR foi encontrado em '{}' nem em work/*_sff.",
-            sprite_path.display()
-        )));
-    }
-
-    let atlas = compose_mugen_character_atlas(&extracted_sprites)?;
     let character_slug = sgdk_entity_id(&candidate.display_name);
     let entity_id = sgdk_entity_id(&candidate.display_name);
     let atlas_asset = format!("assets/sprites/mugen_{}_atlas.png", character_slug);
-    save_rgba_image(&project_dir.join(&atlas_asset), &atlas.image)?;
-
-    let mut animations = mugen_actions_to_animation_defs(&actions, &atlas.frame_indices);
+    let (atlas, mut animations, mut import_report) = match profile {
+        Some(converted) => {
+            save_rgba_image(&project_dir.join(&atlas_asset), &converted.atlas)?;
+            (
+                MugenCharacterAtlas {
+                    image: converted.atlas,
+                    frame_indices: HashMap::new(),
+                    cell_width: converted.cell_w,
+                    cell_height: converted.cell_h,
+                    pivot: converted.pivot,
+                },
+                converted.animations,
+                converted.report,
+            )
+        }
+        None => {
+            let requested_refs = collect_mugen_action_refs(&actions);
+            let extracted_sprites = load_mugen_sprite_assets(&sprite_path, &requested_refs)?;
+            if extracted_sprites.is_empty() {
+                return Err(LoadError(format!(
+                    "Nenhum sprite referenciado pelo AIR foi encontrado em '{}' nem em work/*_sff.",
+                    sprite_path.display()
+                )));
+            }
+            let atlas = compose_mugen_character_atlas(&extracted_sprites)?;
+            save_rgba_image(&project_dir.join(&atlas_asset), &atlas.image)?;
+            let animations = mugen_actions_to_animation_defs(&actions, &atlas.frame_indices);
+            let report = serde_json::json!({
+                "schema": crate::core::mugen_profile::REPORT_SCHEMA,
+                "profile": "legacy_png_extraction",
+                "maturity": "Experimental",
+                "resources": [{
+                    "item": "sprites", "source": sprite_rel, "fidelity": "approximate",
+                    "target": "sprite.asset (atlas)",
+                    "reason": "SFF v1 nao legivel pelo perfil; usados PNGs pre-extraidos (paleta e tempos nao verificados pelo perfil)",
+                    "consequence": "cores, tempos por frame, flips e caixas sem garantia do perfil v1",
+                }],
+                "diagnostics": [], "metrics": [],
+            });
+            (atlas, animations, report)
+        }
+    };
     if let Some(idle) = animations.get("action_0").cloned() {
         animations.insert("idle".to_string(), idle);
     }
@@ -7103,11 +7178,34 @@ fn import_mugen_character_candidate(
         || !fighting_model.states.is_empty()
         || !fighting_model.controllers.is_empty();
     let command_bindings = mugen_command_bindings(&fighting_model, &animations);
-    let graph = if has_fighting_logic {
-        imported_mugen_fighting_logic_graph(&entity_id, &fighting_model)
+    let (graph, behavior) = if has_fighting_logic {
+        imported_mugen_fighting_logic_graph(&entity_id, &fighting_model, &animations)
     } else {
-        imported_mugen_idle_logic_graph(&entity_id)
+        (imported_mugen_idle_logic_graph(&entity_id), Vec::new())
     };
+    import_report["behavior"] = serde_json::Value::Array(behavior);
+    let report_rel = format!("assets/mugen/{character_slug}_import_report.json");
+    let report_path = project_dir.join(&report_rel);
+    if let Some(parent) = report_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            LoadError(format!(
+                "Nao foi possivel criar '{}': {}",
+                parent.display(),
+                e
+            ))
+        })?;
+    }
+    fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&import_report).unwrap_or_default(),
+    )
+    .map_err(|e| {
+        LoadError(format!(
+            "Nao foi possivel gravar '{}': {}",
+            report_path.display(),
+            e
+        ))
+    })?;
     let graph_ref = mugen_graph_ref(&entity_id);
     save_graph_asset(project_dir, &graph_ref, &graph)?;
 
