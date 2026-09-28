@@ -144,6 +144,35 @@ Funções puras de tradução, sem estado global escondido:
   inputs equivalentes e reabertura do projeto. Fonte reconstituída igual não
   basta.
 
+## 6. Registro de módulos e superfícies reservadas
+
+- `crates/<nome>/` é a localização oficial de biblioteca Rust independente, com
+  `Cargo.toml` próprio e gates próprios. Não há `Cargo.toml` de workspace na
+  raiz, e não se cria um apenas para fazer um pacote standalone compilar.
+- `crates/registry.json` é o registro canónico de módulos e a única fonte dessa
+  lista. Consumidores: `npm run check:tree` (recusa diretório não declarado,
+  recusa pacote declarado sem `Cargo.toml`, recusa `crates/` sem registro) e
+  `npm run crates:gates` (`cargo fmt --manifest-path <manifesto> -- --check`,
+  `cargo clippy --manifest-path <manifesto> --all-targets -- -D warnings`,
+  `cargo test --manifest-path <manifesto> --locked`).
+- A escada de maturidade de um pacote tem quatro degraus, cada um com registro
+  próprio na matriz: `biblioteca-implementada` → `gates-proprios-aprovados` →
+  `backend-integrado` → `fluxo-do-usuario-comprovado`. Compilar e passar nos
+  gates próprios **não** registra integração ao produto.
+- Superfícies compartilhadas são do integrador da rodada, não dos agentes em
+  paralelo: manifests e lockfiles (`package.json`, `Cargo.toml`, `Cargo.lock`,
+  `pnpm`/npm lock), `crates/registry.json`, IPC (`src/core/ipc/`), UI
+  (`src/components/`, incluindo `src/components/tools/`), harness principal
+  (`scripts/e2e-tauri-build-run.mjs`), gates de árvore/pacotes
+  (`scripts/check-tree.*`, `scripts/crates-gates.mjs`), workflow (`ci.yml`) e
+  documentos de estado (`docs/06_AI_MEMORY_BANK.md`, `docs/rex_profiles/*`).
+- Entrega de agente vai para o diretório do próprio perfil
+  (`crates/<nome>/`, `data/rex_profiles/<perfil>/`,
+  `docs/rex_profiles/<perfil>/`, `scripts/rex_profiles/<perfil>/`) e é
+  integrada **uma por vez**, com a dependência de branch do agente preservada.
+  Teste ordinário de pacote não depende de ROM BYOR; comparação com ferramenta
+  externa fica identificada à parte, na evidência do perfil.
+
 ## Estado desta versão
 
 v1 congelada em 2026-09-24 pelo integrador da rodada. Nenhum consumidor pode

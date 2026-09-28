@@ -1,0 +1,12 @@
+{
+  "schema": "rex-crate-registry/v1",
+  "descricao": "Lista explicita dos pacotes Rust autonomos desta arvore. Fonte unica: consumida por `npm run check:tree` (que reprova diretorio nao registrado e registro sem diretorio) e por `npm run crates:gates` (fmt, clippy --all-targets -D warnings, test --locked). Registro de modulos e manifests sao responsabilidade do integrador.",
+  "escalade": [
+    "biblioteca-implementada",
+    "gates-proprios-aprovados",
+    "backend-integrado",
+    "fluxo-do-usuario-comprovado"
+  ],
+  "regra": "Compilar e passar nos gates proprios NAO registra integracao ao produto. O nivel backend-integrado exige, na ordem: dependencia por path em src-tauri/Cargo.toml (sem criar workspace na raiz), adaptador no backend e uma chamada real testada pelo backend.",
+  "pacotes": []
+}

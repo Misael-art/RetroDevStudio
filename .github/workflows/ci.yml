@@ -72,6 +72,14 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy -- -D warnings
 
+      # Gates proprios das bibliotecas Rust standalone listadas em
+      # crates/registry.json (fmt --check, clippy --all-targets -D warnings,
+      # test --locked, por --manifest-path; nao existe workspace na raiz).
+      # A lista e explicita: pacote declarado sem Cargo.toml reprova o step.
+      - name: Crate package gates
+        id: crate_gates
+        run: npm run crates:gates
+
       # cargo test --lib isolado com --test-threads=1 para evitar conflitos de I/O
       # e lockfile em hosts Windows com AppLocker/antivirus ativo.
       # Para suites pesadas multithreaded, use o workflow desktop-e2e.yml num runner dedicado.
@@ -106,6 +114,7 @@ jobs:
             "- Rust formatting: ${{ steps.rust_format.outcome }}",
             "- Frontend lint: ${{ steps.frontend_lint.outcome }}",
             "- Rust clippy: ${{ steps.rust_clippy.outcome }}",
+            "- Crate package gates: ${{ steps.crate_gates.outcome }}",
             "- Rust tests: ${{ steps.rust_tests.outcome }}",
             "- Frontend tests: ${{ steps.frontend_tests.outcome }}",
             "- TypeScript check: ${{ steps.tsc_check.outcome }}",
@@ -192,6 +201,12 @@ jobs:
 
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1
+
+      # Mesmos gates proprios dos pacotes standalone registrados (ver job
+      # `validate`): lista explicita em crates/registry.json, sem workspace.
+      - name: Crate package gates
+        id: crate_gates
+        run: npm run crates:gates
 
       - name: Upload Linux validation artifacts
         if: always()

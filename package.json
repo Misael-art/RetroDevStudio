@@ -25,6 +25,7 @@
     "lint": "eslint src vite.config.ts --max-warnings=0",
     "preview": "vite preview",
     "check:tree": "node scripts/check-tree.cjs",
+    "crates:gates": "node scripts/crates-gates.mjs",
     "test": "vitest run",
     "test:e2e:desktop": "node scripts/e2e-tauri-build-run.mjs",
     "test:e2e:desktop:md": "node scripts/e2e-tauri-build-run.mjs --project src-tauri/tests/fixtures/projects/megadrive_dummy",
