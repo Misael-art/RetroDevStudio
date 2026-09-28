@@ -16,6 +16,8 @@ mod md_common;
 pub mod md_linear;
 pub mod md_ssf2;
 pub mod region;
+mod snes_common;
+pub mod snes_lorom;
 pub mod state;
 
 pub use error::{AddressingError, ErrorCode};
