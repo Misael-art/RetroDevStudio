@@ -7,7 +7,9 @@
 //!   runtime (`needs_runtime.loopstart`);
 //! * flip e offset por frame exigem a tabela de runtime (`needs_runtime.frame_table`);
 //! * blend nao tem equivalente no VDP: **nao suportado** (frame exibido opaco);
-//! * sprite ausente no SFF: frame vazio, **aproximado**, erro;
+//! * sprite ausente no SFF: a action **nao e convertida** (nao suportado), erro. Um frame
+//!   vazio encurtaria a animacao no `rescomp` (ele para no primeiro frame vazio) e
+//!   deslocaria os indices das animacoes seguintes;
 //! * celula > 248 px ou > 255 frames por action: **nao suportado** (plano recusado).
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -361,17 +363,17 @@ pub fn plan(inp: &Inputs) -> Result<CharacterPlan, Vec<Diagnostic>> {
             continue;
         }
         let mut frames = Vec::new();
+        let mut missing: Vec<u32> = Vec::new();
         for f in &a.frames {
             let cell = cell_of.get(&(f.group, f.image)).copied();
             if cell.is_none() {
-                fidelity = Fidelity::Approximate;
-                notes.push(format!("linha {}: sprite ausente", f.line));
+                missing.push(f.line);
                 diagnostics.push(Diagnostic::new(
                     "plan.frame.sprite_missing",
                     Severity::Error,
                     at(f.line),
                     format!(
-                        "sprite {},{} nao existe no SFF; o frame fica vazio",
+                        "sprite {},{} nao existe no SFF; a action {n} nao sera convertida",
                         f.group, f.image
                     ),
                     "Inclua o sprite no SFF ou corrija o grupo/imagem no AIR.",
@@ -436,6 +438,20 @@ pub fn plan(inp: &Inputs) -> Result<CharacterPlan, Vec<Diagnostic>> {
                 clsn2: f.clsn2.clone(),
                 line: f.line,
             });
+        }
+        if !missing.is_empty() {
+            provenance.push(Provenance {
+                item: format!("anim:{n}"),
+                source: at(a.line),
+                source_sha256: Some(inp.air_sha256.to_string()),
+                transform: "nao convertida".into(),
+                target: None,
+                fidelity: Fidelity::Unsupported,
+                reason: format!("sprite ausente nas linhas {missing:?}"),
+                consequence: "a animacao nao existe no projeto; estados que a usam ficam sem ela"
+                    .into(),
+            });
+            continue;
         }
         let loopstart = a.loopstart.unwrap_or(0);
         if loopstart > 0 {

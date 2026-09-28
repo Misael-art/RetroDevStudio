@@ -115,12 +115,8 @@ pub(crate) fn convert_character_v1(
                 .join("; ")
         ))
     })?;
-    // Atlas: celulas na ordem do plano + 1 celula vazia se algum frame nao tem sprite.
-    let needs_blank = planned
-        .actions
-        .values()
-        .any(|a| a.frames.iter().any(|f| f.cell.is_none()));
-    let count = planned.cells.len() + usize::from(needs_blank);
+    // Atlas: celulas na ordem do plano (actions com sprite ausente nao sao convertidas).
+    let count = planned.cells.len();
     let cols = (count as f64).sqrt().ceil().max(1.0) as usize;
     let rows = count.div_ceil(cols);
     let (cw, ch) = (planned.cell_w, planned.cell_h);
@@ -138,7 +134,6 @@ pub(crate) fn convert_character_v1(
             }
         }
     }
-    let blank = planned.cells.len() as u32;
     let mut animations = BTreeMap::new();
     for a in planned.actions.values() {
         let durations: Vec<i32> = a
@@ -168,7 +163,7 @@ pub(crate) fn convert_character_v1(
                 frames: a
                     .frames
                     .iter()
-                    .map(|f| f.cell.map(|c| c as u32).unwrap_or(blank))
+                    .map(|f| f.cell.expect("plano so mantem actions completas") as u32)
                     .collect(),
                 fps: (60.0 / avg.max(1.0)).round().clamp(1.0, 60.0) as u32,
                 // MUGEN sempre repete a animacao (frame -1 a segura).
@@ -1137,6 +1132,223 @@ mod tests {
         // Clsn1: janela ativa com a duracao do frame 1 (medida na RAM, mesma fonte = tick).
         let active = |v: &[u16]| v.iter().filter(|c| **c == 1).count();
         assert_eq!((active(&ra.clsn1), active(&rb.clsn1)), (6, 12));
+        emu.stop().ok();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ---------------------------------------------------------------- 2a amostra: Sentinel
+
+    fn import_fixture(fixture: &str, name: &str) -> (PathBuf, PathBuf) {
+        let root = temp(name);
+        let donor = root.join("donor");
+        copy_dir(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../crates/rex-mugen/fixtures")
+                .join(fixture),
+            &donor,
+        );
+        let project = root.join("project");
+        create_project_skeleton(&project, fixture, "megadrive").unwrap();
+        import_mugen_project(&project, &donor).expect("importa pelo caminho do produto");
+        (root, project)
+    }
+
+    /// Classificacao prevista em `fixture::sentinel` (antes da execucao).
+    #[test]
+    fn sentinel_report_matches_the_registered_prediction() {
+        let (root, project) = import_fixture("sentinel", "sentinel-model");
+        let report: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(project.join("assets/mugen/sentinel_import_report.json")).unwrap(),
+        )
+        .unwrap();
+        let find = |key: &str, item: &str| {
+            report[key]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["item"] == item)
+                .cloned()
+                .unwrap_or_else(|| panic!("{key}/{item} ausente: {}", report[key]))
+        };
+        assert_eq!(report["cell"]["width"], 40);
+        assert_eq!(report["cell"]["height"], 48);
+        assert_eq!(find("resources", "palette")["fidelity"], "approximate");
+        let merged = report["metrics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["name"] == "merged_pixels")
+            .unwrap();
+        assert_eq!(merged["value"], 2.0);
+        assert_eq!(merged["over_budget"], true);
+        assert_eq!(find("resources", "anim:0")["fidelity"], "direct");
+        assert_eq!(find("resources", "anim:210")["fidelity"], "approximate");
+        // Previsao registrada dizia "approximate" (frame vazio); a execucao mostrou que frame
+        // vazio quebra o rescomp e o conversor passou a recusar a action (Sentinel = regressao).
+        assert_eq!(find("resources", "anim:99")["fidelity"], "unsupported");
+        let codes: Vec<&str> = report["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["code"].as_str().unwrap())
+            .collect();
+        for c in [
+            "plan.palette.over_budget",
+            "plan.frame.blend_unsupported",
+            "plan.frame.sprite_missing",
+        ] {
+            assert!(codes.contains(&c), "falta {c}: {codes:?}");
+        }
+        assert_eq!(find("behavior", "controller:-1#Kick")["fidelity"], "direct");
+        assert_eq!(
+            find("behavior", "controller:-1#Taunt")["fidelity"],
+            "unsupported"
+        );
+        assert_eq!(
+            find("behavior", "controller:-1#Alt")["fidelity"],
+            "unsupported"
+        );
+        assert_eq!(
+            find("behavior", "controller:210#Push")["fidelity"],
+            "unsupported"
+        );
+        assert_eq!(
+            find("behavior", "controller:210#Back")["fidelity"],
+            "direct"
+        );
+        assert_eq!(find("behavior", "statedef:230")["fidelity"], "approximate");
+        let scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        let sprite = scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "sentinel")
+            .unwrap()
+            .components
+            .sprite
+            .clone()
+            .unwrap();
+        let kick = &sprite.animations["action_210"];
+        assert_eq!(kick.frame_durations.as_deref(), Some(&[4, 5, -1][..]));
+        assert_eq!(
+            kick.mugen_frames.as_ref().unwrap()[1].flags,
+            vec!["V".to_string()]
+        );
+        let idle = &sprite.animations["action_0"];
+        assert_eq!(
+            idle.mugen_frames
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|f| f.clsn2.len())
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn classify_sentinel(emu: &EmulatorCore) -> &'static str {
+        let (raw, size, format) = emu.get_framebuffer().expect("fb");
+        let fb = framebuffer_to_rgba(&raw, size, format);
+        let w = fb.width as usize;
+        let px = |x: usize, y: usize| {
+            let i = (y * w + x) * 4;
+            (fb.rgba[i], fb.rgba[i + 1], fb.rgba[i + 2])
+        };
+        let (hi, lo) = (|v: u8| v > 160, |v: u8| v < 90);
+        let white = |p: (u8, u8, u8)| hi(p.0) && hi(p.1) && hi(p.2);
+        let cyan = |p: (u8, u8, u8)| lo(p.0) && hi(p.1) && hi(p.2);
+        let magenta = |p: (u8, u8, u8)| hi(p.0) && lo(p.1) && hi(p.2);
+        // Marcador do corpo em y=160: o ponto planejado (116,170) cai na faixa colorida
+        // espelhada (linha 21 do sprite) — erro do marcador, nao da geometria (ver relatorio).
+        if cyan(px(116, 160)) && white(px(128, 169)) && !cyan(px(116, 130)) {
+            "kick1_vflip"
+        } else if cyan(px(116, 130)) && white(px(128, 127)) {
+            "kick0"
+        } else if cyan(px(116, 130)) && white(px(116, 100)) && !white(px(128, 127)) {
+            "idle0"
+        } else if cyan(px(116, 130)) && magenta(px(116, 100)) {
+            "idle1"
+        } else {
+            "?"
+        }
+    }
+
+    #[ignore]
+    #[test]
+    fn mugen_sentinel_real_build_and_run() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("target-test/validation/rex-mugen/sentinel-{stamp}"));
+        fs::create_dir_all(&out).unwrap();
+        let (root, project) = import_fixture("sentinel", "sentinel-real");
+        let (rom, rom_sha, sym) = build(&project);
+        fs::copy(&rom, out.join("sentinel.rom")).unwrap();
+        let mut emu = EmulatorCore::new(None);
+        emu.load_rom(&rom).unwrap();
+        emu.set_joypad(JoypadState::default()).unwrap();
+        for _ in 0..60 {
+            emu.run_frame().unwrap();
+        }
+        let (c1, c2) = (
+            sym["rds_mugen_spr_sentinel_clsn1"],
+            sym["rds_mugen_spr_sentinel_clsn2"],
+        );
+        let (mut idle, mut idle_c2) = (Vec::new(), Vec::new());
+        for _ in 0..40 {
+            emu.run_frame().unwrap();
+            idle.push(classify_sentinel(&emu));
+            idle_c2.push(read_u16(&emu, c2));
+        }
+        emu.set_joypad(JoypadState {
+            b: true,
+            ..JoypadState::default()
+        })
+        .unwrap(); // B do Mega Drive
+        let (mut after, mut after_c1) = (Vec::new(), Vec::new());
+        for i in 0..60 {
+            if i == 2 {
+                emu.set_joypad(JoypadState::default()).unwrap();
+            }
+            emu.run_frame().unwrap();
+            after.push(classify_sentinel(&emu));
+            after_c1.push(read_u16(&emu, c1));
+        }
+        let (ri, ra) = (runs_of(&idle), runs_of(&after));
+        println!("sentinel idle {ri:?}\nsentinel depois de B {ra:?}\nclsn2 idle {idle_c2:?}\nclsn1 {after_c1:?}");
+        fs::write(out.join("report.json"), serde_json::to_string_pretty(&serde_json::json!({
+            "rom_sha256": rom_sha,
+            "idle_runs": ri.iter().map(|(l, n)| serde_json::json!([l, n])).collect::<Vec<_>>(),
+            "after_b_runs": ra.iter().map(|(l, n)| serde_json::json!([l, n])).collect::<Vec<_>>(),
+            "clsn2_idle": idle_c2, "clsn1_after_b": after_c1,
+            "layer": "tecnica: import pelo produto + build SGDK + core direto",
+        })).unwrap()).unwrap();
+        // Previsao (fixture::sentinel): idle 8+8; chute 4 baixo, 5 com flip V, depois parado.
+        for w in ri.windows(2).skip(1) {
+            if w[1] != *ri.last().unwrap() {
+                assert_eq!(w[1].1, 8, "idle 8+8: {ri:?}");
+            }
+        }
+        let start = ra
+            .iter()
+            .position(|(l, _)| l.starts_with("kick"))
+            .expect("chute nunca apareceu");
+        assert_eq!(ra[start], ("kick0", 4), "{ra:?}");
+        assert_eq!(ra[start + 1], ("kick1_vflip", 5), "{ra:?}");
+        assert_eq!(ra[start + 2].0, "kick0");
+        assert_eq!(
+            start + 3,
+            ra.len(),
+            "tempo -1: fica parado ate o fim da janela: {ra:?}"
+        );
+        assert_eq!(after_c1.iter().filter(|v| **v == 1).count(), 5);
+        assert!(
+            idle_c2.iter().all(|v| *v == 1 || *v == 2)
+                && idle_c2.contains(&1)
+                && idle_c2.contains(&2)
+        );
         emu.stop().ok();
         let _ = fs::remove_dir_all(root);
     }
