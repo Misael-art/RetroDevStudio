@@ -1352,4 +1352,117 @@ mod tests {
         emu.stop().ok();
         let _ = fs::remove_dir_all(root);
     }
+
+    // ---------------------------------------------------------------- 3a amostra: Warden
+
+    fn classify_warden(emu: &EmulatorCore) -> &'static str {
+        let (raw, size, format) = emu.get_framebuffer().expect("fb");
+        let fb = framebuffer_to_rgba(&raw, size, format);
+        let w = fb.width as usize;
+        let px = |x: usize, y: usize| {
+            let i = (y * w + x) * 4;
+            (fb.rgba[i], fb.rgba[i + 1], fb.rgba[i + 2])
+        };
+        let (hi, lo) = (|v: u8| v > 160, |v: u8| v < 90);
+        let green = |p: (u8, u8, u8)| lo(p.0) && hi(p.1) && lo(p.2);
+        let blue = |p: (u8, u8, u8)| lo(p.0) && lo(p.1) && hi(p.2);
+        let yellow = |p: (u8, u8, u8)| hi(p.0) && hi(p.1) && lo(p.2);
+        let white = |p: (u8, u8, u8)| hi(p.0) && hi(p.1) && hi(p.2);
+        let any = |p: (u8, u8, u8)| green(p) || blue(p) || yellow(p) || white(p);
+        if yellow(px(104, 140)) && !any(px(104, 110)) {
+            "w2_hv"
+        } else if blue(px(104, 110)) && white(px(97, 97)) {
+            "w1"
+        } else if green(px(104, 110)) && !white(px(97, 97)) {
+            "w0"
+        } else {
+            "?"
+        }
+    }
+
+    #[test]
+    fn warden_report_is_all_direct() {
+        let (root, project) = import_fixture("warden", "warden-model");
+        let report: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(project.join("assets/mugen/warden_import_report.json")).unwrap(),
+        )
+        .unwrap();
+        for key in ["resources", "behavior"] {
+            for r in report[key].as_array().unwrap() {
+                assert_eq!(r["fidelity"], "direct", "{key}: {r}");
+            }
+        }
+        assert!(
+            report["diagnostics"].as_array().unwrap().is_empty(),
+            "{}",
+            report["diagnostics"]
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[ignore]
+    #[test]
+    fn mugen_warden_real_build_and_run() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let out = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("target-test/validation/rex-mugen/warden-{stamp}"));
+        fs::create_dir_all(&out).unwrap();
+        let (root, project) = import_fixture("warden", "warden-real");
+        let (rom, rom_sha, _sym) = build(&project);
+        fs::copy(&rom, out.join("warden.rom")).unwrap();
+        let mut emu = EmulatorCore::new(None);
+        emu.load_rom(&rom).unwrap();
+        emu.set_joypad(JoypadState::default()).unwrap();
+        for _ in 0..60 {
+            emu.run_frame().unwrap();
+        }
+        let mut idle = Vec::new();
+        for _ in 0..20 {
+            emu.run_frame().unwrap();
+            idle.push(classify_warden(&emu));
+        }
+        emu.set_joypad(JoypadState {
+            y: true,
+            ..JoypadState::default()
+        })
+        .unwrap();
+        let mut after = Vec::new();
+        for i in 0..30 {
+            if i == 2 {
+                emu.set_joypad(JoypadState::default()).unwrap();
+            }
+            emu.run_frame().unwrap();
+            after.push(classify_warden(&emu));
+        }
+        let (ri, ra) = (runs_of(&idle), runs_of(&after));
+        println!("warden idle {ri:?}\nwarden depois de A {ra:?}");
+        fs::write(out.join("report.json"), serde_json::to_string_pretty(&serde_json::json!({
+            "rom_sha256": rom_sha,
+            "idle_runs": ri.iter().map(|(l, n)| serde_json::json!([l, n])).collect::<Vec<_>>(),
+            "after_a_runs": ra.iter().map(|(l, n)| serde_json::json!([l, n])).collect::<Vec<_>>(),
+            "layer": "tecnica: import pelo produto + build SGDK + core direto",
+        })).unwrap()).unwrap();
+        // Previsao (fixture::warden): idle so W1 (Loopstart no ultimo frame);
+        // golpe W2 HV 2, W1 4, W0 2 + volta ao idle W0 2 = W0 4, depois W1 parado.
+        assert_eq!(ri, vec![("w1", 20)], "idle apos o 1o ciclo: so W1");
+        let start = ra
+            .iter()
+            .position(|(l, _)| *l == "w2_hv")
+            .expect("golpe nunca apareceu");
+        assert_eq!(
+            &ra[start..],
+            &[
+                ("w2_hv", 2),
+                ("w1", 4),
+                ("w0", 4),
+                ("w1", ra.last().unwrap().1)
+            ][..],
+            "{ra:?}"
+        );
+        emu.stop().ok();
+        let _ = fs::remove_dir_all(root);
+    }
 }

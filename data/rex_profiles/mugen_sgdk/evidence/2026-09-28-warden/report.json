@@ -1,0 +1,32 @@
+{
+  "after_a_runs": [
+    [
+      "w1",
+      1
+    ],
+    [
+      "w2_hv",
+      2
+    ],
+    [
+      "w1",
+      4
+    ],
+    [
+      "w0",
+      4
+    ],
+    [
+      "w1",
+      19
+    ]
+  ],
+  "idle_runs": [
+    [
+      "w1",
+      20
+    ]
+  ],
+  "layer": "tecnica: import pelo produto + build SGDK + core direto",
+  "rom_sha256": "a065cc293dcceaa842292a8acd74f0fc46185662f7fa6b6f037efb83bfe08e0b"
+}
