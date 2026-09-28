@@ -8,9 +8,9 @@ lista de aliases, lecturas segmentadas e erros estruturados.
 tamaño nin por banner, non modela chips especiais (DSP/SA-1/Super FX/CX4/SVP),
 non decodifica codecs, non ten UI, e **non afirma soporte a ningún xogo**. O
 contrato formal e os límites están en
-[`docs/rex_profiles/addressing_runtime/CONTRATO.md`](../../../../docs/rex_profiles/addressing_runtime/CONTRATO.md);
+[`docs/rex_profiles/addressing_runtime/CONTRATO.md`](../../docs/rex_profiles/addressing_runtime/CONTRATO.md);
 a evidencia da rolda, en
-[`RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md`](../../../../docs/rex_profiles/addressing_runtime/RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md).
+[`RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md`](../../docs/rex_profiles/addressing_runtime/RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md).
 
 ## Localización: `crates/rex-addressing/`
 
@@ -116,10 +116,10 @@ cargo run --offline --example resource_report          # 13 lecturas + 14 recusa
 ```
 
 Saída literal, `sha256` do informe e como lelo:
-[`docs/rex_profiles/addressing_runtime/EXEMPLO-CONSUMIDOR.md`](../../../../docs/rex_profiles/addressing_runtime/EXEMPLO-CONSUMIDOR.md).
+[`docs/rex_profiles/addressing_runtime/EXEMPLO-CONSUMIDOR.md`](../../docs/rex_profiles/addressing_runtime/EXEMPLO-CONSUMIDOR.md).
 A proposta de adaptación ao produto (ruta do `Cargo.toml`, adaptador, DTO, IPC,
 límites) está en
-[`ADAPTACION.md`](../../../../docs/rex_profiles/addressing_runtime/ADAPTACION.md)
+[`ADAPTACION.md`](../../docs/rex_profiles/addressing_runtime/ADAPTACION.md)
 e **agarda asinatura do integrador**: non está aplicada.
 
 ## Validacións

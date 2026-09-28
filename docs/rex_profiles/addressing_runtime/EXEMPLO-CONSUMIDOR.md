@@ -8,7 +8,7 @@ procedencia física e límites de interpretación.
 ## Como executalo
 
 ```bash
-cd scripts/rex_profiles/addressing_runtime/rex-addressing
+cd crates/rex-addressing
 CARGO_TARGET_DIR=/tmp/rex-a2-target cargo run --offline --example resource_report
 ```
 

@@ -85,7 +85,7 @@ escrita a man `as_dúas_instancias_non_comparten_estado`, e o control **R6** de
 ## 3. Comandos
 
 ```bash
-cd scripts/rex_profiles/addressing_runtime/rex-addressing
+cd crates/rex-addressing
 export CARGO_TARGET_DIR=/tmp/rex-a2-target    # nunca o target do produto
 
 cargo test --offline --test acceptance        # gradúa: produto vs JSON publicado (11/0/1)

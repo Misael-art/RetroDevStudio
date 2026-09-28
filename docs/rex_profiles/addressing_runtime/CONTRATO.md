@@ -40,11 +40,18 @@ paquete moveuse para `crates/rex-addressing/`, rexistrouse, e os tres gates
 proprios (`fmt --check`, `clippy --all-targets -D warnings`, `test --locked`)
 correron na localización nova con `CARGO_TARGET_DIR` fóra da árbore rastreada.
 
-Non se crea `Cargo.toml` de workspace na raíz, e nada no produto consume aínda
-o paquete: o nivel acadado é `gates-proprios-aprovados`, non
-`backend-integrado`. Os rexistros de comandos históricos desta entrega (que se
-executaron no worktree do axente A) mantéñense tal cales: evidencia pasada non
-se reescribe.
+Non se crea `Cargo.toml` de workspace na raíz. O nivel acadado coa promoción foi
+`gates-proprios-aprovados`; o 2026-09-28 o paquete subiu a `backend-integrado`
+cun adaptador propio (`src-tauri/src/tools/reverse/decomp/rex_addressing.rs` e o
+comando Tauri `rex_addressing_read_snapshot`), e só a ese degrau: `read_sequence`,
+as escritas e os tres perfís SNES segúan sen expoñer, e ningún chamador da
+interface usa aínda o comando. O estado por capacidade vive en
+`crates/registry.json` e na matriz de `crates/` de `docs/rex_profiles/ROUND_STATE.md`.
+Os rexistros de comandos históricos desta entrega (que se executaron no worktree
+do axente A) mantéñense tal cales: evidencia pasada non se reescribe. As dúas
+receitas rexecitables que apuntaban á localización antiga actualizáronse a
+`cd crates/rex-addressing` (`ACEITE-ADAPTADOR.md` §3, `EXEMPLO-CONSUMIDOR.md`)
+porque foi a promoción do integrador a que rompeu esas rutas.
 
 ## 1. Identidade e versión
 
