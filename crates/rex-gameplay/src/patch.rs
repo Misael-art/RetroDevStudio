@@ -2,15 +2,18 @@
 //!
 //! * `patch_threshold`: copia a base e reescreve somente o byte imediato do
 //!   `MOVEQ` do limiar (mais o checksum do cabecalho, se a base o tinha valido).
-//! * `regenerate_from_graph`: remonta todas as instrucoes registradas no grafo,
-//!   com o limiar editado, nos offsets originais.
+//! * `regenerate_from_graph`: emite toda a regiao a partir da regra semantica do
+//!   grafo (`emit::emit_region`), com o limiar editado; do registro mapeado so vem o
+//!   layout (offsets e tamanho de desvio). Ver `regeneration_plan`.
 //!
 //! Ambos exigem identidade da base (SHA-256 e bytes da regiao iguais aos do
 //! grafo), recusam crescimento e verificam que nenhum byte fora das faixas
 //! autorizadas mudou.
 
 use crate::graph::OpenedGraph;
-use crate::m68k::{encode, Insn};
+use std::mem::discriminant;
+
+use crate::emit::{emit_region, with_threshold, Emitted};
 use crate::sha256::sha256_hex;
 
 pub const MD_CHECKSUM_AT: usize = 0x18E;
@@ -139,34 +142,68 @@ pub fn patch_threshold(
     )
 }
 
+/// Emissao da regiao a partir da regra semantica do grafo aberto (limiar
+/// editado incluso), com a origem de cada operando. Recusa se a semantica sem
+/// edicao nao reproduzir exatamente os bytes mapeados, se algum offset mapeado
+/// ficar sem emissao ou se o tipo de instrucao divergir do registro.
+pub fn regeneration_plan(opened: &OpenedGraph) -> Result<Vec<Emitted>, String> {
+    let same = emit_region(&opened.rule, &opened.records)?;
+    let offsets: Vec<u32> = same.iter().map(|e| e.offset).collect();
+    let recorded: Vec<u32> = opened.records.keys().copied().collect();
+    if offsets != recorded {
+        return Err(
+            "a semantica nao cobre exatamente as instrucoes mapeadas; recusado".to_string(),
+        );
+    }
+    for e in &same {
+        if opened.recorded_bytes[&e.offset] != e.bytes {
+            return Err(format!(
+                "a semantica recuperada nao reproduz os bytes mapeados em 0x{:06X}; recusado",
+                e.offset
+            ));
+        }
+    }
+    let edited = emit_region(
+        &with_threshold(&opened.rule, opened.threshold),
+        &opened.records,
+    )?;
+    for e in &edited {
+        if discriminant(&e.insn) != discriminant(&opened.records[&e.offset]) {
+            return Err(format!(
+                "tipo de instrucao mudaria em 0x{:06X}; recusado",
+                e.offset
+            ));
+        }
+        if e.bytes.len() != opened.recorded_bytes[&e.offset].len() {
+            return Err(format!(
+                "instrucao em 0x{:06X} mudaria de tamanho; crescimento recusado",
+                e.offset
+            ));
+        }
+    }
+    Ok(edited)
+}
+
 pub fn regenerate_from_graph(
     base: &[u8],
     expected_sha256: &str,
     opened: &OpenedGraph,
 ) -> Result<Rebuilt, String> {
     let sha = verify_base(base, expected_sha256, opened)?;
-    let k = new_k(opened)?;
+    new_k(opened)?;
+    let plan = regeneration_plan(opened)?;
     let mut bytes = base.to_vec();
     let mut authorized = Vec::new();
-    for (start, insn) in &opened.records {
-        let insn = if *start == opened.rule.compare.k_at {
-            match insn {
-                Insn::Moveq { d, .. } => Insn::Moveq { imm: k, d: *d },
-                _ => return Err("registro do limiar nao e MOVEQ".to_string()),
-            }
-        } else {
-            insn.clone()
-        };
-        let encoded = encode(&insn, *start)?;
-        let original_len = opened.recorded_bytes[start].len();
-        if encoded.len() != original_len {
-            return Err(format!(
-                "instrucao em 0x{start:06X} mudaria de tamanho; crescimento recusado"
-            ));
-        }
-        let s = *start as usize;
-        bytes[s..s + encoded.len()].copy_from_slice(&encoded);
-        authorized.push((s, s + encoded.len()));
+    for e in &plan {
+        let s = e.offset as usize;
+        bytes[s..s + e.bytes.len()].copy_from_slice(&e.bytes);
+        authorized.push((s, s + e.bytes.len()));
     }
-    finish("regenerate_region_from_graph", base, sha, bytes, authorized)
+    finish(
+        "regenerate_region_from_semantics",
+        base,
+        sha,
+        bytes,
+        authorized,
+    )
 }

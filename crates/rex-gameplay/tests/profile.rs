@@ -210,7 +210,7 @@ fn edit_matches_the_independent_compiler_rebuild_in_the_region() {
     let patched = patch_threshold(&original.image, &sha, &opened).unwrap();
     let regenerated = regenerate_from_graph(&original.image, &sha, &opened).unwrap();
     assert_eq!(patched.method, "patch_moveq_immediate");
-    assert_eq!(regenerated.method, "regenerate_region_from_graph");
+    assert_eq!(regenerated.method, "regenerate_region_from_semantics");
     assert_eq!(
         patched.bytes, regenerated.bytes,
         "os dois caminhos devem coincidir (verificado, nao assumido)"

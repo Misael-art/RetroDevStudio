@@ -9,6 +9,7 @@
 //! usados apenas como rotulos. Nada aqui le fonte C, AST, grafo autoral ou
 //! resultado esperado.
 
+pub mod emit;
 pub mod graph;
 pub mod json;
 pub mod lift;
@@ -88,11 +89,20 @@ pub struct Candidate {
     pub threshold: i64,
 }
 
+/// Resultado da varredura estrutural: candidatos que elevam no perfil e
+/// quase-casos (mesma abertura `BTST ; BEQ`, mas recusados pela elevacao, com o motivo).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Location {
+    pub candidates: Vec<Candidate>,
+    pub rejected: Vec<(u32, String)>,
+}
+
 /// Varre offsets alinhados procurando a forma com guarda (`BTST #n,Dk ; BEQ saida`)
 /// e tenta recuperar cada um com a saida da propria guarda. So encontra essa forma;
 /// regras sem guarda precisam de entrada/saidas declaradas.
-pub fn scan_guarded_candidates(rom: &[u8]) -> Vec<Candidate> {
-    let mut found = Vec::new();
+pub fn locate(rom: &[u8]) -> Location {
+    let mut candidates = Vec::new();
+    let mut rejected = Vec::new();
     let mut at = 0u32;
     while (at as usize) + 6 <= rom.len() {
         if let Ok(first) = m68k::decode(rom, at) {
@@ -104,15 +114,14 @@ pub fn scan_guarded_candidates(rom: &[u8]) -> Vec<Candidate> {
                         ..
                     } = second.insn
                     {
-                        if let Ok(region) = delimit(rom, at, &[target]) {
-                            if let Ok(rule) = lift(&region) {
-                                found.push(Candidate {
-                                    entry: at,
-                                    exit: target,
-                                    counter_addr: rule.compare.counter_addr,
-                                    threshold: rule.compare.threshold,
-                                });
-                            }
+                        match delimit(rom, at, &[target]).and_then(|region| lift(&region)) {
+                            Ok(rule) => candidates.push(Candidate {
+                                entry: at,
+                                exit: target,
+                                counter_addr: rule.compare.counter_addr,
+                                threshold: rule.compare.threshold,
+                            }),
+                            Err(reason) => rejected.push((at, reason)),
                         }
                     }
                 }
@@ -120,5 +129,34 @@ pub fn scan_guarded_candidates(rom: &[u8]) -> Vec<Candidate> {
         }
         at += 2;
     }
-    found
+    Location {
+        candidates,
+        rejected,
+    }
+}
+
+/// Compatibilidade: so os candidatos de `locate`.
+pub fn scan_guarded_candidates(rom: &[u8]) -> Vec<Candidate> {
+    locate(rom).candidates
+}
+
+/// Exige exatamente um candidato. Com zero ou mais de um, recusa listando o que
+/// achou; nunca escolhe a primeira ocorrencia.
+pub fn locate_unique(rom: &[u8]) -> Result<Candidate, String> {
+    let location = locate(rom);
+    match location.candidates.as_slice() {
+        [only] => Ok(only.clone()),
+        [] => Err(format!(
+            "nenhuma regra compativel com o perfil; {} quase-casos recusados: {:?}",
+            location.rejected.len(),
+            location.rejected
+        )),
+        many => Err(format!(
+            "localizacao ambigua: {} candidatos compativeis {:?}; declare a entrada e as saidas",
+            many.len(),
+            many.iter()
+                .map(|c| format!("0x{:06X}->0x{:06X}", c.entry, c.exit))
+                .collect::<Vec<_>>()
+        )),
+    }
 }
