@@ -4458,11 +4458,23 @@ fn import_mugen_project_at_base_dir(
     mugen_path: &Path,
 ) -> Result<OpenProjectResult, String> {
     let (project_dir, dir_notice) = reserve_project_dir(base_dir, project_name)?;
-
-    let project = create_project_skeleton(&project_dir, project_name, "megadrive")
-        .map_err(|error| error.to_string())?;
-    let report = import_mugen_scene(&project_dir, mugen_path).map_err(|error| error.to_string())?;
-    stamp_imported_mugen_metadata(&project_dir, mugen_path).map_err(|error| error.to_string())?;
+    let origin = reserved_dir_origin(&project_dir);
+    let imported = (|| {
+        let project = create_project_skeleton(&project_dir, project_name, "megadrive")
+            .map_err(|error| error.to_string())?;
+        let report =
+            import_mugen_scene(&project_dir, mugen_path).map_err(|error| error.to_string())?;
+        stamp_imported_mugen_metadata(&project_dir, mugen_path)
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>((project, report))
+    })();
+    let (project, report) = match imported {
+        Ok(value) => value,
+        Err(error) => {
+            discard_failed_import(&project_dir, origin);
+            return Err(error);
+        }
+    };
     let primary_scene_label = report
         .primary_scene
         .display_name
@@ -4489,7 +4501,13 @@ fn import_mugen_project_at_base_dir(
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
-        notice: merge_project_notices(dir_notice, notice),
+        notice: merge_project_notices(
+            dir_notice,
+            merge_project_notices(
+                notice,
+                crate::core::mugen_profile::summary_line(&project_dir),
+            ),
+        ),
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
         import_summary: None,
@@ -4522,6 +4540,49 @@ fn external_import_notice(
     }
 }
 
+/// Estado da pasta reservada antes da importacao, para desfazer so o que a importacao criou.
+enum ReservedDirOrigin {
+    Created,
+    ExistingEmpty,
+    ExistingNonEmpty,
+}
+
+fn reserved_dir_origin(project_dir: &Path) -> ReservedDirOrigin {
+    match fs::read_dir(project_dir) {
+        Err(_) => ReservedDirOrigin::Created,
+        Ok(mut entries) => {
+            if entries.next().is_none() {
+                ReservedDirOrigin::ExistingEmpty
+            } else {
+                ReservedDirOrigin::ExistingNonEmpty
+            }
+        }
+    }
+}
+
+/// Uma importacao que falhou nao pode deixar um projeto que parece valido: remove o que
+/// esta importacao criou na pasta reservada (nunca conteudo preexistente).
+fn discard_failed_import(project_dir: &Path, origin: ReservedDirOrigin) {
+    match origin {
+        ReservedDirOrigin::Created => {
+            let _ = fs::remove_dir_all(project_dir);
+        }
+        ReservedDirOrigin::ExistingEmpty => {
+            if let Ok(entries) = fs::read_dir(project_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let _ = if path.is_dir() {
+                        fs::remove_dir_all(&path)
+                    } else {
+                        fs::remove_file(&path)
+                    };
+                }
+            }
+        }
+        ReservedDirOrigin::ExistingNonEmpty => {}
+    }
+}
+
 fn import_external_project_at_base_dir(
     base_dir: &Path,
     project_name: &str,
@@ -4529,13 +4590,23 @@ fn import_external_project_at_base_dir(
     project_path: &Path,
 ) -> Result<OpenProjectResult, String> {
     let (project_dir, dir_notice) = reserve_project_dir(base_dir, project_name)?;
-
-    let project = create_project_skeleton(&project_dir, project_name, "megadrive")
-        .map_err(|error| error.to_string())?;
-    let report = import_external_scene(&project_dir, profile_id, project_path)
-        .map_err(|error| error.to_string())?;
-    stamp_imported_external_profile_metadata(&project_dir, profile_id, project_path)
-        .map_err(|error| error.to_string())?;
+    let origin = reserved_dir_origin(&project_dir);
+    let imported = (|| {
+        let project = create_project_skeleton(&project_dir, project_name, "megadrive")
+            .map_err(|error| error.to_string())?;
+        let report = import_external_scene(&project_dir, profile_id, project_path)
+            .map_err(|error| error.to_string())?;
+        stamp_imported_external_profile_metadata(&project_dir, profile_id, project_path)
+            .map_err(|error| error.to_string())?;
+        Ok::<_, String>((project, report))
+    })();
+    let (project, report) = match imported {
+        Ok(value) => value,
+        Err(error) => {
+            discard_failed_import(&project_dir, origin);
+            return Err(error);
+        }
+    };
 
     let profile = list_registered_external_import_profiles()
         .into_iter()
@@ -4556,7 +4627,13 @@ fn import_external_project_at_base_dir(
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
-        notice: merge_project_notices(dir_notice, external_import_notice(&profile, &report)),
+        notice: merge_project_notices(
+            dir_notice,
+            merge_project_notices(
+                external_import_notice(&profile, &report),
+                crate::core::mugen_profile::summary_line(&project_dir),
+            ),
+        ),
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
         import_summary,
