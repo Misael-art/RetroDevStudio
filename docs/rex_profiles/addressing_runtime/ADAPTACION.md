@@ -121,7 +121,7 @@ política conservadora e **sen autodedección** (fora do obxectivo da entrega):
 O serde vive no adaptador, non na crate. Campos mínimos para non perder procedencia:
 
 ```text
-perfil, contract_version, origen, sha256_imaxe, bytes_imaxe,
+perfil, contract_version, orixe, sha256_imaxe, bytes_imaxe,
 estado (mapa serializado), cpu_enderezo, lonxitude,
 segmentos[{ indice, cpu_enderezo, cpu_lonxitude, rom_offset, rexión }],
 bytes_sha256            // hash dos bytes devoltos, non dos da imaxe
