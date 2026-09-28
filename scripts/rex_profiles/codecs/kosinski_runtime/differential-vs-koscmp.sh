@@ -15,7 +15,22 @@
 #                               deixar de recusar exatamente como fixado.
 #   SONDA-DEFEITO-NAO-COTADA  — demonstração de defeito da referência;
 #                               NUNCA contada como paridade.
+#   CONTROLE-CORRUPCAO        — stream do PRODUTO mutada de forma
+#                               determinística; prova de que a comparação de
+#                               conteúdo completo detecta erro (a) e de que o
+#                               produto recusa estruturalmente o que o oráculo
+#                               engole (b). NUNCA cotada como paridade.
 #   DIVERGE                   — qualquer outro resultado = falha do script.
+#
+# DIREÇÕES COBERTAS (ETAPA 3 da missão de codificação, 2026-09-27):
+#   A (herdada): streams de referência/autorais → decode do produto e do
+#      oráculo, conteúdo completo comparado.
+#   B (nova):    plains autorais → ENCODE do produto → DECODE do oráculo
+#      (`koscmp -x`), conteúdo completo comparado com o plain (nunca só
+#      prefixo/hashes parciais). Inclui vazio, fronteiras de descritor
+#      (15_lit estraddle e forma 14-mod-16 com placeholder do terminator),
+#      eco, refs curtas/longas, pouco compressível e repetitivo.
+#   Tabela de tamanhos produto vs oráculo (sizes.tsv) para os 12 plains.
 #
 # Exige oráculo instalado e PINADO; falha se os pins divergem. Toda chamada ao
 # oráculo passa por sandbox.sh (timeout + ulimit -v/-t/-f + stdin fechado).
@@ -46,8 +61,9 @@ mkdir -p "$OUT"
 ROWS="$OUT/differential.tsv"
 printf 'caso\tcategoria\tentrada_sha256\tesperado\toraculo\tproduto\tveredito\tjustificativa\n' > "$ROWS"
 
-cargo build --release --manifest-path "$REPO/crates/rex-kosinski/Cargo.toml" --example decode >/dev/null || { echo "build rust falhou"; exit 1; }
+cargo build --release --manifest-path "$REPO/crates/rex-kosinski/Cargo.toml" --examples >/dev/null || { echo "build rust falhou"; exit 1; }
 BIN="$REPO/crates/rex-kosinski/target/release/examples/decode"
+BIN_ENC="$REPO/crates/rex-kosinski/target/release/examples/encode"
 
 sha()   { sha256sum "$1" | cut -d' ' -f1; }
 line()  { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" | tee -a "$ROWS"; }
@@ -57,7 +73,11 @@ rustr() { "$BIN" "$1" "$2" 2>"$OUT/rust.err" >/dev/null; }
 # coluna de resultado: rc + sha do arquivo de saida (ou 'sem-arquivo')
 res()   { local rc="$1" f="$2" errf="${3:-}"; local e=""; [ -n "$errf" ] && [ -s "$errf" ] && e=" $(head -c 120 "$errf" | tr '\t\n' '  ' | sed 's/[[:space:]]\+$//')"; local s="rc=$rc"; if [ -f "$f" ]; then s="$s sha=$(sha "$f")"; else s="$s sem-arquivo"; fi; s="$s$e"; printf '%s' "$s" | sed 's/[[:space:]]\+$//'; }
 
-par=0; contratual=0; sonda=0; bad=0
+par=0; contratual=0; sonda=0; corr=0; bad=0
+
+# patch byte isolado (determinístico): file, offset decimal, hex novo, saida
+patchbyte() { local f="$1" off="$2" hex="$3" o="$4"
+  { head -c "$off" "$f"; printf "\x$hex"; tail -c "+$((off + 2))" "$f"; } > "$o"; }
 
 # ---- 1) goldens: espera publicada (oráculo confirmou na rodada do perfil);
 #         oráculo E produto devem bater a espera byte a byte.
@@ -90,17 +110,18 @@ for f in "$PERFIL"/golden/*.kos; do
 done
 
 # ---- 2a) plains: re-encode do oráculo deve reproduzir a stream publicada.
-#          (produto nao tem encoder — escopo; coluna produto documenta)
+#          (linha herdada da entrega do decoder; o encoder do produto e
+#          coberto pela DIRECAO B em §6 — aqui a espera e a stream publicada)
 for f in "$PERFIL"/plain/*.bin; do
   name="$(basename "$f" .bin)"
   pub="$PERFIL/plain/$name.kos"
   enc="$OUT/$name.reencode.kos"; rm -f "$enc"
   enc_rc=0; kosenc "$f" "$enc" || enc_rc=$?
   if [ -f "$enc" ] && cmp -s "$enc" "$pub"; then
-    line "$name-reencode" "plain-encode" "$(sha "$f")" "sha=$(sha "$pub")" "$(res "$enc_rc" "$enc")" "SEM-ENCODER (fora de escopo)" "PARIDADE" "paridade contra a espera = stream publicada (encoder do produto nao faz parte desta entrega)"
+    line "$name-reencode" "plain-encode" "$(sha "$f")" "sha=$(sha "$pub")" "$(res "$enc_rc" "$enc")" "N/A (espera = stream publicada; produto em §6)" "PARIDADE" "paridade contra a espera = stream publicada (linha herdada da etapa do decoder)"
     par=$((par+1))
   else
-    line "$name-reencode" "plain-encode" "$(sha "$f")" "sha=$(sha "$pub")" "$(res "$enc_rc" "$enc")" "SEM-ENCODER (fora de escopo)" "DIVERGE" "reencode nao reproduziu a stream"
+    line "$name-reencode" "plain-encode" "$(sha "$f")" "sha=$(sha "$pub")" "$(res "$enc_rc" "$enc")" "N/A (espera = stream publicada; produto em §6)" "DIVERGE" "reencode nao reproduziu a stream"
     bad=$((bad+1))
   fi
 done
@@ -183,13 +204,117 @@ else
   bad=$((bad+1))
 fi
 
+# ---- 6) DIRECAO B (ETAPA 3): stream do PRODUTO -> decode do ORACULO,
+#         comparacao de conteudo COMPLETO com o plain autoral.
+#         Cobertura: 12 plains do perfil (inclui vazio, single, pseudo-
+#         aleatorio pouco compressivel, zeros/eco longo, janela distante)
+#         + 3 fixtures autorais encdir (estraddle 15 lit, forma 14-mod-16
+#         com placeholder do terminator, separado count3 real).
+encdir_produto() { # plain -> $OUT/<nome>.prod.kos ; rc 0 se ok
+  local plain="$1" out="$2"
+  "$BIN_ENC" "$plain" "$out" >/dev/null 2>"$OUT/enc.err"
+}
+prodrow() { # nome plain esperacao_txt
+  local name="$1" plain="$2" just="$3"
+  local pst="$OUT/$name.prod.kos" orc="$OUT/$name.prodb.oracle.bin" rs="$OUT/$name.prodb.rust.bin"
+  rm -f "$pst" "$orc" "$rs"
+  if ! encdir_produto "$plain" "$pst"; then
+    line "$name-produto" "produto-stream-oraculo" "sem-stream" "-" "encode-falhou: $(head -c 80 "$OUT/enc.err")" "-" "DIVERGE" "encoder do produto recusou plain autoral valido"
+    bad=$((bad+1)); return
+  fi
+  local orc_rc=0 rust_rc=0
+  kosx "$pst" "$orc" || orc_rc=$?
+  rustr "$pst" "$rs" || rust_rc=$?
+  if [ -f "$orc" ] && [ -f "$rs" ] && cmp -s "$orc" "$plain" && cmp -s "$rs" "$plain"; then
+    line "$name-produto" "produto-stream-oraculo" "$(sha "$pst")" "sha=$(sha "$plain")" "$(res "$orc_rc" "$orc")" "$(res "$rust_rc" "$rs" "$OUT/rust.err")" "PARIDADE" "$just (stream do produto decodificada pelo oraculo com conteudo completo igual ao plain)"
+    par=$((par+1))
+  else
+    line "$name-produto" "produto-stream-oraculo" "$(sha "$pst")" "sha=$(sha "$plain")" "$(res "$orc_rc" "$orc")" "$(res "$rust_rc" "$rs" "$OUT/rust.err")" "DIVERGE" "saida do oraculo ou do produto difere do plain"
+    bad=$((bad+1))
+  fi
+}
+for f in "$PERFIL"/plain/*.bin; do
+  name="$(basename "$f" .bin)"
+  prodrow "$name" "$f" "direcao B do plain do perfil"
+done
+for f in "$RUNTIME"/encdir/*.bin; do
+  name="$(basename "$f" .bin)"
+  prodrow "$name" "$f" "direcao B da fronteira/shape autoral"
+done
+
+# ---- 6b) tabela de tamanhos produto vs encoder de referencia (ETAPA 5);
+#          nao contada como paridade — diagnostico cotavel no REPORT.
+SIZES="$OUT/sizes.tsv"
+printf 'caso\tplain_len\toraculo_stream_len\tproduto_stream_len\tdelta\tproduto_menor\n' > "$SIZES"
+for f in "$PERFIL"/plain/*.bin "$RUNTIME"/encdir/*.bin; do
+  name="$(basename "$f" .bin)"
+  o_size="-"; p_size="-"
+  [ -f "$OUT/$name.reencode.kos" ] && o_size="$(stat -c%s "$OUT/$name.reencode.kos")"
+  [ -f "$OUT/$name.prod.kos" ] && p_size="$(stat -c%s "$OUT/$name.prod.kos")"
+  delta="-"; menor="-"
+  if [ "$o_size" != "-" ] && [ "$p_size" != "-" ]; then
+    delta=$((p_size - o_size)); [ "$delta" -lt 0 ] && menor=sim || menor=nao
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$(stat -c%s "$f")" "$o_size" "$p_size" "$delta" "$menor" | tee -a "$SIZES"
+done
+
+# ---- 7) controles de corrupcao deterministicos sobre streams DO PRODUTO
+#         (missao de codificacao, ETAPA 3: um que produz saida ERRADA
+#         detectada por fora; um recusado ESTRUTURALMENTE pelo produto).
+# (a) literais: `lit14_mod16` tem layout exato pinado na suite (FF BF + 14
+#     literais + placeholder 00 00 + 00 F0 00). Mutar o 1o byte de dado
+#     (offset 2, 41 -> 7A) da saida ERRADA identica nos dois leitores; a
+#     comparacao de conteudo completo com o plain detecta o erro por fora.
+stA="$OUT/lit14_mod16.prod.kos"; wantA="$OUT/controle-a.want"; rm -f "$wantA"
+{ printf '\xff\xbf'; printf 'ABCDEFGHIJKLMN'; printf '\x00\x00\x00\xf0\x00'; } > "$wantA"
+if cmp -s "$stA" "$wantA"; then
+  badA="$OUT/controle-a.kos"; patchbyte "$stA" 2 7a "$badA"
+  oA="$OUT/controle-a.oracle.bin"; rA="$OUT/controle-a.rust.bin"; rm -f "$oA" "$rA"
+  orc_rc=0; kosx "$badA" "$oA" || orc_rc=$?
+  rust_rc=0; rustr "$badA" "$rA" || rust_rc=$?
+  plainA="$RUNTIME/encdir/lit14_mod16.bin"
+  if [ -f "$oA" ] && [ -f "$rA" ] && cmp -s "$oA" "$rA" && ! cmp -s "$oA" "$plainA"; then
+    line "controle-a-literais-corrompidos" "controle-corrupcao" "$(sha "$badA")" "ambos=errado e identico; != sha(plain) $(sha "$plainA")" "$(res "$orc_rc" "$oA")" "$(res "$rust_rc" "$rA" "$OUT/rust.err")" "CONTROLE-CORRUPCAO" "mutacao de byte de dado NAO e detectavel por decoder fiel; a comparacao de conteudo completo com a espera detecta (fora do decoder) — prova de que a paridade da direcao B e nao-vacia"
+    corr=$((corr+1))
+  else
+    line "controle-a-literais-corrompidos" "controle-corrupcao" "$(sha "$badA")" "ambos errados identicos, != plain" "$(res "$orc_rc" "$oA")" "$(res "$rust_rc" "$rA" "$OUT/rust.err")" "DIVERGE" "controle-a nao produziu o padrao esperado de erro detectavel"
+    bad=$((bad+1))
+  fi
+else
+  line "controle-a-literais-corrompidos" "controle-corrupcao" "$(sha "$stA" 2>/dev/null)" "layout FF BF + 14 lit + 00 00 + 00 F0 00" "-" "-" "DIVERGE" "stream do produto divergiu do layout pinado — encoder mudou sem atualizar o controle"
+  bad=$((bad+1))
+fi
+# (b) referencia: `sep_pair` tem layout exato pinado (FF 0A + 8 lit + F8 FE
+#     + 00 F0 00). Mutar Low F8->00 da dist=256 > historico (16 bytes):
+#     o produto DEVE recusar InvalidReference; o oraculo engole (medido).
+stB="$OUT/sep_pair.prod.kos"; wantB="$OUT/controle-b.want"; rm -f "$wantB"
+{ printf '\xff\x0a'; printf 'ABCDEFGH'; printf '\xf8\xfe\x00\xf0\x00'; } > "$wantB"
+if cmp -s "$stB" "$wantB"; then
+  badB="$OUT/controle-b.kos"; patchbyte "$stB" 10 00 "$badB"
+  oB="$OUT/controle-b.oracle.bin"; rB="$OUT/controle-b.rust.bin"; rm -f "$oB" "$rB"
+  orc_rc=0; kosx "$badB" "$oB" || orc_rc=$?
+  rust_rc=0; rustr "$badB" "$rB" || rust_rc=$?
+  if grep -q "erro InvalidReference" "$OUT/rust.err" && { [ ! -f "$oB" ] || ! cmp -s "$oB" "$RUNTIME/encdir/sep_pair.bin"; }; then
+    line "controle-b-ref-corrompida" "controle-corrupcao" "$(sha "$badB")" "produto=InvalidReference; oraculo engole (saida != plain ou incompleta)" "$(res "$orc_rc" "$oB")" "$(res "$rust_rc" "$rB" "$OUT/rust.err")" "CONTROLE-CORRUPCAO" "recusa estrutural do produto sobre stream corrompida do proprio produto; contraste com a tolerancia do oraculo registrada em CONTRACT sec4; NAO conta como paridade"
+    corr=$((corr+1))
+  else
+    line "controle-b-ref-corrompida" "controle-corrupcao" "$(sha "$badB")" "produto=InvalidReference" "$(res "$orc_rc" "$oB")" "$(res "$rust_rc" "$rB" "$OUT/rust.err")" "DIVERGE" "produto deixou de recusar a referencia corrompida"
+    bad=$((bad+1))
+  fi
+else
+  line "controle-b-ref-corrompida" "controle-corrupcao" "$(sha "$stB" 2>/dev/null)" "layout FF 0A + 8 lit + F8 FE + 00 F0 00" "-" "-" "DIVERGE" "stream do produto divergiu do layout pinado — encoder mudou sem atualizar o controle"
+  bad=$((bad+1))
+fi
+
 echo
-echo "TOTAIS: paridade=$par divergencia-contratual-esperada=$contratual sondas-nao-cotadas=$sonda DIVERGE(inaceitavel)=$bad  (tsv: $ROWS)"
+echo "TOTAIS: paridade=$par divergencia-contratual-esperada=$contratual sondas-nao-cotadas=$sonda controles-corrupcao=$corr DIVERGE(inaceitavel)=$bad  (tsv: $ROWS; tamanhos: $SIZES)"
 if [ "$bad" != 0 ]; then exit 1; fi
-# Esperado (esta suite): 36 PARIDADE = 9 goldens bem-formados + 12 plain-encode
-# + 12 plain-decode + 2 runtime (overlap_echo, limite_probe) + 1 k05;
-# 1 DIVERGENCA-CONTRATUAL (m02); 2 SONDA-DEFEITO (nao cotadas). Total = 39.
-if [ "$par" != 36 ] || [ "$contratual" != 1 ] || [ "$sonda" != 2 ]; then
-  echo "ATENCAO: contagens divergem do esperado (paridade=36, contratual=1, sondas=2) — revisar suite nova?"; exit 2;
+# Esperado (pos-ETAPA 3): 51 PARIDADE = 36 da entrega do decoder (9 goldens
+# bem-formados + 12 plain-encode + 12 plain-decode + 2 runtime + 1 k05)
+# + 15 DIRECAO B (12 plains do perfil + 3 fixtures encdir);
+# 1 DIVERGENCA-CONTRATUAL (m02); 2 SONDA-DEFEITO; 2 CONTROLE-CORRUPCAO.
+# Total = 56 linhas.
+if [ "$par" != 51 ] || [ "$contratual" != 1 ] || [ "$sonda" != 2 ] || [ "$corr" != 2 ]; then
+  echo "ATENCAO: contagens divergem do esperado (paridade=51, contratual=1, sondas=2, controles=2) — revisar suite nova?"; exit 2;
 fi
 exit 0
