@@ -3964,6 +3964,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4101,6 +4102,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4214,6 +4216,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4324,6 +4327,7 @@ mod tests {
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             imported_semantics: None,
+                            recovered_rule: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -4486,6 +4490,7 @@ mod tests {
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             imported_semantics: None,
+                            recovered_rule: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -4715,6 +4720,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4846,6 +4852,7 @@ mod tests {
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             imported_semantics: None,
+                            recovered_rule: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -4990,6 +4997,7 @@ mod tests {
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             imported_semantics: None,
+                            recovered_rule: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -5124,6 +5132,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -5222,6 +5231,7 @@ mod tests {
                     logic_hints: Vec::new(),
                     external_source_refs: Vec::new(),
                     imported_semantics: None,
+                    recovered_rule: None,
                     variables: HashMap::new(),
                 }),
                 ..Components::default()
@@ -5458,6 +5468,7 @@ mod tests {
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             imported_semantics: None,
+                            recovered_rule: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -5629,6 +5640,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -5726,6 +5738,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -5826,6 +5839,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -5917,6 +5931,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -6014,6 +6029,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -6211,6 +6227,7 @@ mod tests {
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()

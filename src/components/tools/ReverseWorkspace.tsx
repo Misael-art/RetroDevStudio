@@ -17,7 +17,7 @@ import {
   romSaveAnnotations,
 } from "../../core/ipc/toolsService";
 import { ExperimentalNotice } from "./ToolNotices";
-import { RexGameplayRulePanel } from "./RexGameplayRulePanel";
+import { RexGameplayRulePanel, type RexGameplayPersistencia } from "./RexGameplayRulePanel";
 import InspectionPanel from "./InspectionPanel";
 import { CompressedResourcePanel } from "./CompressedResourcePanel";
 import ToolPathField from "./ToolPathField";
@@ -81,6 +81,45 @@ export default function ReverseWorkspace() {
   const [logicRecoveryBusy, setLogicRecoveryBusy] = useState(false);
   const [logicPatchBusy, setLogicPatchBusy] = useState(false);
   const [logicPatchImmediate, setLogicPatchImmediate] = useState("2");
+
+  const rexEntidade = useMemo(
+    () =>
+      activeScene && selectedEntityId
+        ? activeScene.entities.find((item) => item.entity_id === selectedEntityId) ?? null
+        : null,
+    [activeScene, selectedEntityId]
+  );
+
+  /**
+   * Ponte entre o painel de regra e a escena: o bloque que se garda e o mesmo
+   * que o panel mostra (`components.logic.recovered_rule`, grafo verbatim), e
+   * `persistActiveScene` decide se quedou no disco ou só en memoria. Unha
+   * entidade que xa ten lóxica propia non se sobrescrebe: o panel recusa e di
+   * que se escolla outra.
+   */
+  const rexGameplayPersistencia = useMemo<RexGameplayPersistencia | null>(() => {
+    if (!rexEntidade) return null;
+    const bloque = rexEntidade.components.logic?.recovered_rule ?? null;
+    return {
+      entityId: rexEntidade.entity_id,
+      gardada: bloque,
+      entidadeConLogica:
+        deserializeNodeGraph(rexEntidade.components.logic?.graph).nodes.length > 0 &&
+        bloque === null,
+      gardar: async (regra) => {
+        updateEntity(rexEntidade.entity_id, {
+          components: {
+            ...rexEntidade.components,
+            logic: { ...(rexEntidade.components.logic ?? {}), recovered_rule: regra },
+          },
+        });
+        // Sen proxecto aberto non hai onde escribir: o panel dera que queda
+        // só en memoria en vez de vendelo por persistido.
+        if (!activeProjectDir) return false;
+        return await persistActiveScene(activeProjectDir, "REX gameplay");
+      },
+    };
+  }, [rexEntidade, activeProjectDir, updateEntity]);
 
   useEffect(() => {
     if (!manifest) {
@@ -826,7 +865,11 @@ export default function ReverseWorkspace() {
           {activeView === "code" && (
             <>
               <div className="mb-3">
-                <RexGameplayRulePanel romPath={romPath} logMessage={logMessage} />
+                <RexGameplayRulePanel
+                  romPath={romPath}
+                  logMessage={logMessage}
+                  persistencia={rexGameplayPersistencia}
+                />
               </div>
               <div
                 data-testid="reverse-logic-recovery-card"

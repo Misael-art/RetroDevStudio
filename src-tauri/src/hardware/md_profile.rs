@@ -1182,6 +1182,7 @@ mod tests {
                 logic_hints: vec!["sgdk_import:hud_overlay".to_string()],
                 external_source_refs: Vec::new(),
                 imported_semantics: None,
+                recovered_rule: None,
                 variables: std::collections::HashMap::new(),
             });
         }
@@ -1221,6 +1222,7 @@ mod tests {
             logic_hints: vec!["sgdk_import:canonical_hud_signal".to_string()],
             external_source_refs: Vec::new(),
             imported_semantics: None,
+            recovered_rule: None,
             variables: std::collections::HashMap::new(),
         });
         scene.entities.push(entity);

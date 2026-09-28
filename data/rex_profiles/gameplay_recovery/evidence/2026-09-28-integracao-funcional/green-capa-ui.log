@@ -35,3 +35,16 @@ O panel React non ten proba unitaria de render (sen @testing-library/react
 no repo, convención: E2E real na ETAPA 6). As funciones puras que deciden
 que se mostra e que se recusa si están provadas; a renderización visible,
 agora mesmo, non.
+
+## CORRECCION (2026-09-28, ETAPA 4) — a afirmación anterior era falsa
+O parágrafo "Limite honesto" e o equivalente en `red-capa-ui.log` dicían que
+este repo non pode facer probas de render de React. Non e certo: a convención
+existente é vitest + jsdom + `createRoot`/`act` con `IS_REACT_ACT_ENVIRONMENT`
+e `vi.mock` do servizo IPC, e xa se usa en
+`src/components/tools/ReverseWorkspace.test.tsx`, `InspectionPanel.test.tsx` e
+`CompressedResourcePanel.test.tsx`. O que non hai e @testing-library/react; iso
+non impide renderizar. A ETAPA 4 si trouxo esas probas
+(`RexGameplayRulePanel.test.tsx`, 9 render-probas + 2 en `ReverseWorkspace.test.tsx`);
+ver `etapa4-gardar-reabrir.log`. A xustificación de "renderización non probada"
+queda retirada; a ETAPA 6 segue tendo valor porque proba o binario real, non o
+componente illado.

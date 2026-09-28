@@ -37,3 +37,8 @@ O painel e a súa renderización React NON teñen proba unitaria de compoñente:
 este repo non dispón de @testing-library/react e a convención é probar a
 renderización no E2E real (ETAPA 6). O que si esta probado aqui son as
 funcións puras que o panel usa para decidir que se mostra e que se recusa.
+# CORRECCION (ETAPA 4, 2026-09-28): a primeira afirmacion e falsa. O repo si
+# renderiza compoñentes en probas (vitest + jsdom + createRoot/act; ver
+# ReverseWorkspace.test.tsx). A ETAPA 4 engadiu 9 render-probas do painel e 2
+# da ponte coa escena; ver etapa4-gardar-reabrir.log e a correccion en
+# green-capa-ui.log.

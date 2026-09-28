@@ -135,6 +135,31 @@ export interface ImportedLogicSemantics {
   blocking_gaps?: string[];
 }
 
+/**
+ * Mirror de `ugdm::components::RecoveredRule` (Experimental).
+ *
+ * Bloque opaco para o backend: guardase e devolvese tal cal para que a
+ * entidade poida reabrirse sen volver á ROM. Quen o interpreta e revalida a
+ * identidade e a capa de interface (`core/nodegraph/rexGameplayScene.ts`).
+ */
+export interface RecoveredRule {
+  version: number;
+  profile_id: string;
+  rom_path: string;
+  rom_sha256: string;
+  entry: number;
+  exits: number[];
+  blocks: [number, number][];
+  operator: string;
+  threshold_recovered: number;
+  threshold_current: number;
+  threshold_min: number;
+  threshold_max: number;
+  /** `graph_json` do núcleo, verbatim: nós, arestas e mapeamentos con bytes. */
+  graph_json: string;
+  limitations: string[];
+}
+
 export interface LogicComponent {
   graph?: string;
   graph_ref?: string | null;
@@ -143,6 +168,8 @@ export interface LogicComponent {
   /** Caminhos no doador (ex. C) rastreados sem carregar AST no frontend. */
   external_source_refs?: string[];
   imported_semantics?: ImportedLogicSemantics | null;
+  /** Experimental: regra de gameplay recuperada e persistida na escena. */
+  recovered_rule?: RecoveredRule | null;
   variables?: Record<string, LogicVariable>;
 }
 

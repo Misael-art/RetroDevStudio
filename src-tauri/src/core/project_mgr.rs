@@ -3787,6 +3787,7 @@ fn build_sgdk_tilemap_entity(
                     logic_hints: vec!["sgdk_import:hud_overlay".to_string()],
                     external_source_refs: Vec::new(),
                     imported_semantics: None,
+                    recovered_rule: None,
                     variables: HashMap::new(),
                 })
             } else {
@@ -3957,6 +3958,7 @@ fn import_sgdk_resources_into_scene(
                             },
                             external_source_refs: Vec::new(),
                             imported_semantics: None,
+                            recovered_rule: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -5528,6 +5530,7 @@ fn platformer_player_prefab_with_dims(
                 logic_hints: Vec::new(),
                 external_source_refs: Vec::new(),
                 imported_semantics: None,
+                recovered_rule: None,
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -8779,6 +8782,7 @@ pub fn import_gamemaker_project(
                         },
                         ..ImportedLogicSemantics::default()
                     }),
+                    recovered_rule: None,
                     variables: HashMap::from([
                         (
                             "vertical_speed".to_string(),
@@ -11787,6 +11791,7 @@ fn godot_logic_component(
                 .collect(),
             ..ImportedLogicSemantics::default()
         }),
+        recovered_rule: None,
         variables: HashMap::new(),
     }))
 }
@@ -13945,6 +13950,7 @@ fn openbor_stage_controller_entity(
                     "medium",
                     "OpenBOR level commands converted into spawn timeline, camera scroll and script bridges.",
                 )),
+                recovered_rule: None,
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -14506,6 +14512,7 @@ fn imported_logic_component(graph: Option<String>, logic_hints: Vec<String>) -> 
         logic_hints,
         external_source_refs: Vec::new(),
         imported_semantics: None,
+        recovered_rule: None,
         variables: HashMap::new(),
     }
 }
@@ -15192,6 +15199,7 @@ fn reference_player_prefab() -> Entity {
                 ],
                 external_source_refs: Vec::new(),
                 imported_semantics: None,
+                recovered_rule: None,
                 variables: HashMap::from([
                     (
                         "goal_reached".to_string(),
@@ -16225,6 +16233,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
                 logic_hints: Vec::new(),
                 external_source_refs: Vec::new(),
                 imported_semantics: None,
+                recovered_rule: None,
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -18993,6 +19002,7 @@ void tick_player(void) {\n\
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -19040,6 +19050,7 @@ void tick_player(void) {\n\
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -19064,6 +19075,7 @@ void tick_player(void) {\n\
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         imported_semantics: None,
+                        recovered_rule: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -21920,6 +21932,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     logic_hints: Vec::new(),
                     external_source_refs: Vec::new(),
                     imported_semantics: None,
+                    recovered_rule: None,
                     variables: HashMap::new(),
                 }),
                 ..Components::default()
@@ -27693,5 +27706,122 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         std::env::set_var("RDS_SGDK_REAL_CORPUS_FILTER", "procedural animation");
         std::env::set_var("RDS_SGDK_REAL_CORPUS_RESUME", "1");
         execute_sgdk_corpus_real_build_rom_emulation_report();
+    }
+
+    #[test]
+    fn save_scene_e_reabertura_preservam_a_regra_recuperada_sem_descartar_nada() {
+        let project_dir = temp_dir("scene-recovered-rule");
+        create_project_skeleton(&project_dir, "Regra Recuperada", "megadrive")
+            .expect("create project skeleton");
+
+        let graph_json = r#"{"version":1,"rex_gameplay":{"profile_id":"m68k.counter_threshold_state_gate.v1","rom_sha256":"4149f7b2eb0c5975f97f59be6b44766decc286930d57bba673414205b753589e","entry":"0x000946","exits":["0x000970"],"blocks":[{"rom_start":"0x000946","rom_end":"0x000970"}]},"nodes":[{"id":"entry","type":"rom_region_entry"},{"id":"compare","type":"rom_counter_compare","params":{"operator":">=","threshold":4,"recovered_threshold":6,"threshold_min":-127,"threshold_max":128,"source_mappings":[{"rom_start":"0x00095A","rom_end":"0x000960","bytes":"2039E0FF0054","mnemonic":"MOVE.L $E0FF0054.L,D0"}]}},{"id":"exit_000970","type":"rom_region_exit"}],"edges":[{"id":"e1","fromNode":"entry","fromPort":"exec","toNode":"compare","toPort":"exec"},{"id":"e2","fromNode":"compare","fromPort":"true","toNode":"exit_000970","toPort":"exec"}]}"#;
+
+        let scene_json = serde_json::json!({
+            "scene_id": DEFAULT_SCENE_ID,
+            "schema_version": CURRENT_SCHEMA_VERSION,
+            "display_name": "Main Scene",
+            "background_layers": [],
+            "palettes": [],
+            "entities": [{
+                "entity_id": "player",
+                "transform": { "x": 0, "y": 0 },
+                "components": {
+                    "logic": {
+                        "recovered_rule": {
+                            "version": 1,
+                            "profile_id": "m68k.counter_threshold_state_gate.v1",
+                            "rom_path": "/roms/goal_original_t6.bin",
+                            "rom_sha256": "4149f7b2eb0c5975f97f59be6b44766decc286930d57bba673414205b753589e",
+                            "entry": 2374u32,
+                            "exits": [2416u32],
+                            "blocks": [[2374u32, 2416u32], [3246u32, 3276u32]],
+                            "operator": ">=",
+                            "threshold_recovered": 6i64,
+                            "threshold_current": 4i64,
+                            "threshold_min": -127i64,
+                            "threshold_max": 128i64,
+                            "graph_json": graph_json,
+                            "limitations": [
+                                "a regiao e delimitada a partir de entrada/saidas declaradas pelo chamador"
+                            ]
+                        }
+                    }
+                }
+            }]
+        });
+        let scene_path = project_dir.join(DEFAULT_ENTRY_SCENE);
+        fs::write(&scene_path, scene_json.to_string()).expect("write scene");
+
+        let loaded = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load scene");
+        let rule = loaded
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "player")
+            .and_then(|entity| entity.components.logic.as_ref())
+            .and_then(|logic| logic.recovered_rule.clone())
+            .expect("a escena debe conservar components.logic.recovered_rule");
+
+        assert_eq!(rule.version, 1);
+        assert_eq!(rule.rom_path, "/roms/goal_original_t6.bin");
+        assert_eq!(rule.rom_sha256.len(), 64);
+        assert_eq!(rule.entry, 0x946);
+        assert_eq!(rule.exits, vec![0x970u32]);
+        assert_eq!(
+            rule.blocks,
+            vec![(0x946u32, 0x970u32), (0xCAEu32, 0xCCCu32)]
+        );
+        assert_eq!(rule.operator, ">=");
+        assert_eq!(rule.threshold_recovered, 6);
+        assert_eq!(rule.threshold_current, 4);
+        assert_eq!((rule.threshold_min, rule.threshold_max), (-127, 128));
+        // O grafo volve tal cal: ningún, ningunha aresta e ningún mapeamento
+        // (cos bytes) se perde no gardar/reabrir.
+        assert_eq!(rule.graph_json, graph_json);
+        assert_eq!(rule.limitations.len(), 1);
+
+        save_scene(&project_dir, DEFAULT_ENTRY_SCENE, &loaded).expect("save scene");
+        let en_disco = fs::read_to_string(&scene_path).expect("read scene do disco");
+        assert!(
+            en_disco.contains("\"recovered_rule\""),
+            "o gardado escribiu a escena sen recovered_rule"
+        );
+        // A comparación é sobre o JSON do disco, non sobre o objeto en memoria:
+        // así se ve que nós, arestas e bytes de orixe se escriben tal cal.
+        let valor: serde_json::Value =
+            serde_json::from_str(&en_disco).expect("scene do disco como JSON");
+        let gardada = &valor["entities"][0]["components"]["logic"]["recovered_rule"];
+        assert_eq!(gardada["graph_json"].as_str(), Some(graph_json));
+        assert_eq!(gardada["threshold_current"].as_i64(), Some(4));
+        assert_eq!(gardada["threshold_recovered"].as_i64(), Some(6));
+        assert_eq!(gardada["blocks"].as_array().map(Vec::len), Some(2));
+
+        let reopened = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("reopen scene");
+        assert_eq!(reopened, loaded);
+
+        // Compatibilidade: unha escena sen o bloque segue válida e non o inventa.
+        let sen_regra = serde_json::json!({
+            "scene_id": DEFAULT_SCENE_ID,
+            "schema_version": CURRENT_SCHEMA_VERSION,
+            "display_name": "Main Scene",
+            "background_layers": [],
+            "palettes": [],
+            "entities": [{
+                "entity_id": "player",
+                "transform": { "x": 0, "y": 0 },
+                "components": { "logic": { "graph": "{\"version\":1,\"nodes\":[],\"edges\":[]}" } }
+            }]
+        });
+        fs::write(&scene_path, sen_regra.to_string()).expect("write scene sen regra");
+        let cargada = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load scene sen regra");
+        let logic = cargada
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "player")
+            .and_then(|entity| entity.components.logic.as_ref())
+            .expect("logic component");
+        assert!(logic.graph.is_some());
+        assert!(logic.recovered_rule.is_none());
+
+        let _ = fs::remove_dir_all(project_dir);
     }
 }
