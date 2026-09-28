@@ -20,7 +20,8 @@
     "gates_do_pacote": "rc=0 — rex-addressing 138 executados / 0 fallos / 10 ignorados en 17 targets (fmt, clippy --all-targets -D warnings, test --locked); rex-kosinski 25 / 0 / 0 sen cambios. Os 138 reproducen exactamente os números publicados por A na súa propia árbore.",
     "exemplo": "rc=0 desde a localización nova; resumo 13 lecturas / 14 recusas / 7 códigos; sha256 do resumo 27bebc7b…",
     "destino": "cargo test --lib 754 / 0 / 66 con CARGO_RC=0 (as 17 probas do adaptador entre elas); check:tree rc=0; cargo fmt --check rc=0; cargo clippy --lib -D warnings rc=0.",
-    "non_vacuidade": "o ficheiro de aceite leva o seu SHA pinado dentro do test (`FICHEIRO_SHA256`), así que editar o JSON rompe `o_ficheiro_publicado_ten_a_sha_pinada` antes de ler calquera resultado; a rexeneración só ocorre con `REX_ACEITE_ESCRIBIR=1` e `--ignored`, e non se executou aquí. O diff de ficheiros (42 ↔ 42, sen diferenzas) prueba que non se perdeu nada ao relocalizar."
+    "non_vacuidade": "o ficheiro de aceite leva o seu SHA pinado dentro do test (`FICHEIRO_SHA256`), así que editar o JSON rompe `o_ficheiro_publicado_ten_a_sha_pinada` antes de ler calquera resultado; a rexeneración só ocorre con `REX_ACEITE_ESCRIBIR=1` e `--ignored`, e non se executou aquí. O diff de ficheiros (42 ↔ 42, sen diferenzas) prueba que non se perdeu nada ao relocalizar.",
+    "barra_de_frontend": "rc=0 nas tres (`lint`, `tsc --noEmit`, `npm test` con 749 pasados / 6 saltados / 755) no HEAD 1f304674432bcb882e8772a26bb94d75913d2d6c"
   },
   "nao_alega": "Estes vectores gradúan `read_resource` / `read_sequence` da crate de A, superficies que o adaptador do produto NON expón: polo tanto non son evidencia do adaptador nin moven o degrau `backend-integrado`, que queda tal e como estaba rexistrado. Segue sen haber fluxo de usuario, sen corpus BYOR no gate e sen promoción de maturidade; `Experimental`.",
   "artefatos_promovidos": {
@@ -53,6 +54,11 @@
       "sha256": "0c8a8b07c98a5947165879f980ec14d9714fe3dacd69e02e5001e90adb7b3775",
       "linhas": 31,
       "nota": "paridade e pinos desta perna, con cada comando escrito antes da súa saída. `git ls-remote` (tip de A: `0e5f804`), os 5 commits `30cb311..0e5f804`, 42 ficheiros no paquete de A ↔ 42 neste tronco sen diferenzas de nome, única diferenza de contido `README.md` (a miña nota de localización), SHA do ficheiro de aceite `54ba2b6e…a216` igual ao `FICHEIRO_SHA256` do test, SHA do adaptador `7bd75ea9…` (sen cambios) e a árbore graduada `9101cfb5fb6ec809b457007ac104b0ef6e0822b2`."
+    },
+    "gates-de-frontend-no-head-final.log": {
+      "sha256": "97f60747a05cde52c4727b46c5788e5357288ece6a57a54f4bc5a0bbe4500412",
+      "linhas": 11,
+      "nota": "barra de frontend de AGENTS.md executada no HEAD final desta perna (`1f30467`): `npm run lint` rc=0, `npx tsc --noEmit` rc=0 e `npm test` rc=0 con 79 ficheiros verdes + 1 saltado e **749 pasados / 6 saltados (755)**. Janela 2026-09-28T12:18:14Z–12:20:26Z, despois do último commit de docs; ningún ficheiro de frontend se modificou nesta perna — a execución é a proba de que a promoción do paquete e a rolda de aceite non regrediron a barra."
     }
   },
   "como_conferir": "npm run crates:gates; npm run check:tree; cd src-tauri && cargo test --lib && cargo clippy --lib -- -D warnings && cargo fmt -- --check; CARGO_TARGET_DIR=target/crates-gates cargo run --offline --manifest-path crates/rex-addressing/Cargo.toml --example resource_report; sha256sum crates/rex-addressing/vectors/acceptance-v1.json; git diff --stat 0e5f804:scripts/rex_profiles/addressing_runtime/rex-addressing HEAD:crates/rex-addressing"
