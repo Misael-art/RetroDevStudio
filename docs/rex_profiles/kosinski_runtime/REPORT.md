@@ -323,3 +323,55 @@ bash /home/misael/Projects/REX-KOSINSKI-DECODER-2026-09-27/scripts/rex_profiles/
 | `docs/rex_profiles/kosinski_runtime/CONTRACT.md` (inalterado) | `3062965930ceeaa423d2718fe9b3a929df9d4c4ce2db51b294e66002e3b5798f` |
 | commit da entrega original | `3fea06e` |
 | commit desta revisão | consultável via `git log --oneline -2` na branch (auto-referência: um commit não pode conter o próprio SHA) |
+
+## 13. Continuação (2026-09-28) — codificação e edição de conteúdo autoral (Etapas 1–5 da missão do encoder)
+
+**Classificação atualizada (única permitida):** *"Decodificação, codificação
+e edição de conteúdo autoral Kosinski verificadas no contrato descrito."*
+Continua **sem** alegar: UI do produto, ROM comercial/BYOR, autodescoberta,
+modo modular, patch format.
+
+Commits desta fase (branch `codex/rex-kosinski-decoder`, sobre `1af7017`):
+`0b752b7` contrato do ENCODER antes da implementação · `2b50cab` encoder +
+16 testes + retificação §3 · `36741a5` paridade bidirecional + controles de
+corrupção · `f3c51f2` contêiner de edição + ciclo completo.
+
+Entregue: `src/encode.rs`, `src/edit.rs`, `tests/encode.rs` (16),
+`tests/edit.rs` (8), `examples/encode.rs`, `examples/edit_cycle.rs`,
+`ENCODE-CONTRACT.md` (+ retificações §3 early-fetch e §9.item-3),
+`ENCODE-DELIVERY.md` (API, tabela de tamanhos, limitações, proposta de
+adaptação), 5 fixtures autorais novas (`encdir/`, `edit/`). **Decoder,
+CONTRACT.md e fixtures herdadas inalterados** — a única mudança em `lib.rs`
+são as linhas de wiring `pub mod encode; pub mod edit; pub use …`
+(SHA `7f70a772…` → `0f6e0945…`; lógica do decoder byte a byte idêntica,
+verificável nos diffs).
+
+Evidência reconciliada (detalhe e SHAs completos em `ENCODE-DELIVERY.md`):
+
+- Diferencial externo agora **58 linhas: 53 PARIDADE + 1 DIVERGENCA-CONTRATUAL
+  (m02) + 2 SONDA-DEFEITO (não cotadas) + 2 CONTROLE-CORRUPCAO**, 0 DIVERGE,
+  rc=0 — direção A (streams de referência → decoder do produto) e direção B
+  (streams do produto → koscmp, conteúdo completo), incluindo confirmação
+  EXTERNA do plain editado que sai do contêiner (`edicoe-ciclo-decode`) e
+  vizinhos de 4096 B byte-idênticos antes/depois da reinserção.
+  TSV: `evidence/differential-vs-koscmp.tsv` sha `45e42f7f…` (substitui a
+  tabela 39/36+1+2 da seção 4.4 — contagem anterior fica válida apenas para a
+  entrega do decoder).
+- Tamanhos vs. koscmp: `evidence/encoder-sizes-vs-oracle.tsv` — produto ≤
+  oráculo em 11/12 casos; único pior `noisy_runs_16k` (+558 B), registrado
+  como limitação da estratégia não ótima (promessa explícita do contrato),
+  não escondido.
+- Gates locais: `cargo test` **49/49 verdes sem oráculo** (22 contract +
+  3 mutations + 16 encode + 8 edit), `cargo fmt --check` e
+  `cargo clippy --all-targets -- -D warnings` limpos.
+
+Estado de gates/herança atualizado:
+
+- O gate `check:tree` (§7) foi **fechado pelo integrador no tronco** em
+  2026-09-28 (`crates/` oficial + `crates/registry.json` + `crates:gates`);
+  nesta branch a script herdada ainda rejeita `crates/` — reprodução do
+  fechamento pertence à cadeia do integrador, não a esta frente.
+- Dívida devolvida à frente B pelo integrador (documentada, **não** tratada
+  nesta missão do encoder): fixtures lidas fora do crate
+  (`data/rex_profiles/codec/kosinski`) e metadata `license` ausente —
+  próxima rodada B deve vendorizar ou parametrizar por env.
