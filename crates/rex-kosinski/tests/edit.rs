@@ -8,8 +8,7 @@
 use rex_kosinski::edit::{build, open, reinsert, EditError, HEADER_LEN, SENTINEL_A, SENTINEL_B};
 
 fn editdir() -> std::path::PathBuf {
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../data/rex_profiles/kosinski_runtime/edit")
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/runtime/edit")
 }
 
 fn fixture(nome: &str) -> Vec<u8> {

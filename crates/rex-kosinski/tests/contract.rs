@@ -1,9 +1,11 @@
 //! Testes de contrato v1 do decodificador Kosinski.
 //!
-//! Fixtures: `data/rex_profiles/codec/kosinski/` — esperas INDEPENDENTES do
-//! decoder (bytes `.expected.bin` confirmados pelo oraculo externo koscmp na
-//! rodada anterior; ver manifest.tsv). A suite normal NAO exige o oraculo
-//! instalado; a reproducao diferencial vive em
+//! Fixtures: `fixtures/kosinski/` e `fixtures/runtime/` — cópias
+//! byte-idênticas (SHA-pinned em `tests/fixtures.rs`) das esperas
+//! INDEPENDENTES do decoder publicadas em `data/rex_profiles/codec/kosinski/`
+//! (confirmadas pelo oraculo externo koscmp na rodada do perfil; ver
+//! manifest.tsv de lá). A suite normal NAO exige o oraculo instalado nem a
+//! arvore data/; a reproducao diferencial vive em
 //! `scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh`.
 //! Valores de `bytes_consumed` seguem o contrato (para no terminator; padding
 //! nao consumido), conferidos contra o espelho strict do perfil.
@@ -12,11 +14,11 @@ use rex_kosinski::{decode, KosDecoded, KosError};
 use std::path::PathBuf;
 
 fn perfil() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/rex_profiles/codec/kosinski")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/kosinski")
 }
 
 fn runtime() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/rex_profiles/kosinski_runtime")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/runtime")
 }
 
 fn read(rel: &str) -> Vec<u8> {

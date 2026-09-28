@@ -375,3 +375,128 @@ Estado de gates/herança atualizado:
   nesta missão do encoder): fixtures lidas fora do crate
   (`data/rex_profiles/codec/kosinski`) e metadata `license` ausente —
   próxima rodada B deve vendorizar ou parametrizar por env.
+
+## 14. Rodada de empacotamento (2026-09-28) — pacote reproduzível e contrato de aceite
+
+Missão: eliminar as pendências internas de empacotamento (dívida devolvida
+pelo integrador: fixtures fora do crate + metadata `license`) e entregar um
+pacote Kosinski reproduzível em checkout limpo, com contrato de aceite para o
+adaptador backend. Nada reabre comportamento de `src/` — decoder, encoder e
+contêiner continuam os mesmos códigos das seções 1–13 (SHAs inalterados);
+apenas testes, fixtures e documentação mudaram.
+
+### 14.1 Suíte normal autocontida (vendorização)
+
+- **52 fixtures vendorizadas** em `crates/rex-kosinski/fixtures/`
+  (`kosinski/{golden,plain,negative}` + `runtime/overlap_echo.*` +
+  `runtime/edit/*.bin`), cada uma **byte-idêntica** à origem
+  `data/rex_profiles/*` (conferência `cmp` arquivo a arquivo na cópia) e com
+  **SHA-256 pinado** em `tests/fixtures.rs` (const `PINNED`, 52 pares
+  caminho+hash) — proveniência preservada de forma verificável por máquina,
+  não só narrativa. Mapa humano em `fixtures/PROVENANCE.md`, incluindo o que
+  foi **deliberadamente excluído** (`m02.expected.bin`, manifestos/evidências
+  `.json/.tsv`, `limite_probe.*`, `encdir/` — todos só do lado oráculo ou
+  documentação histórica) e a política de atualização do pino.
+- Os helpers de caminho de TODOS os testes normais agora derivam do próprio
+  pacote (`env!("CARGO_MANIFEST_DIR")/fixtures/...`): nenhum caminho
+  absoluto, nenhuma ferramenta local oculta, nenhum arquivo não rastreado.
+- **Prova de relocabilidade (executada):** cópia isolada de
+  `crates/rex-kosinski` para `/tmp/rex-kos-relocate` sem `target/` e sem a
+  árvore `data/` ao lado → `cargo test --locked` **51/51 verdes**
+  (22 contract + 16 encode + 8 edit + 2 fixtures + 3 mutations).
+- **Prova de não-vacuidade do pino (executada):** no mesmo cópia isolada, um
+  byte de `fixtures/kosinski/golden/m01_literals.kos` foi invertido →
+  `cada_fixture_bate_o_sha_pinado` **FALHOU** apontando exatamente o arquivo
+  corrompido; restaurada a cópia, verde novamente. O pino pega troca,
+  corrupção e ausência (o teste de conjunto exige igualdade exata dos 52).
+
+### 14.2 Três lanes separadas por construção
+
+| Lane | Onde roda | O que exige | Falha do oráculo vira PASS? |
+|---|---|---|---|
+| Suíte ORDINÁRIA | `cargo test` do crate | nada além do próprio pacote (fixtures vendorizadas) | — |
+| Comparação EXTERNA | `scripts/.../differential-vs-koscmp.sh` | oráculo `koscmp` pinado + sandbox | **NÃO**: sem oráculo o script imprime `SKIP: oráculo ausente` e sai **rc=3** (script:52) — jamais `PASS` |
+| Evidência HISTÓRICA | `evidence/*.tsv`, §4.4/§13 | nada (arquivos publicados com SHA) | n/a — registro, não teste |
+
+O modo diferencial **continua lendo `data/rex_profiles/*`** (fonte
+autoritativa do lado oráculo, inalterada); a vendorização não criou segunda
+fonte de verdade para a comparação externa — as cópias do crate servem só à
+suíte normal e são provadas byte-idênticas pelo pino.
+
+### 14.3 Licença: decisão do operador, não suposição
+
+Medição da política atual do repositório (2026-09-28): **não existe arquivo
+`LICENSE` rastreado**; **nenhum** `Cargo.toml` (inclusive `src-tauri`) nem
+`package.json` declara campo `license`; `docs/08_NOTICE` lista licenças de
+ferramentas de terceiros e a política de que **nenhuma release pública do
+produto está autorizada**; `docs/02_TECH_STACK.md:78` proíbe commitar
+dependências de terceiros. Proveniência do crate (reafirmada da §11):
+código original desta frente, zero dependências, fixtures autorais; o
+`koscmp` LGPL-3.0 é **ferramenta externa de comparação** — nenhum código,
+binário ou objeto seu foi incorporado, portanto a LGPL não contamina o
+pacote.
+
+**Consequência:** atribuir SPDX agora seria suposição contra a política
+medida. Esta frente **não** define `license` em `crates/rex-kosinski/Cargo.toml`.
+**Decisão específica necessária ao operador/integrador** (única pendência
+deste item): escolher entre (a) herdar a postura do projeto — código interno
+sem licença pública, protegido pela política de release do NOTICE; (b) adotar
+SPDX explícito para o crate (ex. `MIT OR Apache-2.0`) alinhado a uma futura
+decisão de licenciamento do produto; (c) `license = "UNLICENSED"` +
+`publish = false` como metadado formal. `cargo package --list` apenas emite
+aviso ("manifest has no license...") — não é bloqueante com `publish = false`
+mantido. Os demais itens da missão seguiram e fecharam (14.1, 14.2, 14.4,
+14.5).
+
+### 14.4 Auditoria `cargo package --list` (sem publicar)
+
+Executado com `--allow-dirty` na árvore de trabalho (não publicado — `publish
+= false` intocado): **69 arquivos** — `Cargo.toml`/`.orig`, `Cargo.lock`,
+`src/{lib,encode,edit}.rs`, `tests/{contract,encode,edit,fixtures,mutations}.rs`,
+`examples/{decode,encode,edit_cycle}.rs`, `fixtures/` (52 bins + PROVENANCE.md)
+e `.cargo_vcs_info.json`. **Não aparece**: `target/`, nada de `data/`,
+nenhum executável local, nenhum segredo, nenhum corpus BYOR. A extração do
+tarball equivale à prova de relocabilidade de 14.1 (mesmo conteúdo, verde
+sem `data/`).
+
+### 14.5 Casos de aceite do adaptador backend (vetores EXISTENTES)
+
+Nenhum vetor novo foi criado — cada caso aponta para teste/linha já
+publicada (não há segunda fonte de verdade):
+
+| # | Caso de aceite | Evidência existente (no crate ou no TSV pino) |
+|---|---|---|
+| 1 | decode válido com consumo correto | `tests/contract.rs` goldens m01–m10 com `bytes_consumed` exato medido (11, 11, 18, 115, 14, 10, 17, 23, 21; m02 recusado) |
+| 2 | encode→decode externo | direção B do TSV (`prodrow`, koscmp confere conteúdo das streams do produto) + `edicao-ciclo-*`; internamente P1 `roundtrip` em `tests/encode.rs` |
+| 3 | truncamento e referência inválida | k01/k02/m02 → `Truncated`; k03/k04 + sonda `02 00 FF FF` → `InvalidReference` (`tests/contract.rs` negativos); recusa estrutural à stream corrompida do próprio produto (`CONTROLE-CORRUPCAO` do TSV) |
+| 4 | limites de saída e trabalho | k05 `ExcessiveOutput` em max_out=16 / `Ok` consumindo 296 em 512; orçamento 16→`WorkLimit`, 17→`Ok` (fronteira medida); corte **durante** cópia de 256 (`limites_cortam_durante_a_copia_larga…`, §9) |
+| 5 | padding/trailing conforme contrato | 12 plains com `bytes_consumed == len−1` (padding NÃO consumido, §4.8); trailing após terminator preservado em todos os goldens |
+| 6 | determinismo | `tests/encode.rs` (duplo encode byte-idêntico; independência de limite folgado) + TSV diferencial byte-idêntico reexecutado em 14.6 |
+| 7 | erro preservado na fronteira do backend | enums fechados `KosError{Truncated,InvalidReference,ExcessiveOutput,WorkLimit,EmptyInput}`, `EncError{StreamLimit,WorkLimit}`, `EditError{…}`; mapeamento para códigos do produto e `bytes_consumed` na fronteira descrito na §8; contêiner recusa **sem escrita** (§9/`tests/edit.rs`) |
+
+### 14.6 Regressões reexecutadas nesta rodada (medições)
+
+- `cargo fmt --check` ok; `cargo clippy --all-targets -- -D warnings` limpo;
+  `cargo test --locked` **51/51** (era 49; +2 testes de pino de fixtures).
+- Comparação externa **reexecutada** (caminhos do `edit_cycle` mudaram —
+  fixtures byte-idênticas): TSV **byte-idêntico ao publicado**
+  `45e42f7f6fc698e38bc67ae8eac4a0794a61f72267b5f0b0f129381dca10cd8c` e tamanhos
+  `7700221f…`; categorias **53 PARIDADE / 1 DIVERGENCA-CONTRATUAL / 2
+  SONDA-DEFEITO / 2 CONTROLE-CORRUPCAO / 0 DIVERGE**, rc=0. Nenhuma contagem
+  mudou por caso.
+- `data/rex_profiles/*` intocado (continua authoritative para o diferencial);
+  nenhum manifesto/registro compartilhado, IPC, UI, harness ou doc canônico
+  alterado; nada mesclado ou publicado.
+
+### 14.7 Comandos que funcionam em checkout limpo (para o integrador)
+
+```bash
+# suíte normal (sem oráculo, sem árvore data/, a partir da raiz do repo):
+cargo test --manifest-path crates/rex-kosinski/Cargo.toml --locked
+cargo clippy --manifest-path crates/rex-kosinski/Cargo.toml --all-targets --locked -- -D warnings
+cargo fmt --manifest-path crates/rex-kosinski/Cargo.toml -- --check
+# gates agregados do tronco (após integração pelo integrador):
+npm run crates:gates
+# comparação externa (exige koscmp pinado; SKIP rc=3 sem oráculo):
+bash scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh <dir-saida>
+```

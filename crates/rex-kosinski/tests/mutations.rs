@@ -10,7 +10,7 @@ use rex_kosinski::{decode, KosError};
 use std::path::PathBuf;
 
 fn perfil() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/rex_profiles/codec/kosinski")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/kosinski")
 }
 
 fn todas_streams() -> Vec<(String, Vec<u8>)> {
