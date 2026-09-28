@@ -1,0 +1,28 @@
+RED — capa IPC do adaptador Kosinski (rex_kosinski.rs). Comprobado antes de existir calquera produción ipc_decode/ipc_encode.
+cmd: cargo test --lib rex_kosinski::tests:: (sen as funcións ipc_* definidas)
+2026-09-28T14:58:13Z
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+error[E0432]: unresolved imports `super::ipc_decode`, `super::ipc_encode`, `super::KosinskiDecodeRequest`, `super::KosinskiEncodeRequest`
+   --> src/tools/reverse/decomp/rex_kosinski.rs:222:17
+    |
+222 |     use super::{ipc_decode, ipc_encode, KosinskiDecodeRequest, KosinskiEncodeRequest};
+    |                 ^^^^^^^^^^  ^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^ no `KosinskiEncodeRequest` in `tools::reverse::decomp::rex_kosinski`
+    |                 |           |           |
+    |                 |           |           no `KosinskiDecodeRequest` in `tools::reverse::decomp::rex_kosinski`
+    |                 |           no `ipc_encode` in `tools::reverse::decomp::rex_kosinski`
+    |                 no `ipc_decode` in `tools::reverse::decomp::rex_kosinski`
+    |
+help: a similar name exists in the module
+    |
+222 -     use super::{ipc_decode, ipc_encode, KosinskiDecodeRequest, KosinskiEncodeRequest};
+222 +     use super::{ipc_decode, ipc_encode, KosinskiDecodeLimits, KosinskiEncodeRequest};
+    |
+help: a similar name exists in the module
+    |
+222 -     use super::{ipc_decode, ipc_encode, KosinskiDecodeRequest, KosinskiEncodeRequest};
+222 +     use super::{ipc_decode, ipc_encode, KosinskiDecodeRequest, KosinskiEncodeLimits};
+    |
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `retro-dev-studio` (lib test) due to 1 previous error
+RED_RC=101
