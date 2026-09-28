@@ -88,9 +88,12 @@ pub(crate) fn convert_character_v1(
     let air_bytes = read_limited(&air_path, MAX_TEXT_BYTES)?;
     let air_text = String::from_utf8_lossy(&air_bytes).to_string();
     let air_doc = air::parse(&air_text, air_rel);
-    let Ok(sff_path) = resolve_inside(root, sff_rel) else {
+    // Caminho que sai do pacote e erro fatal (vale tambem para o caminho legado);
+    // so a ausencia do arquivo deixa o chamador tentar os PNGs extraidos.
+    if !root.join(sff_rel.trim().trim_matches('"')).exists() {
         return Ok(None);
-    };
+    }
+    let sff_path = resolve_inside(root, sff_rel)?;
     let sff_bytes = read_limited(&sff_path, sff::MAX_FILE_BYTES as u64)?;
     let sff_doc = match sff::parse(&sff_bytes, sff_rel) {
         Ok(doc) => doc,
@@ -1463,6 +1466,173 @@ mod tests {
             "{ra:?}"
         );
         emu.stop().ok();
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ---------------------------------------------------------------- negativos
+
+    /// Importa uma Probe alterada; devolve (raiz, projeto, resultado).
+    fn import_mutated(
+        name: &str,
+        mutate: impl FnOnce(&Path),
+    ) -> (PathBuf, PathBuf, Result<(), String>) {
+        let root = temp(name);
+        let donor = root.join("donor");
+        copy_dir(&probe_dir(), &donor);
+        mutate(&donor);
+        let project = root.join("project");
+        create_project_skeleton(&project, "Probe", "megadrive").unwrap();
+        let r = import_mugen_project(&project, &donor)
+            .map(|_| ())
+            .map_err(|e| e.0);
+        (root, project, r)
+    }
+
+    /// Falha nao deixa projeto parcial apresentado como valido: cena sem entidade e sem atlas.
+    fn assert_untouched(project: &Path) {
+        let scene = load_scene(project, DEFAULT_ENTRY_SCENE).unwrap();
+        assert!(
+            scene.entities.iter().all(|e| e.components.sprite.is_none()),
+            "entidade parcial na cena"
+        );
+        let sprites: Vec<_> = fs::read_dir(project.join("assets/sprites"))
+            .unwrap()
+            .flatten()
+            .collect();
+        assert!(sprites.is_empty(), "atlas parcial: {sprites:?}");
+    }
+
+    #[test]
+    fn negative_path_escaping_the_package_is_refused() {
+        let (root, project, r) = import_mutated("neg-path", |d| {
+            let def = fs::read_to_string(d.join("probe.def")).unwrap();
+            fs::copy(d.join("probe.sff"), d.parent().unwrap().join("fora.sff")).unwrap();
+            fs::write(
+                d.join("probe.def"),
+                def.replace("sprite = probe.sff", "sprite = ../fora.sff"),
+            )
+            .unwrap();
+        });
+        let e = r.unwrap_err();
+        assert!(e.contains("sai do pacote"), "{e}");
+        assert_untouched(&project);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn negative_oversized_air_is_refused() {
+        let (root, project, r) = import_mutated("neg-size", |d| {
+            let mut air = fs::read_to_string(d.join("probe.air")).unwrap();
+            air.push_str(&";".repeat((super::MAX_TEXT_BYTES + 1) as usize));
+            fs::write(d.join("probe.air"), air).unwrap();
+        });
+        assert!(r.unwrap_err().contains("acima do limite"));
+        assert_untouched(&project);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn negative_truncated_sff_fails_without_partial_project() {
+        let (root, project, r) = import_mutated("neg-trunc", |d| {
+            let sff = fs::read(d.join("probe.sff")).unwrap();
+            fs::write(d.join("probe.sff"), &sff[..600]).unwrap();
+        });
+        assert!(r.is_err(), "SFF truncado nao pode importar");
+        assert_untouched(&project);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn negative_cell_over_budget_is_refused() {
+        let (root, project, r) = import_mutated("neg-budget", |d| {
+            // eixo x=300 empurra a celula comum alem de 248 px
+            let mut sff = fs::read(d.join("probe.sff")).unwrap();
+            sff[512 + 8..512 + 10].copy_from_slice(&300i16.to_le_bytes());
+            fs::write(d.join("probe.sff"), sff).unwrap();
+        });
+        let e = r.unwrap_err();
+        assert!(e.contains("plan.budget.cell_too_large"), "{e}");
+        assert_untouched(&project);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Dado do modelo fora do representavel bloqueia o build (#error), nao aproxima.
+    #[test]
+    fn negative_invalid_model_edit_blocks_the_build() {
+        let (root, project) = import_probe("neg-build");
+        let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        scene
+            .entities
+            .iter_mut()
+            .find(|e| e.entity_id == "probe")
+            .unwrap()
+            .components
+            .sprite
+            .as_mut()
+            .unwrap()
+            .animations
+            .get_mut("action_200")
+            .unwrap()
+            .frame_durations
+            .as_mut()
+            .unwrap()[0] = 0;
+        save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+        let proj = crate::core::project_mgr::load_project(&project).unwrap();
+        let scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        let ast = crate::compiler::ast_generator::generate_ast(&proj, &scene);
+        let c = crate::compiler::sgdk_emitter::emit_sgdk(&ast, "Probe").main_c;
+        assert!(
+            c.contains("#error \"RetroDev MUGEN") && c.contains("duracao 0"),
+            "build deve ser bloqueado"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Gatilho fora do perfil vira ponte explicita, nunca transicao silenciosa.
+    #[test]
+    fn negative_unsupported_trigger_is_bridged_not_wired() {
+        let (root, project, r) = import_mutated("neg-trigger", |d| {
+            let cns = fs::read_to_string(d.join("probe.cns")).unwrap();
+            fs::write(
+                d.join("probe.cns"),
+                cns.replace("trigger1 = AnimTime = 0", "trigger1 = Time > 20"),
+            )
+            .unwrap();
+        });
+        r.unwrap();
+        let report: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(project.join("assets/mugen/probe_import_report.json")).unwrap(),
+        )
+        .unwrap();
+        let end = report["behavior"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["item"] == "controller:200#End")
+            .unwrap();
+        assert_eq!(end["fidelity"], "unsupported");
+        let graph = fs::read_to_string(project.join("graphs/mugen_probe.json")).unwrap();
+        assert!(
+            !graph.contains("\"t_200_0\""),
+            "sem transicao para gatilho nao suportado"
+        );
+        assert!(graph.contains("mugen_changestate_unsupported_trigger"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn negative_logic_file_outside_the_package_is_refused() {
+        let (root, project, r) = import_mutated("neg-cmd", |d| {
+            fs::copy(d.join("probe.cmd"), d.parent().unwrap().join("fora.cmd")).unwrap();
+            let def = fs::read_to_string(d.join("probe.def")).unwrap();
+            fs::write(
+                d.join("probe.def"),
+                def.replace("cmd = probe.cmd", "cmd = ../fora.cmd"),
+            )
+            .unwrap();
+        });
+        assert!(r.unwrap_err().contains("sai do pacote"));
+        assert_untouched(&project);
         let _ = fs::remove_dir_all(root);
     }
 }

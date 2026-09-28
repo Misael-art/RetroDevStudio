@@ -6355,7 +6355,13 @@ fn collect_mugen_character_logic_hints(
             continue;
         }
 
-        let content = read_text_lossy(&path)?;
+        // Dados do pacote: contidos na raiz e limitados em tamanho (perfil mugen.character.v1).
+        crate::core::mugen_profile::resolve_inside(root_dir, relative)?;
+        let content = String::from_utf8_lossy(&crate::core::mugen_profile::read_limited(
+            &path,
+            crate::core::mugen_profile::MAX_TEXT_BYTES,
+        )?)
+        .to_string();
         let relative_label = path
             .strip_prefix(root_dir)
             .ok()
@@ -6439,7 +6445,13 @@ fn collect_mugen_character_fighting_model(
             continue;
         }
 
-        let content = read_text_lossy(&path)?;
+        // Dados do pacote: contidos na raiz e limitados em tamanho (perfil mugen.character.v1).
+        crate::core::mugen_profile::resolve_inside(root_dir, relative)?;
+        let content = String::from_utf8_lossy(&crate::core::mugen_profile::read_limited(
+            &path,
+            crate::core::mugen_profile::MAX_TEXT_BYTES,
+        )?)
+        .to_string();
         let relative_label = path
             .strip_prefix(root_dir)
             .ok()
@@ -7109,6 +7121,10 @@ fn import_mugen_character_candidate(
     })?;
     let anim_path = candidate.root_dir.join(anim_rel);
     let sprite_path = candidate.root_dir.join(sprite_rel);
+    // Tudo que le/valida o pacote vem antes de qualquer gravacao no projeto:
+    // uma falha aqui nao deixa arquivo parcial.
+    let fighting_model = collect_mugen_character_fighting_model(&candidate.root_dir, files)?;
+    let logic_hints = collect_mugen_character_logic_hints(&candidate.root_dir, files)?;
     // Perfil mugen.character.v1 (Experimental): AIR/SFF v1 pela crate rex-mugen, com
     // tempos, flips, offsets e caixas por frame. Sem SFF v1 legivel, cai no caminho
     // legado (PNGs extraidos em work/*_sff), classificado a parte no relatorio.
@@ -7129,20 +7145,17 @@ fn import_mugen_character_candidate(
     let entity_id = sgdk_entity_id(&candidate.display_name);
     let atlas_asset = format!("assets/sprites/mugen_{}_atlas.png", character_slug);
     let (atlas, mut animations, mut import_report) = match profile {
-        Some(converted) => {
-            save_rgba_image(&project_dir.join(&atlas_asset), &converted.atlas)?;
-            (
-                MugenCharacterAtlas {
-                    image: converted.atlas,
-                    frame_indices: HashMap::new(),
-                    cell_width: converted.cell_w,
-                    cell_height: converted.cell_h,
-                    pivot: converted.pivot,
-                },
-                converted.animations,
-                converted.report,
-            )
-        }
+        Some(converted) => (
+            MugenCharacterAtlas {
+                image: converted.atlas,
+                frame_indices: HashMap::new(),
+                cell_width: converted.cell_w,
+                cell_height: converted.cell_h,
+                pivot: converted.pivot,
+            },
+            converted.animations,
+            converted.report,
+        ),
         None => {
             let requested_refs = collect_mugen_action_refs(&actions);
             let extracted_sprites = load_mugen_sprite_assets(&sprite_path, &requested_refs)?;
@@ -7153,7 +7166,6 @@ fn import_mugen_character_candidate(
                 )));
             }
             let atlas = compose_mugen_character_atlas(&extracted_sprites)?;
-            save_rgba_image(&project_dir.join(&atlas_asset), &atlas.image)?;
             let animations = mugen_actions_to_animation_defs(&actions, &atlas.frame_indices);
             let report = serde_json::json!({
                 "schema": crate::core::mugen_profile::REPORT_SCHEMA,
@@ -7170,10 +7182,10 @@ fn import_mugen_character_candidate(
             (atlas, animations, report)
         }
     };
+    save_rgba_image(&project_dir.join(&atlas_asset), &atlas.image)?;
     if let Some(idle) = animations.get("action_0").cloned() {
         animations.insert("idle".to_string(), idle);
     }
-    let fighting_model = collect_mugen_character_fighting_model(&candidate.root_dir, files)?;
     let has_fighting_logic = !fighting_model.commands.is_empty()
         || !fighting_model.states.is_empty()
         || !fighting_model.controllers.is_empty();
@@ -7213,7 +7225,6 @@ fn import_mugen_character_candidate(
         &sgdk_entity_id(&candidate.display_name),
         Some(candidate.display_name.clone()),
     );
-    let logic_hints = collect_mugen_character_logic_hints(&candidate.root_dir, files)?;
     let mut logic = imported_logic_component(Some(graph), logic_hints);
     logic.graph_ref = Some(graph_ref);
     logic.graph_origin = Some(
