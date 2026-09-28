@@ -4,6 +4,7 @@
 //! Pacote autonomo da frente REX: sem dependencia de Tauri, sem dependencias
 //! externas, sem leitura de filesystem na logica de decode.
 
+pub mod edit;
 pub mod encode;
 
 pub use encode::{encode, EncError, KosEncoded};

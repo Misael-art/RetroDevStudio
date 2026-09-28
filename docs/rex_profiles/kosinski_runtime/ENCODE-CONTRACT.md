@@ -190,8 +190,13 @@ Política (explícita, testada):
 1. **no-op** (mesmo plain): re-encode determinístico ⇒ contêiner byte-idêntico;
 2. **edição delimitada**: plain alterado só na região autorizada → re-encode →
    decode externo confirma o conteúdo editado;
-3. **só o slot e `stream_len` podem mudar**; sentinelas e cabeçalho fora de
-   `stream_len` preservados byte a byte (asserção);
+3. **só o slot e os campos que descrevem o conteúdo podem mudar**: as
+   sentinelas A/B, `slot_cap` e a geometria (52 + `slot_cap` + 8) são
+   preservados byte a byte; `plain_len`, `stream_len` e o campo
+   `sha256(plain)` acompanham o novo conteúdo (asserção no teste).
+   (Retificação medida da redação original "fora de `stream_len`": para uma
+   edição que muda conteúdo, um cabeçalho imutável tornaria a política 6
+   insatisfaível — a identidade declarada nunca coincidiria com o decoded.)
 4. stream menor → **padding `0x00` explícito até `slot_cap`** (política única,
    sem realocação nem ponteiros);
 5. stream maior que `slot_cap` → **recusa sem escrita** (`Err`; contêiner
