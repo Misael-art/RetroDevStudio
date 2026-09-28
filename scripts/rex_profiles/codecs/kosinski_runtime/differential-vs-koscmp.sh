@@ -306,15 +306,52 @@ else
   bad=$((bad+1))
 fi
 
+# ---- 8) ciclo de EDIÇÃO autoral (ETAPA 4/5): exemplo executável produz
+#         host_v0/host_v1 + slot re-inserido; o oraculo confirma por fora o
+#         conteudo editado (decode do slot, conteudo completo) e os vizinhos
+#         sao comparados byte a byte.
+cargo build --release --manifest-path "$REPO/crates/rex-kosinski/Cargo.toml" --example edit_cycle >/dev/null || { echo "build edit_cycle falhou"; exit 1; }
+EDD="$OUT/edit"; rm -rf "$EDD"; mkdir -p "$EDD"
+"$REPO/crates/rex-kosinski/target/release/examples/edit_cycle" "$EDD" >"$EDD/cycle.log" 2>&1
+if [ ! -s "$EDD/edited_slot.kos" ]; then
+  line "edicao-ciclo" "edicao" "-" "koscmp -x slot editado == edited_plain" "edit_cycle falhou: $(head -c 100 "$EDD/cycle.log")" "-" "DIVERGE" "exemplo de ciclo nao produziu artefatos"
+  bad=$((bad+1))
+else
+  edout="$EDD/edited_slot.oracle.bin"; rm -f "$edout"
+  ed_rc=0; kosx "$EDD/edited_slot.kos" "$edout" || ed_rc=$?
+  if [ -f "$edout" ] && cmp -s "$edout" "$EDD/edited_plain.expect"; then
+    line "edicao-ciclo-slot-externo" "edicao" "$(sha "$EDD/edited_slot.kos")" "sha=$(sha "$EDD/edited_plain.expect")" "$(res "$ed_rc" "$edout")" "N/A (decode externo e a prova)" "PARIDADE" "conteudo editado confirmado pelo ORACULO a partir do slot re-inserido pelo produto (plain -> stream -> decode -> edicao delimitada -> recompressao -> decode externo)"
+    par=$((par+1))
+  else
+    line "edicao-ciclo-slot-externo" "edicao" "$(sha "$EDD/edited_slot.kos")" "sha=$(sha "$EDD/edited_plain.expect")" "$(res "$ed_rc" "$edout")" "-" "DIVERGE" "oraculo nao reproduziu o conteudo editado esperado"
+    bad=$((bad+1))
+  fi
+  # vizinhos: 4096 B antes + 4096 B depois do contêiner (definidos no exemplo)
+  nb_ok=1
+  head -c 4096 "$EDD/host_v0.bin" > "$EDD/n.pre0"; head -c 4096 "$EDD/host_v1.bin" > "$EDD/n.pre1"
+  tail -c 4096 "$EDD/host_v0.bin" > "$EDD/n.post0"; tail -c 4096 "$EDD/host_v1.bin" > "$EDD/n.post1"
+  [ "$(stat -c%s "$EDD/host_v0.bin")" = "$(stat -c%s "$EDD/host_v1.bin")" ] || nb_ok=0
+  cmp -s "$EDD/n.pre0" "$EDD/n.pre1" || nb_ok=0
+  cmp -s "$EDD/n.post0" "$EDD/n.post1" || nb_ok=0
+  cmp -s "$EDD/host_v0.bin" "$EDD/host_v1.bin" && nb_ok=0 # o slot DEVE ter mudado
+  if [ "$nb_ok" = 1 ]; then
+    line "edicao-ciclo-vizinhos" "edicao" "$(sha "$EDD/host_v1.bin")" "pre/post 4096B identicos; comprimentos identicos; slot alterado" "N/A (comparacao direta dos hosts)" "N/A" "PARIDADE" "reinsercao simulada preserva os vizinhos do slot autoral byte a byte e so o interior do contêiner mudou (geometria fixa, sem realocacao)"
+    par=$((par+1))
+  else
+    line "edicao-ciclo-vizinhos" "edicao" "$(sha "$EDD/host_v1.bin")" "pre/post identicos + slot alterado" "-" "-" "DIVERGE" "preservacao de vizinhos falhou"
+    bad=$((bad+1))
+  fi
+fi
+
 echo
 echo "TOTAIS: paridade=$par divergencia-contratual-esperada=$contratual sondas-nao-cotadas=$sonda controles-corrupcao=$corr DIVERGE(inaceitavel)=$bad  (tsv: $ROWS; tamanhos: $SIZES)"
 if [ "$bad" != 0 ]; then exit 1; fi
-# Esperado (pos-ETAPA 3): 51 PARIDADE = 36 da entrega do decoder (9 goldens
-# bem-formados + 12 plain-encode + 12 plain-decode + 2 runtime + 1 k05)
-# + 15 DIRECAO B (12 plains do perfil + 3 fixtures encdir);
+# Esperado (pos-ETAPAS 3-4): 53 PARIDADE = 36 da entrega do decoder (9
+# goldens + 12 plain-encode + 12 plain-decode + 2 runtime + 1 k05)
+# + 15 DIRECAO B + 2 ciclo de EDICAO (slot externo + vizinhos);
 # 1 DIVERGENCA-CONTRATUAL (m02); 2 SONDA-DEFEITO; 2 CONTROLE-CORRUPCAO.
-# Total = 56 linhas.
-if [ "$par" != 51 ] || [ "$contratual" != 1 ] || [ "$sonda" != 2 ] || [ "$corr" != 2 ]; then
-  echo "ATENCAO: contagens divergem do esperado (paridade=51, contratual=1, sondas=2, controles=2) — revisar suite nova?"; exit 2;
+# Total = 58 linhas.
+if [ "$par" != 53 ] || [ "$contratual" != 1 ] || [ "$sonda" != 2 ] || [ "$corr" != 2 ]; then
+  echo "ATENCAO: contagens divergem do esperado (paridade=53, contratual=1, sondas=2, controles=2) — revisar suite nova?"; exit 2;
 fi
 exit 0
