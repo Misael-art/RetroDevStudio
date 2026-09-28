@@ -2877,6 +2877,7 @@ dependencies = [
  "libloading 0.8.9",
  "rex-addressing",
  "rex-kosinski",
+ "rex-mugen",
  "serde",
  "serde_json",
  "sevenz-rust2",
@@ -2892,6 +2893,10 @@ version = "0.1.0"
 
 [[package]]
 name = "rex-kosinski"
+version = "0.1.0"
+
+[[package]]
+name = "rex-mugen"
 version = "0.1.0"
 
 [[package]]
