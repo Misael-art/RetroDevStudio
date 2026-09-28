@@ -1637,6 +1637,33 @@ pré-existentes condicionadas a toolchain/plataforma
 não nesta entrega. Os 737 do produto não se moveram porque nenhum fonte de produto
 mudou. Jobs pesados serializados, um por vez; nenhum observador de CI deixado de pé.
 
+**Push, CI e a gate reprovada pelo próprio gate.** O push abriu a branch remota
+`codex/rex-integrator-crates-registry` no SHA `a556e86`; a consulta foi pontual, sem
+monitor, e o rollup terminal (`…/2026-09-28-barra-de-entrega/ci-consulta-a556e86.log:80`)
+dá `linux-validate` **success** (`:60`), `desktop-smoke` **success** (`:77`) e
+`validate` (windows-latest) **failure** (`:73`, `:78`) — passo 15 *Frontend tests*,
+**2 failed / 729 passed / 22 skipped (753)**; o total de 753 bate com o Linux e os 22
+skips são as suítes condicionadas a plataforma. Os passos 10 *Structure check* e 13
+*Crate package gates* passaram no Windows: os gates dos dois pacotes também correm lá.
+Quem reprova são **dois testes meus** (`scripts/check-tree-crates.test.mjs:77`, `:96`)
+contra **código meu**: `scripts/check-tree.cjs:47` compunha com `path.join` o caminho
+que a gate **imprime**, então no Windows saía `crates\registry.json` enquanto o
+espelho `.ps1` imprime `crates/registry.json` — as duas implementações da mesma gate
+divergiram na saída. O exame achou um segundo defeito, de veredito: o `.cjs` passava
+`path.normalize` no `manifesto` declarado, e no Windows as duas margens convergiam em
+barras, portanto uma declaração fora do caminho canônico seria **aceita em silêncio**
+— a checagem mordia só no Linux. Reparo `882272c`: caminhos exibidos viram literais
+POSIX nas duas implementações e a comparação passa a ser literal (o `.ps1` foi
+apertado no mesmo ponto); as duas asserções continuam estritas — o errado era a
+produção, não o teste. Não-vacuidade provada por mutação no Linux (reverter o caminho
+exibido derruba exatamente 1 teste; reintroduzir o `path.normalize` derruba
+exatamente 1 teste; restauração conferida por SHA-256) e paridade real entre `.cjs` e
+`.ps1` executados com `pwsh 7.6.6` em quatro casos (`…/2026-09-28-gate-cross-platform/red-green-mutacao.log`
+e `parity-cjs-ps1.log`). Barra do reparo: `check:tree`, `lint` e `tsc --noEmit` rc=0,
+`npm test` **749 passed / 6 skipped (755)** — os 2 a mais são os dois testes novos
+(`gates-frontend-fix.log`). **Ainda não provado:** o veredito do `validate` no Windows
+no SHA do reparo, que depende da consulta pontual ao push seguinte.
+
 **Limites que continuam sendo parte da alegação.** `crates/` é degrau de
 **biblioteca**: a rodada não torna nada "integrado", não prova fluxo de usuário e não
 promove maturidade — as duas bibliotecas seguem de frente `Experimental`. O produto

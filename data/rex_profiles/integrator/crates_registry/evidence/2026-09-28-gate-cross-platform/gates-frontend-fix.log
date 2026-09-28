@@ -1,0 +1,23 @@
+# Barra de entrega do reparo cross-platform, corrida em 2026-09-28T03:49:48Z
+# HEAD no inicio da barra: a556e867a1cef9676c7ea1a740bfe7f9459b0abd  (arvore de trabalho ja com o reparo e os testes novos)
+# Jobs pesados serializados: apenas node/este shell; nenhum cargo, SGDK, Tauri, MAME ou WebDriver em andamento.
+
+## npm run check:tree
+npm notice run node scripts/check-tree.cjs
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+RC_CHECK_TREE=0
+
+## npm run lint
+npm notice run retrodev-studio@0.1.0 lint
+npm notice run eslint src vite.config.ts --max-warnings=0
+RC_LINT=0
+
+## npx tsc --noEmit
+npm notice run retrodev-studio@0.1.0 npx
+npm notice run 'tsc' --noEmit
+RC_TSC=0
+## npm test (suite completa)
+ Test Files  79 passed | 1 skipped (80)
+      Tests  749 passed | 6 skipped (755)
+RC_NPM_TEST=0
+fim 2026-09-28T03:52:05Z

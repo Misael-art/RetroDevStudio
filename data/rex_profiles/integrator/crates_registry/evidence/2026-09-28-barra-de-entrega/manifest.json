@@ -91,7 +91,16 @@
       "arquivo": "host-certify.log",
       "bytes": 207044,
       "sha256": "e9ddaf28e74ee9155436acff691bfa180367bd93c9ce2d8e68edc46ceb7b2ab9"
+    },
+    {
+      "arquivo": "ci-consulta-a556e86.log",
+      "bytes": 7453,
+      "sha256": "e480b587ead3a763829dc70a85b455b4cbda6955422ef507cf52c4b2a9a6cb21",
+      "nota": "consulta pontual (sem monitor) no SHA publicado a556e86. Rollup terminal na linha 80: linux-validate success (:60), desktop-smoke success (:77), validate windows-latest FAILURE (:73, :78) no passo 'Frontend tests'. O defeito e da propria gate check:tree (path.join no caminho exibido + path.normalize no veredicto) e foi reparado em 882272c; evidencia e leitura em ../2026-09-28-gate-cross-platform/."
     }
   ],
-  "o_que_nao_prova": "Nada aqui alega integracao ao produto: rex-kosinski e rex-addressing seguem sem path dependency em src-tauri/Cargo.toml, sem adaptador e sem chamada real pelo backend. Os 737 testes do produto nao exercitam os dois pacotes."
+  "o_que_nao_prova": [
+    "Nada aqui alega integracao ao produto: rex-kosinski e rex-addressing seguem sem path dependency em src-tauri/Cargo.toml, sem adaptador e sem chamada real pelo backend. Os 737 testes do produto nao exercitam os dois pacotes.",
+    "CI verde neste HEAD: o job validate do Windows reprovou dois testes desta rodada, entao a barra acima vale para o Linux local e o pacote de gates de crates; o veredito do reparo depende do proximo SHA publicado."
+  ]
 }

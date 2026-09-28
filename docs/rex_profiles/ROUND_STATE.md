@@ -241,7 +241,12 @@ Regras desta matriz: o registro canônico é `crates/registry.json` (schema
 todo push/PR — não há filtro de caminho a afrouxar. Não existe `Cargo.toml` de
 workspace na raiz, e não se cria um para fazer pacote standalone compilar.
 ROMs comerciais e corpus BYOR continuam fora da árvore: comparação com
-ferramenta externa vive no script do perfil, identificada à parte.
+ferramenta externa vive no script do perfil, identificada à parte. A gate de
+árvore é duplicada (`check-tree.cjs` + `check-tree.ps1`) e imprime caminhos como
+literais POSIX nas duas — nem a saída nem o veredicto podem depender do SO que
+roda o CI (reparo `882272c`; paridade medida com `pwsh 7.6.6` e não-vacuidade por
+mutação em
+`data/rex_profiles/integrator/crates_registry/evidence/2026-09-28-gate-cross-platform/`).
 
 ## Cadeia de recurso comprimido (propriedade: integrador)
 
@@ -312,21 +317,25 @@ já tinha.
   `6a43c53` (pacote registrado + cadeia de fixtures fechada), os 17 commits da
   entrega A `9bec531..0a3ac83` (também `cherry-pick -x`, zero conflitos) e
   `9f83d15` (promoção de `rex-addressing` para `crates/` + registro com gates
-  medidos). **Nada aqui é merge:** os dois pacotes entraram commit a commit, com
+  medidos), `a556e86` (esta célula: matriz, checkpoints e barra medida) e
+  `882272c` (o reparo cross-platform da própria gate, achado pela CI). **Nada aqui é merge:** os dois pacotes entraram commit a commit, com
   autoria e mensagem preservadas, e as branches de cada frente continuam sendo o
   dono do resto do trabalho delas.
 
   **Item 1 — `crates/` formalizado sem afrouxar a gate.** `docs/08_TREE_ARCHITECTURE.md`
   passa a descrever `crates/<nome>/` (com `Cargo.toml`, `src/`, `examples/`,
-  `tests/`) e `crates/registry.json` + `crates/README.md`, com cinco bullets de
-  regra de inserção. `scripts/check-tree.cjs` e o espelho `.ps1` aceitam `crates/`
-  **condicionalmente ao registro**: diretório em `crates/` sem entrada no registro
-  reprova; entrada registrada sem `Cargo.toml` reprova; arquivo solto dentro de
-  `crates/` que não seja o registro nem o README reprova; todo o resto da verificação
-  de primeiro nível continua igual. Sete testes em
-  `scripts/check-tree-crates.test.mjs`, incluindo o que exige que as **duas
+  `tests/`) e `crates/registry.json` + `crates/README.md`, com quatro bullets de
+  regra de inserção (local oficial sem workspace na raiz; registro obrigatório antes
+  de o diretório existir; nada de `target/`, ROM ou corpus BYOR em `crates/`;
+  integração ao produto é etapa posterior e separada). `scripts/check-tree.cjs` e o
+  espelho `.ps1` aceitam `crates/` **condicionalmente ao registro**: diretório em
+  `crates/` sem entrada no registro reprova; entrada registrada sem `Cargo.toml`
+  reprova; arquivo solto dentro de `crates/` que não seja o registro nem o README
+  reprova; todo o resto da verificação de primeiro nível continua igual. Nove testes
+  em `scripts/check-tree-crates.test.mjs`, incluindo o que exige que as **duas
   implementações** (cjs e ps1) aceitem o mesmo conjunto de diretórios — a gate
-  duplicada não pode divergir.
+  duplicada não pode divergir. Os dois últimos testes nasceram justamente da
+  divergência que a própria CI achou, registrada abaixo.
 
   **Itens 2 a 4 — registro e gates próprios, com ausência reprovando.**
   `crates/registry.json` (schema `rex-crate-registry/v1`) é a fonte única da lista
@@ -396,6 +405,43 @@ já tinha.
   6), verificados isoladamente com 13/13 passando. Os 737 do produto não mudaram:
   nenhum fonte de produto foi tocado. Um job pesado por vez, serializado; nenhum
   monitor de CI deixado de pé.
+
+  **Push e CI registrados por SHA — e a gate reprovada por mim.** O push publicou a
+  branch nova `codex/rex-integrator-crates-registry` no SHA `a556e86`. A consulta foi
+  **pontual**, sem monitor, no SHA publicado
+  (`2026-09-28-barra-de-entrega/ci-consulta-a556e86.log`, rollup terminal na linha
+  80): `linux-validate` **success** (`:60`, `:76`), `desktop-smoke` **success**
+  (`:77`) e `validate` (runner `windows-latest`) **FAILURE** (`:73`, `:78`) — o que
+  reprova é o passo 15 *Frontend tests*, com **2 failed / 729 passed / 22 skipped
+  (753)** e 1 arquivo de teste falho (os totais de 753 batem com o Linux; os 22
+  skips contra 6 são as suítes que se ignoram por SO). Os passos 10 *Structure
+  check* e 13 *Crate package gates* passaram no Windows, ou seja, os gates dos dois
+  pacotes também correm lá. O extrato passo a passo está em
+  `2026-09-28-gate-cross-platform/ci-windows-a556e86.log`.
+  As duas asserções que pegaram são as **minhas** (`check-tree-crates.test.mjs:77`
+  e `:96`), e o defeito é do código que eu escrevi: `scripts/check-tree.cjs:47`
+  compunha o caminho *exibido* com `path.join`, então no Windows a gate imprimia
+  `crates\registry.json` enquanto o espelho `.ps1` imprime `crates/registry.json` —
+  duas implementações da mesma gate, duas saídas. O mesmo exame revelou um segundo
+  defeito, pior porque é de veredito e não de texto: o `.cjs` normalizava o
+  `manifesto` declarado antes de comparar, de modo que no Windows as duas margens
+  convergiam em barras e uma declaração torta era **aceita em silêncio** — a
+  checagem mordia só no Linux. O reparo (`882272c`) deixa os caminhos exibidos como
+  literais POSIX (comparação literal nas duas implementações, `.ps1` apertado no
+  mesmo ponto) e **não afrouxa as duas asserções**: o que estava errado era a
+  produção. Prova de não-vacuidade no Linux, por mutação
+  (`2026-09-28-gate-cross-platform/red-green-mutacao.log`): reverter o caminho
+  exibido para `path.join` derruba exatamente 1 teste, reintroduzir o
+  `path.normalize` derruba exatamente 1 teste, e a restauração foi conferida por
+  SHA-256 (duas pernas idênticas). Paridade entre as duas implementações medida com
+  `pwsh 7.6.6` em quatro casos (sem registro; manifesto com barras de Windows; sem
+  campo; com campo POSIX) — vereditos e caminhos iguais nos dois
+  (`parity-cjs-ps1.log`). Barra do reparo: `check:tree`, `lint`, `tsc --noEmit` rc=0
+  e `npm test` **749 passed / 6 skipped (755)** — os 2 a mais sobre os 747 são os
+  dois testes novos (`gates-frontend-fix.log`). **O que isso ainda não prova:** o
+  veredito do `validate` no Windows no SHA do reparo só vem da consulta pontual ao
+  push seguinte; localmente o que existe é o Linux com `path.join` já imprimindo
+  `/`, mais o espelho PowerShell.
 
   **Limites desta célula.** `crates/` é localização de **biblioteca**, não alegação
   de produto; o produto continua com os codecs que já tinha (LZ4W e aPLib na

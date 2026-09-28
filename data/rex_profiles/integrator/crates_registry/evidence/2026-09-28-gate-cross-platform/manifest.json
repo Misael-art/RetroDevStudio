@@ -1,0 +1,78 @@
+{
+  "schema": "rex-integration-gate-run/v1",
+  "rodada": "crates/ — reparo cross-platform da gate check:tree, achado pela propria CI",
+  "gerado_em": "2026-09-28T03:55:00Z",
+  "responsavel": "integrador (superficies compartilhadas: check-tree.*, documentos de estado)",
+  "head_no_inicio_da_barra": "a556e867a1cef9676c7ea1a740bfe7f9459b0abd",
+  "head_do_reparo": "882272cfcadde61016599db48a902756666029b4",
+  "defeito": {
+    "o_que_a_ci_alegou": "job validate (windows-latest), passo 15 'Frontend tests': 2 falhas em scripts/check-tree-crates.test.mjs (:77 e :96) — 'expected ERRO: Estrutura fora de docs/08_TREE_… to contain crates/registry.json', com a saida real '- crates\\registry.json nao existe. crates/ so e aceito com registro explicito de pacotes.'",
+    "causa_1_saida": "scripts/check-tree.cjs:47 compunha o caminho EXIBIDO com path.join; no Windows renderiza 'crates\\registry.json', enquanto scripts/check-tree.ps1 imprime literal 'crates/registry.json'. Duas implementacoes da mesma gate, duas saidas.",
+    "causa_2_veredito": "scripts/check-tree.cjs normalizava o campo 'manifesto' declarado com path.normalize antes de comparar; no Windows as duas margens convergiam em barras e uma declaracao fora do caminho canonico era aceita em silencio. A checagem mordia so no Linux. O .ps1 afrouxava equivalente (-replace '\\\\','/') e foi apertado para a mesma comparacao literal.",
+    "o_que_NAO_eu_fiz": "nenhuma assercao foi afrouxada nem reescrita para passar; o reparo e em producao (scripts/check-tree.cjs e scripts/check-tree.ps1)."
+  },
+  "reparo": {
+    "commit": "882272c — fix(rex): gate check:tree imprime e decide igual em qualquer SO",
+    "arquivos": [
+      "scripts/check-tree.cjs (REGISTRO_CRATES e manifestoEsperado como literais POSIX; comparacao literal do manifesto declarado)",
+      "scripts/check-tree.ps1 (comparacao literal, sem -replace; $esperado definido antes do uso)",
+      "scripts/check-tree-crates.test.mjs (+2 testes: 9 no arquivo)"
+    ]
+  },
+  "gates": {
+    "npm_run_check_tree": { "rc": 0, "log": "gates-frontend-fix.log", "linha_rc": 8 },
+    "npm_run_lint": { "rc": 0, "log": "gates-frontend-fix.log", "linha_rc": 13 },
+    "npx_tsc_noEmit": { "rc": 0, "log": "gates-frontend-fix.log", "linha_rc": 18 },
+    "npm_test": {
+      "rc": 0,
+      "log": "gates-frontend-fix.log",
+      "linha_test_files": 20,
+      "linha_tests": 21,
+      "linha_rc": 22,
+      "test_files": "79 passed | 1 skipped (80)",
+      "tests": "749 passed | 6 skipped (755)",
+      "reconciliacao": "747 -> 749 passed: os 2 testes novos de scripts/check-tree-crates.test.mjs (o comportamental do manifesto com separadores de Windows e o estatico dos caminhos exibidos). Skips inalterados em 6."
+    },
+    "cargo_e_host": "nao reexecutados: nenhum fonte Rust nem host/toolchain foi tocado; a mudanca e em scripts de validacao. O gate de pacotes (npm run crates:gates) tambem nao foi reexecutado porque crates/* nao mudou."
+  },
+  "paridade_entre_implementacoes": {
+    "como": "mesmo fixture, dois executaveis: node scripts/check-tree.cjs e pwsh -NoProfile -File scripts/check-tree.ps1, com RDS_CHECK_TREE_ROOT apontando para a raiz temporaria",
+    "versoes": { "pwsh": "7.6.6", "node_local": "v26.8.1" },
+    "casos": {
+      "A_crates_sem_registro": "cjs rc=1 e ps1 rc=1, ambos com 'crates/registry.json' no caminho exibido",
+      "B_manifesto_com_barras_de_Windows": "cjs rc=1 e ps1 rc=1, ambos 'esperado crates/rex-exemplo/Cargo.toml' (antes: o .ps1 aceitava)",
+      "C_registro_canonico_sem_campo_manifesto": "cjs rc=0 e ps1 rc=0",
+      "D_registro_canonico_com_manifesto_POSIX": "cjs rc=0 e ps1 rc=0"
+    },
+    "log": "parity-cjs-ps1.log"
+  },
+  "prova_de_mutacao": {
+    "log": "red-green-mutacao.log",
+    "mutacao_1": "REGISTRO_CRATES e manifestoEsperado voltam a path.join -> exatamente 1 teste falho (assercao estatica, :168). As comportamentais NAO podem falhar no Linux, porque la path.join ja imprime '/' — por isso as duas assercoes estritas em :77 e :96 continuam no arquivo e e o runner Windows que as pega.",
+    "mutacao_2": "path.normalize(pacote.manifesto) de volta -> exatamente 1 teste falho (assercao estatica, :175)",
+    "restauracao": "sha256 do arquivo corrigido identico nas duas pernas: f85120f6e3b605ad07288c5a0e14eac8454375a21707a998c1aadfc2eec8479a",
+    "green": "9 passed / 0 failed"
+  },
+  "ci_anterior_a556e86": {
+    "log": "ci-windows-a556e86.log",
+    "consulta": "pontual, sem monitor; rollup terminal em 2026-09-28T03:37:22Z (ci-consulta-a556e86.log:80)",
+    "linux-validate": "completed success (job 108773662757)",
+    "desktop-smoke": "completed success (job 108773662698)",
+    "validate_windows": "completed FAILURE (job 108773662536), passo 15 'Frontend tests'; passo 10 'Structure check' success; passo 13 'Crate package gates' success; passo 16 'TypeScript check' skipped",
+    "contagens_windows": "Test Files 1 failed | 77 passed | 2 skipped (80); Tests 2 failed | 729 passed | 22 skipped (753)"
+  },
+  "job_pesado_serial": "apenas node/este shell durante a barra; nenhum cargo, SGDK, Tauri, MAME, Ghidra ou WebDriver em andamento; nenhum monitor de CI deixado de pe.",
+  "conteudo_do_pacote": {
+    "ci-windows-a556e86.log": "1f4b2dadce9a04b4a4a3776146a259879824fafcb9e4408a27d6df301e36b195",
+    "red-green-mutacao.log": "ad806a324be308ccb01d7fc6c3fa0c13b64a76ed53a2bb30ca12810f432598e4",
+    "parity-cjs-ps1.log": "5f6cb60de4a36581e388bb0b3b66c53bf7f4537d7a360518e329cf0589ef5672",
+    "gates-frontend-fix.log": "2d08db73ea96d1dbb9f4fc2cdc2b198f52e92b1991ae8a4b4e950c6bf3295ae0",
+    "manifest.json": "este arquivo nao contem o proprio SHA-256; os quatro acima sao os logs finais, conferiveis com sha256sum no diretorio"
+  },
+  "o_que_nao_prova": [
+    "o veredito do job validate no Windows depois do reparo — so vem da consulta pontual ao proximo SHA publicado",
+    "integracao ao produto: os dois pacotes seguem blocked nos degraus 3 e 4 da escada",
+    "maturidade: nada aqui promove Experimental para outro nivel",
+    "merge ou release"
+  ]
+}

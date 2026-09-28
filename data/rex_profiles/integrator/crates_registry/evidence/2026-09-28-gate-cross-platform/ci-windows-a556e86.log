@@ -1,0 +1,47 @@
+# CI do SHA a556e867a1cef9676c7ea1a740bfe7f9459b0abd (branch codex/rex-integrator-crates-registry)
+# coleta pontual em 2026-09-28T03:48:54Z via gh api / gh run view --log-failed; nenhum monitor ficou de pe.
+
+## rollup dos tres jobs
+# cada veredito vive na linha indicada de 2026-09-28-barra-de-entrega/ci-consulta-a556e86.log
+linux-validate  completed success  job 108773662757  (log:60 primeiro, :76 terminal)
+validate        completed FAILURE  job 108773662536  (log:73 primeiro, :78 terminal), passo 15 'Frontend tests'
+desktop-smoke   completed success  job 108773662698  (log:77)
+terminais em    ROLLUP_TERMINAL 2026-09-28T03:37:22Z (log:80)
+
+## passos do job validate (runner windows-latest)
+1 success | Set up job
+2 success | Checkout
+3 success | Setup Node.js
+4 success | Setup Rust
+5 success | Install frontend dependencies
+6 success | Dependency security audit
+7 success | Install pinned Rust security auditor
+8 success | Rust dependency security audit
+9 success | Rust formatting
+10 success | Structure check
+11 success | Frontend lint
+12 success | Rust clippy
+13 success | Crate package gates
+14 success | Rust tests
+15 failure | Frontend tests
+16 skipped | TypeScript check
+17 success | Write CI summary
+18 success | Upload CI validation artifacts
+35 skipped | Post Setup Node.js
+36 success | Post Checkout
+37 success | Complete job
+
+## vereditos medidos no passo que reprova (Windows)
+2026-09-28T03:35:31.2180922Z ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+2026-09-28T03:35:31.2248238Z  Test Files  1 failed | 77 passed | 2 skipped (80)
+2026-09-28T03:35:31.2253933Z       Tests  2 failed | 729 passed | 22 skipped (753)
+
+## as duas assercoes que pegaram, com a saida real da gate no Windows
+AssertionError: expected 'ERRO: Estrutura fora de docs/08_TREE_…' to contain 'crates/registry.json'
++   - crates/nao-registrado nao esta em crates\registry.json. Modulo novo se registra antes de existir.
+  - crates/nao-registrado nao esta em crates\registry.json. Modulo novo se registra antes de existir.
++   - crates/nao-registrado nao esta em crates\registry.json. Modulo novo se registra antes de existir.
+  - crates/rex-exemplo nao esta em crates\registry.json. Modulo novo se registra antes de existir.
+##[error]AssertionError: expected 'ERRO: Estrutura fora de docs/08_TREE_…' to contain 'crates/registry.json'
+ ❯ scripts/check-tree-crates.test.mjs:77:29
+ ❯ scripts/check-tree-crates.test.mjs:96:29
