@@ -2588,6 +2588,98 @@ async fn rex_kosinski_encode(
 }
 
 #[tauri::command]
+async fn rex_gameplay_scan(
+    request: tools::reverse::decomp::rex_gameplay::GameplayScanRequest,
+) -> Result<
+    tools::reverse::decomp::rex_gameplay::GameplayScanResponse,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    // Varredura da forma coa guarda, servida por `crates/rex-gameplay`. Devolve
+    // CANDIDATOS e a marca de ambiguidade: nunca escolhe unha rotina por conta
+    // propia. identidade (SHA-256 da ROM lida) vai na resposta.
+    run_heavy_command_off_main_thread(
+        move || tools::reverse::decomp::rex_gameplay::ipc_scan(&request),
+        || {
+            Err(tools::reverse::decomp::inspection::InspectionError {
+                code: "command_interrupted".to_string(),
+                message: interrupted_command_message("rex_gameplay_scan"),
+                retryable: true,
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn rex_gameplay_recover(
+    request: tools::reverse::decomp::rex_gameplay::GameplayRecoverRequest,
+) -> Result<
+    tools::reverse::decomp::rex_gameplay::GameplayRecoverResponse,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    // Recuperacion delimitada: entrada e saidas declaradas por quen chama. O
+    // grafo resultante leva a identidade da ROM, a faixa do unico parametro
+    // editable e as limitacions do perfil. Non escribe en ningunha ROM.
+    run_heavy_command_off_main_thread(
+        move || tools::reverse::decomp::rex_gameplay::ipc_recover(&request),
+        || {
+            Err(tools::reverse::decomp::inspection::InspectionError {
+                code: "command_interrupted".to_string(),
+                message: interrupted_command_message("rex_gameplay_recover"),
+                retryable: true,
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn rex_gameplay_edit_threshold(
+    request: tools::reverse::decomp::rex_gameplay::GameplayEditRequest,
+) -> Result<
+    tools::reverse::decomp::rex_gameplay::GameplayEditResponse,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    // Unica edicion exposta: o limiar, dentro da faixa do MOVEQ original. Fora
+    // dela recusase co motivo (range_refused). O grafo devolto revalidase ao
+    // reconstruir; nada se acepta por confianza.
+    run_heavy_command_off_main_thread(
+        move || tools::reverse::decomp::rex_gameplay::ipc_edit(&request),
+        || {
+            Err(tools::reverse::decomp::inspection::InspectionError {
+                code: "command_interrupted".to_string(),
+                message: interrupted_command_message("rex_gameplay_edit_threshold"),
+                retryable: true,
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+async fn rex_gameplay_rebuild(
+    request: tools::reverse::decomp::rex_gameplay::GameplayRebuildRequest,
+) -> Result<
+    tools::reverse::decomp::rex_gameplay::GameplayRebuildResponse,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    // Xera unha copia nova nun camiño distinto; a base nunca se toca. Revalida
+    // a identidade (SHA esperado vs. base vs. grafo) antes de escribir e
+    // recusa resultados de sesions anteriores (identity_mismatch).
+    run_heavy_command_off_main_thread(
+        move || tools::reverse::decomp::rex_gameplay::ipc_rebuild(&request),
+        || {
+            Err(tools::reverse::decomp::inspection::InspectionError {
+                code: "command_interrupted".to_string(),
+                message: interrupted_command_message("rex_gameplay_rebuild"),
+                retryable: true,
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
 fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, String> {
     let trimmed = project_dir.trim();
     if trimmed.is_empty() {
@@ -5236,6 +5328,10 @@ pub fn run() {
             rex_addressing_read_snapshot,
             rex_kosinski_decode,
             rex_kosinski_encode,
+            rex_gameplay_scan,
+            rex_gameplay_recover,
+            rex_gameplay_edit_threshold,
+            rex_gameplay_rebuild,
             list_project_assets,
             read_project_asset_bytes,
             open_project_source_path,

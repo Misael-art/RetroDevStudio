@@ -1,0 +1,15 @@
+2026-09-28T17:15:11Z RED 1 — capa IPC rex_gameplay (ipc_recover/ipc_scan/ipc_edit/ipc_rebuild e tipos de pedido aínda inexistentes)
+      1 error: could not compile `retro-dev-studio` (lib test) due to 46 previous errors
+      6 error[E0422]: cannot find struct, variant or union type `GameplayEditRequest` in this scope
+      1 error[E0422]: cannot find struct, variant or union type `GameplayRebuildRequest` in this scope
+      1 error[E0422]: cannot find struct, variant or union type `GameplayRecoverRequest` in this scope
+      2 error[E0422]: cannot find struct, variant or union type `GameplayScanRequest` in this scope
+      6 error[E0425]: cannot find function `ipc_edit` in this scope
+     11 error[E0425]: cannot find function `ipc_rebuild` in this scope
+     13 error[E0425]: cannot find function `ipc_recover` in this scope
+      2 error[E0425]: cannot find function `ipc_scan` in this scope
+      1 error[E0425]: cannot find type `GameplayRebuildRequest` in this scope
+      1 error[E0425]: cannot find type `GameplayRecoverRequest` in this scope
+      1 error[E0425]: cannot find value `MAX_GRAPH_BYTES` in this scope
+      1 error[E0425]: cannot find value `MAX_ROM_BYTES` in this scope
+RED_RC=101

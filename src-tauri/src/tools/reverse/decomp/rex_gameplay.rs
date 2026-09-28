@@ -15,6 +15,9 @@ use rex_gameplay::graph::{edit_threshold, open_graph, Hints};
 use rex_gameplay::patch::{patch_threshold, regenerate_from_graph, Rebuilt};
 use serde::Serialize;
 
+use super::inspection::InspectionError;
+use crate::core::rom_mastering::sha256_hex;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct GameplayRecoveryDto {
     pub profile_id: String,
@@ -106,6 +109,375 @@ pub fn rebuild_gameplay_rom(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Capa IPC (integrador do produto): limites explicitos, identidade de ROM e
+// erros estruturados. Nada se autodetecta: quen chama declara ROM, entrada,
+// saidas e metodo. Un resultado antigo tras trocar a ROM recusase por
+// identidade (SHA-256 da base vs. SHA registrado no grafo).
+// ---------------------------------------------------------------------------
+
+use rex_gameplay::graph::Hints as GameplayHints;
+use rex_gameplay::scan_guarded_candidates;
+use serde::Deserialize;
+
+/// Techo de lectura de ROM: as imaxes Mega Drive deste produto non superan
+/// 32 MiB; amosar a recusa antes de ler, non OOM.
+pub const MAX_ROM_BYTES: u64 = 32 * 1024 * 1024;
+/// Techo do grafo NodeGraph v1 que viaxa por IPC (8 MiB).
+pub const MAX_GRAPH_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_EXITS: usize = 64;
+pub const MAX_ADDRESS_LABELS: usize = 512;
+
+fn fail_ipc(code: &str, message: impl Into<String>) -> InspectionError {
+    InspectionError {
+        code: code.to_string(),
+        message: message.into(),
+        retryable: false,
+    }
+}
+
+/// Traducion dos erros de texto do paquete a codigos estables. O conxunto de
+/// mensaxes do perfil e pechado (CONTRACT.md); as pruebas enumeratean a
+/// clasificacion. Determinista: `retryable=false` en todas as recusas.
+fn erro_de_perfil(e: String) -> InspectionError {
+    let code = if e.contains("SHA-256 da base diverge")
+        || e.contains("o grafo foi recuperado de")
+        || e.contains("nao sao os registrados no grafo")
+    {
+        "identity_mismatch"
+    } else if e.contains("fora de") && (e.contains("recusada") || e.contains("recusado")) {
+        "range_refused"
+    } else if e.contains("grafo inconsistente")
+        || e.contains("versao de grafo")
+        || e.starts_with("mapping 0x")
+        || e.contains("mapeado por mais de um")
+        || e.contains("fora do fluxo delimitado")
+        || e.contains("semantic_origin")
+    {
+        "graph_tampered"
+    } else if e.starts_with("falha ao ler") || e.starts_with("falha ao gravar") {
+        "io_error"
+    } else {
+        "profile_refused"
+    };
+    InspectionError {
+        code: code.to_string(),
+        message: e,
+        retryable: false,
+    }
+}
+
+fn validar_request_id(id: &str) -> Result<(), InspectionError> {
+    if id.is_empty() || id.len() > 128 {
+        return Err(fail_ipc(
+            "invalid_request",
+            "request_id baleiro ou grande demais (maximo 128 caracteres)",
+        ));
+    }
+    Ok(())
+}
+
+fn ler_rom_limitada(path: &str) -> Result<Vec<u8>, InspectionError> {
+    if path.trim().is_empty() {
+        return Err(fail_ipc("invalid_request", "rom_path baleiro"));
+    }
+    let meta = fs::metadata(path)
+        .map_err(|e| fail_ipc("invalid_request", format!("ROM non accesible: {e}")))?;
+    if !meta.is_file() {
+        return Err(fail_ipc("invalid_request", "rom_path non e un ficheiro"));
+    }
+    if meta.len() > MAX_ROM_BYTES {
+        return Err(fail_ipc(
+            "invalid_request",
+            format!(
+                "ROM de {} bytes excede o limite de {MAX_ROM_BYTES}; recusado sen ler",
+                meta.len()
+            ),
+        ));
+    }
+    fs::read(path).map_err(|e| fail_ipc("io_error", format!("falha ao ler ROM: {e}")))
+}
+
+fn validar_grafo_len(graph_json: &str) -> Result<(), InspectionError> {
+    if graph_json.len() > MAX_GRAPH_BYTES {
+        return Err(fail_ipc(
+            "invalid_request",
+            format!(
+                "grafo de {} bytes excede o limite de {MAX_GRAPH_BYTES}; recusado",
+                graph_json.len()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct GameplayAddressLabel {
+    pub offset: u32,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct GameplayScanRequest {
+    pub request_id: String,
+    pub rom_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GameplayScanCandidate {
+    pub entry: u32,
+    pub exit: u32,
+    pub counter_addr: u32,
+    pub threshold: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GameplayScanResponse {
+    pub request_id: String,
+    pub rom_sha256: String,
+    pub candidates: Vec<GameplayScanCandidate>,
+    /// Exactamente un candidato = non ambigua. Con 0 ou >1 a interface debe
+    /// declarar entrada/saidas: a varredura non escolhe rotina por si.
+    pub ambiguous: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct GameplayRecoverRequest {
+    pub request_id: String,
+    pub rom_path: String,
+    pub entry: u32,
+    pub exits: Vec<u32>,
+    pub address_labels: Vec<GameplayAddressLabel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GameplayRecoverResponse {
+    pub request_id: String,
+    pub profile_id: String,
+    pub rom_sha256: String,
+    pub entry: u32,
+    pub exits: Vec<u32>,
+    pub blocks: Vec<(u32, u32)>,
+    pub operator: String,
+    pub threshold: i64,
+    pub threshold_range: (i64, i64),
+    pub graph_json: String,
+    pub limitations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct GameplayEditRequest {
+    pub request_id: String,
+    pub graph_json: String,
+    pub threshold: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GameplayEditResponse {
+    pub request_id: String,
+    pub graph_json: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct GameplayRebuildRequest {
+    pub request_id: String,
+    pub base_path: String,
+    pub expected_sha256: String,
+    pub graph_json: String,
+    pub output_path: String,
+    /// "patch" (so o inmediato do limiar) ou "regenerate" (remonta a rexion).
+    /// Non e unha compilacion de proxecto: iso segue o fluxo canónico de build.
+    pub method: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GameplayRebuildResponse {
+    pub request_id: String,
+    pub method: String,
+    pub input_sha256: String,
+    pub output_sha256: String,
+    pub output_path: String,
+    pub changed_offsets: Vec<usize>,
+    pub authorized_ranges: Vec<(usize, usize)>,
+    pub checksum_updated: bool,
+}
+
+/// Varredura estrutural de lectura: so candidatos, ningunha eleccion
+/// automatica. Unha resposta non ambigu ten exactamente un candidato.
+pub fn ipc_scan(req: &GameplayScanRequest) -> Result<GameplayScanResponse, InspectionError> {
+    validar_request_id(&req.request_id)?;
+    let rom = ler_rom_limitada(&req.rom_path)?;
+    let candidates: Vec<GameplayScanCandidate> = scan_guarded_candidates(&rom)
+        .into_iter()
+        .map(|c| GameplayScanCandidate {
+            entry: c.entry,
+            exit: c.exit,
+            counter_addr: c.counter_addr,
+            threshold: c.threshold,
+        })
+        .collect();
+    let ambiguous = candidates.len() != 1;
+    Ok(GameplayScanResponse {
+        request_id: req.request_id.clone(),
+        rom_sha256: sha256_hex(&rom),
+        candidates,
+        ambiguous,
+    })
+}
+
+/// Recuperacion delimitada: ROM + entrada + saidas declaradas. Os rotulos de
+/// enderezo son presentacion e non entran na elevacion.
+pub fn ipc_recover(
+    req: &GameplayRecoverRequest,
+) -> Result<GameplayRecoverResponse, InspectionError> {
+    validar_request_id(&req.request_id)?;
+    if req.exits.is_empty() {
+        return Err(fail_ipc(
+            "invalid_request",
+            "ao menos unha saida declarada e obrigatoria; nada se autodetecta",
+        ));
+    }
+    if req.exits.len() > MAX_EXITS {
+        return Err(fail_ipc(
+            "invalid_request",
+            format!("{} saidas exceden o limite de {MAX_EXITS}", req.exits.len()),
+        ));
+    }
+    if req.exits.contains(&req.entry) {
+        return Err(fail_ipc(
+            "invalid_request",
+            "a entrada coincide cunha saida declarada",
+        ));
+    }
+    if !req.entry.is_multiple_of(2) || req.exits.iter().any(|e| !e.is_multiple_of(2)) {
+        return Err(fail_ipc(
+            "invalid_request",
+            "entrada e saidas deben estar aliñadas a palabra (par)",
+        ));
+    }
+    if req.address_labels.len() > MAX_ADDRESS_LABELS {
+        return Err(fail_ipc(
+            "invalid_request",
+            format!(
+                "{} rotulos exceden o limite de {MAX_ADDRESS_LABELS}",
+                req.address_labels.len()
+            ),
+        ));
+    }
+    let _ = ler_rom_limitada(&req.rom_path)?;
+    let hints = GameplayHints {
+        address_names: req
+            .address_labels
+            .iter()
+            .map(|l| (l.offset, l.name.clone()))
+            .collect(),
+        origin: "tauri_ipc:rom_recover_gameplay_gate".to_string(),
+    };
+    let dto = recover_gameplay_gate(Path::new(&req.rom_path), req.entry, &req.exits, &hints)
+        .map_err(erro_de_perfil)?;
+    Ok(GameplayRecoverResponse {
+        request_id: req.request_id.clone(),
+        profile_id: dto.profile_id,
+        rom_sha256: dto.rom_sha256,
+        entry: dto.entry,
+        exits: dto.exits,
+        blocks: dto.blocks,
+        operator: dto.operator,
+        threshold: dto.threshold,
+        threshold_range: dto.threshold_range,
+        graph_json: dto.graph_json,
+        limitations: dto.limitations,
+    })
+}
+
+/// Unica edicion exposta: o limiar do no rom_counter_compare, na faixa que
+/// devolve a recuperacion. Fora dela recúsase co motivo (range_refused).
+pub fn ipc_edit(req: &GameplayEditRequest) -> Result<GameplayEditResponse, InspectionError> {
+    validar_request_id(&req.request_id)?;
+    validar_grafo_len(&req.graph_json)?;
+    let graph_json =
+        edit_gameplay_threshold(&req.graph_json, req.threshold).map_err(erro_de_perfil)?;
+    Ok(GameplayEditResponse {
+        request_id: req.request_id.clone(),
+        graph_json,
+    })
+}
+
+/// Xera unha copia nova: a base NON se toca (recúsase saída == base ou saída
+/// existente) e a identidade revalidase (SHA esperado vs. base vs. grafo).
+pub fn ipc_rebuild(
+    req: &GameplayRebuildRequest,
+) -> Result<GameplayRebuildResponse, InspectionError> {
+    validar_request_id(&req.request_id)?;
+    if req.method != "patch" && req.method != "regenerate" {
+        return Err(fail_ipc(
+            "invalid_request",
+            format!(
+                "metodo '{}' desconhecido; so 'patch' ou 'regenerate'",
+                req.method
+            ),
+        ));
+    }
+    validar_grafo_len(&req.graph_json)?;
+    if req.base_path.trim().is_empty() || req.output_path.trim().is_empty() {
+        return Err(fail_ipc(
+            "invalid_request",
+            "base_path e output_path son obrigatorios",
+        ));
+    }
+    if req.base_path == req.output_path {
+        return Err(fail_ipc(
+            "invalid_request",
+            "a saida debe ser distinta da base: o orixinal presérvase sempre",
+        ));
+    }
+    if Path::new(&req.output_path).exists() {
+        return Err(fail_ipc(
+            "invalid_request",
+            format!(
+                "a saida xa existe; escolla outro camiño: {}",
+                req.output_path
+            ),
+        ));
+    }
+    let sha_ok = req.expected_sha256.len() == 64
+        && req.expected_sha256.bytes().all(|b| b.is_ascii_hexdigit());
+    if !sha_ok {
+        return Err(fail_ipc(
+            "invalid_request",
+            "expected_sha256 debe ser SHA-256 hexadecimal de 64 digitos; nada se adiviña",
+        ));
+    }
+    let dto = rebuild_gameplay_rom(
+        Path::new(&req.base_path),
+        &req.expected_sha256,
+        &req.graph_json,
+        Path::new(&req.output_path),
+        &req.method,
+    )
+    .map_err(erro_de_perfil)?;
+    Ok(GameplayRebuildResponse {
+        request_id: req.request_id.clone(),
+        method: dto.method,
+        input_sha256: dto.input_sha256,
+        output_sha256: dto.output_sha256,
+        output_path: dto.output_path,
+        changed_offsets: dto.changed_offsets,
+        authorized_ranges: dto.authorized_ranges,
+        checksum_updated: dto.checksum_updated,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,6 +516,465 @@ mod tests {
             .unwrap_err()
             .contains("ja existe"));
         assert!(recover_gameplay_gate(&base, 0, &[4], &Hints::default()).is_err());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    // ------------------------------------------------------------------
+    // Capa IPC (integrador): identidade, limites, erros estruturados.
+    // ------------------------------------------------------------------
+
+    fn fixture_image(name: &str) -> Vec<u8> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/rex-gameplay/fixtures")
+            .join(name);
+        let text = fs::read_to_string(&path).expect("fixture");
+        let mut image = Vec::new();
+        for line in text.lines().filter(|l| !l.starts_with('#')) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            match parts[0] {
+                "rom_size" => image = vec![0u8; parts[1].parse().unwrap()],
+                "rom_sha256" => {}
+                "at" => {
+                    let at = usize::from_str_radix(parts[1].trim_start_matches("0x"), 16).unwrap();
+                    let bytes: Vec<u8> = (0..parts[2].len())
+                        .step_by(2)
+                        .map(|i| u8::from_str_radix(&parts[2][i..i + 2], 16).unwrap())
+                        .collect();
+                    image[at..at + bytes.len()].copy_from_slice(&bytes);
+                }
+                other => panic!("linha desconhecida {other}"),
+            }
+        }
+        image
+    }
+
+    fn ipc_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("rex-gameplay-ipc-{tag}-{}", nonce()));
+        fs::create_dir_all(&dir).expect("dir");
+        dir
+    }
+
+    fn write_fixture_rom(dir: &Path, name: &str) -> (PathBuf, Vec<u8>) {
+        let image = fixture_image(name);
+        let p = dir.join(name);
+        fs::write(&p, &image).expect("rom");
+        (p, image)
+    }
+
+    fn recover_request(rom: &Path, entry: u32, exits: &[u32]) -> GameplayRecoverRequest {
+        GameplayRecoverRequest {
+            request_id: "test-recover-1".to_string(),
+            rom_path: rom.to_string_lossy().to_string(),
+            entry,
+            exits: exits.to_vec(),
+            address_labels: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ipc_recover_devolve_grafo_com_identidade_de_rom() {
+        let dir = ipc_dir("ok");
+        let (rom, image) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let resp = ipc_recover(&recover_request(&rom, 0x946, &[0x970])).expect("recover");
+        assert_eq!(resp.request_id, "test-recover-1");
+        assert_eq!(resp.profile_id, "m68k.counter_threshold_state_gate.v1");
+        assert_eq!(
+            resp.rom_sha256,
+            sha256_hex(&image),
+            "identidade = SHA do arquivo lido"
+        );
+        assert_eq!((resp.operator.as_str(), resp.threshold), (">=", 6));
+        assert!(
+            resp.threshold_range.0 <= 12 && 12 <= resp.threshold_range.1,
+            "12 debe ser editabel: {:?}",
+            resp.threshold_range
+        );
+        assert!(resp.graph_json.contains("rom_counter_compare"));
+        assert!(!resp.limitations.is_empty(), "limitaciones viaxan co grafo");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ipc_recover_recusa_fronteira_por_motivo_estruturado() {
+        let dir = ipc_dir("fronteira");
+        let (rom, _) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let base = recover_request(&rom, 0x946, &[0x970]);
+
+        let mut sen_id = base.clone();
+        sen_id.request_id = String::new();
+        let e = ipc_recover(&sen_id).unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+
+        let mut rom_vella = base.clone();
+        rom_vella.rom_path = dir.join("non-existe.bin").to_string_lossy().to_string();
+        let e = ipc_recover(&rom_vella).unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+
+        let mut sen_saida = base.clone();
+        sen_saida.exits = Vec::new();
+        let e = ipc_recover(&sen_saida).unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+
+        let mut entrada_como_saida = base.clone();
+        entrada_como_saida.exits = vec![0x946];
+        let e = ipc_recover(&entrada_como_saida).unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+
+        let grande = dir.join("grande.bin");
+        let f = fs::File::create(&grande).expect("sparse");
+        f.set_len(MAX_ROM_BYTES + 1).expect("set_len");
+        let mut enorme = base.clone();
+        enorme.rom_path = grande.to_string_lossy().to_string();
+        let e = ipc_recover(&enorme).unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+        assert!(!e.retryable, "recusas deterministas non se reintentan");
+
+        // ROM errada: ceros onde hai que recuperar a forma — recusa do perfil, non panic.
+        let branca = dir.join("branca.bin");
+        fs::write(&branca, vec![0u8; 65536]).expect("branca");
+        let e = ipc_recover(&recover_request(&branca, 0x946, &[0x970])).unwrap_err();
+        assert_eq!(e.code, "profile_refused");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ipc_scan_devolve_candidatos_e_marca_a_ambiguidade() {
+        let dir = ipc_dir("scan");
+        let (rom1, _) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let r = ipc_scan(&GameplayScanRequest {
+            request_id: "test-scan-1".to_string(),
+            rom_path: rom1.to_string_lossy().to_string(),
+        })
+        .expect("scan");
+        assert_eq!(r.candidates.len(), 1);
+        assert!(!r.ambiguous);
+        assert_eq!(r.candidates[0].entry, 0x946);
+        assert_eq!(r.request_id, "test-scan-1", "eco de identidade de chamada");
+        assert_eq!(r.rom_sha256, sha256_hex(&fs::read(&rom1).unwrap()));
+
+        // Ambiguidade real: a mesma rotina en dous enderezos dunha imaxe sen
+        // simbolos. Duplicase o span completo da rexion (0x946..0xCCC, incluida
+        // a segunda bloco ao que salta a rama de volta) porque copiar so o
+        // primeiro bloque deixa o BLT fóra do código válido e non e candidato.
+        let image = fixture_image("goal_original_t6.hex");
+        let span = image[0x946..0xCCC].to_vec();
+        let mut image2 = image;
+        image2[0x4000..0x4000 + span.len()].copy_from_slice(&span);
+        let rom_dup = dir.join("rotina_duplicada.bin");
+        fs::write(&rom_dup, &image2).expect("dup");
+        let r = ipc_scan(&GameplayScanRequest {
+            request_id: "test-scan-2".to_string(),
+            rom_path: rom_dup.to_string_lossy().to_string(),
+        })
+        .expect("scan ambigua");
+        assert_eq!(
+            r.candidates.len(),
+            2,
+            "as dúas formas com guarda son candidatas"
+        );
+        assert!(r.ambiguous, "rotina ambigua: a varredura non escolhe");
+        let mut entries: Vec<u32> = r.candidates.iter().map(|c| c.entry).collect();
+        entries.sort_unstable();
+        assert_eq!(entries, vec![0x946, 0x4000]);
+        // Un candidato duplicado é recuperable coas súas propias entradas/saidas:
+        // a ambiguidade recúsase na varredura, non na recuperación declarada.
+        let rec_dup = ipc_recover(&recover_request(&rom_dup, 0x4000, &[0x402A]))
+            .expect("recuperar a copia declarada");
+        assert_eq!(rec_dup.threshold, 6);
+        assert_eq!(rec_dup.entry, 0x4000);
+
+        // two_passages: a regra 2 non ten guarda; a varredura so ve a 1 e a
+        // interface debe declarar entrada/saidas para a outra (recuperable).
+        let (rom2, _) = write_fixture_rom(&dir, "two_passages.hex");
+        let r = ipc_scan(&GameplayScanRequest {
+            request_id: "test-scan-3".to_string(),
+            rom_path: rom2.to_string_lossy().to_string(),
+        })
+        .expect("scan two_passages");
+        assert_eq!(r.candidates.len(), 1);
+        let rec2 = ipc_recover(&recover_request(&rom2, 0xAA0, &[0xAC8, 0xC7A]))
+            .expect("regras sen guarda recuperables con entrada/saidas declaradas");
+        assert_eq!(rec2.threshold, 60);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn compare_threshold(graph_json: &str) -> i64 {
+        let v: Value = serde_json::from_str(graph_json).expect("grafo JSON valido");
+        v["nodes"]
+            .as_array()
+            .expect("nodes")
+            .iter()
+            .find(|n| n["type"].as_str() == Some("rom_counter_compare"))
+            .expect("no rom_counter_compare")["params"]["threshold"]
+            .as_i64()
+            .expect("threshold i64")
+    }
+
+    #[test]
+    fn ipc_edit_permite_so_o_limiar_na_faixa() {
+        let dir = ipc_dir("edit");
+        let (rom, _) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let recovered = ipc_recover(&recover_request(&rom, 0x946, &[0x970])).expect("recover");
+        assert_eq!(compare_threshold(&recovered.graph_json), 6);
+
+        let editado = ipc_edit(&GameplayEditRequest {
+            request_id: "test-edit-1".to_string(),
+            graph_json: recovered.graph_json.clone(),
+            threshold: 12,
+        })
+        .expect("12 na faixa");
+        assert_eq!(compare_threshold(&editado.graph_json), 12);
+        assert_eq!(
+            editado.request_id, "test-edit-1",
+            "eco de identidade de chamada"
+        );
+
+        let e = ipc_edit(&GameplayEditRequest {
+            request_id: "test-edit-2".to_string(),
+            graph_json: recovered.graph_json.clone(),
+            threshold: 100_000,
+        })
+        .unwrap_err();
+        assert_eq!(e.code, "range_refused", "fora da faixa: motivo previsto");
+
+        let e = ipc_edit(&GameplayEditRequest {
+            request_id: "test-edit-3".to_string(),
+            graph_json: "x".repeat(MAX_GRAPH_BYTES + 1),
+            threshold: 12,
+        })
+        .unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ipc_reabertura_recusa_grafo_adulterado() {
+        let dir = ipc_dir("adulterado");
+        let (rom, _) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let recovered = ipc_recover(&recover_request(&rom, 0x946, &[0x970])).expect("recover");
+        let mut graph: Value = serde_json::from_str(&recovered.graph_json).expect("json");
+        let nodes = graph["nodes"].as_array_mut().expect("nodes");
+        let add = nodes
+            .iter_mut()
+            .find(|n| n["type"].as_str() == Some("rom_counter_add"))
+            .expect("no rom_counter_add");
+        let step = add["params"]["step"].as_i64().expect("step i64");
+        add["params"]["step"] = json!(step + 1);
+        let adulterado = serde_json::to_string(&graph).expect("serializar");
+
+        let e = ipc_rebuild(&rebuild_request(
+            &dir,
+            &rom,
+            &sha256_hex(&fs::read(&rom).unwrap()),
+            &adulterado,
+            "patch",
+        ))
+        .unwrap_err();
+        assert_eq!(e.code, "graph_tampered");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn rebuild_request(
+        dir: &Path,
+        base: &Path,
+        expected_sha: &str,
+        graph_json: &str,
+        method: &str,
+    ) -> GameplayRebuildRequest {
+        GameplayRebuildRequest {
+            request_id: "test-rebuild-1".to_string(),
+            base_path: base.to_string_lossy().to_string(),
+            expected_sha256: expected_sha.to_string(),
+            graph_json: graph_json.to_string(),
+            output_path: dir
+                .join(format!("saida-{}.bin", nonce()))
+                .to_string_lossy()
+                .to_string(),
+            method: method.to_string(),
+        }
+    }
+
+    #[test]
+    fn ipc_rebuild_patch_e_regeneracion_coinciden() {
+        let dir = ipc_dir("rebuild");
+        let (rom, image) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let recovered = ipc_recover(&recover_request(&rom, 0x946, &[0x970])).expect("recover");
+        let editado = ipc_edit(&GameplayEditRequest {
+            request_id: "test-edit-r".to_string(),
+            graph_json: recovered.graph_json.clone(),
+            threshold: 12,
+        })
+        .expect("edit");
+        let sha_base = sha256_hex(&image);
+
+        let p = ipc_rebuild(&rebuild_request(
+            &dir,
+            &rom,
+            &sha_base,
+            &editado.graph_json,
+            "patch",
+        ))
+        .expect("patch");
+        assert_eq!(p.method, "patch_moveq_immediate");
+        assert_eq!(
+            p.request_id, "test-rebuild-1",
+            "eco de identidade de chamada"
+        );
+        assert_eq!(p.input_sha256, sha_base);
+        assert_eq!(p.changed_offsets, vec![0x961], "só o inmediato do MOVEQ");
+        let g = ipc_rebuild(&rebuild_request(
+            &dir,
+            &rom,
+            &sha_base,
+            &editado.graph_json,
+            "regenerate",
+        ))
+        .expect("regenerate");
+        assert_eq!(g.method, "regenerate_region_from_graph");
+        assert_eq!(
+            g.output_sha256, p.output_sha256,
+            "verificado, non presumido"
+        );
+        assert_ne!(p.output_sha256, sha_base, "a copia editada diste da base");
+        assert_eq!(
+            fs::read(&p.output_path)
+                .map(|b| sha256_hex(&b))
+                .ok()
+                .as_deref(),
+            Some(p.output_sha256.as_str())
+        );
+
+        // no-op: grafo sen editar rexenera a base idéntica
+        let n = ipc_rebuild(&rebuild_request(
+            &dir,
+            &rom,
+            &sha_base,
+            &recovered.graph_json,
+            "regenerate",
+        ))
+        .expect("no-op");
+        assert_eq!(n.output_sha256, sha_base);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ipc_rebuild_recusa_resultado_antigo_tras_trocar_a_rom() {
+        let dir = ipc_dir("antiga");
+        let (rom_a, image_a) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let recovered = ipc_recover(&recover_request(&rom_a, 0x946, &[0x970])).expect("recover");
+        let editado = ipc_edit(&GameplayEditRequest {
+            request_id: "test-edit-antiga".to_string(),
+            graph_json: recovered.graph_json,
+            threshold: 12,
+        })
+        .expect("edit");
+
+        // Sesión nova: outra ROM (a mesma imaxe cun byte fora da rexión mudado).
+        let mut bytes_b = image_a.clone();
+        bytes_b[0x1234] ^= 0xFF;
+        let rom_b = dir.join("rom-b.bin");
+        fs::write(&rom_b, &bytes_b).expect("rom b");
+        let sha_b = sha256_hex(&bytes_b);
+
+        // (a) grafo vello + base nova: o SHA esperado coincide coa base pero non co grafo.
+        let e = ipc_rebuild(&rebuild_request(
+            &dir,
+            &rom_b,
+            &sha_b,
+            &editado.graph_json,
+            "patch",
+        ))
+        .unwrap_err();
+        assert_eq!(e.code, "identity_mismatch");
+
+        // (b) grafo da sesion nova + base vella: o SHA esperado coincide coa base
+        //     informada, pero o grafo procede da ROM B: identity_mismatch tamén aquí.
+        let rec_b = ipc_recover(&recover_request(&rom_b, 0x946, &[0x970])).expect("recover b");
+        let edit_b = ipc_edit(&GameplayEditRequest {
+            request_id: "test-edit-antiga-b".to_string(),
+            graph_json: rec_b.graph_json,
+            threshold: 12,
+        })
+        .expect("edit b");
+        let e = ipc_rebuild(&rebuild_request(
+            &dir,
+            &rom_a,
+            &sha256_hex(&image_a),
+            &edit_b.graph_json,
+            "patch",
+        ))
+        .map(|_| unreachable!("base vella co grafo novo debe recusarse"))
+        .unwrap_err();
+        assert_eq!(e.code, "identity_mismatch");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ipc_rebuild_recusa_limiar_fora_da_faixa_no_grafo() {
+        // O limiar pode chegar fora da faixa sen pasar por ipc_edit (grafo
+        // editado a man ou de antes dunha mudança de ROM). A reconstrución
+        // recúsao co mesmo motivo estruturado que a edición.
+        let dir = ipc_dir("rbfaixa");
+        let (rom, image) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let recovered = ipc_recover(&recover_request(&rom, 0x946, &[0x970])).expect("recover");
+        let mut graph: Value = serde_json::from_str(&recovered.graph_json).expect("json");
+        let nodes = graph["nodes"].as_array_mut().expect("nodes");
+        let compare = nodes
+            .iter_mut()
+            .find(|n| n["type"].as_str() == Some("rom_counter_compare"))
+            .expect("no rom_counter_compare");
+        compare["params"]["threshold"] = json!(100_000);
+        let adulterado = serde_json::to_string(&graph).expect("serializar");
+
+        let e = ipc_rebuild(&rebuild_request(
+            &dir,
+            &rom,
+            &sha256_hex(&image),
+            &adulterado,
+            "patch",
+        ))
+        .unwrap_err();
+        assert_eq!(
+            e.code, "range_refused",
+            "limiar fóra da faixa: motivo previsto"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn ipc_rebuild_recusa_fronteira_por_motivo_estruturado() {
+        let dir = ipc_dir("rbfront");
+        let (rom, image) = write_fixture_rom(&dir, "goal_original_t6.hex");
+        let recovered = ipc_recover(&recover_request(&rom, 0x946, &[0x970])).expect("recover");
+        let sha = sha256_hex(&image);
+
+        let mut metodo = rebuild_request(&dir, &rom, &sha, &recovered.graph_json, "meter_prisa");
+        let e = ipc_rebuild(&metodo).unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+
+        metodo.method = "patch".to_string();
+        metodo.output_path = rom.to_string_lossy().to_string();
+        let e = ipc_rebuild(&metodo).unwrap_err();
+        assert_eq!(
+            e.code, "invalid_request",
+            "a saída debe ser distinta (preserva o orixinal)"
+        );
+
+        let existente = dir.join("existente.bin");
+        fs::write(&existente, [1u8]).expect("existente");
+        metodo.output_path = existente.to_string_lossy().to_string();
+        let e = ipc_rebuild(&metodo).unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+
+        let mut sen_id = rebuild_request(&dir, &rom, &sha, &recovered.graph_json, "patch");
+        sen_id.request_id = String::new();
+        let e = ipc_rebuild(&sen_id).unwrap_err();
+        assert_eq!(e.code, "invalid_request");
+
+        let mut sha_malo = rebuild_request(&dir, &rom, &sha, &recovered.graph_json, "patch");
+        sha_malo.expected_sha256 = "f".repeat(64);
+        let e = ipc_rebuild(&sha_malo).unwrap_err();
+        assert_eq!(e.code, "identity_mismatch");
         let _ = fs::remove_dir_all(dir);
     }
 

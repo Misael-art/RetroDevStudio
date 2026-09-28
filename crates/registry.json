@@ -50,15 +50,25 @@
     {
       "nome": "rex-gameplay",
       "manifesto": "crates/rex-gameplay/Cargo.toml",
-      "descricao": "Recuperacion delimitada de unha regra de gameplay M68K (guarda de input + contador + limiar + escrita de estado + chamada externa opaca) a partir dos bytes dunha ROM Mega Drive, con grafo NodeGraph v1 editable so no limiar e reconstrucion por patch ou regeneracion sen crecemento. Perfil m68k.counter_threshold_state_gate.v1, Experimental. Contrato en crates/rex-gameplay/CONTRACT.md.",
+      "descricao": "Recuperacion delimitada de unha regra de gameplay M68K (guarda de input + contador + limiar + escrita de estado + chamada externa opaca) a partir dos bytes dunha ROM Mega Drive, con grafo NodeGraph v1 editable so no limiar e reconstrucion por patch ou regeneracion sen crecemento. Perfil m68k.counter_threshold_state_gate.v1, Experimental. Contrato en crates/rex-gameplay/CONTRACT.md. O backend xa a consume (adaptador + catro comandos Tauri rexistrados, chamadas reais testadas); o degrau non se promove nesta rolda por ordem expresa do operador.",
       "maturidade": "gates-proprios-aprovados",
       "maturidade_data": "2026-09-28",
+      "maturidade_nota": "A escada diria backend-integrado (hai dependencia por path, adaptador e chamadas reais testadas). NON se promove: o operador ordenou «sem merge, release ou promoción de maturidade» nesta rolda e falta aínda o fluxo pola interface. Rexístranse os feitos medidos; o degrau queda para cando o operador o autorice.",
       "gates": {
         "medidos_em": "2026-09-28T17:08Z UTC no tronco do integrador, despois do cherry-pick -x (local f35ed0d)",
         "fmt": "OK (rc=0)",
         "clippy_all_targets": "OK (rc=0, -D warnings)",
         "test_locked": "OK — 16 testes executados (6 lib + 10 profile), 0 fallos, 0 ignorados; numeros medidos na localizacion nova, non os anunciados pola fronte",
         "evidencia": "docs/rex_profiles/gameplay_recovery/REPORT.md (fronte) e data/rex_profiles/gameplay_recovery/evidence/2026-09-28-prova-real/ (report.json, real-run.log, SHA256SUMS; prova real SGDK+core executada pola fronte, non re-executada por min ata a rolda de integracion)"
+      },
+      "camada_backend": {
+        "medido_em": "2026-09-28T17:38Z..17:49Z UTC, branch codex/rex-integrator-crates-registry sobre 63d39a2",
+        "dependencia": "src-tauri/Cargo.toml: rex-gameplay = { path = \"../crates/rex-gameplay\" }; Cargo.lock gaña só a entrada local (cero crates externos novos)",
+        "adaptador": "src-tauri/src/tools/reverse/decomp/rex_gameplay.rs — DTOs de fronteira snake_case con deny_unknown_fields nos requests; erros como InspectionError { code, message, retryable=false } co conxunto pechado invalid_request / identity_mismatch / range_refused / graph_tampered / io_error / profile_refused (o texto integro do crate viaxa en message); limites explicitos: ROM 32 MiB, grafo 8 MiB, 64 saidas, 512 rotulos, request_id <=128; identidade: o grafo leva rom_sha256 e a reconstrucion exixe SHA da base == esperado == do grafo",
+        "comandos": "catro comandos Tauri en src-tauri/src/lib.rs rexistrados en generate_handler! e executados fora do fio principal con run_heavy_command_off_main_thread (fallback command_interrupted, retryable=true): rex_gameplay_scan, rex_gameplay_recover, rex_gameplay_edit_threshold, rex_gameplay_rebuild. A PROPOSTA (a63e3a3) pedía rom_scan_gameplay_gate / rom_recover_gameplay_gate / rom_edit_gameplay_threshold / rom_rebuild_gameplay; o integrador renomounos para a convencion rex_* do produto (rex_addressing_*, rex_kosinski_*, rex_resource_*) e substituíu os argumentos soltos por un request DTO con request_id, para poder recusar respostas de sesion anterior",
+        "testes": "10 probas da capa (9 novas desta rolda + a do adaptador previo): identidade na recuperacion, recusa de fronteira por motivo estruturado, varredura con candidatos e ambiguidade, edicion so do limiar na faixa, grafo adulterado na reapertura, patch vs. regeneracion byte-identicos, recusa de resultado antigo tras trocar a ROM, limiar fora de faixa na via de reconstrucion. Suite do backend: 780 executados / 0 fallos / 67 ignorados (rc=0). clippy --lib -D warnings rc=0. fmt --check rc=0.",
+        "mutaciones": "M1..M5 mataron 2, 1, 1, 1 e 2 probas (identity_mismatch, eco de request_id, marca de ambiguidade, limite de bytes do grafo, range_refused); restauracion conferida por SHA-256 do adaptador (0b562d3a...c3ab79 identica antes e despois) e re-execucion verde",
+        "evidencia": "data/rex_profiles/gameplay_recovery/evidence/2026-09-28-integracao-funcional/ (red-ipc-layer.log, green-ipc-layer.log, mutaciones-ipc.log)"
       },
       "acoplamento_declarado": "Zero dependencias externas (Cargo.lock do paquete con 7 liñas); as 3 fixtures hex vendorizan-se dentro do paquete con PROVENANCE.md; non depende de data/ externamente.",
       "nao_alega": "non e decompilacion xeral nin descubrimento automatico de rotinas: so o perfil pechado m68k.counter_threshold_state_gate.v1, con recusa explícita fora del. A equivalencia e por conxunto declarado de estados (80/80), non universal. Non se alega fluxo do usuario: a rolda de integracion en curso publica comandos e UI como Experimental; calquera promotura de degrau queda para o operador. JSR segue opaco; vivacidade de rexistros tras a chamada non analizada.",
