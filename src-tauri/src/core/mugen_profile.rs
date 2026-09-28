@@ -206,6 +206,34 @@ pub(crate) fn convert_character_v1(
             },
         );
     }
+    let boxes_total: usize = planned
+        .actions
+        .values()
+        .flat_map(|a| a.frames.iter())
+        .map(|f| f.clsn1.len() + f.clsn2.len())
+        .sum();
+    let mut resources: Vec<serde_json::Value> = planned
+        .provenance
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "item": p.item, "source": p.source.render(), "source_sha256": p.source_sha256,
+                "transform": p.transform,
+                "target": if p.item.starts_with("anim:") { format!("sprite.animations.action_{}", &p.item[5..]) } else { "sprite.asset (atlas)".to_string() },
+                "fidelity": p.fidelity.as_str(), "reason": p.reason, "consequence": p.consequence,
+            })
+        })
+        .collect();
+    if boxes_total > 0 {
+        resources.push(serde_json::json!({
+            "item": "collision", "source": air_rel, "source_sha256": air_sha,
+            "transform": format!("{boxes_total} caixas Clsn1/Clsn2 por frame -> tabelas na ROM"),
+            "target": "sprite.animations.*.mugen_frames[].clsn1/clsn2",
+            "fidelity": "manual",
+            "reason": "as caixas sao preservadas por frame, mas nenhuma regra de jogo as usa no perfil v1",
+            "consequence": "golpes nao acertam nem recebem dano sozinhos; e preciso ligar a logica de colisao manualmente",
+        }));
+    }
     let report = serde_json::json!({
         "schema": REPORT_SCHEMA,
         "profile": plan::PROFILE_ID,
@@ -216,12 +244,7 @@ pub(crate) fn convert_character_v1(
         },
         "cell": {"width": cw, "height": ch, "anchor": [planned.anchor_x, planned.anchor_y]},
         "runtime_needs": {"loopstart": planned.needs_runtime.loopstart, "frame_table": planned.needs_runtime.frame_table, "clsn_table": planned.needs_runtime.clsn_table},
-        "resources": planned.provenance.iter().map(|p| serde_json::json!({
-            "item": p.item, "source": p.source.render(), "source_sha256": p.source_sha256,
-            "transform": p.transform,
-            "target": if p.item.starts_with("anim:") { format!("sprite.animations.action_{}", &p.item[5..]) } else { "sprite.asset (atlas)".to_string() },
-            "fidelity": p.fidelity.as_str(), "reason": p.reason, "consequence": p.consequence,
-        })).collect::<Vec<_>>(),
+        "resources": resources,
         "metrics": planned.metrics.iter().map(|m| serde_json::json!({
             "name": m.name, "unit": m.unit, "value": m.value, "origin": m.origin.as_str(),
             "window": m.window, "availability": m.availability, "subject": m.subject.render(),
@@ -244,6 +267,155 @@ pub(crate) fn convert_character_v1(
         animations,
         report,
     }))
+}
+
+// ---------------------------------------------------------------- resumo para o usuario
+
+/// Acrescenta ao relatorio os itens de personagem que dependem do DEF/CMD (comandos, som)
+/// e grava o resumo por categoria (`summary`).
+pub(crate) fn append_character_items(
+    report: &mut serde_json::Value,
+    commands: &[(String, String, Vec<String>)],
+    sound_rel: Option<&str>,
+) {
+    if let Some(behavior) = report["behavior"].as_array_mut() {
+        for (name, source, unsupported) in commands {
+            behavior.push(if unsupported.is_empty() {
+                serde_json::json!({ "item": format!("command:{name}"), "source": source, "fidelity": "direct",
+                    "target": format!("input_command {name}"),
+                    "reason": "sequencia de botoes/direcoes representavel no controle Mega Drive",
+                    "consequence": "o comando e reconhecido no jogo" })
+            } else {
+                serde_json::json!({ "item": format!("command:{name}"), "source": source, "fidelity": "approximate",
+                    "target": format!("input_command {name}"),
+                    "reason": format!("partes sem equivalente no controle Mega Drive: {}", unsupported.join(", ")),
+                    "consequence": "o comando pode ser reconhecido de forma diferente do original" })
+            });
+        }
+        if let Some(sound) = sound_rel {
+            behavior.push(serde_json::json!({ "item": "sound", "source": sound, "fidelity": "manual",
+                "target": "audio_bank (quando o .snd e legivel)",
+                "reason": "sons do .snd sao copiados como assets, mas nenhum PlaySnd e ligado a execucao no perfil v1",
+                "consequence": "o personagem fica mudo ate voce ligar os sons nos estados" }));
+        }
+    }
+    let summary = summarize(report);
+    report["summary"] = summary;
+}
+
+const CATEGORIES: [(&str, &str); 7] = [
+    ("sprites", "Sprites e paleta"),
+    ("animations", "Animacoes"),
+    ("commands", "Comandos"),
+    ("states", "Estados e comportamento"),
+    ("collisions", "Colisoes"),
+    ("sound", "Som"),
+    ("stage", "Cenario (stage)"),
+];
+
+fn category_of(item: &str) -> &'static str {
+    if item == "palette" || item.starts_with("sprite:") || item == "sprites" {
+        "sprites"
+    } else if item.starts_with("anim:") {
+        "animations"
+    } else if item.starts_with("command:") {
+        "commands"
+    } else if item.starts_with("statedef:") || item.starts_with("controller:") {
+        "states"
+    } else if item == "collision" {
+        "collisions"
+    } else if item == "sound" {
+        "sound"
+    } else {
+        "stage"
+    }
+}
+
+type CategoryAcc = (BTreeMap<&'static str, u32>, Vec<serde_json::Value>);
+
+/// Resumo por categoria e por classe de fidelidade. Categoria sem itens = `absent`
+/// (nao existe no pacote ou nao se aplica), nunca apresentada como "ok".
+pub(crate) fn summarize(report: &serde_json::Value) -> serde_json::Value {
+    let mut cats: BTreeMap<&str, CategoryAcc> = BTreeMap::new();
+    let mut totals: BTreeMap<&str, u32> = ["direct", "approximate", "manual", "unsupported"]
+        .iter()
+        .map(|k| (*k, 0))
+        .collect();
+    let mut bridges = 0;
+    for key in ["resources", "behavior"] {
+        for it in report[key].as_array().into_iter().flatten() {
+            let item = it["item"].as_str().unwrap_or("");
+            let fid: &'static str = match it["fidelity"].as_str().unwrap_or("unsupported") {
+                "direct" => "direct",
+                "approximate" => "approximate",
+                "manual" => "manual",
+                _ => "unsupported",
+            };
+            if item.starts_with("controller:") && fid != "direct" {
+                bridges += 1;
+            }
+            *totals.get_mut(fid).unwrap() += 1;
+            let entry = cats.entry(category_of(item)).or_default();
+            *entry.0.entry(fid).or_default() += 1;
+            entry.1.push(it.clone());
+        }
+    }
+    let categories: Vec<serde_json::Value> = CATEGORIES
+        .iter()
+        .map(|(id, label)| {
+            let (counts, items) = cats.remove(id).unwrap_or_default();
+            let status = ["unsupported", "manual", "approximate", "direct"]
+                .iter()
+                .find(|k| counts.get(*k).copied().unwrap_or(0) > 0)
+                .copied()
+                .unwrap_or("absent");
+            let note = match (*id, items.is_empty()) {
+                ("stage", true) => "pacote de personagem: cenario nao faz parte desta importacao",
+                ("sound", true) => "o pacote nao declara arquivo de som",
+                ("collisions", true) => "o AIR nao declara caixas de colisao",
+                (_, true) => "nada deste tipo no pacote",
+                _ => "",
+            };
+            let n = |k: &str| counts.get(k).copied().unwrap_or(0);
+            serde_json::json!({ "id": id, "label": label, "status": status,
+                "counts": { "direct": n("direct"), "approximate": n("approximate"),
+                    "manual": n("manual"), "unsupported": n("unsupported") },
+                "note": note, "items": items })
+        })
+        .collect();
+    serde_json::json!({ "categories": categories, "totals": totals, "manual_bridges": bridges })
+}
+
+/// Linha curta para o aviso de sucesso, a partir dos relatorios gravados no projeto.
+pub(crate) fn summary_line(project_dir: &Path) -> Option<String> {
+    let mut parts = Vec::new();
+    for entry in fs::read_dir(project_dir.join("assets/mugen"))
+        .ok()?
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(id) = name.strip_suffix("_import_report.json") else {
+            continue;
+        };
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(report) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+            continue;
+        };
+        let t = &report["summary"]["totals"];
+        let n = |k: &str| t[k].as_u64().unwrap_or(0);
+        parts.push(format!(
+            "{id}: {} funcionam igual, {} com diferenca, {} precisam de ajuste manual, {} nao convertidos ({} pontes manuais no grafo); relatorio em assets/mugen/{name}",
+            n("direct"),
+            n("approximate"),
+            n("manual"),
+            n("unsupported"),
+            report["summary"]["manual_bridges"].as_u64().unwrap_or(0)
+        ));
+    }
+    parts.sort();
+    (!parts.is_empty()).then(|| format!("MUGEN (Experimental) - {}", parts.join("; ")))
 }
 
 // ---------------------------------------------------------------- comportamento
@@ -1633,6 +1805,132 @@ mod tests {
         });
         assert!(r.unwrap_err().contains("sai do pacote"));
         assert_untouched(&project);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    // ---------------------------------------------------------------- produto: falha e resumo
+
+    fn escaping_probe(root: &Path) -> PathBuf {
+        let donor = root.join("donor");
+        copy_dir(&probe_dir(), &donor);
+        fs::copy(donor.join("probe.sff"), root.join("fora.sff")).unwrap();
+        let def = fs::read_to_string(donor.join("probe.def")).unwrap();
+        fs::write(
+            donor.join("probe.def"),
+            def.replace("sprite = probe.sff", "sprite = ../fora.sff"),
+        )
+        .unwrap();
+        donor
+    }
+
+    /// Falha pelos comandos do produto: a pasta criada pela importacao desaparece.
+    #[test]
+    fn failed_import_does_not_leave_a_project_that_looks_valid() {
+        let root = temp("fail-cleanup");
+        let donor = escaping_probe(&root);
+        let base = root.join("projects");
+        fs::create_dir_all(&base).unwrap();
+        for profile in [None, Some("mugen")] {
+            let err = match profile {
+                None => crate::import_mugen_project_at_base_dir(&base, "Escape", &donor)
+                    .err()
+                    .expect("importacao deveria falhar"),
+                Some(p) => crate::import_external_project_at_base_dir(&base, "Escape", p, &donor)
+                    .err()
+                    .expect("importacao deveria falhar"),
+            };
+            assert!(err.contains("sai do pacote"), "{err}");
+            let left: Vec<_> = fs::read_dir(&base)
+                .unwrap()
+                .flatten()
+                .map(|e| e.path())
+                .collect();
+            assert!(left.is_empty(), "{profile:?}: sobrou {left:?}");
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Pasta de destino que ja existia vazia volta a ficar vazia (nunca e apagada).
+    #[test]
+    fn failed_import_into_existing_empty_dir_keeps_the_dir_empty() {
+        let root = temp("fail-existing");
+        let donor = escaping_probe(&root);
+        let base = root.join("projects");
+        let preferred = base.join("Escape");
+        fs::create_dir_all(&preferred).unwrap();
+        let _ = crate::import_mugen_project_at_base_dir(&base, "Escape", &donor)
+            .err()
+            .expect("importacao deveria falhar");
+        assert!(
+            preferred.is_dir(),
+            "pasta preexistente nao pode ser apagada"
+        );
+        assert_eq!(fs::read_dir(&preferred).unwrap().count(), 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Sucesso: o aviso resume perdas e o relatorio traz as 7 categorias com status honesto.
+    #[test]
+    fn successful_import_summarizes_losses_by_category() {
+        let root = temp("summary");
+        let donor = root.join("donor");
+        copy_dir(&probe_dir(), &donor);
+        let base = root.join("projects");
+        fs::create_dir_all(&base).unwrap();
+        let result =
+            crate::import_external_project_at_base_dir(&base, "Probe", "mugen", &donor).unwrap();
+        let notice = result.notice.clone().unwrap_or_default();
+        assert!(notice.contains("MUGEN (Experimental)"), "{notice}");
+        assert!(
+            notice.contains("precisam de ajuste manual") && notice.contains("nao convertidos"),
+            "{notice}"
+        );
+        let report: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(
+                Path::new(&result.path).join("assets/mugen/probe_import_report.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let status = |id: &str| {
+            report["summary"]["categories"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["id"] == id)
+                .map(|c| c["status"].as_str().unwrap().to_string())
+                .unwrap()
+        };
+        assert_eq!(status("sprites"), "direct");
+        assert_eq!(status("animations"), "direct");
+        assert_eq!(status("commands"), "direct");
+        assert_eq!(status("states"), "direct");
+        assert_eq!(
+            status("collisions"),
+            "manual",
+            "caixas preservadas mas sem logica"
+        );
+        assert_eq!(status("sound"), "absent");
+        assert_eq!(status("stage"), "absent");
+        assert_eq!(report["summary"]["totals"]["manual"], 1);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sentinel_summary_exposes_every_loss_class() {
+        let (root, project) = import_fixture("sentinel", "sentinel-summary");
+        let report: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(project.join("assets/mugen/sentinel_import_report.json")).unwrap(),
+        )
+        .unwrap();
+        let t = &report["summary"]["totals"];
+        for k in ["direct", "approximate", "manual", "unsupported"] {
+            assert!(t[k].as_u64().unwrap() > 0, "{k}: {t}");
+        }
+        assert!(
+            report["summary"]["manual_bridges"].as_u64().unwrap() >= 3,
+            "Taunt, Alt, Push"
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

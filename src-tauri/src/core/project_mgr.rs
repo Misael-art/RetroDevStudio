@@ -7196,6 +7196,21 @@ fn import_mugen_character_candidate(
         (imported_mugen_idle_logic_graph(&entity_id), Vec::new())
     };
     import_report["behavior"] = serde_json::Value::Array(behavior);
+    crate::core::mugen_profile::append_character_items(
+        &mut import_report,
+        &fighting_model
+            .commands
+            .iter()
+            .map(|command| {
+                (
+                    command.display_name.clone(),
+                    command.source.clone(),
+                    command.unsupported_tokens.clone(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        files.entries.get("sound").map(String::as_str),
+    );
     let report_rel = format!("assets/mugen/{character_slug}_import_report.json");
     let report_path = project_dir.join(&report_rel);
     if let Some(parent) = report_path.parent() {
