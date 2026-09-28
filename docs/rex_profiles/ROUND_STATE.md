@@ -24,9 +24,10 @@ limites de cobertura da própria célula e as provas herdadas valendo.
   para A/B (caminho canônico `data/canonical-local-2026-09-21/corpus/`).
 - Janela atual: o integrador usou 2026-09-28T08:14Z–09:25Z (UTC) para os gates
   da integración do adaptador, 10:57Z–11:01Z para as re-execucións que a
-  limpeza de `/tmp` obrigou a refazer e 11:44Z–12:02Z para os gates da rolda de
-  aceite. Nada pesado queda executando; non hai monitores de CI vivos nin jobs
-  de A ou B iniciados por esta sesión.
+  limpeza de `/tmp` obrigou a refazer, 11:44Z–12:02Z para os gates da rolda de
+  aceite e 12:18Z–12:20Z para a barra de frontend no HEAD final. Nada pesado
+  queda executando; non hai monitores de CI vivos nin jobs de A ou B iniciados
+  por esta sesión.
 
 ## Matriz de endereçamento (propriedade: agente A)
 
@@ -357,7 +358,12 @@ produto segue com os codecs que já tinha.
   `npm run check:tree` rc=0 (o directorio vello xa non existe), `cargo fmt
   --check` rc=0, `cargo clippy --lib -- -D warnings` rc=0 e `cargo test --lib`
   con **754 / 0 / 66** e `CARGO_RC=0` — as 17 probas do adaptador seguen verdes
-  co crate reconstruído e o SHA do adaptador (`7bd75ea9…`) non cambiou. Paridade
+  co crate reconstruído e o SHA do adaptador (`7bd75ea9…`) non cambiou. A barra
+  de frontend de AGENTS.md re-executada no HEAD final desta perna (`1f30467`) dá
+  rc=0 nos tres comandos (`lint`, `tsc --noEmit`, `npm test` con **749 pasados /
+  6 saltados / 755**), entre as 12:18:14Z e as 12:20:26Z, despois do último
+  commit de docs — ningún ficheiro de frontend se tocou aquí; execútase porque
+  a promoción do paquete non debe regredila. Paridade
   conferida ficheiro a ficheiro: 42 ficheiros no paquete de A, 42 neste tronco,
   cero diferenzas de nome, única diferenza de contido o README coa miña nota de
   localización; árbore graduada `9101cfb5…`. **Un fallo meu de captura,
@@ -371,7 +377,8 @@ produto segue com os codecs que já tinha.
   hai corpus BYOR no gate e non houbo merge, release nin promoción de
   maturidade. Evidencia con manifesto e SHA por ficheiro en
   `data/rex_profiles/addressing_runtime/evidence/2026-09-28-aceite-integrado/`
-  (autocomprobada: 6 artefactos listados, 6 presentes, 0 diverxencias).
+  (autocomprobada con `gates-de-frontend-no-head-final.log` dentro: 7 artefactos
+  listados, 7 presentes, 0 diverxencias).
 
 - 2026-09-28 (integrador, **rodada de integración da frente A — `crates/rex-addressing`
   sobe de `gates propios aprobados` a `backend integrado`, e só a ese degrau**),
