@@ -223,7 +223,28 @@ partir de `16386` (`value 0x3FFF` ⇒ leitura PARA FRENTE, aliassa a ROM), `valu
 com um andador de tokens que exige que todo offset emitido caiba na janela
 legível.
 
+## Matriz de bibliotecas standalone (`crates/`) — propriedade: integrador
+
+A escada tem quatro degraus e **cada degrau é um registro distinto**; subir um
+não implica o seguinte. Uma biblioteca compilar e passar nos gates próprios não
+é integração, e integração ao backend não é fluxo do usuário comprovado.
+
+| Pacote | biblioteca implementada | gates próprios aprovados | backend integrado | fluxo do usuário comprovado |
+|---|---|---|---|---|
+| `crates/rex-kosinski` (frente B) | verified (decodificador Kosinski base não-modular, 179 linhas, contrato v1 em `docs/rex_profiles/kosinski_runtime/CONTRACT.md`; entrega `3fea06e`+`1af7017`, pino revisto `0b752b7`, aplicada por `cherry-pick -x`) | **verified** — `npm run crates:gates` medido 2026-09-28T02:48Z: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **25 executados / 0 falhas / 0 ignorados** (22 contract + 3 mutations). Log + manifesto com SHA em `data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/`. Achado devolvido à B: os testes leem fixtures **fora** do pacote (`data/rex_profiles/codec/kosinski`, importado pelo integrador no mesmo pino — 27 linhas de `manifest.tsv` conferidas, 0 divergências, agregado `ea866df7…` reproduzido); o pacote não é relocável sozinho. O contrato do encoder (`0b752b7`) e o WIP `encode.rs` ficaram de fora desta entrega | **blocked** — sem `rex-kosinski` em `src-tauri/Cargo.toml`, sem adaptador, sem chamada real pelo backend | **blocked** — nada no produto usa este pacote |
+| `crates/rex-addressing` (frente A) | verified (5 perfis MD linear/SSF2 e SNES LoROM/HiROM/ExHiROM; 17 commits `9b27941..57e51d3`, PR #82, `cherry-pick -x` sem conflitos; movido de `scripts/rex_profiles/addressing_runtime/` para `crates/rex-addressing` — promoção que o `CONTRATO.md` do próprio perfil registrava como pendente do integrador) | **verified** — gates medidos 2026-09-28T02:58Z já na localização nova: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **81 executados / 0 falhas / 9 ignorados** (77 em 10 targets + 4 doc-tests). Log + manifesto em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/`. Os 9 ignorados são os BYOR (8) e a preimage exaustiva (1): o gate ordinário não depende de ROM. Pacote **relocável** — vectors pinados dentro dele. Achados devolvidos à A: 15 `.expect()` de produção cujo invariante não tem varredura adversária no gate, e o README anunciar 72 quando a suite integrada executa 77 | **blocked** — sem path dependency em `src-tauri`, sem adaptador, sem chamada real pelo backend | **blocked** |
+
+Regras desta matriz: o registro canônico é `crates/registry.json` (schema
+`rex-crate-registry/v1`), consumido por `npm run check:tree` e por
+`npm run crates:gates`; o CI chama esses gates nos dois jobs
+(`.github/workflows/ci.yml`, passo *Crate package gates*), que disparam em
+todo push/PR — não há filtro de caminho a afrouxar. Não existe `Cargo.toml` de
+workspace na raiz, e não se cria um para fazer pacote standalone compilar.
+ROMs comerciais e corpus BYOR continuam fora da árvore: comparação com
+ferramenta externa vive no script do perfil, identificada à parte.
+
 ## Cadeia de recurso comprimido (propriedade: integrador)
+
 
 | Etapa | Status | Evidência |
 |---|---|---|
@@ -245,16 +266,144 @@ quando outros recursos dependem dos bytes originais (equivalência global de
 decode verificada no teste); sem expansão de ROM, realocação ou edição de
 ponteiros no v1.
 
-Propriedade e integração (2026-09-26): as suítes da agente-A e da agente-B
-continuam **não integradas** a este tronco — seguem nos worktrees de cada uma.
-Do que a B produziu, o integrador apenas **vendorou a ferramenta de medição**
-(68k + jar + MAME) com proveniência e SHA-256 por arquivo em
+Propriedade e integração (2026-09-26, emendado 2026-09-28): as suítes da
+agente-A e da agente-B continuavam **não integradas** a este tronco — seguiam
+nos worktrees de cada uma. Do que a B produziu, o integrador apenas
+**vendorou a ferramenta de medição** (68k + jar + MAME) com proveniência e
+SHA-256 por arquivo em
 `scripts/rex_profiles/integrator/lz4w_68k/PROVENANCE.md`; nada de lá entra no
 produto. Evidência do integrador vive em namespace próprio
 (`data/rex_profiles/integrator/…`), sem invadir os namespaces `addressing/` (A)
 e `codecs/` (B) do CONTRACTS v1.
 
+Emenda 2026-09-28: duas **bibliotecas standalone** dessas frentes passaram a
+existir neste tronco — `crates/rex-kosinski` e `crates/rex-addressing`,
+registradas em `crates/registry.json` e com gates próprios medidos (ver a
+matriz de `crates/` acima). Isso é degrau de biblioteca, **não** integração:
+nada no produto consome os dois pacotes, nenhuma linha de
+`src-tauri/src/tools/reverse/decomp/` foi tocada por essa entrega. O trabalho
+em curso de cada frente segue no worktree dela e não foi integrado: a A tem
+WIP de leitura de recursos (`tests/resource_reader.rs`, `tests/support/banked.rs`)
+e a B tem WIP de encoder (`src/encode.rs`). O produto segue com os codecs que
+já tinha.
+
 ## Histórico da rodada
+
+- 2026-09-28 (integrador, **rodada `crates/` — a árvore formalizada e duas
+  bibliotecas standalone integradas uma por vez, sem promover nenhuma a
+  "integrada ao produto"**), esta célula é o checkpoint. **HEAD de partida:**
+  `9b27941`, sobre branch própria `codex/rex-integrator-crates-registry`.
+  **Ordem recebida:** "A continuará com leitura de recursos através dos perfis de
+  endereçamento. B continuará com codificação Kosinski e prova de edição sobre
+  fixture autoral. Ambos trabalharão em módulos e evidências próprios. Reserve
+  para si manifests compartilhados, registro de módulos, IPC, UI, harness
+  principal e documentos de estado. Integre uma entrega por vez; não espere a
+  conclusão das duas para começar a revisão. Formalize crates/ nas convenções do
+  projeto, preservando a finalidade de check:tree", seguida da decisão em sete
+  itens — "crates/ será a localização oficial das bibliotecas Rust independentes,
+  com gates próprios. Integração ao aplicativo será uma etapa posterior", "Não
+  permita qualquer diretório indiscriminadamente", "Não crie Cargo.toml de
+  workspace na raiz apenas para fazê-los compilar", "Um pacote esperado ausente
+  deve reprovar, não ser silenciosamente ignorado", "Não registre 'integrado ao
+  produto' só porque o pacote compila" e "Diferencie na matriz: biblioteca
+  implementada → gates próprios aprovados → backend integrado → fluxo do usuário
+  comprovado". **Commits desta célula:** `7115fc3` (formalização),
+  `96dbd20`+`f58ff05` (os dois commits da entrega B, por `cherry-pick -x`),
+  `6a43c53` (pacote registrado + cadeia de fixtures fechada), os 17 commits da
+  entrega A `9bec531..0a3ac83` (também `cherry-pick -x`, zero conflitos) e
+  `9f83d15` (promoção de `rex-addressing` para `crates/` + registro com gates
+  medidos). **Nada aqui é merge:** os dois pacotes entraram commit a commit, com
+  autoria e mensagem preservadas, e as branches de cada frente continuam sendo o
+  dono do resto do trabalho delas.
+
+  **Item 1 — `crates/` formalizado sem afrouxar a gate.** `docs/08_TREE_ARCHITECTURE.md`
+  passa a descrever `crates/<nome>/` (com `Cargo.toml`, `src/`, `examples/`,
+  `tests/`) e `crates/registry.json` + `crates/README.md`, com cinco bullets de
+  regra de inserção. `scripts/check-tree.cjs` e o espelho `.ps1` aceitam `crates/`
+  **condicionalmente ao registro**: diretório em `crates/` sem entrada no registro
+  reprova; entrada registrada sem `Cargo.toml` reprova; arquivo solto dentro de
+  `crates/` que não seja o registro nem o README reprova; todo o resto da verificação
+  de primeiro nível continua igual. Sete testes em
+  `scripts/check-tree-crates.test.mjs`, incluindo o que exige que as **duas
+  implementações** (cjs e ps1) aceitem o mesmo conjunto de diretórios — a gate
+  duplicada não pode divergir.
+
+  **Itens 2 a 4 — registro e gates próprios, com ausência reprovando.**
+  `crates/registry.json` (schema `rex-crate-registry/v1`) é a fonte única da lista
+  de pacotes; `scripts/crates-gates.mjs` lê o registro e emite exatamente os três
+  comandos pedidos por pacote, na ordem: `cargo fmt --manifest-path <m> -- --check`,
+  `cargo clippy --manifest-path <m> --all-targets -- -D warnings`,
+  `cargo test --manifest-path <m> --locked`, com `CARGO_TARGET_DIR` apontando para
+  `target/crates-gates` (fora da árvore rastreada). Pacote declarado sem manifesto
+  produz `REPROVADO` e **não** é ignorado; registro ausente ou com schema errado é
+  rc=1. Seis testes em `scripts/crates-gates.test.mjs`; a **não-vacuidade** da regra
+  de ausência foi provada mutando temporariamente a condição para `if (false && …)`:
+  caíram exatamente os dois testes da regra, e o suíte voltou a verde depois de
+  reverter. `npm run crates:gates` entrou no `package.json` e no CI
+  (`.github/workflows/ci.yml`, passo *Crate package gates* nos dois jobs, com
+  `outcome` na janela de resumo) — os dois jobs disparam em todo push/PR, então não
+  houve filtro de caminho a afrouxar.
+
+  **Item 6 — uma entrega por vez: primeiro a B, depois a A.** A B entrou antes:
+  decodificador Kosinski v1 (`3fea06e`+`1af7017`, PR #81, pino revisto `0b752b7`)
+  virou `crates/rex-kosinski` e passou nos gates medidos às 02:48Z — **25 testes
+  executados / 0 falhas / 0 ignorados** (22 contract + 3 mutations). A primeira
+  corrida **falhou** (15 de 25 com "fixture golden/…: No such file or directory"):
+  o pacote lê fixtures **fora** dele, e o perfil existia só na outra linha de branch
+  da B. Fechei como integrador — importando os dados e os scripts geradores no mesmo
+  pino, conferindo as **27** linhas de `manifest.tsv` (0 divergências de SHA) e
+  reproduzindo o hash agregado `ea866df7…` — **sem editar o teste de outra agente**.
+  O achado volta para a B como trabalho dela: vendorizar as fixtures (ou aceitar o
+  caminho por variável de ambiente) para o pacote ser relocável, e a metadata
+  `license` que falta. O contrato do **encoder** (`0b752b7`) e o WIP `encode.rs`
+  ficaram fora: são a próxima entrega dela. A A entrou depois, com os 17 commits do
+  intervalo `9b27941..57e51d3` (PR #82) e o `git mv` de
+  `scripts/rex_profiles/addressing_runtime/rex-addressing` para
+  `crates/rex-addressing` — promoção que o `CONTRATO.md` do próprio perfil declarava
+  como pendente do integrador. Gates medidos às 02:58Z já na localização nova:
+  **81 executados / 0 falhas / 9 ignorados** (77 em 10 targets + 4 doc-tests); os 9
+  ignorados são os 8 BYOR e o preimage exaustivo, então o gate ordinário não depende
+  de ROM. Diferença registrada: o README do pacote anuncia 72 e a suite integrada
+  executa 77. Achado devolvido à A: 15 `.expect()` de produção cujo invariante não
+  tem varredura adversária no gate.
+
+  **Item 7 — a escada de quatro degraus.** Nova seção "Matriz de bibliotecas
+  standalone (`crates/`)" no estado corrente, com as duas pacotes em
+  `biblioteca implementada: verified` e `gates próprios aprovados: verified` e
+  **`backend integrado: blocked` / `fluxo do usuário comprovado: blocked`** nos dois
+  — sem `rex-kosinski` nem `rex-addressing` em `src-tauri/Cargo.toml`, sem adaptador,
+  sem chamada real pelo backend. As matrizes de endereçamento e de codecs (propriedade
+  de A e B) **não** foram tocadas: continuam `blocked`, que é o que é verdade.
+  `docs/rex_profiles/CONTRACTS.md` ganhou a §6 registrando a reserva de superfícies
+  (manifests e lockfiles, registro de módulos, `src/core/ipc/`, `src/components/`,
+  harness principal E2E, `check-tree.*`, `crates-gates.mjs`, `ci.yml` e documentos de
+  estado) e o direito de cada frente ao próprio namespace de evidência.
+
+  **Gates desta barra (medidos, com onde mora cada número).** Pacote de evidência
+  `data/rex_profiles/integrator/crates_registry/evidence/2026-09-28-barra-de-entrega/`
+  (`manifest.json` com SHA-256 por arquivo): `npm run check:tree` rc=0
+  (`gates-frontend.log:6`) · `npm run lint` rc=0 (`:10`) · `npx tsc --noEmit` rc=0
+  (`:14`) · `npm test` **747 passed / 6 skipped (753)**, 118,35 s (`:41-42`, rc na
+  `:46`) · `npm run crates:gates` rc=0 com os seis gates dos dois pacotes
+  (`gates-crates.log`: kosinski 6/9/61, addressing 64/67/238, rc na 241) ·
+  `cargo fmt -- --check` e `cargo clippy -- -D warnings` do produto rc=0
+  (`gates-rust-produto.log:3,6`) · `npm run host:certify` rc=0 — **READY**,
+  fingerprint `60249508…`, lock `dd99a22f…`, `cargo test --lib` **737 passed / 0
+  failed / 66 ignored** (`host-certify.log:2357`, `Success: true` em `:2363`,
+  `READY` em `:2364`). Reconciliação da contagem de frente: o registro anterior
+  desta matriz era **737/3 (740)**; os **13** a mais são exatamente os dois
+  arquivos de teste novos (`check-tree-crates.test.mjs` 7 + `crates-gates.test.mjs`
+  6), verificados isoladamente com 13/13 passando. Os 737 do produto não mudaram:
+  nenhum fonte de produto foi tocado. Um job pesado por vez, serializado; nenhum
+  monitor de CI deixado de pé.
+
+  **Limites desta célula.** `crates/` é localização de **biblioteca**, não alegação
+  de produto; o produto continua com os codecs que já tinha (LZ4W e aPLib na
+  transação canônica), e nenhuma linha de `src-tauri/src/tools/reverse/decomp/`
+  mudou nesta rodada. Os dois pacotes seguem `Experimental` na classificação da
+  rodada, e o degrau `gates-proprios-aprovados` não autoriza ninguém a escrever
+  "integrado" em documento nenhum. **Sem merge, sem release, sem promoção de
+  maturidade.**
 
 - 2026-09-27 (integrador, **edição contextual comprovada pela interface** — o
   resultado visível que o briefing pediu, não mais um relatório do backend),

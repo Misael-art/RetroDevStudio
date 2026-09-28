@@ -1,0 +1,97 @@
+{
+  "schema": "rex-integration-gate-run/v1",
+  "descricao": "Barra de entrega da rodada de formalizacao de crates/ e integracao das duas bibliotecas standalone (rex-kosinski, rex-addressing) na branch do integrador. Cada linha de numero abaixo foi lida do log versionado junto deste manifesto.",
+  "quando_utc": "2026-09-28T03:13:45Z",
+  "quem": "integrador da rodada REX",
+  "branch": "codex/rex-integrator-crates-registry",
+  "head_sob_barra": "9f83d15fed3af04e69ed8591cb41d148599bfadd",
+  "base_da_branch": "9b27941",
+  "gates": {
+    "npm_run_check_tree": {
+      "rc": 0,
+      "saida": "OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.",
+      "log": "gates-frontend.log"
+    },
+    "npm_run_lint": {
+      "rc": 0,
+      "comando": "eslint src vite.config.ts --max-warnings=0",
+      "log": "gates-frontend.log"
+    },
+    "npx_tsc_noEmit": {
+      "rc": 0,
+      "log": "gates-frontend.log"
+    },
+    "npm_test": {
+      "rc": 0,
+      "executados": 753,
+      "passed": 747,
+      "skipped": 6,
+      "arquivos": "79 passed | 1 skipped (80)",
+      "duracao_s": 118.35,
+      "log": "gates-frontend.log"
+    },
+    "npm_run_crates_gates": {
+      "rc": 0,
+      "pacotes": {
+        "rex-kosinski": {
+          "fmt": "OK",
+          "clippy": "OK",
+          "test": "25 executados / 0 falhas / 0 ignorados (22 contract + 3 mutations)"
+        },
+        "rex-addressing": {
+          "fmt": "OK",
+          "clippy": "OK",
+          "test": "81 executados / 0 falhas / 9 ignorados (77 em 10 targets + 4 doc-tests)"
+        }
+      },
+      "log": "gates-crates.log"
+    },
+    "cargo_fmt_produto": {
+      "rc": 0,
+      "log": "gates-rust-produto.log"
+    },
+    "cargo_clippy_produto_d_warnings": {
+      "rc": 0,
+      "log": "gates-rust-produto.log"
+    },
+    "npm_run_host_certify": {
+      "rc": 0,
+      "veredito": "READY",
+      "fingerprint": "60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2",
+      "lock": "dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377",
+      "cargo_test_lib": "737 passed / 0 failed / 66 ignored (99,44 s)",
+      "upstream_smoke": "SGDK + PVSnesLib Success: true",
+      "log": "host-certify.log"
+    }
+  },
+  "reconciliacao_de_contagem": {
+    "anterior_registrado": "737 passed / 3 skipped (740) na celula de fechamento da rodada contextual",
+    "medido_agora": "747 passed / 6 skipped (753)",
+    "delta": "+13 = os dois arquivos de teste desta rodada (scripts/check-tree-crates.test.mjs com 7 e scripts/crates-gates.test.mjs com 6), verificados isoladamente: 13 passed / 0 skipped",
+    "observacao_honesta": "os 3 skips a mais nao vem desta rodada: estao nas suites pre-existentes condicionadas a toolchain/plataforma (src/core/validateUpstreamWindows.test.ts e scripts/decomp/decomp-scripts.test.mjs). A corrida desta barra roda os 13 testes novos e nao pula nenhum deles."
+  },
+  "job_pesado_serial": "check:tree -> lint -> tsc -> npm test -> crates:gates -> host:certify -> fmt/clippy do produto, um por vez; nenhum monitor de CI deixado de pe.",
+  "conteudo_do_pacote": [
+    {
+      "arquivo": "gates-crates.log",
+      "bytes": 11885,
+      "sha256": "5d23bc1194c2727d7c7a004e9965af7a3b9bb48019ee63b4fe19206cefc35f2f"
+    },
+    {
+      "arquivo": "gates-frontend.log",
+      "bytes": 3291,
+      "sha256": "3cb18c618225ab2fe07b85e7b594111b2768cdf8fd60504fc80e384ef291a602"
+    },
+    {
+      "arquivo": "gates-rust-produto.log",
+      "bytes": 245,
+      "sha256": "06ca469ce274751dacfa598cf8df7f080e7517bd0a2a38a095183a3b4ad390af"
+    },
+    {
+      "arquivo": "host-certify.log",
+      "bytes": 207044,
+      "sha256": "e9ddaf28e74ee9155436acff691bfa180367bd93c9ce2d8e68edc46ceb7b2ab9"
+    }
+  ],
+  "o_que_nao_prova": "Nada aqui alega integracao ao produto: rex-kosinski e rex-addressing seguem sem path dependency em src-tauri/Cargo.toml, sem adaptador e sem chamada real pelo backend. Os 737 testes do produto nao exercitam os dois pacotes."
+}
