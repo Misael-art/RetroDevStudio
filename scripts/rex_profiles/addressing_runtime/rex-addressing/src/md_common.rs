@@ -20,7 +20,7 @@ pub(crate) const Z80_START: u32 = 0xA00000;
 pub(crate) const Z80_END: u32 = 0xA0FFFF;
 pub(crate) const IO_START: u32 = 0xA10000;
 pub(crate) const IO_END: u32 = 0xA1FFFF;
-/// Páxina TIME roteada ao cartucho: aí viven os rexistradores do mapper SSF2.
+/// Páxina TIME rotada ao cartucho: aí viven os rexistradores do mapper SSF2.
 pub(crate) const REG_PAGE_START: u32 = 0xA13000;
 pub(crate) const REG_PAGE_END: u32 = 0xA130FF;
 pub(crate) const VDP_START: u32 = 0xC00000;

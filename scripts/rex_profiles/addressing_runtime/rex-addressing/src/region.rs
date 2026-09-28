@@ -13,7 +13,7 @@ pub enum Region {
     Z80Ram,
     /// Chip de E/S do 68K (`$A10000-$A1FFFF`).
     Io,
-    /// Páxina TIME roteada ao cartucho (`$A13000-$A130FF`): rexistradores do
+    /// Páxina TIME rotada ao cartucho (`$A13000-$A130FF`): rexistradores do
     /// mapper SSF2.
     CartIo,
     /// Work RAM do 68K (`$E00000+`).
@@ -40,7 +40,7 @@ impl Region {
         }
     }
 
-    ///rexión non-ROM: o perfil clasifícaa pero non lle dá bytes.
+    /// rexión non-ROM: o perfil clasifícaa pero non lle dá bytes.
     pub fn no_backing(self) -> AddressingError {
         AddressingError::new(
             ErrorCode::Unsupported,

@@ -174,7 +174,11 @@ pub fn invert(rom_offset: u32, state: &MapperState) -> Result<Vec<u32>, Addressi
             _ => None,
         };
         if let Some(a) = candidato {
-            let a = u32::try_from(a).expect("un enderezo de banco sempre cabe en 16 bits");
+            // A xustificación real non é que `a` vala menos de 16 bits (na área 2
+            // vale ata `half2 - 1`, até 4MB): é que `half2 ≤ 4MB < 2^32`. O corte
+            // de 16 bits fai a comprobación de abaixo, `a < window.lo..0x1_0000`.
+            let a =
+                u32::try_from(a).expect("candidato = rem_euclid(half2), e half2 ≤ 4MB cabe en u32");
             if (a >= window.lo) && (a < 0x1_0000) {
                 aliases.push((bank << 16) + a);
             }

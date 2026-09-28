@@ -1,4 +1,4 @@
-// Infraestructura de testes do paquete rex-addressing.
+// Infraestrutura de probas do paquete rex-addressing.
 //
 // Un mesmo módulo é compilado por varios binarios de test, e cada un usa só
 // parte del: o `dead_code` aquí sería ruído, non información.

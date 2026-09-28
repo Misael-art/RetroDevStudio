@@ -23,7 +23,7 @@ pub const WINDOW_SIZE: u32 = 0x80000;
 const WINDOW_OFFSET_MASK: u32 = WINDOW_SIZE - 1;
 pub const MIN_ROM_SIZE: u32 = WINDOW_SIZE; // unha xanela
 pub const MAX_ROM_SIZE: u32 = 0x800000; // 8MB
-/// Páxina TIME roteada ao cartucho: alí escriben os rexistradores do mapper.
+/// Páxina TIME rotada ao cartucho: alí escriben os rexistradores do mapper.
 pub const REGISTER_PAGE_START: u32 = md_common::REG_PAGE_START;
 pub const REGISTER_PAGE_END: u32 = md_common::REG_PAGE_END;
 /// As xanelas remapeables son 1..=7; a 0 está fixada ao banco 0.

@@ -1,0 +1,252 @@
+{
+  "formato": "rex-acceptance-v1",
+  "contract_version": 1,
+  "nota": "Vectores de aceite da capa de lectura. O esperado deriva do motor de xanelas de bsnes/GPGX e da política de corredores de CONTRATO.md §7 e §12.3; nunca de translate() nin read_resource().",
+  "regra_imaxe": {
+    "id": "banked-byte-at-v1",
+    "formula": "byte(i) = (i*37 + (i>>8)*91 + (i>>16)*47) mod 256",
+    "uso": "reconstruír a imaxe que hai que entregar xunto co caso; `imaxe.byte_len` dá o tamaño"
+  },
+  "casos": [
+    {
+      "id": "A1-lectura-simple-md-linear",
+      "que_proba": "unha lectura dentro da xanela do cartucho devolve os bytes do offset físico que declara a procedencia",
+      "operacion": "read_resource",
+      "perfil": "md-linear",
+      "imaxe": {
+        "orixe": "fixture:aceite-A1",
+        "byte_len": 1048576,
+        "sha256": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c3",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 1048576},
+      "pedido": {"cpu_address": 65536, "cpu_address_hex": "0x10000", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": true, "perfil": "md-linear", "cpu_address": 65536, "length": 32, "ataestacion": {"origin": "fixture:aceite-A1", "sha256_hex": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c3"}, "estado": {"rom_size": 1048576}, "segmentos": [{"indice": 0, "cpu_address": 65536, "cpu_address_hex": "0x10000", "cpu_len": 32, "rom_offset": 65536, "rom_offset_hex": "0x10000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "2f54799ec3e80d32577ca1c6eb10355a7fa4c9ee13385d82a7ccf1163b6085aa", "bytes_sha256": "3f15e4853902c142b0442f8b4d58f588affad23d0773f70fc35d13d8dbe75d77"}
+    },
+    {
+      "id": "A2-fronteira-de-xanela-ssf2",
+      "que_proba": "cruzar a fronteira de xanela de 512 KB abre un segmento novo coa súa base, non emende un corredor",
+      "operacion": "read_resource",
+      "perfil": "md-ssf2",
+      "imaxe": {
+        "orixe": "fixture:aceite-A2",
+        "byte_len": 2097152,
+        "sha256": "723967aef3ce92cede29e420a9cc44459d88fce02dd5348b197704c4755168fc",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 2097152, "banks": {}},
+      "pedido": {"cpu_address": 524272, "cpu_address_hex": "0x7fff0", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": true, "perfil": "md-ssf2", "cpu_address": 524272, "length": 32, "ataestacion": {"origin": "fixture:aceite-A2", "sha256_hex": "723967aef3ce92cede29e420a9cc44459d88fce02dd5348b197704c4755168fc"}, "estado": {"rom_size": 2097152, "banks": {}}, "segmentos": [{"indice": 0, "cpu_address": 524272, "cpu_address_hex": "0x7fff0", "cpu_len": 16, "rom_offset": 524272, "rom_offset_hex": "0x7fff0", "rexion": "rom"}, {"indice": 1, "cpu_address": 524288, "cpu_address_hex": "0x80000", "cpu_len": 16, "rom_offset": 524288, "rom_offset_hex": "0x80000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "9ec3e80d32577ca1c6eb10355a7fa4c9789dc2e70c31567ba0c5ea0f34597ea3", "bytes_sha256": "a9558827462019e366427aa19712fe18ba168b45775fcfb81a6c508ec1819623"}
+    },
+    {
+      "id": "A3-alias-mesma-imaxe",
+      "que_proba": "dous enderezos que o espello por máscara identifica devolven bytes idénticos co mesmo rom_offset e cpu_address distintos",
+      "operacion": "read_resource",
+      "perfil": "md-linear",
+      "imaxe": {
+        "orixe": "fixture:aceite-A3",
+        "byte_len": 1048576,
+        "sha256": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c3",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 1048576},
+      "pedido": {"cpu_address": 1114112, "cpu_address_hex": "0x110000", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": true, "perfil": "md-linear", "cpu_address": 1114112, "length": 32, "ataestacion": {"origin": "fixture:aceite-A3", "sha256_hex": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c3"}, "estado": {"rom_size": 1048576}, "segmentos": [{"indice": 0, "cpu_address": 1114112, "cpu_address_hex": "0x110000", "cpu_len": 32, "rom_offset": 65536, "rom_offset_hex": "0x10000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "2f54799ec3e80d32577ca1c6eb10355a7fa4c9ee13385d82a7ccf1163b6085aa", "bytes_sha256": "3f15e4853902c142b0442f8b4d58f588affad23d0773f70fc35d13d8dbe75d77"}
+    },
+    {
+      "id": "A4-rexion-non-rom-tras-ROM",
+      "que_proba": "un percorrido que comeza en ROM e cai no espello WRAM recúsase con non-rom-region, rexión nomeada e o corredor xa lido na procedencia",
+      "operacion": "read_resource",
+      "perfil": "snes-lorom",
+      "imaxe": {
+        "orixe": "fixture:aceite-A4",
+        "byte_len": 524288,
+        "sha256": "63151897936d3277d45a0d7801362e7e1a387cbb68e7d7144800d2de6571bbf2",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 524288},
+      "pedido": {"cpu_address": 65520, "cpu_address_hex": "0xfff0", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": false, "codigo": "non-rom-region", "detido_en": {"dec": 65536, "hex": "0x10000"}, "rexion": "wram-mirror", "segmentos_na_recusa": [{"indice": 0, "cpu_address": 65520, "cpu_address_hex": "0xfff0", "cpu_len": 16, "rom_offset": 32752, "rom_offset_hex": "0x7ff0", "rexion": "rom"}], "detalle_menciona": "wram-mirror"}
+    },
+    {
+      "id": "A5a-longitude-cero",
+      "que_proba": "length 0 é invalid-range antes de percorrer, con procedencia baleira",
+      "operacion": "read_resource",
+      "perfil": "md-linear",
+      "imaxe": {
+        "orixe": "fixture:aceite-A5a",
+        "byte_len": 1048576,
+        "sha256": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c3",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 1048576},
+      "pedido": {"cpu_address": 65536, "cpu_address_hex": "0x10000", "length": 0},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": false, "codigo": "invalid-range", "detido_en": null, "rexion": null, "segmentos_na_recusa": [], "detalle_menciona": "length"}
+    },
+    {
+      "id": "A5b-rango-fora-do-barramento",
+      "que_proba": "cpu_address + length - 1 fóra do barramento é invalid-range sen percorrer nada",
+      "operacion": "read_resource",
+      "perfil": "md-linear",
+      "imaxe": {
+        "orixe": "fixture:aceite-A5b",
+        "byte_len": 1048576,
+        "sha256": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c3",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 1048576},
+      "pedido": {"cpu_address": 16777200, "cpu_address_hex": "0xfffff0", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": false, "codigo": "invalid-range", "detido_en": null, "rexion": null, "segmentos_na_recusa": [], "detalle_menciona": "barramento"}
+    },
+    {
+      "id": "A5c-limite-de-bytes",
+      "que_proba": "un length por riba de Limits::max_bytes recúsase con limit-exceeded sen reservar",
+      "operacion": "read_resource",
+      "perfil": "md-linear",
+      "imaxe": {
+        "orixe": "fixture:aceite-A5c",
+        "byte_len": 1048576,
+        "sha256": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c3",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 1048576},
+      "pedido": {"cpu_address": 65536, "cpu_address_hex": "0x10000", "length": 32},
+      "limites": {"max_bytes": 16, "max_segments": 4096},
+      "esperado": {"ok": false, "codigo": "limit-exceeded", "detido_en": null, "rexion": null, "segmentos_na_recusa": [], "detalle_menciona": "max_bytes"}
+    },
+    {
+      "id": "A5d-limite-de-segmentos",
+      "que_proba": "superar Limits::max_segments devolve limit-exceeded coa procedencia percorrida ata o tope",
+      "operacion": "read_resource",
+      "perfil": "md-ssf2",
+      "imaxe": {
+        "orixe": "fixture:aceite-A5d",
+        "byte_len": 2097152,
+        "sha256": "723967aef3ce92cede29e420a9cc44459d88fce02dd5348b197704c4755168fc",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 2097152, "banks": {}},
+      "pedido": {"cpu_address": 0, "cpu_address_hex": "0x0", "length": 1048576},
+      "limites": {"max_bytes": 16777216, "max_segments": 1},
+      "esperado": {"ok": false, "codigo": "limit-exceeded", "detido_en": {"dec": 524288, "hex": "0x80000"}, "rexion": null, "segmentos_na_recusa": [{"indice": 0, "cpu_address": 0, "cpu_address_hex": "0x0", "cpu_len": 524288, "rom_offset": 0, "rom_offset_hex": "0x0", "rexion": "rom"}], "detalle_menciona": "segmentos"}
+    },
+    {
+      "id": "A5e-imaxe-curta",
+      "que_proba": "unha imaxe máis curta que rom_size devolve incompatible-size e o prefixo real na procedencia, nunca bytes inventados",
+      "operacion": "read_resource",
+      "perfil": "snes-hirom",
+      "imaxe": {
+        "orixe": "fixture:aceite-A5e",
+        "byte_len": 32784,
+        "sha256": "c0d98945c1e45751d5d38a7dc8c16a0948b58e0f53268570070eccde50aea6e9",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 1048576},
+      "pedido": {"cpu_address": 4227072, "cpu_address_hex": "0x408000", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": false, "codigo": "incompatible-size", "detido_en": {"dec": 4227088, "hex": "0x408010"}, "rexion": null, "segmentos_na_recusa": [{"indice": 0, "cpu_address": 4227072, "cpu_address_hex": "0x408000", "cpu_len": 16, "rom_offset": 32768, "rom_offset_hex": "0x8000", "rexion": "rom"}], "detalle_menciona": "máis curta"}
+    },
+    {
+      "id": "A6-secuencia-ssf2-remapeo",
+      "que_proba": "unha escrita de rexistrador na secuencia cambia os bytes da súa xanela (0x80000 → 0x280000) sen tocar a xanela 2, e o estado final vai na resposta",
+      "operacion": "read_sequence",
+      "perfil": "md-ssf2",
+      "imaxe": {
+        "orixe": "fixture:aceite-A6",
+        "byte_len": 4194304,
+        "sha256": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 4194304, "banks": {}},
+      "pasos": [{"ler": {"cpu_address": 524288, "cpu_address_hex": "0x80000", "length": 32}}, {"escribir": {"cpu_address": 10563587, "cpu_address_hex": "0xa13003", "data": 5}}, {"ler": {"cpu_address": 524288, "cpu_address_hex": "0x80000", "length": 32}}, {"ler": {"cpu_address": 1048576, "cpu_address_hex": "0x100000", "length": 32}}],
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"lecturas": [{"ok": true, "perfil": "md-ssf2", "cpu_address": 524288, "length": 32, "ataestacion": {"origin": "fixture:aceite-A6", "sha256_hex": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f"}, "estado": {"rom_size": 4194304, "banks": {}}, "segmentos": [{"indice": 0, "cpu_address": 524288, "cpu_address_hex": "0x80000", "cpu_len": 32, "rom_offset": 524288, "rom_offset_hex": "0x80000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "789dc2e70c31567ba0c5ea0f34597ea3c8ed12375c81a6cbf0153a5f84a9cef3", "bytes_sha256": "0bfecf5e430d4294407fb01ee00ade32d0f589917a17be814bf74f61bba2916f"}, {"ok": true, "perfil": "md-ssf2", "cpu_address": 524288, "length": 32, "ataestacion": {"origin": "fixture:aceite-A6", "sha256_hex": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f"}, "estado": {"rom_size": 4194304, "banks": {"1": 5}}, "segmentos": [{"indice": 0, "cpu_address": 524288, "cpu_address_hex": "0x80000", "cpu_len": 32, "rom_offset": 2621440, "rom_offset_hex": "0x280000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "587da2c7ec11365b80a5caef14395e83a8cdf2173c6186abd0f51a3f6489aed3", "bytes_sha256": "96fced831f393ea03298f8964256804db0bd047244dcf35ed766ec8686eddfd7"}, {"ok": true, "perfil": "md-ssf2", "cpu_address": 1048576, "length": 32, "ataestacion": {"origin": "fixture:aceite-A6", "sha256_hex": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f"}, "estado": {"rom_size": 4194304, "banks": {"1": 5}}, "segmentos": [{"indice": 0, "cpu_address": 1048576, "cpu_address_hex": "0x100000", "cpu_len": 32, "rom_offset": 1048576, "rom_offset_hex": "0x100000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "f0153a5f84a9cef3183d6287acd1f61b40658aafd4f91e43688db2d7fc21466b", "bytes_sha256": "3790f8556975eb9a6daabf65501bfcc1794b592673472f7e05e149f1ef0c4f3a"}], "escritas_aplicadas": 1, "estado_final": {"rom_size": 4194304, "banks": {"1": 5}}}
+    },
+    {
+      "id": "A7a-instancia-con-banco",
+      "que_proba": "o estado A co banco 5 na xanela 1 lé a base 0x280000",
+      "operacion": "read_resource",
+      "perfil": "md-ssf2",
+      "imaxe": {
+        "orixe": "fixture:aceite-A7a",
+        "byte_len": 4194304,
+        "sha256": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 4194304, "banks": {"1": 5}},
+      "pedido": {"cpu_address": 524288, "cpu_address_hex": "0x80000", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": true, "perfil": "md-ssf2", "cpu_address": 524288, "length": 32, "ataestacion": {"origin": "fixture:aceite-A7a", "sha256_hex": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f"}, "estado": {"rom_size": 4194304, "banks": {"1": 5}}, "segmentos": [{"indice": 0, "cpu_address": 524288, "cpu_address_hex": "0x80000", "cpu_len": 32, "rom_offset": 2621440, "rom_offset_hex": "0x280000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "587da2c7ec11365b80a5caef14395e83a8cdf2173c6186abd0f51a3f6489aed3", "bytes_sha256": "96fced831f393ea03298f8964256804db0bd047244dcf35ed766ec8686eddfd7"}
+    },
+    {
+      "id": "A7b-instancia-sen-banco",
+      "que_proba": "o estado B sen escritas segue lendo a identidade 0x80000 despois de ler con A: as dúas instancias non comparten estado",
+      "operacion": "read_resource",
+      "perfil": "md-ssf2",
+      "imaxe": {
+        "orixe": "fixture:aceite-A7b",
+        "byte_len": 4194304,
+        "sha256": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 4194304, "banks": {}},
+      "pedido": {"cpu_address": 524288, "cpu_address_hex": "0x80000", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": true, "perfil": "md-ssf2", "cpu_address": 524288, "length": 32, "ataestacion": {"origin": "fixture:aceite-A7b", "sha256_hex": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f"}, "estado": {"rom_size": 4194304, "banks": {}}, "segmentos": [{"indice": 0, "cpu_address": 524288, "cpu_address_hex": "0x80000", "cpu_len": 32, "rom_offset": 524288, "rom_offset_hex": "0x80000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "789dc2e70c31567ba0c5ea0f34597ea3c8ed12375c81a6cbf0153a5f84a9cef3", "bytes_sha256": "0bfecf5e430d4294407fb01ee00ade32d0f589917a17be814bf74f61bba2916f"}
+    },
+    {
+      "id": "A8-procedencia-reconstrue",
+      "que_proba": "a lista de segmentos reconstrúe byte a byte a saída, con índices e cpu_address contiguos e bases distintas por banco",
+      "operacion": "read_resource",
+      "perfil": "md-ssf2",
+      "imaxe": {
+        "orixe": "fixture:aceite-A8",
+        "byte_len": 4194304,
+        "sha256": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 4194304, "banks": {"1": 5, "2": 3}},
+      "pedido": {"cpu_address": 0, "cpu_address_hex": "0x0", "length": 1572864},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": true, "perfil": "md-ssf2", "cpu_address": 0, "length": 1572864, "ataestacion": {"origin": "fixture:aceite-A8", "sha256_hex": "81841b8bb979b5e147991b9eeeb584158bb704f3eea859c14eebd5ba2261773f"}, "estado": {"rom_size": 4194304, "banks": {"1": 5, "2": 3}}, "segmentos": [{"indice": 0, "cpu_address": 0, "cpu_address_hex": "0x0", "cpu_len": 524288, "rom_offset": 0, "rom_offset_hex": "0x0", "rexion": "rom"}, {"indice": 1, "cpu_address": 524288, "cpu_address_hex": "0x80000", "cpu_len": 524288, "rom_offset": 2621440, "rom_offset_hex": "0x280000", "rexion": "rom"}, {"indice": 2, "cpu_address": 1048576, "cpu_address_hex": "0x100000", "cpu_len": 524288, "rom_offset": 1572864, "rom_offset_hex": "0x180000", "rexion": "rom"}], "bytes_len": 1572864, "bytes_sha256": "7c9c4755a0a0bf119d32dd487a18ac50b54a1f3ff67199b2ec92bf7e28a8ea1a"}
+    },
+    {
+      "id": "A9-estado-alleo-bad-state",
+      "que_proba": "unha clave de mapper nun perfil sen rexistradores é bad-state co nome do perfil no detalle, antes de percorrer",
+      "operacion": "read_resource",
+      "perfil": "snes-hirom",
+      "imaxe": {
+        "orixe": "fixture:aceite-A9",
+        "byte_len": 1048576,
+        "sha256": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c3",
+        "sha256_é_o_da_imaxe": true
+      },
+      "estado": {"rom_size": 1048576, "banks": 1},
+      "pedido": {"cpu_address": 4227072, "cpu_address_hex": "0x408000", "length": 16},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": false, "codigo": "bad-state", "detido_en": null, "rexion": null, "segmentos_na_recusa": [], "detalle_menciona": "snes-hirom"}
+    },
+    {
+      "id": "A10-capacidade-digesto-non-verificado",
+      "que_proba": "a capa comproba a FORMA do digesto e o byte_len, non que sexa o SHA-256 deses bytes: quen hashear é o adaptador",
+      "operacion": "read_resource",
+      "perfil": "md-linear",
+      "imaxe": {
+        "orixe": "fixture:aceite-A10",
+        "byte_len": 1048576,
+        "sha256": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c0",
+        "sha256_é_o_da_imaxe": false
+      },
+      "estado": {"rom_size": 1048576},
+      "pedido": {"cpu_address": 131072, "cpu_address_hex": "0x20000", "length": 32},
+      "limites": {"max_bytes": 16777216, "max_segments": 4096},
+      "esperado": {"ok": true, "perfil": "md-linear", "cpu_address": 131072, "length": 32, "ataestacion": {"origin": "fixture:aceite-A10", "sha256_hex": "9c64d30371e906434d57be2200e535416108d1cdaba3fe5a50c916ac85b954c0"}, "estado": {"rom_size": 1048576}, "segmentos": [{"indice": 0, "cpu_address": 131072, "cpu_address_hex": "0x20000", "cpu_len": 32, "rom_offset": 131072, "rom_offset_hex": "0x20000", "rexion": "rom"}], "bytes_len": 32, "bytes_hex": "5e83a8cdf2173c6186abd0f51a3f6489aed3f81d42678cb1d6fb20456a8fb4d9", "bytes_sha256": "5cf67aa4d316b136f42314bbb88a99ab97c90d9f818d20c1d09c86492dc907e5"}
+    }
+  ]
+}
