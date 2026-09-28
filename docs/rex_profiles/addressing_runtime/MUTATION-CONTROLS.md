@@ -102,13 +102,13 @@ panicked at src/snes_exhirom.rs:259:17: corredor baleiro: a fórmula de offset e
 test result: FAILED. 11 passed; 4 failed; 0 ignored
 ```
 
-**Hallazgo de endurecemento (commit `4958a2b`).** A primeira vez que se rodou
+**Achado de endurecemento (commit `4958a2b`).** A primeira vez que se rodou
 M2b aínda non existía a garda: `run` quedaba en `0`, o cursor non avanzaba e
 `read` **entraba en bucle infinito**; a execución matouse por timeout (>10 min)
 e non por un fallo de test. Agora os cinco bucles de lectura levan
 `debug_assert!(run >= 1, …)`, que converte o hang nun panic co nome do
 problema. Un control de mutación que se detecta por timeout é un control que
-nadie vai repetir; a garda faino reproductible en milisegundos.
+ninguén vai repetir; a garda faino reproductible en milisegundos.
 
 ## M3 — ExHiROM: a segunda área ten que ser potencia de 2
 
