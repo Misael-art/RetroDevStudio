@@ -403,7 +403,7 @@ fn o_detector_ve_un_panico_inxectado() {
     let mut v = Varredura::nova();
     let resultado = v.chigar(
         "control",
-        || panic!("panico de control: isto debe ser visible para a varredura"),
+        || panic!("pánico de control: isto debe ser visible para a varredura"),
         |_: &()| None,
     );
     let (chamadas, _codigos, panicos) = v.acabar();
@@ -416,7 +416,7 @@ fn o_detector_ve_un_panico_inxectado() {
     );
     let texto = &panicos[0];
     assert!(
-        texto.contains("panico de control"),
+        texto.contains("pánico de control"),
         "o pánico capturado debe levar a súa mensaxe: {texto}"
     );
     assert!(
