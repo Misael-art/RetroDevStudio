@@ -149,7 +149,8 @@ fn run_case(case: &Case, shift: u64) -> (usize, usize) {
     let banks: Vec<(u64, u64)> = case.banks.to_vec();
     let engine = Ref::new(case.profile, rom_size, &banks);
     let state = state_of(case.profile, rom_size, &banks);
-    let want = preimage(&engine, &target_offsets(pv, rom_size, shift));
+    let targets = target_offsets(pv, rom_size, shift);
+    let want = preimage(&engine, &targets);
     let mut aliases = 0usize;
     for (offset, list) in &want {
         let got = invert_of(case.profile, *offset as u32, &state)
@@ -176,17 +177,35 @@ fn run_case(case: &Case, shift: u64) -> (usize, usize) {
         }
         aliases += list.len();
     }
+    // Un offset obxectivo sen preimage non é un fallo: é un offset que ese estado
+    // non pode enderezar (`md-ssf2` en estado identidade deixa bloqueos fóra da
+    // táboa de 64 páxinas, e calquera perfil ten offsets fóra do seu `rom_size`).
+    // O que si é un fallo: que o perfil *si* lle devolve aliases.
+    let alcanzados: Vec<u64> = want.iter().map(|(o, _)| *o).collect();
+    let mut sen_preimage = 0usize;
+    for offset in &targets {
+        if alcanzados.contains(offset) {
+            continue;
+        }
+        sen_preimage += 1;
+        let got = invert_of(case.profile, *offset as u32, &state)
+            .unwrap_or_else(|e| panic!("{}: invert({offset:#x}) fallou {e:?}", case.profile));
+        assert!(
+            got.is_empty(),
+            "{}: o perfil devolve {} aliases ({got:?}) para o offset {offset:#x}, que o motor non \
+             endereza en ningún dos {:#x} enderezos do barramento",
+            case.profile,
+            got.len(),
+            BUS_TOP + 1,
+        );
+    }
     println!(
-        "{} rom_size={rom_size:#x} bancos={banks:?}: {} offsets, {} aliases exactos",
+        "{} rom_size={rom_size:#x} bancos={banks:?}: {} offsets con preimage exacto, {} aliases, \
+         {} offsets sen preimage (perfil devolve lista baleira)",
         case.profile,
         want.len(),
         aliases,
-    );
-    assert_eq!(
-        want.len(),
-        target_offsets(pv, rom_size, shift).len(),
-        "{}: algún offset obxectivo non ten preimage no motor (proba vacua)",
-        case.profile,
+        sen_preimage,
     );
     (want.len(), aliases)
 }
