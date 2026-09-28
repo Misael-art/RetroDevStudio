@@ -1,0 +1,9 @@
+[package]
+name = "rex-gameplay"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Recuperacao delimitada de uma regra de gameplay M68K (contador + limiar + desvio + escrita de estado) a partir de ROM Mega Drive, com IR, grafo editavel, patch e re-geracao sem crescimento — pacote REX autonomo"
+publish = false
+
+[dependencies]

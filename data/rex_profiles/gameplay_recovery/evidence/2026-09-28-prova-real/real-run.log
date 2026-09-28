@@ -1,0 +1,18 @@
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/REX-GAMEPLAY-RECOVERY-2026-09-28/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.82s
+     Running unittests src/lib.rs (target/debug/deps/app_lib-66a99f60b444854d)
+
+running 2 tests
+test tools::reverse::decomp::rex_gameplay::tests::adapter_refuses_overwrite_and_unknown_method ... ok
+test tools::reverse::decomp::rex_gameplay::tests::rex_gameplay_real_gate_recovery_equivalence_and_effect ... candidatos (original): [Candidate { entry: 2374, exit: 2416, counter_addr: 3774808148, threshold: 6 }]
+escritores absolutos de score/goal_open: [(954, true), (96a, true), (cb0, true)]
+candidatos (cega): [Candidate { entry: 2374, exit: 2416, counter_addr: 3774808148, threshold: 37 }]
+original_t6: latencia=1 casos=40
+blind_step3_t37: latencia=1 casos=40
+abre em score: original=Some(6) editada=Some(12) noop=Some(6)
+x max editada antes de 12: 36; quadros com original alem da barreira e editada bloqueada: [7, 8, 9, 10, 11, 12]
+relatorio: /home/misael/Projects/REX-GAMEPLAY-RECOVERY-2026-09-28/src-tauri/target-test/validation/rex-gameplay/run-1790614210760192963/report.json
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 836 filtered out; finished in 4.74s
+
