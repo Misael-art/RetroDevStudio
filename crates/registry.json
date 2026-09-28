@@ -12,25 +12,27 @@
     {
       "nome": "rex-kosinski",
       "manifesto": "crates/rex-kosinski/Cargo.toml",
-      "descricao": "Decodificador Kosinski v1 (frente B). Biblioteca standalone: o produto nao a consome ainda.",
+      "descricao": "Codec Kosinski v1 da frente B (decode + encode, variante base nao-modular). Biblioteca standalone: o produto nao a consome ainda.",
       "maturidade": "gates-proprios-aprovados",
       "gates": {
-        "medidos_em": "2026-09-28T02:48Z, branch codex/rex-integrator-crates-registry",
+        "medidos_em": "2026-09-28T02:48Z (decoder, 25 testes); re-medido 2026-09-28T14:36Z-14:37Z depois da entrega mais recente de B (encoder + paridade + contenedor + 52 fixtures)",
         "fmt": "OK",
         "clippy_all_targets": "OK",
-        "test_locked": "OK — 25 testes executados (22 contract + 3 mutations), 0 falhas, 0 ignorados",
-        "evidencia": "data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/",
+        "test_locked": "OK — 51 testes executados (22 contract + 8 edit + 16 encode + 2 fixtures + 3 mutations), 0 falhas, 0 ignorados; fmt e clippy --all-targets OK. A carreira rex-addressing do mesmo gate deu 138/0/10 sem cambios. Registrei os numeros medidos, non os anunciados.",
+        "evidencia": "data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/ e data/rex_profiles/kosinski_runtime/evidence/2026-09-28-entrega-encoder-fixtures/",
         "cargo_target_dir": "target/crates-gates (fora da arvore rastreada; .gitignore ja cobre target/)"
       },
-      "acoplamento_declarado": "os testes do pacote lem fixtures fora dele, em data/rex_profiles/codec/kosinski/ (pergunta via CARGO_MANIFEST_DIR + ../../). O pacote NAO e relocavel sozinho. Importado pelo integrador no mesmo pino (27 linhas de manifest.tsv conferidas, 0 divergencias; hash agregado ea866df7... reproduzido na branch integrada).",
-      "nao_alega": "nada de integracao ao produto: sem dependencia por path em src-tauri, sem adaptador, sem chamada real pelo backend, sem fluxo pela interface. Nivel backend-integrado segue nao alcançado.",
+      "acoplamento_declarado": "Fechado pola propia B na entrega 9223e7a: as 52 fixtures vendorizan-se dentro do paquete (fixtures/kosinski/, fixtures/runtime/) con SHA-256 pinada en tests/fixtures.rs e re-verificada a cada run. O paquete e relocable: a carreira de gates 14:36Z executou neste tronco sen tocar en data/rex_profiles/codec/. Ningunha fixture e ROM: todas autorais/sinteticas (fixtures/PROVENANCE.md, oraculo koscmp usado so como comparacion, cero codigo seu copiado).",
+      "nao_alega": "nada de integracao ao produto: sem dependencia por path en src-tauri, sen adaptador, sen chamada real polo backend, sen fluxo pola interface. Nivel backend-integrado segue non alcançado. O módulo edit (contenedor REXKOS) e proba de contrato — a propia doc del di «NON transacción canónica de producción» — e non se expón como reinserción.",
       "propriedade": "agente B (PR #81); registro e manifests sao do integrador",
-      "origem": "entrega 3fea06e + 1af7017 (PR #81, branch codex/rex-kosinski-decoder, pin revisto 0b752b7), aplicados por cherry-pick -x nesta branch",
+      "origem": "Entrega 3fea06e + 1af7017 (PR #81) por cherry-pick -x (locais 96dbd20/f58ff05). Depois, 8 commits 0b752b7..6a2218e (encoder v1, paridade koscmp bidireccional, contenedor de edición, docs da entrega, fmt, 52 fixtures vendorizadas, package list) pinados en 6a2218e — tip conferido por `git ls-remote` o 2026-09-28T14:38:34Z — e integrados por cherry-pick -x sen conflitos (locais 20d686d..3994cef); a árbore crates/rex-kosinski resultante e byte-idéntica á dela (diff = 0 bytes).",
       "perfil": {
         "contrato": "docs/rex_profiles/kosinski_runtime/CONTRACT.md",
         "relatorio": "docs/rex_profiles/kosinski_runtime/REPORT.md",
         "dados": "data/rex_profiles/kosinski_runtime/",
-        "comparacao_externa": "scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh"
+        "comparacao_externa": "scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh",
+        "contrato_encode": "docs/rex_profiles/kosinski_runtime/ENCODE-CONTRACT.md",
+        "entrega_encode": "docs/rex_profiles/kosinski_runtime/ENCODE-DELIVERY.md"
       },
       "byor": "nenhum teste ordinario do pacote depende de ROM comercial; a comparacao com koscmp fica no script de perfil, fora da suite"
     },

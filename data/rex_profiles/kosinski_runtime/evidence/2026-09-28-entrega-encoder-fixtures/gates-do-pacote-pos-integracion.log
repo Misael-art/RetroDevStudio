@@ -1,0 +1,371 @@
+INICIO 2026-09-28T14:36:18Z
+HEAD: 3994cef1145e7ea4f44b1a1da358005fb946828f
+COMANDO: npm run crates:gates (fmt + clippy --all-targets -D warnings + test --locked, por pacote rexistado)
+GATES_RC=0
+FIN 2026-09-28T14:37:02Z
+npm notice run retrodev-studio@0.1.0 crates:gates
+npm notice run node scripts/crates-gates.mjs
+--- rex-kosinski (crates/rex-kosinski/Cargo.toml) ---
+$ cargo fmt --manifest-path crates/rex-kosinski/Cargo.toml -- --check
+OK: rex-kosinski fmt
+$ cargo clippy --manifest-path crates/rex-kosinski/Cargo.toml --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+OK: rex-kosinski clippy
+$ cargo test --manifest-path crates/rex-kosinski/Cargo.toml --locked
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 22 tests
+test borda_input_vazio_e_degenerado ... ok
+test borda_copia_sobreposta_eco_byte_a_byte ... ok
+test borda_limite_exato_de_saida ... ok
+test borda_referencia_antes_do_historico_sonda_0200ffff ... ok
+test borda_orcamento_de_trabalho_deterministico ... ok
+test borda_truncamentos_sistematicos_de_m01_sem_panic ... ok
+test borda_um_byte_descritor_incompleto ... ok
+test golden_m01_literals ... ok
+test golden_m02_sem_terminador_e_truncated_pelo_contrato ... ok
+test borda_m05_sem_ultimo_byte_e_truncated_oraculo_aceitava ... ok
+test golden_m03_inline_match ... ok
+test golden_m04_separate_short ... ok
+test golden_m06_continue_edge_quirk_aceito ... ok
+test golden_m07_inline_dist_igual_historico ... ok
+test golden_m08_len10_tres_bytes ... ok
+test golden_m09_early_fetch_fronteira_16o_bit ... ok
+test golden_m10_earlyfetch_straddle_inline ... ok
+test limites_cortam_durante_a_copia_larga_nao_so_no_fim ... ok
+test negativos_k01_a_k05_erros_estruturados ... ok
+test golden_m05_separate_long_far ... ok
+test plains_roundtrip_oraculo_reproduzidos_com_padding_parcial ... ok
+test nunca_panic_em_bytes_arbitrarios ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.84s
+
+
+running 8 tests
+test build_open_roundtrip_com_identidade ... ok
+test politica2_edicao_delimitada_confirma_conteudo_editado ... ok
+test politica1_reinsercao_no_op_produz_contener_byte_identico ... ok
+test sentinela_e_truncamento_malformados_recusados_sem_panic ... ok
+test politica6_identidade_divergente_recusada ... ok
+test sha256_bate_vetores_publicados ... ok
+test politica3_geometria_preservada_campos_de_identidade_acompanham_conteudo ... ok
+test politica5_stream_maior_que_slot_recusa_sem_escrita ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 16 tests
+test decoder_do_pacote_recusa_stream_corrompida_estruturalmente ... ok
+test fronteira_16o_bit_segundo_bit_do_terminador_exige_placeholder ... ok
+test fronteira_16o_bit_terminador_estruturado_escreve_placeholder_antes_dos_bytes ... ok
+test dados_repetitivos_emitem_referencias_reais ... ok
+test formula_de_trabalho_exata_e_corte_deterministico ... ok
+test inline_len5_dist5_exato ... ok
+test plain_vazio_produz_stream_minima_de_5_bytes ... ok
+test limites_cortam_no_ponto_de_uso_sem_parcela_em_erro ... ok
+test quase_limites_len_tres_quatro_cinco_e_eco_curto ... ok
+test separado_count3_para_len8_exato ... ok
+test separados_c_e_split_de_256_exato ... ok
+test fronteira_16o_bit_inline_h_antes_do_placeholder_l_depois_m10_like ... ok
+test nunca_panic_em_plains_arbitrarios_com_seed ... ok
+test corpus_plains_roundtrip_interno ... ok
+test determinismo_duplo_e_independencia_de_limite_folgado ... ok
+test dist_maxima_do_formato_8192 ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+
+running 2 tests
+test conjunto_de_fixtures_exatamente_o_pinado ... ok
+test cada_fixture_bate_o_sha_pinado ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 3 tests
+test negativo_discriminativo_alteracao_detectada_por_comparacao_independente ... ok
+test truncamentos_sistematicos_todas_as_streams_sem_panic ... ok
+test mutacoes_com_seed_todas_as_streams_sem_panic_e_limites ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.64s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/lib.rs (target/crates-gates/debug/deps/rex_kosinski-78893b71044125f1)
+     Running tests/contract.rs (target/crates-gates/debug/deps/contract-55afa556b6b3225e)
+     Running tests/edit.rs (target/crates-gates/debug/deps/edit-a6cdf5666c89e7b2)
+     Running tests/encode.rs (target/crates-gates/debug/deps/encode-8bf6465272c6461c)
+     Running tests/fixtures.rs (target/crates-gates/debug/deps/fixtures-7fe1af5d459d2fad)
+     Running tests/mutations.rs (target/crates-gates/debug/deps/mutations-32bddae80bc8512b)
+   Doc-tests rex_kosinski
+OK: rex-kosinski test
+--- rex-addressing (crates/rex-addressing/Cargo.toml) ---
+$ cargo fmt --manifest-path crates/rex-addressing/Cargo.toml -- --check
+OK: rex-addressing fmt
+$ cargo clippy --manifest-path crates/rex-addressing/Cargo.toml --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+OK: rex-addressing clippy
+$ cargo test --manifest-path crates/rex-addressing/Cargo.toml --locked
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 12 tests
+test a_regra_da_imaxe_publicada_reproduse ... ok
+test regenerar_o_ficheiro_de_aceite ... ignored
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test o_ficheiro_publicado_ten_a_sha_pinada ... ok
+test a_recusa_non_rom_nomea_a_rexion_y_non_inventa_bytes ... ok
+test a_bateria_non_e_degenerada ... ok
+test a_capa_non_pode_verificar_o_digesto ... ok
+test os_alias_dous_enderezos_devolven_os_mesmos_bytes ... ok
+test un_vector_alterado_detectase ... ok
+test as_dúas_instancias_non_comparten_estado ... ok
+test todos_os_vectores_de_aceite_gradan_pola_api_publica ... ok
+test o_xerador_reproduce_o_ficheiro_publicado ... ok
+
+test result: ok. 11 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.46s
+
+
+running 9 tests
+test a_imaxe_real_mide_512kb_e_o_resto_e_apendice_non_direccionable ... ignored, BYOR non provisionable: executar con --ignored
+test a_sram_declarada_polo_header_non_e_rom ... ignored, BYOR non provisionable: executar con --ignored
+test as_mostras_pinadas_do_caso_real_retraducen_igual ... ignored, BYOR non provisionable: executar con --ignored
+test cada_alias_da_imaxe_real_devolve_os_mesmos_bytes ... ignored, BYOR non provisionable: executar con --ignored
+test cargando_o_ficheiro_cru_o_apendice_sigue_inalcanzable ... ignored, BYOR non provisionable: executar con --ignored
+test o_banner_real_alcanzase_na_posicion_declarada ... ignored, BYOR non provisionable: executar con --ignored
+test o_tamanho_do_ficheiro_non_e_un_estado_valido ... ignored, BYOR non provisionable: executar con --ignored
+test sen_mapper_linear_e_ssf2_identidade_leeen_igual ... ignored, BYOR non provisionable: executar con --ignored
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+
+test result: ok. 1 passed; 0 failed; 8 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 8 tests
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test md_ssf2_casos_pinados_de_write_mapper_register ... ok
+test md_ssf2_secuencias_de_escrita_pinadas_remapean_e_traducen ... ok
+test md_linear_concorda_cos_vectores_pinados_e_co_motor_de_referencia ... ok
+test snes_lorom_concorda_cos_vectores_pinados_e_co_motor_de_referencia ... ok
+test snes_hirom_concorda_cos_vectores_pinados_e_co_motor_de_referencia ... ok
+test md_ssf2_concorda_cos_vectores_pinados_e_co_motor_de_referencia ... ok
+test snes_exhirom_concorda_cos_vectores_pinados_e_co_motor_de_referencia ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+
+
+running 6 tests
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test vectores_embebidos_teñen_a_sha_e_a_version_pinadas ... ok
+test as_amostras_de_inversion_estan_dentro_da_rom_pinada ... ok
+test o_motor_de_referencia_coincide_cos_negativos_de_rexiaon ... ok
+test o_motor_de_referencia_reproduce_tódolos_translate_positivos ... ok
+test cada_stream_de_fixture_reproduce_o_sha_pinado ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.48s
+
+
+running 2 tests
+test cada_perfil_devolve_exactamente_o_preimage_do_motor ... ignored, preimage exaustivo: 16,7M de traducións do motor por caso
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 7 tests
+test clave_estraña_en_md_linear_comportase_como_na_referencia ... ok
+test estado_ou_tamanho_amañados_non_devolven_offset_cero ... ok
+test invert_fora_da_rom_e_lista_baleira_e_los_aliases_crecentes ... ok
+test rexion_non_rom_clasifican_se_sin_inventar_bytes ... ok
+test so_tamanos_binarios_entre_64kb_e_4mb_son_estado_valido ... ok
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test lectura_enorme_non_reserva_nin_clampa ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 14 tests
+test a_xanela_0_e_fixa_e_a_escrita_non_ten_efecto ... ok
+test banco_mal_formado_rexeitase_con_unsupported ... ok
+test banco_fora_do_fin_da_rom_espealla_por_mascara_non_e_erro ... ok
+test escrita_e_pura_non_muta_o_estado_recibido ... ok
+test decodificacion_da_xanela_use_os_bits_1_a_3_da_paxina ... ok
+test escrita_fora_da_paxina_de_registradores_e_unsupported ... ok
+test estado_amañado_non_devolve_offset_cero ... ok
+test estado_inicial_e_identidade_e_bixectivo_en_4mb ... ok
+test inversion_con_bancos_devolve_tódolos_aliases_en_orde ... ok
+test reescrita_substitue_o_valor_do_banco ... ok
+test rexion_non_rom_clasifican_se_sin_inventar_bytes ... ok
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test tamanos_e_bancos_validos ... ok
+test lectura_corta_por_xanela_a_nda_que_a_rom_sea_contigua ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+
+running 8 tests
+test o_detector_ve_un_panico_inxectado ... ok
+test a_validacion_md_caracteriza_o_dominio_dos_expect ... ok
+test a_capa_de_recursos_non_panic_ante_atestacion_e_limites_hostis ... ok
+test snes_exhirom_nin_un_panico_con_entradas_adversarias ... ok
+test md_linear_nin_un_panico_con_entradas_adversarias ... ok
+test md_ssf2_nin_un_panico_con_entradas_adversarias ... ok
+test snes_lorom_nin_un_panico_con_entradas_adversarias ... ok
+test snes_hirom_nin_un_panico_con_entradas_adversarias ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+
+running 6 tests
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test enderezo_do_bus_e_offset_fisico_non_son_o_mesmo_concepto ... ok
+test a_fronteira_do_barramento_usa_dous_canais_distintos ... ok
+test a_secuencia_loxica_e_a_fisica_cortan_por_motivos_distintos ... ok
+test a_rama_de_esesgo_do_barramento_en_md_non_e_alcanzable ... ok
+test ningunha_rexion_non_rom_se_omite_en_silencio ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+
+running 11 tests
+test a_bateria_non_e_vacia_e_discrimina ... ok
+test o_motor_de_xanelas_declarativas_confirma_los_offsets_da_bateria ... ok
+test o_mesmo_enderezo_loxico_dá_bytes_distintos_segundo_o_estado ... ok
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test dous_instancias_de_estado_non_se_influen ... ok
+test os_alias_acada_os_mesmos_bytes_por_dous_camiños_distintos ... ok
+test a_bateria_de_recusas_devolve_codigo_rexion_e_procedencia ... ok
+test a_bateria_de_lecturas_validas_coincide_co_derivado_a_man ... ok
+test exhirom_fóra_do_contrato_falla_por_estado_non_por_rango ... ok
+test ningunha_chave_de_chip_especial_abre_un_camino_en_snes ... ok
+test a_escrita_de_banco_ss2_non_move_as_xanelas_non_escritas ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.54s
+
+
+running 15 tests
+test a_verificacion_de_contido_e_perna_do_adaptador_non_do_nucleo ... ok
+test estado_rexeitado_polo_perfil_e_badstate_non_invalid_range ... ok
+test lectura_dentro_da_venta_devolve_bytes_e_un_só_segmento ... ok
+test lorom_a15_ambiguo_recusase_por_nome_non_como_rango ... ok
+test a_fronteira_do_barramento_recusase_igual_en_md_e_en_snes ... ok
+test atestacion_e_imaxe_teñen_que_coincidir ... ok
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test rexion_coñecida_sin_backing_recusase_co_nome_da_rexion ... ok
+test lectura_que_sae_da_venta_recusase_deixando_a_procedencia_percorrida ... ok
+test a_procedencia_reconstrue_a_saida_byte_a_byte ... ok
+test limites_de_bytes_e_de_segmentos_recusanse_antes_de_recoller_nada ... ok
+test unha_escrita_de_secuencia_invalida_recusase_a_operacion_completa ... ok
+test secuencia_de_bancos_e_unha_operacion_distinta ... ok
+test mesmo_enderezo_loxico_dous_estados_bytes_distintos ... ok
+test ningunha_lectura_devolve_parciais_como_exitos ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.18s
+
+
+running 16 tests
+test area_dous_base_catro_megabytes_e_espeello_mod_half2 ... ok
+test area_una_desconecta_a22_e_a23 ... ok
+test bancos_completos_non_deixen_ver_o_espello_wram ... ok
+test clave_estraña_en_exhirom_e_rexeitada_non_ignorada ... ok
+test estado_amañado_non_devolve_offset_cero ... ok
+test en_enderezos_fora_do_barramento_non_hai_aritmética ... ok
+test invert_aliases_da_area_dous_co_espeello ... ok
+test invert_aliases_da_area_una ... ok
+test so_a_segunda_area_ten_que_ser_potencia_de_dous ... ok
+test exhirom_tampouco_produce_ambiguidade ... ok
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test rexions_non_rom_clasifican_se_sin_inventar_bytes ... ok
+test lectura_rexeita_antes_de_reservar ... ok
+test lectura_wrap_da_area_dous_no_tamanho_declarado ... ok
+test lectura_imaxe_curta_prefixo_e_erro ... ok
+test lectura_emende_bancos_e_corta_na_fronteira_da_área ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+
+
+running 14 tests
+test en_enderezos_fora_do_barramento_non_hai_aritmética ... ok
+test clave_estraña_en_hirom_e_rexeitada_non_ignorada ... ok
+test estado_amañado_non_devolve_offset_cero ... ok
+test invert_co_espeello_de_tamaño_un_só_grupo_de_bancos ... ok
+test invert_aliases_de_banco_metade_e_completo ... ok
+test lectura_rexeita_antes_de_reservar ... ok
+test rexions_non_rom_clasifican_se_sin_inventar_bytes ... ok
+test rom_e_lineal_con_mascara_de_tamaño ... ok
+test so_tamanos_binarios_entre_64kb_e_4mb_son_estado_valido ... ok
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test hirom_non_produce_ambiguidade_en_ningun_banco ... ok
+test lectura_reproduce_o_espeillo_en_cada_banco ... ok
+test lectura_imaxe_curta_prefixo_e_erro ... ok
+test lectura_emenda_bancos_completos_mas_corta_na_metade_alta ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 12 tests
+test en_enderezos_fora_do_barramento_non_ambiguidade ... ok
+test clave_estraña_en_lorom_e_rexeitada_non_ignorada ... ok
+test estado_amañado_non_devolve_offset_cero ... ok
+test invert_devolve_todos_os_aliases_de_pagina_e_espeello ... ok
+test rexions_non_rom_clasifican_se_sin_inventar_bytes ... ok
+test lectura_rexeita_antes_de_reservar ... ok
+test metade_baixa_con_a15_desconectado_e_ambiguous_nunca_palpito ... ok
+test rom_e_aritmetica_de_pagina_con_espeello ... ok
+test so_tamanos_binarios_entre_32kb_e_4mb_son_estado_valido ... ok
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test lectura_imaxe_curta_prefixo_e_erro ... ok
+test lectura_corta_en_cada_pagina_e_classifica_o_resto ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+
+running 3 tests
+test support::banked::tests::a_fixture_non_e_degenerada_incluso_antes_de_lectura ... ok
+test un_valor_de_banco_que_soborda_non_e_erro_e_a_lectura_espealla ... ok
+test ningunha_escrita_move_unha_xanela_non_escrita ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+
+running 5 tests
+test src/lib.rs - (line 20) ... ok
+test src/lib.rs - (line 44) ... ok
+test src/lib.rs - (line 61) ... ok
+test src/lib.rs - (line 85) ... ok
+test src/resource.rs - resource (line 38) ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/lib.rs (target/crates-gates/debug/deps/rex_addressing-66d78f7ee42d1026)
+     Running tests/acceptance.rs (target/crates-gates/debug/deps/acceptance-42b2965040fa861c)
+     Running tests/byor.rs (target/crates-gates/debug/deps/byor-f25f19139da4fae3)
+     Running tests/differential.rs (target/crates-gates/debug/deps/differential-2a49a798119f4ff7)
+     Running tests/harness_selfcheck.rs (target/crates-gates/debug/deps/harness_selfcheck-bb13b07fe1267bba)
+     Running tests/inversion.rs (target/crates-gates/debug/deps/inversion-5966f24e3492869b)
+     Running tests/md_linear_rules.rs (target/crates-gates/debug/deps/md_linear_rules-d095c435f24d625d)
+     Running tests/md_ssf2_rules.rs (target/crates-gates/debug/deps/md_ssf2_rules-9dc114296e9d56b2)
+     Running tests/no_panic_sweep.rs (target/crates-gates/debug/deps/no_panic_sweep-78317d8c2938e1ce)
+     Running tests/read_semantics_audit.rs (target/crates-gates/debug/deps/read_semantics_audit-aed865e67c54b281)
+     Running tests/resource_fixtures.rs (target/crates-gates/debug/deps/resource_fixtures-04869116e1851897)
+     Running tests/resource_reader.rs (target/crates-gates/debug/deps/resource_reader-2a1726cb287e1071)
+     Running tests/snes_exhirom_rules.rs (target/crates-gates/debug/deps/snes_exhirom_rules-b68b265fcd4a666d)
+     Running tests/snes_hirom_rules.rs (target/crates-gates/debug/deps/snes_hirom_rules-ec5cf0a8ab3ddafa)
+     Running tests/snes_lorom_rules.rs (target/crates-gates/debug/deps/snes_lorom_rules-d1b33f5f3a98848c)
+     Running tests/ssf2_writes.rs (target/crates-gates/debug/deps/ssf2_writes-5783a036122b6cca)
+   Doc-tests rex_addressing
+OK: rex-addressing test
+
+OK: 2 pacote(s) registrado(s), gates proprios aprovados.
+GATES_RC=0
