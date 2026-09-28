@@ -188,6 +188,7 @@ fn run(impl_: &ProfileImpl) {
     invert_cases(impl_, pv, &stream);
     read_cases(impl_, pv, &stream);
     oracle_cross_check(impl_, pv);
+    invert_oracle_cross_check(impl_, pv);
 }
 
 fn fixture_stream(pv: &ProfileVectors) -> Vec<u8> {
@@ -486,6 +487,116 @@ struct RefCase {
     name: String,
     cpu_address: u64,
     state: RawState,
+}
+
+/// Mostras de `a` para o barrido de inversión: tocan os dous bordes de cada
+/// metade e os limiares propios das xanelas (`0x6000`/`0x7FFF` de SRAM,
+/// `0x8000` da metade alta), así que todo banco ve as súas clases de xanela.
+const INVERT_SWEEP_A: [u64; 16] = [
+    0x0000, 0x0001, 0x1fff, 0x2000, 0x5fff, 0x6000, 0x7fff, 0x8000, 0x8001, 0xa55a, 0xbfff, 0xc000,
+    0xdfff, 0xe000, 0xfffe, 0xffff,
+];
+
+/// Segunda referencia para `invert`. `invert_cases` compara a lista co vector
+/// pinado e **retraduce cada alias co propio perfil**, que é autofluxo: proba
+/// coherencia interna, non corrección. Aquí o esperado derívase do motor de
+/// xanelas, en dúas direccións:
+/// - **sonancia**: cada alias que o perfil devolve ten que ser, segundo o motor,
+///   unha ROM co offset pedido. Isto é o que rexeita a fórmula de HiROM anterior
+///   a 2026-09-25, que inventaba aliases `start + 0x8000 + rel`.
+/// - **completude en mostras**: para cada enderezo do barrido que o motor
+///   clasifica como ROM, ese enderezo ten que estar na lista do perfil para o
+///   offset que o motor calcula. Un alias perdido vese aquí, non na retradución.
+///
+/// A completude **exaustiva** (os 16,7M de enderezos) está en `tests/inversion.rs`.
+fn invert_oracle_cross_check(impl_: &ProfileImpl, pv: &ProfileVectors) {
+    let fixture_size = pv.fixture.rom_size;
+    let mut pairs: Vec<(u64, RawState, String)> = Vec::new();
+    for c in &pv.invert {
+        if let (ExpectInv::Aliases(_), RawValue::Uint(offset)) = (&c.expect, &c.rom_offset) {
+            if state_is_modelable(impl_.id, &c.state) {
+                pairs.push((*offset, c.state.clone(), c.name.clone()));
+            }
+        }
+    }
+    for s in &pv.invert_samples {
+        pairs.push((
+            s.rom_offset,
+            RawState::plain(fixture_size),
+            format!("mostra {:#x}", s.rom_offset),
+        ));
+    }
+    assert!(
+        !pairs.is_empty(),
+        "{}: sen pares (offset, estado) modelables a sonancia non se proba",
+        impl_.id
+    );
+
+    let mut graded_aliases = 0usize;
+    for (offset, state, label) in &pairs {
+        let rom_size = state.rom_size().unwrap_or(fixture_size);
+        let engine = reference(impl_.id, rom_size, state);
+        let aliases = (impl_.invert)(conv::u32(*offset), &conv::to_mapper_state(state))
+            .unwrap_or_else(|e| panic!("{} / {label}: invert fallou {e:?}", impl_.id));
+        for alias in &aliases {
+            assert_eq!(
+                engine.translate(u64::from(*alias)),
+                Engine::Ok {
+                    region: "rom".into(),
+                    offset: *offset,
+                },
+                "{}: {label}: o alias {alias:#x} non é ROM desas offset segundo o motor",
+                impl_.id,
+            );
+            graded_aliases += 1;
+        }
+    }
+
+    // Un barrido por estado distinto (os casos pinados comparten estados).
+    let mut vistos: Vec<String> = Vec::new();
+    let mut sweep_hits = 0usize;
+    for (_, state, _) in &pairs {
+        let key = format!("{state:?}");
+        if vistos.contains(&key) {
+            continue;
+        }
+        vistos.push(key);
+        let rom_size = state.rom_size().unwrap_or(fixture_size);
+        let engine = reference(impl_.id, rom_size, state);
+        let mapper = conv::to_mapper_state(state);
+        for bank in 0..=0xffu64 {
+            for a in INVERT_SWEEP_A {
+                let addr = (bank << 16) | a;
+                let Engine::Ok { region, offset } = engine.translate(addr) else {
+                    continue;
+                };
+                if region != "rom" {
+                    continue;
+                }
+                let aliases = (impl_.invert)(conv::u32(offset), &mapper)
+                    .unwrap_or_else(|e| panic!("{}: invert({offset:#x}) fallou {e:?}", impl_.id));
+                assert!(
+                    aliases.contains(&conv::u32(addr)),
+                    "{}: enderezo {addr:#x} ({bank:#04x}:{a:#06x}) é ROM de offset {offset:#x} \
+                     segundo o motor e o perfil non o lista ({} aliases: {aliases:?})",
+                    impl_.id,
+                    aliases.len(),
+                );
+                sweep_hits += 1;
+            }
+        }
+    }
+    assert!(
+        sweep_hits >= 256,
+        "{}: o barrido de inversión só tocou {sweep_hits} ROMs; agardábanse >= 256 (un por banco)",
+        impl_.id,
+    );
+    assert!(
+        graded_aliases >= pv.invert.len(),
+        "{}: a sonancia só gradou {graded_aliases} aliases de {} casos",
+        impl_.id,
+        pv.invert.len(),
+    );
 }
 
 fn reference(profile: &str, rom_size: u64, state: &RawState) -> Reference {
