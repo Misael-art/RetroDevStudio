@@ -55,11 +55,20 @@ inventaba aliases (`rel < 0x8000` + `0x8000`) e ningún caso pinado nela é vál
 
 | Perfil | `rom_size` válido | Estado de bancos |
 |---|---|---|
-| `md-linear` | potencia de 2 en [0x10000, 0x400000] | inexistente (claves extras → `unsupported`) |
+| `md-linear` | potencia de 2 en [0x10000, 0x400000] | inexistente (**claves extras ígnoranse**, como na referencia auditada) |
 | `md-ssf2` | potencia de 2 en [0x80000, 0x800000] | `banks: {1..7 → byte}`, xanela 0 fixa |
-| `snes-lorom` | potencia de 2 en [0x8000, 0x400000] | inexistente |
-| `snes-hirom` | potencia de 2 en [0x10000, 0x400000] | inexistente |
-| `snes-exhirom` | (0x400000, 0x800000] **e** `rom_size − 0x400000` potencia de 2 → 5MB, 6MB, 8MB | inexistente |
+| `snes-lorom` | potencia de 2 en [0x8000, 0x400000] | inexistente (claves extras → `unsupported`) |
+| `snes-hirom` | potencia de 2 en [0x10000, 0x400000] | inexistente (claves extras → `unsupported`) |
+| `snes-exhirom` | (0x400000, 0x800000] **e** `rom_size − 0x400000` potencia de 2 → 5MB, 6MB, 8MB | inexistente (claves extras → `unsupported`) |
+
+**Corrección do contrato (verificada na referencia e fixada con tests).** A
+política de claves alleas **non é simétrica** entre familias: `md-linear` ignora
+calquera clave que non sexa `rom_size` (`md_linear.mjs` non a mira), mentres que
+os tres perfís SNES rexeitan calquera clave adicional. Un `rom_size` **ausente,
+`null`, negativo, non enteiro ou fóra de 32 bits** é `unsupported` (non
+`out-of-range`: o que falla é o estado, non o enderezo). Ambos as behaviors están
+pinados: `tests/md_linear_rules.rs::clave_estraña_en_md_linear_comportase_como_na_referencia`
+e `tests/snes_*_rules.rs::clave_estraña_en_*_e_rexeitada_non_ignorada`.
 
 Non se asume que todos os tamaños de ROM sexan potencias de 2: `snes-exhirom`
 aceita 5MB e 6MB (totais non binarios cuxa **segunda** área si é binaria), e hai
@@ -120,15 +129,23 @@ son distintas:
 
 ## 7. `read` — leituras que cruzan xanelas e frontiras
 
-`read(cpu_address, length, &MapperState, &RomImage) -> Result<Vec<Segment>, AddressingError>`
+`read(cpu_address: u32, length: u32, mapper_state: &MapperState, rom: &[u8]) -> Result<Vec<Segment>, AddressingError>`
 
 ```rust
 pub enum Segment {
     Bytes { region: Region, offset: u32, bytes: Vec<u8> },
-    DeviceNoBacking { region: Region, offset: u32 },   // coñecido, sen backing ROM
-    Invalid(AddressingError),                          // truncamento explícito
+    /// Rexión coñecida sen backing ROM: clasifícase, non se inventan bytes.
+    DeviceNoBacking { region: Region, offset: u32, error_code: ErrorCode },
+    /// Truncamento explícito (área sen dispositivo, ROM curta, fin do barramento).
+    Invalid(AddressingError),
 }
 ```
+
+**Corrección do contrato.** `DeviceNoBacking` leva `error_code` na entrega real
+(`ErrorCode::Unsupported` hoxe): sen el, o consumidor tería que adiviñar *por que*
+non hai bytes, e o contrato existe para que un erro viaxe estruturado ata o
+chamador. A imaxe transmitese como `&[u8]` (non un tipo `RomImage` novo): un
+`Vec<u8>` de calquera cargador chega sen conversións nin dependencias.
 
 - Un segmento por **corrida continua de offset**, non por byte. Corta en:
   fin de xanela/grupo de bancos, borde de espello (`rom_size`, e en ExHiROM
@@ -179,16 +196,38 @@ pub enum Segment {
   banner de header ou tamaño. `corpus-identification` segue `blocked` nos manifests.
 - Decodificación de registros IO individuais (só se clasifica a xanela).
 - Soporte a xogos, codecs ou descompilación: **ningunha** afirmación.
+- **Etiqueta da xanela `$FF0000-$FFFFFF` en Mega Drive.** A referencia auditada
+  clasa todo `$E00000-$FFFFFF` como `work-ram` con `offset = addr & 0xffff`, e os
+  vectores pinados herdan iso; `md-linear`/`md-ssf2` **nunca emiten `Sram`**
+  (ese `Region` véxese nos perfís SNES). Non é un erro ROM/non-ROM — non se
+  inventan bytes — pero a etiqueta é groseira para backup RAM con batería.
+  Corrixila require re-exportar os vectores, fóra desta rolda. Fixado en
+  `tests/byor.rs::a_sram_declarada_polo_header_non_e_rom`.
+- **Prosa vs. aritmética en WRAM SNES.** A especificación de HiROM describe as
+  bancos `7E/7F` como "128KB contiguos", mentres que as tres representacións
+  (perfil Rust, referencia JS e motor de xanelas) dan `offset = a` por banco.
+  Déixase como observación na rolda: o que se entrega é `offset = a`, e a
+  diverxencia de texto queda rexistrada, non "corrixida" por simpatía coa prosa.
 
 ## 11. Validacións obrigatorias e onde viven
 
 | # | Validación | Onde |
 |---|---|---|
 | 1 | Vectores diferenciais existentes, con versión e SHA, sen Node | `tests/differential.rs` (+ `tests/support/json.rs`, parser propio) |
-| 2 | Referencia independente (motor de xanelas declarativas de `crosscheck/`, táboa extraída do `boards.bml` crudo de bsnes) | `tests/oracle.rs` + `tests/support/windows_engine.rs` (só tests; **non** reusa as fórmulas dos perfis) |
-| 3 | Límites de xanela, aliases, tamaños irregulares, enderezos inválidos, rexións excluídas, lecturas fóra da ROM | `tests/limits.rs`, `tests/inversion.rs` |
+| 2 | Referencia independente (motor de xanelas declarativas, táboa extraída do `boards.bml` crudo de bsnes, con SHA propia) | `tests/support/windows_engine.rs` (só tests; **non** reusa as fórmulas dos perfis), consumido en `tests/differential.rs::oracle_cross_check` (translate) e `::invert_oracle_cross_check` (invert) |
+| 3 | Límites de xanela, aliases, tamaños irregulares, enderezos inválidos, rexións excluídas, lecturas fóra da ROM | `tests/md_linear_rules.rs`, `tests/md_ssf2_rules.rs`, `tests/snes_{lorom,hirom,exhirom}_rules.rs`, `tests/inversion.rs` |
 | 4 | SSF2: escritas, bytes antes/despois, xanelas non afectadas iguais | `tests/ssf2_writes.rs` |
-| 5 | Inversión: todo alias retradúcese ao offset pedido; completitude no dominio acotado | `tests/inversion.rs` (rápido) + `tests/exhaustive.rs` (`#[ignore]`) |
+| 5 | Inversión: todo alias retradúcese ao offset pedido; completitude no dominio acotado | `tests/differential.rs` (rápido, mostras) + `tests/inversion.rs::cada_perfil_devolve_exactamente_o_preimage_do_motor` (`#[ignore]`, barrido completo 0x000000-0xffffff) |
 | 6 | Controis discriminativos (mutación → FAIL → reverter → PASS) | `docs/rex_profiles/addressing_runtime/MUTATION-CONTROLS.md` con saída literal |
-| 7 | BYOR separado, identidade exacta, ficheiro ausente ≠ PASS; ExHiROM só-fixture | `tests/byor.rs` |
-| 8 | `fmt`, `clippy -D warnings`, tests rápidos separados dos caros | `MUTATION-CONTROLS.md` / informe final |
+| 7 | BYOR separado, identidade exacta, ficheiro ausente ≠ PASS; ExHiROM só-fixture | `tests/byor.rs` (`#[ignore]`) |
+| 8 | `fmt`, `clippy -D warnings`, tests rápidos separados dos caros | informe final (saída literal alí) |
+
+**Desviación rexistrada da propia táboa.** Este contrato anunciaba
+`tests/oracle.rs`, `tests/limits.rs` e `tests/exhaustive.rs` como ficheiros. Non
+existen con eses nomes: a comparación contra a referencia vive dentro de
+`tests/differential.rs` (porque espera os mesmos vectores pinados), os límites
+viven nos `*_rules.rs` de cada perfil (porque son expectativas derivadas a man da
+sua propia especificación) e o barrido exaustivo vive en `tests/inversion.rs`
+(porque comparte o oráculo de preimage coa proba rápida). Criar os tres
+ficheiros co nomes previstos sería duplicar infrastructure de testes, así que se
+documenta a correspondencia en vez de renomear.
