@@ -8,5 +8,31 @@
     "fluxo-do-usuario-comprovado"
   ],
   "regra": "Compilar e passar nos gates proprios NAO registra integracao ao produto. O nivel backend-integrado exige, na ordem: dependencia por path em src-tauri/Cargo.toml (sem criar workspace na raiz), adaptador no backend e uma chamada real testada pelo backend.",
-  "pacotes": []
+  "pacotes": [
+    {
+      "nome": "rex-kosinski",
+      "manifesto": "crates/rex-kosinski/Cargo.toml",
+      "descricao": "Decodificador Kosinski v1 (frente B). Biblioteca standalone: o produto nao a consome ainda.",
+      "maturidade": "gates-proprios-aprovados",
+      "gates": {
+        "medidos_em": "2026-09-28T02:48Z, branch codex/rex-integrator-crates-registry",
+        "fmt": "OK",
+        "clippy_all_targets": "OK",
+        "test_locked": "OK — 25 testes executados (22 contract + 3 mutations), 0 falhas, 0 ignorados",
+        "evidencia": "data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/",
+        "cargo_target_dir": "target/crates-gates (fora da arvore rastreada; .gitignore ja cobre target/)"
+      },
+      "acoplamento_declarado": "os testes do pacote lem fixtures fora dele, em data/rex_profiles/codec/kosinski/ (pergunta via CARGO_MANIFEST_DIR + ../../). O pacote NAO e relocavel sozinho. Importado pelo integrador no mesmo pino (27 linhas de manifest.tsv conferidas, 0 divergencias; hash agregado ea866df7... reproduzido na branch integrada).",
+      "nao_alega": "nada de integracao ao produto: sem dependencia por path em src-tauri, sem adaptador, sem chamada real pelo backend, sem fluxo pela interface. Nivel backend-integrado segue nao alcançado.",
+      "propriedade": "agente B (PR #81); registro e manifests sao do integrador",
+      "origem": "entrega 3fea06e + 1af7017 (PR #81, branch codex/rex-kosinski-decoder, pin revisto 0b752b7), aplicados por cherry-pick -x nesta branch",
+      "perfil": {
+        "contrato": "docs/rex_profiles/kosinski_runtime/CONTRACT.md",
+        "relatorio": "docs/rex_profiles/kosinski_runtime/REPORT.md",
+        "dados": "data/rex_profiles/kosinski_runtime/",
+        "comparacao_externa": "scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh"
+      },
+      "byor": "nenhum teste ordinario do pacote depende de ROM comercial; a comparacao com koscmp fica no script de perfil, fora da suite"
+    }
+  ]
 }

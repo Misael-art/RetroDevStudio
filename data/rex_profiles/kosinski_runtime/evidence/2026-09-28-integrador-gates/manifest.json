@@ -1,0 +1,67 @@
+{
+  "schema": "rex-crate-integration/v1",
+  "descricao": "Pacote de evidencia da integracao do crate standalone rex-kosinski (frente B) na branch do integrador: revisao, gates proprios medidos e fechamento da cadeia de fixtures que o pacote consome.",
+  "quando_utc": "2026-09-28T02:48Z",
+  "quem": "integrador da rodada REX (nao o agente B)",
+  "branch": "codex/rex-integrator-crates-registry",
+  "base_do_gate": "npm run crates:gates (scripts/crates-gates.mjs), CARGO_TARGET_DIR=target/crates-gates, toolchain 1.97.0 via rust-toolchain.toml da raiz",
+
+  "objeto_da_revisao": {
+    "pacote": "crates/rex-kosinski",
+    "entregas": ["3fea06e", "1af7017"],
+    "pr": 81,
+    "branch_de_origem": "codex/rex-kosinski-decoder",
+    "pin_conferido_na_hora_da_revisao": "0b752b7",
+    "meio_de_integracao": "git cherry-pick -x (preserva autoria e mensagem); nao houve merge de branch",
+    "observacao_de_origem": "0b752b7 (contrato v1 do ENCODER, so documentacao) e o WIP nao commitado de encode.rs em crates/rex-kosinski/src/ ficaram de fora desta integracao: pertencem a proxima entrega da frente B."
+  },
+
+  "gates_mediados": {
+    "cargo_fmt_check": { "rc": 0, "resultado": "OK" },
+    "cargo_clippy_all_targets_d_warnings": { "rc": 0, "resultado": "OK" },
+    "cargo_test_locked": {
+      "rc": 0,
+      "bins_medidos": {
+        "unittests src/lib.rs": "0 passed / 0 failed / 0 ignored",
+        "tests/contract.rs": "22 passed / 0 failed / 0 ignored (1,83 s)",
+        "tests/mutations.rs": "3 passed / 0 failed / 0 ignored (5,65 s)",
+        "doc-tests": "0 passed"
+      },
+      "total_testes": 25,
+      "diferenca_vs_mensagem_do_commit": "a mensagem de 3fea06e anuncia '24 testes'; nesta branch a suite executa 25 (0+22+3). Registro o numero medido, nao o anunciado."
+    },
+    "rc_final_do_wrapper": 0
+  },
+
+  "fechamento_da_cadeia_de_fixtures": {
+    "problema_encontrado": "Na primeira corrida dos gates (antes deste import) 15 dos 25 testes falharam com 'fixture golden/... : No such file or directory'. O pacote le fixtures fora de crates/, por CARGO_MANIFEST_DIR + ../../data/rex_profiles/codec/kosinski, e esse perfil existia apenas na linha de branch da frente B (PR #79), nao na branch integrada.",
+    "importado": {
+      "dados": "data/rex_profiles/codec/kosinski (57 arquivos, 174.770 bytes)",
+      "scripts": "scripts/rex_profiles/codecs/kosinski/{build-vectors.sh,gen_vectors.py,kos_mirror.py}",
+      "de": "codex/rex-kosinski-decoder (mesmo pino revisado)",
+      "nao_importado": "__pycache__ (WIP alheio, artefato de build)"
+    },
+    "conferencia": {
+      "manifest.tsv": "27 linhas conferidas contra os arquivos importados: SHA-256 de cada plain (.bin) e de cada stream (.kos) — 0 divergencias",
+      "hash_agregado": "ea866df797126230b36e27b76ca569d4fd8528d291e86fe578491998ec3d96d1 — REPRODUZIDO nesta branch com a receita declarada no proprio arquivo de evidencia",
+      "receita_agregado": "cd data/rex_profiles/codec/kosinski && { find plain golden negative -type f | LC_ALL=C sort | xargs sha256sum; cat manifest.tsv; } | sha256sum | cut -d' ' -f1"
+    }
+  },
+
+  "achados_da_revisao": [
+    "Acoplamento de fixtures fora do pacote: crates/rex-kosinski nao e relocavel sem data/rex_profiles/codec/kosinski. Ficou declarado em crates/registry.json. Pedida a correcao ao agente B (vendorizar em crates/rex-kosinski/tests/fixtures/ ou receber o caminho por variavel de ambiente); o integrador NAO editou os testes da frente B.",
+    "O contrato do pacote diverge do oraculo em casos malformados (golden m02 e negativos k01..k05): decisao declarada no manifest do perfil e no CONTRACT.md, e exercitada por testes que asserecem a recusa estruturada. Nao e regressao; e o contrato.",
+    "Cargo.toml nao declara campo `license` (com publish = false o build e os gates passam). Registrado como pendencia de metadado, nao como falha de gate."
+  ],
+
+  "limites_deste_pacote": "Nada aqui alega integracao ao produto. O nivel alcanado e 'gates-proprios-aprovados'. Falta, na ordem: dependencia por path em src-tauri/Cargo.toml, adaptador no backend e uma chamada real testada pelo backend (nivel backend-integrado), e depois prova de fluxo pela interface (fluxo-do-usuario-comprovado). A paridade diferencial contra koscmp e capacidade de encoder seguem na frente B; o modo modular nao e coberto.",
+
+  "artefatos_promovidos": {
+    "gates.log": {
+      "sha256": "d0e8d574a696850c90d1f8b28f8b37ca48026bced1903198830079cb7fde97b8",
+      "linhas": 68,
+      "onde_cada_numero_esta": "comandos e rc no corpo do log; contagens 'test result:' nas linhas dos tres targets; 'rc=0' na ultima linha"
+    }
+  },
+  "como_conferir": "npm run crates:gates (reexecuta os tres gates do pacote registrado e imprime os comandos exatos); npm run check:tree (exige que o diretorio exista e esteja registrado); a receita do hash agregado acima; git log --oneline -- crates/rex-kosinski."
+}
