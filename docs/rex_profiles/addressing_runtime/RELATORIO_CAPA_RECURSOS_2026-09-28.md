@@ -23,7 +23,7 @@ compartido co produto e sen emuladores.
 | `cargo test --offline` repetido ×4 | 127/0/9 nas catro: tres para a estabilidade do detector novo e unha tras a última revisión de texto (ver `MUTATION-CONTROLS.md` §R1) |
 | `cargo test --release --offline --test inversion -- --ignored` | 1 pasado · 7 casos · 8.22 s |
 | `cargo test --offline --test byor -- --ignored` | 8 pasados · 0 fallos · 0.19 s |
-| `cargo run --offline --example resource_report` | `lecturas=13 recusas=14` e `resumo sha256=27bebc7b4f83cbf66baaff0a9968bb5055729f015da2079e3c04ab7d13774c8f` (idéntico ao documentado en `EXEMPLO-CONSUMIDOR.md`, executado dúas veces máis) |
+| `cargo run --offline --example resource_report` | `lecturas=13 recusas=14` e `resumo sha256=27bebc7b4f83cbf66baaff0a9968bb5055729f015da2079e3c04ab7d13774c8f` (idéntico ao documentado en `EXEMPLO-CONSUMIDOR.md`, re-executado tres veces máis) |
 | `cargo test --offline --test no_panic_sweep -- --nocapture` | 277 610 chamadas, 0 pánicos (desglose abaixo) |
 | Mutacións R1–R4 | catro FAIL literais, catro reverts con `git diff --stat src/` baleiro |
 
@@ -46,7 +46,7 @@ Controis de mutación desta rolda (detalle completo e saída literal en
 | R1 | invariante dos `.expect()` falso (`md_linear.rs:33` afrouxado) | 3 das 8 probes da varredura; 1 553 216 pánicos en 1 725 576 chamadas |
 | R2 | banco equivocado (`md_ssf2.rs:117`, `window + 1`) | 4/14 `md_ssf2_rules` + 5/11 `resource_fixtures` + 3/15 `resource_reader` |
 | R3 | fronteira equivocada (`md_ssf2.rs:303`, `window + 2`) | 1/14 + 2/11 + 2/15; un segmento chega a proclamar `cpu_len: 524296` |
-| R4 | procedencia que mente (`resource.rs:479`, `rom_offset: cursor`) | 7/11 + 4/15, **co bytes correctos**: só a ve quen lea a procedencia |
+| R4 | procedencia que mente (`resource.rs:479`, `rom_offset: cursor`) | 7/11 + 4/15, **cos bytes correctos**: só a ve quen lea a procedencia |
 
 ## 2. Evidencia herdada (non se volveu xerar)
 
@@ -94,6 +94,12 @@ Unha nota sobre `git diff`: as catro mutacións aplicáronse e **retiráronse** 
 `git checkout -- <ficheiro>`, e a árbore de `cae6b58` non contén ningún
 deses catro parches. Pódese comprobar con `git log -p -S 'unwrap_or(0x1_0000)' --oneline`,
 que non dá commits.
+
+Sobre as citas literais: comprobáronse byte a byte contra os logs daquela
+execución (`/tmp/rex-a2-m1b.log`, `-m2.log`, `-m3.log`, `-m4.log`), pero `/tmp` non
+é duradeiro. O que se publica como evidencia é o **comando de reprodución** de
+`MUTATION-CONTROLS.md` §"Como repetir calquera deles", que volvese a dar os mesmos
+`assertion` na mesma árbore; quen queira o log completo pode redirixilo el mesmo.
 
 ## 4. Que **non** alega esta entrega
 
