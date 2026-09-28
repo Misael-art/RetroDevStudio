@@ -21,6 +21,7 @@ pub mod holdout;
 pub mod inspection;
 pub mod logic_recovery;
 pub mod object_diff;
+pub mod rex_addressing;
 pub mod rex_aplib;
 pub mod rex_codecs;
 pub mod rex_context;

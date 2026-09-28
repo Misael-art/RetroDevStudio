@@ -19,6 +19,11 @@ tauri-plugin-opener = "=2.5.4"
 tauri-plugin-dialog = "=2.7.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Biblioteca de endereçamento REX (Experimental). Dependencia de caminho: não
+# traz crates externos para `Cargo.lock` e continua sem Tauri/serde — a
+# serialização e a tradução de erros vivem no adaptador
+# `tools/reverse/decomp/rex_addressing.rs`.
+rex-addressing = { path = "../crates/rex-addressing" }
 libloading = "0.8"
 image = { version = "0.25", default-features = false, features = ["bmp", "png", "pnm", "jpeg", "gif", "webp"] }
 sevenz-rust2 = { version = "0.16", features = ["util"] }

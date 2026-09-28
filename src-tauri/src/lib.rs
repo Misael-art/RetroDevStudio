@@ -2517,6 +2517,31 @@ async fn rex_resource_apply_edit(
 }
 
 #[tauri::command]
+async fn rex_addressing_read_snapshot(
+    request: tools::reverse::decomp::rex_addressing::SnapshotReadRequest,
+) -> Result<
+    tools::reverse::decomp::rex_addressing::SnapshotReadResult,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    // Leitura de bytes co estado do mapper FIXO, servida pola biblioteca
+    // `crates/rex-addressing`. Serialización, tradución de erros e confereção da
+    // identidade viven no adaptador; a biblioteca segue sen Tauri. As
+    // transicións de banco (`read_sequence`) son outra operación e aínda non se
+    // exponen por aquí. Perfil e estado son explícitos: nada se autodetecta.
+    run_heavy_command_off_main_thread(
+        move || tools::reverse::decomp::rex_addressing::read_fixed_snapshot(&request),
+        || {
+            Err(tools::reverse::decomp::inspection::InspectionError {
+                code: "command_interrupted".to_string(),
+                message: interrupted_command_message("rex_addressing_read_snapshot"),
+                retryable: true,
+            })
+        },
+    )
+    .await
+}
+
+#[tauri::command]
 fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, String> {
     let trimmed = project_dir.trim();
     if trimmed.is_empty() {
@@ -5162,6 +5187,7 @@ pub fn run() {
             rex_resource_context,
             rex_resource_context_hit,
             rex_resource_apply_edit,
+            rex_addressing_read_snapshot,
             list_project_assets,
             read_project_asset_bytes,
             open_project_source_path,
