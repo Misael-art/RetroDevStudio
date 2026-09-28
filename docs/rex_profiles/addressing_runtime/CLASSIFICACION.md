@@ -288,3 +288,14 @@ recursos + 10 da súa batería + 5 doc-tests + 8 da varredura = **127**. Esas 13
 dun mesmo check en 13 contextos; contan como evidencia en cada binario pero non
 son 13 probas distintas, e así se declaran. A clasificación enteira é
 **Experimental**: non se promotiona ningunha palabra do roadmap.
+
+**Actualización da rolda do aceite (árbore de traballo sobre `30cb311`).** Ao
+engadir `tests/acceptance.rs`, o parágrafo anterior queda desactualizado en dous
+números, e así se declara: son **14** os binarios que inclúen `mod support;` (o aceite
+tamén) sobre **15** binarios de integración, e o reconto de `cargo test --offline`
+pasa a **138 executados · 0 fallos · 10 `#[ignore]`** (17 filas: 16 binarios +
+doc-tests). A descomposición, target por target e coa árbore de cada medida, está
+en `scripts/rex_profiles/addressing_runtime/rex-addressing/README.md` §"Validacións";
+os controls que graduan o aceite son **R5–R8** de `MUTATION-CONTROLS.md`. Ningunha
+das cifras antigas se reescribe: pertencen ás árbores nas que se tomaron
+(`13c48ad`, `30cb311`).
