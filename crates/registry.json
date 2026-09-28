@@ -96,6 +96,16 @@
         "o_que_non_prova": "estes vectores gradúan read_resource / read_sequence da crate, superficies que o adaptador do produto NON expón: non son evidencia do adaptador e non moven o degrau backend-integrado. Tamén fica rexistrado que a primeira carreira do lib pipesouse a `tail -30`, polo que o seu `TEST_LIB_RC` era o código de `tail`; a carreira autorizada e cargo-test-lib-pos-aceite.log",
         "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-aceite-integrado/ (manifesto rex-crate-integration/v1 con sha256 e linhas por ficheiro; autocomprobado: 6 listados, 6 presentes, 0 diverxencias)"
       }
+    },
+    {
+      "nome": "rex-gameplay",
+      "manifesto": "crates/rex-gameplay/Cargo.toml",
+      "descricao": "Recuperacao delimitada de uma regra de gameplay M68K (guarda de input + contador + limiar + escrita de estado + chamada externa opaca) a partir de ROM Mega Drive, com grafo NodeGraph v1 editavel (so o limiar), patch e regeneracao sem crescimento. Perfil m68k.counter_threshold_state_gate.v1, Experimental. Contrato em crates/rex-gameplay/CONTRACT.md.",
+      "maturidade": "gates-proprios-aprovados",
+      "maturidade_data": "2026-09-28",
+      "propriedade": "frente de recuperacao de gameplay (branch codex/rex-gameplay-recovery); registro e manifests sao do integrador — entrada PROPOSTA, sujeita a curadoria",
+      "nao_alega": "nenhum comando Tauri nem UI: o adaptador src-tauri/src/tools/reverse/decomp/rex_gameplay.rs so e exercido por testes; nao ha descoberta automatica de rotinas nem decompilacao geral; equivalencia por conjunto declarado de estados.",
+      "evidencia": "docs/rex_profiles/gameplay_recovery/"
     }
   ]
 }

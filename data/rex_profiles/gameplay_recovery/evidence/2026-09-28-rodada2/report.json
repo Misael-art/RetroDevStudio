@@ -1,0 +1,3551 @@
+{
+  "absolute_writers": [
+    {
+      "at": "0x000954",
+      "inside_region": true
+    },
+    {
+      "at": "0x00096A",
+      "inside_region": true
+    },
+    {
+      "at": "0x000CB0",
+      "inside_region": true
+    }
+  ],
+  "builds": {
+    "blind_step3_t37": "55ea591b7ee21dafad953d64ac7c9c897a12df806ba597a15988b9e6f0d64850",
+    "original_t6": "86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e",
+    "sgdk_rebuilt_t12": "06fe310e823f1a510f06f69877aa8a72bb3df669ba0d59afb37e1564c74f104f",
+    "shifted_step2_t20": "f049bbc3daad59d4e416d8c76716ff791c0e8825fb8d37b70af8ffe25de378a2",
+    "shifted_z_step4_t30": "b370d889c54151b5127f75e8c23691c649255d7962bd0281f172d84f7ecf050e"
+  },
+  "checksum": {
+    "algorithm_patcher": "soma MD aditiva de 0x200 ao fim; so reescrita se a base a tiver valida (contrato atual)",
+    "algorithm_pipeline": "SGDK sizebnd: XOR de todas as palavras da ROM exceto 0x18E (core::rom_mastering::sgdk_checksum, aplicado por build_orch apos o header do projeto)",
+    "hardware_note": "o core Libretro nao valida este campo; execucao no core nao prova compatibilidade com hardware",
+    "original": {
+      "md_sum": "CE17",
+      "sgdk_xor": "14BB",
+      "stored": "14BB"
+    },
+    "original_mastering_status": "matching_sgdk",
+    "patched": {
+      "md_sum": "CE1D",
+      "sgdk_xor": "14B5",
+      "stored": "14BB"
+    },
+    "patched_mastering_status": "mismatch",
+    "patched_with_sgdk_xor_recomputed_equals_sgdk_rebuild": true,
+    "policy": "inalterada; atualizacao do checksum SGDK proposta ao integrador",
+    "sgdk_rebuild_t12": {
+      "sgdk_xor": "14B5",
+      "stored": "14B5"
+    }
+  },
+  "controls_planned_before_execution": [
+    {
+      "expected": 6,
+      "id": "open_score_original",
+      "observed": 6,
+      "pass": true
+    },
+    {
+      "expected": 12,
+      "id": "open_score_edited",
+      "observed": 12,
+      "pass": true
+    },
+    {
+      "id": "noop_equals_original",
+      "pass": true
+    },
+    {
+      "id": "edited_differs_from_original (resposta antiga)",
+      "pass": true
+    },
+    {
+      "id": "edited_blocked_before_12 (x+14<=50)",
+      "observed_max_x": 36,
+      "pass": true
+    },
+    {
+      "id": "original_crossed_x_gt_66_at_frame_21",
+      "note": "limiar numerico escolhido sem base na 1a execucao; falhou (x=66) e NAO e mais usado como gate",
+      "observed_x": 66,
+      "pass": false
+    }
+  ],
+  "diagnostic_observations": [
+    {
+      "criterion": "mesmo quadro: original x+14>50 e editada x+14<=50",
+      "frames": [
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ],
+      "id": "per_frame_divergence",
+      "origin": "introduzido apos a 1a captura para substituir o limiar x>66; a previsao causal (limiar -> goal_open -> bloqueio) nao mudou"
+    },
+    {
+      "id": "checksum_0x18F",
+      "origin": "surgiu na 1a execucao; ver `checksum`"
+    }
+  ],
+  "effect_runs": {
+    "noop_t6": {
+      "frames": [
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "273c94820df1d67006542e8708891c041e36f9a0d904db45f748a33bc2810dff",
+          "frame": 1,
+          "goal_open": 0,
+          "player_x": 34,
+          "score": 1
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "2f97d4d08feac287dd44255cfb6cd083fa2a785a7238bf0751a823ae584ecd86",
+          "frame": 2,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 2
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 3,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 3
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 4,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 4
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 5,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 5
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 6,
+          "goal_open": 1,
+          "player_x": 36,
+          "score": 6
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "2bb32724c26c6bdab643f6a4f4a0e35b2d699a06906febab612ce2b32b656d86",
+          "frame": 7,
+          "goal_open": 1,
+          "player_x": 38,
+          "score": 7
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "bb82b58018984f3238def3f03ca7faf815a99309257e459faff9542e067b02ed",
+          "frame": 8,
+          "goal_open": 1,
+          "player_x": 40,
+          "score": 8
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "3bc3e5f3533cb25ce79d823c46af4fc39ff6674f21ba4f6d22d826c3e9dc7856",
+          "frame": 9,
+          "goal_open": 1,
+          "player_x": 42,
+          "score": 9
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "154ef65be00fc8a376263dc356ea2c4e874eec263c5462bf4996b4ae145f92ca",
+          "frame": 10,
+          "goal_open": 1,
+          "player_x": 44,
+          "score": 10
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "9284407e96f8ff5c71b68d64643ae512717c6e88ee6525e9303a039f60d7618c",
+          "frame": 11,
+          "goal_open": 1,
+          "player_x": 46,
+          "score": 11
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "c7b0532b86904e8365206e3617c77a9a86297f205ef3b1cd529f924ea4f9826b",
+          "frame": 12,
+          "goal_open": 1,
+          "player_x": 48,
+          "score": 12
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "888a9d77bbffd631ecea9f7776852fb06b1b020d540647ec6ffc619e9c2c7690",
+          "frame": 13,
+          "goal_open": 1,
+          "player_x": 50,
+          "score": 13
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "ca57c7611efa41b5efb41ef33451709414b870ce2c4356dcba28261ebc4f4886",
+          "frame": 14,
+          "goal_open": 1,
+          "player_x": 52,
+          "score": 14
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "ef52149e41ec82f4d4eeb6f80516426a0550dbf1ef7a333072367350063408ba",
+          "frame": 15,
+          "goal_open": 1,
+          "player_x": 54,
+          "score": 15
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "921632032a412cb01a3267998de134238b916ae12af05788195524643b023f22",
+          "frame": 16,
+          "goal_open": 1,
+          "player_x": 56,
+          "score": 16
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "c500a9f9c2947b3262a2dbdae113e5548e7489cf1698ca6ae4b478dd29e286d2",
+          "frame": 17,
+          "goal_open": 1,
+          "player_x": 58,
+          "score": 17
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1b9f937f6f85c9836d933f4c49f1c5c9bb4b422cb973b18fbed418758ce8f095",
+          "frame": 18,
+          "goal_open": 1,
+          "player_x": 60,
+          "score": 18
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "6d48137be1ee0f9a1a0aa02ce8e6a4887c25f8ed0b0702a2a11a6485a2f93c45",
+          "frame": 19,
+          "goal_open": 1,
+          "player_x": 62,
+          "score": 19
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "f7dec1b237b653b0bc41ba317ef8ae4afda3a38d130aa1c3bb7687dcf5b821f5",
+          "frame": 20,
+          "goal_open": 1,
+          "player_x": 64,
+          "score": 20
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "033bdec542449e147c2cec3e1559e58eeea99e9abf46aa35269d8c0c4ba56828",
+          "frame": 21,
+          "goal_open": 1,
+          "player_x": 66,
+          "score": 21
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "79ce2fc61f5a5c26086c23a934a69a4ff8e0937bb36197dd9e8f72d0ff45a0fa",
+          "frame": 22,
+          "goal_open": 1,
+          "player_x": 68,
+          "score": 22
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "ed586483404e88a630c42787405b6eba05c4c93d18c9f7697af044ffde99195b",
+          "frame": 23,
+          "goal_open": 1,
+          "player_x": 70,
+          "score": 23
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 24,
+          "goal_open": 1,
+          "player_x": 72,
+          "score": 24
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 25,
+          "goal_open": 1,
+          "player_x": 74,
+          "score": 25
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 26,
+          "goal_open": 1,
+          "player_x": 76,
+          "score": 26
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 27,
+          "goal_open": 1,
+          "player_x": 78,
+          "score": 27
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 28,
+          "goal_open": 1,
+          "player_x": 80,
+          "score": 28
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 29,
+          "goal_open": 1,
+          "player_x": 82,
+          "score": 29
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 30,
+          "goal_open": 1,
+          "player_x": 84,
+          "score": 30
+        }
+      ],
+      "rom_sha256": "86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e"
+    },
+    "original_t6": {
+      "frames": [
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "273c94820df1d67006542e8708891c041e36f9a0d904db45f748a33bc2810dff",
+          "frame": 1,
+          "goal_open": 0,
+          "player_x": 34,
+          "score": 1
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "2f97d4d08feac287dd44255cfb6cd083fa2a785a7238bf0751a823ae584ecd86",
+          "frame": 2,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 2
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 3,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 3
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 4,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 4
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 5,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 5
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 6,
+          "goal_open": 1,
+          "player_x": 36,
+          "score": 6
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "2bb32724c26c6bdab643f6a4f4a0e35b2d699a06906febab612ce2b32b656d86",
+          "frame": 7,
+          "goal_open": 1,
+          "player_x": 38,
+          "score": 7
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "bb82b58018984f3238def3f03ca7faf815a99309257e459faff9542e067b02ed",
+          "frame": 8,
+          "goal_open": 1,
+          "player_x": 40,
+          "score": 8
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "3bc3e5f3533cb25ce79d823c46af4fc39ff6674f21ba4f6d22d826c3e9dc7856",
+          "frame": 9,
+          "goal_open": 1,
+          "player_x": 42,
+          "score": 9
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "154ef65be00fc8a376263dc356ea2c4e874eec263c5462bf4996b4ae145f92ca",
+          "frame": 10,
+          "goal_open": 1,
+          "player_x": 44,
+          "score": 10
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "9284407e96f8ff5c71b68d64643ae512717c6e88ee6525e9303a039f60d7618c",
+          "frame": 11,
+          "goal_open": 1,
+          "player_x": 46,
+          "score": 11
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "c7b0532b86904e8365206e3617c77a9a86297f205ef3b1cd529f924ea4f9826b",
+          "frame": 12,
+          "goal_open": 1,
+          "player_x": 48,
+          "score": 12
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "888a9d77bbffd631ecea9f7776852fb06b1b020d540647ec6ffc619e9c2c7690",
+          "frame": 13,
+          "goal_open": 1,
+          "player_x": 50,
+          "score": 13
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "ca57c7611efa41b5efb41ef33451709414b870ce2c4356dcba28261ebc4f4886",
+          "frame": 14,
+          "goal_open": 1,
+          "player_x": 52,
+          "score": 14
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "ef52149e41ec82f4d4eeb6f80516426a0550dbf1ef7a333072367350063408ba",
+          "frame": 15,
+          "goal_open": 1,
+          "player_x": 54,
+          "score": 15
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "921632032a412cb01a3267998de134238b916ae12af05788195524643b023f22",
+          "frame": 16,
+          "goal_open": 1,
+          "player_x": 56,
+          "score": 16
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "c500a9f9c2947b3262a2dbdae113e5548e7489cf1698ca6ae4b478dd29e286d2",
+          "frame": 17,
+          "goal_open": 1,
+          "player_x": 58,
+          "score": 17
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1b9f937f6f85c9836d933f4c49f1c5c9bb4b422cb973b18fbed418758ce8f095",
+          "frame": 18,
+          "goal_open": 1,
+          "player_x": 60,
+          "score": 18
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "6d48137be1ee0f9a1a0aa02ce8e6a4887c25f8ed0b0702a2a11a6485a2f93c45",
+          "frame": 19,
+          "goal_open": 1,
+          "player_x": 62,
+          "score": 19
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "f7dec1b237b653b0bc41ba317ef8ae4afda3a38d130aa1c3bb7687dcf5b821f5",
+          "frame": 20,
+          "goal_open": 1,
+          "player_x": 64,
+          "score": 20
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "033bdec542449e147c2cec3e1559e58eeea99e9abf46aa35269d8c0c4ba56828",
+          "frame": 21,
+          "goal_open": 1,
+          "player_x": 66,
+          "score": 21
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "79ce2fc61f5a5c26086c23a934a69a4ff8e0937bb36197dd9e8f72d0ff45a0fa",
+          "frame": 22,
+          "goal_open": 1,
+          "player_x": 68,
+          "score": 22
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "ed586483404e88a630c42787405b6eba05c4c93d18c9f7697af044ffde99195b",
+          "frame": 23,
+          "goal_open": 1,
+          "player_x": 70,
+          "score": 23
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 24,
+          "goal_open": 1,
+          "player_x": 72,
+          "score": 24
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 25,
+          "goal_open": 1,
+          "player_x": 74,
+          "score": 25
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 26,
+          "goal_open": 1,
+          "player_x": 76,
+          "score": 26
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 27,
+          "goal_open": 1,
+          "player_x": 78,
+          "score": 27
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 28,
+          "goal_open": 1,
+          "player_x": 80,
+          "score": 28
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 29,
+          "goal_open": 1,
+          "player_x": 82,
+          "score": 29
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1dc7f45d0a035a09f4ff1de866bfb646872b68e4405ff6859840b72243953b97",
+          "frame": 30,
+          "goal_open": 1,
+          "player_x": 84,
+          "score": 30
+        }
+      ],
+      "rom_sha256": "86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e"
+    },
+    "patched_t12": {
+      "frames": [
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "273c94820df1d67006542e8708891c041e36f9a0d904db45f748a33bc2810dff",
+          "frame": 1,
+          "goal_open": 0,
+          "player_x": 34,
+          "score": 1
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "2f97d4d08feac287dd44255cfb6cd083fa2a785a7238bf0751a823ae584ecd86",
+          "frame": 2,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 2
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 3,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 3
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 4,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 4
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 5,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 5
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 6,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 6
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 7,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 7
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 8,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 8
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 9,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 9
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 10,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 10
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 11,
+          "goal_open": 0,
+          "player_x": 36,
+          "score": 11
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "53cbaba2a46c0a0c7d27290dd92f45cd684c2287620b9d45840471ec08d656f0",
+          "frame": 12,
+          "goal_open": 1,
+          "player_x": 36,
+          "score": 12
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "2bb32724c26c6bdab643f6a4f4a0e35b2d699a06906febab612ce2b32b656d86",
+          "frame": 13,
+          "goal_open": 1,
+          "player_x": 38,
+          "score": 13
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "2e00ebe43fc0ac3aaa71646acad6d3d08ab428f80443902b80cfd0a0686bcb40",
+          "frame": 14,
+          "goal_open": 1,
+          "player_x": 40,
+          "score": 14
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "90f50dab1b8767a510fcf90584139d353e2b8487a1afff58ff6aa532c514e502",
+          "frame": 15,
+          "goal_open": 1,
+          "player_x": 42,
+          "score": 15
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "5553aaa38e59b0f8acedf175092df27372a58fd80b843b6e5c30ee6e1b6c8a03",
+          "frame": 16,
+          "goal_open": 1,
+          "player_x": 44,
+          "score": 16
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "8eabbccd728f002a6f14001a65e8e356db916d62a93adbf1193042759b776f35",
+          "frame": 17,
+          "goal_open": 1,
+          "player_x": 46,
+          "score": 17
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "671630095530f5b17112467be37e15ebe44beb61f84cc5cbf602fda215ff6613",
+          "frame": 18,
+          "goal_open": 1,
+          "player_x": 48,
+          "score": 18
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "77a7412ca17dcbeded8ebb447c3354e9aa5f6d59474e5b49fd765ee01f844cd4",
+          "frame": 19,
+          "goal_open": 1,
+          "player_x": 50,
+          "score": 19
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "ca57c7611efa41b5efb41ef33451709414b870ce2c4356dcba28261ebc4f4886",
+          "frame": 20,
+          "goal_open": 1,
+          "player_x": 52,
+          "score": 20
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "ef52149e41ec82f4d4eeb6f80516426a0550dbf1ef7a333072367350063408ba",
+          "frame": 21,
+          "goal_open": 1,
+          "player_x": 54,
+          "score": 21
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "921632032a412cb01a3267998de134238b916ae12af05788195524643b023f22",
+          "frame": 22,
+          "goal_open": 1,
+          "player_x": 56,
+          "score": 22
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "c500a9f9c2947b3262a2dbdae113e5548e7489cf1698ca6ae4b478dd29e286d2",
+          "frame": 23,
+          "goal_open": 1,
+          "player_x": 58,
+          "score": 23
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "1b9f937f6f85c9836d933f4c49f1c5c9bb4b422cb973b18fbed418758ce8f095",
+          "frame": 24,
+          "goal_open": 1,
+          "player_x": 60,
+          "score": 24
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "6d48137be1ee0f9a1a0aa02ce8e6a4887c25f8ed0b0702a2a11a6485a2f93c45",
+          "frame": 25,
+          "goal_open": 1,
+          "player_x": 62,
+          "score": 25
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "f7dec1b237b653b0bc41ba317ef8ae4afda3a38d130aa1c3bb7687dcf5b821f5",
+          "frame": 26,
+          "goal_open": 1,
+          "player_x": 64,
+          "score": 26
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "033bdec542449e147c2cec3e1559e58eeea99e9abf46aa35269d8c0c4ba56828",
+          "frame": 27,
+          "goal_open": 1,
+          "player_x": 66,
+          "score": 27
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "79ce2fc61f5a5c26086c23a934a69a4ff8e0937bb36197dd9e8f72d0ff45a0fa",
+          "frame": 28,
+          "goal_open": 1,
+          "player_x": 68,
+          "score": 28
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "34100e40c66349464385f0811722b6db95938628f9cb276f9843f3c5a9d0aa8b",
+          "frame": 29,
+          "goal_open": 1,
+          "player_x": 70,
+          "score": 29
+        },
+        {
+          "band_non_background_px": 3405,
+          "band_sha256": "479c7c8aa4a75a15812427628a6ec28a25c1cd31f726080435a30d05fb7a7f7c",
+          "frame": 30,
+          "goal_open": 1,
+          "player_x": 72,
+          "score": 30
+        }
+      ],
+      "rom_sha256": "4030ec74466751b0ee5e2613f92edd4054f58abe40f137859c9faf02fc19b1db"
+    }
+  },
+  "equivalence_core_oracle": [
+    {
+      "counter_in": "0x00000000",
+      "input": "none",
+      "observed": [
+        "0x00000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "right",
+      "observed": [
+        "0x00000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "none",
+      "observed": [
+        "0x00000000",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "right",
+      "observed": [
+        "0x00000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "none",
+      "observed": [
+        "0x00000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "right",
+      "observed": [
+        "0x00000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000002",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "none",
+      "observed": [
+        "0x00000001",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "right",
+      "observed": [
+        "0x00000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000002",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "none",
+      "observed": [
+        "0x7FFFFFFF",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x7FFFFFFF",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x80000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "none",
+      "observed": [
+        "0x7FFFFFFF",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x7FFFFFFF",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x80000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "none",
+      "observed": [
+        "0x80000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "right",
+      "observed": [
+        "0x80000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000001",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "none",
+      "observed": [
+        "0x80000000",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "right",
+      "observed": [
+        "0x80000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000001",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFFF",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFFF",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x00000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFFF",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFFF",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x00000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFF0",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF0",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "right",
+      "observed": [
+        "0xFFFFFFF1",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF1",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFF0",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF0",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "right",
+      "observed": [
+        "0xFFFFFFF1",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF1",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000003",
+      "input": "none",
+      "observed": [
+        "0x00000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000003",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000003",
+      "input": "right",
+      "observed": [
+        "0x00000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000004",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000003",
+      "input": "none",
+      "observed": [
+        "0x00000003",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000003",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000003",
+      "input": "right",
+      "observed": [
+        "0x00000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000004",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000004",
+      "input": "none",
+      "observed": [
+        "0x00000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000004",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000004",
+      "input": "right",
+      "observed": [
+        "0x00000005",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000005",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000004",
+      "input": "none",
+      "observed": [
+        "0x00000004",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000004",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000004",
+      "input": "right",
+      "observed": [
+        "0x00000005",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000005",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000005",
+      "input": "none",
+      "observed": [
+        "0x00000005",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000005",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000005",
+      "input": "right",
+      "observed": [
+        "0x00000006",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000006",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000005",
+      "input": "none",
+      "observed": [
+        "0x00000005",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000005",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000005",
+      "input": "right",
+      "observed": [
+        "0x00000006",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000006",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000006",
+      "input": "none",
+      "observed": [
+        "0x00000006",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000006",
+        0
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000006",
+      "input": "right",
+      "observed": [
+        "0x00000007",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000007",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000006",
+      "input": "none",
+      "observed": [
+        "0x00000006",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000006",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000006",
+      "input": "right",
+      "observed": [
+        "0x00000007",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000007",
+        1
+      ],
+      "rom": "original_t6",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "none",
+      "observed": [
+        "0x00000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "right",
+      "observed": [
+        "0x00000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000003",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "none",
+      "observed": [
+        "0x00000000",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "right",
+      "observed": [
+        "0x00000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000003",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "none",
+      "observed": [
+        "0x00000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "right",
+      "observed": [
+        "0x00000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000004",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "none",
+      "observed": [
+        "0x00000001",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "right",
+      "observed": [
+        "0x00000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000004",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "none",
+      "observed": [
+        "0x7FFFFFFF",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x7FFFFFFF",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x80000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000002",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "none",
+      "observed": [
+        "0x7FFFFFFF",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x7FFFFFFF",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x80000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000002",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "none",
+      "observed": [
+        "0x80000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "right",
+      "observed": [
+        "0x80000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000003",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "none",
+      "observed": [
+        "0x80000000",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "right",
+      "observed": [
+        "0x80000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000003",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFFF",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFFF",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x00000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000002",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFFF",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFFF",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x00000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000002",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFF0",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF0",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "right",
+      "observed": [
+        "0xFFFFFFF3",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF3",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFF0",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF0",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "right",
+      "observed": [
+        "0xFFFFFFF3",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF3",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000020",
+      "input": "none",
+      "observed": [
+        "0x00000020",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000020",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000020",
+      "input": "right",
+      "observed": [
+        "0x00000023",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000023",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000020",
+      "input": "none",
+      "observed": [
+        "0x00000020",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000020",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000020",
+      "input": "right",
+      "observed": [
+        "0x00000023",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000023",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000021",
+      "input": "none",
+      "observed": [
+        "0x00000021",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000021",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000021",
+      "input": "right",
+      "observed": [
+        "0x00000024",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000024",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000021",
+      "input": "none",
+      "observed": [
+        "0x00000021",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000021",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000021",
+      "input": "right",
+      "observed": [
+        "0x00000024",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000024",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000022",
+      "input": "none",
+      "observed": [
+        "0x00000022",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000022",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000022",
+      "input": "right",
+      "observed": [
+        "0x00000025",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000025",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000022",
+      "input": "none",
+      "observed": [
+        "0x00000022",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000022",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000022",
+      "input": "right",
+      "observed": [
+        "0x00000025",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000025",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000023",
+      "input": "none",
+      "observed": [
+        "0x00000023",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000023",
+        0
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000023",
+      "input": "right",
+      "observed": [
+        "0x00000026",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000026",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000023",
+      "input": "none",
+      "observed": [
+        "0x00000023",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000023",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000023",
+      "input": "right",
+      "observed": [
+        "0x00000026",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000026",
+        1
+      ],
+      "rom": "blind_step3_t37",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "none",
+      "observed": [
+        "0x00000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "right",
+      "observed": [
+        "0x00000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000002",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "none",
+      "observed": [
+        "0x00000000",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "right",
+      "observed": [
+        "0x00000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000002",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "none",
+      "observed": [
+        "0x00000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "right",
+      "observed": [
+        "0x00000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000003",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "none",
+      "observed": [
+        "0x00000001",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "right",
+      "observed": [
+        "0x00000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000003",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "none",
+      "observed": [
+        "0x7FFFFFFF",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x7FFFFFFF",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x80000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000001",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "none",
+      "observed": [
+        "0x7FFFFFFF",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x7FFFFFFF",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x80000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000001",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "none",
+      "observed": [
+        "0x80000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "right",
+      "observed": [
+        "0x80000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000002",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "none",
+      "observed": [
+        "0x80000000",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "right",
+      "observed": [
+        "0x80000002",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000002",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFFF",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFFF",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x00000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFFF",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFFF",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x00000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFF0",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF0",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "right",
+      "observed": [
+        "0xFFFFFFF2",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF2",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFF0",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF0",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "right",
+      "observed": [
+        "0xFFFFFFF2",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF2",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000010",
+      "input": "none",
+      "observed": [
+        "0x00000010",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000010",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000010",
+      "input": "right",
+      "observed": [
+        "0x00000012",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000012",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000010",
+      "input": "none",
+      "observed": [
+        "0x00000010",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000010",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000010",
+      "input": "right",
+      "observed": [
+        "0x00000012",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000012",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000011",
+      "input": "none",
+      "observed": [
+        "0x00000011",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000011",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000011",
+      "input": "right",
+      "observed": [
+        "0x00000013",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000013",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000011",
+      "input": "none",
+      "observed": [
+        "0x00000011",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000011",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000011",
+      "input": "right",
+      "observed": [
+        "0x00000013",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000013",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000012",
+      "input": "none",
+      "observed": [
+        "0x00000012",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000012",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000012",
+      "input": "right",
+      "observed": [
+        "0x00000014",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000014",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000012",
+      "input": "none",
+      "observed": [
+        "0x00000012",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000012",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000012",
+      "input": "right",
+      "observed": [
+        "0x00000014",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000014",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000013",
+      "input": "none",
+      "observed": [
+        "0x00000013",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000013",
+        0
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000013",
+      "input": "right",
+      "observed": [
+        "0x00000015",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000015",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000013",
+      "input": "none",
+      "observed": [
+        "0x00000013",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000013",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000013",
+      "input": "right",
+      "observed": [
+        "0x00000015",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000015",
+        1
+      ],
+      "rom": "shifted_step2_t20",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "none",
+      "observed": [
+        "0x00000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "right",
+      "observed": [
+        "0x00000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000004",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "none",
+      "observed": [
+        "0x00000000",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000000",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000000",
+      "input": "right",
+      "observed": [
+        "0x00000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000004",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "none",
+      "observed": [
+        "0x00000001",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "right",
+      "observed": [
+        "0x00000005",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000005",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "none",
+      "observed": [
+        "0x00000001",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000001",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000001",
+      "input": "right",
+      "observed": [
+        "0x00000005",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000005",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "none",
+      "observed": [
+        "0x7FFFFFFF",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x7FFFFFFF",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x80000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000003",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "none",
+      "observed": [
+        "0x7FFFFFFF",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x7FFFFFFF",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x7FFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x80000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000003",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "none",
+      "observed": [
+        "0x80000000",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "right",
+      "observed": [
+        "0x80000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000004",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "none",
+      "observed": [
+        "0x80000000",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000000",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x80000000",
+      "input": "right",
+      "observed": [
+        "0x80000004",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x80000004",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFFF",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFFF",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x00000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000003",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFFF",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFFF",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFFF",
+      "input": "right",
+      "observed": [
+        "0x00000003",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000003",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFF0",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF0",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "right",
+      "observed": [
+        "0xFFFFFFF4",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF4",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "none",
+      "observed": [
+        "0xFFFFFFF0",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF0",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0xFFFFFFF0",
+      "input": "right",
+      "observed": [
+        "0xFFFFFFF4",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0xFFFFFFF4",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000018",
+      "input": "none",
+      "observed": [
+        "0x00000018",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000018",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000018",
+      "input": "right",
+      "observed": [
+        "0x0000001C",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001C",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000018",
+      "input": "none",
+      "observed": [
+        "0x00000018",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000018",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000018",
+      "input": "right",
+      "observed": [
+        "0x0000001C",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001C",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000019",
+      "input": "none",
+      "observed": [
+        "0x00000019",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000019",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000019",
+      "input": "right",
+      "observed": [
+        "0x0000001D",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001D",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x00000019",
+      "input": "none",
+      "observed": [
+        "0x00000019",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x00000019",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x00000019",
+      "input": "right",
+      "observed": [
+        "0x0000001D",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001D",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x0000001A",
+      "input": "none",
+      "observed": [
+        "0x0000001A",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001A",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x0000001A",
+      "input": "right",
+      "observed": [
+        "0x0000001E",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001E",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x0000001A",
+      "input": "none",
+      "observed": [
+        "0x0000001A",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001A",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x0000001A",
+      "input": "right",
+      "observed": [
+        "0x0000001E",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001E",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x0000001B",
+      "input": "none",
+      "observed": [
+        "0x0000001B",
+        0
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001B",
+        0
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x0000001B",
+      "input": "right",
+      "observed": [
+        "0x0000001F",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001F",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 0
+    },
+    {
+      "counter_in": "0x0000001B",
+      "input": "none",
+      "observed": [
+        "0x0000001B",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001B",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    },
+    {
+      "counter_in": "0x0000001B",
+      "input": "right",
+      "observed": [
+        "0x0000001F",
+        1
+      ],
+      "ok": true,
+      "predicted_by_graph": [
+        "0x0000001F",
+        1
+      ],
+      "rom": "shifted_z_step4_t30",
+      "state_in": 1
+    }
+  ],
+  "equivalence_observation_point": {
+    "claim_limited_to": "valores de contador e goal_open; os unicos escritores absolutos desses enderecos estao dentro da regiao (absolute_writers); escritas indiretas nao sao cobertas",
+    "includes": "todo o codigo do quadro: a regiao, o callee opaco (JSR) e o restante do jogo",
+    "not_claimed": "efeitos do callee, registradores e CCR na saida, VDP/som",
+    "where": "WRAM lida apos `latencia` quadros completos de run_frame (nao na saida da regiao)"
+  },
+  "holdouts": {
+    "blind_step3_t37": {
+      "blocks": [
+        [
+          2374,
+          2416
+        ],
+        [
+          3246,
+          3276
+        ]
+      ],
+      "counter_addr": "0xE0FF0054",
+      "entry": "0x000946",
+      "exit": "0x000970",
+      "matches_source": true,
+      "operator": ">=",
+      "rejected_near_misses": 142,
+      "state_addr": "0xE0FF0062",
+      "step": 3,
+      "threshold": 37
+    },
+    "counter_ram_displacement": {
+      "demonstrated_blind": false,
+      "note": "as duas variantes deslocadas mantiveram logic_var_reference_score em 0xE0FF0054 (layout .bss do GCC); so a fixture nao cega two_passages cobre outro endereco de contador"
+    },
+    "displacement_shifted_a": {
+      "counter_addr_delta": 0,
+      "entry_delta": 48,
+      "state_addr_delta": 24
+    },
+    "displacement_shifted_z": {
+      "counter_addr_delta": 0,
+      "entry_delta": 48,
+      "state_addr_delta": 24
+    },
+    "shifted_step2_t20": {
+      "blocks": [
+        [
+          2422,
+          2464
+        ],
+        [
+          3294,
+          3324
+        ]
+      ],
+      "counter_addr": "0xE0FF0054",
+      "entry": "0x000976",
+      "exit": "0x0009A0",
+      "matches_source": true,
+      "operator": ">=",
+      "rejected_near_misses": 142,
+      "state_addr": "0xE0FF007A",
+      "step": 2,
+      "threshold": 20
+    },
+    "shifted_z_step4_t30": {
+      "blocks": [
+        [
+          2422,
+          2464
+        ],
+        [
+          3294,
+          3324
+        ]
+      ],
+      "counter_addr": "0xE0FF0054",
+      "entry": "0x000976",
+      "exit": "0x0009A0",
+      "matches_source": true,
+      "operator": ">=",
+      "rejected_near_misses": 142,
+      "state_addr": "0xE0FF007A",
+      "step": 4,
+      "threshold": 30
+    }
+  },
+  "layer": "tecnica: chamadas diretas ao core (sem teclado/UI)",
+  "localization": {
+    "blocks": [
+      [
+        2374,
+        2416
+      ],
+      [
+        3246,
+        3276
+      ]
+    ],
+    "counter_symbol": "logic_var_reference_score=0xE0FF0054",
+    "entry": "0x000946",
+    "exit": "0x000970",
+    "method": "varredura estrutural da forma com guarda (sem simbolos); simbolos ELF so validam",
+    "state_symbol": "logic_var_goal_open=0xE0FF0062"
+  },
+  "physical_diverging_frames": [
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "prediction_before_capture": {
+    "condition": "reference_score >= T; T=6 no original, T=12 na editada",
+    "physical": "editada mantem o jogador parado antes da barreira (x+14<=50) enquanto 6<=score<12; original ja atravessa",
+    "variable": "logic_var_goal_open @0xE0FF0062",
+    "visual": "faixa x=50..74 da barreira muda um quadro apos a abertura; na editada permanece ate score 12",
+    "window": "segurando Right a partir de score 0: original abre no quadro de input em que score=6; editada so em score=12; entre esses quadros goal_open difere"
+  },
+  "rebuild": {
+    "base_has_standard_md_checksum": false,
+    "diff_vs_sgdk_confined_to_header_checksum_0x18E": true,
+    "diff_vs_sgdk_offsets": [
+      "0x00018F"
+    ],
+    "noop_regenerate": {
+      "authorized_ranges": [
+        [
+          2374,
+          2378
+        ],
+        [
+          2378,
+          2380
+        ],
+        [
+          2380,
+          2386
+        ],
+        [
+          2386,
+          2388
+        ],
+        [
+          2388,
+          2394
+        ],
+        [
+          2394,
+          2400
+        ],
+        [
+          2400,
+          2402
+        ],
+        [
+          2402,
+          2404
+        ],
+        [
+          2404,
+          2408
+        ],
+        [
+          2408,
+          2410
+        ],
+        [
+          2410,
+          2416
+        ],
+        [
+          3246,
+          3248
+        ],
+        [
+          3248,
+          3254
+        ],
+        [
+          3254,
+          3258
+        ],
+        [
+          3258,
+          3264
+        ],
+        [
+          3264,
+          3270
+        ],
+        [
+          3270,
+          3272
+        ],
+        [
+          3272,
+          3276
+        ]
+      ],
+      "changed_offsets": [],
+      "checksum_updated": false,
+      "input_sha256": "86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e",
+      "method": "regenerate_region_from_semantics",
+      "output_path": "/home/misael/Projects/REX-GAMEPLAY-RECOVERY-2026-09-28/src-tauri/target-test/validation/rex-gameplay/run-1790615546422567756/noop-t6.rom",
+      "output_sha256": "86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e"
+    },
+    "patch": {
+      "authorized_ranges": [
+        [
+          2401,
+          2402
+        ]
+      ],
+      "changed_offsets": [
+        2401
+      ],
+      "checksum_updated": false,
+      "input_sha256": "86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e",
+      "method": "patch_moveq_immediate",
+      "output_path": "/home/misael/Projects/REX-GAMEPLAY-RECOVERY-2026-09-28/src-tauri/target-test/validation/rex-gameplay/run-1790615546422567756/patched-t12.rom",
+      "output_sha256": "4030ec74466751b0ee5e2613f92edd4054f58abe40f137859c9faf02fc19b1db"
+    },
+    "patch_equals_sgdk_rebuild_t12": false,
+    "regenerate": {
+      "authorized_ranges": [
+        [
+          2374,
+          2378
+        ],
+        [
+          2378,
+          2380
+        ],
+        [
+          2380,
+          2386
+        ],
+        [
+          2386,
+          2388
+        ],
+        [
+          2388,
+          2394
+        ],
+        [
+          2394,
+          2400
+        ],
+        [
+          2400,
+          2402
+        ],
+        [
+          2402,
+          2404
+        ],
+        [
+          2404,
+          2408
+        ],
+        [
+          2408,
+          2410
+        ],
+        [
+          2410,
+          2416
+        ],
+        [
+          3246,
+          3248
+        ],
+        [
+          3248,
+          3254
+        ],
+        [
+          3254,
+          3258
+        ],
+        [
+          3258,
+          3264
+        ],
+        [
+          3264,
+          3270
+        ],
+        [
+          3270,
+          3272
+        ],
+        [
+          3272,
+          3276
+        ]
+      ],
+      "changed_offsets": [
+        2401
+      ],
+      "checksum_updated": false,
+      "input_sha256": "86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e",
+      "method": "regenerate_region_from_semantics",
+      "output_path": "/home/misael/Projects/REX-GAMEPLAY-RECOVERY-2026-09-28/src-tauri/target-test/validation/rex-gameplay/run-1790615546422567756/regenerated-t12.rom",
+      "output_sha256": "4030ec74466751b0ee5e2613f92edd4054f58abe40f137859c9faf02fc19b1db"
+    },
+    "sgdk_rebuild_t12_sha256": "06fe310e823f1a510f06f69877aa8a72bb3df669ba0d59afb37e1564c74f104f"
+  },
+  "recognizer_frozen": {
+    "commit": "4163c47d6621283937bd1f91c8a12f42a65a29c4",
+    "record": "data/rex_profiles/gameplay_recovery/evidence/2026-09-28-rodada2/FREEZE.md",
+    "src_tree": "9af241b325bb09d037a961da4620397680468020"
+  }
+}

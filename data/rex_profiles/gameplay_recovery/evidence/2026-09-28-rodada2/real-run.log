@@ -1,0 +1,24 @@
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/REX-GAMEPLAY-RECOVERY-2026-09-28/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.93s
+     Running unittests src/lib.rs (target/debug/deps/app_lib-66a99f60b444854d)
+
+running 2 tests
+test tools::reverse::decomp::rex_gameplay::tests::adapter_refuses_overwrite_and_unknown_method ... ok
+test tools::reverse::decomp::rex_gameplay::tests::rex_gameplay_real_gate_recovery_equivalence_and_effect ... candidato (original): Candidate { entry: 2374, exit: 2416, counter_addr: 3774808148, threshold: 6 }
+escritores absolutos de score/goal_open: [(954, true), (96a, true), (cb0, true)]
+blind_step3_t37: {"blocks":[[2374,2416],[3246,3276]],"counter_addr":"0xE0FF0054","entry":"0x000946","exit":"0x000970","matches_source":true,"operator":">=","rejected_near_misses":142,"state_addr":"0xE0FF0062","step":3,"threshold":37}
+shifted_step2_t20: {"blocks":[[2422,2464],[3294,3324]],"counter_addr":"0xE0FF0054","entry":"0x000976","exit":"0x0009A0","matches_source":true,"operator":">=","rejected_near_misses":142,"state_addr":"0xE0FF007A","step":2,"threshold":20}
+shifted_z_step4_t30: {"blocks":[[2422,2464],[3294,3324]],"counter_addr":"0xE0FF0054","entry":"0x000976","exit":"0x0009A0","matches_source":true,"operator":">=","rejected_near_misses":142,"state_addr":"0xE0FF007A","step":4,"threshold":30}
+deslocamento a_: {"counter_addr_delta":0,"entry_delta":48,"state_addr_delta":24}; z_: {"counter_addr_delta":0,"entry_delta":48,"state_addr_delta":24}
+original_t6: latencia=1 casos=40
+blind_step3_t37: latencia=1 casos=40
+shifted_step2_t20: latencia=1 casos=40
+shifted_z_step4_t30: latencia=1 casos=40
+checksum: {"algorithm_patcher":"soma MD aditiva de 0x200 ao fim; so reescrita se a base a tiver valida (contrato atual)","algorithm_pipeline":"SGDK sizebnd: XOR de todas as palavras da ROM exceto 0x18E (core::rom_mastering::sgdk_checksum, aplicado por build_orch apos o header do projeto)","hardware_note":"o core Libretro nao valida este campo; execucao no core nao prova compatibilidade com hardware","original":{"md_sum":"CE17","sgdk_xor":"14BB","stored":"14BB"},"original_mastering_status":"matching_sgdk","patched":{"md_sum":"CE1D","sgdk_xor":"14B5","stored":"14BB"},"patched_mastering_status":"mismatch","patched_with_sgdk_xor_recomputed_equals_sgdk_rebuild":true,"policy":"inalterada; atualizacao do checksum SGDK proposta ao integrador","sgdk_rebuild_t12":{"sgdk_xor":"14B5","stored":"14B5"}}
+abre em score: original=Some(6) editada=Some(12) noop=Some(6)
+x max editada antes de 12: 36; quadros com original alem da barreira e editada bloqueada: [7, 8, 9, 10, 11, 12]
+relatorio: /home/misael/Projects/REX-GAMEPLAY-RECOVERY-2026-09-28/src-tauri/target-test/validation/rex-gameplay/run-1790615546422567756/report.json
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 836 filtered out; finished in 9.01s
+

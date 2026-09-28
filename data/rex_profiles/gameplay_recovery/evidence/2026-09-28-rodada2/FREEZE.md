@@ -1,0 +1,19 @@
+# Congelamento do reconhecedor antes da variante retida deslocada
+
+registrado_em: 2026-09-28T14:06:30-03:00
+commit: 4163c47d6621283937bd1f91c8a12f42a65a29c4
+tree crates/rex-gameplay/src: 9af241b325bb09d037a961da4620397680468020
+
+```
+b18881ded248f74fc15c807a3f36a85050f5309e57dd7c3f434b891309c896da  emit.rs
+75197f7597727ea98e3f5c8b0400ce1d8e4440e1578437d9dac5246f67ec307b  graph.rs
+c16820fdbe15ad15ed59c6fe72f8909daff7455761b42ef7ceaac3bb45609a36  json.rs
+18407d71a0cb2b5a49c7fc2c475ad4fe9fd2a7bcbc9fb9a7bce62f8832e901b6  lib.rs
+5dc2463d346e28cadfe393596ee5fd6258de6a97fee0cb1c7d3884165a0ff108  lift.rs
+198822b52fb8c15f3f979a88684fec76e123e10a018ee7707c1447b5dc7fae00  m68k.rs
+bc135dddfd97d0c530f7a986ab5c4eeb3959512e5c462c429817947e7af92bf3  patch.rs
+dea038177a128b32d6fe56e13ea70f3dd8ac8f6b59cfd7ce9a3d8e932783343b  region.rs
+f4b98500bfc02128128b5db8f0a0d6b58c1da0eec4e8d1ad5418852a4ff677eb  sha256.rs
+```
+
+Regra: se o reconhecedor mudar depois deste registro por causa da variante, ela passa a regressao e a alegacao exige nova amostra retida.
