@@ -177,6 +177,10 @@ pub fn read(
                 let left_in_mirror = width - u64::from(offset % size);
                 let run = usize::try_from(remaining.min(left_in_bank).min(left_in_mirror))
                     .expect("un corredor LoROM vale como máximo 32KB");
+                debug_assert!(
+                    run >= 1,
+                    "corredor baleiro: a fórmula de offset e a anchura do espeillo non son consistentes"
+                );
                 let start = offset as usize;
                 if start + run > rom.len() {
                     // Imaxe máis curta que `rom_size`: prefixo real + erro, sen
