@@ -1,0 +1,10 @@
+; Probe: personagem autoral de teste (RetroDev rex-mugen)
+[Info]
+name = "Probe"
+author = "RetroDev Studio (autoral)"
+
+[Files]
+cmd = probe.cmd
+cns = probe.cns
+sprite = probe.sff
+anim = probe.air

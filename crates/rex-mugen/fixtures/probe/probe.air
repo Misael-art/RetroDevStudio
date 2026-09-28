@@ -1,0 +1,17 @@
+; Probe AIR
+[Begin Action 0]
+Clsn2Default: 1
+ Clsn2[0] = -4, -24, 8, 0
+0,0, 0,0, 5
+0,1, 0,0, 9
+
+[Begin Action 200]
+Clsn2Default: 1
+ Clsn2[0] = -4, -24, 8, 0
+200,0, 0,0, 3
+Loopstart
+Clsn1: 1
+ Clsn1[0] = 8, -18, 16, -14
+200,1, 2,0, 6
+200,0, 0,0, 4, H
+0,0, 0,0, 2
