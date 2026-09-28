@@ -12,18 +12,29 @@
     {
       "nome": "rex-kosinski",
       "manifesto": "crates/rex-kosinski/Cargo.toml",
-      "descricao": "Codec Kosinski v1 da frente B (decode + encode, variante base nao-modular). Biblioteca standalone: o produto nao a consome ainda.",
-      "maturidade": "gates-proprios-aprovados",
+      "descricao": "Codec Kosinski v1 da frente B (decode + encode, variante base nao-modular). O produto xa o consume: src-tauri/Cargo.toml ten dependencia por path e o adaptador src-tauri/src/tools/reverse/decomp/rex_kosinski.rs expón decodificar e codificar como chamadas reais do backend (comandos Tauri rex_kosinski_decode / rex_kosinski_encode). Non exposto: o contenedor de edición (edit::build/open/reinsert).",
+      "maturidade": "backend-integrado",
+      "maturidade_data": "2026-09-28",
       "gates": {
         "medidos_em": "2026-09-28T02:48Z (decoder, 25 testes); re-medido 2026-09-28T14:36Z-14:37Z depois da entrega mais recente de B (encoder + paridade + contenedor + 52 fixtures)",
         "fmt": "OK",
         "clippy_all_targets": "OK",
         "test_locked": "OK — 51 testes executados (22 contract + 8 edit + 16 encode + 2 fixtures + 3 mutations), 0 falhas, 0 ignorados; fmt e clippy --all-targets OK. A carreira rex-addressing do mesmo gate deu 138/0/10 sem cambios. Registrei os numeros medidos, non os anunciados.",
-        "evidencia": "data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/ e data/rex_profiles/kosinski_runtime/evidence/2026-09-28-entrega-encoder-fixtures/",
+        "evidencia": "data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/, .../2026-09-28-entrega-encoder-fixtures/ e .../2026-09-28-adaptador-backend/",
         "cargo_target_dir": "target/crates-gates (fora da arvore rastreada; .gitignore ja cobre target/)"
       },
       "acoplamento_declarado": "Fechado pola propia B na entrega 9223e7a: as 52 fixtures vendorizan-se dentro do paquete (fixtures/kosinski/, fixtures/runtime/) con SHA-256 pinada en tests/fixtures.rs e re-verificada a cada run. O paquete e relocable: a carreira de gates 14:36Z executou neste tronco sen tocar en data/rex_profiles/codec/. Ningunha fixture e ROM: todas autorais/sinteticas (fixtures/PROVENANCE.md, oraculo koscmp usado so como comparacion, cero codigo seu copiado).",
-      "nao_alega": "nada de integracao ao produto: sem dependencia por path en src-tauri, sen adaptador, sen chamada real polo backend, sen fluxo pola interface. Nivel backend-integrado segue non alcançado. O módulo edit (contenedor REXKOS) e proba de contrato — a propia doc del di «NON transacción canónica de producción» — e non se expón como reinserción.",
+      "nao_alega": "nada de fluxo do usuario: ningun chamador da interface usa rex_kosinski_decode/rex_kosinski_encode e non hai pantalla de codec. O módulo edit (contenedor REXKOS) e proba de contrato — a propia doc del di «NON transacción canónica de producción» — e non se expón como reinserción: as transacións canónicas do produto aínda non consomen Kosinski. Non se alega descuberta de recursos nin lectura sobre xogos reais: a capa só transforma streams declarados por quen chama.",
+      "integracion_backend": {
+        "medida_em": "2026-09-28T14:45Z..15:08Z UTC, branch codex/rex-integrator-crates-registry, HEAD do commit 3428b69",
+        "dependencia": "src-tauri/Cargo.toml: rex-kosinski = { path = \"../crates/rex-kosinski\" }. Sen workspace na raíz; Cargo.lock gaña só a entrada do paquete local (sen campo source) e cero crates externos novos (diff de 5 liñas conferido).",
+        "adaptador": "src-tauri/src/tools/reverse/decomp/rex_kosinski.rs — mapeo 1:1 de KosError/EncError ao CodecError { code, detail } do contrato de codecs (truncated/invalid_reference/excessive_output/work_limit/empty_input; stream_limit/work_limit), preserving bytes_consumed coa regra do contrato v1 §3 (o padding post-terminator non se consume). DTOs de fronteira snake_case con deny_unknown_fields, binarios en base64 + SHA-256 laterais, limites explícitos cos defectos do contrato; o erro viaxa como InspectionError conservando código e detalle, retryable=false para erros deterministas de entrada.",
+        "chamada_real": "dous comandos Tauri, rex_kosinski_decode e rex_kosinski_encode, rexistrados en generate_handler! e executados fora do fio principal con run_heavy_command_off_main_thread (mesmo padriño de rex_addressing_read_snapshot). Decodificar e codificar son chamadas separadas: ningunha escribe en ROM ningunha.",
+        "testes_do_adaptador": "16 (10 da capa codec + 6 da capa IPC), con esperas independentes rexistradas pola fronte B e SHA-pinnadas no gate do paquete: abcdef.kos -> b\\\"ABCDEF\\\" con bytes_consumed=11; sonda 0200ffff -> invalid_reference; [0xff] -> truncated; espido -> empty_input; max_output=5 -> excessive_output; max_work=3 -> work_limit; encode(b\\\"\\\") -> 020000F000; round-trip autoral; stream_limit e work_limit na codificación",
+        "controles_de_mutacao": "M1 (mapeo empty_input->'truncated'), M2 (bytes_consumed da resposta IPC = lonxitude do stream) e M3 (mapeo StreamLimit->'work_limit') mataron cada un as suas pruebas (1, 1 e 2); restauración conferida por SHA-256 do adaptador (3b4115ab...d45eb4e2 idéntica antes e despois) e re-execución verde 16/16.",
+        "gates_no_destino": "cargo test --lib: 770 executados, 0 falhas, 66 ignorados, rc=0 (base 754 + 16 novos). cargo clippy --lib -- -D warnings: rc=0. cargo fmt --check: rc=0. npm run check:tree: rc=0. npm run lint: rc=0. npx tsc --noEmit: rc=0. npm test: 749 executados, 0 falhas, 6 saltados (755), rc=0 — sen cambios de frontend.",
+        "evidencia": "data/rex_profiles/kosinski_runtime/evidence/2026-09-28-adaptador-backend/ (manifesto rex-crate-integration/v1: dous logs RED, mutaciones e gates; autocomprobado: 4 listados, 4 presentes, 0 diverxencias)"
+      },
       "propriedade": "agente B (PR #81); registro e manifests sao do integrador",
       "origem": "Entrega 3fea06e + 1af7017 (PR #81) por cherry-pick -x (locais 96dbd20/f58ff05). Depois, 8 commits 0b752b7..6a2218e (encoder v1, paridade koscmp bidireccional, contenedor de edición, docs da entrega, fmt, 52 fixtures vendorizadas, package list) pinados en 6a2218e — tip conferido por `git ls-remote` o 2026-09-28T14:38:34Z — e integrados por cherry-pick -x sen conflitos (locais 20d686d..3994cef); a árbore crates/rex-kosinski resultante e byte-idéntica á dela (diff = 0 bytes).",
       "perfil": {

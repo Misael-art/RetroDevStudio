@@ -25,9 +25,12 @@ limites de cobertura da própria célula e as provas herdadas valendo.
 - Janela atual: o integrador usou 2026-09-28T08:14Z–09:25Z (UTC) para os gates
   da integración do adaptador, 10:57Z–11:01Z para as re-execucións que a
   limpeza de `/tmp` obrigou a refazer, 11:44Z–12:02Z para os gates da rolda de
-  aceite e 12:18Z–12:20Z para a barra de frontend no HEAD final. Nada pesado
-  queda executando; non hai monitores de CI vivos nin jobs de A ou B iniciados
-  por esta sesión.
+  aceite, 12:18Z–12:20Z para a barra de frontend no HEAD final e 14:36Z–15:08Z
+  para a entrega de B (encoder + fixtures), o adaptador Kosinski e a súa barra
+  de gates (cargo/clippy/fmt/check-tree + lint/tsc/npm test). Nada pesado
+  queda executado; a única consulta CI aberta é a re-execución do job
+  desktop-smoke en `ebfa8ea`, co resultado por SHA rexistrado no log de
+  evidencia da fronte A.
 
 ## Matriz de endereçamento (propriedade: agente A)
 
@@ -59,7 +62,7 @@ que A rexistra aquí.
 | aPLib | verified (variante **raw do SGDK 2.11, sem header `"AP\0"`**, fixada no produto e arbitrada por dois decodificadores de referência independentes; a questão de fundo sobre namespace canônico segue registrada em (b) abaixo) | verified (pino próprio do integrador em `data/rex_profiles/integrator/aplib/vectors/`: 49 arquivos com SHA + hash agregado `3a9d7e9e…`, mais 2 discriminadores em `.../discriminating/`; a cópia da agente A **não** foi adotada) | verified (perna 1 da paridade §4: `aplib_decode` do produto sobre o stream de cada um dos **dois** oráculos — `apultra` exemplar `64be2a7a…` (origem declarada commit `8f340057…`) e `apj.jar` SGDK v2.11 `2d8cdc63…` — nos 8 plains, e nos 9 goldens com `bytes_consumed` exato; **não** alegado pelo desempacotador 68000 real, que hoje só existe para LZ4W) | verified (perna 2 da paridade §4: os dois oráculos devolvem o plain pinado a partir do stream que o **produto** codificou — gate **16 executados / 16 aprovados / 0 divergentes**; mesa de tokens idêntica à dos oráculos em 7 das 8 mesas; **ótimo não alegado** — em `noisy_runs_16k` o produto emite 1 364 B contra 1 205 B dos dois oráculos, e a mesa explica em números: +433 B de `match-10` comprando 272 B de literais e rep-matches) | verified (os 7 negativos recusados cada um pelo código estruturado que o define, `work_limit`, `excessive_output` sem estourar saída, `overflow` por gamma2 sem fim, e `verify_aplib_resource` recusando tamanho declarado divergente e header de outro codec) | **verified no perfil demonstrado** (HAMOOPIG `558bea6c…`, recurso `0x2e12a` da lista real, edição de 1 pixel registrada e aplicada pela barra, reinserção em slot **sem expansão** com 0 bytes fora dele, BPS reaplicado sobre a base reproduzindo o hash da cópia e efeito em tela nas 2 posições previstas pelo desempacotador do próprio jogo — ver as duas packages em `data/rex_profiles/integrator/aplib/evidence/` e o checkpoint abaixo; **não** verificado para os outros 3 recursos aPLib da ROM, para o resto do acervo, nem para o app distribuído) |
 | LZ4W SGDK | verified (SGDK MIT, prev-block + self-contained) | fixture (golden autorais) | verified (desempacotador 68000 oficial sob MAME + lz4w.jar nas duas direções) | verified (o 68000 reproduz byte a byte cada stream dos casos medidos — **pelos dois caminhos do encoder**: entrada DP-first e caminho de escrita com orçamento de espaço; 14 casos em r15) | verified (truncated/invalid-reference/overflow/excessive-output/work-limit/dicionário/fronteira 16384-16385-16386) | verified (corpus HAMOOPIG, ver cadeia) |
 | Nemesis | blocked | fixture (PR #79, vetores nemcmp) | blocked | blocked | blocked | blocked |
-| Kosinski | blocked | blocked | blocked | blocked | blocked | blocked |
+| Kosinski | verified (variante base não-modular v1 fixada em `docs/rex_profiles/kosinski_runtime/CONTRACT.md`; módulo de edição REXKOS declarado prova de contrato, NON transación canónica) | verified (52 fixtures autorais vendorizadas no paquete `crates/rex-kosinski` con SHA-256 pinada en `tests/fixtures.rs`; gate do paquete 51 executados / 0 falhas / 0 ignorados medido 2026-09-28T14:36Z) | verified (gate do paquete + adaptador do backend: 16 probas con esperas rexistradas independentemente por B e confirmadas no oráculo koscmp; diferencial 53/1/2/2 byte-idêntico rexistrado en `data/rex_profiles/kosinski_runtime/`) | verified (paridade bidireccional koscmp nos 16 testes `encode` do paquete + round-trip pola fronteira do backend; **ótimo non alegado**) | verified (truncated / invalid_reference (`0200ffff`) / excessive_output / work_limit / empty_input na decodificación e stream_limit / work_limit na codificación, cada un polo código estruturado do `CodecError` do produto) | **blocked** — ningún recurso real (BYOR) foi decodificado, recodificado ou reinserido polo produto; non hai chamador da interface |
 | Enigma | blocked | fixture (PR #79, vetores enicmp) | blocked | blocked | blocked | blocked |
 
 LZ4W implementado no produto em Rust canônico (`src-tauri/src/tools/reverse/
@@ -246,7 +249,7 @@ não implica o seguinte. Uma biblioteca compilar e passar nos gates próprios n�
 
 | Pacote | biblioteca implementada | gates próprios aprovados | backend integrado | fluxo do usuário comprovado |
 |---|---|---|---|---|
-| `crates/rex-kosinski` (frente B) | verified (decodificador Kosinski base não-modular, 179 linhas, contrato v1 em `docs/rex_profiles/kosinski_runtime/CONTRACT.md`; entrega `3fea06e`+`1af7017`, pino revisto `0b752b7`, aplicada por `cherry-pick -x`) | **verified** — `npm run crates:gates` medido 2026-09-28T02:48Z: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **25 executados / 0 falhas / 0 ignorados** (22 contract + 3 mutations). Log + manifesto com SHA em `data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/`. Achado devolvido à B: os testes leem fixtures **fora** do pacote (`data/rex_profiles/codec/kosinski`, importado pelo integrador no mesmo pino — 27 linhas de `manifest.tsv` conferidas, 0 divergências, agregado `ea866df7…` reproduzido); o pacote não é relocável sozinho. O contrato do encoder (`0b752b7`) e o WIP `encode.rs` ficaram de fora desta entrega | **blocked** — sem `rex-kosinski` em `src-tauri/Cargo.toml`, sem adaptador, sem chamada real pelo backend | **blocked** — nada no produto usa este pacote |
+| `crates/rex-kosinski` (frente B) | verified (codec Kosinski base não-modular v1: decoder + encoder + contenedor de edición autoral + 52 fixtures vendorizadas; contrato `docs/rex_profiles/kosinski_runtime/CONTRACT.md` e `ENCODE-CONTRACT.md`; entregas `3fea06e`+`1af7017` e 8 commits `0b752b7..6a2218e`, pino `6a2218e` conferido por `git ls-remote` 2026-09-28T14:38:34Z, todas por `cherry-pick -x` con paridade byte-exata (diff = 0 bytes)) | **verified** — `npm run crates:gates` medido 2026-09-28T02:48Z (25 executados) e **re-medido 2026-09-28T14:36Z–14:37Z** depois da entrega do encoder: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **51 executados / 0 falhas / 0 ignorados** (22 contract + 8 edit + 16 encode + 2 fixtures + 3 mutations). O achado de relocabilidade (fixtures fóra do pacote) está **fechado** pola propia B: as 52 fixtures vendorizan-se dentro do paquete con SHA-256 pinada en `tests/fixtures.rs`. Log + manifesto con SHA en `data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/` e `.../2026-09-28-entrega-encoder-fixtures/` | **verified** — chamado polo backend real e medido 2026-09-28T14:45Z–15:08Z: `rex-kosinski = { path = "../crates/rex-kosinski" }` em `src-tauri/Cargo.toml` (sem workspace na raiz; `Cargo.lock` +5 linhas, unha entrada `[[package]]` **sem** `source` e zero crates externos novos), adaptador en `src-tauri/src/tools/reverse/decomp/rex_kosinski.rs` (mapeo 1:1 de `KosError`/`EncError` ao `CodecError { code, detail }` do contrato de codecs, `bytes_consumed` conforme contrato v1 §3, DTOs `snake_case` + base64 + SHA-256 laterais) e **dous comandos Tauri** `rex_kosinski_decode`/`rex_kosinski_encode` registrados en `generate_handler!` (HEAD do commit `3428b69`, SHA do adaptador `3b4115ab…`). **16 testes do adaptador, 0 falhas** (10 capa codec + 6 capa IPC) con esperas independentes rexistradas por B (abcdef consumed=11, sonda `0200ffff`, mínima de encode `020000F000`); suite completa `cargo test --lib` **770 / 0 / 66**, `clippy --lib -D warnings` rc=0, `fmt --check` rc=0, `check:tree`/`lint`/`tsc --noEmit`/`npm test` (749/6/755) rc=0. Non-vacuidade: dous RED observados (capa codec e capa IPC, E0432) e tres controles de mutación (mapeo `empty_input`, `bytes_consumed` da resposta IPC, mapeo `stream_limit`) matando 1/1/2 pruebas, restauración conferida por SHA. **Exposto só decodificar e codificar streams en memoria**; o contenedor `edit::build/open/reinsert` queda declarado como non exposto — proba de contrato, non transación canónica | **blocked** — nenhum chamador da interface usa `rex_kosinski_decode`/`rex_kosinski_encode`, non hai pantalla de codec, e ningún recurso real (BYOR) foi decodificado ou recodificado polo produto: as chamadas probadas usan streams autoriais, cero corpus BYOR no gate |
 | `crates/rex-addressing` (frente A) | verified (5 perfis MD linear/SSF2 e SNES LoROM/HiROM/ExHiROM; 17 commits `9b27941..57e51d3`, PR #82, `cherry-pick -x` sem conflitos; movido de `scripts/rex_profiles/addressing_runtime/` para `crates/rex-addressing` — promoção que o `CONTRATO.md` do próprio perfil registrava como pendente do integrador. A entrega mais recente de A também entrou: 7 commits `58a06dd..30cb311` (PR #83, etapas 2–5 — capa de leitura de recursos com procedência, bateria discriminante, exemplo consumidor e varredura *nunca panica*), por `cherry-pick -x` como `cde721c..8a28909`, com pino conferido por fetch pontual antes de integrar) | **verified** — primeira medição 2026-09-28T02:58Z já na localização nova (`fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **81 executados / 0 falhas / 9 ignorados**) e re-medida 2026-09-28T08:14Z depois dos cherry-picks das etapas 2–5: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **127 executados / 0 falhas / 9 ignorados**; e re-medida outra vez 2026-09-28T11:44Z depois da rolda de aceite de A (`30cb311..0e5f804`), cos tres gates OK e **138 executados / 0 falhas / 10 ignorados** en 17 targets — exactamente os números que A publicou na súa propia árbore, reproducidos neste tronco e xa con `examples/` dentro do paquete. Logs + manifestos em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/` e `.../2026-09-28-backend-integrado/`. Os ignorados são os BYOR (8), a preimage exaustiva (1) e — só na carreira de 11:44Z — o caso que rexenera o JSON de aceite baixo `REX_ACEITE_ESCRIBIR=1`, que non se executou en ningunha das tres: o gate ordinário não depende de ROM. Pacote **relocável** — os vectors pinados viven dentro del (`vectors/rust-vectors-v1.json` e `vectors/acceptance-v1.json`, SHA-256 `54ba2b6e…a216` pino dentro de `tests/acceptance.rs`). Achado devolvido à A (15 `.expect()` sem varredura adversária) está **fechado** pela própria etapa 5: `tests/no_panic_sweep.rs`, 277 610 chamadas determinísticas nos cinco perfis mais a capa de recursos | **verified** — chamado pelo backend real e medido: `rex-addressing = { path = "../crates/rex-addressing" }` em `src-tauri/Cargo.toml` (sem workspace na raiz; `Cargo.lock` +5 linhas, uma entrada `[[package]]` **sem** `source` e zero crates externos novos), adaptador em `src-tauri/src/tools/reverse/decomp/rex_addressing.rs` e comando Tauri `rex_addressing_read_snapshot` registrado em `generate_handler!` (SHA do adaptador `7bd75ea9…`). **17 testes do adaptador, 0 falhas**; suite completa `cargo test --lib`: **754 / 0 / 66 ignorados** (737 era a base sem o adaptador), `clippy --lib -D warnings` rc=0, `fmt --check` rc=0, `check:tree`/`lint`/`tsc --noEmit`/`npm test` todos rc=0. Não-vacuidade: RED observado (16 fallos antes da implementação) e três controles de mutação (garda de identidade, procedência do segmento, achatamento de erros) matando 1/2/8 testes, com restauração conferida por SHA. **Exposto apenas a leitura com snapshot fixo nos perfis MD**; `read_sequence`, as escritas e os perfis SNES ficam declarados como não expostos no registro. **A rolda de aceite de A (medida 2026-09-28T11:44Z–12:02Z) non move este degrau**: os seus 15 vectores gradúan `read_resource`/`read_sequence` contra un oráculo independente, superficies que o adaptador do produto non expón, polo que non son evidencia do adaptador. Si mudou a débeda da promoción: `examples/resource_report.rs` da etapa 4 quedara na ruta vella (o paquete graduado ás 08:14Z non tiña exemplo e `clippy --all-targets` nunca o lintaba) e catro ligazóns relativas do README do paquete apuntaban tres niveis por riba da raíz — reparado en `daefb43`, con paridade conferida ficheiro a ficheiro (42 ↔ 42, única diferenza de contido a miña nota de localización) e o exemplo executado rc=0 desde `crates/rex-addressing` (13 lecturas / 14 recusas / 7 códigos, resumo `27bebc7b…`). Log + manifesto por arquivo em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/` | **blocked** — nenhum chamador da interface usa `rex_addressing_read_snapshot` e não existe tela de endereçamento; as únicas imagens lidas são fixtures autoriais do próprio adaptador, sem corpus BYOR no gate |
 
 Regras desta matriz: o registro canônico é `crates/registry.json` (schema
@@ -300,21 +303,68 @@ Emenda 2026-09-28: duas **bibliotecas standalone** dessas frentes passaram a
 existir neste tronco — `crates/rex-kosinski` e `crates/rex-addressing`,
 registradas em `crates/registry.json` e com gates próprios medidos (ver a
 matriz de `crates/` acima). Isso é degrau de biblioteca, **não** integração.
-Emenda da emenda (2026-09-28, rodada de integração da frente A): essa frase já
+Emenda da emenda (2026-09-28, rodada de integración da frente A): essa frase já
 não vale para os dois. `crates/rex-addressing` **foi integrada ao backend** —
 path dependency em `src-tauri/Cargo.toml`, adaptador em
 `src-tauri/src/tools/reverse/decomp/rex_addressing.rs` e comando Tauri
 `rex_addressing_read_snapshot` com 17 testes próprios; a linha de
 `src-tauri/src/tools/reverse/decomp/` foi tocada por essa entrega (o adaptador,
-`mod.rs`, `lib.rs`, `Cargo.toml`/`Cargo.lock`). Continuar **não** valendo para
-`crates/rex-kosinski`, que segue sem consumidora no produto, e o degrau
-`fluxo do usuário comprovado` segue bloqueado para ambos: nada na interface
-chama o comando. O WIP de leitura de recursos da agente A que antes estava no
-worktree dela entrou nesta rodada (`58a06dd..30cb311`, etapa 2 em diante); o
-WIP de encoder da B (`src/encode.rs`) continua fora, no worktree dela. O
-produto segue com os codecs que já tinha.
+`mod.rs`, `lib.rs`, `Cargo.toml`/`Cargo.lock`).
+Emenda da emenda da emenda (2026-09-28, perna B): o mesmo passa a valer para
+`crates/rex-kosinski` — path dependency (`Cargo.lock` +5 linhas, só a entrada
+local), adaptador em `src-tauri/src/tools/reverse/decomp/rex_kosinski.rs` e
+**dous** comandos Tauri (`rex_kosinski_decode`/`rex_kosinski_encode`, HEAD do
+commit `3428b69`) com 16 testes próprios; decodificar e codificar quedan como
+operacións separadas e o contenedor `edit` segue declarado como non exposto.
+O degrau `fluxo do usuário comprovado` segue bloqueado para **ambos**: nada na
+interface chama os comandos. O WIP de encoder da B deixou de estar fora: a
+entrega `0b752b7..6a2218e` (encoder v1 + 52 fixtures vendorizadas) entrou por
+`cherry-pick -x` con paridade byte-exata. O produto segue sen reinserción
+Kosinski nas súas transacións canónicas.
 
 ## Histórico da rodada
+
+- 2026-09-28 (integrador, **perna B2 — `crates/rex-kosinski` sobe a `backend
+  integrado`, e só a ese degrau**), esta célula é o checkpoint. **HEAD de
+  partida:** `ddab0ac` (a entrega `0b752b7..6a2218e` de B xa estaba integrada e
+  rexistrada). **Ordem recebida (mesma misión):** "B — decoder/encoder
+  Kosinski… adaptar limites e erros ao contrato de codecs existente
+  (`CodecError { code, detail }`), preservando a distinción entre decodificar,
+  codificar e reinserir… Integre e valide unha frente por vez… Prossiga até os
+  adaptadores testados e a entrega publicada."
+  **Commits desta célula:** `3428b69` (adaptador + path dep + dous comandos
+  Tauri rexistrados) e o commit de evidencia que o segue.
+  **Medido:** dous RED observados antes de produción (capa codec: E0432 `rc=101`;
+  capa IPC: E0432 para `ipc_decode`/`ipc_encode`, `rc=101`); GREEN **16/16** (10
+  codec + 6 IPC) con esperas independentes rexistradas por B e confirmadas no
+  oráculo koscmp (abcdef.kos → `b"ABCDEF"` con `bytes_consumed=11`; sonda
+  `0200ffff` → `invalid_reference`; `[0xff]` → `truncated`; espido →
+  `empty_input`; `max_output=5` → `excessive_output`; `max_work=3` →
+  `work_limit`; `encode(b"")` → `020000F000`). Non-vacuidade: M1 (mapeo
+  `empty_input`→`truncated`) matou 1, M2 (`bytes_consumed` da resposta IPC =
+  lonxitude do stream) matou 1, M3 (`stream_limit`→`work_limit`) matou 2;
+  restauración conferida por SHA-256 (`3b4115ab…d45eb4e2` idéntica) e 16/16
+  verdes outra vez. **Gates no destino:** `cargo test --lib` **770 / 0 / 66**
+  (base 754 + 16), `clippy --lib -D warnings` rc=0, `fmt --check` rc=0,
+  `check:tree` rc=0, `lint`/`tsc --noEmit` rc=0, `npm test` **749 / 6 / 755**
+  rc=0 sen cambios de frontend. `Cargo.lock`: +5 liñas, só a entrada local
+  `rex-kosinski` sen campo `source`, cero crates externos novos.
+  **O que se expón:** dous comandos Tauri reais (`rex_kosinski_decode`,
+  `rex_kosinski_encode`), operacións separadas, erros viaxan como
+  `CodecError { code, detail }` traducido 1:1 a `InspectionError` (código e
+  detalle preservados, `retryable=false`), limites explícitos cos defectos do
+  contrato (4 MiB / 64 M).
+  **O que NON se expón nin se alega:** o contenedor `edit::build/open/reinsert`
+  segue sendo proba de contrato — a transación canónica do produto aínda non
+  consome Kosinski, polo que a distinción decodificar/codificar/reinserir
+  presérvese por exclusión declarada; non hai fluxo do usuario (ninguén chama
+  os comandos desde a interface), non hai corpus BYOR no gate, non se alega
+  descuberta de recursos, e `rex-kosinski` segue **Experimental**. Sen merge,
+  sen release, sen promoción além do degrau medido. **Licenza:** segue decisión
+  do operador (`UNLICENSED`, `source: workspace`).
+  Evidencia con manifesto e SHA por ficheiro en
+  `data/rex_profiles/kosinski_runtime/evidence/2026-09-28-adaptador-backend/`
+  (autocomprobada: 4 artefactos listados, 4 presentes, 0 diverxencias).
 
 - 2026-09-28 (integrador, **perna `aceite-integrado` — a rolda de invariantes e
   vectores de aceite da fronte A entra no tronco e repárase a débeda da propia
