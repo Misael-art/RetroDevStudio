@@ -1,6 +1,12 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { dispatchGraphHistory } from "./core/nodegraph/graphHistory";
 import { open } from "@tauri-apps/plugin-dialog";
+import { MugenCompatibilityPanel } from "./components/common/MugenCompatibilityPanel";
+import {
+  loadMugenImportReports,
+  summarizeLosses,
+  type LoadedMugenReport,
+} from "./core/mugenCompatibility";
 import {
   Group,
   Panel,
@@ -1440,6 +1446,14 @@ type AutomationState = {
     diagnostic: ActionableDiagnostic | null;
   }>;
   projectSourceKind: string;
+  mugenCompatibility?: {
+    open: boolean;
+    characters: Array<{
+      id: string;
+      totals: Record<string, number> | null;
+      categories: Array<{ id: string; status: string }>;
+    }>;
+  };
 };
 
 type AutomationApi = {
@@ -1533,6 +1547,9 @@ type AutomationApi = {
     entityId: string,
     relativePath?: string | null
   ) => Promise<{ ok: boolean; absolute_path: string | null; relative_path: string | null }>;
+  /** Proximo caminho devolvido pelo seletor de pasta da importacao externa, no lugar do
+   * dialogo nativo (que a automacao nao dirige). O resto do fluxo continua visivel. E2E / QA. */
+  setNextExternalImportPath: (path: string) => boolean;
   getState: () => AutomationState;
 };
 
@@ -1688,6 +1705,14 @@ export default function App() {
   const [showExternalImportSection, setShowExternalImportSection] = useState(false);
   const [templateDonorPaths, setTemplateDonorPaths] = useState<Record<string, string>>({});
   const [lastSgdkImportSummary, setLastSgdkImportSummary] = useState<SgdkImportSummary | null>(null);
+  // Compatibilidade MUGEN (Experimental): relatorios gravados pelo importador do produto.
+  const [mugenReports, setMugenReports] = useState<LoadedMugenReport[]>([]);
+  const [mugenReportsProjectDir, setMugenReportsProjectDir] = useState<string | null>(null);
+  const [mugenPanelOpen, setMugenPanelOpen] = useState(false);
+  const mugenStateRef = useRef({ open: false, reports: [] as LoadedMugenReport[] });
+  mugenStateRef.current = { open: mugenPanelOpen, reports: mugenReports };
+  // Automacao E2E: substitui SO o dialogo nativo de pasta (que o WebDriver nao dirige).
+  const pendingExternalImportPathRef = useRef<string | null>(null);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -2820,6 +2845,11 @@ export default function App() {
   }
 
   async function chooseExternalProjectPath(profile: ExternalImportProfileSummary) {
+    const automationPath = pendingExternalImportPathRef.current;
+    if (automationPath) {
+      pendingExternalImportPathRef.current = null;
+      return automationPath;
+    }
     const selected = await open({
       title: `Escolher projeto ${profile.name} para importar`,
       directory: true,
@@ -2907,6 +2937,24 @@ export default function App() {
     }
   }
 
+  async function showMugenCompatibility(projectDir: string) {
+    try {
+      const reports = await loadMugenImportReports(projectDir);
+      setMugenReports(reports);
+      setMugenReportsProjectDir(projectDir);
+      if (reports.length === 0) {
+        logMessage("warn", "[MUGEN] Importacao sem relatorio de compatibilidade: confira o console e o projeto.");
+        return;
+      }
+      for (const loaded of reports) {
+        logMessage("success", `[MUGEN] ${loaded.id} (Experimental): ${summarizeLosses(loaded.report)}.`);
+      }
+      setMugenPanelOpen(true);
+    } catch (error) {
+      logMessage("warn", `[MUGEN] Relatorio de compatibilidade ilegivel: ${describeError(error)}`);
+    }
+  }
+
   async function handleImportExternalProject() {
     if (!newProjName.trim()) {
       logMessage("warn", "[Projeto] Informe um nome para o projeto importado.");
@@ -2960,6 +3008,9 @@ export default function App() {
         );
         if (result.notice) {
           logMessage("info", `[Projeto] ${result.notice}`);
+        }
+        if (selectedExternalImportProfile.id === "mugen" || selectedExternalImportProfile.id === "ikemen_go") {
+          await showMugenCompatibility(result.path);
         }
       } else {
         logMessage(
@@ -3914,6 +3965,10 @@ export default function App() {
 
     window.__RDS_E2E__ = {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
+      setNextExternalImportPath: (path: string) => {
+        pendingExternalImportPathRef.current = path;
+        return true;
+      },
       loadRomForEmulation: async (
         romPath: string,
         options?: { startPaused?: boolean }
@@ -4216,6 +4271,17 @@ export default function App() {
         }
 
         return {
+          mugenCompatibility: {
+            open: mugenStateRef.current.open,
+            characters: mugenStateRef.current.reports.map((loaded) => ({
+              id: loaded.id,
+              totals: loaded.report.summary?.totals ?? null,
+              categories: (loaded.report.summary?.categories ?? []).map((category) => ({
+                id: category.id,
+                status: category.status,
+              })),
+            })),
+          },
           activeProjectDir: state.activeProjectDir,
           activeProjectName: state.activeProjectName,
           activeTarget: state.activeTarget,
@@ -4636,6 +4702,7 @@ export default function App() {
                         label={creatingProject ? "Importando..." : "Importar Projeto Externo"}
                         onClick={() => void handleImportExternalProject()}
                         disabled={creatingProject || templatesLoading}
+                        testId="external-import-confirm"
                       />
                     </div>
                   </div>
@@ -5092,6 +5159,13 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <MugenCompatibilityPanel
+        open={mugenPanelOpen}
+        projectDir={mugenReportsProjectDir}
+        reports={mugenReports}
+        onClose={() => setMugenPanelOpen(false)}
+      />
 
       {showCommandPalette && (
         <CommandPaletteDialog

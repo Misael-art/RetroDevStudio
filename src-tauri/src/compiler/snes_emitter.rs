@@ -115,6 +115,13 @@ fn build_main_c_with_collision(
             reason: "estado de apoio no chao nao existe no SNES".to_string(),
         });
     }
+    // Runtime MUGEN so existe no emissor Mega Drive: bloquear, nunca aproximar.
+    for var_name in crate::compiler::mugen_runtime::anim_done_vars(ast) {
+        unsupported_semantics.push(crate::compiler::ast_generator::UnsupportedSemantic {
+            node_id: format!("sprite_anim_done({var_name})"),
+            reason: "fim de animacao MUGEN nao existe no emissor SNES".to_string(),
+        });
+    }
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
     let default_size_config = SpriteSizeConfig {
         oam_size: "OBJ_SIZE16_L32",
@@ -1509,7 +1516,7 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
         }
         // Estado de apoio so existe na fisica do emissor Mega Drive.
         // Placeholder: o `#error` de `render_unsupported_semantics` ja bloqueou o build.
-        LogicBoolExpr::Grounded { .. } => "0".to_string(),
+        LogicBoolExpr::Grounded { .. } | LogicBoolExpr::SpriteAnimDone { .. } => "0".to_string(),
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
             left_x = logic_x_expr(left),
@@ -1990,7 +1997,9 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
 
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
-        LogicBoolExpr::Literal(_) | LogicBoolExpr::Grounded { .. } => false,
+        LogicBoolExpr::Literal(_)
+        | LogicBoolExpr::Grounded { .. }
+        | LogicBoolExpr::SpriteAnimDone { .. } => false,
         LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
@@ -2287,6 +2296,7 @@ mod tests {
             frames: vec![0, 1, 2],
             frame_time: 6,
             looping: true,
+            mugen: None,
         };
         SpriteAsset {
             resource_name: "hero".to_string(),

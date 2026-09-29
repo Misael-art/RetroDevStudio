@@ -1,0 +1,9 @@
+; Sentinel: 2a amostra autoral (RetroDev rex-mugen)
+[Info]
+name = "Sentinel"
+
+[Files]
+cmd = sentinel.cmd
+cns = sentinel.cns
+sprite = sentinel.sff
+anim = sentinel.air

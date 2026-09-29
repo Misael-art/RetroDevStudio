@@ -1,0 +1,8 @@
+[Info]
+name = "Warden"
+
+[Files]
+cmd = warden.cmd
+cns = warden.cns
+sprite = warden.sff
+anim = warden.air

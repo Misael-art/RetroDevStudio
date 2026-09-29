@@ -131,6 +131,16 @@
         "o_que_non_prova": "estes vectores gradúan read_resource / read_sequence da crate, superficies que o adaptador do produto NON expón: non son evidencia do adaptador e non moven o degrau backend-integrado. Tamén fica rexistrado que a primeira carreira do lib pipesouse a `tail -30`, polo que o seu `TEST_LIB_RC` era o código de `tail`; a carreira autorizada e cargo-test-lib-pos-aceite.log",
         "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-aceite-integrado/ (manifesto rex-crate-integration/v1 con sha256 e linhas por ficheiro; autocomprobado: 6 listados, 6 presentes, 0 diverxencias)"
       }
+    },
+    {
+      "nome": "rex-mugen",
+      "manifesto": "crates/rex-mugen/Cargo.toml",
+      "descricao": "Perfil mugen.character.v1 (Experimental): AIR, SFF v1 indexado, paleta na grade VDP, plano de conversao para SGDK com diagnostico e proveniencia. Sem dependencias.",
+      "maturidade": "biblioteca-implementada",
+      "maturidade_data": "2026-09-28",
+      "propriedade": "frente MUGEN->SGDK (branch codex/rex-mugen-sgdk); registro e manifests sao do integrador — entrada PROPOSTA, sujeita a curadoria",
+      "nao_alega": "nao e conversao integral de MUGEN; so personagem v1 (SFF v1, AIR, subset CMD/CNS do importador do produto); sem SFF v2, blend, expressoes gerais ou runtime de luta",
+      "evidencia": "docs/rex_profiles/mugen_sgdk/"
     }
   ]
 }

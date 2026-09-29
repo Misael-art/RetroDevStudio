@@ -1,0 +1,9 @@
+[package]
+name = "rex-mugen"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Perfil MUGEN -> SGDK (Experimental): AIR, SFF v1 indexado, paleta na grade do VDP, projecao de animacao para rescomp/SGDK, diagnostico e proveniencia. Sem dependencias."
+publish = false
+
+[dependencies]

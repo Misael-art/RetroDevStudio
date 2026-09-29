@@ -1,0 +1,13 @@
+; Probe CNS
+[Statedef 0]
+type = S
+anim = 0
+
+[Statedef 200]
+type = S
+anim = 200
+
+[State 200, End]
+type = ChangeState
+trigger1 = AnimTime = 0
+value = 0
