@@ -117,6 +117,21 @@ não é FPS e não há valor uniforme por animação.
 
 A coerência entre `frame_durations` e `mugen_frames[].duration` é conferida na geração (seção seguinte).
 
+## Controle pelo teclado (etapa 3 da UX v2)
+
+Comandos e ações **já convertidos** e provados no desktop com a fixture `walker`
+(`crates/rex-mugen/fixtures/walker`, previsão em `fixture.rs`):
+
+| MUGEN | Produto | Prova |
+|---|---|---|
+| `command = F`, `time = 1` (direção segurada) + `ChangeState` no `[Statedef -1]` | `input_command` → estado 20 → animação de caminhada; `AnimTime = 0` volta ao estado 0 e o `-1` religa enquanto a tecla segue segurada (1 tick de idle entre ciclos) | ArrowRight nativo → ack da sessão → 12/6 ticks (4 editado para 12) + índice da animação na RAM |
+| `command = a` | botão A do Mega Drive (KeyZ) → estado 200 → animação de **ataque** | ack da sessão → 3/8 ticks, uma só vez; índice na RAM |
+
+**Sem movimento de posição:** `VelSet`/`PosAdd` não fazem parte do perfil v1 (`unsupported`), então a
+posição do personagem não muda; a prova mede isso (borda esquerda constante). A ação é «animação de
+ataque»: nada de acerto, dano ou colisão. `command` só reconhece a forma segurada (`/`, `~`, `$` e
+sequências não foram exercitados nesta fixture).
+
 ## Esquema de diagnóstico (`rex-mugen/diag/v1`)
 
 | Estrutura | Campos |

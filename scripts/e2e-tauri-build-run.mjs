@@ -5157,8 +5157,17 @@ async function runMugenControlScenario(sessionId, timeoutMs, uiBootstrapTimeoutM
   await waitFor(async () => (await state())?.selectedEntityId === "walker", 15000, "Entidade walker nao foi selecionada.", 200);
   const walkF0 = "inspector-mugen-anim-action_20-frame-0";
   await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value === "4";`, [walkF0]), 15000, "Inspector nao mostrou 4 ticks no quadro 1 da caminhada.", 200);
-  await setInputByTestIdNative(sessionId, walkF0, "0");
-  const badDiag = await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '-error"]')?.textContent ?? false;`, [walkF0]), 5000, "Entrada 0 nao gerou diagnostico.", 100);
+  // A digitacao nativa pode perder o foco/selecao; repete ate 3 vezes (idempotente: "0" nunca e valido)
+  // e, se falhar, o erro mostra o valor real do campo.
+  let badDiag = false;
+  for (let attempt = 1; attempt <= 3 && !badDiag; attempt += 1) {
+    await setInputByTestIdNative(sessionId, walkF0, "0");
+    badDiag = await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '-error"]')?.textContent ?? false;`, [walkF0]), 4000, "Entrada 0 nao gerou diagnostico.", 100).catch(() => false);
+  }
+  if (!badDiag) {
+    const field = await js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value ?? null;`, [walkF0]);
+    fail(`Entrada 0 nao gerou diagnostico apos 3 tentativas (valor atual do campo: ${JSON.stringify(field)}).`);
+  }
   if (!badDiag.includes("Mantido: 4")) fail(`Diagnostico nao informa o valor mantido: ${badDiag}`);
   await setInputByTestIdNative(sessionId, walkF0, String(EDITED_WALK_TICKS));
   await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value === arguments[1];`, [walkF0, String(EDITED_WALK_TICKS)]), 5000, "Campo nao aceitou 12.", 100);
