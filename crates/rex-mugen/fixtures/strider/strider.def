@@ -1,0 +1,9 @@
+[Info]
+name = "Strider"
+author = "RetroDev Studio (autoral)"
+
+[Files]
+cmd = strider.cmd
+cns = strider.cns
+sprite = strider.sff
+anim = strider.air

@@ -82,6 +82,56 @@ fn walk_ops(ops: &[LogicOp], f: &mut dyn FnMut(&LogicBoolExpr)) {
     }
 }
 
+fn collect_velocity_targets(ops: &[LogicOp], out: &mut BTreeSet<String>) {
+    for op in ops {
+        match op {
+            LogicOp::MugenSetVelocityX { target_var, .. } => {
+                out.insert(target_var.clone());
+            }
+            LogicOp::SourceMapped { op, .. } => {
+                collect_velocity_targets(std::slice::from_ref(op.as_ref()), out)
+            }
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            }
+            | LogicOp::ConditionBool {
+                if_true, if_false, ..
+            } => {
+                collect_velocity_targets(if_true, out);
+                collect_velocity_targets(if_false, out);
+            }
+            LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+                collect_velocity_targets(body, out);
+                collect_velocity_targets(done, out);
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_velocity_targets(if_ok, out);
+                collect_velocity_targets(if_warn, out);
+            }
+            LogicOp::HardwareEvent { ops, .. } => collect_velocity_targets(ops, out),
+            LogicOp::StateMachine { states, .. } => {
+                for state in states {
+                    collect_velocity_targets(&state.body, out);
+                    for t in &state.transitions {
+                        collect_velocity_targets(&t.if_matched, out);
+                        collect_velocity_targets(&t.if_unmatched, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Sprites (variaveis) que recebem `MugenSetVelocityX`.
+fn velocity_targets(ast: &AstOutput) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for script in &ast.logic_scripts {
+        collect_velocity_targets(&script.ops, &mut out);
+    }
+    out
+}
+
 /// Sprites (variaveis) usados em `sprite_anim_done`.
 pub(crate) fn anim_done_vars(ast: &AstOutput) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
@@ -171,6 +221,16 @@ pub(crate) fn render_decls(ast: &AstOutput) -> String {
         }
     }
     let vars = mugen_vars(ast, &assets);
+    for target in velocity_targets(ast) {
+        let ok = vars
+            .iter()
+            .any(|(v, res)| *v == target && matches!(assets.get(res), Some(Ok(_))));
+        if !ok {
+            out.push_str(&format!(
+                "#error \"RetroDev MUGEN: VelSet em '{target}' que nao tem tabela MUGEN valida (sem runtime para integrar a velocidade)\"\n"
+            ));
+        }
+    }
     let any_table = assets.values().any(|t| t.is_ok());
     if !any_table {
         out.push_str(&render_done_fns(&done_vars, &vars, &assets));
@@ -255,6 +315,8 @@ pub(crate) fn render_decls(ast: &AstOutput) -> String {
              static volatile u16 rds_mugen_{v}_done = 0;\n\
              static volatile u16 rds_mugen_{v}_clsn1 = 0;\n\
              static volatile u16 rds_mugen_{v}_clsn2 = 0;\n\
+             static volatile s16 rds_mugen_{v}_vx = 0;\n\
+             static s16 rds_mugen_{v}_xacc = 0;\n\
              static void rds_mugen_{v}_tick(void) {{\n\
              \x20   if (!{v}) return;\n\
              \x20   SPR_setAutoAnimation({v}, FALSE);\n\
@@ -276,6 +338,7 @@ pub(crate) fn render_decls(ast: &AstOutput) -> String {
              \x20   SPR_setFrame({v}, rds_mugen_{v}_frame);\n\
              \x20   SPR_setHFlip({v}, (f->flip & 1) ? TRUE : FALSE);\n\
              \x20   SPR_setVFlip({v}, (f->flip & 2) ? TRUE : FALSE);\n\
+             \x20   {{ s32 acc = (s32)rds_mugen_{v}_xacc + (s32)rds_mugen_{v}_vx; s32 step = acc >> 8; rds_mugen_{v}_xacc = (s16)(acc - (step << 8)); {v}_x += (s16)step; }}\n\
              \x20   SPR_setPosition({v}, {v}_x + f->fdx, {v}_y + f->fdy);\n\
              \x20   rds_mugen_{v}_clsn1 = f->c1; rds_mugen_{v}_clsn2 = f->c2;\n\
              }}\n"

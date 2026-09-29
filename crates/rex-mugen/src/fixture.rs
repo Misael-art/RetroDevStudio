@@ -171,7 +171,7 @@ Clsn1: 1\n Clsn1[0] = 8, -18, 16, -14\n\
 ///   Clsn1 so no frame com flip (5 quadros); blend no ultimo frame -> aproximado (opaco);
 /// * action 99 referencia sprite ausente -> aproximado + erro de diagnostico;
 /// * comando `kick` (botao B) liga 0 -> 210 (direto); `Taunt` usa `&&`/`Time` (fora do
-///   perfil) e `Alt` tem dois grupos trigger -> nao suportados, sem transicao; VelSet nao
+///   perfil) e `Alt` tem dois grupos trigger -> nao suportados, sem transicao; `VelSet x = 2` com trigger1 = 1 e ligado (locomocao); outros VelSet
 ///   ligado; statedef 230 aponta anim inexistente -> aproximado.
 pub fn sentinel() -> Files {
     let mut pal = vec![[0u8, 0, 0]; 256];
@@ -551,6 +551,120 @@ pub fn walker() -> Files {
 [Statedef 20]\ntype = S\nanim = 20\n\n\
 [State 20, End]\ntype = ChangeState\nvalue = 0\ntrigger1 = AnimTime = 0\n\n\
 [Statedef 200]\ntype = S\nanim = 200\n\n\
+[State 200, End]\ntype = ChangeState\nvalue = 0\ntrigger1 = AnimTime = 0\n"
+        .to_string();
+    Files {
+        def,
+        air,
+        cmd,
+        cns,
+        sff,
+    }
+}
+
+/// Fixture autoral "Strider": locomoção horizontal com `VelSet` (perfil v1).
+///
+/// Previsão registrada antes da execução (unidade: px por tick de 1/60 s; x positivo = direita;
+/// facing fixo à direita):
+/// * sprites 16x32, eixo (8,32); entidade em (96,96): borda esquerda do sprite = x da entidade;
+/// * idle (action 0, estado 0): corpo VERMELHO, `VelSet x = 0`;
+/// * frente (action 20, estado 20): corpo VERDE 4 ticks / AZUL 6 ticks, `VelSet x = 2.5` (640/256);
+/// * trás (action 21, estado 21): corpo CIANO 4 / MAGENTA 6, `VelSet x = -1.75` (-448/256);
+/// * ataque (action 200, estado 200): AMARELO com punho, 3 + 8 ticks, `VelSet x = 0`, volta ao 0;
+/// * comandos: `fwd = F`, `back = B`, `neutral = 5` (nenhuma direção; notação numérica do
+///   RetroDev, não é sintaxe padrão do MUGEN), `a`; todos `time = 1` (estado atual do controle);
+/// * `[Statedef -1]`: 0/21 --fwd--> 20; 0/20 --back--> 21; 20/21 --neutral--> 0; 0 --a--> 200;
+/// * deslocamento após n ticks: `floor(soma(vx_q8)/256)`, com `vx_q8` = 640, -448 ou 0 conforme o
+///   estado de cada tick (a troca de estado vale no próprio tick).
+pub fn strider() -> Files {
+    let mut pal = vec![[0u8, 0, 0]; 256];
+    pal[1] = [255, 0, 0];
+    pal[2] = [0, 255, 0];
+    pal[3] = [0, 0, 255];
+    pal[4] = [255, 255, 255];
+    pal[5] = [255, 255, 0];
+    pal[6] = [0, 255, 255];
+    pal[7] = [255, 0, 255];
+    let (w, h) = (16usize, 32usize);
+    let fig = |c: u8, fist: Option<(usize, usize, usize)>| {
+        let mut px = vec![0u8; w * h];
+        for y in 0..h - 1 {
+            for x in 0..8 {
+                px[y * w + x] = c;
+            }
+        }
+        for x in 0..w {
+            px[(h - 1) * w + x] = 4;
+        }
+        if let Some((y0, y1, x1)) = fist {
+            for y in y0..y1 {
+                for x in 8..x1 {
+                    px[y * w + x] = 4;
+                }
+            }
+        }
+        px
+    };
+    let sprites: [(u16, u16, Vec<u8>); 7] = [
+        (0, 0, fig(1, None)),
+        (20, 0, fig(2, None)),
+        (20, 1, fig(3, None)),
+        (21, 0, fig(6, None)),
+        (21, 1, fig(7, None)),
+        (200, 0, fig(5, Some((8, 12, 12)))),
+        (200, 1, fig(5, Some((8, 12, 16)))),
+    ];
+    let images: Vec<Image> = sprites
+        .iter()
+        .enumerate()
+        .map(|(i, (group, image, pixels))| Image {
+            group: *group,
+            image: *image,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels,
+            palette: Some(&pal),
+            same_palette: i > 0,
+            link: None,
+        })
+        .collect();
+    let sff = sff_v1(&images);
+    let def = "[Info]\nname = \"Strider\"\nauthor = \"RetroDev Studio (autoral)\"\n\n[Files]\ncmd = strider.cmd\ncns = strider.cns\nsprite = strider.sff\nanim = strider.air\n".to_string();
+    let air = "[Begin Action 0]\n0,0, 0,0, -1\n\n\
+[Begin Action 20]\n20,0, 0,0, 4\n20,1, 0,0, 6\n\n\
+[Begin Action 21]\n21,0, 0,0, 4\n21,1, 0,0, 6\n\n\
+[Begin Action 200]\n200,0, 0,0, 3\n200,1, 0,0, 8\n"
+        .to_string();
+    let mut cmd = String::new();
+    for (name, notation) in [("a", "a"), ("fwd", "F"), ("back", "B"), ("neutral", "5")] {
+        cmd.push_str(&format!(
+            "[Command]\nname = \"{name}\"\ncommand = {notation}\ntime = 1\n\n"
+        ));
+    }
+    cmd.push_str("[Statedef -1]\n\n");
+    for (name, value, command, from) in [
+        ("Fwd0", 20, "fwd", 0),
+        ("Fwd21", 20, "fwd", 21),
+        ("Back0", 21, "back", 0),
+        ("Back20", 21, "back", 20),
+        ("Stop20", 0, "neutral", 20),
+        ("Stop21", 0, "neutral", 21),
+        ("Attack", 200, "a", 0),
+    ] {
+        cmd.push_str(&format!(
+            "[State -1, {name}]\ntype = ChangeState\nvalue = {value}\ntriggerall = command = \"{command}\"\ntrigger1 = stateno = {from}\n\n"
+        ));
+    }
+    let cns = "[Statedef 0]\ntype = S\nanim = 0\n\n\
+[State 0, Stop]\ntype = VelSet\nx = 0\ntrigger1 = 1\n\n\
+[Statedef 20]\ntype = S\nanim = 20\n\n\
+[State 20, Walk]\ntype = VelSet\nx = 2.5\ntrigger1 = 1\n\n\
+[Statedef 21]\ntype = S\nanim = 21\n\n\
+[State 21, Walk]\ntype = VelSet\nx = -1.75\ntrigger1 = 1\n\n\
+[Statedef 200]\ntype = S\nanim = 200\n\n\
+[State 200, Still]\ntype = VelSet\nx = 0\ntrigger1 = 1\n\n\
 [State 200, End]\ntype = ChangeState\nvalue = 0\ntrigger1 = AnimTime = 0\n"
         .to_string();
     Files {

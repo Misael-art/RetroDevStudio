@@ -1140,6 +1140,12 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     ));
                 }
             }
+            LogicOp::MugenSetVelocityX { .. } => {
+                out.push_str(&format!(
+                    "{indent}#error \"RetroDev MUGEN: VelSet nao existe no runtime SNES (perfil mugen.character.v1 e so Mega Drive)\"\n",
+                    indent = indent_str
+                ));
+            }
             LogicOp::SetVelocity {
                 target_name,
                 vx,

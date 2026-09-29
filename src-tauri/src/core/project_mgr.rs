@@ -6855,6 +6855,9 @@ fn imported_mugen_fighting_logic_graph(
                     ));
                 }
             }
+            "velset" if wired.handled.contains(&index) => {
+                // Ligado por wire_behavior_v1 (a recusa mantem o no de referencia abaixo).
+            }
             "velset" | "veladd" => {
                 nodes.push(mugen_node(
                     &id,
@@ -6952,6 +6955,15 @@ fn imported_mugen_fighting_logic_graph(
         if controller
             .controller_type
             .eq_ignore_ascii_case("changestate")
+        {
+            continue;
+        }
+        if controller.controller_type.eq_ignore_ascii_case("velset")
+            && model
+                .controllers
+                .iter()
+                .position(|c| std::ptr::eq(c, controller))
+                .is_some_and(|i| wired.handled.contains(&i) || wired.refused.contains(&i))
         {
             continue;
         }
