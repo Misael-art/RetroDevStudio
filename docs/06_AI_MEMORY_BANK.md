@@ -1,23 +1,70 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
-### Checkpoint 2026-09-29 (h) — integrador, **PR #85 MUGEN → SGDK integrado na árbore do integrador: importación de personaje, panel de compatibilidade e edición persistente probados na UI** (Experimental; publicado como PR #86 sen merge, sen release, sen promoción de maturidade)
+### Checkpoint 2026-09-29 (i) — integrador, **PR #86 MUGEN → SGDK MESCLADO no tronco do integrador; `rex-mugen` promovido a `fluxo-do-usuario-comprovado` co escopo medido; frente MUGEN UX v2 aberta** (Experimental mantido; sen release)
+
+**Ordem recibida:** "Revisar PR #86 para merge humano no tronco de integración.
+Non adicionar funcionalidade nova." Seis verificacións con comando fresco
+(11:40Z–11:52Z UTC, detalle completo na célula de revisión de
+`docs/rex_profiles/ROUND_STATE.md`): (1) diff final = #85 + curaduría, 113
+ficheiros reconciliados (72 + 43 − 2 de solapamento), 0 arquivos alheios, 0
+borrados; (2) `src-tauri/Cargo.toml` conserva as catro path-deps
+(`rex-addressing`, `rex-kosinski`, `rex-gameplay`, `rex-mugen`) e 0 marcadores
+de conflito; (3) CI verde en `35d0450` — `validate` push+PR
+(`36549832173`/`36549838756`), `linux-validate` ×2 e `desktop-smoke` PR
+(`36549838729`); (4) a documentación deixou de afirmar que a fronte non fora
+publicada; (5) os límites MUGEN seguen explícitos na descrición do PR, na
+célula (h) e no `nao_alega` do rexistro; (6) #85 intacto e draft nese intre.
+**Merge executado:** `gh pr merge 86 --merge` → `10c1a3c` (pais `e319fb9` +
+`35d0450`), `mergedAt 2026-09-29T11:51:51Z`. Método `merge` pola política do
+repo e porque squash/rebase destruirían `b410de0`, a proba de procedencia do
+#85. **Consecuencia medida en #85:** GitHub marcouno `MERGED` automaticamente
+ás 11:51:53Z porque `bd02e3c` tornou-se alcanzable desde o tronco; non se
+executou ningunha acción sobre el (sen merge manual, sen comentario),
+`isDraft=true` e os 22 commits permanecen intactos.
+**Rexistro:** `rex-mugen` pasa de `gates-proprios-aprovados` a
+**`fluxo-do-usuario-comprovado`** por ordem expresa do operador, co alegato
+estrictamente escopado ao caso medido no E2E `mugen-import` (binario
+`1b46ff50…`): importación → panel → Build & Run → edición no Inspector →
+salvar/reiniciar/reabrir, sen soporte xeral. Seguen fóra e declarados: SFF v2,
+som, stage, colisión lóxica, teclado/golpe pola UI, reapertura do relatorio,
+rótulo «FPS» do Inspector e licenza do runtime C `mg_*` (non se copia, non se
+asume). **Experimental mantido:** a promoción é un degrau interno da escada;
+ningunha etiqueta de UI, roadmap ou release mudou. **CI da emenda:** rollup
+terminal verde en `6f74ea7` (run `36565719916`, jobs `validate` e
+`linux-validate` success); o CI do commit de medición `f0d0756` non se volta a
+pinar para non mover o tronco outra vez — consúltase con
+`gh api repos/Misael-art/RetroDevStudio/commits/f0d0756/check-runs`. Evidencia
+en `data/rex_profiles/mugen_sgdk/evidence/2026-09-29-revision-merge/`.
+**Frente MUGEN UX v2 aberta** (rama `codex/rex-mugen-ux-v2` @ `f0d0756`, sen
+código nesta rolda), por orde: (1) relatorio de compatibilidade reabrible;
+(2) rótulo correcto de duración/animación no Inspector en vez de «FPS»;
+(3) limpeza do harness para non deixar a app viva tras o reinicio (achado
+`run4`/`run7`); (4) proba de teclado e golpe pola UI; (5) só entón avaliar
+SFF v2, som e stage. **Fechado por ordem do operador:** merge e promoción.
+**Aberto:** licenza do runtime `mg_*`, soporte xeral de MUGEN e calquera
+release.
+
+### Checkpoint 2026-09-29 (h) — integrador, **PR #85 MUGEN → SGDK integrado na árbore do integrador: importación de personaje, panel de compatibilidade e edición persistente probados na UI** (Experimental; publicado como PR #86 sen merge, sen release, sen promoción de maturidade naquele intre — o merge e a promoción rexístranse no checkpoint (i))
 
 **Estado real desta superficie.** O produto acepta **un** caso de uso MUGEN:
 importar un personaje do subconxunto `air` + `sff v1` + paleta nivel VDP +
 `cmd`/`cns` lidos como perfis, e levalo a ROM real por Build & Run. O degrau
-declarado en `crates/registry.json` para `rex-mugen` é
-**`gates-proprios-aprovados`** — non se subiu a `backend-integrado` nin a
-`fluxo-do-usuario-comprovado` neste checkpoint, porque a promoción é decisión
-do operador; o que existe é evidencia. Todo o fluxo permanece etiquetado
+declarado en `crates/registry.json` para `rex-mugen` era
+**`gates-proprios-aprovados`** neste checkpoint — non se subiu a
+`backend-integrado` nin a `fluxo-do-usuario-comprovado` aqui, porque a
+promoción era decisión do operador; o que existe é evidencia (a promoción
+escopada rexístrase no checkpoint (i)). Todo o fluxo permanece etiquetado
 `Experimental` no informe do E2E e na UI.
 
 **Commits desta célula:** `b410de0` (merge curado do PR #85 sobre o tronco do
 integrador; pais `e319fb9` + `bd02e3c`; índice de 72 ficheiros, +7910 / −88) e
 o commit de curaduría que rexistra esta célula (reescribe a entrada `rex-mugen`
 de `crates/registry.json`, emenda `docs/rex_profiles/ROUND_STATE.md` e reforza
-unha aserción do harness). **O PR #85 mantense draft no remoto: non se fixo
+unha aserción do harness). **Neste intre o PR #85 mantense draft no remoto:
+non se fixo
 merge del, nin release, nin promoción de maturidade, e non se lle engadiu
-comentario ningún — o #85 só se referencia.**
+comentario ningún — o #85 só se referencia. (Tras o merge de #86, GitHub
+marcouo MERGED automaticamente por alcanzabilidade; ver checkpoint (i).)**
 
 **Publicación desta frente (2026-09-29, ordem expresa do operador: "faça push
 da branch `codex/rex-integrator-mugen-85` e abra um PR integrado no GitHub, sem
