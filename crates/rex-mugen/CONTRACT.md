@@ -83,8 +83,23 @@ bloqueia o build.
 Editar `frame_durations`, `loop_start` ou `mugen_frames` (flags, axis, caixas) no modelo muda
 a ROM. Valores fora do representável (duração 0 ou fora de −1/1..255, `loop_start` ≥ frames,
 tamanhos divergentes, deslocamento fora de −128..127, animação sem tabela num sprite MUGEN)
-**bloqueiam o build** com `#error`; nunca são aproximados. `mugen_frames[].duration` é
-informativo; a fonte do tempo é `frame_durations`.
+**bloqueiam o build** com `#error`; nunca são aproximados.
+
+### Coerência das durações (fronteira de consumo: `mugen_anim_table`, backend)
+
+Fonte canônica do tempo: `frame_durations` (ticks). `mugen_frames[].duration` espelha o mesmo dado
+e é validado contra ele na geração:
+
+| Situação do projeto | Tratamento |
+|---|---|
+| os dois campos presentes, mesmo comprimento, mesmos valores | gera normalmente |
+| valores diferentes em algum quadro | **bloqueia o build**: `animacao 'X': quadro N: frame_durations = A mas mugen_frames[i].duration = B; ... (nenhum foi escolhido)` |
+| comprimentos diferentes (`frames`, `frame_durations`, `mugen_frames`) | **bloqueia o build** com as três contagens; nada é truncado |
+| `frame_durations` ausente, `mugen_frames` presente (legado) | interpretação inequívoca: a única fonte é `mugen_frames[].duration`; usada **só na geração**, o projeto não é reescrito. O Inspector preenche `frame_durations` apenas quando a pessoa edita um quadro |
+| só `frame_durations` (sem `mugen_frames`) | animação nativa (FPS), sem runtime MUGEN |
+
+Abrir o projeto nunca corrige nem sobrescreve; o Inspector mostra o conflito e não oferece edição até
+que os campos sejam reconciliados no projeto.
 
 ## Unidades de duração (auditoria, etapa 2 da UX v2)
 
@@ -100,8 +115,7 @@ não é FPS e não há valor uniforme por animação.
 | Runtime (`mugen_runtime.rs`) | `rds_mugen_<v>_timer` | um decremento por quadro do jogo; frame com timer `T` fica `T` quadros; `0` = parado. O quadro do jogo é 1/60 s no NTSC (1/50 s no PAL) |
 | Inspector | campo «Quadro N (ticks)» | mesma faixa: `-1` ou inteiro `1..=255`; `0`, `< -1`, `> 255`, vazio e não inteiro são recusados com diagnóstico, sem alterar o último valor válido. Não há ação que uniformize as durações |
 
-Perda residual conhecida: o gerador não confere `frame_durations[i] == mugen_frames[i].duration` (só o primeiro
-é usado); projetos editados à mão podem divergir sem aviso.
+A coerência entre `frame_durations` e `mugen_frames[].duration` é conferida na geração (seção seguinte).
 
 ## Esquema de diagnóstico (`rex-mugen/diag/v1`)
 

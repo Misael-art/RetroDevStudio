@@ -14,6 +14,8 @@ import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
 import {
   describeTicks,
+  durationConflicts,
+  effectiveDurations,
   isMugenAnimation,
   parseTicks,
   withFrameDuration,
@@ -1377,8 +1379,17 @@ export default function InspectorPanel() {
                   .map(([name, def]) => (
                     <div key={name} data-testid={`inspector-mugen-anim-${name}`}>
                       <div className="mb-1 font-mono text-[#89b4fa]">{name}</div>
+                      {durationConflicts(def).length > 0 ? (
+                        <div
+                          data-testid={`inspector-mugen-anim-${name}-conflict`}
+                          className="rounded border border-[#f38ba8]/60 bg-[#f38ba8]/10 p-1.5 text-[#f38ba8]"
+                        >
+                          Tempos inconsistentes no projeto; o build sera bloqueado ate corrigir. Nenhum valor foi
+                          escolhido nem alterado: {durationConflicts(def).join("; ")}.
+                        </div>
+                      ) : null}
                       <div className="flex flex-wrap items-start gap-2">
-                        {(def.frame_durations ?? []).map((ticks, index) => {
+                        {(durationConflicts(def).length > 0 ? [] : effectiveDurations(def)).map((ticks, index) => {
                           const key = `${name}:${index}`;
                           const error = mugenTickErrors[key];
                           return (

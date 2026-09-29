@@ -900,18 +900,47 @@ fn mugen_anim_table(
 ) -> Option<Result<MugenAnimTable, String>> {
     let mugen_frames = animation.mugen_frames.as_ref()?;
     let build = || -> Result<MugenAnimTable, String> {
-        let durations = animation
-            .frame_durations
-            .as_ref()
-            .ok_or("animacao MUGEN sem frame_durations")?;
         let n = animation.frames.len();
-        if durations.len() != n || mugen_frames.len() != n {
-            return Err(format!(
-                "frames ({n}), frame_durations ({}) e mugen_frames ({}) com tamanhos diferentes",
-                durations.len(),
-                mugen_frames.len()
-            ));
-        }
+        // Fonte canonica do tempo: `frame_durations` (ticks de 1/60 s). `mugen_frames[].duration`
+        // espelha o mesmo dado. Politica (crates/rex-mugen/CONTRACT.md, «Coerencia»):
+        // * os dois presentes: comprimentos e valores tem de coincidir; qualquer divergencia
+        //   bloqueia o build (o chamador acrescenta o nome da animacao), com quadro e valores; nenhum e escolhido e o
+        //   projeto nunca e reescrito;
+        // * `frame_durations` ausente (legado): unica fonte e `mugen_frames[].duration`
+        //   (interpretacao inequivoca), usada so na geracao, sem gravar no projeto.
+        let durations: Vec<i32> = match animation.frame_durations.as_ref() {
+            Some(durations) => {
+                if durations.len() != n || mugen_frames.len() != n {
+                    return Err(format!(
+                        "frames ({n}), frame_durations ({}) e mugen_frames ({}) com tamanhos diferentes",
+                        durations.len(),
+                        mugen_frames.len()
+                    ));
+                }
+                if let Some((i, (a, b))) = durations
+                    .iter()
+                    .zip(mugen_frames.iter().map(|f| f.duration))
+                    .enumerate()
+                    .find(|(_, (a, b))| **a != *b)
+                {
+                    return Err(format!(
+                        "quadro {}: frame_durations = {a} mas mugen_frames[{i}].duration = {b}; corrija um dos dois no projeto (nenhum foi escolhido)",
+                        i + 1
+                    ));
+                }
+                durations.clone()
+            }
+            None => {
+                if mugen_frames.len() != n {
+                    return Err(format!(
+                        "frames ({n}) e mugen_frames ({}) com tamanhos diferentes",
+                        mugen_frames.len()
+                    ));
+                }
+                mugen_frames.iter().map(|f| f.duration).collect()
+            }
+        };
+        let durations = &durations;
         if n == 0 || n > 255 {
             return Err(format!("{n} frames (1..=255)"));
         }
@@ -3256,6 +3285,91 @@ mod tests {
             .join(name)
     }
 
+    fn mugen_test_sprite(
+        frame_durations: Option<Vec<i32>>,
+        mugen_durations: &[i32],
+        frames: usize,
+    ) -> (SpriteComponent, AnimationDef) {
+        let animation = AnimationDef {
+            frames: (0..frames as u32).collect(),
+            fps: 4,
+            looping: true,
+            frame_durations,
+            loop_start: Some(0),
+            mugen_frames: Some(
+                mugen_durations
+                    .iter()
+                    .map(|d| crate::ugdm::components::MugenAnimationFrame {
+                        group: 0,
+                        image: 0,
+                        axis: None,
+                        duration: *d,
+                        flags: Vec::new(),
+                        clsn1: Vec::new(),
+                        clsn2: Vec::new(),
+                    })
+                    .collect(),
+            ),
+            onion_skin: None,
+            hitboxes: Vec::new(),
+        };
+        let sprite = SpriteComponent {
+            asset: "assets/sprites/x.png".to_string(),
+            frame_width: 16,
+            frame_height: 16,
+            pivot: Some(crate::ugdm::components::Pivot { x: 8, y: 16 }),
+            palette_slot: 0,
+            animations: std::collections::BTreeMap::new(),
+            priority: "low".to_string(),
+            meta_sprite: false,
+            commands: Vec::new(),
+        };
+        (sprite, animation)
+    }
+
+    #[test]
+    fn mugen_durations_consistent_fields_generate_the_expected_timers() {
+        let (sprite, anim) = mugen_test_sprite(Some(vec![20, 9, -1]), &[20, 9, -1], 3);
+        let table = mugen_anim_table(&sprite, &anim).unwrap().unwrap();
+        assert_eq!(table.timers, vec![20, 9, 0]);
+    }
+
+    #[test]
+    fn mugen_durations_divergence_blocks_with_frame_and_both_values() {
+        let (sprite, anim) = mugen_test_sprite(Some(vec![20, 9]), &[5, 9], 2);
+        let err = mugen_anim_table(&sprite, &anim).unwrap().unwrap_err();
+        assert!(err.contains("quadro 1"), "{err}");
+        assert!(err.contains("frame_durations = 20"), "{err}");
+        assert!(err.contains("mugen_frames[0].duration = 5"), "{err}");
+        assert!(err.contains("nenhum foi escolhido"), "{err}");
+    }
+
+    #[test]
+    fn mugen_durations_length_mismatch_is_reported_not_truncated() {
+        let (sprite, anim) = mugen_test_sprite(Some(vec![5, 9, 4]), &[5, 9], 2);
+        let err = mugen_anim_table(&sprite, &anim).unwrap().unwrap_err();
+        assert!(err.contains("tamanhos diferentes"), "{err}");
+        let (sprite, anim) = mugen_test_sprite(None, &[5], 2);
+        let err = mugen_anim_table(&sprite, &anim).unwrap().unwrap_err();
+        assert!(err.contains("tamanhos diferentes"), "{err}");
+    }
+
+    #[test]
+    fn mugen_legacy_without_frame_durations_uses_mugen_frames_without_touching_the_project() {
+        let (sprite, anim) = mugen_test_sprite(None, &[5, 9], 2);
+        let before = anim.clone();
+        let table = mugen_anim_table(&sprite, &anim).unwrap().unwrap();
+        assert_eq!(table.timers, vec![5, 9]);
+        assert_eq!(anim, before, "a geracao nao reescreve o projeto");
+    }
+
+    #[test]
+    fn mugen_durations_unrepresentable_value_still_blocks() {
+        let (sprite, anim) = mugen_test_sprite(Some(vec![0, 9]), &[0, 9], 2);
+        assert!(mugen_anim_table(&sprite, &anim).unwrap().is_err());
+    }
+
+    #[test]
     #[test]
     fn generate_ast_uses_default_animation_timing_from_sprite_component() {
         let mut animations = std::collections::BTreeMap::new();

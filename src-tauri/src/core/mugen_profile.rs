@@ -1748,7 +1748,8 @@ mod tests {
     fn negative_invalid_model_edit_blocks_the_build() {
         let (root, project) = import_probe("neg-build");
         let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
-        scene
+        // Como o Inspector: os dois campos coerentes, valor nao representavel.
+        let punch = scene
             .entities
             .iter_mut()
             .find(|e| e.entity_id == "probe")
@@ -1759,10 +1760,9 @@ mod tests {
             .unwrap()
             .animations
             .get_mut("action_200")
-            .unwrap()
-            .frame_durations
-            .as_mut()
-            .unwrap()[0] = 0;
+            .unwrap();
+        punch.frame_durations.as_mut().unwrap()[0] = 0;
+        punch.mugen_frames.as_mut().unwrap()[0].duration = 0;
         save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
         let proj = crate::core::project_mgr::load_project(&project).unwrap();
         let scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
@@ -1771,6 +1771,50 @@ mod tests {
         assert!(
             c.contains("#error \"RetroDev MUGEN") && c.contains("duracao 0"),
             "build deve ser bloqueado"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Divergencia entre `frame_durations` e `mugen_frames[].duration` nao chega a ROM:
+    /// bloqueia o build nomeando animacao, quadro e os dois valores; o projeto no disco
+    /// nao e reescrito.
+    #[test]
+    fn negative_divergent_duration_fields_block_the_build_and_leave_the_project_alone() {
+        let (root, project) = import_probe("neg-diverge");
+        let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        {
+            let punch = scene
+                .entities
+                .iter_mut()
+                .find(|e| e.entity_id == "probe")
+                .unwrap()
+                .components
+                .sprite
+                .as_mut()
+                .unwrap()
+                .animations
+                .get_mut("action_200")
+                .unwrap();
+            punch.frame_durations.as_mut().unwrap()[1] = 12; // so um dos campos
+        }
+        save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+        let on_disk = fs::read(project.join("scenes/main.json")).unwrap();
+        let proj = crate::core::project_mgr::load_project(&project).unwrap();
+        let scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        let ast = crate::compiler::ast_generator::generate_ast(&proj, &scene);
+        let c = crate::compiler::sgdk_emitter::emit_sgdk(&ast, "Probe").main_c;
+        assert!(
+            c.contains("#error \"RetroDev MUGEN")
+                && c.contains("action_200")
+                && c.contains("quadro 2")
+                && c.contains("frame_durations = 12")
+                && c.contains("mugen_frames[1].duration = 6"),
+            "divergencia deve bloquear identificando animacao, quadro e valores"
+        );
+        assert_eq!(
+            fs::read(project.join("scenes/main.json")).unwrap(),
+            on_disk,
+            "gerar nao reescreve o projeto"
         );
         let _ = fs::remove_dir_all(root);
     }

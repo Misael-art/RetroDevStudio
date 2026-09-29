@@ -9,13 +9,37 @@ export const MUGEN_MAX_TICKS = 255;
 
 export type TicksParse = { ok: true; value: number } | { ok: false; message: string };
 
+/** Animacao importada de MUGEN = tem `mugen_frames` (o gerador usa a tabela MUGEN so nesse caso). */
 export function isMugenAnimation(def: AnimationDef): boolean {
-  return (
-    Array.isArray(def.mugen_frames) &&
-    Array.isArray(def.frame_durations) &&
-    def.frame_durations.length === def.frames.length &&
-    def.mugen_frames.length === def.frames.length
-  );
+  return Array.isArray(def.mugen_frames);
+}
+
+/**
+ * Duracoes efetivas, como o backend as le: `frame_durations` e a fonte; sem ele (projeto legado)
+ * a unica fonte e `mugen_frames[].duration`. Nada e gravado por esta leitura.
+ */
+export function effectiveDurations(def: AnimationDef): number[] {
+  return def.frame_durations ?? (def.mugen_frames ?? []).map((f) => f.duration);
+}
+
+/** Mesma regra do gerador: comprimentos e valores dos dois campos tem de coincidir. */
+export function durationConflicts(def: AnimationDef): string[] {
+  const frames = def.frames.length;
+  const mugen = def.mugen_frames ?? [];
+  const durations = effectiveDurations(def);
+  if (durations.length !== frames || mugen.length !== frames) {
+    return [
+      `quantidades diferentes: ${frames} quadros, ${def.frame_durations ? `${def.frame_durations.length} em frame_durations, ` : ""}${mugen.length} em mugen_frames`,
+    ];
+  }
+  if (!def.frame_durations) return [];
+  const out: string[] = [];
+  durations.forEach((value, index) => {
+    if (value !== mugen[index].duration) {
+      out.push(`quadro ${index + 1}: frame_durations = ${value}, mugen_frames.duration = ${mugen[index].duration}`);
+    }
+  });
+  return out;
 }
 
 /** Valida o texto digitado; nada e arredondado nem cortado em silencio. */
@@ -48,7 +72,7 @@ export function parseTicks(raw: string): TicksParse {
 export function withFrameDuration(def: AnimationDef, index: number, ticks: number): AnimationDef {
   return {
     ...def,
-    frame_durations: (def.frame_durations ?? []).map((d, i) => (i === index ? ticks : d)),
+    frame_durations: effectiveDurations(def).map((d, i) => (i === index ? ticks : d)),
     mugen_frames: (def.mugen_frames ?? []).map((f, i) => (i === index ? { ...f, duration: ticks } : f)),
   };
 }

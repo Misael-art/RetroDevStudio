@@ -748,4 +748,30 @@ describe("InspectorPanel", () => {
     });
     expect(input(0).value).toBe("20");
   });
+
+  it("shows a conflict instead of editable ticks when MUGEN duration fields diverge", async () => {
+    const hero = spriteFixtureEntity({
+      animations: {
+        action_0: {
+          frames: [0, 1],
+          fps: 4,
+          loop: true,
+          frame_durations: [20, 9],
+          mugen_frames: [
+            { group: 0, image: 0, duration: 5 },
+            { group: 0, image: 1, duration: 9 },
+          ],
+        },
+      },
+    });
+    await act(async () => {
+      useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, entities: [hero] }, selectedEntityId: "hero_sprite" });
+      await flush();
+    });
+    const conflict = container.querySelector('[data-testid="inspector-mugen-anim-action_0-conflict"]');
+    expect(conflict?.textContent).toContain("quadro 1: frame_durations = 20, mugen_frames.duration = 5");
+    expect(conflict?.textContent).toContain("Nenhum valor foi escolhido");
+    expect(container.querySelector('[data-testid="inspector-mugen-anim-action_0-frame-0"]')).toBeNull();
+    expect(useEditorStore.getState().activeScene?.entities[0]?.components.sprite?.animations?.action_0?.frame_durations).toEqual([20, 9]);
+  });
 });

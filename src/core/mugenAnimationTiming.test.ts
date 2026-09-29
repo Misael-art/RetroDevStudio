@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AnimationDef } from "./ipc/sceneService";
-import { describeTicks, isMugenAnimation, parseTicks, withFrameDuration } from "./mugenAnimationTiming";
+import {
+  describeTicks,
+  durationConflicts,
+  effectiveDurations,
+  isMugenAnimation,
+  parseTicks,
+  withFrameDuration,
+} from "./mugenAnimationTiming";
 
 const mugen: AnimationDef = {
   frames: [0, 1],
@@ -37,7 +44,22 @@ describe("mugenAnimationTiming", () => {
   it("tells MUGEN animations from native ones", () => {
     expect(isMugenAnimation(mugen)).toBe(true);
     expect(isMugenAnimation({ frames: [0, 1], fps: 8, loop: true })).toBe(false);
-    expect(isMugenAnimation({ ...mugen, frame_durations: [5] })).toBe(false);
+  });
+
+  it("reports divergences with frame and both values, never picking one", () => {
+    expect(durationConflicts(mugen)).toEqual([]);
+    const diverged = { ...mugen, frame_durations: [20, 9] };
+    expect(durationConflicts(diverged)).toEqual(["quadro 1: frame_durations = 20, mugen_frames.duration = 5"]);
+    expect(durationConflicts({ ...mugen, frame_durations: [5] })[0]).toContain("quantidades diferentes");
+    expect(diverged.frame_durations).toEqual([20, 9]);
+  });
+
+  it("reads legacy animations without frame_durations from mugen_frames and only fills it on edit", () => {
+    const legacy: AnimationDef = { ...mugen, frame_durations: undefined };
+    expect(durationConflicts(legacy)).toEqual([]);
+    expect(effectiveDurations(legacy)).toEqual([5, 9]);
+    expect(legacy.frame_durations).toBeUndefined();
+    expect(withFrameDuration(legacy, 1, 12).frame_durations).toEqual([5, 12]);
   });
 
   it("states the unit when describing a duration", () => {
