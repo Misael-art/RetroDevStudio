@@ -683,4 +683,69 @@ describe("InspectorPanel", () => {
     expect(imported).toBeInstanceOf(HTMLDetailsElement);
     expect((imported as HTMLDetailsElement).open).toBe(false);
   });
+
+  it("edits MUGEN frame timing in ticks per frame, keeps the others and refuses invalid input", async () => {
+    const hero = spriteFixtureEntity({
+      animations: {
+        action_0: {
+          frames: [0, 1],
+          fps: 4,
+          loop: true,
+          frame_durations: [5, 9],
+          loop_start: 0,
+          mugen_frames: [
+            { group: 0, image: 0, duration: 5 },
+            { group: 0, image: 1, duration: 9 },
+          ],
+        },
+        walk: { frames: [0, 1], fps: 8, loop: true },
+      },
+    });
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: { ...EMPTY_SCENE, entities: [hero] },
+        selectedEntityId: "hero_sprite",
+      });
+      await flush();
+    });
+
+    expect(container.querySelector('[data-testid="inspector-mugen-timing-help"]')?.textContent).toContain("1/60 s");
+    // Animacao nativa segue com FPS; a MUGEN nao expoe FPS.
+    expect(container.querySelector('[data-testid="inspector-anim-walk-fps"]')).toBeInstanceOf(HTMLInputElement);
+    expect(container.querySelector('[data-testid="inspector-anim-action_0-fps"]')).toBeNull();
+
+    const input = (index: number) =>
+      container.querySelector(`[data-testid="inspector-mugen-anim-action_0-frame-${index}"]`) as HTMLInputElement;
+    expect(input(0).value).toBe("5");
+    expect(input(1).value).toBe("9");
+
+    const type = async (el: HTMLInputElement, value: string) => {
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        setter.call(el, value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        await flush();
+      });
+    };
+    const current = () =>
+      useEditorStore.getState().activeScene?.entities[0]?.components.sprite?.animations?.action_0;
+
+    await type(input(0), "20");
+    expect(current()?.frame_durations).toEqual([20, 9]);
+    expect(current()?.mugen_frames?.map((f) => f.duration)).toEqual([20, 9]);
+
+    await type(input(0), "0");
+    expect(current()?.frame_durations).toEqual([20, 9]);
+    expect(container.querySelector('[data-testid="inspector-mugen-anim-action_0-frame-0-error"]')?.textContent).toContain(
+      "Mantido: 20"
+    );
+    await type(input(1), "300");
+    expect(current()?.frame_durations).toEqual([20, 9]);
+
+    await act(async () => {
+      input(0).dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      await flush();
+    });
+    expect(input(0).value).toBe("20");
+  });
 });

@@ -4471,6 +4471,67 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
     return seen;
   };
 
+  // Permanencia de cada frame do idle (action_0), medida no core EM QUADROS EMULADOS (1 quadro = 1 tick
+  // de 1/60 s do jogo), nao em milissegundos de parede: o build de debug roda o core mais devagar que o
+  // tempo real (a 1a tentativa em ms deu a razao certa, 0,548 ~ 5/9, mas ~7x mais lento). Cada
+  // putImageData do viewport corresponde a exatamente um quadro emulado; classificamos o pixel de cada um.
+  // Expectativas FIXADAS antes da execucao (fixture probe.air, action 0: elemento 1 = 5 ticks, elemento 2 = 9):
+  //   original: idle0 = 5 quadros, idle1 = 9 quadros
+  //   editado (elemento 1 -> 20 ticks): idle0 = 20 quadros, idle1 = 9 quadros (nao editado)
+  const measureDwell = async (x, y, label) => {
+    await js(
+      `
+      const [x, y] = arguments;
+      const proto = CanvasRenderingContext2D.prototype;
+      if (!window.__mugenOrigPut) window.__mugenOrigPut = proto.putImageData;
+      const orig = window.__mugenOrigPut;
+      const rec = { c: [], done: false };
+      window.__mugenDwell = rec;
+      const hi = (v) => v > 160, lo = (v) => v < 90;
+      proto.putImageData = function (img, ...rest) {
+        const r = orig.call(this, img, ...rest);
+        if (this.canvas?.getAttribute("data-testid") === "viewport-game-canvas" && !rec.done) {
+          const sx = img.width / 320, sy = img.height / 224;
+          const at = (ax, ay) => { const o = (Math.floor((ay + 0.5) * sy) * img.width + Math.floor((ax + 0.5) * sx)) * 4; return [img.data[o], img.data[o + 1], img.data[o + 2]]; };
+          const b = at(x + 4, y + 14), f = at(x + 14, y + 22);
+          let cls = "other";
+          if (hi(b[0]) && lo(b[1]) && lo(b[2])) {
+            if (lo(f[0]) && hi(f[1]) && lo(f[2])) cls = "idle0";
+            else if (lo(f[0]) && lo(f[1]) && hi(f[2])) cls = "idle1";
+          }
+          rec.c.push(cls);
+          if (rec.c.length >= 320) { rec.done = true; proto.putImageData = orig; }
+        }
+        return r;
+      };
+      return true;
+    `,
+      [x, y]
+    );
+    const rec = await waitFor(
+      async () => js("return window.__mugenDwell?.done ? window.__mugenDwell : false;"),
+      180000,
+      "Gravacao de quadros do idle nao terminou.",
+      500
+    );
+    // Trechos interiores (o primeiro e o ultimo podem estar cortados): comprimento em quadros.
+    const runs = [];
+    let start = 0;
+    for (let i = 1; i <= rec.c.length; i += 1) {
+      if (i === rec.c.length || rec.c[i] !== rec.c[start]) {
+        runs.push([rec.c[start], i - start, start === 0, i === rec.c.length]);
+        start = i;
+      }
+    }
+    const interior = runs.filter(([, , first, last]) => !first && !last);
+    const lens = (cls) => interior.filter(([c]) => c === cls).map(([, n]) => n);
+    const result = { label, frames: rec.c.length, idle0Ticks: lens("idle0"), idle1Ticks: lens("idle1"), otherRuns: lens("other").length };
+    report.runs.push({ ...result, kind: "dwell" });
+    return result;
+  };
+  const allIn = (values, expected) => values.length >= 4 && values.every((v) => Math.abs(v - expected) <= 1);
+
+
   // 1. Wizard visivel -> importador externo -> perfil MUGEN -> Importar.
   await setSessionWindowRect(sessionId, 1920, 1080);
   await waitForOnboardingWizard(sessionId);
@@ -4567,8 +4628,12 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   const romSha1 = createHash("sha256").update(await readFile(run1.rom_path)).digest("hex");
   const idle1 = await observeIdle(x0, y0, "original");
   if (idle1.idle0 === 0 || idle1.idle1 === 0) fail(`Personagem nao apareceu com os 2 frames do idle em (${x0},${y0}): ${JSON.stringify(idle1)}`);
+  const dwell1 = await measureDwell(x0, y0, "original");
+  if (!allIn(dwell1.idle0Ticks, 5) || !allIn(dwell1.idle1Ticks, 9) || dwell1.otherRuns > 0) {
+    fail(`Tempos do idle original fora do esperado (5/9 ticks): ${JSON.stringify(dwell1)}`);
+  }
   await shot("03-core-original", "personagem convertido no core");
-  addReportStep(report, "build_run_original", "passed", { rom: run1.rom_path, rom_sha256: romSha1, x: x0, y: y0, idle: idle1 });
+  addReportStep(report, "build_run_original", "passed", { rom: run1.rom_path, rom_sha256: romSha1, x: x0, y: y0, idle: idle1, dwell: dwell1 });
 
   // 4. Edicao no Inspector, salvar, reiniciar o app, reabrir.
   const x1 = x0 + 44;
@@ -4576,6 +4641,54 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   await clickByTestId(sessionId, "hierarchy-entity-probe");
   await waitFor(async () => (await state())?.selectedEntityId === "probe", 15000, "Entidade probe nao foi selecionada.", 200);
   await setInputByTestIdNative(sessionId, "inspector-transform-x", String(x1));
+
+  // 4a. Tempo por quadro pelo controle do Inspector: unidade explicita, valores atuais,
+  // entradas invalidas recusadas com diagnostico e sem alterar o ultimo valor valido.
+  const f0 = "inspector-mugen-anim-action_0-frame-0";
+  const f1 = "inspector-mugen-anim-action_0-frame-1";
+  const timingUi = await waitFor(
+    async () =>
+      js(`
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+      if (!q(arguments[0]) || !q(arguments[1])) return false;
+      return {
+        help: q("inspector-mugen-timing-help")?.textContent ?? "",
+        frame0: q(arguments[0]).value,
+        frame1: q(arguments[1]).value,
+        nativeFpsInputForMugen: Boolean(q("inspector-anim-action_0-fps")),
+        labels: Array.from(document.querySelectorAll('[data-testid="inspector-mugen-anim-action_0"] label span')).map((e) => e.textContent),
+      };
+    `, [f0, f1]),
+    15000,
+    "Inspector nao mostrou o tempo por quadro da animacao MUGEN.",
+    200
+  );
+  if (timingUi.frame0 !== "5" || timingUi.frame1 !== "9" || timingUi.nativeFpsInputForMugen || !timingUi.help.includes("1/60 s") || !timingUi.labels.some((l) => l.includes("Quadro 1 (ticks)"))) {
+    fail(`Inspector exibiu tempo/unidade errados: ${JSON.stringify(timingUi)}`);
+  }
+  await setInputByTestIdNative(sessionId, f0, "20");
+  await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value === "20";`, [f0]), 5000, "Campo nao aceitou 20.", 100);
+  const invalidResults = [];
+  for (const bad of ["0", "-2", "x"]) {
+    await setInputByTestIdNative(sessionId, f0, bad);
+    const err = await waitFor(
+      async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '-error"]')?.textContent ?? false;`, [f0]),
+      5000,
+      `Entrada invalida '${bad}' nao gerou diagnostico.`,
+      100
+    );
+    if (!err.includes("Mantido: 20")) fail(`Diagnostico de '${bad}' nao informa o valor mantido: ${err}`);
+    invalidResults.push({ input: bad, diagnostic: err });
+  }
+  // Sai do campo (foco em outro): o campo volta ao ultimo valor valido.
+  await js(`document.querySelector('[data-testid="' + arguments[0] + '"]').blur(); return true;`, [f0]);
+  const afterBlur = await waitFor(
+    async () => js(`const v = document.querySelector('[data-testid="' + arguments[0] + '"]')?.value; return v === "20" ? v : false;`, [f0]),
+    5000,
+    "Campo nao voltou ao ultimo valor valido apos entrada invalida.",
+    100
+  );
+  addReportStep(report, "inspector_edit_ticks", "passed", { ui: timingUi, edited: { frame: 1, from: 5, to: 20 }, invalidResults, valueAfterBlur: afterBlur });
   await clickTopBarMenuAction(sessionId, "Salvar");
   await waitFor(
     async () => {
@@ -4586,7 +4699,16 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
     "Edicao de x nao chegou ao disco.",
     300
   );
-  addReportStep(report, "edit_and_save", "passed", { from: x0, to: x1 });
+  const savedScene = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  const savedAnims = savedScene.entities.find((e) => (e.entity_id ?? e.id) === "probe").components.sprite.animations;
+  const expectedSaved = { action_0: [20, 9], action_200: [3, 6, 4, 2] };
+  for (const [name, expected] of Object.entries(expectedSaved)) {
+    const anim = savedAnims[name];
+    if (JSON.stringify(anim.frame_durations) !== JSON.stringify(expected) || JSON.stringify(anim.mugen_frames.map((f) => f.duration)) !== JSON.stringify(expected)) {
+      fail(`Disco: duracoes de ${name} divergem de ${JSON.stringify(expected)}: ${JSON.stringify(anim.frame_durations)} / ${JSON.stringify(anim.mugen_frames.map((f) => f.duration))}`);
+    }
+  }
+  addReportStep(report, "edit_and_save", "passed", { from: x0, to: x1, savedDurations: { action_0: savedAnims.action_0.frame_durations, action_200: savedAnims.action_200.frame_durations } });
   await deleteSession(sessionId);
   sessionId = await createSession(appPath);
   currentE2eRunContext.sessionId = sessionId;
@@ -4607,7 +4729,19 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   );
   if (Number(reopenedX) !== x1) fail(`x nao sobreviveu ao reinicio: ${reopenedX}`);
   await shot("04-reopened", "projeto reaberto com x editado");
-  addReportStep(report, "restart_reopen", "passed", { reopenedX: Number(reopenedX) });
+  const reopenedTicks = await waitFor(
+    async () =>
+      js(`
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+      if (!q(arguments[0]) || !q(arguments[1])) return false;
+      return [q(arguments[0]).value, q(arguments[1]).value];
+    `, ["inspector-mugen-anim-action_0-frame-0", "inspector-mugen-anim-action_0-frame-1"]),
+    15000,
+    "Inspector nao mostrou o tempo por quadro apos reabrir.",
+    200
+  );
+  if (reopenedTicks[0] !== "20" || reopenedTicks[1] !== "9") fail(`Duracoes nao sobreviveram ao reinicio: ${JSON.stringify(reopenedTicks)}`);
+  addReportStep(report, "restart_reopen", "passed", { reopenedX: Number(reopenedX), reopenedTicks });
 
   // 4b. Relatorio MUGEN reaberto pela UI numa sessao nova (sem estado da sessao que importou).
   const beforeReopen = await state();
@@ -4657,8 +4791,14 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   const oldSpot = await observeIdle(x0, y0, "posicao antiga apos edicao");
   if (idle2.idle0 === 0 || idle2.idle1 === 0) fail(`Personagem nao apareceu na posicao editada: ${JSON.stringify(idle2)}`);
   if (oldSpot.idle0 + oldSpot.idle1 > 0) fail(`Personagem ainda aparece na posicao antiga: ${JSON.stringify(oldSpot)}`);
+  const dwell2 = await measureDwell(x1, y0, "editado");
+  if (!allIn(dwell2.idle0Ticks, 20) || !allIn(dwell2.idle1Ticks, 9) || dwell2.otherRuns > 0) {
+    fail(`Tempos do idle editado fora do esperado (20/9 ticks): ${JSON.stringify(dwell2)}`);
+  }
+  // Discriminacao: o frame editado ficou bem mais longo; o nao editado manteve o tempo.
+  // (as faixas exatas acima ja separam 5 de 20 quadros; o frame nao editado segue em 9)
   await shot("05-core-edited", "personagem na posicao editada");
-  addReportStep(report, "build_run_edited", "passed", { rom: run2.rom_path, rom_sha256: romSha2, idle: idle2, oldSpot });
+  addReportStep(report, "build_run_edited", "passed", { rom: run2.rom_path, rom_sha256: romSha2, idle: idle2, oldSpot, dwell: dwell2 });
 
   // 6. Negativo: pacote com sprite fora da pasta.
   const baseDir = path.dirname(projectDir);
