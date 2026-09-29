@@ -27,8 +27,15 @@ limites de cobertura da própria célula e as provas herdadas valendo.
   limpeza de `/tmp` obrigou a refazer, 11:44Z–12:02Z para os gates da rolda de
   aceite, 12:18Z–12:20Z para a barra de frontend no HEAD final e 14:36Z–15:08Z
   para a entrega de B (encoder + fixtures), o adaptador Kosinski e a súa barra
-  de gates (cargo/clippy/fmt/check-tree + lint/tsc/npm test). Nada pesado
-  queda executado; a única consulta CI aberta é a re-execución do job
+  de gates (cargo/clippy/fmt/check-tree + lint/tsc/npm test). Para a PR #85
+  (MUGEN -> SGDK) o integrador usou 2026-09-29T02:08Z–02:20Z na barra de gates
+  do destino e 02:36Z–02:50Z no E2E desktop `mugen-import` (unha primeira
+  lanza duplicada por un `&` mal posto competiu por `dist/` e foi descartada;
+  ver `data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/LEIAME-e2e-e-host.md`)
+  e 03:00Z–03:17Z na re-execución completa da barra sobre a árbore final curada
+  (dez gates + `node --check` + `host:certify`, todos rc=0; evidencia en
+  `data/rex_profiles/mugen_sgdk/evidence/2026-09-29-pos-curaduria/`).
+  Nada pesado queda executado; a única consulta CI aberta é a re-execución do job
   desktop-smoke en `ebfa8ea`, co resultado por SHA rexistrado no log de
   evidencia da fronte A.
 
@@ -251,6 +258,8 @@ não implica o seguinte. Uma biblioteca compilar e passar nos gates próprios n�
 |---|---|---|---|---|
 | `crates/rex-kosinski` (frente B) | verified (codec Kosinski base não-modular v1: decoder + encoder + contenedor de edición autoral + 52 fixtures vendorizadas; contrato `docs/rex_profiles/kosinski_runtime/CONTRACT.md` e `ENCODE-CONTRACT.md`; entregas `3fea06e`+`1af7017` e 8 commits `0b752b7..6a2218e`, pino `6a2218e` conferido por `git ls-remote` 2026-09-28T14:38:34Z, todas por `cherry-pick -x` con paridade byte-exata (diff = 0 bytes)) | **verified** — `npm run crates:gates` medido 2026-09-28T02:48Z (25 executados) e **re-medido 2026-09-28T14:36Z–14:37Z** depois da entrega do encoder: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **51 executados / 0 falhas / 0 ignorados** (22 contract + 8 edit + 16 encode + 2 fixtures + 3 mutations). O achado de relocabilidade (fixtures fóra do pacote) está **fechado** pola propia B: as 52 fixtures vendorizan-se dentro do paquete con SHA-256 pinada en `tests/fixtures.rs`. Log + manifesto con SHA en `data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/` e `.../2026-09-28-entrega-encoder-fixtures/` | **verified** — chamado polo backend real e medido 2026-09-28T14:45Z–15:08Z: `rex-kosinski = { path = "../crates/rex-kosinski" }` em `src-tauri/Cargo.toml` (sem workspace na raiz; `Cargo.lock` +5 linhas, unha entrada `[[package]]` **sem** `source` e zero crates externos novos), adaptador en `src-tauri/src/tools/reverse/decomp/rex_kosinski.rs` (mapeo 1:1 de `KosError`/`EncError` ao `CodecError { code, detail }` do contrato de codecs, `bytes_consumed` conforme contrato v1 §3, DTOs `snake_case` + base64 + SHA-256 laterais) e **dous comandos Tauri** `rex_kosinski_decode`/`rex_kosinski_encode` registrados en `generate_handler!` (HEAD do commit `3428b69`, SHA do adaptador `3b4115ab…`). **16 testes do adaptador, 0 falhas** (10 capa codec + 6 capa IPC) con esperas independentes rexistradas por B (abcdef consumed=11, sonda `0200ffff`, mínima de encode `020000F000`); suite completa `cargo test --lib` **770 / 0 / 66**, `clippy --lib -D warnings` rc=0, `fmt --check` rc=0, `check:tree`/`lint`/`tsc --noEmit`/`npm test` (749/6/755) rc=0. Non-vacuidade: dous RED observados (capa codec e capa IPC, E0432) e tres controles de mutación (mapeo `empty_input`, `bytes_consumed` da resposta IPC, mapeo `stream_limit`) matando 1/1/2 pruebas, restauración conferida por SHA. **Exposto só decodificar e codificar streams en memoria**; o contenedor `edit::build/open/reinsert` queda declarado como non exposto — proba de contrato, non transación canónica | **blocked** — nenhum chamador da interface usa `rex_kosinski_decode`/`rex_kosinski_encode`, non hai pantalla de codec, e ningún recurso real (BYOR) foi decodificado ou recodificado polo produto: as chamadas probadas usan streams autoriais, cero corpus BYOR no gate |
 | `crates/rex-addressing` (frente A) | verified (5 perfis MD linear/SSF2 e SNES LoROM/HiROM/ExHiROM; 17 commits `9b27941..57e51d3`, PR #82, `cherry-pick -x` sem conflitos; movido de `scripts/rex_profiles/addressing_runtime/` para `crates/rex-addressing` — promoção que o `CONTRATO.md` do próprio perfil registrava como pendente do integrador. A entrega mais recente de A também entrou: 7 commits `58a06dd..30cb311` (PR #83, etapas 2–5 — capa de leitura de recursos com procedência, bateria discriminante, exemplo consumidor e varredura *nunca panica*), por `cherry-pick -x` como `cde721c..8a28909`, com pino conferido por fetch pontual antes de integrar) | **verified** — primeira medição 2026-09-28T02:58Z já na localização nova (`fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **81 executados / 0 falhas / 9 ignorados**) e re-medida 2026-09-28T08:14Z depois dos cherry-picks das etapas 2–5: `fmt` OK, `clippy --all-targets -D warnings` OK, `test --locked` OK com **127 executados / 0 falhas / 9 ignorados**; e re-medida outra vez 2026-09-28T11:44Z depois da rolda de aceite de A (`30cb311..0e5f804`), cos tres gates OK e **138 executados / 0 falhas / 10 ignorados** en 17 targets — exactamente os números que A publicou na súa propia árbore, reproducidos neste tronco e xa con `examples/` dentro do paquete. Logs + manifestos em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/` e `.../2026-09-28-backend-integrado/`. Os ignorados são os BYOR (8), a preimage exaustiva (1) e — só na carreira de 11:44Z — o caso que rexenera o JSON de aceite baixo `REX_ACEITE_ESCRIBIR=1`, que non se executou en ningunha das tres: o gate ordinário não depende de ROM. Pacote **relocável** — os vectors pinados viven dentro del (`vectors/rust-vectors-v1.json` e `vectors/acceptance-v1.json`, SHA-256 `54ba2b6e…a216` pino dentro de `tests/acceptance.rs`). Achado devolvido à A (15 `.expect()` sem varredura adversária) está **fechado** pela própria etapa 5: `tests/no_panic_sweep.rs`, 277 610 chamadas determinísticas nos cinco perfis mais a capa de recursos | **verified** — chamado pelo backend real e medido: `rex-addressing = { path = "../crates/rex-addressing" }` em `src-tauri/Cargo.toml` (sem workspace na raiz; `Cargo.lock` +5 linhas, uma entrada `[[package]]` **sem** `source` e zero crates externos novos), adaptador em `src-tauri/src/tools/reverse/decomp/rex_addressing.rs` e comando Tauri `rex_addressing_read_snapshot` registrado em `generate_handler!` (SHA do adaptador `7bd75ea9…`). **17 testes do adaptador, 0 falhas**; suite completa `cargo test --lib`: **754 / 0 / 66 ignorados** (737 era a base sem o adaptador), `clippy --lib -D warnings` rc=0, `fmt --check` rc=0, `check:tree`/`lint`/`tsc --noEmit`/`npm test` todos rc=0. Não-vacuidade: RED observado (16 fallos antes da implementação) e três controles de mutação (garda de identidade, procedência do segmento, achatamento de erros) matando 1/2/8 testes, com restauração conferida por SHA. **Exposto apenas a leitura com snapshot fixo nos perfis MD**; `read_sequence`, as escritas e os perfis SNES ficam declarados como não expostos no registro. **A rolda de aceite de A (medida 2026-09-28T11:44Z–12:02Z) non move este degrau**: os seus 15 vectores gradúan `read_resource`/`read_sequence` contra un oráculo independente, superficies que o adaptador do produto non expón, polo que non son evidencia do adaptador. Si mudou a débeda da promoción: `examples/resource_report.rs` da etapa 4 quedara na ruta vella (o paquete graduado ás 08:14Z non tiña exemplo e `clippy --all-targets` nunca o lintaba) e catro ligazóns relativas do README do paquete apuntaban tres niveis por riba da raíz — reparado en `daefb43`, con paridade conferida ficheiro a ficheiro (42 ↔ 42, única diferenza de contido a miña nota de localización) e o exemplo executado rc=0 desde `crates/rex-addressing` (13 lecturas / 14 recusas / 7 códigos, resumo `27bebc7b…`). Log + manifesto por arquivo em `data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/` | **blocked** — nenhum chamador da interface usa `rex_addressing_read_snapshot` e não existe tela de endereçamento; as únicas imagens lidas são fixtures autoriais do próprio adaptador, sem corpus BYOR no gate |
+| `crates/rex-gameplay` (frente de recuperación de gameplay) | verified (perfil pechado `m68k.counter_threshold_state_gate.v1`: guarda de input + contador + limiar + escrita de estado + chamada externa opaca, con grafo NodeGraph v1 editable só no limiar; PR #84 `308fd44` + `a63e3a3` (PROPOSTA), o de paquete entrou por `cherry-pick -x` como `f35ed0d` e o integrador reescribiu `registry.json`/`Cargo.toml`/`Cargo.lock`/`mod.rs` polas convencións actuais. Zero dependencias externas; 3 fixtures hex vendorizadas con `PROVENANCE.md`) | **verified** — medido 2026-09-28T17:08Z no tronco do integrador: `fmt` OK (rc=0), `clippy --all-targets -D warnings` OK (rc=0), `test --locked` OK con **16 executados / 0 falhas / 0 ignorados** (6 lib + 10 profile); números medidos na localización nova, non os publicados pola fronte | **verified** — `rex-gameplay = { path = "../crates/rex-gameplay" }` en `src-tauri/Cargo.toml`, adaptador `src-tauri/src/tools/reverse/decomp/rex_gameplay.rs` (DTOs `snake_case` con `deny_unknown_fields`, erros `InspectionError { code, message, retryable }` con conxunto pechado de códigos, límites ROM 32 MiB / grafo 8 MiB / 64 saídas / 512 rótulos, identidade por `rom_sha256`) e catro comandos rexistrados en `generate_handler!` (`rex_gameplay_scan`/`_recover`/`_edit_threshold`/`_rebuild`), executados fóra do fio principal. Suite do backend **780 / 0 / 67**, `clippy --lib` rc=0, `fmt --check` rc=0. Non-vacuidade: M1..M5 mataron 2/1/1/1/2 probas con restauración conferida por SHA. **Exposta a inspección, recuperación, edición do limiar e reconstrución; JSR segue opaco** | **blocked** — a rolda pola interface (ETAPA 6: grafo visible + teclado real no E2E desktop) aínda non executou; o degrau non se promove por ordem expresa do operador ("sem merge, release ou promoción de maturidade"). Evidencia en `data/rex_profiles/gameplay_recovery/evidence/` |
+| `crates/rex-mugen` (frente MUGEN -> SGDK, PR #85) | verified (perfil `mugen.character.v1`: AIR, SFF v1 indexado, paleta na grade do VDP, proxección de animación para rescomp/SGDK, diagnóstico `rex-mugen/diag/v1` e informe `retrodev.mugen_import_report/v1` en 7 categorías; 22 commits `a08c2c6..bd02e3c` entraron como merge curado do integrador `b410de0` — o único conflito material eran 2 liñas de path-deps en `src-tauri/Cargo.toml`, e resolveuse conservando `rex-kosinski`, `rex-gameplay` e `rex-mugen`. Zero dependencias externas; as 3 mostras (Probe/Sentinel/Warden) **xéranse por código** en `src/fixture.rs` con `fixtures/.gitattributes` `* -text`) | **verified** — medido 2026-09-29T02:08Z–02:20Z sobre `b410de0`: `fmt` OK (rc=0), `clippy --all-targets -D warnings` OK (rc=0), `test --locked` OK con **12 executados / 0 falhas / 0 ignorados** (8 lib: 3 air + 2 palette + 2 sff + 1 sha256; 4 en `tests/fixture_probe.rs`); `npm run crates:gates` rc=0 cos 4 paquetes registrados. Suite do backend **796 / 0 / 70** (reconciliada: base 770/66 + PR 15/3 + integrador 11/1), frontend `npm test` **812 passed / 0 failed / 6 skipped**. Logs + `SHA256SUMS` en `data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/` | **verified** — `rex-mugen = { path = "../crates/rex-mugen" }`; adaptador `src-tauri/src/core/mugen_profile.rs` (1951 liñas, 18 `#[test]` con 3 `#[ignore]` para a proba real SGDK) con contención de caminhos `resolve_inside()` (absoluto, prefixo, `RootDir` e calquera `..` fóra do paquete recusan), `read_limited()` con 1 MiB de texto e 32 MiB de SFF, **validación integral antes de calquera escritura** (un só `save_rgba_image`), `discard_failed_import()` segundo a orixe reservada do cartafol, runtime xerado en `compiler/mugen_runtime.rs` (317 liñas) e ganchos en `project_mgr`/`ast_generator`/`sgdk_emitter`/`snes_emitter`/`build_orch`. `clippy --lib` e `clippy` por defecto rc=0, `cargo fmt --check` rc=0, `check:tree` rc=0 | **verified (con límites declarados)** — E2E desktop `mugen-import` verde 2026-09-29T02:46Z–02:47Z sobre o binario SHA-256 `1b46ff50…`: importación pola UI (wizard -> perfil `mugen` -> Importar), panel coas 7 categorías e resumo «12 funcionam igual, 0 con diferenca, 1 precisam de ajuste seu, 0 non convertidos», Build & Run real co personaxe no canvas 320x224 (mostra en (96,96): idle0=11, idle1=14), edición +44 no Inspector -> Salvar -> reinicio -> reapertura -> ROM distinta (`10658a6c` vs `5a6aff76`) co personaxe na posición nova e a vella baleira, e negativo `../fora.sff` recusado con mensaxe específica sen cartafol desta execución e sen mover o proxecto activo. **Non conta como fluxo completo**: SFF v2, som, stage e colisión lóxica seguen fóra, o comando por teclado e o golpe só teñen proba técnica/core, o informe non ten reapertura futura e o Inspector etiqueta «FPS» unha animación MUGEN. O degrau **non se promove** (ordem do operador). Condición do host e dous achados do harness en `.../e2e-e-host.md` |
 
 Regras desta matriz: o registro canônico é `crates/registry.json` (schema
 `rex-crate-registry/v1`), consumido por `npm run check:tree` e por
@@ -323,6 +332,110 @@ entrega `0b752b7..6a2218e` (encoder v1 + 52 fixtures vendorizadas) entrou por
 Kosinski nas súas transacións canónicas.
 
 ## Histórico da rodada
+
+- 2026-09-29 (integrador, **PR #85 MUGEN -> SGDK integrado no tronco — sen merge
+  no remoto e sen promoción de maturidade**), esta célula é o checkpoint.
+  **HEAD de partida:** `e319fb9` (tronco do integrador, xa con `rex-gameplay`
+  integrado). **Ordem recebida:** "Revisar e integrar o PR draft #85 MUGEN -> SGDK,
+  sem merge automatico… Reexecutar no destino… Validar especificamente: falha de
+  importação não deixa projeto fantasma; relatório de compatibilidade aparece na
+  UI; sucesso resume perdas; paths fora do pacote são recusados; projeto anterior
+  aberto não muda após falha; personagem aparece no core; edição no Inspector
+  persiste após salvar, reiniciar e reabrir… Entrega: PR integrado ou relatório de
+  bloqueios. Sem release, sem promoção de maturidade."
+  **Revisión das 5 superficies centrais (reservadas ao integrador):**
+  `src-tauri/src/lib.rs` (+91/-14: envolve a importación, chama
+  `discard_failed_import(project_dir, origin)` segundo a orixe reservada do
+  cartafol e fusiona `mugen_profile::summary_line()` no aviso de éxito, nas dúas
+  vías de importación externa), `src/App.tsx` (+74: estado `mugenCompatibility`,
+  panel, `__RDS_E2E__.setNextExternalImportPath`, `testid` de confirmación),
+  `src/core/diagnostics.ts` (+45/-2: `mugenImportCause()` con causa + acción para
+  os catro casos e peche «Nenhum projeto foi criado.»),
+  `scripts/e2e-tauri-build-run.mjs` (+291/-2: escenario `mugen-import`) e
+  `src-tauri/Cargo.toml`. **Conflito:** un só, de 2 liñas de path-deps; resolto
+  conservando `rex-kosinski`, `rex-gameplay` e `rex-mugen`, sen apagar avanço do
+  integrador (`git diff --diff-filter=U` = 0 e ningún marcador na árbore).
+  **Commits desta célula:** `b410de0` (merge curado, pais `e319fb9` + `bd02e3c`,
+  índice de 72 ficheiros / +7910 / -88) e o commit de curaduría que rexistra esta
+  célula, reescribe `crates/registry.json` e reforza o harness. **O PR mantense
+  draft no remoto: non se fixo merge nin push desta branch.**
+  **Barra no destino (todos rc=0):** `check:tree`, `lint`, `tsc --noEmit`,
+  `npm test` **812 passed / 0 failed / 6 skipped** (83 ficheiros passed | 1
+  skipped; +5 respecto da base: panel + diagnostics), `cargo fmt --check`,
+  `cargo clippy --lib -- -D warnings`, `cargo clippy -- -D warnings`, `cargo test
+  --lib` **796 executados / 0 fallos / 70 ignorados** e `npm run crates:gates` cos
+  4 paquetes. **Reexecución sobre a árbore final curada (2026-09-29T03:00Z–03:17Z
+  UTC, despois de reescribir o rexistro e de reforzar o harness):** todos os
+  gates volven dar rc=0 coas mesmas contaxes (812/0/6 e 796/0/70), `node --check`
+  do harness rc=0, e `npm run host:certify` rc=0 co host **READY** (fingerprint
+  `60249508…`, lock `dd99a22f…`) e o smoke oficial SGDK/PVSnesLib `Success: true`
+  (`src-tauri/target-test/validation/upstream-validation-linux.json`). O E2E **non**
+  se volveu executar: entre run7 e esta reexecución só mudaron
+  `crates/registry.json`, `docs/rex_profiles/ROUND_STATE.md`,
+  `docs/06_AI_MEMORY_BANK.md` e a aserción do harness que run7 xa levaba aplicada;
+  ningún byte de produto, de fixture ou do escenario cambiou. Evidencia desa reexecución:
+  `data/rex_profiles/mugen_sgdk/evidence/2026-09-29-pos-curaduria/`. **Reconciliación independente da contaxe:** base `a08c2c6` 770/66 +
+  PR 15 executados/3 ignorados (os 18 `#[test]` de `mugen_profile.rs`, 3 deles
+  `#[ignore]` para a proba real SGDK) + integrador 11/1 (`project_mgr.rs` +1,
+  `rex_gameplay.rs` +11/+1) = 796/70; os 781/0/69 que anunciou a fronte son unha
+  medición anterior á súa propia entrega (o seu `REPORT.md` xa di 785/0/69).
+  **Débeda anterior, non atribuíble ao PR:** `cargo clippy --all-targets` no
+  backend reproba con 46 avisos en código `#[cfg(test)]` de `rex_context` (18),
+  `rex_aplib` (8), `rex_resources` (5), `project_mgr` (5), `rex_codecs` (4) e 1
+  cada un en `logic_recovery`, `holdout`, `graphics_discovery`, `lib.rs:165` e
+  `build_orch:5227`; cruzadas as 45 localizacións únicas co conxunto de liñas
+  engadidas polo PR, **0** caen nelas. Rexístrase e non se corrige nesta rolda
+  (atribúese, non se arrecula o avance alleo).
+  **E2E desktop `mugen-import` (run7, verde 2026-09-29T02:46Z–02:47Z, binario
+  SHA-256 `1b46ff50…`):** as 7 validacións pedidas quedan provadas — (1) a falla
+  non deixa projeto fantasma (`failed_import_does_not_leave_a_project_that_looks_valid`,
+  `failed_import_into_existing_empty_dir_keeps_the_dir_empty` e, no E2E, a
+  comprobación explícita de que `Mugen_Escape_1790650044699` non existe no disco);
+  (2) o relatório aparece na UI (tests do panel + asercións DOM no E2E coas 7
+  categorías `{sprites/animations/commands/states: direct, collisions: manual,
+  sound/stage: absent}` e texto cru de 15 527 caracteres); (3) o éxito resume
+  perdas (`successful_import_summarizes_losses_by_category`,
+  `sentinel_summary_exposes_every_loss_class` e o console
+  `[MUGEN] probe (Experimental): 12 funcionam igual, …`); (4) os caminhos fora do
+  paquete recusanse (`negative_path_escaping_the_package_is_refused`,
+  `negative_logic_file_outside_the_package_is_refused`,
+  `negative_oversized_air_is_refused`, `negative_cell_over_budget_is_refused` +
+  o negativo do E2E); (5) o projeto aberto anterior non muda (`activeProjectDir`
+  invariado — **só probado no E2E**, non hai test Rust para isto); (6) o
+  personaxe aparece no core (Build & Run real, mostra no canvas 320x224 en
+  (96,96): idle0=11, idle1=14; a proba `mugen_probe_real_build_run_edit_and_effect`
+  segue `#[ignore]`); (7) a edición persiste tras salvar/reiniciar/reabrir (+44 no
+  Inspector, x=140 tras a reapertura, ROM `10658a6c` vs `5a6aff76`, personaxe na
+  posición nova e vella baleira — **só probado no E2E**).
+  **Dous achados do propio harness (superficie do integrador):** a aserción do
+  projeto fantasma comparaba só o *conteo* de cartafoles `Mugen_Escape_*` e non era
+  discriminante se xa existía un de outra execución — agora exixe ademais que o
+  `escapeName` desta execución non estea no disco; e tras o reinicio do E2E queda
+  unha instancia de `retro-dev-studio` viva (pasou en run4 e run7), rexistrada como
+  límite sen corrixir nesta rolda. O cartafol `Mugen_Escape_1790639205721` que
+  aínda existe en `~/Documents/RetroDevProjects` **non é un fantasma MUGEN**: o seu
+  `project.rds` di `template_id = "starter_guided"`, `source_kind = "builtin"`,
+  `imported_at_ms = 1790640543662`, é dicir, creouno o onboarding da rolda da
+  fronte a partir dun nome de wizard pendurado. Non se borrou.
+  **Condición do host:** o output primario pasou a ser un panel rotado
+  `1280x800+0+0` e o compositor recorta alí as xanelas, así que o redimensionado a
+  1920x1080 CSS era imposible (`inner=948x564`, factor físico/CSS 1,35). Un vixía
+  temporal fóra do repo colocou **só a xanela da app de proba** no monitor externo
+  (`3456x1458+1281+0`, físico 2592x1458 = 1920x1080 CSS) para reproducir o mesmo
+  viewport da proba da fronte; non se mudou a configuración de pantallas do
+  operador nin se alterou o harness para aceptar outra xeometría.
+  **Limites rexistrados (o que non se alega):** SFF v2, som, stage e colisión
+  lóxica seguen fóra; o comando por teclado e o golpe son proba técnica/core, non
+  de UI; o relatório non ten reapertura futura; o Inspector usa a etiqueta «FPS»
+  para unha animación MUGEN; non se copia o runtime C `mg_*` (base HAMOOPIG de
+  terceiros, licenza non verificada — `docs/rex_profiles/mugen_sgdk/AUDIT.md`) e
+  non se asume licenza estra; **a promoción de degrau e a decisión de licenza e
+  fluxo de usuario quedan en mans do operador**.
+  **Evidencia:** `data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/`
+  (logs por paso, informe do E2E, 6 capturas, `LEIAME-e2e-e-host.md` cos descartes
+  e `SHA256SUMS` de 26 ficheiros) e `data/rex_profiles/mugen_sgdk/evidence/2026-09-29-pos-curaduria/`
+  (reexecución da barra, `LEIAME.md` con rc/comando/log/medida por gate e
+  `SHA256SUMS` de 11 ficheiros).
 
 - 2026-09-28 (integrador, **perna B2 — `crates/rex-kosinski` sobe a `backend
   integrado`, e só a ese degrau**), esta célula é o checkpoint. **HEAD de

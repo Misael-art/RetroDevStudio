@@ -1,0 +1,2 @@
+npm notice run retrodev-studio@0.1.0 lint
+npm notice run eslint src vite.config.ts --max-warnings=0

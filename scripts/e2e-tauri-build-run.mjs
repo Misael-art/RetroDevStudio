@@ -4646,10 +4646,14 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   }
   const after = (await readdir(baseDir)).filter((n) => n.startsWith("Mugen_Escape_"));
   if (after.length !== before.length) fail(`Importacao recusada deixou pasta de projeto: ${JSON.stringify(after)}`);
+  // A comparacion de conteos non discrimina cando xa existe un Mugen_Escape_* douta
+  // execucion: exige explicitamente que O NOME desta proba non chegou ao disco.
+  if (after.includes(escapeName)) fail(`Importacao recusada deixou o projeto desta execucion: ${escapeName}`);
   const afterState = await state();
   if (afterState?.activeProjectDir !== projectDir) fail(`Projeto ativo mudou apos importacao recusada: ${afterState?.activeProjectDir}`);
   await shot("06-negative", "importacao recusada sem projeto parcial");
   addReportStep(report, "negative_path_escape", "passed", {
+    escapeName,
     userMessage,
     suggestedAction: failure.diagnostic?.suggested_action ?? null,
     technicalDetail: failure.diagnostic?.technical_detail ?? null,

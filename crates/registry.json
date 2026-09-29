@@ -135,12 +135,50 @@
     {
       "nome": "rex-mugen",
       "manifesto": "crates/rex-mugen/Cargo.toml",
-      "descricao": "Perfil mugen.character.v1 (Experimental): AIR, SFF v1 indexado, paleta na grade VDP, plano de conversao para SGDK com diagnostico e proveniencia. Sem dependencias.",
-      "maturidade": "biblioteca-implementada",
-      "maturidade_data": "2026-09-28",
-      "propriedade": "frente MUGEN->SGDK (branch codex/rex-mugen-sgdk); registro e manifests sao do integrador — entrada PROPOSTA, sujeita a curadoria",
-      "nao_alega": "nao e conversao integral de MUGEN; so personagem v1 (SFF v1, AIR, subset CMD/CNS do importador do produto); sem SFF v2, blend, expressoes gerais ou runtime de luta",
-      "evidencia": "docs/rex_profiles/mugen_sgdk/"
+      "descricao": "Perfil mugen.character.v1 (Experimental): importa un paquete MUGEN de personagem (AIR, SFF v1 indexado, paleta na grade do VDP, subset CMD/CNS) e proxecta a animacion para rescomp/SGDK, con diagnostico rexistrado rex-mugen/diag/v1 e relatorio de compatibilidade retrodev.mugen_import_report/v1 en 7 categorias. O producto xa o consume (camada core + panel na UI + E2E pola interface); o degrau non se promove nesta rolda por ordem expresa do operador. Contrato en crates/rex-mugen/CONTRACT.md.",
+      "maturidade": "gates-proprios-aprovados",
+      "maturidade_data": "2026-09-29",
+      "maturidade_nota": "A escada diria fluxo-do-usuario-comprovado: hai panel de compatibilidade na UI, importacion real, Build & Run co personagem visible no canvas e edicion no Inspector que persiste tras salvar/reiniciar/reabrir, todo medido no E2E mugen-import. NON se promove: o operador ordenou «sem merge, release ou promoción de maturidade» nesta rolda, e quedan fora catro clases de contido (SFF v2, som, stage e colision loxica) mais a proba por teclado do comando. Rexístranse os feitos medidos; o degrau queda para cando o operador o autorice.",
+      "gates": {
+        "medidos_em": "2026-09-29T02:08Z..02:20Z UTC no tronco do integrador, sobre o merge b410de0, reexecutado sobre a arvore final curada em 2026-09-29T03:00Z..03:17Z UTC com as mesmas contaxes",
+        "fmt": "OK (rc=0)",
+        "clippy_all_targets": "OK (rc=0, -D warnings) sobre ESTE paquete. A débeda de clippy --all-targets que reproba esta no tronco é do backend (46 avisos #[cfg(test)] previos ao PR), non do crate; ningunha das 45 localizaciones unicas cae nas liñas do PR.",
+        "test_locked": "OK — 12 testes executados (8 lib: 3 air + 2 palette + 2 sff + 1 sha256; 4 en tests/fixture_probe.rs), 0 fallos, 0 ignorados. A contaxe midiuse na localizacion nova, non a que anunciou a fronte.",
+        "npm_run_crates_gates": "rc=0 cos 4 paquetes registrados (rex-kosinski, rex-gameplay, rex-addressing, rex-mugen)",
+        "evidencia": "data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/ (crates-gates.log, check-tree.log, lint.log, tsc.log, npm-test.log, cargo-fmt.log, cargo-clippy-lib.log, cargo-clippy.log, cargo-test-lib.log, SHA256SUMS) e a reexecucion pos-curaduria em data/rex_profiles/mugen_sgdk/evidence/2026-09-29-pos-curaduria/ (LEIAME.md coa tabela de rc por gate, host-certify.log).",
+        "host_certify": "rc=0 na reexecucion: host READY, fingerprint 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2, lock dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377, smoke oficial SGDK/PVSnesLib Success: true"
+      },
+      "camada_backend": {
+        "medido_em": "2026-09-29T02:08Z..02:30Z UTC, branch codex/rex-integrator-mugen-85 (merge b410de0, pais e319fb9 + bd02e3c)",
+        "dependencia": "src-tauri/Cargo.toml: rex-mugen = { path = \"../crates/rex-mugen\" }, a convivir con rex-kosinski e rex-gameplay. Este foi o UNICO conflito material co tronco (2 liñas de path-deps) e resolveuse conservando as tres.",
+        "adaptador": "src-tauri/src/core/mugen_profile.rs (1951 liñas): contencion de caminhos resolve_inside() (absoluto, prefixo, RootDir e calquera `..` que saia do paquete recusan), read_limited() con MAX_TEXT_BYTES 1 MiB e sff::MAX_FILE_BYTES 32 MiB, validacion integral ANTES de calquera escritura e relatorio retrodev.mugen_import_report/v1 con 7 categorias.",
+        "escritura": "project_mgr crea a seccion MUGEN do proxecto cun so save_rgba_image despois do match; compiler/mugen_runtime.rs (317 liñas) xera o runtime de animacion e a condicion sprite_anim_done; ganchos en ast_generator, sgdk_emitter, snes_emitter e build_orch.",
+        "falha_limpa": "lib.rs envolve a importacion e chama discard_failed_import(project_dir, origin) segundo a origem reservada do cartafol (Created / ExistingEmpty / ExistingNonEmpty); o aviso de exito fusiona mugen_profile::summary_line(), tanto na importacion MUGEN como na externa.",
+        "ui": "src/components/common/MugenCompatibilityPanel.tsx (243 liñas) + src/core/mugenCompatibility.ts (147); App.tsx garda mugenCompatibility no estado e publica __RDS_E2E__.setNextExternalImportPath, que substitue SO o dialogo nativo de escoller carpeta.",
+        "diagnostica": "src/core/diagnostics.ts: mugenImportCause() devolve causa + accion para `..` fóra do paquete, bytes acima do limite, celula acima do orzamento (248 px) e SFF v2; todas as catro rematan en «Nenhum projeto foi criado.»",
+        "testes": "Suite do backend no destino: 796 executados / 0 fallos / 70 ignorados (rc=0). Reconciliacion independente: base a08c2c6 con 770/66 + PR con 15 executados e 3 ignorados (os 18 #[test] de mugen_profile.rs, 3 deles #[ignore] para a proba real SGDK) + integrador con 11 executados e 1 ignorados (1 en project_mgr.rs, 11+1 en rex_gameplay.rs). Frontend: npm test 812 passed / 0 failed / 6 skipped, 83 ficheiros passed | 1 skipped (+5 respecto da base: panel + diagnostics)."
+      },
+      "e2e_interface": {
+        "medido_em": "2026-09-29T02:46Z..02:47Z UTC (run7, verde)",
+        "comando": "node scripts/e2e-tauri-build-run.mjs --scenario mugen-import",
+        "binario": "src-tauri/target-test/debug/retro-dev-studio SHA-256 1b46ff504ba3aacab59f27c3c3bb664fcf0d83428fc1499207acc507d31abb09; o informe leva o sha do binario que o produciu.",
+        "resultados": "Importacion pola UI (wizard -> perfil mugen -> Importar); panel coas 7 categorias {sprites, animations, commands, states: direct; collisions: manual; sound, stage: absent} e resumo «12 funcionam igual, 0 con diferenca, 1 precisam de ajuste seu, 0 non convertidos»; Build & Run real co personagem no canvas 320x224 (mostra en (96,96): idle0=11, idle1=14); edicion +44 no Inspector -> Salvar -> reinicio -> reapertura (x=140) -> ROM distinta (10658a6c vs 5a6aff76), co personagem na posicion nova e a vella baleira (idle0=0, idle1=0); negativo ../fora.sff recusado con mensaxe especifica, sen cartafol desta execucion e sen cambiar o proxecto activo.",
+        "condicion_do_host": "O output primario pasou a ser un panel rotado de 1280x800+0+0 e o compositor recorta alí calquera xanela, de xeito que o redimensionado a 1920x1080 CSS era imposible (inner=948x564). A xanela da app de proba colocouse no monitor externo (3456x1458+1281+0, tamaño fisico 2592x1458 = 1920x1080 CSS a DPR 1,35) cun vixia temporal fóra do repo, para reproducir o mesmo viewport co que a fronte probou. Non se mudou a configuracion de pantallas do operador nin se alterou o harness para aceptar outra xeometría.",
+        "evidencia": "data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/ (e2e-mugen-import-run7.log, e2e-mugen-import-report-run7.json, 6 capturas e2e-run7-*.png, LEIAME-e2e-e-host.md co detalle dos descartes e dos dous achados no harness)"
+      },
+      "acoplamento_declarado": "Zero dependencias externas (Cargo.lock do paquete con 7 liñas e 1 paquete). As 3 mostras (Probe, Sentinel, Warden) xéranse por codigo en src/fixture.rs, son autorais e deterministicas, e fixtures/.gitattributes pon «* -text» para que ninguen lles altere os bytes; o paquete non depende de data/ externamente.",
+      "nao_alega": "Non e conversion integral de MUGEN: so personagem v1 (SFF v1, AIR e o subset CMD/CNS que entende o importador do produto). Seguen fóra SFF v2, som, stage e colision loxica — as caixas consérvanse por frame pero ningunha regra de xogo as usa no perfil v1. O comando por teclado e o golpe non teñen proba de UI: seguen sendo proba tecnica/core. O relatorio non ten reabertura futura: pechado o panel, non hai forma de volver velo. O Inspector usa a etiqueta «FPS» para a animacion MUGEN, que non son FPS. Non se copia o runtime C mg_*, baseado no HAMOOPIG de terceiros con licenza non verificada (docs/rex_profiles/mugen_sgdk/AUDIT.md), e non se asume licenza estra. Non se alega degrau superior: a promocion queda en mans do operador.",
+      "propriedade": "frente MUGEN->SGDK (PR #85 draft, branch codex/rex-mugen-sgdk); registro, manifests, src-tauri/src/lib.rs, App.tsx, core/diagnostics.ts, harness E2E principal e docs de estado son do integrador",
+      "origem": "PR #85: 22 commits desde a base común a08c2c6 ata bd02e3c. Entrada feita polo integrador como merge curado propio (b410de0, pais e319fb9 do tronco + bd02e3c da fronte), porque o conflito material estaba en superficies reservadas. Non houbo merge no remoto — o PR segue draft — nin push desta branch.",
+      "perfil": {
+        "contrato": "crates/rex-mugen/CONTRACT.md",
+        "relatorio": "docs/rex_profiles/mugen_sgdk/REPORT.md",
+        "auditoria": "docs/rex_profiles/mugen_sgdk/AUDIT.md",
+        "proposta_integracion": "docs/rex_profiles/mugen_sgdk/INTEGRATION_PROPOSAL.md",
+        "proposta_memoria": "docs/rex_profiles/mugen_sgdk/MEMORY_BANK_PROPOSAL.md",
+        "dados": "data/rex_profiles/mugen_sgdk/"
+      },
+      "byor": "Ningun test ordinario do paquete necesita ROM: a mostra do E2E e un paquete MUGEN autoral xerado por codigo e a ROM compílase polo pipeline canonico SGDK dentro do cartafol de validacion. Cero ROM comercial; o corpus non se trata como dependencia provisionable."
     }
   ]
 }
