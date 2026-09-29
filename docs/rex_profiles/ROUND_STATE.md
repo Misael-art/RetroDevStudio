@@ -33,11 +33,13 @@ limites de cobertura da própria célula e as provas herdadas valendo.
   lanza duplicada por un `&` mal posto competiu por `dist/` e foi descartada;
   ver `data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/LEIAME-e2e-e-host.md`)
   e 03:00Z–03:17Z na re-execución completa da barra sobre a árbore final curada
-  (dez gates + `node --check` + `host:certify`, todos rc=0; evidencia en
+  (os 11 gates da barra, todos rc=0; evidencia en
   `data/rex_profiles/mugen_sgdk/evidence/2026-09-29-pos-curaduria/`).
-  Nada pesado queda executado; a única consulta CI aberta é a re-execución do job
-  desktop-smoke en `ebfa8ea`, co resultado por SHA rexistrado no log de
-  evidencia da fronte A.
+  Nada pesado queda executado. **Consultas CI, todas pontuais sen monitor
+  permanente:** a re-execución do job `desktop-smoke` en `ebfa8ea` (fronte A)
+  fechou `completed`/`success` xunto con `validate` e `linux-validate`, e o CI
+  do PR #86 en `d36df92` está terminal verde (detalle na célula de abaixo e no
+  checkpoint (h) do Memory Bank).
 
 ## Matriz de endereçamento (propriedade: agente A)
 
@@ -357,8 +359,18 @@ Kosinski nas súas transacións canónicas.
   integrador (`git diff --diff-filter=U` = 0 e ningún marcador na árbore).
   **Commits desta célula:** `b410de0` (merge curado, pais `e319fb9` + `bd02e3c`,
   índice de 72 ficheiros / +7910 / -88) e o commit de curaduría que rexistra esta
-  célula, reescribe `crates/registry.json` e reforza o harness. **O PR mantense
-  draft no remoto: non se fixo merge nin push desta branch.**
+  célula, reescribe `crates/registry.json` e reforza o harness. **O PR #85
+  mantense draft no remoto e non se lle tocou nada além de o referenciar.**
+  **Publicación (ordem do operador, 2026-09-29):** tronco
+  `codex/rex-integrator-crates-registry` adiantado en fast-forward
+  `00f9d29..e319fb9` antes do push, e **PR #86** aberto con head
+  `codex/rex-integrator-mugen-85 @ d36df92` (base o tronco, 24 commits, 113
+  ficheiros, +18009/−90, non draft, `MERGEABLE`/`CLEAN`) coa descrición
+  obrigatoria completa. **CI terminal en `d36df92`, consulta pontual:** runs
+  `36542842781` e `36542937864` (CI, `validate`+`linux-validate`) e
+  `36542842770` e `36542937819` (Desktop E2E, `desktop-smoke`) — todos
+  `completed`/`success` entre 08:27:33Z e 08:52:05Z; `CodeRabbit` `pass`,
+  `Sourcery` `skipping`. **Sen merge: #86 queda aberto para revisión humana.**
   **Barra no destino (todos rc=0):** `check:tree`, `lint`, `tsc --noEmit`,
   `npm test` **812 passed / 0 failed / 6 skipped** (83 ficheiros passed | 1
   skipped; +5 respecto da base: panel + diagnostics), `cargo fmt --check`,

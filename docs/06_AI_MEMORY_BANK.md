@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
-### Checkpoint 2026-09-29 (h) — integrador, **PR #85 MUGEN → SGDK integrado na árbore do integrador: importación de personaje, panel de compatibilidade e edición persistente probados na UI** (Experimental; sen merge no remoto, sen release, sen promoción de maturidade)
+### Checkpoint 2026-09-29 (h) — integrador, **PR #85 MUGEN → SGDK integrado na árbore do integrador: importación de personaje, panel de compatibilidade e edición persistente probados na UI** (Experimental; publicado como PR #86 sen merge, sen release, sen promoción de maturidade)
 
 **Estado real desta superficie.** O produto acepta **un** caso de uso MUGEN:
 importar un personaje do subconxunto `air` + `sff v1` + paleta nivel VDP +
@@ -16,7 +16,30 @@ integrador; pais `e319fb9` + `bd02e3c`; índice de 72 ficheiros, +7910 / −88) 
 o commit de curaduría que rexistra esta célula (reescribe a entrada `rex-mugen`
 de `crates/registry.json`, emenda `docs/rex_profiles/ROUND_STATE.md` e reforza
 unha aserción do harness). **O PR #85 mantense draft no remoto: non se fixo
-merge, push, release nin promoción.**
+merge del, nin release, nin promoción de maturidade, e non se lle engadiu
+comentario ningún — o #85 só se referencia.**
+
+**Publicación desta frente (2026-09-29, ordem expresa do operador: "faça push
+da branch `codex/rex-integrator-mugen-85` e abra um PR integrado no GitHub, sem
+merge, sem release e sem promoção de maturidade").** Antes do push, o tronco do
+integrador `codex/rex-integrator-crates-registry` adiantouse en fast-forward
+`00f9d29..e319fb9` (publica `aa959a9` + `e319fb9`; `git fetch` antes do push
+confirmou 0 atrás / 2 á frente) para que o diff do PR sexa exactamente a
+integración de #85 máis a curaduría. Esta frente quedou en `d36df92` no remoto
+e abriu-se o **PR #86** (`Integrate experimental MUGEN import flow`, base
+`codex/rex-integrator-crates-registry`, head `codex/rex-integrator-mugen-85`,
+24 commits, 113 ficheiros, +18009/−90, `isDraft=false`, `mergeable=MERGEABLE`,
+`mergeStateStatus=CLEAN`), coa descrición obrigatoria completa: base, merge
+curado, curaduría, conflito de `src-tauri/Cargo.toml`, os 11 gates do destino
+coas contaxes, os 8 puntos do E2E e as 8 limitacións rexistradas. **CI
+terminal sobre o SHA pinado `d36df92`, medido por consulta pontual sen monitor
+permanente:** catro runs `completed`/`success` — `CI` `36542842781`
+(`linux-validate` 08:27:36Z→08:40:54Z; `validate` →08:50:28Z), `Desktop E2E`
+`36542842770` (`desktop-smoke` →08:46:52Z), `CI` `36542937864` (`validate`
+→08:52:04Z; `linux-validate` →08:41:42Z) e `Desktop E2E` `36542937819`
+(`desktop-smoke` →08:48:23Z); `CodeRabbit` `pass` (reviews desactivados para
+esta base) e `Sourcery review` `skipping`. **Non houbo merge: #86 queda aberto
+para revisión humana e #85 segue draft.**
 
 **Revisión das 5 superficies centrais tocadas (todas reservadas ao integrador).**
 `src-tauri/src/lib.rs` (+91/−14): envolve a importación externa nas dúas vías,
