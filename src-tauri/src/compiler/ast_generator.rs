@@ -291,6 +291,12 @@ pub enum LogicOp {
         target_var: String,
         anim_index: u32,
     },
+    /// Perfil `mugen.character.v1`: velocidade horizontal em Q8.8 (1/256 px por tick de 1/60 s)
+    /// da entidade; integrada por `compiler/mugen_runtime.rs` a cada tick (estado por entidade).
+    MugenSetVelocityX {
+        target_var: String,
+        vx_q8: i32,
+    },
     SetTile {
         layer: String,
         tile: LogicMathExpr,
@@ -1457,7 +1463,7 @@ fn compile_logic_graph(
             }),
     );
 
-    if let Some(fsm_script) = compile_fsm_script(graph, runtime_entities, &mut output) {
+    if let Some(fsm_script) = compile_fsm_script(graph, entity_id, runtime_entities, &mut output) {
         output.scripts.push(fsm_script);
     }
     let hardware_event_scripts =
@@ -1505,9 +1511,13 @@ fn compile_hardware_event_scripts(
 
 fn compile_fsm_script(
     graph: &StoredNodeGraph,
+    entity_id: &str,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
     output: &mut CompiledLogicOutput,
 ) -> Option<LogicScript> {
+    // Uma maquina por entidade: o nome carrega o id da entidade (duas entidades com FSM nao
+    // compartilham o indice de estado).
+    let machine_var = format!("fsm_state_{}", sanitize_identifier(entity_id));
     let mut state_nodes = graph
         .nodes
         .iter()
@@ -1535,7 +1545,7 @@ fn compile_fsm_script(
 
     Some(LogicScript {
         ops: vec![LogicOp::StateMachine {
-            machine_var: "fsm_state".to_string(),
+            machine_var: machine_var.to_string(),
             states,
         }],
     })
@@ -1900,6 +1910,14 @@ fn compile_logic_node(
             } else {
                 Some(CompiledLogicNode::NoOp)
             }
+        }
+        "set_velocity"
+            if param_string(node, "profile").as_deref() == Some(rex_mugen::plan::PROFILE_ID) =>
+        {
+            Some(CompiledLogicNode::Linear(mugen_set_velocity_op(
+                node,
+                runtime_entities,
+            )))
         }
         "set_velocity" => {
             let raw_target = param_string(node, "target").unwrap_or_else(|| "entity".to_string());
@@ -2765,6 +2783,7 @@ fn collect_unsupported_from_ops(
                 collect_unsupported_from_math(vx, found);
                 collect_unsupported_from_math(vy, found);
             }
+            LogicOp::MugenSetVelocityX { .. } => {}
             LogicOp::SetTile { tile, x, y, .. } => {
                 collect_unsupported_from_math(tile, found);
                 collect_unsupported_from_math(x, found);
@@ -2954,6 +2973,42 @@ fn overlap_expr_for_node(
     }
 }
 
+/// `set_velocity` do perfil MUGEN: x literal decimal (px/tick) -> Q8.8; o que nao for
+/// representavel bloqueia o build (`#error`), nunca vira 0 nem e aproximado em silencio.
+fn mugen_set_velocity_op(
+    node: &StoredNodeGraphNode,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+) -> LogicOp {
+    let bridge = |why: String| LogicOp::SourceBridgeError {
+        gap: format!("mugen_velset: {why}"),
+        source_file: param_string(node, "controller").unwrap_or_else(|| node.id.clone()),
+        source_line: 0,
+    };
+    let raw_target = param_string(node, "target").unwrap_or_default();
+    let Some(sprite) = runtime_entities
+        .get(&raw_target)
+        .and_then(|runtime| runtime.sprite.as_ref())
+    else {
+        return bridge(format!("entidade '{raw_target}' sem sprite"));
+    };
+    if param_string(node, "mode").as_deref().unwrap_or("set") != "set" {
+        return bridge("so mode = set (VelAdd nao faz parte do perfil v1)".to_string());
+    }
+    if param_i32(node, "vy", 0) != 0 {
+        return bridge("vy diferente de 0 (vertical fora do perfil v1)".to_string());
+    }
+    let Some(text) = param_string(node, "vx") else {
+        return bridge("vx ausente ou nao literal".to_string());
+    };
+    match crate::core::mugen_profile::parse_velocity_q8(&text) {
+        Ok(velocity) => LogicOp::MugenSetVelocityX {
+            target_var: sprite.var_name.clone(),
+            vx_q8: velocity.q8,
+        },
+        Err(why) => bridge(why),
+    }
+}
+
 fn param_string(node: &StoredNodeGraphNode, key: &str) -> Option<String> {
     node.params.get(key).and_then(|value| match value {
         Value::String(text) => Some(text.clone()),
@@ -3082,6 +3137,7 @@ fn collect_logic_sound_names_from_ops(
             | LogicOp::RomBranchCompareWord { .. }
             | LogicOp::SetSpritePosition { .. }
             | LogicOp::SetVelocity { .. }
+            | LogicOp::MugenSetVelocityX { .. }
             | LogicOp::SetAnimationState { .. }
             | LogicOp::SetTile { .. }
             | LogicOp::CameraFollow { .. }

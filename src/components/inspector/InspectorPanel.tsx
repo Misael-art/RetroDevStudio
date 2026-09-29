@@ -20,6 +20,11 @@ import {
   parseTicks,
   withFrameDuration,
 } from "../../core/mugenAnimationTiming";
+import {
+  parseVelocity,
+  readMugenVelocities,
+  withMugenVelocity,
+} from "../../core/mugenVelocity";
 import { persistActiveScene } from "../../core/scenePersistence";
 import {
   constrainSpriteFrameSize,
@@ -961,6 +966,36 @@ export default function InspectorPanel() {
     setMugenTickErrors((current) => omitKey(current, key));
   }
 
+  function handleMugenVelocityChange(stateNo: number, raw: string) {
+    const key = String(stateNo);
+    setMugenVelocityDrafts((current) => ({ ...current, [key]: raw }));
+    const parsed = parseVelocity(raw);
+    if (!parsed.ok) {
+      setMugenVelocityErrors((current) => ({ ...current, [key]: parsed.message }));
+      return;
+    }
+    setMugenVelocityErrors((current) => omitKey(current, key));
+    if (!entity || !selectedEntityId || !entity.components.logic) return;
+    // O que se grava e o literal digitado; o aviso de arredondamento e mostrado abaixo do campo.
+    const graph = withMugenVelocity(entity, stateNo, raw.trim());
+    if (graph === null) return;
+    updateEntity(
+      selectedEntityId,
+      buildEntityPatch(entity, ["components", "logic"], {
+        ...entity.components.logic,
+        graph,
+        graph_origin: "user_edited_ref",
+      })
+    );
+    scheduleAutoSave();
+  }
+
+  function handleMugenVelocityBlur(stateNo: number) {
+    const key = String(stateNo);
+    setMugenVelocityDrafts((current) => omitKey(current, key));
+    setMugenVelocityErrors((current) => omitKey(current, key));
+  }
+
   /**
    * Duplicates the selected entity under a fresh id, offset to the right. The resolved
    * copy (with inherited prefab components) goes to the active scene so it renders and
@@ -971,6 +1006,8 @@ export default function InspectorPanel() {
   const [pendingDuplicate, setPendingDuplicate] = useState<{ manualNodes: number | null } | null>(null);
   const [mugenTickDrafts, setMugenTickDrafts] = useState<Record<string, string>>({});
   const [mugenTickErrors, setMugenTickErrors] = useState<Record<string, string>>({});
+  const [mugenVelocityDrafts, setMugenVelocityDrafts] = useState<Record<string, string>>({});
+  const [mugenVelocityErrors, setMugenVelocityErrors] = useState<Record<string, string>>({});
   function manualLogicOf(candidate: Entity | null | undefined): { manualNodes: number | null; graph: NodeGraph } {
     const logic = candidate?.components.logic;
     const graph = deserializeNodeGraph(logic?.graph);
@@ -1358,6 +1395,62 @@ export default function InspectorPanel() {
                 <div className="mt-1 flex gap-1">
                   <button type="button" data-testid="inspector-duplicate-confirm" onClick={handleDuplicateEntity} className="rounded border border-[#fab387]/60 px-2 py-0.5 font-semibold">Duplicar assim</button>
                   <button type="button" data-testid="inspector-duplicate-cancel" onClick={() => setPendingDuplicate(null)} className="rounded px-2 py-0.5 text-[#a6adc8]">Cancelar</button>
+                </div>
+              </div>
+            ) : null}
+            {readMugenVelocities(entity).length > 0 ? (
+              <div
+                data-testid="inspector-mugen-velocity"
+                className="space-y-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]"
+              >
+                <span className="text-[9px] uppercase tracking-[0.14em]">Velocidade dos estados (MUGEN, Experimental)</span>
+                <p data-testid="inspector-mugen-velocity-help" className="leading-relaxed text-[#7f849c]">
+                  Quantos pixels o personagem anda a cada tick (1 tick = 1/60 s) enquanto esta naquele estado.
+                  Positivo = direita, negativo = esquerda, 0 = parado; o personagem sempre olha para a direita.
+                  Vai de -127,99 a 127,99 em passos de 1/256 px. So muda a horizontal e nao cria colisao nem limite de tela.
+                </p>
+                <div className="flex flex-wrap items-start gap-2">
+                  {readMugenVelocities(entity).map((state) => {
+                    const key = String(state.stateNo);
+                    const shown = mugenVelocityDrafts[key] ?? state.vx;
+                    const parsed = parseVelocity(shown);
+                    const error = mugenVelocityErrors[key];
+                    return (
+                      <label key={key} className="flex flex-col gap-0.5">
+                        <span>Estado {state.stateNo} (px/tick)</span>
+                        <input
+                          data-testid={`inspector-mugen-velocity-state-${state.stateNo}`}
+                          type="text"
+                          inputMode="decimal"
+                          aria-invalid={error ? true : undefined}
+                          value={shown}
+                          onChange={(event) => handleMugenVelocityChange(state.stateNo, event.target.value)}
+                          onBlur={() => handleMugenVelocityBlur(state.stateNo)}
+                          className={`w-20 rounded border bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4] ${
+                            error ? "border-[#f38ba8]" : "border-[#45475a]"
+                          }`}
+                        />
+                        {parsed.ok ? (
+                          <span
+                            data-testid={`inspector-mugen-velocity-state-${state.stateNo}-note`}
+                            className="max-w-40 text-[9px] text-[#7f849c]"
+                          >
+                            {parsed.exact
+                              ? `${parsed.q8}/256 px/tick`
+                              : `Arredondado para ${parsed.effective} (${parsed.q8}/256).`}
+                          </span>
+                        ) : null}
+                        {error ? (
+                          <span
+                            data-testid={`inspector-mugen-velocity-state-${state.stateNo}-error`}
+                            className="max-w-40 text-[9px] text-[#f38ba8]"
+                          >
+                            {error} Mantido: {state.vx}.
+                          </span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
                 </div>
               </div>
             ) : null}

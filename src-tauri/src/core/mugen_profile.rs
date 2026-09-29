@@ -437,6 +437,144 @@ pub(crate) struct ControllerView {
     pub source: String,
 }
 
+// ---------------------------------------------------------------- velocidade (VelSet)
+
+/// Limite de |Q8.8| aceito (s16): |v| <= 127,99609375 px/tick.
+pub(crate) const VELOCITY_MAX_Q8: i32 = 32767;
+
+/// Velocidade horizontal em Q8.8 (1/256 px por tick de 1/60 s).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VelocityQ8 {
+    pub q8: i32,
+    /// `false` quando o literal nao e multiplo de 1/256 (arredondado ao mais proximo,
+    /// metade para longe do zero) — o chamador registra como aproximado.
+    pub exact: bool,
+}
+
+/// Literal decimal `[+-]digitos[.digitos]` (px/tick) -> Q8.8. Expressoes, `const(...)`,
+/// expoentes e qualquer outra sintaxe sao recusadas, nunca tratadas como constante.
+pub(crate) fn parse_velocity_q8(text: &str) -> Result<VelocityQ8, String> {
+    let t = text.trim();
+    let (neg, body) = match t.as_bytes().first() {
+        Some(b'-') => (true, &t[1..]),
+        Some(b'+') => (false, &t[1..]),
+        _ => (false, t),
+    };
+    let (int_s, frac_s) = body.split_once('.').unwrap_or((body, ""));
+    let digits_ok = |x: &str| x.bytes().all(|b| b.is_ascii_digit());
+    if body.is_empty()
+        || int_s.is_empty()
+        || !digits_ok(int_s)
+        || !digits_ok(frac_s)
+        || (body.contains('.') && frac_s.is_empty())
+    {
+        return Err(format!(
+            "'{t}' nao e um literal decimal (so [+-]N ou [+-]N.N; sem expressoes, const() ou expoente)"
+        ));
+    }
+    if int_s.len() > 6 || frac_s.len() > 9 {
+        return Err(format!(
+            "'{t}' tem digitos demais (ate 6 inteiros e 9 decimais)"
+        ));
+    }
+    let den: i128 = 10i128.pow(frac_s.len() as u32);
+    let num: i128 = format!("{int_s}{frac_s}").parse::<i128>().unwrap_or(0);
+    let scaled = num * 256;
+    let mut q = scaled / den;
+    let rem = scaled % den;
+    if rem != 0 && rem * 2 >= den {
+        q += 1;
+    }
+    if q > VELOCITY_MAX_Q8 as i128 {
+        return Err(format!(
+            "'{t}' fora do intervalo representavel (|v| <= 127,99609375 px/tick)"
+        ));
+    }
+    let q8 = if neg { -(q as i32) } else { q as i32 };
+    Ok(VelocityQ8 {
+        q8,
+        exact: rem == 0,
+    })
+}
+
+/// Um `VelSet` dentro do subconjunto: componente x constante, `trigger1 = 1`, sem vertical.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VelSetSpec {
+    /// Literal de x como autorado (fonte do modelo; a ROM usa o Q8.8 derivado).
+    pub x_text: String,
+    pub velocity: VelocityQ8,
+}
+
+fn raw_param(raw: &[String], key: &str) -> Option<String> {
+    raw.iter().find_map(|l| {
+        let l = l.split(';').next().unwrap_or("");
+        let (k, v) = l.split_once('=')?;
+        k.trim()
+            .eq_ignore_ascii_case(key)
+            .then(|| v.trim().to_string())
+    })
+}
+
+/// Contrato v1 do `VelSet`: `x = N` ou `value = N[, 0]` (N literal decimal); y ausente ou 0;
+/// exatamente `trigger1 = 1` (todo quadro em que o estado esta ativo) e nenhum `triggerall`.
+pub(crate) fn parse_velset(raw: &[String]) -> Result<VelSetSpec, String> {
+    let (all, groups) = trigger_groups(raw);
+    let always = groups.len() == 1
+        && groups
+            .get(&1)
+            .is_some_and(|g| g.len() == 1 && g[0].trim() == "1");
+    if !all.is_empty() || !always {
+        return Err(
+            "gatilho fora do contrato do VelSet v1 (so 'trigger1 = 1', sem triggerall)".into(),
+        );
+    }
+    for line in raw {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if line.is_empty() || line.starts_with('[') {
+            continue;
+        }
+        let Some((k, _)) = line.split_once('=') else {
+            continue;
+        };
+        let k = k.trim().to_ascii_lowercase();
+        let known = matches!(
+            k.as_str(),
+            "type" | "name" | "x" | "y" | "value" | "triggerall"
+        ) || k
+            .strip_prefix("trigger")
+            .is_some_and(|n| n.parse::<u32>().is_ok());
+        if !known {
+            return Err(format!("parametro '{k}' do VelSet nao e convertido"));
+        }
+    }
+    let (x_text, y_text) = match (raw_param(raw, "x"), raw_param(raw, "value")) {
+        (Some(_), Some(_)) => return Err("x e value ao mesmo tempo".into()),
+        (Some(x), None) => (x, raw_param(raw, "y")),
+        (None, Some(v)) => {
+            let mut it = v.splitn(2, ',');
+            let x = it.next().unwrap_or("").trim().to_string();
+            let y = it.next().map(|y| y.trim().to_string());
+            (x, y.or_else(|| raw_param(raw, "y")))
+        }
+        (None, None) => {
+            return Err("sem componente x (VelSet so vertical nao move na horizontal)".into())
+        }
+    };
+    if x_text.is_empty() {
+        return Err("componente x omitido (x inalterado nao e convertido)".into());
+    }
+    if let Some(y) = y_text {
+        let yv = parse_velocity_q8(&y).map_err(|e| format!("componente y: {e}"))?;
+        if yv.q8 != 0 {
+            return Err(format!(
+                "componente y = {y} (movimento vertical nao faz parte do perfil v1)"
+            ));
+        }
+    }
+    let velocity = parse_velocity_q8(&x_text).map_err(|e| format!("componente x: {e}"))?;
+    Ok(VelSetSpec { x_text, velocity })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Cond {
     Command(String),
@@ -559,6 +697,8 @@ pub(crate) struct Wired {
     pub report: Vec<serde_json::Value>,
     /// Controllers ja representados (o chamador nao gera outro no para eles).
     pub handled: std::collections::BTreeSet<usize>,
+    /// Controllers recusados aqui com motivo especifico (o chamador nao repete o relatorio).
+    pub refused: std::collections::BTreeSet<usize>,
 }
 
 /// Liga ao NodeGraph o subconjunto executavel do perfil v1:
@@ -580,6 +720,7 @@ pub(crate) fn wire_behavior_v1(
         edges: Vec::new(),
         report: Vec::new(),
         handled: Default::default(),
+        refused: Default::default(),
     };
     let playable: Vec<&StateView> = states.iter().filter(|s| s.state_no >= 0).collect();
     let state_id = |n: i32| format!("fsm_state_{n}");
@@ -805,7 +946,142 @@ pub(crate) fn wire_behavior_v1(
             prev = Some((tid, "next"));
         }
     }
+    wire_velsets(&mut w, entity_id, &playable, controllers);
     w
+}
+
+/// `VelSet` (x constante) como `set_velocity` do perfil, no corpo do estado (todo quadro,
+/// depois da animacao) e na entrada por transicao (mesmo tick, como a animacao).
+fn wire_velsets(
+    w: &mut Wired,
+    entity_id: &str,
+    playable: &[&StateView],
+    controllers: &[ControllerView],
+) {
+    let state_id = |n: i32| format!("fsm_state_{n}");
+    let mut by_state: BTreeMap<i32, Vec<(usize, String, VelSetSpec)>> = BTreeMap::new();
+    for c in controllers {
+        if !c.kind.eq_ignore_ascii_case("velset") {
+            continue;
+        }
+        let item = format!(
+            "controller:{}#{}",
+            c.state_no.map(|s| s.to_string()).unwrap_or("?".into()),
+            c.name
+        );
+        let refuse = |w: &mut Wired, why: String| {
+            w.refused.insert(c.index);
+            w.report.push(serde_json::json!({ "item": item, "source": c.source, "fidelity": "unsupported",
+                "target": serde_json::Value::Null, "reason": format!("VelSet fora do contrato v1: {why}"),
+                "consequence": "a velocidade nao e aplicada; o personagem nao se desloca por este controller" }));
+        };
+        let Some(state_no) = c
+            .state_no
+            .filter(|s| playable.iter().any(|p| p.state_no == *s))
+        else {
+            refuse(
+                w,
+                "estado de origem ausente ou nao jogavel (-1/-2/-3)".into(),
+            );
+            continue;
+        };
+        match parse_velset(&c.raw_lines) {
+            Ok(spec) => by_state
+                .entry(state_no)
+                .or_default()
+                .push((c.index, item.clone(), spec)),
+            Err(why) => refuse(w, why),
+        }
+    }
+    for (state_no, list) in &by_state {
+        let mut body_prev = (state_id(*state_no), "exec".to_string());
+        if w.nodes
+            .iter()
+            .any(|n| n["id"] == format!("state_{state_no}_anim"))
+        {
+            body_prev = (format!("state_{state_no}_anim"), "exec".to_string());
+        }
+        for (k, (index, item, spec)) in list.iter().enumerate() {
+            let params = |instance: &str| {
+                serde_json::json!({
+                    "target": entity_id, "vx": spec.x_text, "vy": 0, "mode": "set",
+                    "profile": plan::PROFILE_ID, "state_no": state_no,
+                    "unit": "px/tick (1/60 s)", "controller": item, "instance": instance })
+            };
+            let id = format!("state_{state_no}_velset_{k}");
+            w.nodes.push(node(
+                &id,
+                "set_velocity",
+                &format!("VelSet x = {}", spec.x_text),
+                860,
+                80 + k as i32 * 60,
+                params("body"),
+            ));
+            w.edges.push(edge(
+                &format!("e_{id}"),
+                &body_prev.0,
+                &body_prev.1,
+                &id,
+                "exec",
+            ));
+            body_prev = (id, "exec".to_string());
+            let transitions: Vec<String> = w
+                .nodes
+                .iter()
+                .filter(|n| {
+                    n["type"] == "fsm_transition"
+                        && n["params"]["target_state"] == format!("state_{state_no}")
+                })
+                .filter_map(|n| n["id"].as_str().map(str::to_string))
+                .collect();
+            for tid in transitions {
+                let enter = format!("{tid}_enter_velset_{k}");
+                let enter_anim = format!("{tid}_enter_anim");
+                let (from, port) = if k > 0 {
+                    (format!("{tid}_enter_velset_{}", k - 1), "exec".to_string())
+                } else if w.nodes.iter().any(|n| n["id"] == enter_anim) {
+                    (enter_anim, "exec".to_string())
+                } else {
+                    (tid.clone(), "matched".to_string())
+                };
+                w.nodes.push(node(
+                    &enter,
+                    "set_velocity",
+                    &format!("Enter VelSet x = {}", spec.x_text),
+                    1340,
+                    80 + k as i32 * 60,
+                    params("enter"),
+                ));
+                w.edges
+                    .push(edge(&format!("e_{enter}"), &from, &port, &enter, "exec"));
+            }
+            w.handled.insert(*index);
+            let (fid, reason, consequence) = if spec.velocity.exact {
+                (
+                    "direct",
+                    format!(
+                        "VelSet x = {} = {}/256 px/tick, trigger1 = 1",
+                        spec.x_text, spec.velocity.q8
+                    ),
+                    "o personagem desloca esse valor a cada tick em que o estado esta ativo (facing fixo a direita)".to_string(),
+                )
+            } else {
+                (
+                    "approximate",
+                    format!(
+                        "VelSet x = {} nao e multiplo de 1/256; usado {}/256 = {} px/tick",
+                        spec.x_text,
+                        spec.velocity.q8,
+                        spec.velocity.q8 as f64 / 256.0
+                    ),
+                    "o deslocamento por tick e arredondado ao multiplo de 1/256 px mais proximo"
+                        .to_string(),
+                )
+            };
+            w.report.push(serde_json::json!({ "item": item, "source": serde_json::Value::Null, "fidelity": fid,
+                "target": format!("{}:set_velocity", state_id(*state_no)), "reason": reason, "consequence": consequence }));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1398,9 +1674,10 @@ mod tests {
             find("behavior", "controller:-1#Alt")["fidelity"],
             "unsupported"
         );
+        // VelSet x = 2, trigger1 = 1: dentro do contrato de locomocao (antes: nao ligado).
         assert_eq!(
             find("behavior", "controller:210#Push")["fidelity"],
-            "unsupported"
+            "direct"
         );
         assert_eq!(
             find("behavior", "controller:210#Back")["fidelity"],
@@ -1819,6 +2096,376 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // ------------------------------------------------------------ locomocao (VelSet)
+
+    fn strider_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/rex-mugen/fixtures/strider")
+    }
+
+    /// Importa a fixture `strider` (com o CNS trocado por `edit`) pelo caminho do produto.
+    fn import_strider(name: &str, edit: impl FnOnce(String) -> String) -> (PathBuf, PathBuf) {
+        let root = temp(name);
+        let donor = root.join("donor");
+        copy_dir(&strider_dir(), &donor);
+        let cns = fs::read_to_string(donor.join("strider.cns")).unwrap();
+        fs::write(donor.join("strider.cns"), edit(cns)).unwrap();
+        let project = root.join("project");
+        create_project_skeleton(&project, "Strider", "megadrive").unwrap();
+        import_mugen_project(&project, &donor).expect("importa a Strider");
+        (root, project)
+    }
+
+    fn strider_report(project: &Path) -> serde_json::Value {
+        serde_json::from_str(
+            &fs::read_to_string(project.join("assets/mugen/strider_import_report.json")).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn behavior_item<'a>(report: &'a serde_json::Value, item: &str) -> &'a serde_json::Value {
+        report["behavior"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["item"] == item)
+            .unwrap_or_else(|| panic!("item {item} ausente do relatorio"))
+    }
+
+    fn strider_c(project: &Path) -> String {
+        let proj = crate::core::project_mgr::load_project(project).unwrap();
+        let scene = load_scene(project, DEFAULT_ENTRY_SCENE).unwrap();
+        let ast = crate::compiler::ast_generator::generate_ast(&proj, &scene);
+        crate::compiler::sgdk_emitter::emit_sgdk(&ast, "Strider").main_c
+    }
+
+    fn strider_graph_nodes(project: &Path) -> Vec<serde_json::Value> {
+        let scene = load_scene(project, DEFAULT_ENTRY_SCENE).unwrap();
+        let entity = scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "strider")
+            .unwrap();
+        let graph: serde_json::Value = serde_json::from_str(
+            entity
+                .components
+                .logic
+                .as_ref()
+                .unwrap()
+                .graph
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap();
+        graph["nodes"].as_array().unwrap().clone()
+    }
+
+    fn velocity_nodes(nodes: &[serde_json::Value], state: i64) -> Vec<serde_json::Value> {
+        nodes
+            .iter()
+            .filter(|n| {
+                n["type"] == "set_velocity"
+                    && n["params"]["profile"] == "mugen.character.v1"
+                    && n["params"]["state_no"] == state
+            })
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn velocity_literals_convert_to_q8_with_documented_rounding() {
+        use super::parse_velocity_q8;
+        let ok = |t: &str| parse_velocity_q8(t).unwrap();
+        assert_eq!((ok("2.5").q8, ok("2.5").exact), (640, true));
+        assert_eq!((ok("-1.75").q8, ok("-1.75").exact), (-448, true));
+        assert_eq!((ok("0").q8, ok("+3").q8), (0, 768));
+        assert_eq!((ok("2.4").q8, ok("2.4").exact), (614, false));
+        // metade para longe do zero (1/512 px = meio passo)
+        assert_eq!(ok("0.001953125").q8, 1);
+        assert_eq!(ok("-0.001953125").q8, -1);
+        assert_eq!(ok("127.99609375").q8, 32767);
+        for bad in [
+            "",
+            "abc",
+            "1e2",
+            "2,5",
+            "1.",
+            ".5",
+            "1+1",
+            "128",
+            "-128",
+            "const(velocity.walk.fwd.x)",
+            "1234567",
+            "0.1234567891",
+        ] {
+            assert!(
+                parse_velocity_q8(bad).is_err(),
+                "'{bad}' deveria ser recusado"
+            );
+        }
+    }
+
+    #[test]
+    fn strider_import_wires_velset_into_the_state_graph_and_reports_it() {
+        let (root, project) = import_strider("strider-wire", |c| c);
+        let nodes = strider_graph_nodes(&project);
+        for (state, vx) in [(0i64, "0"), (20, "2.5"), (21, "-1.75"), (200, "0")] {
+            let v = velocity_nodes(&nodes, state);
+            let body: Vec<_> = v
+                .iter()
+                .filter(|n| n["params"]["instance"] == "body")
+                .collect();
+            assert_eq!(body.len(), 1, "estado {state}: um no de corpo");
+            assert_eq!(body[0]["params"]["vx"], vx);
+            assert_eq!(body[0]["params"]["target"], "strider");
+            if state != 0 {
+                assert!(
+                    v.iter().any(|n| n["params"]["instance"] == "enter"),
+                    "estado {state}: aplicado tambem na entrada"
+                );
+            }
+        }
+        let report = strider_report(&project);
+        for (item, fid) in [
+            ("controller:20#Walk", "direct"),
+            ("controller:21#Walk", "direct"),
+            ("controller:0#Stop", "direct"),
+        ] {
+            assert_eq!(behavior_item(&report, item)["fidelity"], fid, "{item}");
+        }
+        // nenhum VelSet do perfil ficou como referencia nao ligada
+        assert!(!nodes
+            .iter()
+            .any(|n| n["type"] == "set_velocity" && n["params"]["wired"] == false));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn strider_generation_uses_per_entity_velocity_and_state_machine() {
+        let (root, project) = import_strider("strider-gen", |c| c);
+        let c = strider_c(&project);
+        for expect in [
+            "rds_mugen_spr_strider_vx = 640;",
+            "rds_mugen_spr_strider_vx = -448;",
+            "rds_mugen_spr_strider_vx = 0;",
+            "static volatile s16 rds_mugen_spr_strider_vx = 0;",
+            "static s16 rds_mugen_spr_strider_xacc = 0;",
+            "logic_var_fsm_state_strider",
+        ] {
+            assert!(c.contains(expect), "C sem `{expect}`");
+        }
+        assert!(!c.contains("#error"), "geracao limpa");
+        assert!(
+            !c.contains("logic_var_fsm_state ="),
+            "sem maquina global compartilhada"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn strider_fractional_literal_not_on_the_grid_is_approximate_and_explicit() {
+        let (root, project) = import_strider("strider-approx", |c| c.replace("x = 2.5", "x = 2.4"));
+        let report = strider_report(&project);
+        let item = behavior_item(&report, "controller:20#Walk");
+        assert_eq!(item["fidelity"], "approximate");
+        assert!(item["reason"].as_str().unwrap().contains("614/256"));
+        assert!(strider_c(&project).contains("rds_mugen_spr_strider_vx = 614;"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Sintaxe fora do contrato nao vira constante: relatorio `unsupported`, sem no ligado.
+    #[test]
+    fn strider_unsupported_velset_forms_are_refused_not_guessed() {
+        let cases: [(&str, &str, &str, &str); 6] = [
+            (
+                "expr",
+                "x = 2.5",
+                "x = const(velocity.walk.fwd.x)",
+                "literal decimal",
+            ),
+            (
+                "trigger",
+                "x = 2.5\ntrigger1 = 1",
+                "x = 2.5\ntrigger1 = Time = 0",
+                "gatilho",
+            ),
+            ("vertical", "x = 2.5", "x = 2.5\ny = -3", "vertical"),
+            ("range", "x = 2.5", "x = 200", "intervalo"),
+            ("only_y", "x = 2.5", "y = 0", "sem componente x"),
+            (
+                "param",
+                "x = 2.5",
+                "x = 2.5\nignorehitpause = 1",
+                "ignorehitpause",
+            ),
+        ];
+        for (name, from, to, reason) in cases {
+            let (root, project) = import_strider(&format!("strider-neg-{name}"), |c| {
+                assert!(c.contains(from), "{name}: trecho ausente");
+                c.replace(from, to)
+            });
+            let report = strider_report(&project);
+            let item = behavior_item(&report, "controller:20#Walk");
+            assert_eq!(item["fidelity"], "unsupported", "{name}");
+            assert!(
+                item["reason"].as_str().unwrap().contains(reason),
+                "{name}: {}",
+                item["reason"]
+            );
+            let nodes = strider_graph_nodes(&project);
+            assert!(
+                velocity_nodes(&nodes, 20).is_empty(),
+                "{name}: nao liga o no"
+            );
+            let c = strider_c(&project);
+            assert!(!c.contains("rds_mugen_spr_strider_vx = 640;"), "{name}");
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn strider_velocity_edit_in_the_model_changes_the_generated_c_and_invalid_edit_blocks() {
+        let (root, project) = import_strider("strider-edit", |c| c);
+        let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        let set_vx = |scene: &mut crate::ugdm::entities::Scene, vx: &str| {
+            let logic = scene
+                .entities
+                .iter_mut()
+                .find(|e| e.entity_id == "strider")
+                .unwrap()
+                .components
+                .logic
+                .as_mut()
+                .unwrap();
+            let mut graph: serde_json::Value =
+                serde_json::from_str(logic.graph.as_ref().unwrap()).unwrap();
+            for n in graph["nodes"].as_array_mut().unwrap() {
+                if n["type"] == "set_velocity" && n["params"]["state_no"] == 20 {
+                    n["params"]["vx"] = serde_json::json!(vx);
+                }
+            }
+            logic.graph = Some(graph.to_string());
+        };
+        set_vx(&mut scene, "3.75");
+        save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+        let c = strider_c(&project);
+        assert!(c.contains("rds_mugen_spr_strider_vx = 960;"));
+        assert!(!c.contains("rds_mugen_spr_strider_vx = 640;"));
+        // valor nao representavel: bloqueia o build, nao vira 0
+        set_vx(&mut scene, "300");
+        save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+        let c = strider_c(&project);
+        assert!(c.contains("#error") && c.contains("mugen_velset") && c.contains("intervalo"));
+        assert!(!c.contains("rds_mugen_spr_strider_vx = 0;\n") || c.contains("#error"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn two_controlled_instances_do_not_share_velocity_or_state_machine() {
+        let (root, project) = import_strider("strider-two", |c| c);
+        let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        let mut second = scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "strider")
+            .unwrap()
+            .clone();
+        second.entity_id = "strider2".to_string();
+        second.transform.x += 120;
+        let logic = second.components.logic.as_mut().unwrap();
+        logic.graph = logic
+            .graph
+            .as_ref()
+            .map(|g| g.replace("\"strider\"", "\"strider2\""));
+        scene.entities.push(second);
+        save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+        let c = strider_c(&project);
+        assert!(c.contains("logic_var_fsm_state_strider ="), "maquina da 1a");
+        assert!(
+            c.contains("logic_var_fsm_state_strider2 ="),
+            "maquina da 2a"
+        );
+        assert_eq!(
+            c.matches("static volatile s16 rds_mugen_").count(),
+            2,
+            "um vx por instancia"
+        );
+        assert!(
+            c.contains("rds_mugen_spr_strider2_vx = 640;") || c.contains("_strider2_vx = 640;")
+        );
+        assert!(!c.contains("#error"), "geracao limpa com duas instancias");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Locomocao com a toolchain e o core reais: o deslocamento por quadro bate com o contrato
+    /// (`floor(soma(vx_q8)/256)` com o vx de cada quadro derivado das ENTRADAS, nao do runtime).
+    #[ignore]
+    #[test]
+    fn mugen_strider_real_build_run_locomotion() {
+        let (root, project) = import_strider("strider-real", |c| c);
+        let (rom, _sha, sym) = build(&project);
+        let x_addr = sym["spr_strider_x"];
+        let mut emu = EmulatorCore::new(None);
+        emu.load_rom(&rom).expect("load");
+        emu.set_joypad(JoypadState::default()).unwrap();
+        for _ in 0..60 {
+            emu.run_frame().unwrap();
+        }
+        let x0 = read_u16(&emu, x_addr) as i16;
+        assert_eq!(x0, 96, "posicao inicial da entidade");
+        // (quadros, direita, esquerda)
+        let script: [(usize, bool, bool); 6] = [
+            (30, false, false),
+            (40, true, false),
+            (30, false, false),
+            (40, false, true),
+            (30, false, false),
+            (25, true, false),
+        ];
+        let (mut acc, mut expected, mut observed): (i32, i32, Vec<i16>) = (0, 0, Vec::new());
+        let mut mismatches = Vec::new();
+        let mut frame = 0usize;
+        for (frames, right, left) in script {
+            emu.set_joypad(JoypadState {
+                right,
+                left,
+                ..JoypadState::default()
+            })
+            .unwrap();
+            for _ in 0..frames {
+                emu.run_frame().unwrap();
+                let vq8: i32 = if right {
+                    640
+                } else if left {
+                    -448
+                } else {
+                    0
+                };
+                acc += vq8;
+                let step = acc >> 8;
+                acc -= step << 8;
+                expected += step;
+                let x = read_u16(&emu, x_addr) as i16;
+                observed.push(x);
+                if x as i32 != 96 + expected {
+                    mismatches.push((frame, x, 96 + expected));
+                }
+                frame += 1;
+            }
+        }
+        let total: Vec<i16> = observed.iter().copied().step_by(10).collect();
+        eprintln!("x a cada 10 quadros: {total:?}");
+        eprintln!(
+            "primeiros desvios: {:?}",
+            &mismatches[..mismatches.len().min(12)]
+        );
+        assert!(
+            mismatches.is_empty(),
+            "{} quadros divergem do contrato",
+            mismatches.len()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
     /// Gatilho fora do perfil vira ponte explicita, nunca transicao silenciosa.
     #[test]
     fn negative_unsupported_trigger_is_bridged_not_wired() {
@@ -1987,8 +2634,8 @@ mod tests {
             assert!(t[k].as_u64().unwrap() > 0, "{k}: {t}");
         }
         assert!(
-            report["summary"]["manual_bridges"].as_u64().unwrap() >= 3,
-            "Taunt, Alt, Push"
+            report["summary"]["manual_bridges"].as_u64().unwrap() >= 2,
+            "Taunt, Alt (Push virou VelSet ligado)"
         );
         let _ = fs::remove_dir_all(root);
     }
