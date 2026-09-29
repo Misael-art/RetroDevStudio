@@ -35,9 +35,10 @@ limites de cobertura da própria célula e as provas herdadas valendo.
   e 03:00Z–03:17Z na re-execución completa da barra sobre a árbore final curada
   (os 11 gates da barra, todos rc=0; evidencia en
   `data/rex_profiles/mugen_sgdk/evidence/2026-09-29-pos-curaduria/`).
-  e 11:40Z–11:52Z na revisión de PR #86, no merge `10c1a3c` e no rexistro
-  posterior (promoción escopada de `rex-mugen`); nada pesado en local nesas
-  dúas xanelas (só gates de estrutura e consultas `gh`).
+  e 11:40Z–12:38Z na revisión de PR #86, no merge `10c1a3c`, no rexistro
+  posterior (promoción escopada de `rex-mugen`) e na consulta do rollup CI de
+  `6f74ea7`; nada pesado en local nesas xanelas (só gates de estrutura, carga
+  do JSON do rexistro e consultas `gh`).
   Nada pesado queda executado. **Consultas CI, todas pontuais sen monitor
   permanente:** a re-execución do job `desktop-smoke` en `ebfa8ea` (fronte A)
   fechou `completed`/`success` xunto con `validate` e `linux-validate`, e o CI
@@ -349,7 +350,8 @@ Kosinski nas súas transacións canónicas.
   MUGEN continuam explícitas; #85 segue intacto e draft. Se aprovado: mergear #86
   conforme política do projeto; manter rex-mugen Experimental; registrar status
   como fluxo de usuário comprovado, sem suporte geral; não abrir release."
-  **As seis verificacións, todas con comando fresco (11:40Z–11:52Z UTC):**
+  **As seis verificacións, todas con comando fresco (11:40Z–11:52Z UTC; a
+  reconsulta final do rollup CI e dos PRs fechou ás 12:38Z UTC):**
   (1) *diff final = #85 + curadoria*: `git merge-base --is-ancestor` confirma que
   `e319fb9` (base) e `bd02e3c` (cabeza do #85) están dentro de `35d0450`;
   `diff(e319fb9..35d0450)` = **113** ficheiros, `diff(e319fb9..b410de0)` = **72**,
@@ -422,8 +424,14 @@ Kosinski nas súas transacións canónicas.
   consumible), carga do JSON cos 4 paquetes e `git diff --check` da miña emenda.
   A barra pesada non se volveu executar localmente: o cambio é de rexistro + docs,
   e CI no push do tronco executa `crates:gates`, `clippy`, `cargo test --lib`,
-  `npm test`, `lint`, `tsc`, `check:tree` e os audits — o rollup por SHA rexístrase
-  no log de evidencia desta frente.
+  `npm test`, `lint`, `tsc`, `check:tree` e os audits. **Rollup terminal medido
+  no SHA pinado `6f74ea7`** (emenda publicada 10c1a3c..6f74ea7, confirmado por
+  `git ls-remote`): workflow run `36565719916` (CI #922, event push,
+  created 12:04:21Z, updated 12:28:06Z) `completed`/`success` cos dous jobs
+  (`validate` `109397008723`, `linux-validate` `109397008309`); 5 consultas
+  puntuais, sen monitor permanente; non houbo run `Desktop E2E` de push porque o
+  disparador filtra por `paths:` e a emenda só toca rexistro e docs. Logs en
+  `data/rex_profiles/mugen_sgdk/evidence/2026-09-29-revision-merge/`.
   **Frente MUGEN UX v2 aberta** (ramas e escopo, sen código nesta rolda): (1)
   relatorio de compatibilidade reabrible, (2) rótulo correcto de
   duración/animeación no Inspector en vez de «FPS», (3) limpeza do harness para non
