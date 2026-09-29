@@ -86,6 +86,23 @@ tamanhos divergentes, deslocamento fora de −128..127, animação sem tabela nu
 **bloqueiam o build** com `#error`; nunca são aproximados. `mugen_frames[].duration` é
 informativo; a fonte do tempo é `frame_durations`.
 
+## Unidades de duração (auditoria, etapa 2 da UX v2)
+
+A duração é **por elemento** da animação (uma por linha de frame do `.air`), em **ticks de 1/60 s**;
+não é FPS e não há valor uniforme por animação.
+
+| Fronteira | Campo | Unidade e valores |
+|---|---|---|
+| AIR (`air.rs`) | 5º campo da linha (`tempo`) | tick de 1/60 s; `-1` = infinito (`None`); `>= 0` aceito; `< -1` → `air.frame.bad_time` (linha ignorada) |
+| Plano (`plan.rs`) | `PlannedFrame.timer: u8` | `-1` → `0` (parado, **direto**); `1..=255` → igual (**direto**); `0` → `1` e `>255` → `255` (**aproximado**, com diagnóstico `plan.frame.zero_time`/`time_clamped`) |
+| Modelo (`AnimationDef`) | `frame_durations[i]` e `mugen_frames[i].duration` (`i32`) | ticks; `-1` = parado (o importador grava `0 → -1`); os dois campos devem ser iguais — a UI grava ambos. `fps` é só um resumo (`60/média`) e **não afeta a ROM** das animações MUGEN |
+| Gerador (`ast_generator.rs`) | `timers: Vec<u8>` | `frame_durations[i]`: `-1 → 0`, `1..=255 → i`, qualquer outro valor **falha o build** com `duracao N fora de -1 ou 1..=255` |
+| Runtime (`mugen_runtime.rs`) | `rds_mugen_<v>_timer` | um decremento por quadro do jogo; frame com timer `T` fica `T` quadros; `0` = parado. O quadro do jogo é 1/60 s no NTSC (1/50 s no PAL) |
+| Inspector | campo «Quadro N (ticks)» | mesma faixa: `-1` ou inteiro `1..=255`; `0`, `< -1`, `> 255`, vazio e não inteiro são recusados com diagnóstico, sem alterar o último valor válido. Não há ação que uniformize as durações |
+
+Perda residual conhecida: o gerador não confere `frame_durations[i] == mugen_frames[i].duration` (só o primeiro
+é usado); projetos editados à mão podem divergir sem aviso.
+
 ## Esquema de diagnóstico (`rex-mugen/diag/v1`)
 
 | Estrutura | Campos |
