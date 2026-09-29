@@ -480,6 +480,7 @@ function parseArgs(argv) {
           "inspection-preview-unavailable",
           "logic-recovery",
           "logic-recovery-branch",
+          "mugen-import",
         ].includes(
           value
         )
@@ -4384,6 +4385,285 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
     rom_size_bytes: rom.sizeBytes,
     framebuffer,
   };
+}
+
+// ── MUGEN import pela interface (perfil mugen.character.v1, Experimental) ────────
+// Fluxo visivel: wizard -> importador externo -> perfil MUGEN -> Importar -> painel de
+// compatibilidade -> Build & Run -> pixels do personagem no core -> editar x no Inspector ->
+// salvar -> reiniciar o app -> reabrir -> Build & Run -> pixels deslocados. Negativo: pacote
+// com caminho fora da pasta falha sem deixar projeto. So o dialogo nativo de pasta e
+// substituido (setNextExternalImportPath), como no importSgdkProject existente.
+async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
+  const artifactPrefix = `mugen-import-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appPath = currentE2eRunContext?.appPath ?? null;
+  const report = {
+    generatedAt: null,
+    scenario: "mugen-import",
+    maturity: "Experimental",
+    testedApplication: {
+      path: appPath,
+      sha256: appPath ? createHash("sha256").update(await readFile(appPath)).digest("hex") : null,
+    },
+    sample: {},
+    artifacts: [],
+    steps: [],
+    runs: [],
+    dialogSubstitution:
+      "somente o dialogo nativo de escolha de pasta e substituido por setNextExternalImportPath; nome, perfil, botao Importar, painel, Inspector, Salvar, reinicio, reabertura e Build & Run sao a UI visivel",
+  };
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const state = () => readAutomationState(sessionId);
+  const shot = async (name, label) =>
+    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const fixtureDir = path.join(repoRoot, "crates", "rex-mugen", "fixtures", "probe");
+  const workDir = path.join(validationDir, `${artifactPrefix}-work`);
+  const donorDir = path.join(workDir, "probe");
+  await mkdir(donorDir, { recursive: true });
+  const sampleHashes = {};
+  for (const name of ["probe.def", "probe.air", "probe.cmd", "probe.cns", "probe.sff"]) {
+    const bytes = await readFile(path.join(fixtureDir, name));
+    await writeFile(path.join(donorDir, name), bytes);
+    sampleHashes[name] = createHash("sha256").update(bytes).digest("hex");
+  }
+  report.sample = { fixture: "crates/rex-mugen/fixtures/probe", sha256: sampleHashes };
+
+  // Pixel do canvas do core em coordenadas da tela Mega Drive (320x224).
+  const sample = async (points) =>
+    js(
+      `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      const ctx = canvas.getContext("2d");
+      const sx = canvas.width / 320, sy = canvas.height / 224;
+      return { w: canvas.width, h: canvas.height, px: arguments[0].map(([x, y]) => {
+        const d = ctx.getImageData(Math.floor((x + 0.5) * sx), Math.floor((y + 0.5) * sy), 1, 1).data;
+        return [d[0], d[1], d[2]];
+      }) };
+    `,
+      [points]
+    );
+  const colorOf = ([r, g, b]) => {
+    const hi = (v) => v > 160, lo = (v) => v < 90;
+    if (hi(r) && lo(g) && lo(b)) return "red";
+    if (lo(r) && hi(g) && lo(b)) return "green";
+    if (lo(r) && lo(g) && hi(b)) return "blue";
+    return "other";
+  };
+  // Marcadores da fixture Probe (eixo = transform + (6,24)): corpo vermelho (x+4, y+14),
+  // pe (x+14, y+22) verde no idle0 e azul no idle1.
+  const observeIdle = async (x, y, label) => {
+    const seen = { idle0: 0, idle1: 0, other: 0 };
+    let dims = null;
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      const s = await sample([[x + 4, y + 14], [x + 14, y + 22]]);
+      if (s) {
+        dims = [s.w, s.h];
+        const [body, foot] = s.px.map(colorOf);
+        if (body === "red" && foot === "green") seen.idle0 += 1;
+        else if (body === "red" && foot === "blue") seen.idle1 += 1;
+        else seen.other += 1;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    report.runs.push({ label, x, y, canvas: dims, samples: seen });
+    return seen;
+  };
+
+  // 1. Wizard visivel -> importador externo -> perfil MUGEN -> Importar.
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await clickByTestId(sessionId, "wizard-external-import-toggle");
+  const selected = await js(`
+    const select = document.querySelector('[data-testid="external-import-profile-select"]');
+    if (!(select instanceof HTMLSelectElement)) return null;
+    const option = Array.from(select.options).find((o) => o.value === "mugen");
+    if (!option) return Array.from(select.options).map((o) => o.value);
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(select, "mugen");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return select.value;
+  `);
+  if (selected !== "mugen") fail(`Perfil MUGEN nao disponivel no importador: ${JSON.stringify(selected)}`);
+  const projectName = `Mugen_Probe_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [donorDir]);
+  await shot("01-importer", "importador externo com perfil MUGEN");
+  await clickByTestId(sessionId, "external-import-confirm");
+
+  // 2. Painel de compatibilidade.
+  const panelState = await waitFor(
+    async () => {
+      const current = await state();
+      return current?.mugenCompatibility?.open && current.mugenCompatibility.characters.length > 0 ? current : false;
+    },
+    60000,
+    "Painel de compatibilidade MUGEN nao abriu apos a importacao.",
+    300
+  );
+  const projectDir = panelState.activeProjectDir;
+  onProjectCreated(projectDir);
+  const character = panelState.mugenCompatibility.characters.find((c) => c.id === "probe");
+  if (!character) fail("Painel nao mostrou o personagem probe.");
+  const status = Object.fromEntries(character.categories.map((c) => [c.id, c.status]));
+  const expectedStatus = {
+    sprites: "direct", animations: "direct", commands: "direct", states: "direct",
+    collisions: "manual", sound: "absent", stage: "absent",
+  };
+  if (JSON.stringify(status) !== JSON.stringify(expectedStatus)) {
+    fail(`Categorias do painel divergem: ${JSON.stringify(status)}`);
+  }
+  const panelDom = await waitFor(
+    async () =>
+      js(`
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+      const img = q("mugen-compat-character-preview");
+      if (!(img instanceof HTMLImageElement) || !img.complete || img.naturalWidth === 0) return false;
+      return {
+        summary: q("mugen-compat-summary")?.textContent ?? "",
+        collisionLoss: q("mugen-compat-loss-collision")?.textContent ?? "",
+        stage: q("mugen-compat-category-stage")?.textContent ?? "",
+        rawLength: (q("mugen-compat-raw")?.textContent ?? "").length,
+        preview: [img.naturalWidth, img.naturalHeight],
+      };
+    `),
+    20000,
+    "Painel nao exibiu o personagem convertido.",
+    250
+  );
+  if (!panelDom.collisionLoss.includes("golpes nao acertam") || !panelDom.stage.includes("Nao existe neste pacote") || panelDom.rawLength < 200) {
+    fail(`Painel nao explicou perdas: ${JSON.stringify(panelDom)}`);
+  }
+  const consoleSummary = (panelState.consoleEntries ?? []).map((e) => String(e.message)).find((m) => m.includes("[MUGEN] probe (Experimental)"));
+  if (!consoleSummary) fail("Console nao resumiu as perdas da importacao MUGEN.");
+  await shot("02-compatibility-panel", "painel de compatibilidade MUGEN");
+  addReportStep(report, "import_via_ui_and_panel", "passed", { projectDir, status, panelDom, consoleSummary, totals: character.totals });
+  await clickByTestId(sessionId, "mugen-compat-close");
+
+  // 3. Build & Run pela UI; personagem visivel na posicao do projeto (96,96).
+  const scene0 = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  const probe0 = scene0.entities.find((e) => (e.entity_id ?? e.id) === "probe");
+  if (!probe0) fail("Cena importada sem a entidade probe.");
+  const x0 = probe0.transform.x, y0 = probe0.transform.y;
+  const run1 = await runBuildRunAndCollect(sessionId, "mugen probe original", timeoutMs, report, artifactPrefix);
+  const romSha1 = createHash("sha256").update(await readFile(run1.rom_path)).digest("hex");
+  const idle1 = await observeIdle(x0, y0, "original");
+  if (idle1.idle0 === 0 || idle1.idle1 === 0) fail(`Personagem nao apareceu com os 2 frames do idle em (${x0},${y0}): ${JSON.stringify(idle1)}`);
+  await shot("03-core-original", "personagem convertido no core");
+  addReportStep(report, "build_run_original", "passed", { rom: run1.rom_path, rom_sha256: romSha1, x: x0, y: y0, idle: idle1 });
+
+  // 4. Edicao no Inspector, salvar, reiniciar o app, reabrir.
+  const x1 = x0 + 44;
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-probe");
+  await waitFor(async () => (await state())?.selectedEntityId === "probe", 15000, "Entidade probe nao foi selecionada.", 200);
+  await setInputByTestIdNative(sessionId, "inspector-transform-x", String(x1));
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const onDisk = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+      return onDisk.entities.find((e) => (e.entity_id ?? e.id) === "probe")?.transform?.x === x1;
+    },
+    20000,
+    "Edicao de x nao chegou ao disco.",
+    300
+  );
+  addReportStep(report, "edit_and_save", "passed", { from: x0, to: x1 });
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto importado.", 300);
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto importado nao reabriu.", 300);
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-probe");
+  const reopenedX = await waitFor(
+    async () => js(`return document.querySelector('[data-testid="inspector-transform-x"]')?.value ?? false;`),
+    15000,
+    "Inspector nao mostrou x apos reabrir.",
+    200
+  );
+  if (Number(reopenedX) !== x1) fail(`x nao sobreviveu ao reinicio: ${reopenedX}`);
+  await shot("04-reopened", "projeto reaberto com x editado");
+  addReportStep(report, "restart_reopen", "passed", { reopenedX: Number(reopenedX) });
+
+  // 5. Build & Run de novo: personagem deslocado +44 e ausente da posicao antiga.
+  const run2 = await runBuildRunAndCollect(sessionId, "mugen probe editado", timeoutMs, report, artifactPrefix);
+  const romSha2 = createHash("sha256").update(await readFile(run2.rom_path)).digest("hex");
+  if (romSha2 === romSha1) fail("A ROM nao mudou apos a edicao (resposta antiga reutilizada?).");
+  const idle2 = await observeIdle(x1, y0, "editado");
+  const oldSpot = await observeIdle(x0, y0, "posicao antiga apos edicao");
+  if (idle2.idle0 === 0 || idle2.idle1 === 0) fail(`Personagem nao apareceu na posicao editada: ${JSON.stringify(idle2)}`);
+  if (oldSpot.idle0 + oldSpot.idle1 > 0) fail(`Personagem ainda aparece na posicao antiga: ${JSON.stringify(oldSpot)}`);
+  await shot("05-core-edited", "personagem na posicao editada");
+  addReportStep(report, "build_run_edited", "passed", { rom: run2.rom_path, rom_sha256: romSha2, idle: idle2, oldSpot });
+
+  // 6. Negativo: pacote com sprite fora da pasta.
+  const baseDir = path.dirname(projectDir);
+  const escapeRoot = path.join(workDir, "escape");
+  const escapeDonor = path.join(escapeRoot, "probe");
+  await mkdir(escapeDonor, { recursive: true });
+  for (const name of ["probe.air", "probe.cmd", "probe.cns"]) {
+    await writeFile(path.join(escapeDonor, name), await readFile(path.join(fixtureDir, name)));
+  }
+  await writeFile(path.join(escapeRoot, "fora.sff"), await readFile(path.join(fixtureDir, "probe.sff")));
+  const def = await readFile(path.join(fixtureDir, "probe.def"), "utf8");
+  await writeFile(path.join(escapeDonor, "probe.def"), def.replace("sprite = probe.sff", "sprite = ../fora.sff"));
+  const escapeName = `Mugen_Escape_${Date.now()}`;
+  const before = (await readdir(baseDir)).filter((n) => n.startsWith("Mugen_Escape_"));
+  await clickTopBarMenuAction(sessionId, "Novo Projeto");
+  await waitForOnboardingWizard(sessionId);
+  const toggled = await js(`return Boolean(document.querySelector('[data-testid="external-import-profile-select"]'));`);
+  if (!toggled) await clickByTestId(sessionId, "wizard-external-import-toggle");
+  await js(`
+    const select = document.querySelector('[data-testid="external-import-profile-select"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(select, "mugen");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  `);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', escapeName);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [escapeDonor]);
+  const errorsBefore = ((await state())?.consoleEntries ?? []).length;
+  await clickByTestId(sessionId, "external-import-confirm");
+  const failure = await waitFor(
+    async () => {
+      const entries = ((await state())?.consoleEntries ?? []).slice(errorsBefore);
+      const hit = entries.find((e) => String(e?.diagnostic?.technical_detail ?? "").includes("sai do pacote"));
+      return hit ?? false;
+    },
+    30000,
+    "Importacao com caminho fora do pacote nao reportou erro na UI.",
+    300
+  );
+  const userMessage = String(failure.diagnostic?.user_message ?? "");
+  if (!userMessage.includes("fora da pasta do personagem") || !userMessage.includes("Nenhum projeto foi criado")) {
+    fail(`Mensagem ao usuario nao explica a recusa: ${userMessage}`);
+  }
+  const after = (await readdir(baseDir)).filter((n) => n.startsWith("Mugen_Escape_"));
+  if (after.length !== before.length) fail(`Importacao recusada deixou pasta de projeto: ${JSON.stringify(after)}`);
+  // A comparacion de conteos non discrimina cando xa existe un Mugen_Escape_* douta
+  // execucion: exige explicitamente que O NOME desta proba non chegou ao disco.
+  if (after.includes(escapeName)) fail(`Importacao recusada deixou o projeto desta execucion: ${escapeName}`);
+  const afterState = await state();
+  if (afterState?.activeProjectDir !== projectDir) fail(`Projeto ativo mudou apos importacao recusada: ${afterState?.activeProjectDir}`);
+  await shot("06-negative", "importacao recusada sem projeto parcial");
+  addReportStep(report, "negative_path_escape", "passed", {
+    escapeName,
+    userMessage,
+    suggestedAction: failure.diagnostic?.suggested_action ?? null,
+    technicalDetail: failure.diagnostic?.technical_detail ?? null,
+    baseDir,
+    leftovers: after,
+  });
+
+  report.generatedAt = new Date().toISOString();
+  await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
+  console.log(`OK: Desktop Tauri mugen-import E2E passou. Relatorio: ${reportPath}`);
 }
 
 async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCreated) {
@@ -12531,7 +12811,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" || options.scenario === "nodegraph-authoring" || options.scenario === "behaviors-independence" || options.scenario === "collect-goal" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" || options.scenario === "nodegraph-authoring" || options.scenario === "behaviors-independence" || options.scenario === "collect-goal" || options.scenario === "mugen-import" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -12547,7 +12827,8 @@ async function main() {
     options.scenario !== "authoring-acceptance" &&
     options.scenario !== "nodegraph-authoring" &&
     options.scenario !== "behaviors-independence" &&
-    options.scenario !== "collect-goal";
+    options.scenario !== "collect-goal" &&
+    options.scenario !== "mugen-import";
   let temporaryProjectDir = "";
   let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
@@ -14142,6 +14423,18 @@ async function main() {
       } finally {
         await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
       }
+      return;
+    }
+
+    if (options.scenario === "mugen-import") {
+      await runMugenImportScenario(
+        sessionId,
+        emulatorActivationTimeoutMs,
+        uiBootstrapTimeoutMs,
+        (projectDir) => {
+          temporaryProjectDir = projectDir;
+        }
+      );
       return;
     }
 

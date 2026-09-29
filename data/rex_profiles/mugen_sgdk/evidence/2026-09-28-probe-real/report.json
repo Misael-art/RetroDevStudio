@@ -1,0 +1,291 @@
+{
+  "layer": "tecnica: import pelo caminho do produto + build SGDK + core direto; sem UI/teclado",
+  "loaded_rom_sha256": {
+    "edited": "16aaff85b54378e278417c44bf356b086393fe7df8a89687e8b8ccb1a7861e4e",
+    "original": "c9b15745500f25a318d2092c4cf0657aadad3a2784c4ba1f3827e8f8b7d6bb21"
+  },
+  "observed": {
+    "clsn1_edited": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "clsn1_original": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "idle_runs_original": [
+      [
+        "idle1",
+        6
+      ],
+      [
+        "idle0",
+        5
+      ],
+      [
+        "idle1",
+        9
+      ],
+      [
+        "idle0",
+        5
+      ],
+      [
+        "idle1",
+        9
+      ],
+      [
+        "idle0",
+        5
+      ],
+      [
+        "idle1",
+        3
+      ]
+    ],
+    "press_to_punch_frames": {
+      "edited": 1,
+      "original": 1
+    },
+    "punch_runs_edited": [
+      [
+        "punch0",
+        3
+      ],
+      [
+        "punch1",
+        12
+      ],
+      [
+        "punch0_hflip",
+        4
+      ],
+      [
+        "idle0",
+        7
+      ],
+      [
+        "idle1",
+        9
+      ],
+      [
+        "idle0",
+        5
+      ],
+      [
+        "idle1",
+        9
+      ]
+    ],
+    "punch_runs_original": [
+      [
+        "punch0",
+        3
+      ],
+      [
+        "punch1",
+        6
+      ],
+      [
+        "punch0_hflip",
+        4
+      ],
+      [
+        "idle0",
+        7
+      ],
+      [
+        "idle1",
+        9
+      ],
+      [
+        "idle0",
+        5
+      ],
+      [
+        "idle1",
+        9
+      ],
+      [
+        "idle0",
+        5
+      ],
+      [
+        "idle1",
+        1
+      ]
+    ]
+  },
+  "prediction": {
+    "axis_screen": [
+      102,
+      120
+    ],
+    "clsn1_active_frames": {
+      "edited": 12,
+      "original": 6
+    },
+    "idle_cycle": [
+      [
+        "idle0",
+        5
+      ],
+      [
+        "idle1",
+        9
+      ]
+    ],
+    "pixel_markers": {
+      "idle0": "vermelho (100,110), verde (110,118)",
+      "idle1": "azul (110,118)",
+      "punch0": "punho branco a direita (108,105)",
+      "punch0_hflip": "punho branco a esquerda do eixo (95,105), corpo em (103,110)",
+      "punch1": "corpo amarelo (100,110) por offset +2, punho (110,103)"
+    },
+    "punch_edited_frame1_12": [
+      [
+        "punch0",
+        3
+      ],
+      [
+        "punch1",
+        12
+      ],
+      [
+        "punch0_hflip",
+        4
+      ],
+      [
+        "idle0",
+        7
+      ],
+      [
+        "idle1",
+        9
+      ]
+    ],
+    "punch_original": [
+      [
+        "punch0",
+        3
+      ],
+      [
+        "punch1",
+        6
+      ],
+      [
+        "punch0_hflip",
+        4
+      ],
+      [
+        "idle0",
+        7
+      ],
+      [
+        "idle1",
+        9
+      ]
+    ],
+    "registered_before_execution": true
+  },
+  "roms": {
+    "edited_frame1_12": "16aaff85b54378e278417c44bf356b086393fe7df8a89687e8b8ccb1a7861e4e",
+    "original": "c9b15745500f25a318d2092c4cf0657aadad3a2784c4ba1f3827e8f8b7d6bb21"
+  }
+}

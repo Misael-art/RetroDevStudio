@@ -1,5 +1,151 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-29 (h) — integrador, **PR #85 MUGEN → SGDK integrado na árbore do integrador: importación de personaje, panel de compatibilidade e edición persistente probados na UI** (Experimental; publicado como PR #86 sen merge, sen release, sen promoción de maturidade)
+
+**Estado real desta superficie.** O produto acepta **un** caso de uso MUGEN:
+importar un personaje do subconxunto `air` + `sff v1` + paleta nivel VDP +
+`cmd`/`cns` lidos como perfis, e levalo a ROM real por Build & Run. O degrau
+declarado en `crates/registry.json` para `rex-mugen` é
+**`gates-proprios-aprovados`** — non se subiu a `backend-integrado` nin a
+`fluxo-do-usuario-comprovado` neste checkpoint, porque a promoción é decisión
+do operador; o que existe é evidencia. Todo o fluxo permanece etiquetado
+`Experimental` no informe do E2E e na UI.
+
+**Commits desta célula:** `b410de0` (merge curado do PR #85 sobre o tronco do
+integrador; pais `e319fb9` + `bd02e3c`; índice de 72 ficheiros, +7910 / −88) e
+o commit de curaduría que rexistra esta célula (reescribe a entrada `rex-mugen`
+de `crates/registry.json`, emenda `docs/rex_profiles/ROUND_STATE.md` e reforza
+unha aserción do harness). **O PR #85 mantense draft no remoto: non se fixo
+merge del, nin release, nin promoción de maturidade, e non se lle engadiu
+comentario ningún — o #85 só se referencia.**
+
+**Publicación desta frente (2026-09-29, ordem expresa do operador: "faça push
+da branch `codex/rex-integrator-mugen-85` e abra um PR integrado no GitHub, sem
+merge, sem release e sem promoção de maturidade").** Antes do push, o tronco do
+integrador `codex/rex-integrator-crates-registry` adiantouse en fast-forward
+`00f9d29..e319fb9` (publica `aa959a9` + `e319fb9`; `git fetch` antes do push
+confirmou 0 atrás / 2 á frente) para que o diff do PR sexa exactamente a
+integración de #85 máis a curaduría. Esta frente quedou en `d36df92` no remoto
+e abriu-se o **PR #86** (`Integrate experimental MUGEN import flow`, base
+`codex/rex-integrator-crates-registry`, head `codex/rex-integrator-mugen-85`,
+24 commits, 113 ficheiros, +18009/−90, `isDraft=false`, `mergeable=MERGEABLE`,
+`mergeStateStatus=CLEAN`), coa descrición obrigatoria completa: base, merge
+curado, curaduría, conflito de `src-tauri/Cargo.toml`, os 11 gates do destino
+coas contaxes, os 8 puntos do E2E e as 8 limitacións rexistradas. **CI
+terminal sobre o SHA pinado `d36df92`, medido por consulta pontual sen monitor
+permanente:** catro runs `completed`/`success` — `CI` `36542842781`
+(`linux-validate` 08:27:36Z→08:40:54Z; `validate` →08:50:28Z), `Desktop E2E`
+`36542842770` (`desktop-smoke` →08:46:52Z), `CI` `36542937864` (`validate`
+→08:52:04Z; `linux-validate` →08:41:42Z) e `Desktop E2E` `36542937819`
+(`desktop-smoke` →08:48:23Z); `CodeRabbit` `pass` (reviews desactivados para
+esta base) e `Sourcery review` `skipping`. Despois desa medição, `eaf980c`
+(só os dous documentos de estado: rexistro desta mesma publicación) entrou na
+mesma branch por fast-forward `d36df92..eaf980c`, e o seu CI tamén é terminal
+verde — `CI` `36546968827` (push) + `36546969248` (pull_request) e `Desktop E2E`
+`36546969249` (pull_request), todos `completed`/`success` (`CodeRabbit` `pass`,
+`Sourcery` `skipping`); **non houbo run `Desktop E2E` de `push` porque o
+disparador `push` do workflow filtra por `paths:` e `docs/` non está nessa
+lista** — o gate de PR seguiu executado e verde. O CI do commit que leva esta
+liña non se volveu pinar aqui para non mover o head outra vez: consúltase con
+`gh pr checks 86`. **Non houbo merge: #86 queda aberto para revisión humana e
+#85 segue draft.**
+
+**Revisión das 5 superficies centrais tocadas (todas reservadas ao integrador).**
+`src-tauri/src/lib.rs` (+91/−14): envolve a importación externa nas dúas vías,
+chama `discard_failed_import(project_dir, origin)` segundo a orixe reservada do
+cartafol e fusiona `mugen_profile::summary_line()` no aviso de éxito.
+`src/App.tsx` (+74): estado `mugenCompatibility`, render do panel,
+`__RDS_E2E__.setNextExternalImportPath` e `testid` de confirmación.
+`src/core/diagnostics.ts` (+45/−2): `mugenImportCause()` con causa + acción
+suxerida para os catro casos e peche «Nenhum projeto foi criado.».
+`scripts/e2e-tauri-build-run.mjs` (+291/−2): escenario `mugen-import`.
+`src-tauri/Cargo.toml`: único conflito da integración, 2 liñas de path-deps,
+resolto conservando `rex-kosinski`, `rex-gameplay` **e** `rex-mugen`, sen apagar
+avanço do integrador (`git diff --diff-filter=U` = 0, ningún marcador na árbore).
+
+**Barra no destino (todos rc=0).** `npm run check:tree`, `npm run lint`,
+`npx tsc --noEmit`, `npm test` **812 passed / 0 failed / 6 skipped**, `cargo fmt
+--check`, `cargo clippy --lib -- -D warnings`, `cargo clippy -- -D warnings`,
+`cargo test --lib` **796 executados / 0 fallos / 70 ignorados**, `npm run
+crates:gates` cos 4 paquetes, `node --check` do harness e `npm run host:certify`
+(host **READY**, fingerprint `60249508…`, lock `dd99a22f…`, smoke oficial
+SGDK/PVSnesLib `Success: true`). A barra foi **reexecutada íntegra sobre a árbore
+final curada** (2026-09-29T03:00Z–03:17Z) despois de reescribir o rexistro e
+reforzar a aserción do harness, con contaxes idénticas; o E2E non se volveu
+executar porque entre run7 e esa reexecución non mudou ningún byte de produto,
+de fixture ou do escenario. Reconciliación independente da contaxe Rust: base
+`a08c2c6` 770/66 + PR 15/3 (os 18 `#[test]` de `mugen_profile.rs`, 3 deles
+`#[ignore]`) + integrador 11/1 = **796/70**; os 781/0/69 anunciados pola fronte
+son unha medición anterior á súa propia entrega. **Débeda preexistente, non
+atribuíble ao PR:** `cargo clippy --all-targets` reproba con 46 avisos de
+`#[cfg(test)]` (`rex_context` 18, `rex_aplib` 8, `rex_resources` 5, `project_mgr`
+5, `rex_codecs` 4, e 1 cada un en `logic_recovery`, `holdout`,
+`graphics_discovery`, `lib.rs:165`, `build_orch:5227`); cruzadas as 45
+localizacións únicas coas liñas engadidas polo PR, **0** caen nelas. Rexístrase e
+non se corrige (atribúese, non se arrecula o avance alleo).
+
+**E2E desktop `mugen-import` verde** (run7, 2026-09-29T02:46Z–02:47Z, binario
+SHA-256 `1b46ff50…`, fixture autoral con SHA por arquivo). As 7 validacións
+pedidas polo operador están probadas, con separación honesta entre o que proba o
+core e o que só proba a interface: (1) a falla non deixa projeto fantasma
+(`failed_import_does_not_leave_a_project_that_looks_valid`,
+`failed_import_into_existing_empty_dir_keeps_the_dir_empty`, e no E2E a
+comprobación explícita de que o `escapeName` desta execución non chegou ao
+disco); (2) o relatório aparece na UI (tests do panel + asercións DOM, 7
+categorías `{sprites/animations/commands/states: direct, collisions: manual,
+sound/stage: absent}`, texto cru de 15 527 caracteres); (3) o éxito resume perdas
+(`successful_import_summarizes_losses_by_category`,
+`sentinel_summary_exposes_every_loss_class`, e o console `[MUGEN] probe
+(Experimental): 12 funcionam igual, 0 con diferenca, 1 precisam de ajuste seu, 0
+nao convertidos`); (4) os caminhos fora do paquete recusanse (4 tests negativos +
+o negativo do E2E); (5) o projeto aberto anterior non muda tras a falla
+(`activeProjectDir` invariado — **só probado no E2E**, sen test Rust); (6) o
+personaxe aparece no core (Build & Run real, mostra no canvas 320×224 en (96,96):
+idle0=11, idle1=14; a proba `mugen_probe_real_build_run_edit_and_effect` segue
+`#[ignore]`); (7) a edición no Inspector persiste tras salvar, reiniciar e
+reabrir (x 96→140, reapertura en 140, ROM `10658a6c…` vs `5a6aff76…`, personaxe
+na posición nova e vella baleira — **só probado no E2E**).
+
+**Dous achados na superficie do propio integrador.** (a) A aserción do projeto
+fantasma comparaba só o *conteo* de cartafoles `Mugen_Escape_*`, polo que non era
+discriminante cando xa existía un de outra execución — endurecida para esixir que
+o nome desta proba non estea no disco, e run7 reexecutado despois do endurecemento.
+(b) Tras o reinicio do E2E queda unha instancia de `retro-dev-studio` viva
+(observado en run4 e run7) — rexistrada como límite do harness, **non** corrixida
+nesta rolda. O cartafol `Mugen_Escape_1790639205721` que aínda existe en
+`~/Documents/RetroDevProjects` non é un fantasma MUGEN: o seu `project.rds`
+declara `template_id = "starter_guided"`, `source_kind = "builtin"`, polo que o
+creou o onboarding doutra rolda; non se borrou.
+
+**Condición do host (non escondida).** O output primario pasou a ser un panel
+rotado `1280x800+0+0` e o compositor recorta alí as xanelas, así que o
+redimensionado a 1920×1080 CSS era imposible (`inner=948x564`, factor físico/CSS
+1,35). Un vixía temporal **fóra do repo** colocou só a xanela da app de proba no
+monitor externo (`3456x1458+1281+0`, físico 2592×1458 = 1920×1080 CSS) para
+reproducir o mesmo viewport da proba da fronte. Non se mudou a configuración de
+pantallas do operador nin se alterou o harness para aceptar outra xeometría.
+
+**Limites rexistrados (o que non se alega).** SFF v2, som, stage e colisión
+lóxica seguen fóra. Comando por teclado e golpe son proba técnica/core, **non**
+de UI. O relatório de compatibilidade non ten reapertura futura. O Inspector usa
+a etiqueta «FPS» para unha animación MUGEN (rótulo inadecuado, coñecido). Non se
+copia o runtime C `mg_*` (base HAMOOPIG de terceiros, licenza non verificada —
+`docs/rex_profiles/mugen_sgdk/AUDIT.md`) e non se asume licenza estra. **Aberto,
+en mans do operador:** promoción de degrau, licenza e fluxo de usuario completo
+(para á importación, edición de animación e xogo).
+
+**Evidencia:** `data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/`
+(logs por paso, informe do E2E, 6 capturas, `LEIAME-e2e-e-host.md` cos descartes
+explícitos das execucións non válidas e `SHA256SUMS` de 26 ficheiros verificados)
+e `data/rex_profiles/mugen_sgdk/evidence/2026-09-29-pos-curaduria/` (reexecución
+da barra sobre a árbore final, `LEIAME.md` con rc/comando/log/medida por gate e
+`SHA256SUMS` de 11 ficheiros verificados).
+
+**Arquivos alheios á rolda** (`APJ-unpack`, `a.out`, `apultra-decode`,
+`.mimosa/`, `src-tauri/.mimosa/`, `src-tauri/src-tauri/`,
+`data/canonical-local-2026-09-21/`, `__pycache__/` e o log de consulta CI da
+fronte) seguen intocados: non executados, non stagingados, non apagados.
+
 ### Checkpoint 2026-09-26 (g) — integrador, **aPLib em Rust canônico**: decoder aceito pelos vetores, um bug de formato achado por arbitragem em stream real e aceite BYOR das duas streams (Experimental; sem merge, sem release, sem promoção)
 
 **Commits desta frente** (`codex/rex-integrator-aplib-decode`, baseada no trunk

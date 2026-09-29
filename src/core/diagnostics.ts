@@ -138,7 +138,7 @@ export function createFallbackDiagnostic(input: {
     column,
     user_message: fallbackUserMessage(input.area, sourcePath, technicalDetail),
     technical_detail: technicalDetail,
-    suggested_action: input.suggestedAction ?? fallbackSuggestedAction(input.area),
+    suggested_action: input.suggestedAction ?? fallbackSuggestedAction(input.area, technicalDetail),
     blocking,
     evidence_path: input.evidencePath ?? null,
   };
@@ -180,6 +180,39 @@ export function normalizeBuildDiagnostics(
   );
 }
 
+/** Causas especificas da importacao MUGEN (perfil mugen.character.v1), a partir da
+ * mensagem real do backend. A importacao recusada nao deixa projeto (limpeza no backend). */
+function mugenImportCause(technicalDetail: string): { message: string; action: string } | null {
+  const lower = technicalDetail.toLowerCase();
+  const escaping = technicalDetail.match(/caminho '([^']+)' (?:sai do pacote|absoluto recusado)/)?.[1];
+  const oversized = technicalDetail.match(/'([^']+)' tem \d+ bytes, acima do limite/)?.[1];
+  if (escaping) {
+    return {
+      message: `Importacao MUGEN recusada por seguranca: o pacote aponta para '${escaping}', fora da pasta do personagem. Nenhum projeto foi criado.`,
+      action: "Coloque o arquivo dentro da pasta do pacote e corrija o caminho no .def antes de importar de novo.",
+    };
+  }
+  if (oversized) {
+    return {
+      message: `Importacao MUGEN recusada: '${oversized}' e maior que o limite aceito pelo perfil. Nenhum projeto foi criado.`,
+      action: "Confira se escolheu o pacote certo; arquivos de texto do MUGEN tem ate 1 MiB e o SFF ate 32 MiB.",
+    };
+  }
+  if (lower.includes("plan.budget.cell_too_large")) {
+    return {
+      message: "Importacao MUGEN recusada: os sprites, somados ao eixo, passam de 248 px (limite do Mega Drive nesta conversao). Nenhum projeto foi criado.",
+      action: "Reduza o tamanho ou o deslocamento de eixo dos maiores sprites no SFF, ou importe menos animacoes.",
+    };
+  }
+  if (lower.includes("sff v2") || lower.includes("versao nao suportada")) {
+    return {
+      message: "Importacao MUGEN recusada: o SFF e da versao 2, que esta conversao ainda nao le. Nenhum projeto foi criado.",
+      action: "Converta o SFF para a versao 1 (por exemplo no editor do MUGEN 1.0) e importe de novo.",
+    };
+  }
+  return null;
+}
+
 function fallbackUserMessage(
   area: DiagnosticArea,
   sourcePath: string | null | undefined,
@@ -204,6 +237,10 @@ function fallbackUserMessage(
     return "Runtime Setup falhou ao preparar uma dependencia oficial.";
   }
 
+  if (area === "import_mugen") {
+    const cause = mugenImportCause(technicalDetail);
+    if (cause) return cause.message;
+  }
   if (IMPORT_AREAS.has(area)) {
     return `${importFailureLabel(area)} falhou porque a origem nao pode ser processada.`;
   }
@@ -232,7 +269,11 @@ function importFailureLabel(area: DiagnosticArea): string {
   }
 }
 
-function fallbackSuggestedAction(area: DiagnosticArea): string {
+function fallbackSuggestedAction(area: DiagnosticArea, technicalDetail = ""): string {
+  if (area === "import_mugen") {
+    const cause = mugenImportCause(technicalDetail);
+    if (cause) return cause.action;
+  }
   if (area === "build_sgdk") {
     return "Abra o detalhe tecnico, corrija o asset/codigo indicado ou reinstale SGDK pelo Runtime Setup.";
   }

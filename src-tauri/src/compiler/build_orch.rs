@@ -3243,12 +3243,14 @@ mod tests {
                     frames: vec![0],
                     frame_time: 10,
                     looping: true,
+                    mugen: None,
                 },
                 SpriteAnimation {
                     name: "run".into(),
                     frames: vec![3, 1, 2],
                     frame_time: 5,
                     looping: true,
+                    mugen: None,
                 },
             ],
         };

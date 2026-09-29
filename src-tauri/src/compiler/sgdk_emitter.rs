@@ -233,6 +233,8 @@ fn build_main_c_inner(
     }
     // Resolved after the body is rendered: only declared when edge input / music guards are used.
     out.push_str(RUNTIME_STATE_DECL_MARKER);
+    // Perfil MUGEN (Experimental): tabelas e tick de animacao gerados a partir do modelo.
+    out.push_str(&super::mugen_runtime::render_decls(ast));
     if has_rom_addq_word {
         out.push_str(
             "static volatile u32 *const rds_logic_recovery_oracle_value = (volatile u32 *)0xE0FFFF00;\n",
@@ -694,6 +696,7 @@ static u8 rds_hits_wall(s16 x, s16 y, u16 w, u16 h, s16 dx)\n{{\n    s16 edge = 
                     );
                 }
                 render_retrofx_frame(&mut out, &parallax_layers, &raster_lines, 8);
+                out.push_str(&super::mugen_runtime::render_ticks(ast, 8));
                 if managed_sprites {
                     out.push_str("        rds_sync_sprite_residency();\n");
                 }
@@ -2037,6 +2040,7 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
             }
         }
         LogicBoolExpr::Grounded { var_name } => format!("({var_name}_on_ground)"),
+        LogicBoolExpr::SpriteAnimDone { var_name } => format!("rds_anim_done_{var_name}()"),
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
             left_x = logic_x_expr(left),
@@ -2552,7 +2556,9 @@ pub(crate) fn collect_grounded_vars(ast: &AstOutput) -> std::collections::BTreeS
 
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
-        LogicBoolExpr::Literal(_) | LogicBoolExpr::Grounded { .. } => false,
+        LogicBoolExpr::Literal(_)
+        | LogicBoolExpr::Grounded { .. }
+        | LogicBoolExpr::SpriteAnimDone { .. } => false,
         LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
@@ -2921,6 +2927,7 @@ mod tests {
             frames: vec![0, 1, 2, 3],
             frame_time,
             looping,
+            mugen: None,
         };
         SpriteAsset {
             resource_name: "hero".to_string(),
@@ -3054,6 +3061,7 @@ mod tests {
             frames: vec![1, 2, 3],
             frame_time: 5,
             looping: true,
+            mugen: None,
         });
         assert_eq!(resource_animation_time(&asset), "[[10][5,5,5]]");
     }

@@ -1,0 +1,446 @@
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Checking rex-mugen v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/crates/rex-mugen)
+error: struct update has no effect, all the fields in the struct have already been specified
+    --> src/compiler/build_orch.rs:5227:15
+     |
+5227 |             ..BuildEnvironment::default()
+     |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_update
+     = note: `-D clippy::needless-update` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::needless_update)]`
+
+error: using `contains()` instead of `iter().any()` is more efficient
+     --> src/core/project_mgr.rs:21217:52
+      |
+21217 |             map.width == 40 && map.height == 28 && map.data.iter().any(|cell| *cell == 1)
+      |                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `map.data.contains(&1)`
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_contains
+      = note: `-D clippy::manual-contains` implied by `-D warnings`
+      = help: to override `-D warnings` add `#[allow(clippy::manual_contains)]`
+
+error: used `assert_eq!` with a literal bool
+     --> src/core/project_mgr.rs:22151:9
+      |
+22151 |         assert_eq!(physics.gravity, false);
+      |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#bool_assert_comparison
+      = note: `-D clippy::bool-assert-comparison` implied by `-D warnings`
+      = help: to override `-D warnings` add `#[allow(clippy::bool_assert_comparison)]`
+help: replace it with `assert!(..)`
+      |
+22151 -         assert_eq!(physics.gravity, false);
+22151 +         assert!(!physics.gravity);
+      |
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+     --> src/core/project_mgr.rs:25881:21
+      |
+25881 | /                     &checkpoint
+25882 | |                         .file_stem()
+25883 | |                         .and_then(|stem| stem.to_str())
+25884 | |                         .unwrap_or("checkpoint-frame"),
+      | |______________________________________________________^
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+      = note: `-D clippy::needless-borrow` implied by `-D warnings`
+      = help: to override `-D warnings` add `#[allow(clippy::needless_borrow)]`
+help: change this to
+      |
+25881 ~                     checkpoint
+25882 +                         .file_stem()
+25883 +                         .and_then(|stem| stem.to_str())
+25884 ~                         .unwrap_or("checkpoint-frame"),
+      |
+
+error: very complex type used. Consider factoring parts into `type` definitions
+     --> src/core/project_mgr.rs:27151:10
+      |
+27151 |     ) -> Result<(usize, String, u32, u32, u32, Vec<u8>), String> {
+      |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+      = note: `-D clippy::type-complexity` implied by `-D warnings`
+      = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: very complex type used. Consider factoring parts into `type` definitions
+     --> src/core/project_mgr.rs:27250:10
+      |
+27250 |     ) -> Result<(usize, String, u32, u32, u32, Vec<u8>), String> {
+      |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+      |
+      = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+error: the following explicit lifetimes could be elided: 'a
+    --> src/tools/reverse/decomp/graphics_discovery.rs:1946:24
+     |
+1946 |     fn classify_symbol<'a>(symbol_name: &str, res_decls: &'a [ResDecl]) -> (String, ProvenClass) {
+     |                        ^^                                 ^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_lifetimes
+     = note: `-D clippy::needless-lifetimes` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::needless_lifetimes)]`
+help: elide the lifetimes
+     |
+1946 -     fn classify_symbol<'a>(symbol_name: &str, res_decls: &'a [ResDecl]) -> (String, ProvenClass) {
+1946 +     fn classify_symbol(symbol_name: &str, res_decls: &[ResDecl]) -> (String, ProvenClass) {
+     |
+
+error: unnecessary use of `clone` to create a slice from a reference
+   --> src/tools/reverse/decomp/holdout.rs:661:65
+    |
+661 |                 let measurement = &measure_holdout(&candidates, &[region.clone()])[0];
+    |                                                                 ^^^^^^^^^^^^^^^^^ help: try: `std::slice::from_ref(&region)`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#cloned_ref_to_slice_refs
+    = note: `-D clippy::cloned-ref-to-slice-refs` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::cloned_ref_to_slice_refs)]`
+
+error: equality checks against false can be replaced by a negation
+   --> src/tools/reverse/decomp/logic_recovery.rs:620:17
+    |
+620 |         assert!(wrapped.1 == false && wrapped.2 && wrapped.4 && wrapped.5);
+    |                 ^^^^^^^^^^^^^^^^^^ help: try: `!wrapped.1`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#bool_comparison
+    = note: `-D clippy::bool-comparison` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::bool_comparison)]`
+
+error: it looks like the same item is being pushed into this `Vec`
+   --> src/tools/reverse/decomp/rex_aplib.rs:994:13
+    |
+994 |             bits.push(1);
+    |             ^^^^
+    |
+    = help: consider using `vec![1;SIZE]`
+    = help: or `bits.extend(std::iter::repeat_n(1, SIZE))`
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#same_item_push
+    = note: `-D clippy::same-item-push` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::same_item_push)]`
+
+error: it looks like the same item is being pushed into this `Vec`
+    --> src/tools/reverse/decomp/rex_aplib.rs:1017:13
+     |
+1017 |             bits.push(0);
+     |             ^^^^
+     |
+     = help: consider using `vec![0;SIZE]`
+     = help: or `bits.extend(std::iter::repeat_n(0, SIZE))`
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#same_item_push
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_aplib.rs:1037:18
+     |
+1037 |                   .err()
+     |  __________________^
+1038 | |                 .expect("stream vazio deve ser recusado")
+     | |_______________________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+     = note: `-D clippy::err-expect` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::err_expect)]`
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_aplib.rs:1050:14
+     |
+1050 |               .err()
+     |  ______________^
+1051 | |             .expect("max_output 0 deve recusar antes de qualquer byte")
+     | |___________________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_aplib.rs:1294:10
+     |
+1294 |           .err()
+     |  __________^
+1295 | |         .expect("4096 bytes incompressíveis não cabem num slot de 64");
+     | |_______________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_aplib.rs:1322:14
+     |
+1322 |               .err()
+     |  ______________^
+1323 | |             .expect("um byte a menos não cabe")
+     | |___________________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_aplib.rs:1336:14
+     |
+1336 |               .err()
+     |  ______________^
+1337 | |             .expect("orçamento zero recusa antes de alocar")
+     | |___________________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_aplib.rs:1426:10
+     |
+1426 |           .err()
+     |  __________^
+1427 | |         .expect("2 000 operações não pagam ~8 000 comparações de busca");
+     | |_______________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: very complex type used. Consider factoring parts into `type` definitions
+    --> src/tools/reverse/decomp/rex_codecs.rs:1479:22
+     |
+1479 |         let configs: [(&str, usize, u32, usize, usize, usize, usize, u32, u32); 5] = [
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+error: manual `RangeInclusive::contains` implementation
+    --> src/tools/reverse/decomp/rex_codecs.rs:1576:36
+     |
+1576 |   ...                   && off >= 1
+     |  __________________________^
+1577 | | ...                   && off <= ENCODER_WINDOW_WORDS,
+     | |____________________________________________________^ help: use: `(1..=ENCODER_WINDOW_WORDS).contains(&off)`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_range_contains
+     = note: `-D clippy::manual-range-contains` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::manual_range_contains)]`
+
+error: manual `RangeInclusive::contains` implementation
+    --> src/tools/reverse/decomp/rex_codecs.rs:1584:36
+     |
+1584 |   ...                   && off >= 1
+     |  __________________________^
+1585 | | ...                   && off <= SHORT_MAX_OFFSET_WORDS,
+     | |______________________________________________________^ help: use: `(1..=SHORT_MAX_OFFSET_WORDS).contains(&off)`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_range_contains
+
+error: very complex type used. Consider factoring parts into `type` definitions
+    --> src/tools/reverse/decomp/rex_codecs.rs:1765:22
+     |
+1765 |         let configs: [(usize, u32, usize, usize, usize, usize, u32, u32); 3] = [
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#type_complexity
+
+error: manual implementation of `.is_multiple_of()`
+    --> src/tools/reverse/decomp/rex_context.rs:2069:12
+     |
+2069 |         if at % 2 != 0 {
+     |            ^^^^^^^^^^^ help: replace with: `!at.is_multiple_of(2)`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+     = note: `-D clippy::manual-is-multiple-of` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::manual_is_multiple_of)]`
+
+error: manual implementation of `.is_multiple_of()`
+    --> src/tools/reverse/decomp/rex_context.rs:2682:12
+     |
+2682 |         if col % 2 == 0 {
+     |            ^^^^^^^^^^^^ help: replace with: `col.is_multiple_of(2)`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#manual_is_multiple_of
+
+error: the borrowed expression implements the required traits
+    --> src/tools/reverse/decomp/rex_context.rs:2761:33
+     |
+2761 |             .and_then(|x| x.get(&tile.to_string()))
+     |                                 ^^^^^^^^^^^^^^^^^ help: change this to: `tile.to_string()`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrows_for_generic_args
+     = note: `-D clippy::needless-borrows-for-generic-args` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::needless_borrows_for_generic_args)]`
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:2852:41
+     |
+2852 |         let cadeia = cadeia_do_mapa(&d, &mapa);
+     |                                         ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:2912:55
+     |
+2912 |         let camada = compor_camada(tileset.decoded(), &mapa, &paleta).expect("camada composta");
+     |                                                       ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: casting to the same type is unnecessary (`usize` -> `usize`)
+    --> src/tools/reverse/decomp/rex_context.rs:2913:20
+     |
+2913 |         assert_eq!(camada.width as usize * camada.height as usize, {
+     |                    ^^^^^^^^^^^^^^^^^^^^^ help: try: `camada.width`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_cast
+     = note: `-D clippy::unnecessary-cast` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::unnecessary_cast)]`
+
+error: casting to the same type is unnecessary (`usize` -> `usize`)
+    --> src/tools/reverse/decomp/rex_context.rs:2913:44
+     |
+2913 |         assert_eq!(camada.width as usize * camada.height as usize, {
+     |                                            ^^^^^^^^^^^^^^^^^^^^^^ help: try: `camada.height`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_cast
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:2956:36
+     |
+2956 |             let celula = celula_em(&mapa, *x, *y).unwrap_or_else(|e| {
+     |                                    ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:2971:43
+     |
+2971 |         for celula in ocorrencias_do_tile(&mapa, t_fonte).expect("ocorrências") {
+     |                                           ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:2990:49
+     |
+2990 |         let compartilhado = ocorrencias_do_tile(&mapa, t_fonte).expect("ocorrências do tile 2");
+     |                                                 ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:3011:37
+     |
+3011 |                 ocorrencias_do_tile(&mapa, tile).expect("ocorrências").len(),
+     |                                     ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:3017:33
+     |
+3017 |             ocorrencias_do_tile(&mapa, 15)
+     |                                 ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:3025:29
+     |
+3025 |             celulas_do_mapa(&mapa)
+     |                             ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:3035:53
+     |
+3035 |         let erro = compor_camada(tileset.decoded(), &ghost, &paleta)
+     |                                                     ^^^^^^ help: change this to: `ghost`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:3274:41
+     |
+3274 |         let cadeia = cadeia_do_mapa(&d, &mapa);
+     |                                         ^^^^^ help: change this to: `mapa`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:3351:51
+     |
+3351 |         let cadeia_nova = cadeia_do_mapa(&d_novo, &mapa_novo);
+     |                                                   ^^^^^^^^^^ help: change this to: `mapa_novo`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: this expression creates a reference which is immediately dereferenced by the compiler
+    --> src/tools/reverse/decomp/rex_context.rs:3374:49
+     |
+3374 |         let camada_depois = compor_camada(novo, &mapa_novo, &paleta_nova).expect("camada depois");
+     |                                                 ^^^^^^^^^^ help: change this to: `mapa_novo`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#needless_borrow
+
+error: casting to the same type is unnecessary (`usize` -> `usize`)
+    --> src/tools/reverse/decomp/rex_context.rs:3376:23
+     |
+3376 |         let largura = camada_antes.width as usize;
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: try: `camada_antes.width`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#unnecessary_cast
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_resources.rs:1241:14
+     |
+1241 |               .err()
+     |  ______________^
+1242 | |             .expect("header com tamanho declarado errado deveria ser recusado");
+     | |___________________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_resources.rs:1255:14
+     |
+1255 |               .err()
+     |  ______________^
+1256 | |             .expect("verificação aPLib deveria recusar header LZ4W");
+     | |___________________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_resources.rs:1273:14
+     |
+1273 |               .err()
+     |  ______________^
+1274 | |             .expect("guarda LZ4W foi aberta");
+     | |___________________^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: this operation has no effect
+    --> src/tools/reverse/decomp/rex_resources.rs:1526:28
+     |
+1526 |         let byte_editado = 1 * 32 + 3 * 4 + 5 / 2;
+     |                            ^^^^^^ help: consider reducing it to: `32`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#identity_op
+     = note: `-D clippy::identity-op` implied by `-D warnings`
+     = help: to override `-D warnings` add `#[allow(clippy::identity_op)]`
+
+error: called `.err().expect()` on a `Result` value
+    --> src/tools/reverse/decomp/rex_resources.rs:2462:35
+     |
+2462 |                     base.as_ref().err().expect("ramo acima")
+     |                                   ^^^^^^^^^^^^ help: try: `expect_err`
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#err_expect
+
+error: this let-binding has unit value
+   --> src/lib.rs:165:21
+    |
+165 |                     let _ = rx.recv().unwrap(); // bloqueia até o teste liberar
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.97.0/index.html#let_unit_value
+    = note: `-D clippy::let-unit-value` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::let_unit_value)]`
+help: omit the `let` binding
+    |
+165 -                     let _ = rx.recv().unwrap(); // bloqueia até o teste liberar
+165 +                     rx.recv().unwrap(); // bloqueia até o teste liberar
+    |
+
+error: could not compile `retro-dev-studio` (lib test) due to 45 previous errors
