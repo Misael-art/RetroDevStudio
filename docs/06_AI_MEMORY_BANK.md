@@ -47,8 +47,8 @@ verde — `CI` `36546968827` (push) + `36546969248` (pull_request) e `Desktop E2
 disparador `push` do workflow filtra por `paths:` e `docs/` non está nessa
 lista** — o gate de PR seguiu executado e verde. O CI do commit que leva esta
 liña non se volveu pinar aqui para non mover o head outra vez: consúltase con
-`gh pr checks 86`. **Non houbo merge: #86 queda aberto para revisión humana e
-#85 segue draft.**
+`gh pr checks 86`. **Aínda sen merge nese intre: #86 quedou
+aberto para revisión humana (pecha na célula (i)) e #85 segue draft.**
 
 **Revisión das 5 superficies centrais tocadas (todas reservadas ao integrador).**
 `src-tauri/src/lib.rs` (+91/−14): envolve a importación externa nas dúas vías,
