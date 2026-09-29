@@ -4539,6 +4539,23 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   if (!consoleSummary) fail("Console nao resumiu as perdas da importacao MUGEN.");
   await shot("02-compatibility-panel", "painel de compatibilidade MUGEN");
   addReportStep(report, "import_via_ui_and_panel", "passed", { projectDir, status, panelDom, consoleSummary, totals: character.totals });
+  // Instantaneo do painel (categorias, totais e perdas exibidos) para comparar apos reabrir.
+  const snapshotPanel = () =>
+    js(`
+      const all = (sel) => Array.from(document.querySelectorAll(sel));
+      const txt = (el) => (el?.textContent ?? "").replace(/\\s+/g, " ").trim();
+      return {
+        categories: all('[data-testid^="mugen-compat-category-"]').map((el) => [el.getAttribute("data-testid"), txt(el)]),
+        totals: all('[data-testid^="mugen-compat-total-"]').map((el) => [el.getAttribute("data-testid"), txt(el)]),
+        losses: all('[data-testid^="mugen-compat-loss-"]').map((el) => [el.getAttribute("data-testid"), txt(el)]),
+        summary: txt(document.querySelector('[data-testid="mugen-compat-summary"]')),
+      };
+    `);
+  const importSnapshot = await snapshotPanel();
+  if (importSnapshot.categories.length !== 7 || importSnapshot.losses.length === 0) {
+    fail(`Instantaneo do painel na importacao incompleto: ${JSON.stringify(importSnapshot)}`);
+  }
+  const reportOnDisk = JSON.parse(await readFile(path.join(projectDir, "assets", "mugen", "probe_import_report.json"), "utf8"));
   await clickByTestId(sessionId, "mugen-compat-close");
 
   // 3. Build & Run pela UI; personagem visivel na posicao do projeto (96,96).
@@ -4591,6 +4608,46 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   if (Number(reopenedX) !== x1) fail(`x nao sobreviveu ao reinicio: ${reopenedX}`);
   await shot("04-reopened", "projeto reaberto com x editado");
   addReportStep(report, "restart_reopen", "passed", { reopenedX: Number(reopenedX) });
+
+  // 4b. Relatorio MUGEN reaberto pela UI numa sessao nova (sem estado da sessao que importou).
+  const beforeReopen = await state();
+  if (beforeReopen?.mugenCompatibility?.open || beforeReopen?.mugenCompatibility?.characters?.length) {
+    fail(`Sessao nova ja trazia estado do relatorio: ${JSON.stringify(beforeReopen.mugenCompatibility)}`);
+  }
+  await clickTopBarMenuAction(sessionId, "Relatorio MUGEN");
+  const reopenedPanel = await waitFor(
+    async () => {
+      const current = await state();
+      return current?.mugenCompatibility?.open && current.mugenCompatibility.characters.length > 0 ? current : false;
+    },
+    30000,
+    "Relatorio MUGEN nao reabriu pelo menu apos reabrir o projeto.",
+    300
+  );
+  await waitFor(
+    async () => js(`return Boolean(document.querySelector('[data-testid="mugen-compat-loss-collision"]'));`),
+    20000,
+    "Painel reaberto nao exibiu as perdas.",
+    250
+  );
+  const reopenedSnapshot = await snapshotPanel();
+  if (JSON.stringify(reopenedSnapshot) !== JSON.stringify(importSnapshot)) {
+    fail(`Relatorio reaberto diverge do exibido na importacao: ${JSON.stringify({ importSnapshot, reopenedSnapshot })}`);
+  }
+  const reopenedChar = reopenedPanel.mugenCompatibility.characters.find((c) => c.id === "probe");
+  const diskStatus = Object.fromEntries(reportOnDisk.summary.categories.map((c) => [c.id, c.status]));
+  const reopenedStatus = Object.fromEntries((reopenedChar?.categories ?? []).map((c) => [c.id, c.status]));
+  if (JSON.stringify(diskStatus) !== JSON.stringify(reopenedStatus) || ["direct", "approximate", "manual", "unsupported"].some((k) => reportOnDisk.summary.totals[k] !== reopenedChar?.totals?.[k])) {
+    fail(`Painel reaberto diverge do relatorio gravado: ${JSON.stringify({ diskStatus, reopenedStatus })}`);
+  }
+  await shot("04b-report-reopened", "relatorio MUGEN reaberto apos reabrir o projeto");
+  addReportStep(report, "report_reopened_after_restart", "passed", {
+    status: reopenedStatus,
+    totals: reopenedChar.totals,
+    losses: reopenedSnapshot.losses.map(([id]) => id),
+    identicalToImportPanel: true,
+  });
+  await clickByTestId(sessionId, "mugen-compat-close");
 
   // 5. Build & Run de novo: personagem deslocado +44 e ausente da posicao antiga.
   const run2 = await runBuildRunAndCollect(sessionId, "mugen probe editado", timeoutMs, report, artifactPrefix);

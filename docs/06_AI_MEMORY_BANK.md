@@ -1,5 +1,8 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-29 (j) — MUGEN UX v2, etapa 1: **relatório de compatibilidade reabrible** (Experimental mantido)
+Rama `codex/rex-mugen-ux-v2`. Novo menú Projeto → «Relatorio MUGEN» (`menu-action-mugen-report`) reabre o panel a partir de `assets/mugen/<id>_import_report.json` no disco (`showMugenCompatibility(dir, true)`), sen depender do estado da sesión que importou; «Fechar» limpa o estado. Sen relatorio → aviso explicativo. Proba: `npm test` 813/0/6, E2E desktop `--scenario mugen-import` verde co paso novo `report_reopened_after_restart` (importar → reiniciar app → reabrir proxecto → menú → mesmas categorías, totais e perdas que o panel da importación e que o JSON gravado). Fóra de escopo (non iniciado): SFF v2, son, stage, comandos de golpe.
+
 ### Checkpoint 2026-09-29 (h) — integrador, **PR #85 MUGEN → SGDK integrado na árbore do integrador: importación de personaje, panel de compatibilidade e edición persistente probados na UI** (Experimental; publicado como PR #86 sen merge, sen release, sen promoción de maturidade)
 
 **Estado real desta superficie.** O produto acepta **un** caso de uso MUGEN:

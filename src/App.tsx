@@ -2430,6 +2430,17 @@ export default function App() {
           title: getShortcutTitle("scene.save", "Salvar cena ativa", shortcuts),
         },
         {
+          label: "Relatorio MUGEN",
+          onClick: () => {
+            if (activeProjectDir) void showMugenCompatibility(activeProjectDir, true);
+          },
+          disabled: !activeProjectDir,
+          title: activeProjectDir
+            ? "Reabrir o relatorio de compatibilidade da importacao MUGEN (Experimental)"
+            : "Abra um projeto importado de MUGEN para ver o relatorio",
+          testId: "menu-action-mugen-report",
+        },
+        {
           label: "Configuracoes",
           onClick: () => void handleOpenProjectSettings(),
           disabled: !activeProjectDir,
@@ -2937,17 +2948,26 @@ export default function App() {
     }
   }
 
-  async function showMugenCompatibility(projectDir: string) {
+  // Le sempre do disco (assets/mugen/*_import_report.json); `reopened` = pedido pelo menu
+  // depois da importacao, sem depender de nada guardado pela sessao que importou.
+  async function showMugenCompatibility(projectDir: string, reopened = false) {
     try {
       const reports = await loadMugenImportReports(projectDir);
       setMugenReports(reports);
       setMugenReportsProjectDir(projectDir);
       if (reports.length === 0) {
-        logMessage("warn", "[MUGEN] Importacao sem relatorio de compatibilidade: confira o console e o projeto.");
+        logMessage(
+          "warn",
+          reopened
+            ? "[MUGEN] Este projeto nao tem relatorio de compatibilidade MUGEN (nao foi importado de MUGEN/Ikemen)."
+            : "[MUGEN] Importacao sem relatorio de compatibilidade: confira o console e o projeto."
+        );
         return;
       }
-      for (const loaded of reports) {
-        logMessage("success", `[MUGEN] ${loaded.id} (Experimental): ${summarizeLosses(loaded.report)}.`);
+      if (!reopened) {
+        for (const loaded of reports) {
+          logMessage("success", `[MUGEN] ${loaded.id} (Experimental): ${summarizeLosses(loaded.report)}.`);
+        }
       }
       setMugenPanelOpen(true);
     } catch (error) {
@@ -3575,6 +3595,9 @@ export default function App() {
     resetHwValidation();
     setSelectedEntityId(null);
     setLastSgdkImportSummary(null);
+    setMugenPanelOpen(false);
+    setMugenReports([]);
+    setMugenReportsProjectDir(null);
     setShowProjectSettings(false);
     setProjectSettings(null);
     setProjectSettingsDraft(null);
