@@ -5959,7 +5959,7 @@ mod tests {
             })
             .expect("fsm graph should compile into a state machine");
 
-        assert_eq!(state_machine.0, "fsm_state");
+        assert_eq!(state_machine.0, "fsm_state_player");
         assert_eq!(state_machine.1.len(), 2);
         assert_eq!(state_machine.1[0].state_name, "idle");
         assert_eq!(state_machine.1[1].state_name, "run");

@@ -71,7 +71,9 @@ essa transformação.
 | `triggerall` + exatamente um `trigger1` | AND |
 | `[Statedef -1]` | vale para todo estado (ou só para `stateno = K`), antes das transições do próprio estado |
 | outros gatilhos, OR (`trigger2..N`), `-2`/`-3` | ponte explícita `mugen_changestate_unsupported_trigger`, **sem transição** |
-| VelSet/VelAdd/PosSet/PosAdd/PlaySnd | nó presente só como referência (`wired: false`), **não executado**, `unsupported` no relatório |
+| `VelSet` com x constante, `trigger1 = 1` (seção «Locomoção horizontal») | `set_velocity` do perfil no corpo do estado e na entrada da transição; integrado no runtime | **direto** (múltiplo de 1/256 px/tick) ou **aproximado** (arredondado, com o valor efetivo no relatório) |
+| `VelSet` fora do contrato (expressão, outro gatilho, y ≠ 0, x omitido, parâmetro extra, fora da faixa) | nó de referência **não ligado** | `unsupported`, com o motivo |
+| VelAdd/PosSet/PosAdd/PlaySnd | nó presente só como referência (`wired: false`), **não executado** | `unsupported` no relatório |
 | HitDef | ponte `mugen_hitdef` (herdado) |
 
 Ordem por quadro na ROM: leitura do joypad → FSM (transições) → tick de animação →
@@ -127,10 +129,35 @@ Comandos e ações **já convertidos** e provados no desktop com a fixture `walk
 | `command = F`, `time = 1` (direção segurada) + `ChangeState` no `[Statedef -1]` | `input_command` → estado 20 → animação de caminhada; `AnimTime = 0` volta ao estado 0 e o `-1` religa enquanto a tecla segue segurada (1 tick de idle entre ciclos) | ArrowRight nativo → ack da sessão → 12/6 ticks (4 editado para 12) + índice da animação na RAM |
 | `command = a` | botão A do Mega Drive (KeyZ) → estado 200 → animação de **ataque** | ack da sessão → 3/8 ticks, uma só vez; índice na RAM |
 
-**Sem movimento de posição:** `VelSet`/`PosAdd` não fazem parte do perfil v1 (`unsupported`), então a
-posição do personagem não muda; a prova mede isso (borda esquerda constante). A ação é «animação de
+**Fixture `walker` sem movimento de posição** (não tem `VelSet`); a locomoção tem contrato próprio na seção
+«Locomoção horizontal» e a fixture `strider`. A ação é «animação de
 ataque»: nada de acerto, dano ou colisão. `command` só reconhece a forma segurada (`/`, `~`, `$` e
 sequências não foram exercitados nesta fixture).
+
+## Locomoção horizontal (`VelSet`, Experimental)
+
+Subconjunto **restrito**: só a componente x constante de `VelSet`. Não é física do MUGEN.
+
+| Item | Contrato |
+|---|---|
+| Unidade e frequência | pixels por **tick lógico**; 1 tick = 1 quadro emulado (1/60 s no NTSC; no PAL o quadro é 1/50 s e a velocidade em px/s cai proporcionalmente — **PAL não medido**) |
+| Coordenada, direção e facing | x cresce para a **direita**; x positivo desloca à direita, negativo à esquerda. **Facing fixo à direita** (sem inversão do sinal nem espelhamento); `VelSet x = -1.75` anda para a esquerda de costas |
+| Sintaxe aceita | `x = N` ou `value = N[, 0]`, `N` literal decimal `[+-]dígitos[.dígitos]` (até 6 inteiros e 9 decimais); `y` ausente ou `0`; gatilho **exatamente** `trigger1 = 1` (todo tick em que o estado está ativo), sem `triggerall`; parâmetros `type`, `name`, `x`, `y`, `value`, `trigger<N>` |
+| Representação | **Q8.8** (múltiplos de 1/256 px/tick), `s16`: \|v\| ≤ 127,99609375. Literal fora da grade é **arredondado ao mais próximo, metade para longe do zero** e o relatório o marca `approximate` com o valor efetivo (`2.4` → `614/256 = 2,3984375`) |
+| Ordem por tick | joypad → FSM (`Statedef -1`, transições do estado; a entrada em um estado aplica a animação **e** o `VelSet` do estado no mesmo tick) → tick de animação → **integração da posição** (`acc += vx; passo = acc >> 8; acc -= passo << 8; x += passo`) → `SPR_update` |
+| Fracionário | o acumulador (`s16`, 0..255) nunca é zerado: deslocamento após n ticks = `floor(Σ vx_q8 / 256)`. Para velocidade negativa o piso é em direção a −∞ (o 1º passo de −0,5 px/tick já move 1 px e o 2º não move) |
+| Componentes omitidos | y omitido = 0 (não há vertical); x omitido ou só `y` = **recusado** (não se assume «inalterado»); estado **sem** `VelSet` **mantém** a velocidade anterior (como o MUGEN), então toda parada precisa de um `VelSet x = 0` no estado de destino |
+| Parada e troca de direção | definidas pelos estados/comandos da fixture: um comando `neutral = 5` (nenhuma direção; notação numérica do RetroDev, **não** é sintaxe padrão do MUGEN) leva 20/21 → 0; `back` em 20 e `fwd` em 21 trocam direto de estado sem passar pelo 0 |
+| Limites | sem limite de tela, colisão, chão nem paredes: a posição é um `s16` (dá a volta em ±32767); fora da tela o sprite some |
+| Estado por entidade | `rds_mugen_<v>_vx` (`s16`), `rds_mugen_<v>_xacc`, e a máquina de estados `fsm_state_<entidade>`; duas entidades não compartilham velocidade, acumulador, posição nem índice de estado. Um `VelSet` em sprite sem tabela MUGEN válida (ou no SNES) **bloqueia o build** (`#error`) |
+| Rejeições | expressão, `const(...)`, expoente, vírgula decimal, valor fora da faixa, vertical ≠ 0, gatilho ≠ `trigger1 = 1`, `triggerall`, parâmetro extra (`ignorehitpause`, `persistent`, …): `unsupported` no relatório, nó de referência não ligado; no modelo, valor não representável vira `#error` no build, nunca 0 |
+| Fora do escopo | `PosAdd`/`PosSet` (incremento/atribuição de posição, com contrato e prova próprios), `VelAdd`, `physics`/atrito de `Statedef`, facing, gatilhos `Time`/`Vel`/`Pos`, vertical |
+| Por que não o `set_velocity` nativo | ele alimenta o sistema de física do produto (`_vel_x/16`, atrito, paredes); a semântica difere (Q8.8 por tick, sem física). Reaproveita-se o **tipo de nó** no grafo (perfil `mugen.character.v1`), não a semântica. Proveniência: nenhum código do SGDK Forge foi transplantado nem consultado nesta rodada |
+| Editor | Inspector → «Velocidade dos estados (MUGEN)»: px/tick, aviso de arredondamento, diagnóstico e valor mantido em entrada inválida; grava o literal no nó do grafo (`components.logic.graph`, corpo e entrada) |
+
+Prova (fixture `strider`, `crates/rex-mugen/fixtures/strider`): a ROM real no core real bate o contrato
+**em todos os quadros** (teste ignorado `mugen_strider_real_build_run_locomotion`) e o cenário desktop
+`mugen-locomotion` mede a posição por quadro emulado no viewport.
 
 ## Esquema de diagnóstico (`rex-mugen/diag/v1`)
 
