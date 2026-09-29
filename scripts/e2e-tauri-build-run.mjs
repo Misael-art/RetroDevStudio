@@ -11,7 +11,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { constants as fsConstants, existsSync } from "node:fs";
+import { constants as fsConstants, existsSync, readdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -481,6 +481,7 @@ function parseArgs(argv) {
           "logic-recovery",
           "logic-recovery-branch",
           "mugen-import",
+          "mugen-control",
         ].includes(
           value
         )
@@ -1179,6 +1180,100 @@ async function waitForDriverOffline(timeoutMs, label) {
   );
 }
 
+// ── Propriedade de processos do cenario ──────────────────────────────────────────────────
+// O cenario acompanha tudo o que inicia: o tauri-driver (filho direto) e a arvore abaixo dele
+// (driver nativo + app, inclusive a instancia criada apos reiniciar o app), alem das sessoes
+// WebDriver abertas. Cada PID e guardado com o `starttime` de /proc/<pid>/stat; so se encerra um
+// PID cujo starttime ainda coincide (nunca por nome, nunca um PID reaproveitado por outra sessao).
+const ownedSessions = new Set();
+const ownedProcesses = new Map(); // pid -> { start, cmd }
+let ownedDriverPid = null;
+
+function readProcStat(pid) {
+  if (process.platform !== "linux") return null;
+  try {
+    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
+    // pid (comm) state ppid ... starttime = campo 22; comm pode conter espacos/parenteses.
+    const tail = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
+    return { ppid: Number(tail[1]), start: tail[19] };
+  } catch {
+    return null;
+  }
+}
+
+function readProcCmd(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ").slice(0, 200);
+  } catch {
+    return "";
+  }
+}
+
+function listDescendants(rootPid) {
+  if (process.platform !== "linux") return [];
+  const children = new Map();
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    const stat = readProcStat(entry);
+    if (!stat) continue;
+    if (!children.has(stat.ppid)) children.set(stat.ppid, []);
+    children.get(stat.ppid).push(Number(entry));
+  }
+  const out = [];
+  const queue = [rootPid];
+  while (queue.length) {
+    for (const child of children.get(queue.shift()) ?? []) {
+      out.push(child);
+      queue.push(child);
+    }
+  }
+  return out;
+}
+
+function trackOwnedProcesses() {
+  if (!ownedDriverPid) return;
+  for (const pid of [ownedDriverPid, ...listDescendants(ownedDriverPid)]) {
+    if (ownedProcesses.has(pid)) continue;
+    const stat = readProcStat(pid);
+    if (stat) ownedProcesses.set(pid, { start: stat.start, cmd: readProcCmd(pid) });
+  }
+}
+
+function ownedProcessAlive(pid) {
+  const stat = readProcStat(pid);
+  return Boolean(stat) && stat.start === ownedProcesses.get(pid).start;
+}
+
+/** Encerra so o que o cenario iniciou e ainda esta vivo: SIGTERM, espera limitada, SIGKILL, espera limitada. */
+async function cleanupOwnedProcesses() {
+  trackOwnedProcesses();
+  const summary = { tracked: [...ownedProcesses].map(([pid, v]) => ({ pid, cmd: v.cmd })), terminated: [], killed: [], survivors: [] };
+  const alive = () => [...ownedProcesses.keys()].filter(ownedProcessAlive);
+  const waitGone = async (ms) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline && alive().length) await new Promise((resolve) => setTimeout(resolve, 100));
+  };
+  await waitGone(3000);
+  for (const pid of alive()) {
+    try { process.kill(pid, "SIGTERM"); summary.terminated.push(pid); } catch { /* ja saiu */ }
+  }
+  await waitGone(5000);
+  for (const pid of alive()) {
+    try { process.kill(pid, "SIGKILL"); summary.killed.push(pid); } catch { /* ja saiu */ }
+  }
+  await waitGone(3000);
+  summary.survivors = alive();
+  console.log(
+    `[cleanup] processos do cenario: ${summary.tracked.length} acompanhados, ${summary.terminated.length} SIGTERM, ${summary.killed.length} SIGKILL, ${summary.survivors.length} vivos`
+  );
+  for (const t of summary.tracked) console.log(`[cleanup]   pid ${t.pid} ${t.cmd}`);
+  if (summary.survivors.length) {
+    console.error(`[cleanup] ERRO: processos do cenario ainda vivos: ${summary.survivors.join(", ")}`);
+    process.exitCode = 1;
+  }
+  return summary;
+}
+
 async function createSession(applicationPath) {
   const payload = {
     capabilities: {
@@ -1191,10 +1286,15 @@ async function createSession(applicationPath) {
     },
   };
   const response = await webdriverRequest("POST", "/session", payload);
-  return response.value?.sessionId ?? response.sessionId;
+  const created = response.value?.sessionId ?? response.sessionId;
+  if (created) ownedSessions.add(created);
+  trackOwnedProcesses();
+  return created;
 }
 
 async function deleteSession(sessionId) {
+  trackOwnedProcesses();
+  ownedSessions.delete(sessionId);
   try {
     await webdriverRequest("DELETE", `/session/${sessionId}`);
   } catch {
@@ -4728,6 +4828,10 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
     200
   );
   if (Number(reopenedX) !== x1) fail(`x nao sobreviveu ao reinicio: ${reopenedX}`);
+  if (process.env.RDS_E2E_INJECT_FAILURE === "after-restart") {
+    // Falha controlada para provar a limpeza (app reiniciado + driver) no caminho de erro.
+    fail("Falha controlada (RDS_E2E_INJECT_FAILURE=after-restart) apos reiniciar o app.");
+  }
   await shot("04-reopened", "projeto reaberto com x editado");
   const reopenedTicks = await waitFor(
     async () =>
@@ -4861,6 +4965,364 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   report.generatedAt = new Date().toISOString();
   await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
   console.log(`OK: Desktop Tauri mugen-import E2E passou. Relatorio: ${reportPath}`);
+}
+
+// ── MUGEN: personagem importado, editado e controlado pelo usuario (perfil mugen.character.v1, Experimental) ──
+// Fixture autoral `walker` (crates/rex-mugen/fixtures/walker; previsao em fixture.rs). Fluxo pela UI:
+// importar -> compatibilidade -> editar duracao no Inspector -> salvar -> reiniciar -> reabrir ->
+// Build & Run -> focar o jogo -> teclado NATIVO (ArrowRight = direcao F, KeyZ = botao A do MD) ->
+// observar (a) pixels por quadro emulado e (b) o estado do runtime na RAM do core (indice da animacao).
+// Escopo: o perfil v1 NAO converte VelSet/PosAdd; nao ha movimento de posicao. "Mover" = direcao ->
+// estado/animacao de caminhada; "acao" = botao -> animacao de ataque (sem acerto, dano ou colisao).
+async function runMugenControlScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
+  const artifactPrefix = `mugen-control-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appPath = currentE2eRunContext?.appPath ?? null;
+  const sha256File = async (file) => createHash("sha256").update(await readFile(file)).digest("hex");
+  const report = {
+    generatedAt: null,
+    scenario: "mugen-control",
+    maturity: "Experimental",
+    testedApplication: { path: appPath, sha256: appPath ? await sha256File(appPath) : null },
+    frontend: { indexHtmlSha256: await sha256File(path.join(repoRoot, "dist", "index.html")).catch(() => null) },
+    sample: {},
+    artifacts: [],
+    steps: [],
+    runs: [],
+    scope:
+      "sem movimento de posicao (VelSet/PosAdd nao fazem parte do perfil v1); provado: direcao -> estado/animacao de caminhada e botao -> animacao de ataque; sem acerto, dano ou colisao",
+    dialogSubstitution:
+      "somente o dialogo nativo de escolha de pasta e substituido por setNextExternalImportPath; nome, perfil, Importar, painel, Inspector, Salvar, reinicio, reabertura, Build & Run e o teclado (eventos nativos WebDriver) sao a UI/entrada do produto",
+  };
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const state = () => readAutomationState(sessionId);
+  const shot = async (name, label) =>
+    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const fixtureDir = path.join(repoRoot, "crates", "rex-mugen", "fixtures", "walker");
+  const workDir = path.join(validationDir, `${artifactPrefix}-work`);
+  const donorDir = path.join(workDir, "walker");
+  await mkdir(donorDir, { recursive: true });
+  const sampleHashes = {};
+  for (const name of ["walker.def", "walker.air", "walker.cmd", "walker.cns", "walker.sff"]) {
+    const bytes = await readFile(path.join(fixtureDir, name));
+    await writeFile(path.join(donorDir, name), bytes);
+    sampleHashes[name] = createHash("sha256").update(bytes).digest("hex");
+  }
+  report.sample = { fixture: "crates/rex-mugen/fixtures/walker", sha256: sampleHashes };
+
+  // Expectativas FIXADAS antes da execucao (fixture walker; 1 tick = 1 quadro emulado):
+  //   compatibilidade: sprites/animations/commands/states direct; collisions/sound/stage absent
+  //   AIR: idle red -1; walk green 4 -> BLUE 6; attack yellow+fist 3 -> yellow+long fist 8
+  //   edicao pelo Inspector: walk quadro 1: 4 -> 12  => ROM: green 12, blue 6 (nao editado)
+  //   segurando ArrowRight: anim RAM = walk; verde 12 / azul 6 por ciclo; sem movimento de posicao
+  //   soltando: volta a idle (anim RAM = 0); sem input: nunca sai de idle
+  //   KeyZ: anim RAM = attack; hitA 3 / hitB 8; depois idle
+  const EDITED_WALK_TICKS = 12;
+  const expectedStatus = {
+    sprites: "direct", animations: "direct", commands: "direct", states: "direct",
+    collisions: "absent", sound: "absent", stage: "absent",
+  };
+
+  // ── utilitarios de observacao ────────────────────────────────────────────────────────────
+  // Classe do quadro emulado (1 putImageData = 1 quadro): corpo e punho em coordenadas de tela.
+  // Entidade em (96,96) -> sprite 16x32 com origem (96,96): corpo (98,112), punho curto (105,105), longo (109,105).
+  const startFrameRecorder = async (frames) =>
+    js(
+      `
+      const proto = CanvasRenderingContext2D.prototype;
+      if (!window.__mugenOrigPut) window.__mugenOrigPut = proto.putImageData;
+      const orig = window.__mugenOrigPut;
+      const rec = { c: [], bbox: [], done: false };
+      window.__mugenRec = rec;
+      const want = arguments[0];
+      proto.putImageData = function (img, ...rest) {
+        const r = orig.call(this, img, ...rest);
+        if (this.canvas?.getAttribute("data-testid") === "viewport-game-canvas" && !rec.done) {
+          const sx = img.width / 320, sy = img.height / 224;
+          const at = (ax, ay) => { const o = (Math.floor((ay + 0.5) * sy) * img.width + Math.floor((ax + 0.5) * sx)) * 4; return [img.data[o], img.data[o + 1], img.data[o + 2]]; };
+          const hi = (v) => v > 160, lo = (v) => v < 90;
+          const is = (px, r0, g0, b0) => (r0 ? hi(px[0]) : lo(px[0])) && (g0 ? hi(px[1]) : lo(px[1])) && (b0 ? hi(px[2]) : lo(px[2]));
+          const body = at(98, 112), fistA = at(105, 105), fistB = at(109, 105);
+          let cls = "other";
+          if (is(body, 1, 0, 0)) cls = "idle";
+          else if (is(body, 0, 1, 0)) cls = "walkA";
+          else if (is(body, 0, 0, 1)) cls = "walkB";
+          else if (is(body, 1, 1, 0)) cls = is(fistB, 1, 1, 1) ? "hitB" : is(fistA, 1, 1, 1) ? "hitA" : "hit?";
+          // caixa do corpo: coluna mais a esquerda nao preta na linha do corpo (deteccao de deslocamento).
+          let left = -1;
+          for (let x = 60; x < 160; x += 1) { const px = at(x, 112); if (px[0] + px[1] + px[2] > 200) { left = x; break; } }
+          rec.c.push(cls); rec.bbox.push(left);
+          if (rec.c.length >= want) { rec.done = true; proto.putImageData = orig; }
+        }
+        return r;
+      };
+      return true;
+    `,
+      [frames]
+    );
+  const recorderDone = async () => js("return Boolean(window.__mugenRec?.done);");
+  const takeRecording = async () => js("return window.__mugenRec;");
+  const runsOf = (classes) => {
+    const runs = [];
+    let start = 0;
+    for (let i = 1; i <= classes.length; i += 1) {
+      if (i === classes.length || classes[i] !== classes[start]) {
+        runs.push({ cls: classes[start], n: i - start, first: start === 0, last: i === classes.length });
+        start = i;
+      }
+    }
+    return runs;
+  };
+  // ELF32 big-endian (m68k): tabela de simbolos -> endereco.
+  const elfSymbols = (elf) => {
+    const dv = new DataView(elf.buffer, elf.byteOffset, elf.byteLength);
+    if (elf[0] !== 0x7f || elf[1] !== 0x45 || elf[4] !== 1 || elf[5] !== 2) fail("rom.out nao e ELF32 big-endian");
+    const shOff = dv.getUint32(32), shSize = dv.getUint16(46), shCount = dv.getUint16(48);
+    const out = {};
+    for (let i = 0; i < shCount; i += 1) {
+      const sec = shOff + i * shSize;
+      if (dv.getUint32(sec + 4) !== 2) continue;
+      const table = dv.getUint32(sec + 16), size = dv.getUint32(sec + 20);
+      const strtab = shOff + dv.getUint32(sec + 24) * shSize;
+      const strings = dv.getUint32(strtab + 16);
+      for (let c = table; c + 16 <= table + size; c += 16) {
+        const nameOff = dv.getUint32(c);
+        if (!nameOff) continue;
+        let end = strings + nameOff;
+        while (elf[end] !== 0) end += 1;
+        out[Buffer.from(elf.subarray(strings + nameOff, end)).toString("utf8")] = dv.getUint32(c + 4);
+      }
+    }
+    return out;
+  };
+  const readInput = async () => js("return window.__RDS_E2E__.getLastInputObservation();");
+  const waitInputAck = async (key, value, label) =>
+    waitFor(
+      async () => {
+        const o = await readInput();
+        return o?.lastJoypadAck?.joypad?.[key] === value && !o.lastJoypadSendError ? o : false;
+      },
+      15000,
+      `Ack do input '${key}=${value}' nao chegou (${label}).`,
+      100
+    );
+
+  // 1. Importar pela UI.
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await clickByTestId(sessionId, "wizard-external-import-toggle");
+  const selected = await js(`
+    const select = document.querySelector('[data-testid="external-import-profile-select"]');
+    if (!(select instanceof HTMLSelectElement)) return null;
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(select, "mugen");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return select.value;
+  `);
+  if (selected !== "mugen") fail(`Perfil MUGEN nao disponivel no importador: ${JSON.stringify(selected)}`);
+  const projectName = `Mugen_Walker_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [donorDir]);
+  await clickByTestId(sessionId, "external-import-confirm");
+
+  // 2. Compatibilidade.
+  const panelState = await waitFor(
+    async () => {
+      const current = await state();
+      return current?.mugenCompatibility?.open && current.mugenCompatibility.characters.length > 0 ? current : false;
+    },
+    60000,
+    "Painel de compatibilidade MUGEN nao abriu apos a importacao.",
+    300
+  );
+  const projectDir = panelState.activeProjectDir;
+  onProjectCreated(projectDir);
+  const character = panelState.mugenCompatibility.characters.find((c) => c.id === "walker");
+  if (!character) fail("Painel nao mostrou o personagem walker.");
+  const status = Object.fromEntries(character.categories.map((c) => [c.id, c.status]));
+  if (JSON.stringify(status) !== JSON.stringify(expectedStatus)) fail(`Categorias divergem do esperado: ${JSON.stringify({ status, expectedStatus })}`);
+  await shot("01-compatibility", "compatibilidade do personagem walker");
+  addReportStep(report, "import_and_compatibility", "passed", { projectDir, status, totals: character.totals });
+  await clickByTestId(sessionId, "mugen-compat-close");
+
+  // 3. Editar a duracao no Inspector (walk quadro 1: 4 -> 12), recusar invalido, salvar.
+  const scene0 = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  const walker0 = scene0.entities.find((e) => (e.entity_id ?? e.id) === "walker");
+  if (!walker0) fail("Cena importada sem a entidade walker.");
+  const animNames = Object.keys(walker0.components.sprite.animations).sort();
+  const animIndex = Object.fromEntries(animNames.map((n, i) => [n, i]));
+  if (JSON.stringify(walker0.components.sprite.animations.action_20.frame_durations) !== "[4,6]") fail("AIR importado com duracoes inesperadas para action_20.");
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-walker");
+  await waitFor(async () => (await state())?.selectedEntityId === "walker", 15000, "Entidade walker nao foi selecionada.", 200);
+  const walkF0 = "inspector-mugen-anim-action_20-frame-0";
+  await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value === "4";`, [walkF0]), 15000, "Inspector nao mostrou 4 ticks no quadro 1 da caminhada.", 200);
+  await setInputByTestIdNative(sessionId, walkF0, "0");
+  const badDiag = await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '-error"]')?.textContent ?? false;`, [walkF0]), 5000, "Entrada 0 nao gerou diagnostico.", 100);
+  if (!badDiag.includes("Mantido: 4")) fail(`Diagnostico nao informa o valor mantido: ${badDiag}`);
+  await setInputByTestIdNative(sessionId, walkF0, String(EDITED_WALK_TICKS));
+  await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value === arguments[1];`, [walkF0, String(EDITED_WALK_TICKS)]), 5000, "Campo nao aceitou 12.", 100);
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const onDisk = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+      const a = onDisk.entities.find((e) => (e.entity_id ?? e.id) === "walker").components.sprite.animations;
+      return JSON.stringify(a.action_20.frame_durations) === `[${EDITED_WALK_TICKS},6]` && JSON.stringify(a.action_20.mugen_frames.map((f) => f.duration)) === `[${EDITED_WALK_TICKS},6]` && JSON.stringify(a.action_200.frame_durations) === "[3,8]";
+    },
+    20000,
+    "Edicao de duracao nao chegou ao disco (ou alterou quadros nao editados).",
+    300
+  );
+  addReportStep(report, "inspector_edit_ticks", "passed", { edited: { animation: "action_20", frame: 1, from: 4, to: EDITED_WALK_TICKS }, invalidZeroDiagnostic: badDiag, animIndex });
+
+  // 4. Encerrar o app, reabrir, conferir. (a limpeza dos processos e do cenario, em main/finally)
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto importado.", 300);
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto importado nao reabriu.", 300);
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-walker");
+  const reopened = await waitFor(
+    async () =>
+      js(`
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+      if (!q(arguments[0]) || !q(arguments[1])) return false;
+      return [q(arguments[0]).value, q(arguments[1]).value];
+    `, [walkF0, "inspector-mugen-anim-action_20-frame-1"]),
+    15000,
+    "Inspector nao mostrou o tempo apos reabrir.",
+    200
+  );
+  if (reopened[0] !== String(EDITED_WALK_TICKS) || reopened[1] !== "6") fail(`Duracoes nao sobreviveram ao reinicio: ${JSON.stringify(reopened)}`);
+  await clickTopBarMenuAction(sessionId, "Relatorio MUGEN");
+  await waitFor(async () => { const cur = await state(); return cur?.mugenCompatibility?.open && cur.mugenCompatibility.characters.some((c) => c.id === "walker"); }, 30000, "Relatorio MUGEN nao reabriu.", 300);
+  await clickByTestId(sessionId, "mugen-compat-close");
+  await shot("02-reopened", "projeto reaberto com a duracao editada");
+  addReportStep(report, "restart_reopen", "passed", { reopenedTicks: reopened, reportReopened: true });
+  if (process.env.RDS_E2E_INJECT_FAILURE === "after-restart") fail("Falha controlada (RDS_E2E_INJECT_FAILURE=after-restart) apos reiniciar o app.");
+
+  // 5. Build & Run.
+  const run = await runBuildRunAndCollect(sessionId, "mugen walker editado", timeoutMs, report, artifactPrefix);
+  const romSha = await sha256File(run.rom_path);
+  const progress0 = await readCanonicalGameProgress(sessionId);
+  if (!progress0 || progress0.romSha256 !== romSha) fail(`ROM em execucao nao e a compilada: ${JSON.stringify({ running: progress0?.romSha256, built: romSha })}`);
+  const elf = await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out"));
+  const symbols = elfSymbols(elf);
+  const animAddr = symbols["rds_mugen_spr_walker_anim"];
+  if (typeof animAddr !== "number") fail(`Simbolo rds_mugen_spr_walker_anim ausente no ELF (${Object.keys(symbols).filter((k) => k.includes("mugen")).join(",")}).`);
+  const readAnim = async () => {
+    const r = await readEmulatorMemory(sessionId, 2, animAddr & 0xffff, 2);
+    return readU16le(r.data, 0); // WRAM do core vem em ordem little-endian (mesmo decode do teste Rust do produto)
+  };
+  report.runs.push({ kind: "identity", rom_path: run.rom_path, rom_sha256: romSha, elf_sha256: createHash("sha256").update(elf).digest("hex"), anim_symbol: "rds_mugen_spr_walker_anim", anim_address: `0x${animAddr.toString(16)}` });
+  await focusGameCanvasNatively(sessionId);
+
+  // Fase A: sem input. O personagem fica em idle o tempo todo (controle negativo).
+  await startFrameRecorder(90);
+  const idlePolls = [];
+  await waitFor(async () => { idlePolls.push(await readAnim()); return (await recorderDone()) ? true : false; }, 120000, "Gravacao sem input nao terminou.", 50);
+  const recA = await takeRecording();
+  // 0xFFFF = valor inicial antes do 1o tick do runtime; depois dele o indice tem de ser o do idle.
+  const idleSettled = idlePolls.filter((v) => v !== 0xffff);
+  if (recA.c.some((c) => c !== "idle") || idleSettled.length < 3 || idleSettled.some((v) => v !== animIndex.action_0)) fail(`Sem input o personagem saiu do idle: ${JSON.stringify({ classes: [...new Set(recA.c)], polls: [...new Set(idlePolls)] })}`);
+  addReportStep(report, "no_input_control", "passed", { frames: recA.c.length, animPolls: [...new Set(idlePolls)] });
+
+  // Fase B: segurar ArrowRight (evento nativo) -> caminhada.
+  await startFrameRecorder(150);
+  const reqBefore = (await readInput())?.lastJoypadRequest?.seq ?? 0;
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "direcao F do MUGEN");
+  const rightAck = await waitInputAck("right", true, "ArrowRight");
+  if (!(rightAck.lastJoypadRequest.seq > reqBefore) || rightAck.lastJoypadAck.seq !== rightAck.lastJoypadRequest.seq || rightAck.lastJoypadAck.sessionId !== rightAck.joypadSessionId) fail(`Intencao/aceitacao de input inconsistentes: ${JSON.stringify(rightAck)}`);
+  const walkPolls = [];
+  await waitFor(async () => { walkPolls.push(await readAnim()); return (await recorderDone()) ? true : false; }, 180000, "Gravacao da caminhada nao terminou.", 50);
+  const recB = await takeRecording();
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "liberacao da direcao F");
+  const rightRelease = await waitInputAck("right", false, "liberacao de ArrowRight");
+  const walkRuns = runsOf(recB.c);
+  const interior = walkRuns.filter((r) => !r.first && !r.last);
+  const near = (n, expected) => Math.abs(n - expected) <= 1;
+  const greens = interior.filter((r) => r.cls === "walkA").map((r) => r.n);
+  const blues = interior.filter((r) => r.cls === "walkB").map((r) => r.n);
+  const idles = interior.filter((r) => r.cls === "idle").map((r) => r.n);
+  const others = recB.c.filter((c) => c === "other" || c === "hitA" || c === "hitB" || c === "hit?").length;
+  if (greens.length < 3 || blues.length < 3 || !greens.every((n) => near(n, EDITED_WALK_TICKS)) || !blues.every((n) => near(n, 6)) || idles.some((n) => n > 2) || others > 0) {
+    fail(`Caminhada nao segue 12/6 ticks (editado/nao editado): ${JSON.stringify({ greens, blues, idles, others, runs: walkRuns.slice(0, 12) })}`);
+  }
+  if (!walkPolls.every((v) => v === animIndex.action_20 || v === animIndex.action_0) || walkPolls.filter((v) => v === animIndex.action_20).length < walkPolls.length * 0.6) fail(`Estado na RAM nao acompanhou a caminhada: ${JSON.stringify({ walk: animIndex.action_20, polls: walkPolls })}`);
+  const lefts = [...new Set(recB.bbox)];
+  if (lefts.length !== 1) fail(`A posicao horizontal mudou (o perfil v1 nao move o personagem): ${JSON.stringify(lefts)}`);
+  await shot("03-walking", "personagem caminhando (ultimo quadro gravado)");
+  addReportStep(report, "keyboard_walk", "passed", {
+    request: rightAck.lastJoypadRequest, ack: rightAck.lastJoypadAck, release: rightRelease.lastJoypadAck,
+    greenTicks: greens, blueTicks: blues, idleGapTicks: idles, animPolls: [...new Set(walkPolls)], expectedAnimIndex: animIndex.action_20,
+    positionLeftEdgeValues: lefts,
+  });
+
+  // Fase C: retorno ao idle apos soltar.
+  await startFrameRecorder(90);
+  const relPolls = [];
+  await waitFor(async () => { relPolls.push(await readAnim()); return (await recorderDone()) ? true : false; }, 120000, "Gravacao pos-soltar nao terminou.", 50);
+  const recC = await takeRecording();
+  const tailIdle = recC.c.slice(-60);
+  if (tailIdle.some((c) => c !== "idle") || relPolls.slice(-10).some((v) => v !== animIndex.action_0)) fail(`Nao voltou ao idle apos soltar a tecla: ${JSON.stringify({ tail: [...new Set(tailIdle)], polls: relPolls.slice(-10) })}`);
+  addReportStep(report, "release_returns_idle", "passed", { firstIdleFrame: recC.c.indexOf("idle"), tailClasses: [...new Set(tailIdle)] });
+
+  // Fase D: acao (KeyZ = botao A do Mega Drive = comando `a`).
+  await startFrameRecorder(90);
+  const reqBeforeA = (await readInput())?.lastJoypadRequest?.seq ?? 0;
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "botao a do MUGEN");
+  const actAck = await waitInputAck("y", true, "KeyZ");
+  if (!(actAck.lastJoypadRequest.seq > reqBeforeA) || actAck.lastJoypadAck.seq !== actAck.lastJoypadRequest.seq || actAck.lastJoypadAck.sessionId !== actAck.joypadSessionId) fail(`Intencao/aceitacao do botao inconsistentes: ${JSON.stringify(actAck)}`);
+  const actPolls = [];
+  let released = false;
+  const framesAtPress = (await readCanonicalGameProgress(sessionId)).renderedFrames;
+  await waitFor(
+    async () => {
+      actPolls.push(await readAnim());
+      if (!released && (await readCanonicalGameProgress(sessionId)).renderedFrames >= framesAtPress + 3) {
+        released = true;
+        await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "liberacao do botao a");
+      }
+      return (await recorderDone()) ? true : false;
+    },
+    180000,
+    "Gravacao da acao nao terminou.",
+    50
+  );
+  const actRelease = await waitInputAck("y", false, "liberacao de KeyZ");
+  const recD = await takeRecording();
+  const actRuns = runsOf(recD.c);
+  const hitA = actRuns.filter((r) => r.cls === "hitA" && !r.first && !r.last).map((r) => r.n);
+  const hitB = actRuns.filter((r) => r.cls === "hitB" && !r.first && !r.last).map((r) => r.n);
+  const order = actRuns.map((r) => r.cls).join(">");
+  if (hitA.length !== 1 || hitB.length !== 1 || !near(hitA[0], 3) || !near(hitB[0], 8) || !/^idle>hitA>hitB>idle$/.test(order) || recD.c.some((c) => c === "walkA" || c === "walkB" || c === "other" || c === "hit?")) {
+    fail(`Acao nao segue a sequencia 3/8 (hitA>hitB>idle) uma unica vez: ${JSON.stringify({ hitA, hitB, order, runs: actRuns })}`);
+  }
+  if (!actPolls.includes(animIndex.action_200) || actPolls.includes(animIndex.action_20) || actPolls[actPolls.length - 1] !== animIndex.action_0) fail(`Estado na RAM nao acompanhou a acao: ${JSON.stringify({ attack: animIndex.action_200, polls: [...new Set(actPolls)], last: actPolls[actPolls.length - 1] })}`);
+  await shot("04-after-action", "apos a acao (idle)");
+  addReportStep(report, "keyboard_action", "passed", {
+    label: "acao/animacao de ataque (sem acerto, dano ou colisao)",
+    request: actAck.lastJoypadRequest, ack: actAck.lastJoypadAck, release: actRelease.lastJoypadAck,
+    hitATicks: hitA, hitBTicks: hitB, sequence: order, animPolls: [...new Set(actPolls)], expectedAnimIndex: animIndex.action_200,
+  });
+
+  // Fase E: de novo sem input, o personagem permanece em idle (a acao nao se repete sozinha).
+  await startFrameRecorder(60);
+  const finalPolls = [];
+  await waitFor(async () => { finalPolls.push(await readAnim()); return (await recorderDone()) ? true : false; }, 120000, "Gravacao final nao terminou.", 50);
+  const recE = await takeRecording();
+  if (recE.c.some((c) => c !== "idle") || finalPolls.some((v) => v !== animIndex.action_0)) fail(`Idle nao se manteve sem input: ${JSON.stringify({ classes: [...new Set(recE.c)] })}`);
+  addReportStep(report, "final_no_input_control", "passed", { frames: recE.c.length });
+
+  report.generatedAt = new Date().toISOString();
+  await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
+  console.log(`OK: Desktop Tauri mugen-control E2E passou. Relatorio: ${reportPath}`);
 }
 
 async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCreated) {
@@ -13008,7 +13470,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" || options.scenario === "nodegraph-authoring" || options.scenario === "behaviors-independence" || options.scenario === "collect-goal" || options.scenario === "mugen-import" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" || options.scenario === "nodegraph-authoring" || options.scenario === "behaviors-independence" || options.scenario === "collect-goal" || options.scenario === "mugen-import" || options.scenario === "mugen-control" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -13025,7 +13487,8 @@ async function main() {
     options.scenario !== "nodegraph-authoring" &&
     options.scenario !== "behaviors-independence" &&
     options.scenario !== "collect-goal" &&
-    options.scenario !== "mugen-import";
+    options.scenario !== "mugen-import" &&
+    options.scenario !== "mugen-control";
   let temporaryProjectDir = "";
   let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
@@ -13177,6 +13640,7 @@ async function main() {
       driverExited = true;
       driverExitCode = code;
     });
+    ownedDriverPid = driverProcess.pid ?? null;
   }
 
   let sessionId = "";
@@ -14620,6 +15084,18 @@ async function main() {
       } finally {
         await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
       }
+      return;
+    }
+
+    if (options.scenario === "mugen-control") {
+      await runMugenControlScenario(
+        sessionId,
+        emulatorActivationTimeoutMs,
+        uiBootstrapTimeoutMs,
+        (projectDir) => {
+          temporaryProjectDir = projectDir;
+        }
+      );
       return;
     }
 
@@ -17254,9 +17730,11 @@ async function main() {
         : details
     );
   } finally {
-    if (sessionId) {
-      await deleteSession(sessionId);
+    // Todas as sessoes abertas pelo cenario (inclusive a criada apos reiniciar o app), nao so a inicial.
+    for (const owned of new Set([sessionId, currentE2eRunContext?.sessionId, ...ownedSessions].filter(Boolean))) {
+      await deleteSession(owned);
     }
+    trackOwnedProcesses();
     if (driverProcess) {
       if (!driverExited) {
         driverProcess.kill();
@@ -17274,6 +17752,7 @@ async function main() {
         console.warn(`[cleanup] tauri-driver ainda responde em ${driverServerUrl} apos cleanup.`);
       }
     }
+    await cleanupOwnedProcesses();
     if (temporaryProjectDir && process.env.RDS_E2E_KEEP_PROJECT === "1") {
       console.warn(`[cleanup] RDS_E2E_KEEP_PROJECT=1: projeto temporario preservado para diagnostico: ${temporaryProjectDir}`);
     } else if (temporaryProjectDir) {

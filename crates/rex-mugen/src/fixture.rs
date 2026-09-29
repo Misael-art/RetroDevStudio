@@ -428,3 +428,136 @@ pub fn warden() -> Files {
         sff,
     }
 }
+
+/// Fixture autoral "Walker": um personagem controlável só com o que o perfil v1 converte.
+///
+/// Previsão registrada antes da execução:
+/// * sprites 16x32, eixo (8,32); entidade em (96,96) -> eixo (104,128);
+/// * idle (action 0): corpo VERMELHO, um frame parado (`-1`);
+/// * caminhada (action 20): corpo VERDE 4 ticks -> corpo AZUL 6 ticks (durações diferentes),
+///   termina em `AnimTime = 0` e volta ao estado 0; enquanto a direção `F` estiver segurada o
+///   estado -1 a liga de novo;
+/// * ataque (action 200): corpo AMARELO com punho BRANCO 3 ticks -> AMARELO com punho longo 8 ticks;
+///   `AnimTime = 0` volta ao estado 0;
+/// * `[Command] fwd = F` (direção 6, `time = 1` = segurada) liga 0 -> 20; `a` liga 0 -> 200;
+/// * NÃO há movimento de posição: `VelSet`/`PosAdd` não fazem parte do perfil v1.
+pub fn walker() -> Files {
+    let mut pal = vec![[0u8, 0, 0]; 256];
+    pal[1] = [255, 0, 0];
+    pal[2] = [0, 255, 0];
+    pal[3] = [0, 0, 255];
+    pal[4] = [255, 255, 255];
+    pal[5] = [255, 255, 0];
+    let (w, h) = (16usize, 32usize);
+    // corpo (colunas 0..8) na cor `c`, linha de base branca; `fist` = (y0, y1, x1) pinta um punho branco.
+    let fig = |c: u8, fist: Option<(usize, usize, usize)>| {
+        let mut px = vec![0u8; w * h];
+        for y in 0..h - 1 {
+            for x in 0..8 {
+                px[y * w + x] = c;
+            }
+        }
+        for x in 0..w {
+            px[(h - 1) * w + x] = 4;
+        }
+        if let Some((y0, y1, x1)) = fist {
+            for y in y0..y1 {
+                for x in 8..x1 {
+                    px[y * w + x] = 4;
+                }
+            }
+        }
+        px
+    };
+    let idle = fig(1, None);
+    let walk_a = fig(2, None);
+    let walk_b = fig(3, None);
+    let hit_a = fig(5, Some((8, 12, 12)));
+    let hit_b = fig(5, Some((8, 12, 16)));
+    let sff = sff_v1(&[
+        Image {
+            group: 0,
+            image: 0,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels: &idle,
+            palette: Some(&pal),
+            same_palette: false,
+            link: None,
+        },
+        Image {
+            group: 20,
+            image: 0,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels: &walk_a,
+            palette: Some(&pal),
+            same_palette: true,
+            link: None,
+        },
+        Image {
+            group: 20,
+            image: 1,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels: &walk_b,
+            palette: Some(&pal),
+            same_palette: true,
+            link: None,
+        },
+        Image {
+            group: 200,
+            image: 0,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels: &hit_a,
+            palette: Some(&pal),
+            same_palette: true,
+            link: None,
+        },
+        Image {
+            group: 200,
+            image: 1,
+            axis_x: 8,
+            axis_y: 32,
+            width: 16,
+            height: 32,
+            pixels: &hit_b,
+            palette: Some(&pal),
+            same_palette: true,
+            link: None,
+        },
+    ]);
+    let def = "[Info]\nname = \"Walker\"\nauthor = \"RetroDev Studio (autoral)\"\n\n[Files]\ncmd = walker.cmd\ncns = walker.cns\nsprite = walker.sff\nanim = walker.air\n".to_string();
+    let air = "[Begin Action 0]\n0,0, 0,0, -1\n\n\
+[Begin Action 20]\n20,0, 0,0, 4\n20,1, 0,0, 6\n\n\
+[Begin Action 200]\n200,0, 0,0, 3\n200,1, 0,0, 8\n"
+        .to_string();
+    let cmd = "[Command]\nname = \"a\"\ncommand = a\ntime = 1\n\n\
+[Command]\nname = \"fwd\"\ncommand = F\ntime = 1\n\n\
+[Statedef -1]\n\n\
+[State -1, Attack]\ntype = ChangeState\nvalue = 200\ntriggerall = command = \"a\"\ntrigger1 = stateno = 0\n\n\
+[State -1, Walk]\ntype = ChangeState\nvalue = 20\ntriggerall = command = \"fwd\"\ntrigger1 = stateno = 0\n"
+        .to_string();
+    let cns = "[Statedef 0]\ntype = S\nanim = 0\n\n\
+[Statedef 20]\ntype = S\nanim = 20\n\n\
+[State 20, End]\ntype = ChangeState\nvalue = 0\ntrigger1 = AnimTime = 0\n\n\
+[Statedef 200]\ntype = S\nanim = 200\n\n\
+[State 200, End]\ntype = ChangeState\nvalue = 0\ntrigger1 = AnimTime = 0\n"
+        .to_string();
+    Files {
+        def,
+        air,
+        cmd,
+        cns,
+        sff,
+    }
+}
