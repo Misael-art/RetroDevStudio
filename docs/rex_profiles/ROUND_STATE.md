@@ -370,7 +370,12 @@ Kosinski nas súas transacións canónicas.
   `36542842781` e `36542937864` (CI, `validate`+`linux-validate`) e
   `36542842770` e `36542937819` (Desktop E2E, `desktop-smoke`) — todos
   `completed`/`success` entre 08:27:33Z e 08:52:05Z; `CodeRabbit` `pass`,
-  `Sourcery` `skipping`. **Sen merge: #86 queda aberto para revisión humana.**
+  `Sourcery` `skipping`. **Segunda medição tras o fast-forward
+  `d36df92..eaf980c`** (só os dous documentos de estado): `CI` `36546968827`
+  (push) + `36546969248` (PR) e `Desktop E2E` `36546969249` (PR)
+  `completed`/`success`; non hai run `Desktop E2E` de push porque o `paths:`
+  dese disparador non inclúe `docs/`. **Sen merge: #86 queda aberto para
+  revisión humana.**
   **Barra no destino (todos rc=0):** `check:tree`, `lint`, `tsc --noEmit`,
   `npm test` **812 passed / 0 failed / 6 skipped** (83 ficheiros passed | 1
   skipped; +5 respecto da base: panel + diagnostics), `cargo fmt --check`,
