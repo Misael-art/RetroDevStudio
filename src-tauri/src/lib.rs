@@ -4681,13 +4681,46 @@ fn import_external_project_at_base_dir(
     profile_id: &str,
     project_path: &Path,
 ) -> Result<OpenProjectResult, String> {
+    import_external_project_at_base_dir_with_review(
+        base_dir,
+        project_name,
+        profile_id,
+        project_path,
+        None,
+    )
+}
+
+fn import_external_project_at_base_dir_with_review(
+    base_dir: &Path,
+    project_name: &str,
+    profile_id: &str,
+    project_path: &Path,
+    review: Option<&core::mugen_profile::ReviewOptions>,
+) -> Result<OpenProjectResult, String> {
     let (project_dir, dir_notice) = reserve_project_dir(base_dir, project_name)?;
     let origin = reserved_dir_origin(&project_dir);
     let imported = (|| {
         let project = create_project_skeleton(&project_dir, project_name, "megadrive")
             .map_err(|error| error.to_string())?;
-        let report = import_external_scene(&project_dir, profile_id, project_path)
-            .map_err(|error| error.to_string())?;
+        let report = if let Some(review) = review {
+            if !matches!(profile_id, "mugen" | "ikemen_go") {
+                return Err("Revisao MUGEN exige perfil MUGEN/Ikemen.".into());
+            }
+            core::project_mgr::import_mugen_project_with_review(
+                &project_dir,
+                project_path,
+                profile_id,
+                Some(review),
+            )
+            .map(|r| core::project_mgr::ExternalImportReport {
+                primary_scene: r.primary_scene,
+                imported_scenes: r.imported_scenes,
+                skipped_sources: r.skipped_sources,
+            })
+        } else {
+            import_external_scene(&project_dir, profile_id, project_path)
+        }
+        .map_err(|error| error.to_string())?;
         stamp_imported_external_profile_metadata(&project_dir, profile_id, project_path)
             .map_err(|error| error.to_string())?;
         Ok::<_, String>((project, report))
@@ -4893,9 +4926,17 @@ async fn import_external_project(
     base_dir: String,
     profile_id: String,
     project_path: String,
+    mugen_review: Option<core::mugen_profile::ReviewOptions>,
 ) -> Result<OpenProjectResult, String> {
-    run_heavy_result_command("import_external_project", move || {
-        import_external_project_impl(project_name, base_dir, profile_id, project_path)
+    run_heavy_result_command("import_external_project", move || match mugen_review {
+        Some(review) => import_external_project_impl_with_review(
+            project_name,
+            base_dir,
+            profile_id,
+            project_path,
+            Some(review),
+        ),
+        None => import_external_project_impl(project_name, base_dir, profile_id, project_path),
     })
     .await
 }
@@ -4905,6 +4946,16 @@ fn import_external_project_impl(
     base_dir: String,
     profile_id: String,
     project_path: String,
+) -> Result<OpenProjectResult, String> {
+    import_external_project_impl_with_review(project_name, base_dir, profile_id, project_path, None)
+}
+
+fn import_external_project_impl_with_review(
+    project_name: String,
+    base_dir: String,
+    profile_id: String,
+    project_path: String,
+    mugen_review: Option<core::mugen_profile::ReviewOptions>,
 ) -> Result<OpenProjectResult, String> {
     let trimmed_name = project_name.trim();
     let trimmed_base_dir = base_dir.trim();
@@ -4920,13 +4971,35 @@ fn import_external_project_impl(
     let resolved_base_dir = resolve_project_base_dir(
         (!trimmed_base_dir.is_empty()).then(|| Path::new(trimmed_base_dir)),
     )?;
-    let result = import_external_project_at_base_dir(
-        &resolved_base_dir.path,
-        trimmed_name,
-        trimmed_profile_id,
-        Path::new(trimmed_project_path),
-    )?;
+    let result = if let Some(review) = mugen_review.as_ref() {
+        import_external_project_at_base_dir_with_review(
+            &resolved_base_dir.path,
+            trimmed_name,
+            trimmed_profile_id,
+            Path::new(trimmed_project_path),
+            Some(review),
+        )
+    } else {
+        import_external_project_at_base_dir(
+            &resolved_base_dir.path,
+            trimmed_name,
+            trimmed_profile_id,
+            Path::new(trimmed_project_path),
+        )
+    }?;
     Ok(attach_base_dir_notice(result, resolved_base_dir))
+}
+
+#[tauri::command]
+async fn analyze_mugen_source(
+    project_path: String,
+    options: Option<core::mugen_profile::ReviewOptions>,
+) -> Result<serde_json::Value, String> {
+    run_heavy_result_command("analyze_mugen_source", move || {
+        core::mugen_profile::analyze_source(Path::new(project_path.trim()), options)
+            .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -5345,6 +5418,7 @@ pub fn run() {
             list_external_import_profiles,
             create_project_from_template,
             import_external_project,
+            analyze_mugen_source,
             import_sgdk_project,
             inspect_sgdk_project_inventory,
             inspect_sgdk_corpus_inventory,

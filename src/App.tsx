@@ -2,6 +2,8 @@ import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { dispatchGraphHistory } from "./core/nodegraph/graphHistory";
 import { open } from "@tauri-apps/plugin-dialog";
 import { MugenCompatibilityPanel } from "./components/common/MugenCompatibilityPanel";
+import MugenSourceReviewPanel from "./components/common/MugenSourceReviewPanel";
+import type { MugenReviewOptions } from "./core/mugenReview";
 import {
   loadMugenImportReports,
   summarizeLosses,
@@ -1709,6 +1711,7 @@ export default function App() {
   const [mugenReports, setMugenReports] = useState<LoadedMugenReport[]>([]);
   const [mugenReportsProjectDir, setMugenReportsProjectDir] = useState<string | null>(null);
   const [mugenPanelOpen, setMugenPanelOpen] = useState(false);
+  const [mugenReviewPath, setMugenReviewPath] = useState<string | null>(null);
   const mugenStateRef = useRef({ open: false, reports: [] as LoadedMugenReport[] });
   mugenStateRef.current = { open: mugenPanelOpen, reports: mugenReports };
   // Automacao E2E: substitui SO o dialogo nativo de pasta (que o WebDriver nao dirige).
@@ -2975,7 +2978,7 @@ export default function App() {
     }
   }
 
-  async function handleImportExternalProject() {
+  async function handleImportExternalProject(review?: MugenReviewOptions, reviewedPath?: string) {
     if (!newProjName.trim()) {
       logMessage("warn", "[Projeto] Informe um nome para o projeto importado.");
       return;
@@ -3000,18 +3003,27 @@ export default function App() {
 
     let projectPath: string | null = null;
     try {
-      projectPath = await chooseExternalProjectPath(selectedExternalImportProfile);
+      projectPath = reviewedPath ?? await chooseExternalProjectPath(selectedExternalImportProfile);
       if (!projectPath) {
         return;
       }
 
+      if (!reviewedPath && (selectedExternalImportProfile.id === "mugen" || selectedExternalImportProfile.id === "ikemen_go")) {
+        setMugenReviewPath(projectPath);
+        return;
+      }
+
       setCreatingProject(true);
-      const result = await importExternalProject(
+      const importArgs = [
         newProjName.trim(),
         newProjBaseDir.trim(),
         selectedExternalImportProfile.id,
-        projectPath
-      );
+        projectPath,
+      ] as const;
+      const result = review
+        ? await importExternalProject(...importArgs, review)
+        : await importExternalProject(...importArgs);
+      setMugenReviewPath(null);
       setLastSgdkImportSummary(
         selectedExternalImportProfile.id === "sgdk" ? result.import_summary ?? null : null
       );
@@ -5189,6 +5201,7 @@ export default function App() {
         reports={mugenReports}
         onClose={() => setMugenPanelOpen(false)}
       />
+      {mugenReviewPath && <MugenSourceReviewPanel sourcePath={mugenReviewPath} onCancel={() => setMugenReviewPath(null)} onImport={(options) => handleImportExternalProject(options, mugenReviewPath)} />}
 
       {showCommandPalette && (
         <CommandPaletteDialog

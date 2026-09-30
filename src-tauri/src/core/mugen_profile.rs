@@ -10,15 +10,262 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use base64::Engine;
 use image::{ImageBuffer, Rgba, RgbaImage};
 use rex_mugen::diag::{Diagnostic, Fidelity, Severity};
 use rex_mugen::{air, plan, sff, sha256::sha256_hex};
+use serde::{Deserialize, Serialize};
 
 use crate::core::project_mgr::LoadError;
 use crate::ugdm::components::{AnimationDef, MugenAnimationFrame, MugenCollisionBox, Pivot};
 
 pub const REPORT_SCHEMA: &str = "retrodev.mugen_import_report/v1";
 pub const MAX_TEXT_BYTES: u64 = 1024 * 1024;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReviewOptions {
+    pub def_file: String,
+    #[serde(default)]
+    pub actions: Vec<i32>,
+    pub palette_file: Option<String>,
+    #[serde(default)]
+    pub authored_demo: bool,
+    pub source_sha256: Option<String>,
+}
+
+pub(crate) fn package_files(root: &Path) -> Result<Vec<String>, LoadError> {
+    fn walk(
+        root: &Path,
+        dir: &Path,
+        files: &mut Vec<String>,
+        depth: usize,
+    ) -> Result<(), LoadError> {
+        if depth > 16 {
+            return Err(LoadError("pacote MUGEN excede 16 niveis de pastas".into()));
+        }
+        let mut entries = fs::read_dir(dir)
+            .map_err(|e| LoadError(e.to_string()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| LoadError(e.to_string()))?;
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let path = e.path();
+            let ty = e.file_type().map_err(|e| LoadError(e.to_string()))?;
+            if ty.is_symlink() {
+                return Err(LoadError(format!(
+                    "link simbolico '{}' recusado na analise",
+                    path.display()
+                )));
+            }
+            if ty.is_dir() {
+                walk(root, &path, files, depth + 1)?;
+            } else if ty.is_file() {
+                files.push(
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+                if files.len() > 4096 {
+                    return Err(LoadError("pacote excede 4096 arquivos".into()));
+                }
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out, 0)?;
+    out.sort();
+    Ok(out)
+}
+
+pub(crate) fn package_digest(root: &Path) -> Result<String, LoadError> {
+    let mut data = Vec::new();
+    for file in package_files(root)? {
+        let bytes = read_limited(&resolve_inside(root, &file)?, sff::MAX_FILE_BYTES as u64)?;
+        if data.len() + bytes.len() > 128 * 1024 * 1024 {
+            return Err(LoadError("pacote excede 128 MiB de analise".into()));
+        }
+        data.extend_from_slice(&(file.len() as u64).to_le_bytes());
+        data.extend_from_slice(file.as_bytes());
+        data.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        data.extend_from_slice(&bytes);
+    }
+    Ok(sha256_hex(&data))
+}
+
+/// Análise somente leitura usada antes da importação e repetida na fronteira de
+/// gravação. O digest impede importar uma fonte diferente da revisada.
+pub(crate) fn analyze_source(
+    root: &Path,
+    requested: Option<ReviewOptions>,
+) -> Result<serde_json::Value, LoadError> {
+    use rex_mugen::source::{parse_def, resolve, Resolution};
+    let files = package_files(root)?;
+    let digest = package_digest(root)?;
+    let mut defs = Vec::new();
+    for file in files
+        .iter()
+        .filter(|f| f.to_ascii_lowercase().ends_with(".def"))
+    {
+        let text =
+            String::from_utf8_lossy(&read_limited(&resolve_inside(root, file)?, MAX_TEXT_BYTES)?)
+                .into_owned();
+        let d = parse_def(&text);
+        if d.is_character() {
+            defs.push(serde_json::json!({"file":file,"name":d.name}));
+        }
+    }
+    let selected = requested
+        .as_ref()
+        .map(|r| r.def_file.clone())
+        .filter(|d| !d.is_empty())
+        .or_else(|| (defs.len() == 1).then(|| defs[0]["file"].as_str().unwrap().to_string()));
+    let mut out = serde_json::json!({"schema":"retrodev.mugen_source_analysis/v1","maturity":"Experimental",
+        "source_sha256":digest,"defs":defs,"selected_def":selected,"diagnostics":[],"references":[],"actions":[],"palettes":[],"report":null});
+    let Some(def_file) = selected else {
+        if out["defs"].as_array().unwrap().is_empty() {
+            let screenpack = files
+                .iter()
+                .any(|f| f.eq_ignore_ascii_case("data/system.def"));
+            let mut stage = false;
+            for file in files
+                .iter()
+                .filter(|f| f.to_ascii_lowercase().ends_with(".def"))
+            {
+                let bytes = read_limited(&root.join(file), MAX_TEXT_BYTES)?;
+                let text = String::from_utf8_lossy(&bytes).to_ascii_lowercase();
+                stage |= text.contains("[bgdef]") || text.contains("[stageinfo]");
+            }
+            if screenpack || stage {
+                out["legacy_kind"] =
+                    serde_json::json!(if screenpack { "screenpack" } else { "stage" });
+                out["diagnostics"] = serde_json::json!([{"code":"source.non_character","severity":"warning","source":"pacote","message":"Este pacote e um cenario/screenpack. A revisao de personagem nao se aplica; use a importacao existente (Experimental).","action":"Confira o relatorio apos importar."}]);
+                return Ok(out);
+            }
+        }
+        out["diagnostics"] = serde_json::json!([{"code":"source.def.selection","severity":"error","source":"pacote","message":"Selecione um unico DEF de personagem antes de importar.","action":"Escolha o DEF na lista."}]);
+        return Ok(out);
+    };
+    if !out["defs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["file"] == def_file)
+    {
+        return Err(LoadError(
+            "DEF selecionado nao e um candidato deste pacote".into(),
+        ));
+    }
+    let def_path = resolve_inside(root, &def_file)?;
+    let char_root = def_path.parent().unwrap();
+    let base = def_file.rsplit_once('/').map(|(b, _)| b).unwrap_or("");
+    let bytes = read_limited(&def_path, MAX_TEXT_BYTES)?;
+    let d = parse_def(&String::from_utf8_lossy(&bytes));
+    let mut resolved = BTreeMap::new();
+    let mut diags = Vec::new();
+    let mut refs = Vec::new();
+    let mut palettes = Vec::new();
+    for (key, line) in &d.duplicate_keys {
+        diags.push(serde_json::json!({"code":"source.def.duplicate","severity":"error","source":format!("{def_file}:{line}"),"message":format!("Referencia {key} duplicada; nenhum valor foi escolhido."),"action":"Corrija o DEF ou escolha outra variante."}));
+    }
+    for r in &d.references {
+        let resolution = resolve(&files, base, &r.value);
+        let (status, path) = match &resolution {
+            Resolution::Resolved(p) => ("resolved", Some(p.clone())),
+            Resolution::Missing => ("missing", None),
+            Resolution::Ambiguous(_) => ("ambiguous", None),
+            Resolution::External => ("external", None),
+        };
+        let required = r.section == "files" && matches!(r.key.as_str(), "sprite" | "anim");
+        if status != "resolved" {
+            diags.push(serde_json::json!({"code":format!("source.reference.{status}"),"severity":if required || status=="ambiguous" {"error"} else {"warning"},"source":format!("{def_file}:{}",r.line),"message":format!("{} = {}: {status}",r.key,r.value),"action":"A dependencia nao sera inventada nem baixada; confira o pacote."}));
+        }
+        let hash = path
+            .as_ref()
+            .map(|p| {
+                read_limited(&root.join(p), sff::MAX_FILE_BYTES as u64).map(|b| sha256_hex(&b))
+            })
+            .transpose()?;
+        refs.push(serde_json::json!({"key":r.key,"requested":r.value,"line":r.line,"status":status,"resolved":path,"sha256":hash,"candidates":match resolution {Resolution::Ambiguous(v)=>v,_=>vec![]}}));
+        if let Some(path) = path {
+            let relative = Path::new(&path)
+                .strip_prefix(base)
+                .unwrap_or(Path::new(&path))
+                .to_string_lossy()
+                .replace('\\', "/");
+            if r.section == "files" {
+                resolved.insert(r.key.clone(), relative.clone());
+            }
+            if r.key.starts_with("pal") {
+                palettes.push(relative);
+            }
+        }
+    }
+    out["references"] = serde_json::json!(refs);
+    out["palettes"] = serde_json::json!(palettes);
+    out["diagnostics"] = serde_json::json!(diags);
+    if out["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["severity"] == "error")
+    {
+        return Ok(out);
+    }
+    let air_rel = &resolved["anim"];
+    let sff_rel = &resolved["sprite"];
+    out["original_logic"] = crate::core::project_mgr::inspect_mugen_logic(char_root, &resolved)?;
+    let sb = read_limited(
+        &resolve_inside(char_root, sff_rel)?,
+        sff::MAX_FILE_BYTES as u64,
+    )?;
+    out["format"] = serde_json::json!({"file":sff_rel,"format":"SFF","version":sb.get(12..16).map(|v|v.iter().rev().copied().collect::<Vec<_>>())});
+    if let Ok(decoded) = sff::parse(&sb, sff_rel) {
+        out["sprites"]=serde_json::json!(decoded.sprites.values().map(|s|serde_json::json!({"group":s.group,"image":s.image,"size":[s.width,s.height],"axis":[s.axis_x,s.axis_y],"offset":s.offset})).collect::<Vec<_>>());
+    }
+    let ab = read_limited(&resolve_inside(char_root, air_rel)?, MAX_TEXT_BYTES)?;
+    let ad = air::parse(&String::from_utf8_lossy(&ab), air_rel);
+    out["actions"] = serde_json::json!(ad
+        .actions
+        .values()
+        .map(|a| serde_json::json!({"number":a.number,"frames":a.frames.len(),"line":a.line}))
+        .collect::<Vec<_>>());
+    let mut options = requested.unwrap_or_else(|| ReviewOptions {
+        def_file: def_file.clone(),
+        palette_file: palettes.first().cloned(),
+        ..ReviewOptions::default()
+    });
+    options.def_file = def_file;
+    options.source_sha256 = Some(digest);
+    out["options"] = serde_json::to_value(&options).map_err(|e| LoadError(e.to_string()))?;
+    if options.authored_demo
+        && [0, 20, 21, 200].iter().any(|n| {
+            !ad.actions.contains_key(n)
+                || (!options.actions.is_empty() && !options.actions.contains(n))
+        })
+    {
+        out["diagnostics"].as_array_mut().unwrap().push(serde_json::json!({"code":"source.demo.actions","severity":"error","source":air_rel,"message":"Demonstracao autoral exige acoes 0, 20, 21 e 200 na selecao.","action":"Inclua as quatro acoes ou desligue a demonstracao autoral."}));
+        return Ok(out);
+    }
+    match convert_character_v1_with_review(char_root, air_rel, sff_rel, Some(&options)) {
+        Ok(Some(mut c)) => {
+            out["diagnostics"]
+                .as_array_mut()
+                .unwrap()
+                .extend(c.report["diagnostics"].as_array().unwrap().iter().cloned());
+            c.report["source_analysis"] = out.clone();
+            out["report"] = c.report;
+        }
+        Ok(None) => {
+            out["diagnostics"].as_array_mut().unwrap().push(serde_json::json!({"code":"source.sff.unsupported","severity":"error","source":sff_rel,"message":"SFF nao e v1 legivel pelo perfil de revisao.","action":"Selecione SFF v1; nenhum placeholder sera gerado."}));
+        }
+        Err(e) => {
+            out["diagnostics"].as_array_mut().unwrap().push(serde_json::json!({"code":"source.plan.refused","severity":"error","source":air_rel,"message":e.0,"action":"Revise a selecao de acoes e a paleta."}));
+        }
+    }
+    Ok(out)
+}
 
 /// Resolve `rel` dentro de `root`; recusa caminho absoluto, `..` que escape e link para fora.
 pub(crate) fn resolve_inside(root: &Path, rel: &str) -> Result<PathBuf, LoadError> {
@@ -84,6 +331,15 @@ pub(crate) fn convert_character_v1(
     air_rel: &str,
     sff_rel: &str,
 ) -> Result<Option<Converted>, LoadError> {
+    convert_character_v1_with_review(root, air_rel, sff_rel, None)
+}
+
+pub(crate) fn convert_character_v1_with_review(
+    root: &Path,
+    air_rel: &str,
+    sff_rel: &str,
+    review: Option<&ReviewOptions>,
+) -> Result<Option<Converted>, LoadError> {
     let air_path = resolve_inside(root, air_rel)?;
     let air_bytes = read_limited(&air_path, MAX_TEXT_BYTES)?;
     let air_text = String::from_utf8_lossy(&air_bytes).to_string();
@@ -95,9 +351,19 @@ pub(crate) fn convert_character_v1(
     }
     let sff_path = resolve_inside(root, sff_rel)?;
     let sff_bytes = read_limited(&sff_path, sff::MAX_FILE_BYTES as u64)?;
-    let sff_doc = match sff::parse(&sff_bytes, sff_rel) {
+    let mut sff_doc = match sff::parse(&sff_bytes, sff_rel) {
         Ok(doc) => doc,
         Err(_) => return Ok(None),
+    };
+    let palette_source = if let Some(rel) = review.and_then(|r| r.palette_file.as_deref()) {
+        let bytes = read_limited(&resolve_inside(root, rel)?, 768)?;
+        let palette = sff::read_act(&bytes).map_err(|e| LoadError(e.into()))?;
+        for sprite in sff_doc.sprites.values_mut() {
+            sprite.palette.clone_from(&palette);
+        }
+        Some((rel, sha256_hex(&bytes)))
+    } else {
+        None
     };
     let (air_sha, sff_sha) = (sha256_hex(&air_bytes), sha256_hex(&sff_bytes));
     let planned = plan::plan(&plan::Inputs {
@@ -105,7 +371,7 @@ pub(crate) fn convert_character_v1(
         air_sha256: &air_sha,
         sff: &sff_doc,
         sff_sha256: &sff_sha,
-        actions: &[],
+        actions: review.map(|r| r.actions.as_slice()).unwrap_or(&[]),
     })
     .map_err(|diags| {
         LoadError(format!(
@@ -234,7 +500,7 @@ pub(crate) fn convert_character_v1(
             "consequence": "golpes nao acertam nem recebem dano sozinhos; e preciso ligar a logica de colisao manualmente",
         }));
     }
-    let report = serde_json::json!({
+    let mut report = serde_json::json!({
         "schema": REPORT_SCHEMA,
         "profile": plan::PROFILE_ID,
         "maturity": "Experimental",
@@ -256,6 +522,31 @@ pub(crate) fn convert_character_v1(
             "manual": Fidelity::Manual.as_str(), "unsupported": Fidelity::Unsupported.as_str(),
         },
     });
+    if let Some(review) = review {
+        if let Some((rel, digest)) = palette_source {
+            report["sources"][rel] =
+                serde_json::json!({"sha256": digest, "format": "ACT", "order": "reversed_256_rgb"});
+            report["palette_choice"] = serde_json::json!({"file": rel, "sha256": digest,
+                "application": "paleta escolhida explicitamente para todos os sprites selecionados"});
+        } else {
+            report["palette_choice"] =
+                serde_json::json!({"file": null, "application": "paleta embutida do SFF"});
+        }
+        report["review_options"] =
+            serde_json::to_value(review).map_err(|e| LoadError(e.to_string()))?;
+        for n in air_doc
+            .actions
+            .keys()
+            .filter(|n| !planned.actions.contains_key(n))
+        {
+            report["resources"].as_array_mut().unwrap().push(serde_json::json!({
+                "item": format!("anim:{n}"), "source": air_rel, "source_sha256": air_sha,
+                "fidelity": "unsupported", "reason": "acao fora da selecao desta importacao",
+                "consequence": "esta animacao nao esta no projeto; o pacote original foi preservado"
+            }));
+        }
+        report["visual_review"] = visual_review(&planned, &sff_doc)?;
+    }
     Ok(Some(Converted {
         atlas,
         cell_w: cw as u32,
@@ -267,6 +558,110 @@ pub(crate) fn convert_character_v1(
         animations,
         report,
     }))
+}
+
+fn png_data(image: &RgbaImage) -> Result<String, LoadError> {
+    let mut buf = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .map_err(|e| LoadError(e.to_string()))?;
+    Ok(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(buf.into_inner())
+    ))
+}
+
+/// Compõe o elemento AIR em um palco comum. Origem e convertido usam a mesma
+/// escala e âncora; nada é redesenhado. A prova independente vive no harness.
+fn visual_review(p: &plan::CharacterPlan, sff: &sff::Sff) -> Result<serde_json::Value, LoadError> {
+    let pad = 128usize;
+    let (w, h) = (p.cell_w + 2 * pad, p.cell_h + 2 * pad);
+    let mut frames = Vec::new();
+    let mut budget = 0usize;
+    for a in p.actions.values() {
+        for (element, f) in a.frames.iter().enumerate() {
+            if frames.len() >= 1024 {
+                return Err(LoadError(
+                    "revisao visual excede 1024 elementos; selecione menos acoes".into(),
+                ));
+            }
+            let cell = f.cell.unwrap();
+            let c = &p.cells[cell];
+            let s = &sff.sprites[&c.sprite];
+            let mut original = RgbaImage::new(w as u32, h as u32);
+            let mut converted = RgbaImage::new(w as u32, h as u32);
+            let rendered = p.render_cell(sff, cell);
+            for y in 0..p.cell_h {
+                for x in 0..p.cell_w {
+                    let ox = if f.hflip { p.cell_w - 1 - x } else { x };
+                    let oy = if f.vflip { p.cell_h - 1 - y } else { y };
+                    let dx = pad as i32
+                        + ox as i32
+                        + f.x
+                        + if f.hflip {
+                            2 * p.anchor_x as i32 - p.cell_w as i32
+                        } else {
+                            0
+                        };
+                    let dy = pad as i32
+                        + oy as i32
+                        + f.y
+                        + if f.vflip {
+                            2 * p.anchor_y as i32 - p.cell_h as i32
+                        } else {
+                            0
+                        };
+                    if dx < 0 || dy < 0 || dx >= w as i32 || dy >= h as i32 {
+                        return Err(LoadError(
+                            "offset AIR fora do palco de revisao; selecione menos acoes".into(),
+                        ));
+                    }
+                    if x >= c.dx && y >= c.dy && x - c.dx < s.width && y - c.dy < s.height {
+                        let i = s.pixels[(y - c.dy) * s.width + x - c.dx] as usize;
+                        if i != 0 {
+                            let rgb = s.palette[i];
+                            original.put_pixel(
+                                dx as u32,
+                                dy as u32,
+                                Rgba([rgb[0], rgb[1], rgb[2], 255]),
+                            );
+                        }
+                    }
+                    if let Some(rgb) = rendered[y * p.cell_w + x] {
+                        converted.put_pixel(
+                            dx as u32,
+                            dy as u32,
+                            Rgba([rgb[0], rgb[1], rgb[2], 255]),
+                        );
+                    }
+                }
+            }
+            let op = png_data(&original)?;
+            let cp = png_data(&converted)?;
+            budget += op.len() + cp.len();
+            if budget > 16 * 1024 * 1024 {
+                return Err(LoadError(
+                    "revisao visual excede 16 MiB; selecione menos acoes".into(),
+                ));
+            }
+            frames.push(serde_json::json!({
+                "action":a.number,"element":element,"group":s.group,"image":s.image,
+                "source":format!("{}@0x{:X}",sff.file,s.offset),"air_line":f.line,
+                "sprite_size":[s.width,s.height],"sprite_axis":[s.axis_x,s.axis_y],
+                "offset":[f.x,f.y],"hflip":f.hflip,"vflip":f.vflip,
+                "duration":if f.timer==0 {-1} else {f.timer as i32},
+                "indices_sha256":sha256_hex(&s.pixels),
+                "palette_sha256":sha256_hex(&s.palette.iter().flatten().copied().collect::<Vec<_>>()),
+                "original_sha256":sha256_hex(original.as_raw()),"converted_sha256":sha256_hex(converted.as_raw()),
+                "original_png":op,"converted_png":cp
+            }));
+        }
+    }
+    Ok(
+        serde_json::json!({"width":w,"height":h,"anchor":[pad+p.anchor_x,pad+p.anchor_y],
+        "loop_start":p.actions.iter().map(|(n,a)|(n.to_string(),a.loopstart)).collect::<BTreeMap<_,_>>(),"frames":frames,
+        "note":"Pixels reais; cores arredondadas para 3 bits por canal. Fonte e convertido na mesma escala. A previa usa RGB normalizado; a saida de cor do core e conferida separadamente. Emulacao ainda nao comprovada por esta previa."}),
+    )
 }
 
 // ---------------------------------------------------------------- resumo para o usuario
@@ -320,7 +715,10 @@ fn category_of(item: &str) -> &'static str {
         "animations"
     } else if item.starts_with("command:") {
         "commands"
-    } else if item.starts_with("statedef:") || item.starts_with("controller:") {
+    } else if item == "original_logic"
+        || item.starts_with("statedef:")
+        || item.starts_with("controller:")
+    {
         "states"
     } else if item == "collision" {
         "collisions"
@@ -2512,6 +2910,259 @@ mod tests {
         assert!(r.unwrap_err().contains("sai do pacote"));
         assert_untouched(&project);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn review_palette_selection_changes_real_pixels_and_survives_reopen() {
+        let root = temp("review-act");
+        let donor = root.join("donor");
+        copy_dir(&probe_dir(), &donor);
+        let mut act = vec![0; 768];
+        act[(255 - 1) * 3 + 2] = 255;
+        act[(255 - 2) * 3 + 1] = 255;
+        act[(255 - 3) * 3] = 255;
+        fs::write(donor.join("choice.act"), &act).unwrap();
+        let def = fs::read_to_string(donor.join("probe.def")).unwrap();
+        fs::write(donor.join("probe.def"), format!("{def}\npal1=choice.act\n")).unwrap();
+        let initial = super::analyze_source(&donor, None).unwrap();
+        let options = super::ReviewOptions {
+            def_file: "probe.def".into(),
+            palette_file: Some("choice.act".into()),
+            source_sha256: Some(initial["source_sha256"].as_str().unwrap().into()),
+            ..Default::default()
+        };
+        let chosen = super::analyze_source(&donor, Some(options.clone())).unwrap();
+        assert!(!chosen["report"].is_null(), "{chosen}");
+        let selected = super::convert_character_v1_with_review(
+            &donor,
+            "probe.air",
+            "probe.sff",
+            Some(&options),
+        )
+        .unwrap()
+        .unwrap();
+        let embedded = super::convert_character_v1(&donor, "probe.air", "probe.sff")
+            .unwrap()
+            .unwrap();
+        assert_ne!(
+            sha(selected.atlas.as_raw()),
+            sha(embedded.atlas.as_raw()),
+            "ACT deve alterar pixels, nao somente o rotulo"
+        );
+        let project = root.join("project");
+        create_project_skeleton(&project, "Probe", "megadrive").unwrap();
+        crate::core::project_mgr::import_mugen_project_with_review(
+            &project,
+            &donor,
+            "mugen",
+            Some(&options),
+        )
+        .unwrap();
+        let report: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(project.join("assets/mugen/probe_import_report.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report["review_options"]["palette_file"], "choice.act");
+        assert_eq!(report["visual_review"], chosen["report"]["visual_review"]);
+        assert_eq!(
+            report["source_analysis"]["source_sha256"],
+            options.source_sha256.unwrap()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reviewed_source_mutation_is_refused_before_writing_assets() {
+        let root = temp("review-stale");
+        let donor = root.join("donor");
+        copy_dir(&probe_dir(), &donor);
+        let mut options = super::ReviewOptions {
+            def_file: "probe.def".into(),
+            ..Default::default()
+        };
+        options.source_sha256 = Some(super::package_digest(&donor).unwrap());
+        fs::write(donor.join("probe.air"), "[Begin Action 0]\n0,0,0,0,6\n").unwrap();
+        let project = root.join("project");
+        create_project_skeleton(&project, "Probe", "megadrive").unwrap();
+        let e = crate::core::project_mgr::import_mugen_project_with_review(
+            &project,
+            &donor,
+            "mugen",
+            Some(&options),
+        )
+        .unwrap_err();
+        assert!(e.0.contains("mudou desde a revisao"), "{e}");
+        assert_untouched(&project);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn source_analysis_requires_explicit_def_and_reports_missing_dependencies() {
+        let root = temp("review-def");
+        copy_dir(&probe_dir(), &root);
+        fs::copy(root.join("probe.def"), root.join("alternative.def")).unwrap();
+        let a = super::analyze_source(&root, None).unwrap();
+        assert_eq!(a["defs"].as_array().unwrap().len(), 2);
+        assert!(a["selected_def"].is_null());
+        assert!(import_mugen_project(&root.join("project"), &root)
+            .unwrap_err()
+            .0
+            .contains("Mais de um DEF"));
+        let def = fs::read_to_string(root.join("probe.def")).unwrap();
+        fs::write(
+            root.join("probe.def"),
+            format!("{def}\nstcommon = common1.cns\n"),
+        )
+        .unwrap();
+        let a = super::analyze_source(
+            &root,
+            Some(super::ReviewOptions {
+                def_file: "probe.def".into(),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        assert!(a["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "source.reference.missing"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reviewed_case_insensitive_references_reach_the_canonical_importer() {
+        let root = temp("review-case");
+        let donor = root.join("donor");
+        copy_dir(&probe_dir(), &donor);
+        let text = fs::read_to_string(donor.join("probe.def"))
+            .unwrap()
+            .replace("probe.air", "PROBE.AIR")
+            .replace("probe.sff", "PROBE.SFF")
+            .replace("probe.cmd", "PROBE.CMD");
+        fs::write(donor.join("probe.def"), text).unwrap();
+        let a = super::analyze_source(&donor, None).unwrap();
+        let options: super::ReviewOptions = serde_json::from_value(a["options"].clone()).unwrap();
+        assert!(!a["report"].is_null(), "{a}");
+        let project = root.join("project");
+        create_project_skeleton(&project, "Probe", "megadrive").unwrap();
+        crate::core::project_mgr::import_mugen_project_with_review(
+            &project,
+            &donor,
+            "mugen",
+            Some(&options),
+        )
+        .unwrap();
+        assert!(project
+            .join("assets/mugen/probe_import_report.json")
+            .is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn source_analysis_routes_a_stage_to_the_existing_non_character_flow() {
+        let root = temp("review-stage");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("stage.def"),
+            "[Info]\nname=Stage\n[StageInfo]\nzoffset=180\n[BGdef]\n",
+        )
+        .unwrap();
+        let a = super::analyze_source(&root, None).unwrap();
+        assert_eq!(a["legacy_kind"], "stage");
+        assert!(a["report"].is_null());
+        assert_eq!(a["diagnostics"][0]["severity"], "warning");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Fonte BYOR real e SGDK/core oficiais; saída preservada para comparação
+    /// independente de pixels. Nenhuma expectativa de Ken vem da fixture Strider.
+    #[test]
+    #[ignore]
+    fn mugen_real_pilot_build_and_capture() {
+        let source =
+            PathBuf::from(std::env::var("RDS_MUGEN_REAL_SOURCE").expect("RDS_MUGEN_REAL_SOURCE"));
+        let output =
+            PathBuf::from(std::env::var("RDS_MUGEN_REAL_OUTPUT").expect("RDS_MUGEN_REAL_OUTPUT"));
+        fs::create_dir_all(&output).unwrap();
+        let options = super::ReviewOptions {
+            def_file: "ken8.def".into(),
+            actions: vec![0, 20, 21, 200],
+            palette_file: Some("ken1.act".into()),
+            authored_demo: true,
+            source_sha256: Some(super::package_digest(&source).unwrap()),
+        };
+        let analysis = super::analyze_source(&source, Some(options.clone())).unwrap();
+        assert!(!analysis["report"].is_null(), "{analysis}");
+        fs::write(
+            output.join("analysis.json"),
+            serde_json::to_vec_pretty(&analysis).unwrap(),
+        )
+        .unwrap();
+        let project = output.join("project");
+        create_project_skeleton(&project, "Ken real", "megadrive").unwrap();
+        crate::core::project_mgr::import_mugen_project_with_review(
+            &project,
+            &source,
+            "mugen",
+            Some(&options),
+        )
+        .unwrap();
+        crate::core::project_mgr::stamp_imported_mugen_metadata(&project, &source).unwrap();
+        let (rom, rom_sha, sym) = build(&project);
+        let mut emu = EmulatorCore::new(None);
+        emu.load_rom(&rom).unwrap();
+        emu.set_joypad(JoypadState::default()).unwrap();
+        for _ in 0..60 {
+            emu.run_frame().unwrap();
+        }
+        let mut samples = Vec::new();
+        let mut tick = 0;
+        for (phase, count, right, left, attack) in [
+            ("idle", 48, false, false, false),
+            ("walk", 36, true, false, false),
+            ("stop", 24, false, false, false),
+            ("back", 36, false, true, false),
+            ("stop2", 12, false, false, false),
+            ("attack", 18, false, false, true),
+            ("idle2", 30, false, false, false),
+        ] {
+            emu.set_joypad(JoypadState {
+                right,
+                left,
+                y: attack,
+                ..Default::default()
+            })
+            .unwrap();
+            for local in 0..count {
+                if attack && local == 1 {
+                    emu.set_joypad(JoypadState::default()).unwrap();
+                }
+                emu.run_frame().unwrap();
+                let (raw, size, format) = emu.get_framebuffer().unwrap();
+                let fb = framebuffer_to_rgba(&raw, size, format);
+                let filename = format!("core-{tick:04}.png");
+                image::save_buffer(
+                    output.join(&filename),
+                    &fb.rgba,
+                    fb.width,
+                    fb.height,
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+                samples.push(serde_json::json!({"tick":tick,"phase":phase,"file":filename,"rgba_sha256":sha(&fb.rgba),"width":fb.width,"height":fb.height,
+                    "anim":read_u16(&emu,sym["rds_mugen_spr_kenmasters_anim"]),"frame":read_u16(&emu,sym["rds_mugen_spr_kenmasters_frame"]),
+                    "x":read_u16(&emu,sym["spr_kenmasters_x"]) as i16,"y":read_u16(&emu,sym["spr_kenmasters_y"]) as i16}));
+                tick += 1;
+            }
+        }
+        let report = serde_json::json!({"schema":"retrodev.mugen_real_core_capture/v1","rom":rom,"rom_sha256":rom_sha,"elf_sha256":sha(&fs::read(project.join("build/megadrive/out/rom.out")).unwrap()),"samples":samples,"scope":"arte real e comportamento autoral, facing fixo; comparacao independente ainda obrigatoria"});
+        fs::write(
+            output.join("core-capture.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        eprintln!("Captura BYOR: {}", output.display());
     }
 
     // ---------------------------------------------------------------- produto: falha e resumo
