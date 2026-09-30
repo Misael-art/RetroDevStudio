@@ -53,21 +53,26 @@ export function composeFrame({ rom, profile, palettes, frame, globalFlip = { x: 
       const tile = decoded[Math.floor(sy / 8) * p.w + Math.floor(sx / 8)];
       return tile[(sy % 8) * 8 + (sx % 8)];
     };
+    const [t0, t1, t2] = palette[0];
     for (let row = 0; row < blockH; row++) {
       for (let col = 0; col < blockW; col++) {
         const index = sample(col, row);
         const dstX = p.x - minX + col;
         const dstY = p.y - minY + row;
         const i = (dstY * width + dstX) * 4;
+        // convencao RGBA identica ao oraculo independente do piloto (e2e-tauri-build-run):
+        // canal 3 bits * 36; indice 0 mantem o RGB da cor 0 sob alpha 0
         if (index === 0) {
+          data[i] = t0 * 36;
+          data[i + 1] = t1 * 36;
+          data[i + 2] = t2 * 36;
           data[i + 3] = 0;
           continue;
         }
         const [r, g, b] = palette[index];
-        // expansao RGB333 -> 8 bits: round(v*255/7), ponta 7 = 0xff
-        data[i] = Math.round((r * 255) / 7);
-        data[i + 1] = Math.round((g * 255) / 7);
-        data[i + 2] = Math.round((b * 255) / 7);
+        data[i] = r * 36;
+        data[i + 1] = g * 36;
+        data[i + 2] = b * 36;
         data[i + 3] = 255;
       }
     }

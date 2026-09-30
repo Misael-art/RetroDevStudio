@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inflateRawSync } from "node:zlib";
+import { inflateSync } from "node:zlib"; // PNG IDAT = stream zlib (RFC1950)
 import { encodePng } from "./png.mjs";
 
 function chunks(png) {
@@ -35,7 +35,7 @@ describe("encoder PNG", () => {
     const png = encodePng({ width: 2, height: 2, data });
     const cs = chunks(png);
     const idat = cs.find((c) => c.type === "IDAT");
-    const raw = inflateRawSync(Buffer.from(idat.data));
+    const raw = inflateSync(Buffer.from(idat.data));
     const expected = [0];
     for (let y = 0; y < 2; y++) {
       if (y > 0) expected.push(0);

@@ -1,5 +1,7 @@
-// Encoder PNG 8-bit RGBA proprio (sem dependencia nova): IHDR + IDAT (deflate raw) + IEND.
-import { deflateRawSync } from "node:zlib";
+// Encoder PNG 8-bit RGBA proprio (sem dependencia nova): IHDR + IDAT + IEND.
+// IDAT e stream ZLIB (RFC1950: cabecalho + Adler32), NAO raw deflate — decodificadores
+// estritos (libpng) rejeitam raw.
+import { deflateSync } from "node:zlib";
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -58,7 +60,7 @@ export function encodePng({ width, height, data }) {
   ihdr[9] = 6; // color type RGBA
   const parts = [];
   chunk("IHDR", ihdr, parts);
-  chunk("IDAT", new Uint8Array(deflateRawSync(raw)), parts);
+  chunk("IDAT", new Uint8Array(deflateSync(raw)), parts);
   chunk("IEND", new Uint8Array(0), parts);
   const sig = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const total = sig.length + parts.reduce((n, p) => n + p.length, 0);

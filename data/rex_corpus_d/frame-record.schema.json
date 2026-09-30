@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rex-corpus-d/frame-record.schema.json",
+  "title": "REX frame record (MISSAO D)",
+  "description": "Cadeia rastreavel ROM -> tabela -> entrada -> pecas -> slots DPLC -> arte -> paleta -> composicao. Enderecos sao inteiros absolutos no espaco do cartucho (bytes), sempre hex na documentacao.",
+  "type": "object",
+  "required": ["frame", "map", "dplc", "pieces", "gaps"],
+  "additionalProperties": false,
+  "properties": {
+    "frame": { "type": "integer", "minimum": 0, "description": "ID de frame do objeto (indice na tabela de mapping e no DPLC)" },
+    "frame_name": { "type": ["string", "null"] },
+    "map": {
+      "type": "object",
+      "required": ["table_addr", "entry_index", "entry_offset", "addr", "piece_count", "format"],
+      "properties": {
+        "table_addr": { "type": "integer" },
+        "entry_index": { "type": "integer" },
+        "entry_offset": { "type": "integer", "description": "palavra RELATIVA lida da tabela; addr = table_addr + entry_offset" },
+        "addr": { "type": "integer", "description": "endereco absoluto do header da entrada" },
+        "piece_count": { "type": "integer" },
+        "format": { "const": "sonic-v1-5byte" }
+      }
+    },
+    "dplc": {
+      "type": "object",
+      "required": ["table_addr", "entry_index", "entry_offset", "addr", "slots", "format", "semantics"],
+      "properties": {
+        "table_addr": { "type": "integer" },
+        "entry_index": { "type": "integer" },
+        "entry_offset": { "type": "integer" },
+        "addr": { "type": "integer" },
+        "slots": { "type": "array", "items": { "type": "integer" }, "description": "indices de arte na ordem de carga do buffer DPLC do frame" },
+        "format": { "const": "sonic-v1" },
+        "semantics": { "type": "string" }
+      }
+    },
+    "pieces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["byte_addr", "x", "y", "w_tiles", "h_tiles", "tile_slot", "xflip", "yflip", "pal", "pri", "palette_addr"],
+        "additionalProperties": true,
+        "properties": {
+          "byte_addr": { "type": "integer", "description": "endereco absoluto dos 5 bytes da peca" },
+          "x": { "type": "integer" }, "y": { "type": "integer" },
+          "w_tiles": { "type": "integer", "minimum": 1, "maximum": 4 },
+          "h_tiles": { "type": "integer", "minimum": 1, "maximum": 4 },
+          "tile_slot": { "type": "integer", "description": "indice no buffer DPLC do frame — NAO e indice de arte" },
+          "xflip": { "type": "integer", "enum": [0, 1] },
+          "yflip": { "type": "integer", "enum": [0, 1] },
+          "pal": { "type": "integer", "minimum": 0, "maximum": 3 },
+          "pri": { "type": "integer", "enum": [0, 1] },
+          "palette_addr": { "type": "integer", "description": "pal_addr + pal*0x20" },
+          "art_index": { "type": ["integer", "null"] },
+          "art_addr": { "type": ["integer", "null"], "description": "art_addr + art_index*32; null quando ha lacuna" },
+          "gap": { "type": "string", "description": "presente quando o slot nao e carregado pelo DPLC; nenhum tile e inventado" }
+        }
+      }
+    },
+    "gaps": { "type": "array", "items": { "type": "object", "required": ["tile", "byte_addr", "reason"] } },
+    "composition": {
+      "type": "object",
+      "required": ["width", "height", "anchor"],
+      "properties": {
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "anchor": { "type": "object", "required": ["x", "y"], "properties": { "x": { "type": "integer" }, "y": { "type": "integer" } } }
+      }
+    }
+  }
+}
