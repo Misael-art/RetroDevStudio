@@ -59,6 +59,60 @@ essa transformação.
 | escala/ângulo/`Interpolate` | não | diagnóstico; ignorados |
 | frame com sprite ausente | não | a action **não é convertida** (um frame vazio encurtaria a animação no `rescomp`) |
 
+## Revisão da fonte antes de importar (Ken real, 2026-09-30)
+
+O comando canônico `analyze_mugen_source` é somente leitura. `source.rs` inventaria
+DEFs de personagem (storyboards não são candidatos), chaves duplicadas e referências
+relativas sem escolher silenciosamente entre colisões. O backend informa localização,
+hashes, SFF/versão, sprites/eixos, ações, dependências e controllers originais; o plano
+prevê transformações para as ações selecionadas. DEFs múltiplos exigem seleção.
+Limites da análise: 4.096 arquivos, 16 níveis, 128 MiB no pacote, textos até 1 MiB;
+links simbólicos são recusados. Esses são limites do analisador, não do hardware.
+
+Escolhas persistidas em `review_options`: DEF, lista de ações (vazia = todas),
+paleta e modo de comportamento. ACT MUGEN tem exatamente 768 bytes/256 RGB em ordem
+invertida. A escolha substitui explicitamente a paleta dos sprites selecionados;
+`null` usa a embutida. O DEF determina a primeira paleta sugerida. Não há detecção
+automática do significado de paletas alternativas ou suporte a ACT estendida.
+O digest é SHA-256 da sequência ordenada de caminhos UTF-8 e bytes: para cada arquivo,
+comprimento do caminho (`u64` little endian), caminho, comprimento (`u64`), conteúdo.
+A importação repete a análise e recusa digest diferente do revisado.
+
+`visual_review` preserva PNGs reais, hashes RGBA/índices/paleta e metadados por
+elemento AIR (até 1.024 elementos e 16 MiB codificados). A composição tem palco
+comum e margem de 128 px; offsets fora dele exigem seleção menor. A revisão e as
+escolhas reabrem no relatório existente. Nenhum asset BYOR é versionado no repo.
+As cores da prévia são a representação RGB normalizada da grade CRAM; a curva
+RGB565 do core é uma fronteira separada, verificada pelo oráculo independente.
+O staging BMP reserva índice 0 exclusivamente à máscara: preto opaco usa outro
+índice, inclusive na busca da cor aproximada.
+
+O modo opcional `authored_visual_demo` exige ações 0/20/21/200. Cria comportamento
+RetroDev rotulado: direções, neutral e botão A; velocidades 0/2,5/−1,75/0 px/tick,
+editáveis, facing fixo à direita. **Não converte o CNS original.** Controllers e
+grafo original ficam no relatório/arquivo de referência; nada desconhecido é
+removido da fonte. Som permanece asset manual, caixas permanecem dados e não
+produzem dano. O modo padrão continua o subconjunto original anterior.
+O comando A autoral é de nível: pode reiniciar o ataque após voltar ao idle
+se permanecer pressionado. A captura desktop mede a duração efetiva do input
+em quadros emulados (a UI atual observa lotes), não o tempo solicitado no harness.
+
+O atlas permanece em ROM e o SGDK carrega o quadro corrente. A estimativa de
+residência de projetos `imported_mugen`/`imported_ikemen_go` usa o modo SGDK
+gerenciado existente (dois quadros conservadores); warnings de transferências
+continuam. O custo compilado é medido separadamente por `maxNumTile`, peças e
+tiles no artefato. Não se reduz resolução nem se descarta frame para vencer uma
+estimativa que conte o atlas inteiro como residente. A célula de 248 px é uma
+restrição deste perfil/rescomp, não tamanho máximo universal de personagem.
+
+QA BYOR: `mugen_real_pilot_build_and_capture` e desktop `--scenario mugen-real`,
+com `RDS_MUGEN_REAL_SOURCE`/saídas locais. `scripts/verify-mugen-real.py` usa Pillow
+PCX, AIR/ACT independentes e tiles VDP da ROM, conferindo máscara/pixels/ordem/
+tempo/geometria e negativos. Python/Pillow são ferramentas de QA já presentes,
+não dependências do app. Contrato do oráculo restrito ao piloto Ken SFF v1 +
+recursos SGDK 2.11 sem compressão. Evidência e limites em
+`docs/rex_profiles/mugen_sgdk/REAL_MISSION.md`.
+
 ## Comportamento
 
 | MUGEN | Suporte v1 |

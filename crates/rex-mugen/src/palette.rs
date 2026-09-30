@@ -15,7 +15,8 @@ pub fn vdp_level(c: u8) -> u8 {
     ((c as u32 * 7 + 127) / 255) as u8
 }
 
-/// Cor de 8 bits que o VDP de fato exibe para um nivel.
+/// Representação RGB normalizada do nível CRAM (a curva de saída do core ou
+/// monitor é outra fronteira e deve ser conferida separadamente).
 pub fn level_rgb(level: u8) -> u8 {
     ((level as u32 * 255 + 3) / 7) as u8
 }

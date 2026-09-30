@@ -124,7 +124,16 @@ struct MdVramAnalysis {
 }
 
 fn is_sgdk_managed_source(source_kind: Option<&str>) -> bool {
-    matches!(source_kind, Some("external_sgdk") | Some("imported_sgdk"))
+    // MUGEN derivatives are emitted as SGDK SpriteDefinition resources too.
+    // SPR_addSprite reserves maxNumTile, then uploads the current animation
+    // frame; the entire atlas remains in ROM, not simultaneously in VRAM.
+    matches!(
+        source_kind,
+        Some("external_sgdk")
+            | Some("imported_sgdk")
+            | Some("imported_mugen")
+            | Some("imported_ikemen_go")
+    )
 }
 
 fn sprite_total_frames(sprite: &crate::ugdm::components::SpriteComponent) -> u32 {
@@ -1018,6 +1027,37 @@ mod tests {
         assert_eq!(status.palette_banks_limit, MD_PALETTE_SLOTS as u32);
         assert_eq!(status.bg_layers_limit, 3);
         assert!(status.errors.is_empty());
+    }
+
+    #[test]
+    fn mugen_atlas_stays_in_rom_and_current_frames_use_sgdk_residency() {
+        let mut scene = empty_scene();
+        let mut ken = meta_sprite_entity("ken", 104, 104);
+        ken.components.sprite.as_mut().unwrap().animations.insert(
+            "walk".into(),
+            crate::ugdm::components::AnimationDef {
+                frames: (0..27).collect(),
+                fps: 12,
+                looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
+            },
+        );
+        scene.entities.push(ken);
+        let status = hw_status_with_source_kind(&scene, Some("imported_mugen"));
+        assert_eq!(status.analysis_mode, "sgdk_managed");
+        assert_eq!(status.resident_vram_bytes, 2 * 169 * MD_TILE_BYTES);
+        assert!(status.project_asset_bytes > MD_VRAM_BYTES);
+        assert!(
+            !validate_scene_with_source_kind(&scene, Some("imported_mugen"))
+                .iter()
+                .any(|e| e.is_fatal)
+        );
+        // Conservative transfer warning is retained, never represented as telemetry.
+        assert!(status.dma_frame_bytes > MD_DMA_VBLANK_BYTES);
     }
 
     // ── PROMPT 8: Camera entity does not produce false sprite errors ──

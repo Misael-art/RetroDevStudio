@@ -5862,6 +5862,15 @@ fn import_mugen_project_with_engine(
     mugen_path: &Path,
     source_engine: &str,
 ) -> Result<MugenImportReport, LoadError> {
+    import_mugen_project_with_review(project_dir, mugen_path, source_engine, None)
+}
+
+pub(crate) fn import_mugen_project_with_review(
+    project_dir: &Path,
+    mugen_path: &Path,
+    source_engine: &str,
+    review: Option<&crate::core::mugen_profile::ReviewOptions>,
+) -> Result<MugenImportReport, LoadError> {
     if !mugen_path.exists() {
         return Err(LoadError(format!(
             "Projeto MUGEN indisponivel: '{}' nao existe.",
@@ -5869,7 +5878,41 @@ fn import_mugen_project_with_engine(
         )));
     }
 
-    let candidates = scan_mugen_candidates(mugen_path)?;
+    let mut verified_analysis = None;
+    let candidates = if let Some(review) = review {
+        let mut analysis =
+            crate::core::mugen_profile::analyze_source(mugen_path, Some(review.clone()))?;
+        if review.source_sha256.as_deref() != analysis["source_sha256"].as_str() {
+            return Err(LoadError(
+                "Pacote mudou desde a revisao; analise novamente antes de importar.".into(),
+            ));
+        }
+        if analysis["report"].is_null()
+            || analysis["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["severity"] == "error")
+        {
+            return Err(LoadError(format!(
+                "Analise MUGEN bloqueada: {}",
+                analysis["diagnostics"]
+            )));
+        }
+        analysis.as_object_mut().unwrap().remove("report");
+        verified_analysis = Some(analysis);
+        let def_path = crate::core::mugen_profile::resolve_inside(mugen_path, &review.def_file)?;
+        let display_name =
+            mugen_info_name(&read_text_lossy(&def_path)?).unwrap_or_else(|| "Personagem".into());
+        vec![MugenCandidate {
+            kind: MugenCandidateKind::Character,
+            root_dir: def_path.parent().unwrap().to_path_buf(),
+            def_path,
+            display_name,
+        }]
+    } else {
+        scan_mugen_candidates(mugen_path)?
+    };
     if candidates.is_empty() {
         return Err(LoadError(format!(
             "Nenhum modelo MUGEN suportado foi encontrado em '{}'. Use uma pasta de personagem, stage ou screenpack.",
@@ -5881,7 +5924,13 @@ fn import_mugen_project_with_engine(
     let mut skipped = Vec::new();
 
     for candidate in candidates {
-        match import_mugen_candidate(project_dir, &candidate, source_engine) {
+        let result = if candidate.kind == MugenCandidateKind::Character && review.is_some() {
+            import_mugen_character_with_review(project_dir, &candidate, source_engine, review)
+                .map(|s| vec![s])
+        } else {
+            import_mugen_candidate(project_dir, &candidate, source_engine)
+        };
+        match result {
             Ok(mut scenes) => imported.append(&mut scenes),
             Err(error) => skipped.push(format!("{}: {}", candidate.display_name, error)),
         }
@@ -5896,6 +5945,27 @@ fn import_mugen_project_with_engine(
     }
 
     let primary_scene = imported.remove(0);
+    if let Some(analysis) = verified_analysis {
+        let rel = format!(
+            "assets/mugen/{}_import_report.json",
+            sgdk_entity_id(
+                primary_scene
+                    .display_name
+                    .as_deref()
+                    .unwrap_or(&primary_scene.scene_id)
+            )
+        );
+        let path = project_dir.join(rel);
+        let mut persisted: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).map_err(|e| LoadError(e.to_string()))?)
+                .map_err(|e| LoadError(e.to_string()))?;
+        persisted["source_analysis"] = analysis;
+        fs::write(
+            path,
+            serde_json::to_vec_pretty(&persisted).map_err(|e| LoadError(e.to_string()))?,
+        )
+        .map_err(|e| LoadError(e.to_string()))?;
+    }
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &primary_scene)?;
     for scene in imported.iter() {
         let scene_id = next_scene_id(project_dir, &scene.scene_id);
@@ -6045,7 +6115,16 @@ fn detect_mugen_candidates_in_root(root: &Path) -> Result<Vec<MugenCandidate>, L
         return Ok(Vec::new());
     }
 
-    character_candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
+    if character_candidates.len() > 1 {
+        return Err(LoadError(format!(
+            "Mais de um DEF de personagem: {}. Selecione explicitamente um DEF na revisao MUGEN.",
+            character_candidates
+                .iter()
+                .map(|(_, c)| c.def_path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
     Ok(vec![character_candidates.remove(0).1])
 }
 
@@ -6483,6 +6562,32 @@ fn collect_mugen_character_fighting_model(
     Ok(model)
 }
 
+/// Read-only inventory before import; original controllers are retained as
+/// references. A controller name alone never certifies executable semantics.
+pub(crate) fn inspect_mugen_logic(
+    root: &Path,
+    references: &BTreeMap<String, String>,
+) -> Result<serde_json::Value, LoadError> {
+    let files = MugenIniSection {
+        name: "files".into(),
+        entries: references
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    };
+    let model = collect_mugen_character_fighting_model(root, &files)?;
+    Ok(serde_json::json!({
+        "states":model.states.iter().map(|s|serde_json::json!({"number":s.state_no,"source":s.source_ref})).collect::<Vec<_>>(),
+        "commands":model.commands.len(),
+        "controllers":model.controllers.iter().map(|c|serde_json::json!({
+            "state":c.state_no,"name":c.name,"kind":c.controller_type,"source":c.source_ref,
+            "profile_candidate":matches!(c.controller_type.to_ascii_lowercase().as_str(),"changestate"|"velset"),
+            "raw_lines":c.raw_lines,
+        })).collect::<Vec<_>>(),
+        "notice":"Inventario da logica original; candidatos ainda dependem de gatilhos e parametros suportados. Demonstracao autoral substitui a execucao e preserva os controllers como referencia."
+    }))
+}
+
 fn mugen_logic_file_priority(lowered_key: &str) -> Option<u8> {
     if lowered_key == "cmd" {
         Some(0)
@@ -6737,7 +6842,7 @@ fn parse_mugen_pair_numbers(value: Option<&str>) -> Option<(i32, i32)> {
             })
         })
         .collect::<Vec<_>>();
-    (numbers.len() >= 2).then_some((numbers[0], numbers[1]))
+    (numbers.len() >= 2).then(|| (numbers[0], numbers[1]))
 }
 
 fn imported_mugen_fighting_logic_graph(
@@ -7113,8 +7218,32 @@ fn import_mugen_character_candidate(
     candidate: &MugenCandidate,
     source_engine: &str,
 ) -> Result<Scene, LoadError> {
+    import_mugen_character_with_review(project_dir, candidate, source_engine, None)
+}
+
+fn import_mugen_character_with_review(
+    project_dir: &Path,
+    candidate: &MugenCandidate,
+    source_engine: &str,
+    review: Option<&crate::core::mugen_profile::ReviewOptions>,
+) -> Result<Scene, LoadError> {
     let def_content = read_text_lossy(&candidate.def_path)?;
-    let sections = parse_mugen_ini(&def_content);
+    let mut sections = parse_mugen_ini(&def_content);
+    if review.is_some() {
+        let inventory = crate::core::mugen_profile::package_files(&candidate.root_dir)?;
+        if let Some(files) = sections
+            .iter_mut()
+            .find(|s| s.name.eq_ignore_ascii_case("files"))
+        {
+            for relative in files.entries.values_mut() {
+                if let rex_mugen::source::Resolution::Resolved(path) =
+                    rex_mugen::source::resolve(&inventory, "", relative)
+                {
+                    *relative = path;
+                }
+            }
+        }
+    }
     let files = find_section(&sections, "files").ok_or_else(|| {
         LoadError(format!(
             "Character '{}' nao possui secao [Files] valida.",
@@ -7138,16 +7267,29 @@ fn import_mugen_character_candidate(
     let sprite_path = candidate.root_dir.join(sprite_rel);
     // Tudo que le/valida o pacote vem antes de qualquer gravacao no projeto:
     // uma falha aqui nao deixa arquivo parcial.
-    let fighting_model = collect_mugen_character_fighting_model(&candidate.root_dir, files)?;
+    let original_model = collect_mugen_character_fighting_model(&candidate.root_dir, files)?;
+    let fighting_model = if review.is_some_and(|r| r.authored_demo) {
+        authored_mugen_visual_demo()?
+    } else {
+        original_model.clone()
+    };
     let logic_hints = collect_mugen_character_logic_hints(&candidate.root_dir, files)?;
     // Perfil mugen.character.v1 (Experimental): AIR/SFF v1 pela crate rex-mugen, com
     // tempos, flips, offsets e caixas por frame. Sem SFF v1 legivel, cai no caminho
     // legado (PNGs extraidos em work/*_sff), classificado a parte no relatorio.
-    let profile = crate::core::mugen_profile::convert_character_v1(
-        &candidate.root_dir,
-        anim_rel,
-        sprite_rel,
-    )?;
+    let profile = match review {
+        Some(r) => crate::core::mugen_profile::convert_character_v1_with_review(
+            &candidate.root_dir,
+            anim_rel,
+            sprite_rel,
+            Some(r),
+        ),
+        None => crate::core::mugen_profile::convert_character_v1(
+            &candidate.root_dir,
+            anim_rel,
+            sprite_rel,
+        ),
+    }?;
     let actions = parse_mugen_air(&read_text_lossy(&anim_path)?);
     if actions.is_empty() {
         return Err(LoadError(format!(
@@ -7211,6 +7353,28 @@ fn import_mugen_character_candidate(
         (imported_mugen_idle_logic_graph(&entity_id), Vec::new())
     };
     import_report["behavior"] = serde_json::Value::Array(behavior);
+    if let Some(review) = review {
+        import_report["behavior_mode"] = serde_json::json!(if review.authored_demo {
+            "authored_visual_demo"
+        } else {
+            "original_subset"
+        });
+        import_report["behavior_notice"] = serde_json::json!(if review.authored_demo {
+            "Comportamento autoral RetroDev: direcao segurada e botao A demonstram as imagens importadas. Nao e conversao do CNS original. Facing fixo a direita; sem acerto, dano ou fisica."
+        } else {
+            "Apenas o subconjunto declarado do CNS original e convertido; dependencias externas e controllers desconhecidos nao executam."
+        });
+        if review.authored_demo {
+            let (reference, source_behavior) =
+                imported_mugen_fighting_logic_graph(&entity_id, &original_model, &animations);
+            let rel = format!("graphs/mugen_{entity_id}_original_reference.json");
+            save_graph_asset(project_dir, &rel, &reference)?;
+            import_report["original_behavior"] = serde_json::json!(source_behavior);
+            import_report["original_graph_reference"] = serde_json::json!(rel);
+            import_report["behavior"].as_array_mut().unwrap().push(serde_json::json!({"item":"original_logic","source":candidate.def_path.file_name().unwrap().to_string_lossy(),"fidelity":"unsupported",
+                "reason":"demonstracao autoral escolhida explicitamente; logica original preservada como referencia","consequence":"esta demonstracao nao executa os controllers do CNS original"}));
+        }
+    }
     crate::core::mugen_profile::append_character_items(
         &mut import_report,
         &fighting_model
@@ -7340,6 +7504,38 @@ fn import_mugen_character_candidate(
     });
 
     Ok(scene)
+}
+
+/// Comportamento de demonstração explícito. Reusa os parsers e gerador do produto,
+/// sem fingir que os common states externos ou o CNS foram convertidos.
+fn authored_mugen_visual_demo() -> Result<MugenFightingModel, LoadError> {
+    let source = "retrodev.authored_visual_demo/v1";
+    let cmd="[Command]\nname = fwd\ncommand = F\ntime = 1\n[Command]\nname = back\ncommand = B\ntime = 1\n[Command]\nname = neutral\ncommand = 5\ntime = 1\n[Command]\nname = attack\ncommand = a\ntime = 1\n";
+    let mut cns = String::new();
+    for (state, anim, vx) in [
+        (0, 0, "0"),
+        (20, 20, "2.5"),
+        (21, 21, "-1.75"),
+        (200, 200, "0"),
+    ] {
+        cns.push_str(&format!("[Statedef {state}]\nanim = {anim}\n[State {state}, velocity]\ntype = VelSet\ntrigger1 = 1\nx = {vx}\n"));
+    }
+    cns.push_str("[State 200, return]\ntype = ChangeState\ntrigger1 = AnimTime = 0\nvalue = 0\n[Statedef -1]\n");
+    for (from, command, to) in [
+        (0, "attack", 200),
+        (0, "fwd", 20),
+        (0, "back", 21),
+        (20, "neutral", 0),
+        (21, "neutral", 0),
+        (20, "back", 21),
+        (21, "fwd", 20),
+    ] {
+        cns.push_str(&format!("[State -1, {from}_{command}]\ntype = ChangeState\ntriggerall = stateno = {from}\ntrigger1 = command = \"{command}\"\nvalue = {to}\n"));
+    }
+    let mut model = parse_mugen_state_logic_file(&cns, source);
+    model.commands = crate::core::input_commands::parse_command_dat(cmd, source);
+    model.source_refs = vec![source.into()];
+    Ok(model)
 }
 
 fn import_mugen_stage_candidate(
@@ -8032,7 +8228,7 @@ fn parse_pair_i32(value: Option<&str>) -> Option<(i32, i32)> {
         .split(',')
         .filter_map(|entry| entry.trim().parse::<i32>().ok())
         .collect::<Vec<_>>();
-    (numbers.len() >= 2).then_some((numbers[0], numbers[1]))
+    (numbers.len() >= 2).then(|| (numbers[0], numbers[1]))
 }
 
 fn save_mugen_sounds(
@@ -17644,6 +17840,14 @@ fn sync_parent_dir(_path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn numeric_pair_accepts_pairs_and_rejects_scalar_without_panicking() {
+        assert_eq!(super::parse_pair_i32(None), None);
+        assert_eq!(super::parse_pair_i32(Some("")), None);
+        assert_eq!(super::parse_pair_i32(Some("4")), None);
+        assert_eq!(super::parse_pair_i32(Some("invalid,4")), None);
+        assert_eq!(super::parse_pair_i32(Some(" -3, 7 ")), Some((-3, 7)));
+    }
     use super::*;
     use crate::compiler::ast_generator::generate_ast_with_prefabs;
     use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
