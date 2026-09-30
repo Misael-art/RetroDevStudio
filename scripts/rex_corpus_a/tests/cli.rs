@@ -647,11 +647,11 @@ fn consumidor_atopa_a_chamada_a_referencia_e_a_táboa_que_vinculan_un_enderezo()
     assert_eq!(o.status.code(), Some(0), "stderr: {err}");
     let out = String::from_utf8_lossy(&o.stdout).to_string();
     assert!(
-        out.contains("CONSUMIDOR esquema=rex-corpus-consumer/v1"),
+        out.contains("CONSUMIDOR esquema=rex-corpus-consumer/v2"),
         "{out}"
     );
     assert!(
-        out.contains("ENDERESO 0x00280 referencias=2 chamadas=1 taboas=1 vinculo=si"),
+        out.contains("ENDERESO 0x00280 referencias=2 chamadas=1 taboas=1 cargas=0 vinculo=si"),
         "liña ENDERESO: {out}"
     );
     assert!(out.contains("CHAMADA offset=0x00210"), "chamada: {out}");
@@ -990,4 +990,97 @@ fn verify_sin_referencia_erro_de_uso_e_dous() {
     assert_eq!(o.status.code(), Some(2));
     let err = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(err.contains("--referencia"), "stderr: {err}");
+}
+
+// ---------- consumidor: carga de argumento absoluto longo (Fase 4) ----------
+
+/// Escribe nunha imaxe de 128 bytes a secuencia medida na ROM reservada:
+/// `lea $795A2,A0` / `lea $FF7000,A1` / `jsr $85A2`, en 0x40.
+fn imaxe_lea_e_jsr(dir: &std::path::Path, nome: &str, chamada: &[u8]) -> std::path::PathBuf {
+    let mut im = vec![0u8; 128];
+    im[0x40..0x46].copy_from_slice(&[0x41, 0xF9, 0x00, 0x07, 0x95, 0xA2]);
+    im[0x46..0x4C].copy_from_slice(&[0x43, 0xF9, 0x00, 0xFF, 0x70, 0x00]);
+    im[0x4C..0x4C + chamada.len()].copy_from_slice(chamada);
+    let caminho = dir.join(nome);
+    std::fs::write(&caminho, &im).unwrap();
+    caminho
+}
+
+fn consumidor_con(caminho: &std::path::Path, endereco: &str) -> (Option<i32>, String) {
+    let o = executar(&[
+        "consumidor",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--endereco",
+        endereco,
+    ]);
+    (
+        o.status.code(),
+        String::from_utf8_lossy(&o.stdout).to_string(),
+    )
+}
+
+#[test]
+fn consumidor_etiqueta_a_carga_de_operando_que_unha_chamada_non_ve() {
+    // Secuencia literal medida en Streets of Rage: a chamada vai á rutina, polo
+    // que `chamadas=0` para o enderezo do fluxo; o vínculo está na carga.
+    let d = dir_temporal("consumidor-lea-jsr");
+    let c = imaxe_lea_e_jsr(&d, "so-r.gen", &[0x4E, 0xB9, 0x00, 0x00, 0x85, 0xA2]);
+    let (st, out) = consumidor_con(&c, "497058"); // 0x795A2
+    assert_eq!(st, Some(0), "saída: {out}");
+    assert!(
+        out.contains(
+            "CARGA offset=0x00040 rexistro=A0 operando=0x795A2 chamada=0x0004C destino=0x085A2"
+        ),
+        "saída: {out}"
+    );
+    assert!(
+        out.contains("chamadas=0 taboas=0 cargas=1"),
+        "a carga debe contarse aparte das chamadas: {out}"
+    );
+    assert!(out.contains("vinculo=si"), "saída: {out}");
+    assert!(
+        out.contains("RESUMO enderezos=1 vinculados=1 sen_vinculo=0 cargas=1"),
+        "saída: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn consumidor_distingue_a_convencion_sonic_de_bsr_pc_relativo() {
+    // Sonic 1 (medido en 0x01364, 0x03082, 0x051BC): `lea fluxo,A0`,
+    // `lea destino,A1`, `bsr` de 16 bits. Non hai chamada absoluta longa, así
+    // que `destino` queda como `ningunha` e o vínculo segue sendo a carga.
+    let d = dir_temporal("consumidor-lea-bsr");
+    let c = imaxe_lea_e_jsr(&d, "sonic.bin", &[0x61, 0x00, 0x05, 0x2A]);
+    let (st, out) = consumidor_con(&c, "497058");
+    assert_eq!(st, Some(0), "saída: {out}");
+    assert!(
+        out.contains("chamada=ningunha destino=ningunha"),
+        "bsr non é chamada absoluta longa: {out}"
+    );
+    assert!(out.contains("cargas=1"), "saída: {out}");
+    assert!(out.contains("vinculo=si"), "saída: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn consumidor_non_confunde_unha_referencia_de_datos_cunha_carga_de_operando() {
+    // Control discriminativo tomado de Rocket Knight: alí os bytes do enderezo
+    // van precedidos de `31 FC` (inmediate de 16 bits), non dun `lea abs.l`.
+    // Se `cargas=1` aquí, a etiqueta está a contar calquera aparición.
+    let d = dir_temporal("consumidor-coincidencia");
+    let c = imaxe_lea_e_jsr(&d, "rka.md", &[0x31, 0xFC, 0x00, 0x40]);
+    let mut im = vec![0u8; 128];
+    // `31 FC` no lugar do `lea`: mesmo enderezo, forma de datos.
+    im[0x40..0x46].copy_from_slice(&[0x31, 0xFC, 0x00, 0x07, 0x95, 0xA2]);
+    std::fs::write(&c, &im).unwrap();
+    let (st, out) = consumidor_con(&c, "497058");
+    assert_eq!(st, Some(0), "saída: {out}");
+    assert!(
+        out.contains("referencias=1 chamadas=0 taboas=0 cargas=0"),
+        "a coincidencia de bytes non é vínculo: {out}"
+    );
+    assert!(out.contains("vinculo=non"), "saída: {out}");
+    let _ = std::fs::remove_dir_all(&d);
 }
