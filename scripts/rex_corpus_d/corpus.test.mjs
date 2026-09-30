@@ -65,6 +65,9 @@ describe.skipIf(!ready)("corpus real Sonic 1 (BYOR)", () => {
     expect(img.height).toBe(40);
     expect(img.gaps).toEqual([]);
     expect(sha(Buffer.from(img.data))).toBe(computeOracleForStand());
+    // oraculo independente do piloto (scripts/e2e-tauri-build-run.mjs, rodada anterior):
+    //RGBA 32x40 do frame stand com *36 e alpha 0 no indice 0
+    expect(sha(Buffer.from(img.data))).toBe("ce95ea66f2cfcec40a0fb12cb35fe5e88530de036de9f897333ce762f06b40d4");
   });
 
   it("Ani_Sonic: entrada 0 (walk) e o script especial de 6 frames do disassembly", () => {
@@ -155,9 +158,9 @@ function computeOracleForStand() {
             const py = s.y + ty * 8 + row - minY;
             const i = (py * width + px) * 4;
             const [r, g, b] = pal[idx];
-            data[i] = Math.round((r * 255) / 7);
-            data[i + 1] = Math.round((g * 255) / 7);
-            data[i + 2] = Math.round((b * 255) / 7);
+            data[i] = r * 36;
+            data[i + 1] = g * 36;
+            data[i + 2] = b * 36;
             data[i + 3] = 255;
           }
         }

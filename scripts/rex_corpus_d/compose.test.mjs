@@ -47,7 +47,7 @@ describe("compositor de frames", () => {
     const { rom } = fixture();
     const img = composeFrame({ rom, profile, palettes, frame: 0 });
     expect(img).toMatchObject({ width: 8, height: 8, anchor: { x: 8, y: 8 } });
-    expect(px(img, 0, 0)).toEqual([0xff, 0, 0, 0xff]);
+    expect(px(img, 0, 0)).toEqual([0xfc, 0, 0, 0xff]);
   });
 
   it("indice 0 e transparencia (alpha 0), nao preto opaco", () => {
@@ -61,7 +61,7 @@ describe("compositor de frames", () => {
   it("pal=1 seleciona a outra linha de paleta", () => {
     const { rom } = fixture({ pal: 1 });
     const img = composeFrame({ rom, profile, palettes, frame: 0 });
-    expect(px(img, 0, 0)).toEqual([0, 0, 0xff, 0xff]);
+    expect(px(img, 0, 0)).toEqual([0, 0, 0xfc, 0xff]);
   });
 
   it("xflip espelha o padroao dentro da peca sem mover seu retangulo", () => {
@@ -69,17 +69,17 @@ describe("compositor de frames", () => {
     for (let r = 0; r < 8; r++) left[r * 4] = 0x10; // coluna 0 = indice 1, resto 0
     const a = composeFrame({ rom: fixture({ artFill: left }).rom, profile, palettes, frame: 0 });
     const b = composeFrame({ rom: fixture({ artFill: left, xflip: 1 }).rom, profile, palettes, frame: 0 });
-    expect(px(a, 0, 0)).toEqual([0xff, 0, 0, 0xff]);
+    expect(px(a, 0, 0)).toEqual([0xfc, 0, 0, 0xff]);
     expect(px(a, 7, 0)[3]).toBe(0);
     expect(px(b, 0, 0)[3]).toBe(0);
-    expect(px(b, 7, 0)).toEqual([0xff, 0, 0, 0xff]);
+    expect(px(b, 7, 0)).toEqual([0xfc, 0, 0, 0xff]);
   });
 
   it("yflip espelha verticalmente", () => {
     const top = new Uint8Array(32);
     top[0] = 0x10; // linha 0 col 0 -> indice 1
     const b = composeFrame({ rom: fixture({ artFill: top, yflip: 1 }).rom, profile, palettes, frame: 0 });
-    expect(px(b, 0, 7)).toEqual([0xff, 0, 0, 0xff]);
+    expect(px(b, 0, 7)).toEqual([0xfc, 0, 0, 0xff]);
     expect(px(b, 0, 0)[3]).toBe(0);
   });
 
@@ -96,8 +96,8 @@ describe("compositor de frames", () => {
     rom.fill(0x11, profile.art_addr, profile.art_addr + 32); // tile arte 0: tudo indice 1
     rom.fill(0x22, profile.art_addr + 32, profile.art_addr + 64); // tile arte 1: tudo indice 2
     const img = composeFrame({ rom, profile, palettes, frame: 0 });
-    expect(px(img, 3, 3)).toEqual([0xff, 0, 0, 0xff]); // primeira metade: cor 1
-    expect(px(img, 11, 3)).toEqual([0xff, 0xff, 0xff, 0xff]); // segunda metade: indice 2 = branco
+    expect(px(img, 3, 3)).toEqual([0xfc, 0, 0, 0xff]); // primeira metade: cor 1
+    expect(px(img, 11, 3)).toEqual([0xfc, 0xfc, 0xfc, 0xff]); // segunda metade: indice 2 = branco
   });
 
   it("xflip em peca 2x1 inverte a ORDEM dos tiles e os pixels (bloco inteiro, como o VDP)", () => {
@@ -116,8 +116,8 @@ describe("compositor de frames", () => {
     rom.set(t1, profile.art_addr + 32);
     const img = composeFrame({ rom, profile, palettes, frame: 0 });
     // sem flip: [vermelho|branco]; com flip de bloco: [branco|vermelho]
-    expect(px(img, 3, 3)).toEqual([0xff, 0xff, 0xff, 0xff]);
-    expect(px(img, 11, 3)).toEqual([0xff, 0, 0, 0xff]);
+    expect(px(img, 3, 3)).toEqual([0xfc, 0xfc, 0xfc, 0xff]);
+    expect(px(img, 11, 3)).toEqual([0xfc, 0, 0, 0xff]);
   });
 
   it("globalFlipX espelha o quadro inteiro em torno da ancora (equivalente a BuildSpr_FlipX)", () => {
@@ -126,8 +126,8 @@ describe("compositor de frames", () => {
     const f = fixture({ artFill: left });
     const normal = composeFrame({ rom: f.rom, profile, palettes, frame: 0 });
     const flipped = composeFrame({ rom: f.rom, profile, palettes, frame: 0, globalFlip: { x: true, y: false } });
-    expect(px(normal, 0, 0)).toEqual([0xff, 0, 0, 0xff]);
-    expect(px(flipped, 7, 0)).toEqual([0xff, 0, 0, 0xff]);
+    expect(px(normal, 0, 0)).toEqual([0xfc, 0, 0, 0xff]);
+    expect(px(flipped, 7, 0)).toEqual([0xfc, 0, 0, 0xff]);
     expect(px(flipped, 0, 0)[3]).toBe(0);
   });
 
