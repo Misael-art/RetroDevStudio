@@ -1,0 +1,193 @@
+{
+  "schema": "rex-corpus-c-profile/1",
+  "profile": "ancient-music-driver-md",
+  "profile_version": "1",
+  "derived_from": "Story of Thor, The (Europe).gen",
+  "derivation": "Every field below was read out of the driver's own 68000 instructions in the local ROM. No external write-up was used and no ROM byte was executed.",
+  "identity": {
+    "banner_68k": {
+      "text": "Ancient Music Driver -MD- 68000 Program Version 1.06",
+      "rom_offset": "0x60010"
+    },
+    "banner_z80": {
+      "text": "Ancient Music Driver -MD- Z80 Program Version 1.06",
+      "rom_offset": "0x62e58"
+    }
+  },
+  "z80_image": {
+    "rom_offset": "0x62e38",
+    "size_bytes": 8192,
+    "dest_cpu_address": "0xa00000",
+    "copy_routine_rom_offset": "0x6134e",
+    "bank_register": "0xa11100",
+    "mars_register": "0xa11200",
+    "evidence": "lea.l $62e38-ish source + lea.l $a00000,a2 + move.w #$1fff,d0 + move.b (a1)+,(a2)+ + dbra, then move.w #$0,$a11200 / move.w #$0,$a11100"
+  },
+  "song_index": {
+    "table_rom_offset": "0x638d4",
+    "slots": 256,
+    "record_bytes": 4,
+    "record_encoding": "big-endian uint32",
+    "value_semantics": "offset of the song header, relative to table_rom_offset; 0 = slot not used",
+    "slot_count_evidence": "andi.w #$ff,d0 then lsl.w #$2,d0 then move.l (a0,d0.w),d1 then adda.l d1,a0",
+    "consumer_offsets": [
+      "0x60b50",
+      "0x60f1c",
+      "0x60f54"
+    ]
+  },
+  "track_header": {
+    "record_bytes": 2,
+    "record_encoding": "little-endian uint16 (Z80 side order)",
+    "value_semantics": "offset of the track's sequence stream, relative to the song header address itself; 0 = empty track slot",
+    "evidence": "movea.l <header>,a0 / move.l a0,d1 / move.b $1(a0),d3 / lsl.w #$8,d3 / move.b (a0),d3 / addq.l #$2,a0 / add.l d1,d3 / move.l d3,$c(a6)"
+  },
+  "stream_event_model": {
+    "fetch_evidence": "movea.l $2(a6),a0 / moveq #$0,d2 / move.b (a0)+,d2 / cmpi.b #$f0,d2 / bcc <command dispatch> / tst.b d2 / bne <note path> / <end-of-stream handler>",
+    "events": [
+      {
+        "byte_range": "0x00",
+        "kind": "end_of_stream",
+        "size_bytes": 1,
+        "evidence": "tst.b d2 / beq -> bsr $62156 (end handler), stream cursor not advanced past the marker"
+      },
+      {
+        "byte_range": "0x80-0xef",
+        "kind": "duration",
+        "size_bytes": 1,
+        "value_semantics": "length = byte - 0x80, stored to track fields $06/$07 (a 1-byte countdown at $06 is later decremented by subq.b #$1,$6(a6))",
+        "evidence": "bclr.b #$7,d2 / bne <duration path> -> move.b d2,$6(a6) / move.b d2,$7(a6)"
+      },
+      {
+        "byte_range": "0x01-0x7f + 1 operand",
+        "kind": "note",
+        "size_bytes": 2,
+        "value_semantics": "operand low nibble indexes a 16-entry big-endian word table; operand high nibble is shifted left by 7 and added. The table is read as data only - the mapping to a concert pitch or MIDI number is NOT proven and is reported as an opaque code.",
+        "evidence": "move.b (a0)+,d0 / andi.b #$f,d0 / add.w d0,d0 / lea $62da8(pc),a2 / move.w (a2,d0.w),d1 / andi.w #$f0,d3 / lsl.w #$7,d3"
+      },
+      {
+        "byte_range": "0xf0-0xff",
+        "kind": "command",
+        "size_bytes": "1 + per-command operands",
+        "evidence": "subi.b #$f0,d2 / add.w d2,d2 / move.w $61f84(pc,d2.w),d2 / jsr $61f84(pc,d2.w)"
+      }
+    ]
+  },
+  "command_jump_table": {
+    "rom_offset": "0x61f84",
+    "entries": 16,
+    "encoding": "big-endian uint16, relative to the table address",
+    "widths": [
+      {
+        "command": "0xf0",
+        "operands": 1,
+        "certainty": "proven"
+      },
+      {
+        "command": "0xf1",
+        "operands": 1,
+        "certainty": "proven"
+      },
+      {
+        "command": "0xf2",
+        "operands": 2,
+        "certainty": "proven",
+        "note": "read as one little-endian 16-bit value"
+      },
+      {
+        "command": "0xf3",
+        "operands": 1,
+        "certainty": "proven"
+      },
+      {
+        "command": "0xf4",
+        "operands": 1,
+        "certainty": "partial",
+        "note": "handler re-dispatches through a second table at $6229a indexed by the operand; the sub-cases may consume more bytes"
+      },
+      {
+        "command": "0xf5",
+        "operands": 2,
+        "certainty": "proven",
+        "note": "handler skips 2 bytes (addq.l #$2,a0) without interpreting them"
+      },
+      {
+        "command": "0xf6",
+        "operands": 0,
+        "certainty": "proven",
+        "note": "handler works on track state only"
+      },
+      {
+        "command": "0xf7",
+        "operands": 4,
+        "certainty": "proven",
+        "note": "four move.b (a0)+,(a1)+ into track field $18"
+      },
+      {
+        "command": "0xf8",
+        "operands": 1,
+        "certainty": "proven"
+      },
+      {
+        "command": "0xf9",
+        "operands": 1,
+        "certainty": "proven"
+      },
+      {
+        "command": "0xfa",
+        "operands": 2,
+        "certainty": "proven"
+      },
+      {
+        "command": "0xfb",
+        "operands": 1,
+        "certainty": "proven",
+        "note": "added to track field $12 (a delta, not an absolute)"
+      },
+      {
+        "command": "0xfc",
+        "operands": 3,
+        "certainty": "partial",
+        "note": "handler stores into $84(a6) and repeats through the same lea; the repeat count is not proven"
+      },
+      {
+        "command": "0xfd",
+        "operands": 0,
+        "certainty": "proven",
+        "note": "bset.b #$1,$0(a6); rts"
+      },
+      {
+        "command": "0xfe",
+        "operands": 2,
+        "certainty": "proven",
+        "note": "handler skips 2 bytes without interpreting them"
+      },
+      {
+        "command": "0xff",
+        "operands": 1,
+        "certainty": "partial",
+        "note": "handler re-dispatches through a second jump table at $61fb8, i.e. a nested command space"
+      }
+    ]
+  },
+  "pitch_table": {
+    "rom_offset": "0x62da8",
+    "entries": 16,
+    "encoding": "big-endian uint16"
+  },
+  "envelope_table": {
+    "rom_offset": "0x62d84",
+    "entries": "unknown",
+    "encoding": "uint8",
+    "note": "indexed by (track $12 + track $6f) >> 1; table length not proven"
+  },
+  "limitations": [
+    "Offsets are specific to Story of Thor (Europe). Other Ancient ROMs carry the same structures at different addresses and need their own anchors.",
+    "Only the stream *structure* is proven. Instrument, FM/PSG voice and sample representations were not reached by this profile.",
+    "The pitch word table is reported as an opaque code; no note-name or MIDI mapping is claimed.",
+    "Three commands (0xf4, 0xfc, 0xff) have unproven operand widths, so a stream walk stops there instead of guessing."
+  ],
+  "rom_sha256": "9afb0388a7f045241f9fddb87afe20ade65acbed9f1605637d8cbe23c0fd6415",
+  "rom_sha256_note": "sha-256 of the NORMALISED image (trailing padding run removed) that the extractor receives; the container member hash is 86e79eeaa90fbd7cebbc121a6dada007a4ee406b8f9946495950b9b8b06a265b (3145728 B, 5398 padding bytes trimmed).",
+  "normalized_sha256": "9afb0388a7f045241f9fddb87afe20ade65acbed9f1605637d8cbe23c0fd6415"
+}
