@@ -294,7 +294,9 @@ fn verificar_devolge_verbos_por_fonte_e_o_mesmo_estatus_que_inventario() {
 
 #[test]
 fn un_subcomando_non_implementado_falla_explicitamente_en_lugar_de_simular() {
-    let o = executar(&["scan"]);
+    // `verify` é o verbo que aínda non existe: a proba quere o verbo *pendente*,
+    // non un que xa implementamos (antes usábase `scan` e `roundtrip`).
+    let o = executar(&["verify"]);
     assert_eq!(o.status.code(), Some(2), "non implementado = codigo 2");
     let err = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(err.contains("non implementado"), "stderr: {err}");
@@ -308,4 +310,404 @@ fn sen_argumentos_escribe_o_uso_en_stderr_e_sale_con_dous() {
     for sub in ["inventario", "verificar", "scan", "verify"] {
         assert!(err.contains(sub), "falta {sub} no uso: {err}");
     }
+}
+
+// ---------- scan (Fase 2) ----------
+
+/// Descritor Kosinski cuxos primeiros bits (LSB->MSB) son `bits`.
+fn descritor(bits: &[u8]) -> [u8; 2] {
+    let mut v = 0u16;
+    for (i, b) in bits.iter().enumerate() {
+        v |= (*b as u16) << i;
+    }
+    [v as u8, (v >> 8) as u8]
+}
+
+/// Fluxo Kosinski autoral de nove literais ("PINEAPPLE") + terminator:
+/// 9 bits a 1, despois 0,1 + low + high + 0 => descritor 0x05FF en LE.
+fn fluxo_pineapple() -> Vec<u8> {
+    let d = descritor(&[1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1]);
+    let mut v = vec![d[0], d[1]];
+    v.extend_from_slice(b"PINEAPPLE");
+    v.extend_from_slice(&[0x00, 0x00, 0x00]);
+    v
+}
+
+/// Oito literais idénticos + terminator. Plantado a man é un fluxo de 13 bytes;
+/// reescrito polo encoder ten que ser máis curto, porque oito repeticións son
+/// un match. Por iso serve de control contra un `roundtrip` que fingise o
+/// encode volvendo decodificar os bytes que el mesmo plantou.
+fn fluxo_oito_iguais() -> Vec<u8> {
+    let d = descritor(&[1, 1, 1, 1, 1, 1, 1, 1, 0, 1]);
+    let mut v = vec![d[0], d[1]];
+    v.extend_from_slice(&[b'A'; 8]);
+    v.extend_from_slice(&[0x00, 0x00, 0x00]);
+    v
+}
+
+/// Valor enteiro dun campo `clave=valor` da saída do CLI.
+fn campo(saída: &str, clave: &str) -> usize {
+    let prefixo = format!("{clave}=");
+    for liña in saída.lines() {
+        for anaco in liña.split_whitespace() {
+            if let Some(v) = anaco.strip_prefix(prefixo.as_str()) {
+                if let Ok(n) = v.parse::<usize>() {
+                    return n;
+                }
+            }
+        }
+    }
+    panic!("campo '{clave}' non aparece na saída: {saída}")
+}
+
+#[test]
+fn scan_reporta_o_fluxo_plantado_co_desprazamento_o_consumo_e_a_saida_medidos() {
+    let d = dir_temporal("scan-plantado");
+    let mut img = imaxe();
+    let fluxo = fluxo_pineapple();
+    let plantado = 0x200usize;
+    img[plantado..plantado + fluxo.len()].copy_from_slice(&fluxo);
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, &img).expect("escribir imaxe");
+
+    let o = executar(&[
+        "scan",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--min-saida",
+        "4",
+    ]);
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert_eq!(o.status.code(), Some(0), "stderr: {err}");
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.contains("SCAN esquema=rex-corpus-scan/v1"),
+        "cabeculler: {out}"
+    );
+    assert!(
+        out.contains(&format!(
+            "CAND offset=0x{plantado:05X} consumo={} saida=9 sha256={}",
+            fluxo.len(),
+            sha_hex(b"PINEAPPLE")
+        )),
+        "liña CAND: {out}"
+    );
+    assert!(out.contains("RESUMO candidatos=1"), "resumo: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn scan_nunha_imaxe_sin_fluxos_devolve_candidatos_cero_e_negativas_por_motivo() {
+    let d = dir_temporal("scan-baleiro");
+    let img = imaxe();
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, &img).expect("escribir imaxe");
+
+    let o = executar(&["scan", "--imaxe", caminho.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(0));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("RESUMO candidatos=0"), "resumo: {out}");
+    // Unha imaxe de ceros dá referencias imposibles: o desglose debe dicilo.
+    assert!(out.contains("negativas "), "desglose: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn scan_se_a_imaxe_byor_non_existe_declara_non_executado_e_sale_con_catro() {
+    let d = dir_temporal("scan-ausente");
+    let caminho = d.join("non-existe.bin");
+    let o = executar(&["scan", "--imaxe", caminho.to_str().unwrap()]);
+    assert_eq!(
+        o.status.code(),
+        Some(4),
+        "BYOR ausente non pode ser un pase"
+    );
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("non executado"), "stderr: {err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn scan_sin_imaxe_pide_o_argumento_obrigatorio_e_sale_con_dous() {
+    let o = executar(&["scan"]);
+    assert_eq!(o.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("--imaxe"), "stderr: {err}");
+}
+
+// ---------- roundtrip (Fase 3) ----------
+
+#[test]
+fn roundtrip_pecha_o_ciclo_decode_encode_decode_na_mesma_saida() {
+    let d = dir_temporal("rt-ok");
+    let mut img = imaxe();
+    let fluxo = fluxo_pineapple();
+    let plantado = 0x200usize;
+    img[plantado..plantado + fluxo.len()].copy_from_slice(&fluxo);
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, &img).expect("escribir imaxe");
+
+    let o = executar(&[
+        "roundtrip",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--offset",
+        "512",
+    ]);
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert_eq!(o.status.code(), Some(0), "stderr: {err}");
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.contains(&format!("RT offset=0x{plantado:05X} saida=9")),
+        "liña RT: {out}"
+    );
+    assert!(out.contains("ciclo=ok"), "ciclo: {out}");
+    assert!(
+        out.contains(&format!("saida_sha256={}", sha_hex(b"PINEAPPLE"))),
+        "{out}"
+    );
+    assert!(out.contains("RESUMO ciclos=1 diverxentes=0"), "{out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn roundtrip_con_offset_non_decodificable_declara_a_negativa_en_vez_de_inventar_un_ciclo() {
+    let d = dir_temporal("rt-negativo");
+    let img = imaxe(); // corpo de ceros: non hai fluxo aí
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, &img).expect("escribir imaxe");
+
+    let o = executar(&[
+        "roundtrip",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--offset",
+        "512",
+    ]);
+    assert_eq!(
+        o.status.code(),
+        Some(5),
+        "un ciclo que non pecha é unha diverxencia"
+    );
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("ciclo=non-decodifica"), "saída: {out}");
+    assert!(
+        out.contains("RESUMO ciclos=0 diverxentes=1"),
+        "resumo: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn roundtrip_se_a_imaxe_byor_non_existe_declara_non_executado_e_sale_con_catro() {
+    let d = dir_temporal("rt-ausente");
+    let caminho = d.join("non-existe.bin");
+    let o = executar(&[
+        "roundtrip",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--offset",
+        "512",
+    ]);
+    assert_eq!(o.status.code(), Some(4));
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("non executado"), "stderr: {err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn roundtrip_sin_offsets_erro_de_uso_e_dous() {
+    let d = dir_temporal("rt-uso");
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, imaxe()).expect("escribir imaxe");
+    let o = executar(&["roundtrip", "--imaxe", caminho.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("--offset"), "stderr: {err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn roundtrip_reescribe_con_o_encoder_en_vez_de_volver_decodificar_o_plantado() {
+    let d = dir_temporal("rt-encoder");
+    let mut img = imaxe();
+    let fluxo = fluxo_oito_iguais();
+    let plantado = 0x200usize;
+    img[plantado..plantado + fluxo.len()].copy_from_slice(&fluxo);
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, &img).expect("escribir imaxe");
+
+    let o = executar(&[
+        "roundtrip",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--offset",
+        "512",
+    ]);
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert_eq!(o.status.code(), Some(0), "stderr: {err}");
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert_eq!(campo(&out, "saida"), 8, "saida: {out}");
+    assert_eq!(campo(&out, "recuperado"), 8, "recuperado: {out}");
+    assert!(
+        out.contains(&format!("saida_sha256={}", sha_hex(&[b'A'; 8]))),
+        "{out}"
+    );
+    assert!(out.contains("ciclo=ok"), "ciclo: {out}");
+    assert!(
+        campo(&out, "reescrito") < campo(&out, "consumo"),
+        "o encoder debe producir un stream propio, non ecoar os {} bytes plantados: {out}",
+        fluxo.len()
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// ---------- magia (Fase 3: confirmation por maxia de fluxo) ----------
+
+#[test]
+fn magia_nunha_imaxe_sin_maxias_devolve_contas_cero_e_un_veredito_explicito() {
+    let d = dir_temporal("magia-cero");
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, imaxe()).expect("escribir imaxe");
+    let o = executar(&["magia", "--imaxe", caminho.to_str().unwrap()]);
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert_eq!(
+        o.status.code(),
+        Some(0),
+        "un cero medido non é un fallo: {err}"
+    );
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("MAXIA esquema=rex-corpus-magia/v1"), "{out}");
+    assert!(
+        out.contains("RESUMO maxias=0 veredito=sen-maxia-familiar"),
+        "resumo: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn magia_counta_a_secuencia_plantada_co_desprazamento_medido() {
+    let d = dir_temporal("magia-plantada");
+    let mut img = imaxe();
+    img[0x210..0x214].copy_from_slice(b"KosM");
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, &img).expect("escribir imaxe");
+    let o = executar(&["magia", "--imaxe", caminho.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(0));
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("SEQ KosM ocorrencias=1"), "liña SEQ: {out}");
+    assert!(out.contains("0x00210"), "desprazamento: {out}");
+    assert!(out.contains("RESUMO maxias=1"), "resumo: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn magia_se_a_imaxe_byor_non_existe_declara_non_executado_e_sale_con_catro() {
+    let d = dir_temporal("magia-ausente");
+    let caminho = d.join("non-existe.bin");
+    let o = executar(&["magia", "--imaxe", caminho.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(4));
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("non executado"), "stderr: {err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+// ---------- consumidor (Fase 2: evidencia estrutural na ROM local) ----------
+
+/// Imaxe con dous consumidores reais dun enderezo: unha chamada `jsr` e unha
+/// táboa de punteiros longos, máis a referencia bruta do operando.
+fn imaxe_con_consumidores(dir: &std::path::Path) -> std::path::PathBuf {
+    let mut img = imaxe();
+    // 0x210: 4E B9 0000_0280  (jsr absoluto longo ao 0x280)
+    img[0x210] = 0x4E;
+    img[0x211] = 0xB9;
+    img[0x212..0x218].copy_from_slice(&[0x00, 0x00, 0x02, 0x80, 0x00, 0x00]);
+    // 0x260: táboa de catro longwords crecentes, todos dentro da imaxe
+    for (i, v) in [0x280u32, 0x290, 0x2A0, 0x2B0].iter().enumerate() {
+        img[0x260 + i * 4..0x264 + i * 4].copy_from_slice(&v.to_be_bytes());
+    }
+    let caminho = dir.join("con-consumidores.bin");
+    std::fs::write(&caminho, &img).expect("escribir imaxe");
+    caminho
+}
+
+#[test]
+fn consumidor_atopa_a_chamada_a_referencia_e_a_táboa_que_vinculan_un_enderezo() {
+    let d = dir_temporal("consumidor-vinculo");
+    let caminho = imaxe_con_consumidores(&d);
+    let o = executar(&[
+        "consumidor",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--endereco",
+        "640",
+    ]);
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert_eq!(o.status.code(), Some(0), "stderr: {err}");
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.contains("CONSUMIDOR esquema=rex-corpus-consumer/v1"),
+        "{out}"
+    );
+    assert!(
+        out.contains("ENDERESO 0x00280 referencias=2 chamadas=1 taboas=1 vinculo=si"),
+        "liña ENDERESO: {out}"
+    );
+    assert!(out.contains("CHAMADA offset=0x00210"), "chamada: {out}");
+    assert!(
+        out.contains("TABOA base=0x00260 entradas=4"),
+        "táboa: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn consumidor_declara_sen_vinculo_cando_ningun_byte_aponta_ao_enderezo() {
+    let d = dir_temporal("consumidor-sen");
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, imaxe()).expect("escribir imaxe");
+    let o = executar(&[
+        "consumidor",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--endereco",
+        "640",
+    ]);
+    assert_eq!(o.status.code(), Some(0), "a negativa é un resultado");
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("vinculo=non"), "saída: {out}");
+    assert!(
+        out.contains("RESUMO enderezos=1 vinculados=0 sen_vinculo=1"),
+        "resumo: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn consumidor_se_a_imaxe_byor_non_existe_declara_non_executado_e_sale_con_catro() {
+    let d = dir_temporal("consumidor-ausente");
+    let caminho = d.join("non-existe.bin");
+    let o = executar(&[
+        "consumidor",
+        "--imaxe",
+        caminho.to_str().unwrap(),
+        "--endereco",
+        "640",
+    ]);
+    assert_eq!(o.status.code(), Some(4));
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("non executado"), "stderr: {err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn consumidor_sin_enderezo_erro_de_uso_e_dous() {
+    let d = dir_temporal("consumidor-uso");
+    let caminho = d.join("imaxe.bin");
+    std::fs::write(&caminho, imaxe()).expect("escribir imaxe");
+    let o = executar(&["consumidor", "--imaxe", caminho.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("--endereco"), "stderr: {err}");
+    let _ = std::fs::remove_dir_all(&d);
 }
