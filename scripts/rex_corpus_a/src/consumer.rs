@@ -3,12 +3,13 @@
 //! Non se transplantan offsets doutra revisión nin se deducen polo nome do
 //! xogo. Todo o que aquí se reporta é unha medida sobre os bytes locais.
 //!
-//! As tres funcións son deliberadamente distintas porque proban cousas
+//! As funcións son deliberadamente distintas porque proban cousas
 //! distintas: [`call_sites`] recoñece só operacións de chamada reais,
 //! [`references_to`] busca o patrón de bytes sen interpretar (por iso atopaa
-//! tamén dentro dunha táboa), e [`tables_for`] require que os valores caian
-//! **dentro da imaxe**: un punteiro fóra da ROM non é un offset medido, é unha
-//! suposición.
+//! tamén dentro dunha táboa), [`cargas_abs_l`] recoñece o operand dun `lea`
+//! absoluto longo — a forma pola que un fluxo chega á rutina — e
+//! [`tables_for`] require que os valores caian **dentro da imaxe**: un punteiro
+//! fóra da ROM non é un offset medido, é unha suposición.
 
 /// `jsr`/`jmp` absolutos longos (`4E B9` / `4E FD`) nunha xanela da imaxe.
 ///
@@ -34,9 +35,60 @@ pub struct RefSite {
     pub operand: u32,
 }
 
+/// `lea abs.l,An` (`41 F9`…`4F F9`): un enderezo absoluto longo cargado nun
+/// rexistro de dirección.
+///
+/// Esta é a forma habitual de entregar un fluxo á rutina de descompresión
+/// (`lea fluxo,A0`, `lea destino,A1`, chamada). `call_sites` non o ve porque a
+/// chamada apunta á rutina, non ao fluxo.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CargaAbsoluta {
+    pub offset: usize,
+    /// 0..7 para A0..A7.
+    pub registro: u8,
+    pub operando: u32,
+}
+
 /// Opcode de chamada absoluta longa: `4E B9` (jsr) ou `4E FD` (jmp).
 fn opcode_chamada(image: &[u8], o: usize) -> bool {
     image.len() > o + 1 && image[o] == 0x4E && (image[o + 1] == 0xB9 || image[o + 1] == 0xFD)
+}
+
+/// Cargas de enderezo absoluto longo nun rexistro de dirección, nunha xanela.
+///
+/// `lea abs.l,An` codifícase `0100 ddd 111 | 111 001`: o mesmo par `111/001`
+/// (absoluto longo) que usa `4E B9` (`jsr abs.l`), co rexistro de destino no
+/// campo `ddd`. Por iso os oitos opcodes válidos son `41 F9`, `43 F9` … `4F F9`
+/// — todos con primeiro byte impar e nibre alto `4`. `4E F9` (`jmp abs.l`)
+/// queda fóra porque o seu primeiro byte é par.
+///
+/// Os desprazamentos examínanse de dous en dous: un opcode en desprazamento
+/// impar non é código 68k.
+pub fn cargas_abs_l(image: &[u8], from: usize, to: usize, max: usize) -> Vec<CargaAbsoluta> {
+    let to = to.min(image.len());
+    let mut out = Vec::new();
+    let mut o = from;
+    // 2 bytes de opcode + 4 de operando.
+    while o + 6 <= to {
+        let primeiro = image[o];
+        if primeiro & 0xF0 == 0x40 && primeiro & 1 == 1 && image[o + 1] == 0xF9 {
+            out.push(CargaAbsoluta {
+                offset: o,
+                registro: (primeiro >> 1) & 7,
+                operando: u32::from_be_bytes([
+                    image[o + 2],
+                    image[o + 3],
+                    image[o + 4],
+                    image[o + 5],
+                ]),
+            });
+            if out.len() >= max {
+                return out;
+            }
+        }
+        o += 2;
+    }
+    out
 }
 
 pub fn call_sites(image: &[u8], from: usize, to: usize, max: usize) -> Vec<JsrSite> {

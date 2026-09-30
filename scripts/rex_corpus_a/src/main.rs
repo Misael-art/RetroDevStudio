@@ -22,7 +22,8 @@ const LIMITE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Etiquetas de esquema das saidas de sondeo (versionadas como o manifesto).
 const SCHEMA_MAGIA: &str = "rex-corpus-magia/v1";
-const SCHEMA_CONSUMIDOR: &str = "rex-corpus-consumer/v1";
+/// v2: `ENDERESO` leva `cargas=` e aparecen as liñas `CARGA` (Fase 4).
+const SCHEMA_CONSUMIDOR: &str = "rex-corpus-consumer/v2";
 
 const USO: &str = "\
 rex-corpus — ferramentas de corpus para REX (Misión A)
@@ -53,8 +54,11 @@ Subcomandos:
                non emprega esses contedores; non e un fallo da ferramenta.
   consumidor   --imaxe FICHEIRO --endereco N [--endereco N ...]
                [--desde N] [--ata N] [--max-referencias N] [--min-entradas N]
-               Quen chama ese enderezo, quen o cita e se unha táboa de
-               punteiros o contén. `vinculo=non` e un resultado medido.
+               [--ventanxa-chamada N]
+               Quen chama ese enderezo, quen o cita, se unha táboa de punteiros
+               o contén e se é o operando dun `lea abs.l,An` (así chega un fluxo
+               á súa rutina; a chamada vai á rutina, non ao fluxo). `vinculo=non`
+               e un resultado medido.
   verify       --referencia DIR [--max-saida N] [--orzamento N]
                [--limite-negativos N] [--max-bytes N]
                Aceite do noso camiño de consumo contra fixtures autorais
@@ -588,14 +592,17 @@ fn cmd_magia(args: &[String]) -> i32 {
     0
 }
 
-/// Evidencia estrutural dun enderezo: quen o chama, quen o cita e se hai unha
-/// táboa de punteiros que o conteña.
+/// Evidencia estrutural dun enderezo: quen o chama, quen o cita, se hai unha
+/// táboa de punteiros que o conteña e se é o operando dunha carga absoluta
+/// longa.
 ///
 /// Distinguimos `vinculo=si` de `vinculo=non` porque unha referencia de bytes
 /// crú non abonda: `references_to` topa calquera patrón, dentro dunha táboa ou
-/// dentro de datos. Só unha chamada real (`jsr`/`jmp`) ou unha entrada de
-/// táboa ligada ao enderezo conta como vínculo, que é o que a misión exige
-/// antes de chamar recurso a un fluxo.
+/// dentro de datos. Contan como vínculo unha chamada real (`jsr`/`jmp`), unha
+/// entrada de táboa ligada ao enderezo, ou que o enderezo sexa o operando dun
+/// `lea abs.l,An` — a forma pola que case todos os xogos entregan o fluxo á
+/// rutina de descompresión, e que `call_sites` non ve porque a chamada apunta á
+/// rutina. É o que a misión exige antes de chamar recurso a un fluxo.
 fn cmd_consumidor(args: &[String]) -> i32 {
     let Some(camiño) = opt(args, "--imaxe") else {
         eprintln!("ERRO: consumidor precisa --imaxe FICHEIRO");
@@ -619,33 +626,46 @@ fn cmd_consumidor(args: &[String]) -> i32 {
         .unwrap_or(imaxe.len());
     let max_ref = num_opt(args, "--max-referencias", 64);
     let min_entradas = num_opt(args, "--min-entradas", 3);
+    let ventanxa = num_opt(args, "--ventanxa-chamada", 16);
 
     println!(
         "CONSUMIDOR esquema={} imaxe={camiño} bytes={} xanela=0x{desde:05X}..0x{ata:05X}",
         SCHEMA_CONSUMIDOR,
         imaxe.len()
     );
+    let todas_cargas = rex_corpus::consumer::cargas_abs_l(&imaxe, desde, ata, usize::MAX);
+    let todas_chamadas = rex_corpus::consumer::call_sites(&imaxe, desde, ata, usize::MAX);
     let mut vinculados = 0usize;
     let mut sen_vinculo = 0usize;
+    let mut cargas_totais = 0usize;
     for addr in enderezos {
-        let chamadas = rex_corpus::consumer::call_sites(&imaxe, desde, ata, usize::MAX)
-            .into_iter()
+        let chamadas = todas_chamadas
+            .iter()
             .filter(|s| s.target == addr)
             .take(max_ref)
+            .cloned()
             .collect::<Vec<_>>();
         let referencias = rex_corpus::consumer::references_to(&imaxe, addr, max_ref);
         let taboas = rex_corpus::consumer::tables_for(&imaxe, &[addr], min_entradas, 16);
-        let vincula = !chamadas.is_empty() || !taboas.is_empty();
+        let cargas = todas_cargas
+            .iter()
+            .filter(|c| c.operando == addr)
+            .take(max_ref)
+            .cloned()
+            .collect::<Vec<_>>();
+        let vincula = !chamadas.is_empty() || !taboas.is_empty() || !cargas.is_empty();
         if vincula {
             vinculados += 1;
         } else {
             sen_vinculo += 1;
         }
+        cargas_totais += cargas.len();
         println!(
-            "ENDERESO 0x{addr:05X} referencias={} chamadas={} taboas={} vinculo={}",
+            "ENDERESO 0x{addr:05X} referencias={} chamadas={} taboas={} cargas={} vinculo={}",
             referencias.len(),
             chamadas.len(),
             taboas.len(),
+            cargas.len(),
             if vincula { "si" } else { "non" }
         );
         for r in &referencias[..referencias.len().min(8)] {
@@ -667,12 +687,32 @@ fn cmd_consumidor(args: &[String]) -> i32 {
                 if t.ascending { "si" } else { "non" }
             );
         }
+        for c in &cargas {
+            // A chamada relevante é a primeira que segue á carga dentro da
+            // ventanxa: é o que pasa o fluxo á rutina. Mídese, non se supone.
+            let desde_chamada = c.offset + 6;
+            let ate_chamada = desde_chamada + ventanxa;
+            let chamada = todas_chamadas
+                .iter()
+                .find(|s| s.offset >= desde_chamada && s.offset <= ate_chamada);
+            match chamada {
+                Some(s) => println!(
+                    "CARGA offset=0x{:05X} rexistro=A{} operando=0x{:05X} chamada=0x{:05X} destino=0x{:05X}",
+                    c.offset, c.registro, c.operando, s.offset, s.target
+                ),
+                None => println!(
+                    "CARGA offset=0x{:05X} rexistro=A{} operando=0x{:05X} chamada=ningunha destino=ningunha",
+                    c.offset, c.registro, c.operando
+                ),
+            }
+        }
     }
     println!(
-        "RESUMO enderezos={} vinculados={} sen_vinculo={}",
+        "RESUMO enderezos={} vinculados={} sen_vinculo={} cargas={}",
         vinculados + sen_vinculo,
         vinculados,
-        sen_vinculo
+        sen_vinculo,
+        cargas_totais
     );
     let _ = std::io::stdout().flush();
     0

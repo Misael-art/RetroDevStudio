@@ -365,3 +365,95 @@ fn rexistro_candidato_sin_evidencia_de_consumidor_non_se_presenta_como_confirmad
     assert!(j.contains("\"confianza\":\"candidato\""), "{j}");
     assert!(j.contains("\"evidencia_consumidor\":[]"), "{j}");
 }
+
+// ---------------------------------------------------------------------------
+// Fase 4 — carga de argumento absoluto longo (`lea abs.l,An`).
+//
+// A regra que se prova aquí nace dunha medida, non dunha suposición: na ROM
+// reservada, 6 dos 383 `lea abs.l` teñen por operando un candidato do sondeo,
+// os 6 caen no rexistro A0 e os 6 van seguidos de `jsr abs.l` ao mesmo destino
+// (0x85A2). `call_sites` non detecta ningún deles porque a chamada apunta á
+// rutina, non ao stream.
+// ---------------------------------------------------------------------------
+
+/// Imaxe de 64 bytes chea de ceros coa secuencia medida colocada en `de`.
+fn imaxe_con(de: usize, bytes: &[u8]) -> Vec<u8> {
+    let mut v = vec![0u8; 64];
+    v[de..de + bytes.len()].copy_from_slice(bytes);
+    v
+}
+
+#[test]
+fn carga_abs_l_a0_devolve_operando_rexistro_e_offset() {
+    // `41 F9 00 07 95 A2` = lea $795A2.l,A0 (medido en 0x10636 da ROM).
+    let im = imaxe_con(8, &[0x41, 0xF9, 0x00, 0x07, 0x95, 0xA2]);
+    let got = rex_corpus::consumer::cargas_abs_l(&im, 0, im.len(), 8);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].offset, 8);
+    assert_eq!(got[0].registro, 0);
+    assert_eq!(got[0].operando, 0x795A2);
+}
+
+#[test]
+fn carga_abs_l_cobre_os_oito_rexistros_coa_codificación_derivada_de_4eb9() {
+    // O campo rexistro vale 0x200 por cada An: a A0 é 41F9 e a A7 é 4FF9.
+    // Derivación: lea abs.l = 0100 ddd 111 111 001, co mesmo 111/001 (absL)
+    // que confirma `4E B9` (jsr abs.l); ddd desprázase 9 bits acima.
+    for n in 0..8u8 {
+        let im = imaxe_con(4, &[0x41 + 2 * n, 0xF9, 0x00, 0x11, 0x22, 0x33]);
+        let got = rex_corpus::consumer::cargas_abs_l(&im, 0, im.len(), 8);
+        assert_eq!(
+            got.len(),
+            1,
+            "A{n} non se reconoce ({:02X}F9)",
+            0x41 + 2 * n
+        );
+        assert_eq!(got[0].registro, n, "A{n} etiketou outro rexistro");
+        assert_eq!(got[0].operando, 0x0011_2233);
+    }
+}
+
+#[test]
+fn carga_abs_l_rexeita_palabras_que_non_son_carga_absoluta_longa() {
+    // Control non vacuo tomado da ROM Rocket Knight: alí o word que precede os
+    // bytes dun candidato é `31 FC` (móvese unha constante a (A0)) e `08 F8`.
+    // Contalos como punteiros sería inferir estrutura polo aspecto dos datos.
+    for (etiqueta, par) in [
+        ("31FC", [0x31u8, 0xFC]),
+        ("08F8", [0x08, 0xF8]),
+        ("4EB9", [0x4E, 0xB9]), // chamada, non carga
+        ("4EF9", [0x4E, 0xF9]),
+        ("41F8", [0x41, 0xF8]), // recheo de datos, non carga
+    ] {
+        let im = imaxe_con(6, &[par[0], par[1], 0x00, 0x00, 0x10, 0x00]);
+        let got = rex_corpus::consumer::cargas_abs_l(&im, 0, im.len(), 8);
+        assert!(
+            got.is_empty(),
+            "{etiqueta} non é lea abs.l pero devolveu {got:?}"
+        );
+    }
+}
+
+#[test]
+fn carga_abs_l_ignora_desprazamentos_impares() {
+    // Mesma instrucción desprazada un byte: o opcode caería en desprazamento
+    // impar, que en 68k non é código.
+    let im = imaxe_con(9, &[0x41, 0xF9, 0x00, 0x00, 0x10, 0x00]);
+    let got = rex_corpus::consumer::cargas_abs_l(&im, 0, im.len(), 8);
+    assert!(got.is_empty(), "desprazamento impar non é código: {got:?}");
+}
+
+#[test]
+fn carga_abs_l_respeta_a_xanela_e_o_tope() {
+    let mut im = vec![0u8; 64];
+    for de in [4usize, 20, 36] {
+        im[de..de + 6].copy_from_slice(&[0x41, 0xF9, 0x00, 0x00, 0x10, 0x00]);
+    }
+    let ata_24 = rex_corpus::consumer::cargas_abs_l(&im, 0, 24, 8);
+    assert_eq!(ata_24.len(), 1, "xanela 0..24: {ata_24:?}");
+    let tope_2 = rex_corpus::consumer::cargas_abs_l(&im, 0, im.len(), 2);
+    assert_eq!(tope_2.len(), 2, "tope 2: {tope_2:?}");
+    // Non pode desbordar: a última carga empeza en 36 e necesita ata 42.
+    let curto = rex_corpus::consumer::cargas_abs_l(&im, 0, 40, 8);
+    assert_eq!(curto.len(), 2, "carga incompleta fóra da xanela: {curto:?}");
+}
