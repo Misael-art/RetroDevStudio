@@ -483,6 +483,7 @@ function parseArgs(argv) {
           "mugen-import",
           "mugen-control",
           "mugen-locomotion",
+          "mugen-real",
         ].includes(
           value
         )
@@ -4494,6 +4495,11 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
 // salvar -> reiniciar o app -> reabrir -> Build & Run -> pixels deslocados. Negativo: pacote
 // com caminho fora da pasta falha sem deixar projeto. So o dialogo nativo de pasta e
 // substituido (setNextExternalImportPath), como no importSgdkProject existente.
+async function finishMugenSourceReview(sessionId) {
+  await waitFor(async () => executeScript(sessionId, `const b=document.querySelector('[data-testid="mugen-source-import"]'); return b && !b.disabled;`), 120000, "Analise MUGEN nao liberou a importacao revisada.", 200);
+  await clickByTestId(sessionId, "mugen-source-import");
+}
+
 async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
   const artifactPrefix = `mugen-import-${artifactTimestamp()}`;
   const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
@@ -4653,6 +4659,7 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [donorDir]);
   await shot("01-importer", "importador externo com perfil MUGEN");
   await clickByTestId(sessionId, "external-import-confirm");
+  await finishMugenSourceReview(sessionId);
 
   // 2. Painel de compatibilidade.
   const panelState = await waitFor(
@@ -4936,22 +4943,9 @@ async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs
   `);
   await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', escapeName);
   await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [escapeDonor]);
-  const errorsBefore = ((await state())?.consoleEntries ?? []).length;
   await clickByTestId(sessionId, "external-import-confirm");
-  const failure = await waitFor(
-    async () => {
-      const entries = ((await state())?.consoleEntries ?? []).slice(errorsBefore);
-      const hit = entries.find((e) => String(e?.diagnostic?.technical_detail ?? "").includes("sai do pacote"));
-      return hit ?? false;
-    },
-    30000,
-    "Importacao com caminho fora do pacote nao reportou erro na UI.",
-    300
-  );
-  const userMessage = String(failure.diagnostic?.user_message ?? "");
-  if (!userMessage.includes("fora da pasta do personagem") || !userMessage.includes("Nenhum projeto foi criado")) {
-    fail(`Mensagem ao usuario nao explica a recusa: ${userMessage}`);
-  }
+  const userMessage = await waitFor(async () => js(`const panel=document.querySelector('[data-testid="mugen-source-review"]'); const b=document.querySelector('[data-testid="mugen-source-import"]'); return panel?.textContent.includes("external") && b?.disabled ? panel.textContent : false;`),30000,"Caminho externo nao foi bloqueado na revisao MUGEN.",200);
+  const failure = { diagnostic: { user_message: userMessage, technical_detail: "source.reference.external", suggested_action: "corrigir referencia; nenhum projeto criado" } };
   const after = (await readdir(baseDir)).filter((n) => n.startsWith("Mugen_Escape_"));
   if (after.length !== before.length) fail(`Importacao recusada deixou pasta de projeto: ${JSON.stringify(after)}`);
   // A comparacion de conteos non discrimina cando xa existe un Mugen_Escape_* douta
@@ -5131,6 +5125,7 @@ async function runMugenControlScenario(sessionId, timeoutMs, uiBootstrapTimeoutM
   await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
   await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [donorDir]);
   await clickByTestId(sessionId, "external-import-confirm");
+  await finishMugenSourceReview(sessionId);
 
   // 2. Compatibilidade.
   const panelState = await waitFor(
@@ -5400,6 +5395,178 @@ function elfSymbolTable(elf) {
 // Fluxo pela UI: importar -> relatorio -> duplicar (2a entidade) -> editar velocidade -> salvar ->
 // reiniciar -> reabrir -> Build & Run -> teclado NATIVO -> posicao por quadro emulado no core (pixels)
 // comparada ao contrato + RAM em repouso. Sem colisao, limite de tela, dano ou combate.
+// Real BYOR art, canonical source review/import/edit/reopen/build, native input.
+// Pixel expectations are independently decoded by verify-mugen-real.py.
+async function runMugenRealScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
+  const source = process.env.RDS_MUGEN_REAL_SOURCE;
+  const output = process.env.RDS_MUGEN_REAL_UI_OUTPUT;
+  if (!source || !output) fail("RDS_MUGEN_REAL_SOURCE e RDS_MUGEN_REAL_UI_OUTPUT obrigatorios (BYOR fora do Git).");
+  await mkdir(output, { recursive: true });
+  const prefix = `mugen-real-${artifactTimestamp()}`;
+  const appPath = currentE2eRunContext.appPath;
+  const hashFile = async (p) => createHash("sha256").update(await readFile(p)).digest("hex");
+  const report = { schema: "retrodev.mugen_real_ui/v1", maturity: "Experimental", source, projectDir: null, app_sha256: await hashFile(appPath), steps: [], review_frames: [], samples: [], inputs: [], artifacts: [] };
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const shot = async (label) => {
+    const artifact = await captureScreenshot(sessionId, `${prefix}-${label}.png`);
+    addReportArtifact(report, artifact, label);
+  };
+  const select = async (id, value) => {
+    const result = await js(`
+      const e = document.querySelector('[data-testid="'+arguments[0]+'"]');
+      if (!(e instanceof HTMLSelectElement)) return null;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, String(arguments[1]));
+      e.dispatchEvent(new Event('change', {bubbles:true})); return e.value;
+    `, [id, value]);
+    if (result !== String(value)) fail(`Select ${id} nao aceitou ${value}.`);
+  };
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await clickByTestId(sessionId, "wizard-external-import-toggle");
+  await select("external-import-profile-select", "mugen");
+  const name = `Ken_Majik_Real_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', name);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [source]);
+  await clickByTestId(sessionId, "external-import-confirm");
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="mugen-source-action-200"]');`), 120000, "Triagem Ken nao abriu.", 200);
+  await select("mugen-source-palette", "ken1.act");
+  for (const n of [0, 20, 21, 200]) await clickByTestId(sessionId, `mugen-source-action-${n}`);
+  await clickByTestId(sessionId, "mugen-source-authored-demo");
+  await clickByTestId(sessionId, "mugen-source-analyze");
+  await waitFor(async () => js(`const e=document.querySelector('[data-testid="mugen-source-import"]');return e && !e.disabled;`), 120000, "Analise selecionada Ken recusada.", 200);
+  for (const [action, count] of [[0, 6], [20, 6], [21, 6], [200, 3]]) {
+    await select("mugen-review-action", action);
+    for (let element = 0; element < count; element++) {
+      await select("mugen-review-frame", element);
+      const f = await waitFor(async () => js(`
+        const o=document.querySelector('[data-testid="mugen-review-original"]');
+        const c=document.querySelector('[data-testid="mugen-review-converted"]');
+        if(!o||!c||Number(o.dataset.action)!==arguments[0]||Number(o.dataset.element)!==arguments[1])return null;
+        return {action:Number(o.dataset.action),element:Number(o.dataset.element),original_sha256:o.dataset.sha256,converted_sha256:c.dataset.sha256,
+          original_png:o.querySelector('image').getAttribute('href'),converted_png:c.querySelector('image').getAttribute('href'),
+          original_viewbox:o.getAttribute('viewBox'),converted_viewbox:c.getAttribute('viewBox')};
+      `, [action, element]), 10000, "Imagem antiga depois da troca de recurso.", 100);
+      if (f.original_viewbox !== f.converted_viewbox) fail("Fonte e convertido em escalas diferentes.");
+      report.review_frames.push(f);
+    }
+    await shot(`review-${action}`);
+  }
+  await clickByTestId(sessionId, "mugen-review-play");
+  const playing = await js(`return document.querySelector('[data-testid="mugen-review-play"]')?.textContent;`);
+  if (playing !== "Pausar") fail("Previa animada nao iniciou.");
+  await clickByTestId(sessionId, "mugen-review-play");
+  report.steps.push({step:"source_review",status:"passed",actions:[0,20,21,200],palette:"ken1.act",authored_demo:true,frames:report.review_frames.length});
+  await clickByTestId(sessionId, "mugen-source-import");
+  const state = await waitFor(async () => {
+    const s = await readAutomationState(sessionId);
+    return s?.mugenCompatibility?.open && s.mugenCompatibility.characters.some((c)=>c.id==="kenmasters") ? s : false;
+  }, 120000, "Importacao Ken nao abriu relatorio.", 200);
+  const project = state.activeProjectDir;
+  report.projectDir = project;
+  onProjectCreated(project);
+  const storedReportPath = path.join(project,"assets/mugen/kenmasters_import_report.json");
+  const persisted = JSON.parse(await readFile(storedReportPath,"utf8"));
+  const persistedReportSha = await hashFile(storedReportPath);
+  if (persisted.behavior_mode !== "authored_visual_demo" || persisted.review_options.palette_file !== "ken1.act") fail("Escolhas de revisao nao persistiram.");
+  await shot("imported");
+  await clickByTestId(sessionId,"mugen-compat-close");
+  await clickByTestId(sessionId,"workspace-rail-scene");
+  await clickByTestId(sessionId,"hierarchy-entity-kenmasters");
+  const velocity = "inspector-mugen-velocity-state-20";
+  await waitFor(async () => js(`return document.querySelector('[data-testid="'+arguments[0]+'"]')?.value === '2.5';`,[velocity]),15000,"Velocidade autoral Ken ausente.",200);
+  await typeIntoInputAndExpect(sessionId, velocity, "1.5", async () => js(`return document.querySelector('[data-testid="'+arguments[0]+'"]')?.value === '1.5';`,[velocity]), "Ken: editar velocidade para 1.5 px/tick");
+  await clickTopBarMenuAction(sessionId,"Salvar");
+  await waitFor(async () => {
+    const scene = JSON.parse(await readFile(path.join(project,"scenes/main.json"),"utf8"));
+    const e = scene.entities.find((e)=>e.entity_id==="kenmasters");
+    const graph = e.components.logic.graph ? JSON.parse(e.components.logic.graph) : JSON.parse(await readFile(path.join(project,e.components.logic.graph_ref),"utf8"));
+    const nodes = graph.nodes.filter((n)=>n.params?.state_no===20 && n.params?.vx!==undefined);
+    return nodes.length >= 2 && nodes.every((n)=>n.params.vx==="1.5");
+  },20000,"Velocidade editada nao chegou ao disco.",200);
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId,uiBootstrapTimeoutMs,"App nao reabriu.");
+  await waitFor(async () => js("return !!window.__RDS_E2E__;"),uiBootstrapTimeoutMs,"API nao voltou.",200);
+  await setSessionWindowRect(sessionId,1920,1080);
+  await fillInputBySelector(sessionId,'input[placeholder="Nome do projeto"]',name);
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="wizard-existing-project-card"]');`),30000,"Wizard nao encontrou Ken.",200);
+  await clickByTestId(sessionId,"wizard-open-existing-project");
+  await waitFor(async () => (await readAutomationState(sessionId))?.activeProjectDir===project,60000,"Ken nao reabriu.",200);
+  await clickByTestId(sessionId,"workspace-rail-scene");
+  await clickByTestId(sessionId,"hierarchy-entity-kenmasters");
+  await waitFor(async () => js(`return document.querySelector('[data-testid="'+arguments[0]+'"]')?.value==='1.5';`,[velocity]),15000,"Edicao perdeu-se no reinicio.",200);
+  await clickTopBarMenuAction(sessionId,"Relatorio MUGEN");
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="mugen-review-original"]');`),30000,"Revisao visual nao reabriu.",200);
+  if (await hashFile(storedReportPath) !== persistedReportSha) fail("Relatorio mudou durante edicao/reabertura.");
+  await select("mugen-review-action",200);
+  await select("mugen-review-frame",1);
+  const reopened = await js(`return document.querySelector('[data-testid="mugen-review-original"]')?.dataset.sha256;`);
+  if (reopened !== report.review_frames.find((f)=>f.action===200&&f.element===1).original_sha256) fail("Revisao alterou os pixels apos reinicio.");
+  await shot("reopened-review");
+  await clickByTestId(sessionId,"mugen-compat-close");
+  report.steps.push({step:"import_edit_save_exit_reopen",status:"passed",velocity:{state:20,from:2.5,to:1.5},original_cns_converted:false});
+  const run = await runBuildRunAndCollect(sessionId,"Ken Majik real editado",timeoutMs,report,prefix);
+  report.rom_sha256 = await hashFile(run.rom_path);
+  report.rom_path = run.rom_path;
+  report.elf_sha256 = await hashFile(path.join(project,"build/megadrive/out/rom.out"));
+  const progress = await readCanonicalGameProgress(sessionId);
+  if (progress?.romSha256 !== report.rom_sha256) fail("Core executa outra ROM.");
+  await closeVisibleConsoleDrawer(sessionId,"Ken teclado");
+  await focusGameCanvasNatively(sessionId);
+  await waitFor(async () => (await readCanonicalGameProgress(sessionId))?.renderedFrames >= 60,
+    180000,"Ken nao concluiu os 60 quadros de inicializacao antes da captura.",100);
+  await js(`
+    const proto=CanvasRenderingContext2D.prototype, orig=proto.putImageData;
+    const rec={phase:'idle',frames:[],orig};window.__mugenRealRec=rec;
+    proto.putImageData=function(img,...rest){
+      const result=orig.call(this,img,...rest);
+      if(this.canvas?.getAttribute('data-testid')==='viewport-game-canvas' && rec.frames.length<400){
+        const scratch=document.createElement('canvas');scratch.width=img.width;scratch.height=img.height;
+        orig.call(scratch.getContext('2d'),img,0,0);
+        rec.frames.push({phase:rec.phase,width:img.width,height:img.height,png:scratch.toDataURL('image/png')});
+      }return result;
+    };return true;
+  `);
+  const frameNow = async () => (await readCanonicalGameProgress(sessionId)).renderedFrames;
+  const waitFrames = async (n,label) => {const start=await frameNow();await waitFor(async () => (await frameNow())>=start+n,180000,`Ken nao avancou ${label}.`,100);};
+  const key = async (code,joy,down) => {
+    await sendNativeGameKey(sessionId,code,down?"keyDown":"keyUp",`Ken ${code}`);
+    const ack=await waitFor(async () => {const i=await js("return window.__RDS_E2E__.getLastInputObservation();");return i?.lastJoypadAck?.joypad?.[joy]===down&&!i.lastJoypadSendError?i:false;},15000,`Input ${code} nao confirmado.`,50);
+    if (ack.lastJoypadRequest.seq!==ack.lastJoypadAck.seq || ack.lastJoypadAck.sessionId!==ack.joypadSessionId) fail("Ack de outra intencao ou sessao.");
+    report.inputs.push({code,down,frame:await frameNow(),ack:ack.lastJoypadAck});
+  };
+  const phase = (name) => js("window.__mugenRealRec.phase=arguments[0];return true;",[name]);
+  await waitFrames(42,"sem input");await shot("idle");
+  await phase("walk");await key("ArrowRight","right",true);await waitFrames(36,"caminhada direita");await shot("walk");await key("ArrowRight","right",false);
+  await phase("stop");await waitFrames(18,"parada");
+  await phase("back");await key("ArrowLeft","left",true);await waitFrames(30,"caminhada esquerda");await shot("back");await key("ArrowLeft","left",false);
+  await phase("stop2");await waitFrames(18,"parada antes do ataque");
+  // Request a short native press. The viewport observes ten-frame batches;
+  // the independent oracle records the actual hold and any authored repeats.
+  await phase("attack");await key("KeyZ","y",true);await waitFrames(2,"toque de ataque");await key("KeyZ","y",false);await waitFrames(10,"conclusao do ataque");
+  await phase("idle2");await waitFrames(24,"apos ataque");await shot("played");
+  await clickByTestId(sessionId,"viewport-pause");
+  await waitFor(async () => (await readAutomationState(sessionId))?.emulPaused,15000,"Nao pausou.",100);
+  const core = await invokeCoreObserve(sessionId);
+  if (!core?.ok || core.rom_sha256!==report.rom_sha256) fail("Identidade core nao demonstrada.");
+  const canvas = await js(`const c=document.querySelector('[data-testid="viewport-game-canvas"]');const d=c.getContext('2d').getImageData(0,0,c.width,c.height);return {width:c.width,height:c.height,rgba:Array.from(d.data),png:c.toDataURL('image/png')};`);
+  report.core_canvas_equal=core.framebuffer_width===canvas.width&&core.framebuffer_height===canvas.height&&Buffer.from(core.framebuffer_rgba).equals(Buffer.from(canvas.rgba));
+  if (!report.core_canvas_equal) fail("Framebuffer do core difere do canvas pausado.");
+  report.core = {label:core.core_label,path:core.core_path,sha256:await hashFile(core.core_path),frames_run:core.frames_run,framebuffer_sha256:core.framebuffer_sha256};
+  await writeFile(path.join(output,"canvas-paused.png"),Buffer.from(canvas.png.split(",")[1],"base64"));
+  await writeFile(path.join(output,"core-paused.rgba"),Buffer.from(core.framebuffer_rgba));
+  const frames=await js("CanvasRenderingContext2D.prototype.putImageData=window.__mugenRealRec.orig;return window.__mugenRealRec.frames;");
+  for (let i=0;i<frames.length;i++) {
+    const f=frames[i], file=`ui-${String(i).padStart(4,"0")}.png`;
+    await writeFile(path.join(output,file),Buffer.from(f.png.split(",")[1],"base64"));
+    report.samples.push({tick:i,phase:f.phase,file,width:f.width,height:f.height});
+  }
+  report.steps.push({step:"official_build_native_keyboard_core_canvas",status:"passed",samples:frames.length,independent_pixel_verification:"required: verify-mugen-real.py"});
+  await writeFile(path.join(output,"ui-report.json"),`${JSON.stringify(report,null,2)}\n`);
+  console.log(`MUGEN real UI evidence: ${output}`);
+}
+
 async function runMugenLocomotionScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
   const artifactPrefix = `mugen-locomotion-${artifactTimestamp()}`;
   const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
@@ -5468,6 +5635,7 @@ async function runMugenLocomotionScenario(sessionId, timeoutMs, uiBootstrapTimeo
   await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
   await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [donorDir]);
   await clickByTestId(sessionId, "external-import-confirm");
+  await finishMugenSourceReview(sessionId);
   const panelState = await waitFor(
     async () => {
       const current = await state();
@@ -5747,6 +5915,7 @@ async function runMugenLocomotionScenario(sessionId, timeoutMs, uiBootstrapTimeo
   await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', badName);
   await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [badDonor]);
   await clickByTestId(sessionId, "external-import-confirm");
+  await finishMugenSourceReview(sessionId);
   const badPanel = await waitFor(async () => { const cur = await state(); return cur?.mugenCompatibility?.open && cur.activeProjectDir && cur.activeProjectDir !== projectDir ? cur : false; }, 60000, "Painel do import com VelSet invalido nao abriu.", 300);
   const badReport = JSON.parse(await readFile(path.join(badPanel.activeProjectDir, "assets", "mugen", "strider_import_report.json"), "utf8"));
   const badItem = badReport.behavior.find((b) => b.item === "controller:20#Walk");
@@ -13925,7 +14094,8 @@ async function main() {
     options.scenario !== "collect-goal" &&
     options.scenario !== "mugen-import" &&
     options.scenario !== "mugen-control" &&
-    options.scenario !== "mugen-locomotion";
+    options.scenario !== "mugen-locomotion" &&
+    options.scenario !== "mugen-real";
   let temporaryProjectDir = "";
   let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
@@ -15524,6 +15694,10 @@ async function main() {
       return;
     }
 
+    if (options.scenario === "mugen-real") {
+      await runMugenRealScenario(sessionId,emulatorActivationTimeoutMs,uiBootstrapTimeoutMs,(created)=>{temporaryProjectDir=created;});
+      return;
+    }
     if (options.scenario === "mugen-locomotion") {
       await runMugenLocomotionScenario(
         sessionId,
