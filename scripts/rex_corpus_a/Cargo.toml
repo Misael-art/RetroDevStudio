@@ -1,0 +1,25 @@
+[package]
+name = "rex-corpus"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Ferramentas da MISSAO A: inventario de corpus real, localizacion de streams Kosinski e verificacao de recursos consumindo rex-addressing e rex-kosinski. Experimental."
+license = "UNLICENSED"
+publish = false
+
+# Sen dependencias externas: consome os dous paquetes REX por path. O SHA-256
+# reutiliza o que xa publica rex-kosinski (mesma convencion dos paquetes REX),
+# non se escribe unha segunda implementacion.
+[dependencies]
+rex-addressing = { path = "../../crates/rex-addressing" }
+rex-kosinski = { path = "../../crates/rex-kosinski" }
+
+[dev-dependencies]
+
+[lib]
+name = "rex_corpus"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rex-corpus"
+path = "src/main.rs"
