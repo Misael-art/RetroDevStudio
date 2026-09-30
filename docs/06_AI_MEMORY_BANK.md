@@ -1,5 +1,84 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-30 (n) — Ken Majik real: triagem, revisão visual e cadeia SGDK → ROM → core → UI comprovadas (Experimental mantido)
+
+Frente isolada `codex/rex-mugen-real`, dependente de `codex/rex-mugen-locomotion`
+@ `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` (PR #87 confirmado aberto,
+base UX v2 `d1b5a4d2bc37d4a9d3c78ea708b899ed44a38d7a`). Worktree
+`/home/misael/Projects/REX-MUGEN-REAL-2026-09-30`; checkout canônico e seus
+arquivos não rastreados preservados. `0194f9465e759a3ba3d6fae84b4f5aef0576a4af`
+continua fora da base: conservar (i)–(n) na integração futura. Sem merge/release.
+Matriz única, comparação Forge → RetroDev, limites e reprodução em
+`docs/rex_profiles/mugen_sgdk/REAL_MISSION.md`; manifesto completo de hashes
+e metadados em `REAL_EVIDENCE.json`, sem pixels/ROM/corpus BYOR no Git.
+
+**Fonte e diagnóstico.** Operador autorizou expressamente `Ken_Majik_.zip`,
+SHA `b244ec9a105fa0131b37c075dc06b032a87cf0f839f46ec7054ac60d9bd6f14c`;
+`ken8.def`, SFF v1.0.1.0 com 201 sprites, AIR 102 ações, `ken1.act`;
+`common1.cns` ausente e introdução absoluta registrados. Consulta Forge
+somente leitura, licença MIT conferida, sem transplante/preparo do doador.
+Pillow PCX independente confrontou os 201 índices/paletas com Rust sem
+divergência: a primeira falha era **ACT ignorada**, não decoder. Outra falha
+na fronteira BMP/tiles perdia 172 pixels de preto opaco no idle por associar
+RGB preto ao índice de máscara 0; corrigida e coberta por regressão.
+Corrigidos também pares numéricos escalares que causavam panic e orçamento
+que contava atlas inteiro residente apesar do streaming SGDK existente.
+
+**Produto.** Triagem Rust reutilizável anterior à conversão: DEF inequívoco,
+duplicados/case/referências ausentes ou ambíguas, versões, inventário de
+sprites/ações/controllers e localização; digest conferido novamente ao
+importar. Seleção ACT/ações explícita, fonte intacta e derivados rastreáveis.
+Wizard canônico recebe revisão com miniaturas reais, ação/quadro, original e
+RGB333 na mesma escala, checker, eixo opcional e duração AIR; escolhas,
+relatório e pixels reabrem. Stage/screenpack continuam na rota existente.
+Piloto seleciona 0/20/21/200, 21 elementos AIR/18 células, 104×104, âncora
+(51,98), durações 6/5/2; 15 cores opacas, zero fusões e sem redução de resolução.
+**CNS original não convertido:** modo `authored_visual_demo` explicitamente
+rotulado, grafo/controllers originais preservados como referência, facing
+fixo à direita, sem acerto/dano/colisão. Nenhum flip nas ações selecionadas.
+
+**Aceite real.** UI Tauri: selecionar/analisar/inspecionar/importar → editar
+VelSet do estado 20 (2,5 → 1,5) → salvar/encerrar/reabrir → Build & Run oficial
+→ teclado nativo →/←/Z, acks mesma sessão/seq → core/canvas integralmente
+iguais. App `9b602ff3519f179804722da1f3ba3b35d28bdb1deeb2fb3d646c7a29d4ce5d36`;
+ROM UI `0e8af2eb8015beb6830b5074f8ed52e8537d4e9bf86f48d023d9d27f8febe6fe`;
+ELF `6e3eae8d525cbe1361c3d70812998122fabfbb6c6dee8bf302ab359a020b7fec`.
+Core oficial Genesis Plus GX v1.7.4 `46a5521`, hash
+`07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1`.
+Oráculo externo independente passou em 21 prévias, 27 frames compilados por
+projeto, 204 core e 212 UI: pixels/máscara, geometria, ordem e ticks exatos;
+paleta/sprite/eixo/flip/imagem antiga alterados são recusados. Galeria de
+mesma pose fonte/prévia/core/UI e sequência GIF inspecionadas, locais em
+`~/.retrodev/mugen-real-2026-09-30/oracle/`.
+UI mede caminhada 384/256, volta −448/256, paradas imóveis. Solicitação de
+toque nativo foi observada em lote de 10 ticks: **dois** ataques completos
+de 6 ticks, idle entre eles e depois; comando autoral de nível pode repetir
+enquanto pressionado. Backend de um tick prova um ciclo. Não alegar input
+instantâneo/um único ataque na UI. Curva RGB565 do core verificada pela fonte
+imutável `46a55214d0dab654e5a525ae0c54921ca9716872`, separada da prévia RGB.
+Custos compilados: 96 tiles/3.072 B residentes, até 8 peças, pico 4 peças e
+104 px/scanline, até 3.072 B de tiles por troca. CPU/DMA temporal, hardware
+físico, PAL e FPS real não medidos; warning conservador permanece.
+
+**Validação.** `mugen-import`, `mugen-control`, `mugen-locomotion` verdes no
+mesmo app; 14 processos próprios por cenário, 0 vivos. Gates: tree, lint,
+tsc, fmt, clippy `-D warnings`, frontend 828/0/6 (834), Rust 818/0/72 (890),
+`crates:gates` quatro pacotes, syntax harness e oráculo. Patch transitivo
+único `brace-expansion` 5.0.9 → 5.0.12 remove vulnerabilidades altas; audit
+no limiar high passa com quatro moderadas Vitest registradas como dívida de
+teste. RustSec passa com oito avisos informacionais herdados, cadeias e IDs
+registrados no documento de missão; nenhuma dependência Rust nova/alterada.
+Licenças reexecutadas (334 npm/499 Cargo/15 toolchains). Host READY,
+fingerprint `60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2`.
+`host:certify` passou: READY, frontend 831/0/3 com ambiente oficial habilitado,
+Rust 818/0/72 e validação upstream Linux SGDK/PVSnesLib/core `success: true`.
+
+Commits de produto `90481e7d50b047ff0711d09290abbfe2b6269041`, QA
+`44a850c8e11b14d178683129dbb3ff9a454b2a99`, segurança
+`23df72290ccdf29acbe5322756c35979d9af23f0`. Publicar PR dependente da branch
+de #87, consultar CI pelo SHA final (não presumido neste checkpoint).
+Esta prova é do piloto delimitado; não promove suporte geral MUGEN nem maturidade.
+
 ### Checkpoint 2026-09-29 (m) — MUGEN UX v2, lote 4: **locomoção horizontal por `VelSet` (x constante, Q8.8) importada, editável e comprovada na ROM** (Experimental mantido)
 Rama `codex/rex-mugen-locomotion` (dependente de `codex/rex-mugen-ux-v2` @ `d1b5a4d`, CI verde por SHA). `0194f94` (checkpoint (i), só docs) segue fóra das duas ramas: conservar (i), (j), (k), (l) e (m) na integración sen duplicar.
 **Subconjunto** (contrato completo em `crates/rex-mugen/CONTRACT.md`, «Locomoção horizontal»): `VelSet x = N` / `value = N[, 0]`, `N` literal decimal, `trigger1 = 1`; px por tick (1 tick = 1 quadro emulado), x+ = direita, facing fixo à direita, Q8.8 com arredondamento ao mais próximo, deslocamento = `floor(Σ vx_q8/256)`; estado sen `VelSet` mantém a velocidade. Recusado com motivo (`unsupported`, sen ligar o nó): expressão/`const()`, outro gatilho, y≠0, x omitido, parámetro extra, fóra da faixa. **`PosAdd`/`PosSet`/`VelAdd` seguen fóra.**
@@ -1969,4 +2048,3 @@ implementación.
 decisión do operador. O siguiente degrau para B é fluxo do usuario (UI que chame
 decode/encode) ou reinserción na transación canónica — ambos requiren decisión explícita
 do operador antes de calquera promoción.
-
