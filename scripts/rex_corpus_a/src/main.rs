@@ -7,6 +7,8 @@
 //! - 3: entrada ilegible (folla de proveniancia malformada).
 //! - 4: falta un arquivo que a entrada anuncia, ou excede o límite declarado.
 //! - 5: traballo feito pero con diverxencias medidas (manifesto parcial).
+//! - 6: aceite incompleto — habería fluxo que non se puido executar (sen
+//!   ficherio de agardo). Distinto de 5: aquí non hai medida, falta.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -14,6 +16,7 @@ use std::process::ExitCode;
 
 use rex_corpus::inventory::{inspect, inventory_json, parse_provenance, Item, Provenance};
 use rex_corpus::json::render;
+use rex_corpus::spec::{negativo_de, token_declarado};
 
 const LIMITE_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -52,10 +55,20 @@ Subcomandos:
                [--desde N] [--ata N] [--max-referencias N] [--min-entradas N]
                Quen chama ese enderezo, quen o cita e se unha táboa de
                punteiros o contén. `vinculo=non` e un resultado medido.
-  verify       (non implementado) aceite dun recurso contra referencia fixada.
+  verify       --referencia DIR [--max-saida N] [--orzamento N]
+               [--limite-negativos N] [--max-bytes N]
+               Aceite do noso camiño de consumo contra fixtures autorais
+               (golden/ plain/ negative/). Non le ROMs nin escribe bytes.
+               Se un negative ten a súa declaración lateral
+               (<nome>.expected.json), compróbase a razón de rexeito, o seu
+               max_out e a lonxitude de entrada declarada; sen declaración
+               só se rexistra o rexeito (`declarado=ningún`).
+               Un fluxo sen ficherio de agardo declárase `non executado`
+               (código 6): a misión prohibe que a ausencia sexa un pase.
 
 Códigos: 0 ok · 2 uso/non implementado · 3 entrada ilegible ·
-4 arquivo ausente ou fora de límite · 5 diverxencias medidas.
+4 arquivo ausente ou fora de límite · 5 diverxencias medidas ·
+6 aceite incompleto (hai fluxo sen executar).
 ";
 
 fn opt(args: &[String], nome: &str) -> Option<String> {
@@ -665,6 +678,304 @@ fn cmd_consumidor(args: &[String]) -> i32 {
     0
 }
 
+/// Etiqueta de esquema do sondeo de aceptacion (Fase 3).
+const SCHEMA_VERIFICACION: &str = "rex-corpus-verify/v1";
+
+/// Lista ordenada e determinista dos `*.kos` dun subdirectorio de referencia.
+fn fluxos_de_referencia(raiz: &Path, sub: &str) -> Vec<(String, PathBuf)> {
+    let directorio = raiz.join(sub);
+    let Ok(lectura) = std::fs::read_dir(&directorio) else {
+        return Vec::new();
+    };
+    let mut nomes: Vec<(String, PathBuf)> = lectura
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "kos").unwrap_or(false))
+        .filter_map(|p| {
+            let nome = p.file_stem()?.to_string_lossy().into_owned();
+            Some((nome, p))
+        })
+        .collect();
+    nomes.sort();
+    nomes
+}
+
+/// Lee un ficheiro de referencia dentro do límite declarado.
+fn ler_referencia(ruta: &Path, max_bytes: u64) -> Result<Vec<u8>, i32> {
+    let meta = match std::fs::metadata(ruta) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!(
+                "ERRO: non executado :: non podo abrir {}: {e}",
+                ruta.display()
+            );
+            return Err(4);
+        }
+    };
+    if meta.len() > max_bytes {
+        eprintln!(
+            "ERRO: non executado :: {} ten {} bytes, excede o límite {max_bytes}",
+            ruta.display(),
+            meta.len()
+        );
+        return Err(4);
+    }
+    match std::fs::read(ruta) {
+        Ok(b) => Ok(b),
+        Err(e) => {
+            eprintln!(
+                "ERRO: non executado :: non podo ler {}: {e}",
+                ruta.display()
+            );
+            Err(4)
+        }
+    }
+}
+
+/// Aceite do noso camiño de consumo contra a referencia fixada.
+///
+/// A referencia son fixtures **autorais** (as `golden/`, `plain/` e `negative/`
+/// do paquete `rex-kosinski`): non se leen ROMs nin bytes comerciais, e non se
+/// duplica o códec — consómese `decode`/`encode` fixados. Tres resultados
+/// distínguense e non se funden:
+/// - `ok`: a saída medida coincide hash con hash coa expectativa;
+/// - `diverxencia`: non coincide, ou un negativo si decodifica;
+/// - `sen-expectativa`: a referencia non ten arquivo de agardo para ese fluxo
+///   (é o caso contractual do `m02`, `Truncated`). Non se conta como pase:
+///   un campo non medido queda explícito no resumo.
+///
+/// Os negativos execútanse co límite apertado (`limite_negativos`, defecto 16)
+/// porque a propia referencia documenta que `k05` é un fluxo **ben formado**
+/// cuxa recusa é obrigación do produto: sen ese contexto, «decodificou» sería
+/// un falso defecto.
+fn cmd_verify(args: &[String]) -> i32 {
+    let Some(dir) = opt(args, "--referencia") else {
+        eprintln!("ERRO: verify precisa --referencia DIR");
+        return 2;
+    };
+    let raiz = Path::new(&dir);
+    if !raiz.is_dir() {
+        eprintln!("ERRO: non executado :: non podo abrir o directorio de referencia {dir}");
+        return 4;
+    }
+    let tope_bytes = max_bytes(args);
+    let defecto = rex_corpus::scan::ScanLimits::DEFAULT;
+    let max_output = num_opt(args, "--max-saida", defecto.max_output);
+    let work_limit = num_opt(args, "--orzamento", defecto.work_limit);
+    let limite_negativos = num_opt(args, "--limite-negativos", 16);
+
+    println!(
+        "VERIFICO esquema={SCHEMA_VERIFICACION} referencia={dir} max_saida={max_output} orzamento={work_limit} limite_negativos={limite_negativos}"
+    );
+
+    let mut golden = 0usize;
+    let mut plain = 0usize;
+    let mut negative = 0usize;
+    let mut ok = 0usize;
+    let mut ok_rexeitado = 0usize;
+    let mut sen_expectativa = 0usize;
+    let mut diverxentes = 0usize;
+
+    for (nome, ruta) in fluxos_de_referencia(raiz, "golden") {
+        golden += 1;
+        let bytes = match ler_referencia(&ruta, tope_bytes) {
+            Ok(b) => b,
+            Err(c) => return c,
+        };
+        let esperado_ruta = raiz.join("golden").join(format!("{nome}.expected.bin"));
+        let esperado = match std::fs::read(&esperado_ruta) {
+            Ok(e) => e,
+            Err(_) => {
+                sen_expectativa += 1;
+                println!(
+                    "GOLDEN {nome} bytes_in={} resultado=sen-expectativa motivo=sen-ficheiro-de-agardo",
+                    bytes.len()
+                );
+                continue;
+            }
+        };
+        let sha_esperado = rex_kosinski::edit::sha256_hex(&esperado);
+        match rex_kosinski::decode(&bytes, max_output, work_limit) {
+            Err(e) => {
+                diverxentes += 1;
+                println!(
+                    "GOLDEN {nome} bytes_in={} medido=- esperado={sha_esperado} resultado=diverxencia motivo={}",
+                    bytes.len(),
+                    motivo_decode(&e)
+                );
+            }
+            Ok(d) => {
+                let medido = rex_kosinski::edit::sha256_hex(&d.output);
+                if medido == sha_esperado {
+                    ok += 1;
+                    println!(
+                        "GOLDEN {nome} bytes_in={} consumo={} saida={} sha256={medido} esperado={sha_esperado} resultado=ok",
+                        bytes.len(),
+                        d.bytes_consumed,
+                        d.output.len()
+                    );
+                } else {
+                    diverxentes += 1;
+                    println!(
+                        "GOLDEN {nome} bytes_in={} consumo={} saida={} medido={medido} esperado={sha_esperado} resultado=diverxencia motivo=saida-diferente",
+                        bytes.len(),
+                        d.bytes_consumed,
+                        d.output.len()
+                    );
+                }
+            }
+        }
+    }
+
+    for (nome, ruta) in fluxos_de_referencia(raiz, "plain") {
+        plain += 1;
+        let bytes = match ler_referencia(&ruta, tope_bytes) {
+            Ok(b) => b,
+            Err(c) => return c,
+        };
+        let esperado_ruta = raiz.join("plain").join(format!("{nome}.bin"));
+        let esperado = match std::fs::read(&esperado_ruta) {
+            Ok(e) => e,
+            Err(_) => {
+                sen_expectativa += 1;
+                println!(
+                    "PLAIN {nome} bytes_in={} resultado=sen-expectativa motivo=sen-ficheiro-de-agardo",
+                    bytes.len()
+                );
+                continue;
+            }
+        };
+        let sha_esperado = rex_kosinski::edit::sha256_hex(&esperado);
+        let decodificado = match rex_kosinski::decode(&bytes, max_output, work_limit) {
+            Ok(d) => d,
+            Err(e) => {
+                diverxentes += 1;
+                println!(
+                    "PLAIN {nome} bytes_in={} medido=- esperado={sha_esperado} resultado=diverxencia motivo={}",
+                    bytes.len(),
+                    motivo_decode(&e)
+                );
+                continue;
+            }
+        };
+        let medido = rex_kosinski::edit::sha256_hex(&decodificado.output);
+        let ciclo = fechar_ciclo(&bytes, 0, max_output, work_limit);
+        let coincide = medido == sha_esperado;
+        let resultado = if coincide && ciclo.estado == "ok" {
+            ok += 1;
+            "ok"
+        } else {
+            diverxentes += 1;
+            "diverxencia"
+        };
+        println!(
+            "PLAIN {nome} bytes_in={} consumo={} saida={} sha256={medido} esperado={sha_esperado} ciclo={} resultado={resultado}",
+            bytes.len(),
+            decodificado.bytes_consumed,
+            decodificado.output.len(),
+            ciclo.estado
+        );
+    }
+
+    for (nome, ruta) in fluxos_de_referencia(raiz, "negative") {
+        negative += 1;
+        let bytes = match ler_referencia(&ruta, tope_bytes) {
+            Ok(b) => b,
+            Err(c) => return c,
+        };
+        // A referencia declara tamén *por que* debe ser rexeitado o vector e
+        // cal é o seu límite de saída. Comprobar só «deu erro» aceptaría un
+        // decoder que falla polo motivo equivocado.
+        let lateral = raiz.join("negative").join(format!("{nome}.expected.json"));
+        let declarado = std::fs::read_to_string(&lateral)
+            .ok()
+            .map(|t| negativo_de(&t));
+        let tope = declarado
+            .as_ref()
+            .and_then(|d| d.max_out)
+            .unwrap_or(limite_negativos);
+        let etiqueta = declarado.as_ref().and_then(|d| d.expected_error.clone());
+        let lonxitude_declarada = declarado.as_ref().and_then(|d| d.stream_len);
+        let mut campos = vec![
+            format!("bytes_in={}", bytes.len()),
+            format!("max_out={tope}"),
+            format!(
+                "declarado={}",
+                etiqueta.clone().unwrap_or_else(|| "ningún".into())
+            ),
+        ];
+        if let Some(m) = declarado.as_ref().and_then(|d| d.mirror_condition.clone()) {
+            campos.push(format!("espello={m}"));
+        }
+
+        let resultado: &'static str;
+        let motivo: &'static str;
+        let lonxitude_trocada = lonxitude_declarada.filter(|n| *n != bytes.len());
+        if let Some(n) = lonxitude_trocada {
+            // Non son os bytes que a referencia describe: discutir a razón de
+            // rexeito sobre outro fluxo sería encher un campo cunha estimación.
+            campos.push(format!("declarado_len={n} medido={}", bytes.len()));
+            resultado = "diverxencia";
+            motivo = "lonxitude-declarada-diferente";
+        } else {
+            match rex_kosinski::decode(&bytes, tope, work_limit) {
+                Ok(d) => {
+                    campos.push(format!("medido=- saida={}", d.output.len()));
+                    resultado = "diverxencia";
+                    motivo = "decodificou";
+                }
+                Err(e) => {
+                    let medido = motivo_decode(&e);
+                    campos.push(format!("medido={medido}"));
+                    let esperado = etiqueta.as_deref().and_then(token_declarado);
+                    match esperado {
+                        Some(agardado) if agardado == medido => {
+                            resultado = "rexeitado";
+                            motivo = medido;
+                        }
+                        Some(agardado) => {
+                            campos.push(format!("esperado={agardado}"));
+                            resultado = "diverxencia";
+                            motivo = "motivo-diferente";
+                        }
+                        None if etiqueta.is_some() => {
+                            resultado = "diverxencia";
+                            motivo = "etiqueta-declarada-descoecida";
+                        }
+                        None => {
+                            resultado = "rexeitado";
+                            motivo = "sen-declaracion";
+                        }
+                    }
+                }
+            }
+        }
+        if resultado == "rexeitado" {
+            ok_rexeitado += 1;
+        } else {
+            diverxentes += 1;
+        }
+        campos.push(format!("resultado={resultado} motivo={motivo}"));
+        println!("NEGATIVE {nome} {}", campos.join(" "));
+    }
+
+    println!(
+        "RESUMO golden={golden} plain={plain} negative={negative} ok={ok} rexeitado={ok_rexeitado} sen_expectativa={sen_expectativa} diverxentes={diverxentes}"
+    );
+    let _ = std::io::stdout().flush();
+    if diverxentes > 0 {
+        5
+    } else if sen_expectativa > 0 {
+        // Un fluxo sen agardo non executouse: non pode herdar o verde dos que si.
+        eprintln!(
+            "ERRO: non executado :: {sen_expectativa} fluxo(s) de referencia sen ficherio de agardo; aceite incompleto, non un pase"
+        );
+        6
+    } else {
+        0
+    }
+}
+
 fn executar(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         None => {
@@ -681,6 +992,7 @@ fn executar(args: &[String]) -> i32 {
         Some("roundtrip") => cmd_roundtrip(&args[1..]),
         Some("magia") => cmd_magia(&args[1..]),
         Some("consumidor") => cmd_consumidor(&args[1..]),
+        Some("verify") => cmd_verify(&args[1..]),
         Some(outro) => {
             eprintln!("ERRO: subcomando '{outro}' non implementado");
             2

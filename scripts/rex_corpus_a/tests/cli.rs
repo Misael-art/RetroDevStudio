@@ -294,9 +294,10 @@ fn verificar_devolge_verbos_por_fonte_e_o_mesmo_estatus_que_inventario() {
 
 #[test]
 fn un_subcomando_non_implementado_falla_explicitamente_en_lugar_de_simular() {
-    // `verify` é o verbo que aínda non existe: a proba quere o verbo *pendente*,
-    // non un que xa implementamos (antes usábase `scan` e `roundtrip`).
-    let o = executar(&["verify"]);
+    // `descompilar` non existe e non vai existir nesta misión (prohibido
+    // declarar decompilación de lóxica). A proba pinned nun verbo pendente, non
+    // nun que xa implementamos (antes usábase `scan`, `roundtrip` e `verify`).
+    let o = executar(&["descompilar"]);
     assert_eq!(o.status.code(), Some(2), "non implementado = codigo 2");
     let err = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(err.contains("non implementado"), "stderr: {err}");
@@ -710,4 +711,283 @@ fn consumidor_sin_enderezo_erro_de_uso_e_dous() {
     let err = String::from_utf8_lossy(&o.stderr).to_string();
     assert!(err.contains("--endereco"), "stderr: {err}");
     let _ = std::fs::remove_dir_all(&d);
+}
+
+// ---------- verify (Fase 3: aceite contra referencia fixada) ----------
+
+/// Crea a árbore dunha referencia: `golden/`, `plain/`, `negative/`.
+fn dir_referencia(nome: &str) -> std::path::PathBuf {
+    let d = dir_temporal(nome);
+    for sub in ["golden", "plain", "negative"] {
+        std::fs::create_dir_all(d.join(sub)).expect("subdirector de referencia");
+    }
+    d
+}
+
+#[test]
+fn verify_compara_a_saida_dun_golden_co_hash_da_expectativa_e_sa_cero() {
+    let d = dir_referencia("v-golden-ok");
+    std::fs::write(d.join("golden/m01_literals.kos"), fluxo_pineapple()).unwrap();
+    std::fs::write(d.join("golden/m01_literals.expected.bin"), b"PINEAPPLE").unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert_eq!(o.status.code(), Some(0), "stderr: {err}");
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.contains("VERIFICO esquema=rex-corpus-verify/v1"),
+        "{out}"
+    );
+    assert!(out.contains("GOLDEN m01_literals"), "liña GOLDEN: {out}");
+    assert!(
+        out.contains(&format!("sha256={}", sha_hex(b"PINEAPPLE"))),
+        "hash medido: {out}"
+    );
+    assert!(out.contains("resultado=ok"), "resultado: {out}");
+    assert!(out.contains("diverxentes=0"), "resumo: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_marca_diverxencia_cando_o_golden_non_da_a_saida_esperada() {
+    let d = dir_referencia("v-golden-div");
+    std::fs::write(d.join("golden/m01_literals.kos"), fluxo_pineapple()).unwrap();
+    std::fs::write(d.join("golden/m01_literals.expected.bin"), b"MANGO").unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    assert_eq!(
+        o.status.code(),
+        Some(5),
+        "un hash que non coincide é diverxencia"
+    );
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("resultado=diverxencia"), "saída: {out}");
+    assert!(out.contains("esperado="), "hash agardado: {out}");
+    assert!(out.contains("medido="), "hash medido: {out}");
+    assert!(out.contains("diverxentes=1"), "resumo: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_declara_sen_expectativa_en_vez_de_inventar_un_pase_para_un_golden_baleiro() {
+    // `m02_single_with_eod` non ten `.expected.bin` na referencia fixada: é a
+    // excepción contractual (Truncated). Unha proba de aceite non pode
+    // convertela en `ok` nin silenciala; queda como campo non medido.
+    let d = dir_referencia("v-sen-expectativa");
+    std::fs::write(d.join("golden/m02_truncado.kos"), fluxo_pineapple()).unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("resultado=sen-expectativa"), "saída: {out}");
+    assert!(out.contains("sen_expectativa=1"), "resumo: {out}");
+    assert!(out.contains("ok=0"), "non se conta como pase: {out}");
+    // O código vai despois das asercións textuais: se o resumo desaparece,
+    // o fallo debe dicir «falta a liña RESUMO», non «esperaba 6».
+    assert_eq!(
+        o.status.code(),
+        Some(6),
+        "aceite incompleto non pode ser un verde: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_non_aceite_incompleto_non_se_confunde_con_diverxencias_medidas() {
+    // 6 = algo ficou sen executar; 5 = executouse e diverxe. Unha carreira
+    // con ambos os dous estados debe seguir sinalando a diverxencia.
+    let d = dir_referencia("v-incompleto-e-diverxente");
+    std::fs::write(d.join("golden/m02_truncado.kos"), fluxo_pineapple()).unwrap();
+    std::fs::write(d.join("golden/k01_erreonea.kos"), fluxo_pineapple()).unwrap();
+    std::fs::write(d.join("golden/k01_erreonea.expected.bin"), b"NON-E-SAIDA").unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("diverxentes=1"), "resumo: {out}");
+    assert!(out.contains("sen_expectativa=1"), "resumo: {out}");
+    assert_eq!(
+        o.status.code(),
+        Some(5),
+        "unha diverxencia medida manda sobre o aceite incompleto: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_pecha_o_ciclo_dos_plain_e_rexeita_os_negativos_da_referencia() {
+    let d = dir_referencia("v-plain-negative");
+    std::fs::write(d.join("plain/p01.kos"), fluxo_pineapple()).unwrap();
+    std::fs::write(d.join("plain/p01.bin"), b"PINEAPPLE").unwrap();
+    // negative: corpo de ceros que non decodifica (referencia antes do histórico)
+    std::fs::write(d.join("negative/n01.kos"), [0x00u8, 0x00, 0x00, 0x00]).unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert_eq!(o.status.code(), Some(0), "stderr: {err}");
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("PLAIN p01"), "liña PLAIN: {out}");
+    assert!(out.contains("ciclo=ok"), "ciclo: {out}");
+    assert!(out.contains("NEGATIVE n01"), "liña NEGATIVE: {out}");
+    assert!(out.contains("resultado=rexeitado"), "negative: {out}");
+    assert!(
+        out.contains(
+            "RESUMO golden=0 plain=1 negative=1 ok=1 rexeitado=1 sen_expectativa=0 diverxentes=0"
+        ),
+        "resumo: {out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_trata_como_diverxencia_un_negativo_que_si_decodifica() {
+    let d = dir_referencia("v-negativo-falso");
+    std::fs::write(d.join("negative/n01.kos"), fluxo_pineapple()).unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    assert_eq!(
+        o.status.code(),
+        Some(5),
+        "un negativo que decodifica é un fallo"
+    );
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(out.contains("resultado=diverxencia"), "saída: {out}");
+    assert!(out.contains("motivo=decodificou"), "motivo: {out}");
+    // Sen declaración lateral a proba segue sendo «rexeitado en calquera
+    // motivo», e dilo: `declarado=ningún` non é un Pase silencioso da razón.
+    assert!(out.contains("declarado=ningún"), "saída: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Unha `negative/nome.expected.json` coa forma que publica a referencia.
+fn declaracion_negativa(etiqueta: &str, max_out: &str, stream_len: usize) -> String {
+    format!(
+        "{{\"vector\": \"n01\", \"kind\": \"negative-spec\", \"expected_error\": \"{etiqueta}\", \"mirror_condition\": \"ERR-x\", \"max_out\": {max_out}, \"stream_len\": {stream_len}, \"note\": \"derivado do contrato v1.\"}}"
+    )
+}
+
+/// Literal único cuxo byte de datos non está: Truncated.
+const FLUXO_TRUNCADO: [u8; 2] = [0x01, 0x00];
+
+/// Descritor de ceros → match inline con distancia fóra do histórico.
+const FLUXO_REFERENCIA_INVALIDA: [u8; 4] = [0x00, 0x00, 0x00, 0x00];
+
+#[test]
+fn verify_confirma_un_negativo_só_cando_a_razon_de_rexeito_coincide_coa_declarada() {
+    let d = dir_referencia("v-negativo-razon-ok");
+    std::fs::write(d.join("negative/n01.kos"), FLUXO_TRUNCADO).unwrap();
+    std::fs::write(
+        d.join("negative/n01.expected.json"),
+        declaracion_negativa("truncated", "null", 2),
+    )
+    .unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert_eq!(o.status.code(), Some(0), "saída: {out}");
+    assert!(out.contains("declarado=truncated"), "declaración: {out}");
+    assert!(out.contains("medido=fluxo-truncado"), "medida: {out}");
+    assert!(out.contains("resultado=rexeitado"), "saída: {out}");
+    assert!(out.contains("diverxentes=0"), "resumo: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_rexeita_un_decoder_que_falla_polo_motivo_equivocado_aínda_que_rexeite() {
+    // É o falso positivo que a misión prohíbe: «deu erro» non é aceite. Aquí
+    // o fluxo rexease por referencia invalida pero a referencia declara
+    // `truncated`, así que a razón é a proba.
+    let d = dir_referencia("v-negativo-razon-troeada");
+    std::fs::write(d.join("negative/n01.kos"), FLUXO_REFERENCIA_INVALIDA).unwrap();
+    std::fs::write(
+        d.join("negative/n01.expected.json"),
+        declaracion_negativa("truncated", "null", 4),
+    )
+    .unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert_eq!(o.status.code(), Some(5), "razón trocada: {out}");
+    assert!(out.contains("motivo=motivo-diferente"), "motivo: {out}");
+    assert!(out.contains("medido=referencia-invalida"), "medida: {out}");
+    assert!(out.contains("esperado=fluxo-truncado"), "agardo: {out}");
+    assert!(out.contains("diverxentes=1"), "resumo: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_obedece_o_max_out_declarado_por_vector_en_lugar_do_limite_xeral() {
+    // `fluxo_oito_iguais` decodifica en 8 bytes: co límite xeral (16) sería un
+    // negativo falso. Se a ferramenta honra o `max_out: 4` declarado, o
+    // rexeito produce `saida-excesiva` e coincide.
+    let d = dir_referencia("v-negativo-max-out");
+    let fluxo = fluxo_oito_iguais();
+    let len = fluxo.len();
+    std::fs::write(d.join("negative/n01.kos"), &fluxo).unwrap();
+    std::fs::write(
+        d.join("negative/n01.expected.json"),
+        declaracion_negativa("excessive-output", "4", len),
+    )
+    .unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert!(
+        out.contains("max_out=4"),
+        "o límite do vector debe imprimirse: {out}"
+    );
+    assert!(out.contains("medido=saida-excesiva"), "medida: {out}");
+    assert!(out.contains("resultado=rexeitado"), "saída: {out}");
+    assert_eq!(o.status.code(), Some(0), "saída: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_comproba_a_lonxitude_de_entrada_que_a_referencia_declara() {
+    // Un `.kos` que non é o bytes que a referencia describe non é o vector da
+    // referencia: comparar a razón sería un exercicio de adiviñanza.
+    let d = dir_referencia("v-negativo-lonxitude");
+    std::fs::write(d.join("negative/n01.kos"), FLUXO_TRUNCADO).unwrap();
+    std::fs::write(
+        d.join("negative/n01.expected.json"),
+        declaracion_negativa("truncated", "null", 296),
+    )
+    .unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert_eq!(o.status.code(), Some(5), "lonxitude trocada: {out}");
+    assert!(
+        out.contains("motivo=lonxitude-declarada-diferente"),
+        "motivo: {out}"
+    );
+    assert!(out.contains("declarado_len=296"), "esperado: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_unha_etiqueta_de_erro_descoecida_e_una_diverxencia_explicita_en_vez_de_a_sumir() {
+    let d = dir_referencia("v-negativo-etiqueta");
+    std::fs::write(d.join("negative/n01.kos"), FLUXO_TRUNCADO).unwrap();
+    std::fs::write(
+        d.join("negative/n01.expected.json"),
+        declaracion_negativa("bit-flipped", "null", 2),
+    )
+    .unwrap();
+    let o = executar(&["verify", "--referencia", d.to_str().unwrap()]);
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    assert_eq!(o.status.code(), Some(5), "etiqueta nova: {out}");
+    assert!(
+        out.contains("motivo=etiqueta-declarada-descoecida"),
+        "motivo: {out}"
+    );
+    assert!(out.contains("declarado=bit-flipped"), "declaración: {out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_se_a_referencia_non_existe_declara_non_executado_e_sale_con_catro() {
+    let d = dir_temporal("v-ausente");
+    let caminho = d.join("non-existe");
+    let o = executar(&["verify", "--referencia", caminho.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(4));
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("non executado"), "stderr: {err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn verify_sin_referencia_erro_de_uso_e_dous() {
+    let o = executar(&["verify"]);
+    assert_eq!(o.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert!(err.contains("--referencia"), "stderr: {err}");
 }
