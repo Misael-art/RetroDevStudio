@@ -213,6 +213,31 @@ Prova (fixture `strider`, `crates/rex-mugen/fixtures/strider`): a ROM real no co
 **em todos os quadros** (teste ignorado `mugen_strider_real_build_run_locomotion`) e o cenário desktop
 `mugen-locomotion` mede a posição por quadro emulado no viewport.
 
+## Cadeia original (`mugen.original_chain.v1`, Experimental)
+
+Converte **uma** cadeia delimitada do CMD/CNS real, sem substituí-la por comportamento autoral:
+comando → condição → mudança de estado → animação → condição de retorno. Implementação:
+`src-tauri/src/core/mugen_chain.rs` (analisador/conversor), `compiler/mugen_runtime.rs` (C gerado).
+Não é conversão do personagem, de colisão, dano nem combate.
+
+| Item | Contrato |
+|---|---|
+| Fontes lidas | CMD (`cmd`), arquivos de estado (`cns`, `st`, `st0`…`st9`) e `stcommon` **somente se estiver dentro do pacote** (hash registrado). Uma instalação externa de `common1.cns` nunca é presumida equivalente |
+| Dependência ausente | `stcommon` não resolvido → relatório `dependencies[].status = missing`; o estado 0 (que vive no `common1.cns`) vira **stand-in autoral**: `statetype S`, `ctrl 1`, `anim 0`, sem controladores. Não é o estado 0 original (sem andar, agachar, pular, virar) |
+| Comandos | `[Command]` de **um elemento** com `time = 1` e `buffer.time` ausente ou 1: botão (`x` = borda de subida neste tick; `/x` = segurado; `~x` = soltura) e direção segurada (`/$D`, `/D`; F = direita, B = esquerda, facing fixo). Sequências, `+`, `>`, `time` ≠ 1: não convertidos, com motivo |
+| Ligação de botões | **autoral**, declarada: MUGEN `x`→A, `y`→B, `z`→C, `s`→START do Mega Drive (o teclado do produto só chega a A/B/C/START e direções; X/Y/Z do pad de 6 botões não chegam ao jogo). `a`/`b`/`c` do MUGEN não têm ligação: comando que os use não é convertido |
+| Gatilhos | `lhs op rhs` simples, sem composição: `command =/!= "nome"`, `statetype =/!= S\|C\|A\|L`, `ctrl`, `stateno`, `time`, `animtime` (inteiros literais; `=`,`!=`,`<`,`>`,`<=`,`>=`), `1`. Grupos: `triggerall` e, entre `trigger1..N`, **E** dentro do grupo e **OU** entre grupos (cns.html). Qualquer outro gatilho (`MoveContact`, `power`, `Pos y`, `AnimElem`, expressões) deixa o **controlador inteiro** não convertido: nenhuma avaliação parcial |
+| Controladores | `ChangeState` com `value` literal e `ctrl` opcional; demais parâmetros (`persistent`, `ignorehitpause`, `anim`…) recusados. `HitDef`, `PlaySnd` e qualquer outro tipo: não convertidos |
+| `Statedef` | `type`, `ctrl`, `anim` e `velset` (x literal Q8.8, y = 0) aplicados **na entrada**; `poweradd`, `juggle`, `movetype`, `physics` e demais: não convertidos, listados com o limite |
+| Ordem por tick | amostra do pad e comandos → controladores do estado −1 na ordem da fonte → controladores do estado atual → rastro → `Time` e relógio da animação avançam. `ChangeState` aborta o resto do estado e **continua do início do novo estado no mesmo tick** (teto de 16 mudanças por tick). Estado −2/−3: nenhum convertido (relatados). Ordem de `ctrl` do `ChangeState` × `Statedef ctrl`: a documentação não define; irrelevante na cadeia |
+| Tempo | `Time` = 0 no tick de entrada (cns.html); `AnimTime` = ticks desde a entrada da animação − soma das durações do AIR (≤ 0; 0 ao fim da ação). `AnimTime` sobre animação sem fim (`-1`) não é convertido. A entrada reinicia a animação mesmo que o índice seja o mesmo (`rds_mugen_<v>_restart`) |
+| Semântica de entrada | comando pressionado = **uma** ocorrência por borda de subida; segurar não repete. Isso vem do CMD/CNS do Ken (`trigger2 = stateno = 200, time > 5` só reentra com **nova** pressão) e foi observado, não imposto. O produto **não** garante «um ataque por toque» além disso |
+| Mapeamento de fonte | todo gatilho, controlador, comando e parâmetro convertido leva `SourceRef {file, section, line, text}`. O `digest` (SHA-256 do programa sem `entity`) cobre tudo; digest incoerente, linha 0, texto vazio, estado alvo inexistente ou comando ausente **bloqueiam o build** (`#error mugen_program`) |
+| Classes no relatório | `converted` (da fonte), `approximate` (semântica derivada: `AnimTime`, ordem por tick, janela de comando), `authored` (stand-in do estado 0, ligação de botões), `unconverted` (com motivo e limite). O relatório lista **cada** controlador não convertido, inclusive os dos estados −1/−2 |
+| Rastro (observabilidade) | anel de 512 entradas × 22 bytes por instância (`rds_mc_<v>_trace`): tick, estado, `Time`, ctrl/statetype, ação, bits de comando, **pad amostrado**, relógio da animação, vx, x, `vtimer`. A prova compara a ROM com a referência independente a partir do pad que a própria ROM amostrou |
+| Estado por instância | `rds_mc_<v>_*` (12 variáveis voláteis + anel) por sprite; duas instâncias não compartilham estado, `Time`, animação nem comandos. Dois programas no mesmo sprite bloqueiam o build |
+| Limites | 1 cadeia por importação; sem facing/virada, colisão, dano, som, energia, projéteis; `Pos y` assumido 0 (nenhum controlador referenciado move y); PAL não medido; tempo real não certificado |
+
 ## Esquema de diagnóstico (`rex-mugen/diag/v1`)
 
 | Estrutura | Campos |

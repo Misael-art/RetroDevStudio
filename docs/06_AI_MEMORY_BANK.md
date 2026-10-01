@@ -1,5 +1,41 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-30 (o) — MUGEN: **cadeia original do Ken (Stand_X) convertida da fonte e comparada com referência independente** (Experimental mantido)
+
+Frente `codex/rex-mugen-original-chain`, dependente de `codex/rex-mugen-real` (PR #90 @ `508db51b20c701f61a8fcdbc9bf43a642d28fa3c`);
+PR dependente publicado sem merge/release. Detalhe, auditoria com arquivo:linha, tabela operação → implementação → teste → resultado → limite em
+`docs/rex_profiles/mugen_sgdk/ORIGINAL_CHAIN.md`; hashes e números em `ORIGINAL_CHAIN_EVIDENCE.json`; contrato em `crates/rex-mugen/CONTRACT.md` («Cadeia original»).
+Conserve (i)–(o) na integração futura (`0194f94` continua fora da base).
+
+**Cadeia.** `ken.cmd:963` `[State -1]` (comando `x`, `command != "holddown"`, `statetype = S`, `ctrl = 1`, reentrada `stateno = 200` + `time > 5`) → `ken.cns:285` Statedef 200
+(`ctrl 0`, `velset 0,0`, `anim 200`) → AIR 2+2+2 → `ken.cns:343` `ChangeState 0 ctrl 1` em `AnimTime = 0`. **`common1.cns` não existe** (pacote nem máquina): o estado 0 é um
+**stand-in autoral declarado**; HitDef, PlaySnd, poweradd, juggle, movetype, physics e 55 dos 56 controladores do `-1` ficam **não convertidos**, listados com origem e motivo.
+Estado 200 = parcial; estado 0 = autoral. Nenhuma instalação externa foi presumida equivalente.
+
+**Produto.** `core/mugen_chain.rs` (subconjunto mínimo e reutilizável: comandos de 1 elemento, gatilhos simples, `ChangeState`, `Statedef type/ctrl/anim/velset`), nó
+`mugen_state_program` (programa como string JSON + digest que cobre o mapeamento de fonte; adulterar bloqueia o build), runtime `rds_mc_<v>_*` na ordem comandos → −1 → estado
+atual → rastro → avanço, anel de rastreio na RAM (pad amostrado, estado, `vtimer`), revisão de origem na UI (4 classes: convertido/aproximado/autoral/não convertido), opção
+`original_chain` + escolha de cadeia no assistente. `authored_visual_demo` segue padrão. O editor de grafos só conhece parâmetros string/número e rejeitava tipos
+desconhecidos (corrigido, com teste).
+
+**Prova.** Referência independente `scripts/verify-mugen-chain.py` (lê CMD/CNS/AIR sozinha, lógica de 3 valores sobre todos os controladores do `-1`/`-2`, alimentada pelo pad que a ROM amostrou):
+**0 divergências** no core direto (197 ticks) e na UI real com teclado nativo (336 ticks), 7 controles negativos recusados, 184/295 quadros de pixels idênticos ao Pillow
+(defasagem 0 vblank pelo `vtimer`; 1 tick = 1 vblank). Toque → 1 ataque de 6 ticks; segurar → 1 ataque; 2º toque cedo ignorado; `Time = 6` reentra; X+baixo não ataca.
+Fluxo UI: importar → revisar origem → salvar → reiniciar → reabrir (relatório e digest idênticos; editor de grafos intacto) → Build & Run → teclado nativo. Instâncias independentes
+provadas na ROM real. Negativos: dependência ausente, condição não suportada, comando incorreto/ausente, mapeamento adulterado, estado ambíguo/animação ausente.
+
+**Caminho de input.** Sem lotes: `emulator_run_frame` quadro a quadro (core de debug ≈ 10,6 quadros/s); os «dez ticks» vinham do harness (duas requisições + polling ≈ 1 s). Entrega pode cair
+no quadro em curso ou no seguinte; semântica de comando = borda (segurar não repete). **Limitação medida, não corrigida:** o joypad é nível, não fila: 1 de 9 toques nativos (6 ms) se perdeu;
+recomendação: latch de 1 pressão por quadro em `emulator_send_input` (afeta todos os cenários; fora desta frente).
+
+**Regressões e gates.** Reexecutados no binário final (app `2f8457a9432b1fee7cf595ad9d6fe61546a752b1dda43a3fe541a21c06bdb39d`): `mugen-real` + oráculo Pillow (204/211 quadros), `mugen-import`,
+`mugen-control`, `mugen-locomotion`, strider real e provas reais da cadeia. `mugen-real` falhou 2× sob carga do host (flutuação do harness) antes de passar sem mudança de código. Gates: tree, lint, tsc, fmt,
+clippy `-D warnings`, frontend 831/0/6, Rust 832/0/75, `crates:gates` 4 pacotes. ROM UI `028158917e7cb847276b7f536204424fed6f743548b53034332398fbfc47d513`,
+ELF `ad21039b6677685719cd0b0f4da90fa0218cbc75231b26cdd7891b1af3e02d6d`; ROM backend `c421c92d5065e4d8ff8de22aa3541e3b5d4795e27f249190f2a0959cbc6ae666`; programa `87cbd0bbee56468bc12db16790deaffbdabd5609841996526917f9eeefb58a14`;
+core Genesis Plus GX v1.7.4 `46a5521` (`07c10476…`). CI por SHA: consultar no PR.
+
+**Não provado:** conversão integral do Ken, colisão/dano/combate, facing, andar/pular/agachar (dependem do `common1.cns`), fidelidade ao motor MUGEN real (nenhum runtime original executou; borda do botão simples e `buffer.time` padrão não confirmados na doc primária), PAL, tempo real.
+
 ### Checkpoint 2026-09-30 (n) — Ken Majik real: triagem, revisão visual e cadeia SGDK → ROM → core → UI comprovadas (Experimental mantido)
 
 Frente isolada `codex/rex-mugen-real`, dependente de `codex/rex-mugen-locomotion`

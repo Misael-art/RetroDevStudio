@@ -1515,6 +1515,12 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     target = target_var
                 ));
             }
+            LogicOp::MugenProgramStep { target_var, .. } => {
+                out.push_str(&format!(
+                    "{indent}rds_mc_{target_var}_step();\n",
+                    indent = indent_str
+                ));
+            }
             LogicOp::MugenSetVelocityX { target_var, vx_q8 } => {
                 out.push_str(&format!(
                     "{indent}rds_mugen_{target_var}_vx = {vx_q8};\n",
@@ -1841,7 +1847,7 @@ fn collect_logic_velocity_targets_from_ops(
             LogicOp::SourceMapped { op, .. } => {
                 collect_logic_velocity_targets_from_ops(std::slice::from_ref(op.as_ref()), targets);
             }
-            LogicOp::MugenSetVelocityX { .. } => {}
+            LogicOp::MugenSetVelocityX { .. } | LogicOp::MugenProgramStep { .. } => {}
             LogicOp::SetVelocity {
                 target_name,
                 runtime_var,

@@ -30,7 +30,87 @@ pub struct ReviewOptions {
     pub palette_file: Option<String>,
     #[serde(default)]
     pub authored_demo: bool,
+    /// Converte uma cadeia original delimitada (CMD/CNS) em vez do comportamento autoral.
+    #[serde(default)]
+    pub original_chain: bool,
+    /// Estado de destino da cadeia escolhida (p.ex. 200); exigido com `original_chain`.
+    #[serde(default)]
+    pub chain_state: Option<i32>,
     pub source_sha256: Option<String>,
+}
+
+/// Le DEF/CMD/CNS do pacote e roda a analise da cadeia original. Dependencia comum so e
+/// aceita se estiver DENTRO do pacote (com hash); nunca de outra instalacao.
+pub(crate) fn chain_input<'a>(
+    char_root: &Path,
+    def_text: &str,
+    def_name: &str,
+    chain_state: i32,
+    actions: &'a BTreeMap<i32, u32>,
+    entity: &str,
+) -> Result<crate::core::mugen_chain::ChainInput<'a>, LoadError> {
+    use crate::core::mugen_chain::{ChainInput, CommonDependency, SourceFile};
+    use rex_mugen::source::{parse_def, resolve, Resolution};
+    let d = parse_def(def_text);
+    let inventory = package_files(char_root)?;
+    let load = |value: &str| -> Result<Option<SourceFile>, LoadError> {
+        match resolve(&inventory, "", value) {
+            Resolution::Resolved(path) => {
+                let bytes = read_limited(&resolve_inside(char_root, &path)?, MAX_TEXT_BYTES)?;
+                Ok(Some(SourceFile::new(&path, &bytes)))
+            }
+            _ => Ok(None),
+        }
+    };
+    let find = |key: &str| {
+        d.references
+            .iter()
+            .find(|r| r.section == "files" && r.key == key)
+    };
+    let cmd = find("cmd").map(|r| load(&r.value)).transpose()?.flatten();
+    let mut state_files: Vec<SourceFile> = Vec::new();
+    for key in [
+        "cns", "st", "st0", "st1", "st2", "st3", "st4", "st5", "st6", "st7", "st8", "st9",
+    ] {
+        if let Some(f) = find(key).map(|r| load(&r.value)).transpose()?.flatten() {
+            if !state_files.iter().any(|s| s.name == f.name) {
+                state_files.push(f);
+            }
+        }
+    }
+    let common = match find("stcommon") {
+        Some(r) => CommonDependency {
+            requested: Some(r.value.clone()),
+            def_line: Some(r.line),
+            file: load(&r.value)?,
+        },
+        None => CommonDependency::default(),
+    };
+    Ok(ChainInput {
+        def_name: def_name.to_string(),
+        cmd,
+        state_files,
+        common,
+        chain_states: vec![chain_state],
+        actions,
+        entity: entity.to_string(),
+    })
+}
+
+/// Duracao total (ticks) por acao AIR; 0 = sem fim. Respeita a selecao (vazia = todas).
+pub(crate) fn action_totals(ad: &air::Air, selected: &[i32]) -> BTreeMap<i32, u32> {
+    ad.actions
+        .values()
+        .filter(|a| selected.is_empty() || selected.contains(&a.number))
+        .map(|a| {
+            let total = a
+                .frames
+                .iter()
+                .try_fold(0u32, |acc, f| f.time.map(|t| acc + t))
+                .unwrap_or(0);
+            (a.number, total)
+        })
+        .collect()
 }
 
 pub(crate) fn package_files(root: &Path) -> Result<Vec<String>, LoadError> {
@@ -236,7 +316,7 @@ pub(crate) fn analyze_source(
         palette_file: palettes.first().cloned(),
         ..ReviewOptions::default()
     });
-    options.def_file = def_file;
+    options.def_file = def_file.clone();
     options.source_sha256 = Some(digest);
     out["options"] = serde_json::to_value(&options).map_err(|e| LoadError(e.to_string()))?;
     if options.authored_demo
@@ -247,6 +327,35 @@ pub(crate) fn analyze_source(
     {
         out["diagnostics"].as_array_mut().unwrap().push(serde_json::json!({"code":"source.demo.actions","severity":"error","source":air_rel,"message":"Demonstracao autoral exige acoes 0, 20, 21 e 200 na selecao.","action":"Inclua as quatro acoes ou desligue a demonstracao autoral."}));
         return Ok(out);
+    }
+    if options.original_chain {
+        let def_text = String::from_utf8_lossy(&bytes).into_owned();
+        let totals = action_totals(&ad, &options.actions);
+        let entity = options_entity(&d.name);
+        match chain_input(char_root, &def_text, &def_file, options.chain_state.unwrap_or(-9999), &totals, &entity) {
+            Ok(input) => {
+                out["original_chain_candidates"] = crate::core::mugen_chain::candidates(&input);
+                match options.chain_state {
+                    None => out["diagnostics"].as_array_mut().unwrap().push(serde_json::json!({"code":"source.chain.selection","severity":"error","source":def_file,"message":"Escolha a cadeia original a converter.","action":"Selecione um estado da lista de cadeias disponiveis."})),
+                    Some(_) => {
+                        let a = crate::core::mugen_chain::analyze(&input);
+                        if let Err(e) = &a.program {
+                            out["diagnostics"].as_array_mut().unwrap().push(serde_json::json!({"code":"source.chain.refused","severity":"error","source":def_file,"message":e,"action":"Selecione as acoes da cadeia ou outro estado."}));
+                        }
+                        out["original_chain"] = a.report;
+                    }
+                }
+            }
+            Err(e) => out["diagnostics"].as_array_mut().unwrap().push(serde_json::json!({"code":"source.chain.input","severity":"error","source":def_file,"message":e.0,"action":"Confira CMD/CNS do pacote."})),
+        }
+        if out["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x["severity"] == "error")
+        {
+            return Ok(out);
+        }
     }
     match convert_character_v1_with_review(char_root, air_rel, sff_rel, Some(&options)) {
         Ok(Some(mut c)) => {
@@ -265,6 +374,10 @@ pub(crate) fn analyze_source(
         }
     }
     Ok(out)
+}
+
+fn options_entity(name: &str) -> String {
+    crate::core::project_mgr::sgdk_entity_id(name)
 }
 
 /// Resolve `rel` dentro de `root`; recusa caminho absoluto, `..` que escape e link para fora.
@@ -3091,6 +3204,7 @@ mod tests {
             palette_file: Some("ken1.act".into()),
             authored_demo: true,
             source_sha256: Some(super::package_digest(&source).unwrap()),
+            ..Default::default()
         };
         let analysis = super::analyze_source(&source, Some(options.clone())).unwrap();
         assert!(!analysis["report"].is_null(), "{analysis}");
@@ -3163,6 +3277,838 @@ mod tests {
         )
         .unwrap();
         eprintln!("Captura BYOR: {}", output.display());
+    }
+
+    // ---------------------------------------------------------------- cadeia original
+
+    const CHAIN_CMD: &str = "[Command]\nname = \"x\"\ncommand = x\ntime = 1\n\n[Command]\nname = \"holddown\"\ncommand = /$D\ntime = 1\n\n[Command]\nname = \"qcf_x\"\ncommand = ~D, DF, F, x\ntime = 15\n\n[Statedef -1]\n\n;Stand_X\n[State -1]\ntype = ChangeState\nvalue = 200\ntriggerall = command = \"x\"\ntriggerall = command != \"holddown\"\ntrigger1 = statetype = S\ntrigger1 = ctrl = 1\ntrigger2 = stateno = 200\ntrigger2 = time > 5\n\n[State -1]\ntype = ChangeState\nvalue = 1000\ntriggerall = command = \"qcf_x\"\ntrigger1 = ctrl = 1\n";
+    const CHAIN_CNS: &str = "[Statedef 200]\ntype = S\nmovetype = A\nphysics = S\njuggle = 1\nvelset = 0,0\nctrl = 0\nanim = 200\npoweradd = 15\n\n[State 200, 1]\ntype = HitDef\ntrigger1 = AnimElem = 2\ndamage = 34\n\n[State 200, 2]\ntype = ChangeState\ntrigger1 = AnimTime = 0\nvalue = 0\nctrl = 1\n\n[State 200, 3]\ntype = PlaySnd\ntrigger1 = time = 1\nvalue = 6,0\n";
+
+    fn walker_chain_options(donor: &Path) -> super::ReviewOptions {
+        super::ReviewOptions {
+            def_file: "walker.def".into(),
+            actions: vec![0, 200],
+            original_chain: true,
+            chain_state: Some(200),
+            source_sha256: Some(super::package_digest(donor).unwrap()),
+            ..Default::default()
+        }
+    }
+
+    /// Fixture autoral `walker` com CMD/CNS no formato do Ken (comando, condicao, estado,
+    /// animacao, retorno) e `edit` aplicado ao CNS.
+    fn import_chain(
+        name: &str,
+        edit_cmd: impl FnOnce(String) -> String,
+        edit_cns: impl FnOnce(String) -> String,
+    ) -> (PathBuf, PathBuf, Result<(), String>) {
+        let root = temp(name);
+        let donor = root.join("donor");
+        copy_dir(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/rex-mugen/fixtures/walker"),
+            &donor,
+        );
+        fs::write(donor.join("walker.cmd"), edit_cmd(CHAIN_CMD.into())).unwrap();
+        fs::write(donor.join("walker.cns"), edit_cns(CHAIN_CNS.into())).unwrap();
+        let def = fs::read_to_string(donor.join("walker.def")).unwrap();
+        fs::write(
+            donor.join("walker.def"),
+            format!("{def}stcommon = common1.cns\n"),
+        )
+        .unwrap();
+        let project = root.join("project");
+        create_project_skeleton(&project, "Walker", "megadrive").unwrap();
+        let options = walker_chain_options(&donor);
+        let result = crate::core::project_mgr::import_mugen_project_with_review(
+            &project,
+            &donor,
+            "mugen",
+            Some(&options),
+        )
+        .map(|_| ())
+        .map_err(|e| e.0);
+        (root, project, result)
+    }
+
+    fn chain_report(project: &Path) -> serde_json::Value {
+        serde_json::from_str(
+            &fs::read_to_string(project.join("assets/mugen/walker_import_report.json")).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn chain_c(project: &Path) -> String {
+        let proj = crate::core::project_mgr::load_project(project).unwrap();
+        let scene = load_scene(project, DEFAULT_ENTRY_SCENE).unwrap();
+        let ast = crate::compiler::ast_generator::generate_ast(&proj, &scene);
+        crate::compiler::sgdk_emitter::emit_sgdk(&ast, "Walker").main_c
+    }
+
+    fn chain_graph_path(project: &Path) -> PathBuf {
+        project.join("graphs/mugen_walker.json")
+    }
+
+    #[test]
+    fn original_chain_import_wires_the_program_and_generates_the_state_runtime() {
+        let (root, project, r) = import_chain("chain-wire", |c| c, |c| c);
+        r.unwrap();
+        let report = chain_report(&project);
+        assert_eq!(report["behavior_mode"], "original_chain");
+        assert_eq!(report["original_chain"]["status"], "converted");
+        assert_eq!(
+            report["original_chain"]["dependencies"][0]["status"],
+            "missing"
+        );
+        let graph = fs::read_to_string(chain_graph_path(&project)).unwrap();
+        assert!(graph.contains("\"type\":\"mugen_state_program\""));
+        assert!(!graph.contains("fsm_state"), "sem maquina autoral/paralela");
+        let c = chain_c(&project);
+        assert!(
+            !c.contains("#error"),
+            "{}",
+            c.lines()
+                .filter(|l| l.contains("#error"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        for needle in [
+            "rds_mc_spr_walker_step();",
+            "(pressed & BUTTON_A)",
+            "(pad & BUTTON_DOWN)",
+            "rds_mugen_spr_walker_restart = 1",
+            "- (s16)rds_mc_spr_walker_animtotal) == 0",
+            "(s16)rds_mc_spr_walker_time > 5",
+        ] {
+            assert!(c.contains(needle), "C sem '{needle}'");
+        }
+        // o autoral anterior nao vaza para a cadeia original
+        assert!(
+            !c.contains("rds_input_match_command"),
+            "sem comandos autorais por nivel"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn original_chain_report_separates_converted_approximate_authored_and_unconverted() {
+        let (root, project, r) = import_chain("chain-report", |c| c, |c| c);
+        r.unwrap();
+        let chain = &chain_report(&project)["original_chain"];
+        let ops = chain["operations"].as_array().unwrap();
+        let by = |class: &str| ops.iter().filter(|o| o["class"] == class).count();
+        assert!(by("converted") >= 10 && by("approximate") >= 2 && by("authored") >= 2);
+        assert!(
+            by("unconverted") >= 5,
+            "poweradd/juggle/movetype/physics/HitDef/PlaySnd"
+        );
+        for o in ops
+            .iter()
+            .filter(|o| o["class"] == "converted" && o["kind"] != "command")
+        {
+            let line = o["source"]["line"].as_u64().unwrap();
+            let file = o["source"]["file"].as_str().unwrap();
+            let text = o["source"]["text"].as_str().unwrap();
+            assert!(line > 0 && !file.is_empty() && !text.is_empty(), "{o}");
+        }
+        let verdicts: Vec<(i64, String)> = chain["state_status"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| {
+                (
+                    v["state"].as_i64().unwrap(),
+                    v["verdict"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert!(
+            verdicts.contains(&(200, "parcial".into()))
+                && verdicts.contains(&(0, "autoral".into())),
+            "{verdicts:?}"
+        );
+        let hit = ops
+            .iter()
+            .find(|o| {
+                o["source"]["text"]
+                    .as_str()
+                    .is_some_and(|t| t == "[State 200, 1]")
+            })
+            .unwrap();
+        assert_eq!(hit["class"], "unconverted");
+        assert!(chain["unconverted_controllers"]
+            .to_string()
+            .contains("qcf_x"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn original_chain_negatives_are_refused_with_a_specific_reason() {
+        for (name, from, to, reason) in [
+            (
+                "cond",
+                "trigger1 = AnimTime = 0",
+                "trigger1 = AnimTime = 0 && Time > 1",
+                "retorno",
+            ),
+            (
+                "hit",
+                "trigger1 = AnimTime = 0",
+                "trigger1 = MoveContact",
+                "retorno",
+            ),
+            (
+                "val",
+                "value = 0\nctrl = 1",
+                "value = 0 + 1\nctrl = 1",
+                "retorno",
+            ),
+        ] {
+            let (root, _p, r) = import_chain(
+                &format!("chain-neg-{name}"),
+                |c| c,
+                |c| {
+                    assert!(c.contains(from));
+                    c.replace(from, to)
+                },
+            );
+            let e = r.unwrap_err();
+            assert!(
+                e.contains("source.chain.refused") && e.contains(reason),
+                "{name}: {e}"
+            );
+            let _ = fs::remove_dir_all(root);
+        }
+        let (root, _p, r) = import_chain(
+            "chain-neg-cmd",
+            |c| c.replace("command = x\ntime = 1", "command = ~D, DF, x\ntime = 1"),
+            |c| c,
+        );
+        assert!(
+            r.unwrap_err().contains("alcanca a cadeia"),
+            "comando incorreto recusado"
+        );
+        let _ = fs::remove_dir_all(root);
+        let (root, _p, r) = import_chain(
+            "chain-neg-nocmd",
+            |c| {
+                c.replace(
+                    "triggerall = command = \"x\"",
+                    "triggerall = command = \"fantasma\"",
+                )
+            },
+            |c| c,
+        );
+        assert!(
+            r.unwrap_err().contains("alcanca a cadeia"),
+            "comando ausente recusado"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn original_chain_refuses_authored_demo_together_and_missing_selection() {
+        let root = temp("chain-flags");
+        let donor = root.join("donor");
+        copy_dir(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../crates/rex-mugen/fixtures/walker"),
+            &donor,
+        );
+        fs::write(donor.join("walker.cmd"), CHAIN_CMD).unwrap();
+        fs::write(donor.join("walker.cns"), CHAIN_CNS).unwrap();
+        let project = root.join("project");
+        create_project_skeleton(&project, "Walker", "megadrive").unwrap();
+        let mut options = walker_chain_options(&donor);
+        options.authored_demo = true;
+        let e = crate::core::project_mgr::import_mugen_project_with_review(
+            &project,
+            &donor,
+            "mugen",
+            Some(&options),
+        )
+        .unwrap_err();
+        assert!(e.0.contains("bloqueada"), "{e}");
+        let mut options = walker_chain_options(&donor);
+        options.chain_state = None;
+        let e = crate::core::project_mgr::import_mugen_project_with_review(
+            &project,
+            &donor,
+            "mugen",
+            Some(&options),
+        )
+        .unwrap_err();
+        assert!(e.0.contains("source.chain.selection"), "{e}");
+        assert_untouched(&project);
+        let analysis = super::analyze_source(&donor, Some(walker_chain_options(&donor))).unwrap();
+        assert_eq!(analysis["original_chain"]["status"], "converted");
+        assert_eq!(
+            analysis["original_chain_candidates"]["available"][0]["state"],
+            200
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Edita o programa como quem mexe no projeto fora do produto (grafo embutido na cena).
+    fn edit_chain_graph(project: &Path, edit: impl FnOnce(&mut serde_json::Value)) {
+        let mut scene = load_scene(project, DEFAULT_ENTRY_SCENE).unwrap();
+        let logic = scene
+            .entities
+            .iter_mut()
+            .find(|e| e.entity_id == "walker")
+            .unwrap()
+            .components
+            .logic
+            .as_mut()
+            .unwrap();
+        let mut graph: serde_json::Value =
+            serde_json::from_str(logic.graph.as_ref().unwrap()).unwrap();
+        let mut program: serde_json::Value = serde_json::from_str(
+            graph["nodes"][0]["params"]["program_json"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        edit(&mut program);
+        graph["nodes"][0]["params"]["program_json"] = serde_json::json!(program.to_string());
+        logic.graph = Some(graph.to_string());
+        save_scene(project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+    }
+
+    #[test]
+    fn negative_tampered_chain_program_or_source_mapping_blocks_the_build() {
+        type Edit = fn(&mut serde_json::Value);
+        let edits: [(&str, Edit); 5] = [
+            ("condicao", |p| {
+                p["special"][0]["groups"][1][1]["expr"]["value"] = serde_json::json!(0)
+            }),
+            ("alvo", |p| p["special"][0]["target"] = serde_json::json!(0)),
+            ("linha", |p| {
+                p["special"][0]["src"]["line"] = serde_json::json!(1)
+            }),
+            ("texto", |p| {
+                p["special"][0]["src"]["text"] = serde_json::json!("outro")
+            }),
+            ("remover", |p| {
+                p["special"][0]["src"] = serde_json::Value::Null;
+            }),
+        ];
+        for (name, edit) in edits {
+            let (root, project, r) = import_chain(&format!("chain-tamper-{name}"), |c| c, |c| c);
+            r.unwrap();
+            assert!(!chain_c(&project).contains("#error"), "{name}: base limpa");
+            edit_chain_graph(&project, edit);
+            let c = chain_c(&project);
+            assert!(
+                c.contains("#error") && c.contains("mugen_program"),
+                "{name}: adulteracao deve bloquear"
+            );
+            assert!(!c.contains("rds_mc_spr_walker_step();") || c.contains("#error"));
+            let _ = fs::remove_dir_all(root);
+        }
+    }
+
+    #[test]
+    fn two_chain_instances_keep_independent_state_variables() {
+        let (root, project, r) = import_chain("chain-two", |c| c, |c| c);
+        r.unwrap();
+        let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        let mut second = scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "walker")
+            .unwrap()
+            .clone();
+        second.entity_id = "walker2".to_string();
+        second.transform.x += 120;
+        let logic = second.components.logic.as_mut().unwrap();
+        logic.graph = logic
+            .graph
+            .as_ref()
+            .map(|g| g.replace("\"walker\"", "\"walker2\""));
+        scene.entities.push(second);
+        save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+        let c = chain_c(&project);
+        assert!(
+            !c.contains("#error"),
+            "{}",
+            c.lines()
+                .filter(|l| l.contains("#error"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        for var in [
+            "rds_mc_spr_walker_stateno",
+            "rds_mc_spr_walker__walker2_stateno",
+            "rds_mc_spr_walker_time",
+            "rds_mc_spr_walker__walker2_time",
+            "rds_mc_spr_walker__walker2_step();",
+        ] {
+            assert!(c.contains(var), "falta {var}");
+        }
+        assert_eq!(
+            c.matches("static volatile u16 rds_mc_").count(),
+            24,
+            "12 variaveis volateis u16 por instancia"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Passo de entrada do script de captura: `frames` quadros com o pad `joypad`.
+    struct ChainStep {
+        label: &'static str,
+        frames: usize,
+        joypad: JoypadState,
+    }
+
+    fn pad(a: bool, down: bool) -> JoypadState {
+        // `y` do RetroPad chega como botao A do Mega Drive (ver MEGADRIVE_KEY_MAP).
+        JoypadState {
+            y: a,
+            down,
+            ..Default::default()
+        }
+    }
+
+    fn read_bytes(emu: &EmulatorCore, addr: u32, len: usize) -> Vec<u8> {
+        emu.read_memory(2, (addr & 0xFFFF) as usize, len)
+            .expect("WRAM")
+            .0
+    }
+
+    /// Roda o script no core real, quadro a quadro, e devolve o anel de rastreio da ROM
+    /// (o que o jogo VIU e decidiu a cada tick) + a ligacao quadro -> tick. Opcionalmente grava
+    /// o framebuffer de cada quadro para a comparacao independente de pixels.
+    fn capture_chain(
+        project: &Path,
+        var: &str,
+        steps: &[ChainStep],
+        frames_dir: Option<&Path>,
+    ) -> serde_json::Value {
+        capture_chain_vars(project, &[var], steps, frames_dir).remove(0)
+    }
+
+    /// Uma execucao, varias instancias: devolve um rastreio por variavel de sprite.
+    fn capture_chain_vars(
+        project: &Path,
+        vars: &[&str],
+        steps: &[ChainStep],
+        frames_dir: Option<&Path>,
+    ) -> Vec<serde_json::Value> {
+        let (rom, rom_sha, sym) = build(project);
+        let sym_of = |name: String| {
+            *sym.get(&name)
+                .unwrap_or_else(|| panic!("simbolo {name} ausente"))
+        };
+        let tick_addr = sym_of(format!("rds_mc_{}_tick", vars[0]));
+        let vtimer_addr = sym_of("vtimer".to_string());
+        let mut emu = EmulatorCore::new(None);
+        emu.load_rom(&rom).expect("load");
+        emu.set_joypad(JoypadState::default()).unwrap();
+        for _ in 0..60 {
+            emu.run_frame().unwrap();
+        }
+        let mut frames = Vec::new();
+        let mut index = 0usize;
+        for step in steps {
+            emu.set_joypad(step.joypad.clone()).unwrap();
+            for local in 0..step.frames {
+                emu.run_frame().unwrap();
+                let tick_after = read_u16(&emu, tick_addr);
+                // vtimer (u32 big-endian na RAM do 68k): palavra baixa em +2.
+                let vtimer_after = read_u16(&emu, vtimer_addr + 2);
+                let mut row = serde_json::json!({"frame": index, "step": step.label, "local": local,
+                    "tick_after": tick_after, "vtimer_after": vtimer_after, "a": step.joypad.y, "b": step.joypad.b, "down": step.joypad.down});
+                if let Some(dir) = frames_dir {
+                    let (raw, size, format) = emu.get_framebuffer().unwrap();
+                    let fb = framebuffer_to_rgba(&raw, size, format);
+                    let file = format!("core-{index:04}.png");
+                    image::save_buffer(
+                        dir.join(&file),
+                        &fb.rgba,
+                        fb.width,
+                        fb.height,
+                        image::ColorType::Rgba8,
+                    )
+                    .unwrap();
+                    row["file"] = serde_json::json!(file);
+                    row["rgba_sha256"] = serde_json::json!(sha(&fb.rgba));
+                }
+                frames.push(row);
+                index += 1;
+            }
+        }
+        let elf_sha = sha(&fs::read(project.join("build/megadrive/out/rom.out")).unwrap());
+        vars.iter()
+            .map(|var| {
+                let trace_addr = sym_of(format!("rds_mc_{var}_trace"));
+                let n = read_u16(&emu, sym_of(format!("rds_mc_{var}_trace_n"))) as usize;
+                assert!(n <= crate::core::mugen_chain::TRACE_ENTRIES, "anel de rastreio deu a volta ({n} ticks)");
+                let stride = crate::core::mugen_chain::TRACE_ENTRY_BYTES;
+                let raw = read_bytes(&emu, trace_addr, crate::core::mugen_chain::TRACE_ENTRIES * stride);
+                let word = |i: usize| i16::from_le_bytes([raw[i], raw[i + 1]]);
+                let entries: Vec<serde_json::Value> = (0..n)
+                    .map(|k| {
+                        let b = k * stride;
+                        serde_json::json!({"tick": word(b) as u16, "stateno": word(b + 2) as u16, "time": word(b + 4) as u16,
+                            "ctrl": (word(b + 6) as u16) & 1, "statetype": ((word(b + 6) as u16) >> 8) as u8 as char,
+                            "action": word(b + 8) as u16, "cmd": word(b + 10) as u16, "pad": word(b + 12) as u16,
+                            "animtick": word(b + 14) as u16, "vx": word(b + 16), "x": word(b + 18), "vt": word(b + 20) as u16})
+                    })
+                    .collect();
+                serde_json::json!({"schema": "retrodev.mugen_chain_capture/v1", "var": var, "rom_sha256": rom_sha,
+                    "elf_sha256": elf_sha, "entries": entries, "frames": frames, "ticks": n})
+            })
+            .collect()
+    }
+
+    /// Duas instancias do mesmo programa, estados independentes na ROM real: a 2a e religada ao
+    /// botao B (autoral, via o proprio digest do produto). A so move a 1a, B so a 2a, os dois
+    /// juntos movem as duas sem compartilhar Time/estado/animacao.
+    #[test]
+    #[ignore]
+    fn mugen_chain_two_instances_real_independent_state() {
+        let (root, project, r) = import_chain("chain-two-real", |c| c, |c| c);
+        r.unwrap();
+        let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).unwrap();
+        let mut second = scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "walker")
+            .unwrap()
+            .clone();
+        second.entity_id = "walker2".to_string();
+        second.transform.x += 120;
+        let logic = second.components.logic.as_mut().unwrap();
+        let mut graph: serde_json::Value =
+            serde_json::from_str(logic.graph.as_ref().unwrap()).unwrap();
+        graph["nodes"][0]["params"]["target"] = serde_json::json!("walker2");
+        let mut program: crate::core::mugen_chain::Program = serde_json::from_str(
+            graph["nodes"][0]["params"]["program_json"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        program.entity = "walker2".into();
+        program.bindings.insert("x".into(), "BUTTON_B".into());
+        let program = program.seal();
+        graph["nodes"][0]["params"]["program_json"] =
+            serde_json::json!(serde_json::to_string(&program).unwrap());
+        graph["nodes"][0]["params"]["program_sha256"] = serde_json::json!(program.digest);
+        logic.graph = Some(graph.to_string());
+        scene.entities.push(second);
+        save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).unwrap();
+        let b = |a: bool, bb: bool| JoypadState {
+            y: a,
+            b: bb,
+            ..Default::default()
+        };
+        let script = [
+            ChainStep {
+                label: "idle",
+                frames: 20,
+                joypad: b(false, false),
+            },
+            ChainStep {
+                label: "a_only",
+                frames: 2,
+                joypad: b(true, false),
+            },
+            ChainStep {
+                label: "a_after",
+                frames: 30,
+                joypad: b(false, false),
+            },
+            ChainStep {
+                label: "b_only",
+                frames: 2,
+                joypad: b(false, true),
+            },
+            ChainStep {
+                label: "b_after",
+                frames: 30,
+                joypad: b(false, false),
+            },
+            ChainStep {
+                label: "both",
+                frames: 2,
+                joypad: b(true, true),
+            },
+            ChainStep {
+                label: "both_after",
+                frames: 30,
+                joypad: b(false, false),
+            },
+            ChainStep {
+                label: "a_then_b_offset",
+                frames: 1,
+                joypad: b(true, false),
+            },
+            ChainStep {
+                label: "gap",
+                frames: 4,
+                joypad: b(false, false),
+            },
+            ChainStep {
+                label: "b_mid",
+                frames: 1,
+                joypad: b(false, true),
+            },
+            ChainStep {
+                label: "end",
+                frames: 30,
+                joypad: b(false, false),
+            },
+        ];
+        let traces = capture_chain_vars(
+            &project,
+            &["spr_walker", "spr_walker__walker2"],
+            &script,
+            None,
+        );
+        let attacks = |t: &serde_json::Value| -> Vec<usize> {
+            let e = t["entries"].as_array().unwrap();
+            (1..e.len())
+                .filter(|&i| e[i]["stateno"] == 200 && e[i - 1]["stateno"] != 200)
+                .collect()
+        };
+        let (a1, a2) = (attacks(&traces[0]), attacks(&traces[1]));
+        eprintln!("ataques A: {a1:?}  B: {a2:?}");
+        assert_eq!(a1.len(), 3, "A ataca no so-A, no ambos e no deslocado");
+        assert_eq!(a2.len(), 3, "B ataca no so-B, no ambos e no deslocado");
+        let ea = traces[0]["entries"].as_array().unwrap();
+        let eb = traces[1]["entries"].as_array().unwrap();
+        // so-A: a 2a fica parada (idle, ctrl 1) durante todo o ataque da 1a
+        let span =
+            |e: &Vec<serde_json::Value>, i: usize| e[i..i + 11].iter().all(|x| x["stateno"] == 200);
+        assert!(
+            span(ea, a1[0])
+                && eb[a1[0]..a1[0] + 11]
+                    .iter()
+                    .all(|x| x["stateno"] == 0 && x["ctrl"] == 1),
+            "so-A nao move B"
+        );
+        assert!(
+            span(eb, a2[0])
+                && ea[a2[0]..a2[0] + 11]
+                    .iter()
+                    .all(|x| x["stateno"] == 0 && x["ctrl"] == 1),
+            "so-B nao move A"
+        );
+        assert_eq!(a1[1], a2[1], "ambos no mesmo tick");
+        // deslocado: os dois atacam em ticks diferentes, com Time/animtick proprios
+        assert!(a2[2] > a1[2], "B comeca depois de A");
+        let mid = a2[2];
+        assert!(
+            ea[mid]["stateno"] == 200 && ea[mid]["time"] != eb[mid]["time"],
+            "relogios independentes"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Cadeia original (formato Ken) na ROM e no core reais: o que o jogo viu a cada tick bate
+    /// com a leitura direta do CNS: toque -> 1 ataque; segurar -> 1 ataque; segundo toque cedo
+    /// (Time <= 5) ignorado; Time > 5 reinicia; ctrl 0 durante o estado e 1 ao voltar.
+    #[ignore]
+    #[test]
+    fn mugen_chain_walker_real_build_run() {
+        let (root, project, r) = import_chain("chain-real", |c| c, |c| c);
+        r.unwrap();
+        let script = [
+            ChainStep {
+                label: "idle",
+                frames: 40,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "tap",
+                frames: 1,
+                joypad: pad(true, false),
+            },
+            ChainStep {
+                label: "after_tap",
+                frames: 30,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "hold",
+                frames: 40,
+                joypad: pad(true, false),
+            },
+            ChainStep {
+                label: "release",
+                frames: 20,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "down_plus_a",
+                frames: 3,
+                joypad: pad(true, true),
+            },
+            ChainStep {
+                label: "down_release",
+                frames: 20,
+                joypad: pad(false, false),
+            },
+        ];
+        let capture = capture_chain(&project, "spr_walker", &script, None);
+        let entries = capture["entries"].as_array().unwrap();
+        let runs = |state: u64| {
+            let mut out: Vec<(usize, usize)> = Vec::new();
+            for (i, e) in entries.iter().enumerate() {
+                if e["stateno"] == state {
+                    match out.last_mut() {
+                        Some((s, l)) if *s + *l == i => *l += 1,
+                        _ => out.push((i, 1)),
+                    }
+                }
+            }
+            out
+        };
+        let attacks = runs(200);
+        eprintln!("ataques: {attacks:?}");
+        assert_eq!(
+            attacks.len(),
+            2,
+            "toque e segurar: um ataque cada; X + baixo nao ataca"
+        );
+        assert!(
+            attacks.iter().all(|(_, len)| *len == 11),
+            "duracao do AIR (3+8 ticks): {attacks:?}"
+        );
+        let first = entries[attacks[0].0].clone();
+        assert_eq!(first["ctrl"], 0);
+        assert_eq!(entries[attacks[0].0 + 11]["stateno"], 0);
+        assert_eq!(entries[attacks[0].0 + 11]["ctrl"], 1);
+        assert!(entries[..attacks[0].0]
+            .iter()
+            .all(|e| e["stateno"] == 0 && e["ctrl"] == 1));
+        assert!(entries.last().unwrap()["stateno"] == 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Fonte BYOR real (Ken Majik): importa a cadeia Stand_X pelo caminho do produto,
+    /// compila e captura, quadro a quadro, pixels do core + rastreio da ROM para o oraculo
+    /// independente (`scripts/verify-mugen-chain.py`). Nada de Ken entra no Git.
+    #[test]
+    #[ignore]
+    fn mugen_original_chain_real_ken_capture() {
+        let source =
+            PathBuf::from(std::env::var("RDS_MUGEN_REAL_SOURCE").expect("RDS_MUGEN_REAL_SOURCE"));
+        let output =
+            PathBuf::from(std::env::var("RDS_MUGEN_CHAIN_OUTPUT").expect("RDS_MUGEN_CHAIN_OUTPUT"));
+        fs::create_dir_all(&output).unwrap();
+        let options = super::ReviewOptions {
+            def_file: "ken8.def".into(),
+            actions: vec![0, 20, 21, 200],
+            palette_file: Some("ken1.act".into()),
+            original_chain: true,
+            chain_state: Some(200),
+            source_sha256: Some(super::package_digest(&source).unwrap()),
+            ..Default::default()
+        };
+        let analysis = super::analyze_source(&source, Some(options.clone())).unwrap();
+        assert!(!analysis["report"].is_null(), "{analysis}");
+        fs::write(
+            output.join("analysis.json"),
+            serde_json::to_vec_pretty(&analysis).unwrap(),
+        )
+        .unwrap();
+        let project = output.join("project");
+        create_project_skeleton(&project, "Ken chain", "megadrive").unwrap();
+        crate::core::project_mgr::import_mugen_project_with_review(
+            &project,
+            &source,
+            "mugen",
+            Some(&options),
+        )
+        .unwrap();
+        crate::core::project_mgr::stamp_imported_mugen_metadata(&project, &source).unwrap();
+        let script = [
+            ChainStep {
+                label: "idle",
+                frames: 30,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "tap",
+                frames: 1,
+                joypad: pad(true, false),
+            },
+            ChainStep {
+                label: "after_tap",
+                frames: 24,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "hold",
+                frames: 25,
+                joypad: pad(true, false),
+            },
+            ChainStep {
+                label: "release",
+                frames: 20,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "early_second",
+                frames: 1,
+                joypad: pad(true, false),
+            },
+            ChainStep {
+                label: "early_gap",
+                frames: 2,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "early_press",
+                frames: 1,
+                joypad: pad(true, false),
+            },
+            ChainStep {
+                label: "early_after",
+                frames: 24,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "reentry_first",
+                frames: 1,
+                joypad: pad(true, false),
+            },
+            ChainStep {
+                label: "reentry_gap",
+                frames: 5,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "reentry_press",
+                frames: 1,
+                joypad: pad(true, false),
+            },
+            ChainStep {
+                label: "reentry_after",
+                frames: 24,
+                joypad: pad(false, false),
+            },
+            ChainStep {
+                label: "down_plus_x",
+                frames: 5,
+                joypad: pad(true, true),
+            },
+            ChainStep {
+                label: "down_release",
+                frames: 20,
+                joypad: pad(false, false),
+            },
+        ];
+        let mut capture = capture_chain(&project, "spr_kenmasters", &script, Some(&output));
+        capture["scope"] = serde_json::json!(
+            "cadeia Stand_X do Ken; stand-in autoral para o estado 0; sem colisao, dano ou combate"
+        );
+        fs::write(
+            output.join("chain-capture.json"),
+            serde_json::to_vec_pretty(&capture).unwrap(),
+        )
+        .unwrap();
+        eprintln!("Captura da cadeia original: {}", output.display());
     }
 
     // ---------------------------------------------------------------- produto: falha e resumo

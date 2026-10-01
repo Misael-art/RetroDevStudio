@@ -385,6 +385,12 @@ export const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
       profile_id: "m68k.add_compare_branch_word_d0_wram.v1",
     },
   },
+  mugen_state_program: {
+    type: "mugen_state_program", label: "Programa de estados MUGEN",
+    inputs: [],
+    outputs: [],
+    params: { target: "", profile: "mugen.original_chain.v1", program_sha256: "", program_json: "" },
+  },
   bridge_unconverted_source: {
     type: "bridge_unconverted_source", label: "Source Bridge",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],

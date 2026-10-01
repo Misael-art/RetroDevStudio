@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Dialog from "./Dialog";
 import MugenVisualComparison from "./MugenVisualComparison";
+import MugenChainReview from "./MugenChainReview";
 import { analyzeMugenSource, visualReviewOf, type MugenReviewOptions, type MugenSourceAnalysis } from "../../core/mugenReview";
 
 export default function MugenSourceReviewPanel({ sourcePath, onCancel, onImport }: {
@@ -13,7 +14,7 @@ export default function MugenSourceReviewPanel({ sourcePath, onCancel, onImport 
   const analyze=async (choice?:MugenReviewOptions) => {
     const gen=++generation.current; setBusy(true);setError("");setAnalysis(null);
     try {const a=await analyzeMugenSource(sourcePath,choice); if(gen!==generation.current)return;
-      setAnalysis(a);setOptions(a.options ?? choice ?? {def_file:a.selected_def ?? "",actions:[],palette_file:null,authored_demo:false,source_sha256:a.source_sha256});
+      setAnalysis(a);setOptions(a.options ?? choice ?? {def_file:a.selected_def ?? "",actions:[],palette_file:null,authored_demo:false,original_chain:false,chain_state:null,source_sha256:a.source_sha256});
     } catch(e){if(gen===generation.current)setError(String(e));}
     finally {if(gen===generation.current)setBusy(false);}
   };
@@ -36,13 +37,20 @@ export default function MugenSourceReviewPanel({ sourcePath, onCancel, onImport 
         <fieldset className="rounded border border-[#45475a] p-2"><legend>Ações incluídas (vazio = todas)</legend>
           <div className="flex max-h-24 flex-wrap gap-3 overflow-auto">{analysis?.actions.map((a)=><label key={a.number}><input data-testid={`mugen-source-action-${a.number}`} type="checkbox" checked={options.actions.includes(a.number)} onChange={(e)=>edit({actions:e.target.checked?[...options.actions,a.number].sort((a,b)=>a-b):options.actions.filter((n)=>n!==a.number)})} /> {a.number} ({a.frames} quadros)</label>)}</div>
         </fieldset>
-        <label className="block"><input data-testid="mugen-source-authored-demo" type="checkbox" checked={options.authored_demo} onChange={(e)=>edit({authored_demo:e.target.checked})} /> Comportamento autoral para demonstrar arte (ações 0, 20, 21 e 200)</label>
+        <label className="block"><input data-testid="mugen-source-authored-demo" type="checkbox" checked={options.authored_demo} onChange={(e)=>edit({authored_demo:e.target.checked,...(e.target.checked?{original_chain:false,chain_state:null}:{})})} /> Comportamento autoral para demonstrar arte (ações 0, 20, 21 e 200)</label>
         <p className="text-[#f9e2af]">A demonstração autoral usa →/← e botão A, facing fixo à direita e velocidades 2,5/−1,75 px por tick editáveis. Isso não converte o CNS original, colisão ou dano. Controllers originais ficam como referência.</p>
+        <label className="block"><input data-testid="mugen-source-original-chain" type="checkbox" checked={!!options.original_chain} onChange={(e)=>edit({original_chain:e.target.checked,chain_state:null,...(e.target.checked?{authored_demo:false}:{})})} /> Converter uma cadeia original do CMD/CNS (comando → condição → estado → animação → retorno)</label>
+        {options.original_chain && <fieldset data-testid="mugen-source-chain-picker" className="rounded border border-[#45475a] p-2"><legend>Cadeia original a converter</legend>
+          {(analysis?.original_chain_candidates?.available ?? []).length===0 && <p className="text-[#a6adc8]">Analise as escolhas para listar as cadeias convertíveis com as ações selecionadas.</p>}
+          {(analysis?.original_chain_candidates?.available ?? []).map((c)=><label key={c.state} className="block"><input data-testid={`mugen-source-chain-${c.state}`} type="radio" name="mugen-chain" checked={options.chain_state===c.state} onChange={()=>edit({chain_state:c.state})} /> Estado {c.state} · comandos {c.commands.join(", ")} · entrada {c.entries.map((e)=>`${e.source.file}:${e.source.line}`).join(", ")}</label>)}
+          {(analysis?.original_chain_candidates?.refused ?? []).length>0 && <details><summary>{analysis?.original_chain_candidates?.refused.length} alvos do estado -1 nao selecionaveis (com motivo)</summary><ul className="text-[10px] text-[#a6adc8]">{analysis?.original_chain_candidates?.refused.map((r)=><li key={r.state}>Estado {r.state}: {r.reason}</li>)}</ul></details>}
+        </fieldset>}
         <button data-testid="mugen-source-analyze" disabled={busy} onClick={()=>void analyze(options)} className="rounded bg-[#45475a] px-3 py-2">{busy?"Analisando…":"Analisar escolhas"}</button>
       </>}
       {busy && <p>Verificando arquivos, paleta, animações e transformações…</p>}
       {error && <p role="alert" className="text-[#f38ba8]">{error}</p>}
       <ul>{analysis?.diagnostics.map((d,i)=><li key={i} className={d.severity==="error"?"text-[#f38ba8]":"text-[#f9e2af]"}>{d.source}: {d.message}</li>)}</ul>
+      {analysis?.original_chain?.status==="converted" && <MugenChainReview chain={analysis.original_chain} />}
       {visual && <MugenVisualComparison visual={visual} />}
       {analysis?.report?.metrics && <p>Custo estimado: {analysis.report.metrics.filter((m)=>["cell_width","cell_height","tiles_per_frame","palette_colors","merged_pixels"].includes(m.name)).map((m)=>`${({cell_width:"Largura",cell_height:"Altura",tiles_per_frame:"Blocos por quadro",palette_colors:"Cores",merged_pixels:"Pixels com cores fundidas"} as Record<string,string>)[m.name]}: ${m.value ?? "não medido"} ${m.unit}`).join(" · ")}. CPU, transferências e sprites compilados ainda não medidos.</p>}
       <details><summary>Arquivos e dependências</summary><ul>{analysis?.references.map((r,i)=><li key={i}>{r.key}: {r.requested} — {r.status}</li>)}</ul></details>
