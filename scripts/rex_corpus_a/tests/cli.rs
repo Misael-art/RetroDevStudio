@@ -1084,3 +1084,317 @@ fn consumidor_non_confunde_unha_referencia_de_datos_cunha_carga_de_operando() {
     assert!(out.contains("vinculo=non"), "saída: {out}");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// ---------------------------------------------------------------------------
+// Fase 5 — `perfil` e `rexistro`: perfis JSON versionados e o rexistro
+// `rex-corpus-resource/v1` producido polo CLI.
+//
+// As fixtures son autorais: a imaxe é un bloque de 64 KiB (o tamaño mínimo do
+// perfil `md-linear`) co cabeco SGDK, e o fluxo Kosinski constrúese a man co
+// formato documentado en `crates/rex-kosinski`. Ningunha expectativa depende de
+// bytes comerciais.
+// ---------------------------------------------------------------------------
+
+/// Imaxe lineal de 64 KiB co fluxo en `0x1000`. Con `vinculo` planta a
+/// convención medida (`lea fluxo,A0` + `jsr abs.l rutina`).
+fn imaxe_rexistro(dir: &std::path::Path, nome: &str, vinculo: bool) -> PathBuf {
+    let mut im = vec![0xFFu8; 0x1_0000];
+    im[0x100..0x105].copy_from_slice(b"SEGA ");
+    im[0x1000..0x1000 + fluxo_pineapple().len()].copy_from_slice(&fluxo_pineapple());
+    if vinculo {
+        im[0x2000..0x2006].copy_from_slice(&[0x41, 0xF9, 0x00, 0x00, 0x10, 0x00]);
+        im[0x2006..0x200C].copy_from_slice(&[0x4E, 0xB9, 0x00, 0x00, 0x85, 0xA2]);
+    }
+    let caminho = dir.join(nome);
+    std::fs::write(&caminho, &im).unwrap();
+    caminho
+}
+
+/// Perfil autoral pinned á imaxe: os límites son os que usa o CLI por defecto.
+fn perfil_de(dir: &std::path::Path, nome: &str, sha: &str, orientacion: &str) -> PathBuf {
+    let p = dir.join(nome);
+    std::fs::write(
+        &p,
+        format!(
+            "{{\"schema_version\":\"rex-corpus-perfil/v1\",\"perfil_id\":\"md-linear\",\"imaxe_normalizada_sha256\":\"{sha}\",\"orientacion\":\"{orientacion}\",\"codec\":\"kosinski\",\"variante\":\"base\",\"estado_revision\":\"descoecida\",\"desde\":0,\"ata\":null,\"stride\":2,\"min_saida\":16,\"max_saida\":2097152,\"orzamento\":4000000,\"ventanxa_chamada\":16,\"min_entradas\":3,\"limite_bytes\":16777216}}\n"
+        ),
+    )
+    .unwrap();
+    p
+}
+
+fn rexistro_con(imaxe: &Path, perfil: &Path, enderezo: &str) -> (Option<i32>, String, String) {
+    let o = executar(&[
+        "rexistro",
+        "--imaxe",
+        &imaxe.to_string_lossy(),
+        "--perfil",
+        &perfil.to_string_lossy(),
+        "--endereco",
+        enderezo,
+    ]);
+    (
+        o.status.code(),
+        String::from_utf8_lossy(&o.stdout).to_string(),
+        String::from_utf8_lossy(&o.stderr).to_string(),
+    )
+}
+
+#[test]
+fn rexistro_esixe_imaxe_perfil_e_enderezo() {
+    let d = dir_temporal("rexistro-uso");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let o = executar(&[
+        "rexistro",
+        "--imaxe",
+        &im.to_string_lossy(),
+        "--endereco",
+        "4096",
+    ]);
+    assert_eq!(o.status.code(), Some(2), "sen --perfil");
+    let p = perfil_de(
+        &d,
+        "a.json",
+        &sha_hex(&std::fs::read(&im).unwrap()),
+        "lineal",
+    );
+    let o = executar(&[
+        "rexistro",
+        "--perfil",
+        &p.to_string_lossy(),
+        "--endereco",
+        "4096",
+    ]);
+    assert_eq!(o.status.code(), Some(2), "sen --imaxe");
+    let o = executar(&[
+        "rexistro",
+        "--imaxe",
+        &im.to_string_lossy(),
+        "--perfil",
+        &p.to_string_lossy(),
+    ]);
+    assert_eq!(o.status.code(), Some(2), "sen --endereco");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_seralliza_un_recurso_confirmado_pola_carga_medida() {
+    let d = dir_temporal("rexistro-confirmado");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let bytes = std::fs::read(&im).unwrap();
+    let sha = sha_hex(&bytes);
+    let p = perfil_de(&d, "a.json", &sha, "lineal");
+    let (st, out, err) = rexistro_con(&im, &p, "4096");
+    assert_eq!(st, Some(0), "stdout={out} stderr={err}");
+    assert!(
+        out.contains("\"schema_version\":\"rex-corpus-resource/v1\""),
+        "{out}"
+    );
+    assert!(out.contains(&format!("\"rom_sha256\":\"{sha}\"")), "{out}");
+    assert!(out.contains("\"perfil\":\"md-linear\""), "{out}");
+    assert!(out.contains("\"offset\":4096"), "{out}");
+    assert!(out.contains("\"bytes_consumidos\":14"), "{out}");
+    assert!(out.contains("\"saida_bytes\":9"), "{out}");
+    // A saída do fixture é coñecida de antemán: o rexistro dixestsellea.
+    assert!(
+        out.contains(&format!("\"saida_sha256\":\"{}\"", sha_hex(b"PINEAPPLE"))),
+        "{out}"
+    );
+    assert!(
+        out.contains("\"evidencia_consumidor\":[\"lea@0x02000/A0/chamada@0x02006/0x085A2\"]"),
+        "a evidencia non é a cadea medida: {out}"
+    );
+    assert!(
+        out.contains("\"confianza\":\"confirmado-estaticamente\""),
+        "{out}"
+    );
+    assert!(
+        out.contains("\"estado_mapper\":\"rom_size=0x10000\""),
+        "{out}"
+    );
+    assert!(out.contains("\"perfil_mapper\":\"md-linear\""), "{out}");
+    assert!(out.contains("REXISTRO 0x01000"), "{out}");
+    assert!(
+        out.contains("RESUMO rexistros=1 confirmados=1 candidatos=0"),
+        "{out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_marca_candidato_cando_decodifica_sen_vinculo() {
+    // Control de non-vacuidade: o mesmo fluxo sen `lea`/`jsr` segue decodificando
+    // igual. Se aquí sae `confirmado-estaticamente`, a confianza depende do
+    // decode e non da evidencia de consumidor.
+    let d = dir_temporal("rexistro-candidato");
+    let im = imaxe_rexistro(&d, "a.md", false);
+    let sha = sha_hex(&std::fs::read(&im).unwrap());
+    let p = perfil_de(&d, "a.json", &sha, "lineal");
+    let (st, out, err) = rexistro_con(&im, &p, "4096");
+    assert_eq!(st, Some(0), "stdout={out} stderr={err}");
+    assert!(out.contains("\"confianza\":\"candidato\""), "{out}");
+    assert!(out.contains("\"evidencia_consumidor\":[]"), "{out}");
+    assert!(out.contains("\"bytes_consumidos\":14"), "{out}");
+    assert!(
+        out.contains("RESUMO rexistros=1 confirmados=0 candidatos=1"),
+        "{out}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_non_inventa_un_rexistro_nun_enderezo_que_non_decodifica() {
+    let d = dir_temporal("rexistro-non-fluxo");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let sha = sha_hex(&std::fs::read(&im).unwrap());
+    let p = perfil_de(&d, "a.json", &sha, "lineal");
+    // 0x3000 está cheo de 0xFF: non é un fluxo Kosinski.
+    let (st, out, err) = rexistro_con(&im, &p, "12288");
+    assert_eq!(st, Some(0), "stdout={out} stderr={err}");
+    assert!(!out.contains("schema_version"), "emitiu un rexistro: {out}");
+    assert!(out.contains("non-fluxo"), "{out}");
+    assert!(out.contains("REXISTRO sen rexistros"), "{out}");
+    assert!(out.contains("RESUMO rexistros=0"), "{out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_rexeite_un_perfil_que_non_pinna_a_imaxe_entregada() {
+    // É a garda do trasplante: un perfil coños bytes doutra imaxe non se aplica.
+    let d = dir_temporal("rexistro-trasplante");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let p = perfil_de(&d, "a.json", &"f".repeat(64), "lineal");
+    let (st, out, err) = rexistro_con(&im, &p, "4096");
+    assert_eq!(st, Some(5), "stdout={out} stderr={err}");
+    assert!(err.contains("PERFIL-DIVERXENCIA"), "{err}");
+    assert!(err.contains("medido="), "{err}");
+    assert!(
+        !out.contains("schema_version"),
+        "hai rexistro tras a diverxencia"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_rexeite_un_perfil_cuxa_orientacion_a_imaxe_desmente() {
+    let d = dir_temporal("rexistro-orientacion");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let sha = sha_hex(&std::fs::read(&im).unwrap());
+    let p = perfil_de(&d, "a.json", &sha, "interlazado-smd");
+    let (st, out, err) = rexistro_con(&im, &p, "4096");
+    assert_eq!(st, Some(5), "stdout={out} stderr={err}");
+    assert!(err.contains("ORIENTACION-DIVERXENCIA"), "{err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_saida_3_cun_perfil_malformado_e_4_cun_perfil_inexistente() {
+    let d = dir_temporal("rexistro-perfil-roto");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let malo = d.join("malo.json");
+    std::fs::write(&malo, "{\"perfil_id\":\"md-linear\"}\n").unwrap();
+    let (st, out, err) = rexistro_con(&im, &malo, "4096");
+    assert_eq!(st, Some(3), "stdout={out} stderr={err}");
+    assert!(err.contains("sen-esquema"), "{err}");
+    let (st, _, err) = rexistro_con(&im, &d.join("non-existe.json"), "4096");
+    assert_eq!(st, Some(4), "{err}");
+    assert!(err.contains("non executado"), "{err}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_enderezo_fora_do_barramento_non_produce_rexistro() {
+    // O enderezamento vai por `rex-addressing`, non por suposición: un enderezo
+    // fóra dos 24 bits do 68000 erroa antes de tocar os bytes.
+    let d = dir_temporal("rexistro-barramento");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let sha = sha_hex(&std::fs::read(&im).unwrap());
+    let p = perfil_de(&d, "a.json", &sha, "lineal");
+    let (st, out, err) = rexistro_con(&im, &p, "16777216");
+    assert_eq!(st, Some(0), "stdout={out} stderr={err}");
+    assert!(out.contains("non-traducible=out-of-range"), "{out}");
+    assert!(!out.contains("schema_version"), "{out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn perfil_escrito_polo_cli_reler_se_e_aplica_a_a_imaxe_que_pinna() {
+    // Reusabilidade: `perfil --imaxe … --out P` produce o perfil de P e
+    // `rexistro --perfil P` rexistra o mesmo recurso que o perfil escrito a man.
+    let d = dir_temporal("perfil-roundtrip");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let p = d.join("xugado.json");
+    let o = executar(&[
+        "perfil",
+        "--imaxe",
+        &im.to_string_lossy(),
+        "--out",
+        &p.to_string_lossy(),
+    ]);
+    let out = String::from_utf8_lossy(&o.stdout).to_string();
+    let err = String::from_utf8_lossy(&o.stderr).to_string();
+    assert_eq!(o.status.code(), Some(0), "{out} {err}");
+    let texto = ler(&p);
+    let sha = sha_hex(&std::fs::read(&im).unwrap());
+    assert!(
+        texto.contains("\"schema_version\":\"rex-corpus-perfil/v1\""),
+        "{texto}"
+    );
+    assert!(texto.contains(&sha), "{texto}");
+    assert!(texto.contains("\"orientacion\":\"lineal\""), "{texto}");
+    let (st, rex, e2) = rexistro_con(&im, &p, "4096");
+    assert_eq!(st, Some(0), "{rex} {e2}");
+    assert!(
+        rex.contains("\"confianza\":\"confirmado-estaticamente\""),
+        "{rex}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_aceita_o_enderezo_en_hexadecimal_sem_gardarse_un_token_malo() {
+    // Os informes do corpus escriben os offsets en hexadecimal (`0x1CAEC`). Se
+    // o CLI só entende decimal, cada offset hai que reconverter a man — e unha
+    // conversión errada produce un rexistro falso, non un erro. Un token que non
+    // é un número rexeitase: non se descarta en silencio.
+    let d = dir_temporal("rexistro-hex");
+    let im = imaxe_rexistro(&d, "a.md", true);
+    let sha = sha_hex(&std::fs::read(&im).unwrap());
+    let p = perfil_de(&d, "a.json", &sha, "lineal");
+    let (st, out, err) = rexistro_con(&im, &p, "0x1000");
+    assert_eq!(st, Some(0), "stdout={out} stderr={err}");
+    assert!(
+        out.contains("\"confianza\":\"confirmado-estaticamente\""),
+        "0x1000 non se leu como 4096: {out}"
+    );
+    let (st, out, err) = rexistro_con(&im, &p, "0x1000g");
+    assert_eq!(st, Some(2), "stdout={out} stderr={err}");
+    assert!(
+        err.contains("0x1000g"),
+        "o token rexeitado non se nomea: {err}"
+    );
+    assert!(!out.contains("schema_version"), "{out}");
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+#[test]
+fn rexistro_non_inventa_un_offset_na_zona_de_recheo_da_imaxe() {
+    // `md-linear` enmascara co `rom_size`, que ten que ser potencia de 2. Nunha
+    // imaxe de 0x11000 bytes o rom_size efectivo é 0x20000, así que o enderezo
+    // 0x1FF00 traduce a un offset que non existe no arquivo. Ese offset non é
+    // unha medida: hai que dicilo, non decodificar recheo.
+    let d = dir_temporal("rexistro-recheo");
+    let mut im = vec![0xFFu8; 0x1_1000];
+    im[0x100..0x105].copy_from_slice(b"SEGA ");
+    let caminho = d.join("a.md");
+    std::fs::write(&caminho, &im).unwrap();
+    let sha = sha_hex(&im);
+    let p = perfil_de(&d, "a.json", &sha, "lineal");
+    let (st, out, err) = rexistro_con(&caminho, &p, "0x1FF00");
+    assert_eq!(st, Some(0), "stdout={out} stderr={err}");
+    assert!(out.contains("non-traducible=offset-fora-da-imaxe"), "{out}");
+    assert!(out.contains("imaxe=0x11000"), "{out}");
+    assert!(!out.contains("schema_version"), "{out}");
+    assert!(out.contains("non_traducibles=1"), "{out}");
+    let _ = std::fs::remove_dir_all(&d);
+}

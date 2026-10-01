@@ -314,7 +314,7 @@ fn rexistro() -> ResourceRecord {
         bytes_consumed: Some(0x31),
         output_size: Some(0x800),
         output_sha256: Some("cc".repeat(32)),
-        consumer_evidence: vec!["tabla@0xC0".into()],
+        consumer_evidence: vec!["taboa@0x000C0/3/crecente".into()],
         confidence: Confidence::ConfirmadoEstaticamente,
         limitations: vec!["sen execución".into()],
         mapper_profile: Some("md-linear".into()),
@@ -335,9 +335,12 @@ fn rexistro_versiona_o_esquema_a_confianza_e_o_offset_medido() {
     );
     assert!(j.contains("\"offset\":76864"), "{j}");
     assert!(
-        j.contains("\"evidencia_consumidor\":[\"tabla@0xC0\"]"),
+        j.contains("\"evidencia_consumidor\":[\"taboa@0x000C0/3/crecente\"]"),
         "{j}"
     );
+    // A mostra desta crate tamén ten que cumprir o contrato de evidencia: un
+    // rexistro que non pasa `validar()` non é un exemplo, é una falsa.
+    rexistro().validar().expect("fixture fóra do contrato");
 }
 
 #[test]
