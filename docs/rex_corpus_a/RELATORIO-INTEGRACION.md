@@ -116,3 +116,38 @@ Executados en `~/RDS-REX-CORPUS-A/scripts/rex_corpus_a` con HEAD `ac74ebf`:
 | Bytes comerciais no índice | ningún (ver FASE5 §5; os ficheiros de datos son JSON/JSONL de hashes) |
 | ROMs (BYOR) | fóra do índice, en `~/.retrodev/rex_corpus_a_work/staged` e `~/.retrodev/rex_corpus_a_holdout/staged`, identificadas por SHA-256 |
 | Controles discriminativos | 5 mutacións → FAIL esperado → restauración byte a byte → 157 verdes (FASE5 §6.1) |
+
+## 7. Adenda do integrador (2026-10-01)
+
+Revisión de pre-integración feita polo integrador na curadoria
+`codex/rex-integrator-corpus-a` (cherry-picks `-x` dos sete commits sobre
+`2793430`; esta worktree da agente non foi tocada). Evidencia histórica
+mantense tal cal; esta adenda non reescribe o corpo do relatorio.
+
+1. **Re-medición no destino:** `cargo test --offline` **157 passed · 0 failed ·
+   0 ignored** e `npm run check:tree` OK na curadoria — idénticos aos números
+   de §6.
+2. **Corrección factual pendente da agente:** a edición AÍNDA NON commitada
+   deste relatorio (preservada en
+   `REX-HANDOFF-2026-10-01/084414Z/A-unstaged.patch` e
+   `backup-integracao-2026-10-01/copias/A-RELATORIO-INTEGRACION-modificado.md`)
+   afirma que «o tronco é `codex/collect-counter-goal`». **Non é correcto**: o
+   repositorio ten `origin/main` (`616abdb`, parado) e o tronco de trabalho é a
+   liña do integrador `codex/rex-integrator-crates-registry` @ `0194f94`, da
+   cal descende `2793430`. A afirmación non entra nesta cadea porque só existe
+   no diff non commitado; ao rebasear esa edición, substituir pola liña da
+   adenda.
+3. **Veredicto da revisión (consumidor + variante + saída):** o alvo do LEA é o
+   propio offset do stream (`lea $3F09A,A0` @ `0x03082` → recurso
+   `offset:258202`), variante declarada `base` sen alegar modular/Kosinski+, e
+   a saída ten aceite contra `koscmp` (21 coincidencias + 5 rexeitos). §3.2
+   alega soamente ausencia de marcadores de fluxo (0/5 imaxes), non ausencia de
+   codec — a disciplina pedida cúmprese.
+4. **Nota de procedencia (compartida coa fronte D):** a imaxe «Sonic 1» local
+   (531577 bytes, SHA-256 `c7da53a1…`) ten checksum de cabeceiro diverxente do
+   varexo (declarado 57871, observado 30221). Xa declarado en §3.1; toda a
+   proba é contra ESTA imaxe, pinada por hash.
+5. **Decisións que seguen abertas para o operador** (§5 orixinal mantense):
+   licenza/exposición do crate (consome referencia LGPL só como *fixture*) e
+   calquera promoción de madurez — nada aquí é merge, release nin promoción.
+
