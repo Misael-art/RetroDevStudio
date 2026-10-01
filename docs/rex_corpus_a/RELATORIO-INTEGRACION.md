@@ -69,14 +69,16 @@ ferramenta sobre as imaxes locais e comprovados contra as medidas da Fase 4.
    (Fases 4–6): en Sonic 1, `41 F9 00 03 F0 9A` en `0x03082` é
    `lea $3F09A,A0` — bytes comprobados na imaxe; a evidencia versionada é
    unha **referencia estática** (`referencia-estatica`: o enderezo é operando
-   dunha instrución; a chamada `bsr.w $0189E` foi medida na Fase 6, fóra da
+   dunha instrución; a chamada `bsr.w $0189C` — **o prólogo da rutina** — foi
+   medida na Fase 6, fóra da
    gramática actual). Na reservada, seis cargas `lea …,A0` seguidas de
    `4E B9 … 0x085A2` — **vínculo estrutural** (`vinculo-estrutural`): carga +
    chamada á rutina, con fonte en A0 e destino en A1 medidos nos seis sitios.
    A rutina `$085A2` ten a **forma morfolóxica completa dun descompresor con
    convencións Kosinski base** (descritor LE/LSB-first, 1=literal, distancia
    `(High&0xF8)<<5|Low`) — comprobada instrución a instrución en
-   `$085A2…$08621`, **sen executar un byte** (FASE6 §5). Ningún rótulo alega
+   `$085A2…$08641` (160 bytes, idénticos nos dous xogos), **sen executar un
+   byte** (FASE6 §5). Ningún rótulo alega
    recurso consumido en runtime.
 5. **Comparación independente do produto decodificado** (FASE6 §6): unha
    segunda implementación do codec, escrita de cero e validada nos 27
@@ -94,10 +96,12 @@ ferramenta sobre as imaxes locais e comprovados contra as medidas da Fase 4.
   que eses fluxos se carguen en pantalla nin que A1 reciba esas escritas.
   A identidade de `$085A2` como descompresor é **morfolóxica** (bytes
   decodificados á man), non execución.
-- A cauda da rutina (`$08622`…) non se decodificou instrución a instrución;
-  e en Sonic 1 a convención de entrada está **aberta**: os tres `bsr.w`
-  apuntan a `$0189E`, dous bytes despois do prólogo `55 8F`
-  (FASE6 §10.3).
+- A rutina está **medida fim a fim**: 160 bytes idénticos nos dous xogos
+  (`$085A2…$08641` vs `$0189C…$0193B`, SHA-256 `e8028514…`), do
+  `subq.b #2,(A7)` ao `addq.b #2,(A7); rts`; os tres `bsr.w` de Sonic
+  apuntan a `$0189C` — o prólogo, a mesma convención de entrada da
+  reservada. Quedan por decodificar o mecanismo de desprazamento variable
+  do laço de copia e a reconstrución do enderezo de retorno (FASE6 §10.2).
 - A busca de opcodes é **varredura lineal aliñada a palabra**, non análise de
   alcanzabilidade: un opcode pode casar en bytes de datos (a limitación vai
   declarada en cada rexistro).
