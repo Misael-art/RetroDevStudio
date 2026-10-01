@@ -3,7 +3,7 @@
 //!
 //! Este ficheiro **non** necesita ningunha ROM: comprueba a forma e a
 //! coherencia interna do que está no depósito (perfis fixados por SHA-256 e
-//! rexistros `rex-corpus-resource/v1`). A lectura da imaxe segue sendo BYOR e,
+//! rexistros `rex-corpus-resource/v2`). A lectura da imaxe segue sendo BYOR e,
 //! se falta, declárase `non executado` noutro sitio — aquí non hai nada que
 //! executar.
 
@@ -151,9 +151,9 @@ fn nome_da_rota(c: &std::path::Path) -> String {
 
 /// Repón a regra de `ResourceRecord::validar` sobre o texto versionado: o
 /// contrato é o mesmo, aquí non hai un parser de rexistros.
-fn rexistro_da_liña(liña: &str, nome: &str, pins: &[String]) -> usize {
+fn rexistro_da_liña(liña: &str, nome: &str, pins: &[String]) -> (usize, usize) {
     assert!(
-        liña.contains("\"schema_version\":\"rex-corpus-resource/v1\""),
+        liña.contains("\"schema_version\":\"rex-corpus-resource/v2\""),
         "{nome}: liña sen a etiqueta do esquema"
     );
     assert!(!liña.contains("/home/"), "{nome}: camiño local no rexistro");
@@ -169,11 +169,15 @@ fn rexistro_da_liña(liña: &str, nome: &str, pins: &[String]) -> usize {
     let evidencias =
         cadeas_de_array(liña, "evidencia_consumidor").unwrap_or_else(|| panic!("{nome}"));
     let mut vinculantes = 0usize;
+    let mut cargas_con_chamada = 0usize;
     for cadea in &evidencias {
         let e = Evidencia::parse(cadea)
             .unwrap_or_else(|| panic!("{nome}: evidencia fóra da gramática: {cadea}"));
         if e.vincula() {
             vinculantes += 1;
+        }
+        if e.e_carga_con_chamada() {
+            cargas_con_chamada += 1;
         }
         // O sitio da evidencia ten que caer dentro da imaxe: un `0x` de oito
         // díxitos só aparece se alguén escribe un enderezo inventado.
@@ -182,11 +186,19 @@ fn rexistro_da_liña(liña: &str, nome: &str, pins: &[String]) -> usize {
             "{nome}: evidencia fóra do mapa: {cadea}"
         );
     }
+    // O vocabulario v2 nomea a medida; `confirmado-estaticamente` (v1) quedou
+    // retirado porque cubría dous niveis de proba distintos.
     match confianza.as_str() {
-        "confirmado-estaticamente" => assert!(
-            vinculantes > 0,
-            "{nome}: confianza afirmada sen evidencia vinculante: {liña}"
+        "vinculo-estrutural" => assert!(
+            cargas_con_chamada > 0,
+            "{nome}: vinculo-estrutural sen carga con chamada: {liña}"
         ),
+        "referencia-estatica" => {
+            assert!(
+                vinculantes > 0 && cargas_con_chamada == 0,
+                "{nome}: referencia-estatica precisa instrución sen chamada conectada: {liña}"
+            );
+        }
         "candidato" => assert_eq!(
             vinculantes, 0,
             "{nome}: candidato con evidencia vinculante: {liña}"
@@ -213,22 +225,35 @@ fn rexistro_da_liña(liña: &str, nome: &str, pins: &[String]) -> usize {
         pins.contains(&pin),
         "{nome}: rexistro que non apunta a ningún perfil versionado"
     );
-    vinculantes
+    (vinculantes, cargas_con_chamada)
 }
 
 #[test]
-fn rexistros_versionados_dan_polos_menos_dous_recursos_reais_confirmados() {
-    // A misión prefire dous recursos confirmados sobre bytes reais. Se un
-    // retroceso dos verificadores os deixa en candidatos, isto daimos, non a
-    // ROM que falta.
-    let confirmados: usize = ficheiros(&cartafol("evidencia"), "jsonl")
-        .iter()
-        .map(|c| std::fs::read_to_string(c).expect("jsonl lexible"))
-        .flat_map(|t| t.lines().map(str::to_string).collect::<Vec<String>>())
-        .filter(|l| l.contains("\"confianza\":\"confirmado-estaticamente\""))
-        .count();
+fn rexistros_versionados_dan_polos_menos_dous_vinculos_estruturais_e_una_referencia() {
+    // A misión pide vínculos medidos sobre bytes reais. O rótulo forte v1
+    // (`confirmado-estaticamente`) retirouse: o que queda — e o que se
+    // esixe — é polo menos dous vínculos estruturais (lea→chamada, na
+    // reservada) e polo menos unha referencia estática de instrución (Sonic
+    // 1, carga sen chamada modelada). Ningún deles alega runtime.
+    let mut estruturais = 0usize;
+    let mut referencias = 0usize;
+    for c in ficheiros(&cartafol("evidencia"), "jsonl") {
+        let texto = std::fs::read_to_string(&c).expect("jsonl lexible");
+        for l in texto.lines().filter(|l| !l.trim().is_empty()) {
+            if l.contains("\"confianza\":\"vinculo-estrutural\"") {
+                estruturais += 1;
+            }
+            if l.contains("\"confianza\":\"referencia-estatica\"") {
+                referencias += 1;
+            }
+        }
+    }
     assert!(
-        confirmados >= 2,
-        "recursos confirmados no corpus: {confirmados}"
+        estruturais >= 2,
+        "vínculos estruturais no corpus: {estruturais}"
+    );
+    assert!(
+        referencias >= 1,
+        "referencias estáticas no corpus: {referencias}"
     );
 }

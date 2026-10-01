@@ -647,7 +647,7 @@ fn consumidor_atopa_a_chamada_a_referencia_e_a_táboa_que_vinculan_un_enderezo()
     assert_eq!(o.status.code(), Some(0), "stderr: {err}");
     let out = String::from_utf8_lossy(&o.stdout).to_string();
     assert!(
-        out.contains("CONSUMIDOR esquema=rex-corpus-consumer/v2"),
+        out.contains("CONSUMIDOR esquema=rex-corpus-consumer/v3"),
         "{out}"
     );
     assert!(
@@ -1187,7 +1187,7 @@ fn rexistro_seralliza_un_recurso_confirmado_pola_carga_medida() {
     let (st, out, err) = rexistro_con(&im, &p, "4096");
     assert_eq!(st, Some(0), "stdout={out} stderr={err}");
     assert!(
-        out.contains("\"schema_version\":\"rex-corpus-resource/v1\""),
+        out.contains("\"schema_version\":\"rex-corpus-resource/v2\""),
         "{out}"
     );
     assert!(out.contains(&format!("\"rom_sha256\":\"{sha}\"")), "{out}");
@@ -1205,7 +1205,7 @@ fn rexistro_seralliza_un_recurso_confirmado_pola_carga_medida() {
         "a evidencia non é a cadea medida: {out}"
     );
     assert!(
-        out.contains("\"confianza\":\"confirmado-estaticamente\""),
+        out.contains("\"confianza\":\"vinculo-estrutural\""),
         "{out}"
     );
     assert!(
@@ -1215,7 +1215,7 @@ fn rexistro_seralliza_un_recurso_confirmado_pola_carga_medida() {
     assert!(out.contains("\"perfil_mapper\":\"md-linear\""), "{out}");
     assert!(out.contains("REXISTRO 0x01000"), "{out}");
     assert!(
-        out.contains("RESUMO rexistros=1 confirmados=1 candidatos=0"),
+        out.contains("RESUMO rexistros=1 vinculo-estrutural=1 referencia-estatica=0 candidatos=0"),
         "{out}"
     );
     let _ = std::fs::remove_dir_all(&d);
@@ -1224,7 +1224,7 @@ fn rexistro_seralliza_un_recurso_confirmado_pola_carga_medida() {
 #[test]
 fn rexistro_marca_candidato_cando_decodifica_sen_vinculo() {
     // Control de non-vacuidade: o mesmo fluxo sen `lea`/`jsr` segue decodificando
-    // igual. Se aquí sae `confirmado-estaticamente`, a confianza depende do
+    // igual. Se aquí sae `vinculo-estrutural`, a confianza depende do
     // decode e non da evidencia de consumidor.
     let d = dir_temporal("rexistro-candidato");
     let im = imaxe_rexistro(&d, "a.md", false);
@@ -1236,7 +1236,7 @@ fn rexistro_marca_candidato_cando_decodifica_sen_vinculo() {
     assert!(out.contains("\"evidencia_consumidor\":[]"), "{out}");
     assert!(out.contains("\"bytes_consumidos\":14"), "{out}");
     assert!(
-        out.contains("RESUMO rexistros=1 confirmados=0 candidatos=1"),
+        out.contains("RESUMO rexistros=1 vinculo-estrutural=0 referencia-estatica=0 candidatos=1"),
         "{out}"
     );
     let _ = std::fs::remove_dir_all(&d);
@@ -1345,7 +1345,7 @@ fn perfil_escrito_polo_cli_reler_se_e_aplica_a_a_imaxe_que_pinna() {
     let (st, rex, e2) = rexistro_con(&im, &p, "4096");
     assert_eq!(st, Some(0), "{rex} {e2}");
     assert!(
-        rex.contains("\"confianza\":\"confirmado-estaticamente\""),
+        rex.contains("\"confianza\":\"vinculo-estrutural\""),
         "{rex}"
     );
     let _ = std::fs::remove_dir_all(&d);
@@ -1364,7 +1364,7 @@ fn rexistro_aceita_o_enderezo_en_hexadecimal_sem_gardarse_un_token_malo() {
     let (st, out, err) = rexistro_con(&im, &p, "0x1000");
     assert_eq!(st, Some(0), "stdout={out} stderr={err}");
     assert!(
-        out.contains("\"confianza\":\"confirmado-estaticamente\""),
+        out.contains("\"confianza\":\"vinculo-estrutural\""),
         "0x1000 non se leu como 4096: {out}"
     );
     let (st, out, err) = rexistro_con(&im, &p, "0x1000g");

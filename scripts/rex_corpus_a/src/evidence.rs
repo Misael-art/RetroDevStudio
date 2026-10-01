@@ -19,9 +19,11 @@
 //! Un desprazamento con menos de cinco díxitos rexéitase na lectura — `0x40`
 //! non é a forma en que se mediu.
 //!
-//! [`Evidencia::vincula`] separa o que a Fase 2 xa aprendeu: a presenza de
-//! bytes (`ref`) non é un consumidor. Unha cadea `ref` pode acompañar un
-//! rexistro, pero soa non o confirma.
+//! [`Evidencia::vincula`] separa o que as fases mediron: a presenza de
+//! bytes (`ref`) non é un consumidor (retractación da Fase 2), e unha táboa
+//! de punteiros crecentes tampouco (refutación de R1 na Fase 4). Unha cadea
+//! `ref` ou `taboa` pode acompañar un rexistro; soa non o confirma. O que
+//! vincula é unha forma de instrución medida: `lea` ou chamada absoluta.
 
 use crate::consumer::{CargaAbsoluta, JsrSite, PointerTable, RefSite};
 
@@ -80,10 +82,31 @@ impl Evidencia {
         Evidencia::Referencia { offset: r.offset }
     }
 
-    /// ¿Proba esta evidencia un consumidor? `Referencia` non: é a forma que a
-    /// Fase 2 tomou por vínculo e despois retractou.
+    /// ¿Proba esta evidencia un consumidor? Só as formas de **instrución**:
+    /// `Carga` (`lea abs.l,An` co fluxo como operando) e `Chamada`
+    /// (`jsr`/`jmp` abs.l). `Referencia` non — é a forma que a Fase 2 tomou
+    /// por vínculo e despois retractou — e `Taboa` tampouco: a Fase 4 mediu
+    /// que unha secuencia crecente de longwords non distingue recurso de
+    /// azar (as táboas da reservada desaparecen entre `min=3` e `min=4`, e
+    /// Altered Beast produce táboas que comezan en `0x12`). Unha táboa pode
+    /// acompañar un rexistro; soa non o confirma.
     pub fn vincula(&self) -> bool {
-        !matches!(self, Evidencia::Referencia { .. })
+        matches!(self, Evidencia::Carga { .. } | Evidencia::Chamada { .. })
+    }
+
+    /// A carga vai seguida, dentro da ventá, dunha chamada a unha rutina:
+    /// é a forma completa `lea fluxo,A0 → jsr rutina`. É a evidencia que
+    /// sustenta `vinculo-estrutural`; unha `lea` sen chamada é
+    /// `referencia-estatica` (Sonic 1 chama con `bsr`, que a ferramenta non
+    /// modela — Fase 4 §7).
+    pub fn e_carga_con_chamada(&self) -> bool {
+        matches!(
+            self,
+            Evidencia::Carga {
+                chamada: Some(_),
+                ..
+            }
+        )
     }
 
     pub fn format(&self) -> String {

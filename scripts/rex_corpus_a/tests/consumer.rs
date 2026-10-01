@@ -314,8 +314,8 @@ fn rexistro() -> ResourceRecord {
         bytes_consumed: Some(0x31),
         output_size: Some(0x800),
         output_sha256: Some("cc".repeat(32)),
-        consumer_evidence: vec!["taboa@0x000C0/3/crecente".into()],
-        confidence: Confidence::ConfirmadoEstaticamente,
+        consumer_evidence: vec!["lea@0x00040/A0/chamada@0x0004C/0x085A2".into()],
+        confidence: Confidence::VinculoEstrutural,
         limitations: vec!["sen execución".into()],
         mapper_profile: Some("md-linear".into()),
         mapper_state: None,
@@ -326,21 +326,42 @@ fn rexistro() -> ResourceRecord {
 fn rexistro_versiona_o_esquema_a_confianza_e_o_offset_medido() {
     let j = render(&rexistro().to_json());
     assert!(
-        j.contains("\"schema_version\":\"rex-corpus-resource/v1\""),
+        j.contains("\"schema_version\":\"rex-corpus-resource/v2\""),
         "{j}"
     );
-    assert!(
-        j.contains("\"confianza\":\"confirmado-estaticamente\""),
-        "{j}"
-    );
+    assert!(j.contains("\"confianza\":\"vinculo-estrutural\""), "{j}");
     assert!(j.contains("\"offset\":76864"), "{j}");
     assert!(
-        j.contains("\"evidencia_consumidor\":[\"taboa@0x000C0/3/crecente\"]"),
+        j.contains("\"evidencia_consumidor\":[\"lea@0x00040/A0/chamada@0x0004C/0x085A2\"]"),
         "{j}"
     );
     // A mostra desta crate tamén ten que cumprir o contrato de evidencia: un
     // rexistro que non pasa `validar()` non é un exemplo, é una falsa.
     rexistro().validar().expect("fixture fóra do contrato");
+}
+
+#[test]
+fn rexistro_con_soa_taboa_non_pode_afirmar_vinculo() {
+    // A Fase 4 refutou R1: unha táboa crecente non distingue recurso de azar.
+    // Un rexistro cuxa única evidencia é unha táboa queda `candidato` coa
+    // medida rexistrada, nunca `vinculo-estrutural`.
+    let so_taboa = ResourceRecord {
+        consumer_evidence: vec!["taboa@0x000C0/3/crecente".into()],
+        confidence: Confidence::Candidato,
+        ..rexistro()
+    };
+    so_taboa
+        .validar()
+        .expect("candidato con táboa medida é coherente");
+    let afirmado = ResourceRecord {
+        consumer_evidence: vec!["taboa@0x000C0/3/crecente".into()],
+        confidence: Confidence::VinculoEstrutural,
+        ..rexistro()
+    };
+    assert!(
+        afirmado.validar().is_err(),
+        "unha táboa non sustenta vinculo-estrutural"
+    );
 }
 
 #[test]

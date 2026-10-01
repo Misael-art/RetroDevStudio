@@ -24,7 +24,9 @@ const LIMITE_BYTES: u64 = 16 * 1024 * 1024;
 /// Etiquetas de esquema das saidas de sondeo (versionadas como o manifesto).
 const SCHEMA_MAGIA: &str = "rex-corpus-magia/v1";
 /// v2: `ENDERESO` leva `cargas=` e aparecen as liñas `CARGA` (Fase 4).
-const SCHEMA_CONSUMIDOR: &str = "rex-corpus-consumer/v2";
+/// v3: `vinculo=si` só por forma de instrución (chamada ou carga); unha
+/// `TABOA` enumérase pero non pon vínculo — refutación de R1 (Fase 4 §4).
+const SCHEMA_CONSUMIDOR: &str = "rex-corpus-consumer/v3";
 
 const USO: &str = "\
 rex-corpus — ferramentas de corpus para REX (Misión A)
@@ -80,9 +82,12 @@ Subcomandos:
                hai bytes que medir. Esixe --perfil: o perfil pinna o SHA-256 da
                imaxe, e se os bytes non coinciden a ferramenta para con
                PERFIL-DIVERXENCIA (codigo 5) en vez de transplantar offsets
-               doutra revision. A confianza soe ser `confirmado-estaticamente`
-               cando hai evidencia que vincule (`rex-corpus-evidence/v1`); sen
-               ela, `candidato`.
+               doutra revision. A confianza segue a evidencia medida
+               (`rex-corpus-evidence/v1`): `vinculo-estrutural` con carga
+               seguida de chamada a rutina, `referencia-estatica` cando o
+               enderezo e operando dunha instrucion sen chamada conectada,
+               `candidato` sen evidencia de instrucion. Ningunha delas proba
+               que a rutina descomprima nin que o fluxo se consuma en runtime.
                Os rexistros do corpus real estan versionados en
                `data/rex_corpus_a/evidencia/*.jsonl` e os seus perfis en
                `data/rex_corpus_a/perfis/*.json`; só levan hashes, offsets e
@@ -695,7 +700,11 @@ fn cmd_consumidor(args: &[String]) -> i32 {
             .take(max_ref)
             .cloned()
             .collect::<Vec<_>>();
-        let vincula = !chamadas.is_empty() || !taboas.is_empty() || !cargas.is_empty();
+        // Só unha forma de instrución pon vínculo: a Fase 4 mediu que unha
+        // táboa crecente de longwords non distingue recurso de azar (R1
+        // refutada), e chamalo vínculo foi o erro que a Fase 2 retractou en
+        // Sonic 0x745DC. A táboa enumérase; non vencella.
+        let vincula = !chamadas.is_empty() || !cargas.is_empty();
         if vincula {
             vinculados += 1;
         } else {
@@ -824,8 +833,10 @@ fn cmd_perfil(args: &[String]) -> i32 {
     0
 }
 
-/// Rexistro `rex-corpus-resource/v1` dun enderezo: que bytes consume, que
-/// produce e **quen o chama**.
+/// Rexistro `rex-corpus-resource/v2` dun enderezo: que bytes consume, que
+/// produce e **quen o referencia**. A confianza (v2) nomea a medida:
+/// `vinculo-estrutural` / `referencia-estatica` / `candidato` — ningunha
+/// alega que a rutina sexa un decoder nin que haxa consumo en runtime.
 ///
 /// Esixe `--perfil` porque sen imaxe pinada non hai rexistro reutilizable: o
 /// perfil fixa o SHA-256 dos bytes que se lle entregan. Se non coincide, isto
@@ -905,7 +916,8 @@ fn cmd_rexistro(args: &[String]) -> i32 {
     let todas_chamadas = rex_corpus::consumer::call_sites(&imaxe, desde, ata, usize::MAX);
 
     let mut rexistros = 0usize;
-    let mut confirmados = 0usize;
+    let mut estruturais = 0usize;
+    let mut referencias = 0usize;
     let mut candidatos = 0usize;
     let mut sen_fluxo = 0usize;
     let mut non_traducibles = 0usize;
@@ -948,7 +960,10 @@ fn cmd_rexistro(args: &[String]) -> i32 {
                 }
             };
 
-        // Evidencia medida nesta imaxe, nas tres formas que a Fase 4 separou.
+        // Evidencia medida nesta imaxe, nas formas que a Fase 4 separou. O
+        // nivel de confianza sale da evidencia, non ao revés: carga con
+        // chamada → vinculo-estrutural; instrución sen chamada conectada →
+        // referencia-estatica; sen evidencia de instrución → candidato.
         let mut evidencias: Vec<rex_corpus::evidence::Evidencia> = Vec::new();
         for c in todas_cargas.iter().filter(|c| c.operando == *addr) {
             let d0 = c.offset + 6;
@@ -963,8 +978,12 @@ fn cmd_rexistro(args: &[String]) -> i32 {
         for t in rex_corpus::consumer::tables_for(&imaxe, &[*addr], perfil.min_entradas, 16) {
             evidencias.push(rex_corpus::evidence::Evidencia::desde_taboa(&t));
         }
-        let confianza = if evidencias.iter().any(|e| e.vincula()) {
-            Confidence::ConfirmadoEstaticamente
+        let carga_con_chamada = evidencias.iter().any(|e| e.e_carga_con_chamada());
+        let vinculantes = evidencias.iter().filter(|e| e.vincula()).count();
+        let confianza = if carga_con_chamada {
+            Confidence::VinculoEstrutural
+        } else if vinculantes > 0 {
+            Confidence::ReferenciaEstatica
         } else {
             Confidence::Candidato
         };
@@ -977,6 +996,14 @@ fn cmd_rexistro(args: &[String]) -> i32 {
                 "rom_size efective {rom_efectivo:#x} nunha imaxe de {} bytes: md-linear esixe potencia de 2 e o arquivo non se modificou",
                 imaxe.len()
             ));
+        }
+        if confianza != Confidence::Candidato {
+            // O que a busca de opcodes é — e o que non é. Pode casar bytes de
+            // datos: non hai análise de alcanzabilidade desde o punto de entrada.
+            limitacions.push(
+                "evidencia por varredura lineal aliñada a palabra: un opcode pode casar en bytes de datos; sen análise de alcanzabilidade"
+                    .to_string(),
+            );
         }
         if confianza == Confidence::Candidato {
             limitacions.push(
@@ -1007,10 +1034,10 @@ fn cmd_rexistro(args: &[String]) -> i32 {
             }
             Ok(()) => {
                 rexistros += 1;
-                if rexistro.confidence == Confidence::ConfirmadoEstaticamente {
-                    confirmados += 1;
-                } else {
-                    candidatos += 1;
+                match rexistro.confidence {
+                    Confidence::VinculoEstrutural => estruturais += 1,
+                    Confidence::ReferenciaEstatica => referencias += 1,
+                    _ => candidatos += 1,
                 }
                 println!(
                     "REXISTRO 0x{addr:05X} perfil={} confianza={} consumo={} saida={} evidencia={}",
@@ -1028,7 +1055,7 @@ fn cmd_rexistro(args: &[String]) -> i32 {
         println!("REXISTRO sen rexistros :: ningún enderezo deu un fluxo medible e valido");
     }
     println!(
-        "RESUMO rexistros={rexistros} confirmados={confirmados} candidatos={candidatos} sen_fluxo={sen_fluxo} non_traducibles={non_traducibles} rexeitados={rexeitados}"
+        "RESUMO rexistros={rexistros} vinculo-estrutural={estruturais} referencia-estatica={referencias} candidatos={candidatos} sen_fluxo={sen_fluxo} non_traducibles={non_traducibles} rexeitados={rexeitados}"
     );
     let _ = std::io::stdout().flush();
     if rexeitados > 0 {

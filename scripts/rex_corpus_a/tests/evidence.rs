@@ -1,10 +1,11 @@
 //! Contrato das cadeas de evidencia de consumidor (`rex-corpus-evidence/v1`).
 //!
-//! O rexistro `rex-corpus-resource/v1` garda `consumer_evidence` como
-//! `Vec<String>`. Se calquera cadea vale, un rexistro pode afirmar
-//! `confirmado-estaticamente` cunha proba inventada. Estas probas fixan a
-//! gramática: só se fabrican desde as estruturas medidas, e só se len se cumpren
-//! a forma.
+//! O rexistro `rex-corpus-resource/v2` garda `consumer_evidence` como
+//! `Vec<String>`. Se calquera cadea vale, un rexistro pode afirmar unha
+//! confianza máis forte que a súa proba. Estas probas fixan a gramática: só
+//! se fabrican desde as estruturas medidas, só se len se cumpren a forma, e
+//! a confianza corresponde exactamente á evidencia — nin máis forte nin máis
+//! feble.
 
 use rex_corpus::consumer::{CargaAbsoluta, JsrSite, PointerTable, RefSite};
 use rex_corpus::evidence::{Evidencia, SCHEMA_EVIDENCIA};
@@ -61,7 +62,11 @@ fn chamada_e_taboa_formatean_as_súas_formas_medibles() {
         ascending: true,
     });
     assert_eq!(t.format(), "taboa@0x71A9C/19/crecente");
-    assert!(t.vincula());
+    assert!(
+        !t.vincula(),
+        "a Fase 4 refutou R1: unha táboa crecente non distingue recurso de azar \
+         (desaparece entre min=3 e min=4 na reservada; Altered Beast produce-as dende 0x12)"
+    );
 }
 
 #[test]
@@ -183,26 +188,73 @@ fn rexistro(confidence: Confidence, evidencia: &[&str]) -> ResourceRecord {
 }
 
 #[test]
-fn rexistro_confirmado_cunha_evidencia_da_gramatica_valida() {
+fn rexistro_estrutural_cunha_carga_con_chamada_valida() {
     let r = rexistro(
-        Confidence::ConfirmadoEstaticamente,
+        Confidence::VinculoEstrutural,
         &["lea@0x10642/A0/chamada@0x10648/0x085A2"],
     );
     r.validar().expect("rexistro coherente");
 }
 
 #[test]
-fn rexistro_confirmado_sen_evidencia_vinculante_rexeitase() {
-    let baleiro = rexistro(Confidence::ConfirmadoEstaticamente, &[]);
-    let erro = baleiro.validar().unwrap_err();
-    assert!(erro.contains("sen evidencia"), "{erro}");
+fn rexistro_estrutural_sen_carga_con_chamada_rexeitase() {
+    // `vinculo-estrutural` precisa a forma completa lea→chamada: unha `lea`
+    // solitaria é menos do que o rótulo afirma.
+    let so_lea = rexistro(Confidence::VinculoEstrutural, &["lea@0x00040/A0"]);
+    let erro = so_lea.validar().unwrap_err();
+    assert!(erro.contains("máis forte que a proba"), "{erro}");
 
-    // Unha `ref` é medida pero non vínculo: Fase 2 tomouno por un e retractouse.
-    let so_ref = rexistro(Confidence::ConfirmadoEstaticamente, &["ref@0x71998"]);
+    let baleiro = rexistro(Confidence::VinculoEstrutural, &[]);
+    assert!(baleiro.validar().is_err(), "estrutural sen proba ningunha");
+}
+
+#[test]
+fn rexistro_referencia_estatica_cunha_instrucion_sen_chamada_valida() {
+    // Sonic 1: `lea fluxo,A0` medida; a chamada é `bsr`, que non se modela.
+    let r = rexistro(Confidence::ReferenciaEstatica, &["lea@0x03082/A0"]);
+    r.validar().expect("referencia estática coherente");
+
+    // Unha chamada ao enderezo tamén é forma de instrución.
+    let c = rexistro(Confidence::ReferenciaEstatica, &["chamada@0x1085E/0x1CAEC"]);
+    c.validar().expect("chamada ao enderezo é instrución");
+}
+
+#[test]
+fn rexistro_referencia_estatica_rexeitase_se_a_medida_e_mais_forte_ou_mais_feble() {
+    // Se hai carga con chamada medida, a confianza non pode ser a feble: o
+    // rexistro mentiría por defecto.
+    let baixa = rexistro(
+        Confidence::ReferenciaEstatica,
+        &["lea@0x10642/A0/chamada@0x10648/0x085A2"],
+    );
+    let erro = baixa.validar().unwrap_err();
+    assert!(erro.contains("máis feble que a medida"), "{erro}");
+
+    // E sen ningunha forma de instrución tampoco é referencia estática.
+    let so_ref = rexistro(Confidence::ReferenciaEstatica, &["ref@0x71998"]);
     assert!(
         so_ref.validar().is_err(),
-        "unha referencia crúa confirma un recurso"
+        "unha referencia crúa non sustenta referencia-estatica"
     );
+    let so_taboa = rexistro(
+        Confidence::ReferenciaEstatica,
+        &["taboa@0x71A9C/19/crecente"],
+    );
+    assert!(
+        so_taboa.validar().is_err(),
+        "unha táboa non sustenta referencia-estatica: R1 refutada"
+    );
+}
+
+#[test]
+fn rexistro_candidato_permite_evidencia_que_non_vincula() {
+    // `ref` e `taboa` son medidas sen forza de vínculo: pódense rexistrar
+    // xunto a `candidato` sen contradicior a medida.
+    let r = rexistro(
+        Confidence::Candidato,
+        &["ref@0x71998", "taboa@0x71A9C/19/crecente"],
+    );
+    r.validar().expect("evidencia non vinculante con candidato");
 }
 
 #[test]
@@ -213,7 +265,7 @@ fn rexistro_rexeita_evidencia_fora_da_gramatica_que_afirma_un_vinculo() {
         "TABOA base=0x71A9C entradas=19",
         "taboa@0x71A9C/19/crecente/extracampo",
     ] {
-        let r = rexistro(Confidence::ConfirmadoEstaticamente, &[mala]);
+        let r = rexistro(Confidence::VinculoEstrutural, &[mala]);
         assert!(r.validar().is_err(), "aceitou {mala:?} como evidencia");
     }
 }
