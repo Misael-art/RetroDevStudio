@@ -1,0 +1,148 @@
+{
+ "schema_version": 1,
+ "gerado_por": "scripts/rex_corpus_b/find-references.py",
+ "metodo": "duas passadas: (1) padrao de 4 bytes big-endian do endereco absoluto, com classificacao do opcode anterior pelo ISA publico 68000; (2) instrucoes lea/movea.l/move.l com deslocamento de 16 bits relativo ao PC cujo alvo calculado e o endereco consultado",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
+  "nome": "sonic1",
+  "sha256_arquivo": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "size_bytes": 531577,
+  "procedencia_interna": {
+   "kind": "raw",
+   "member": "Sonic the Hedgehog (USA, Europe).bin",
+   "member_size": 531577
+  },
+  "internal_name": "SONIC THE",
+  "product_code": "GM 00001009-00",
+  "programa_declarado": [
+   "0x0",
+   "0x805a6"
+  ]
+ },
+ "enderecos": [
+  {
+   "endereco": "0x1b64c",
+   "absoluto": {
+    "total_ocorrencias": 0,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 1,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x1c900",
+      "opcode": "0x672a",
+      "candidato_instrucao": null,
+      "disp": "-0x12b6",
+      "alvo": "0x1b64c",
+      "antes": "6704383c00014a44",
+      "depois": "2d40000447f120002c9b2c9b"
+     }
+    ],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x4100",
+   "absoluto": {
+    "total_ocorrencias": 0,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 2,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x40f8",
+      "opcode": "0x21fb",
+      "candidato_instrucao": null,
+      "disp": "0x6",
+      "alvo": "0x4100",
+      "antes": "70001038fe10e548",
+      "depois": "f7964e7500064a0000064b9a"
+     },
+     {
+      "offset": "0x423a",
+      "opcode": "0x7",
+      "candidato_instrucao": null,
+      "disp": "-0x13c",
+      "alvo": "0x4100",
+      "antes": "5338fec46a1811fc",
+      "depois": "5238fec50c380006fec56506"
+     }
+    ],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x1b648",
+   "absoluto": {
+    "total_ocorrencias": 0,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 0,
+    "instrucoes_classificadas": 0,
+    "candidatos": [],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x65432",
+   "absoluto": {
+    "total_ocorrencias": 1,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x1b64c",
+      "opcode_anterior": "0x0",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "4b4c4d4e4b4c4d4e0000",
+      "depois": "000656ac00065abe00065e1a000662f4"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 2,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x64420",
+      "opcode": "0xf9f4",
+      "candidato_instrucao": null,
+      "disp": "0x1010",
+      "alvo": "0x65432",
+      "antes": "f1f1101010101010",
+      "depois": "101010101010101010101010"
+     },
+     {
+      "offset": "0x6b230",
+      "opcode": "0x1d0",
+      "candidato_instrucao": null,
+      "disp": "-0x5e00",
+      "alvo": "0x65432",
+      "antes": "10a002b09a001100",
+      "depois": "1158032ca512117003773600"
+     }
+    ],
+    "omitidos": 0
+   }
+  }
+ ],
+ "limitacoes": [
+  "Uma ocorrencia dos 4 bytes de um endereco pode ser dado coincidente; so a classificacao de opcode + contexto indica instrucao real.",
+  "O passo absoluto so casa operando (xxx).L (4 bytes). Formas (xxx).W, modo registrador, (d8,PC), tabelas indexadas a partir de um registrador base e salto via vetor NAO sao detectadas; ausencia de ocorrencia NAO e prova de ausencia de consumidor.",
+  "O passo pc-relativo enumera candidatos por aritmetica de deslocamento (opcode cru no resultado); rotulos so sao emitidos para formas catalogadas, e a classificacao cobre MOVE/MOVEA/LEA/CMP/JSR/JMP com (d16,PC) em fronteira de palavra.",
+  "Rotulos derivam da tabela publica de modos de enderecamento do 68000 (modo 111: 000=.W, 001=.L, 010=(d16).PC, 100=imediato); a fonte esta no docstring do modulo.",
+  "Isto e evidencia de CONSUMIDOR CANDIDATO; a semantica do recurso ainda exige leitura da rotina."
+ ]
+}

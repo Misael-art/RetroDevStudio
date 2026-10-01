@@ -1,0 +1,77 @@
+{
+ "schema_version": 1,
+ "gerado_por": "scripts/rex_corpus_b/find-references.py",
+ "metodo": "duas passadas: (1) padrao de 4 bytes big-endian do endereco absoluto, com classificacao do opcode anterior pelo ISA publico 68000; (2) instrucoes lea/movea.l/move.l com deslocamento de 16 bits relativo ao PC cujo alvo calculado e o endereco consultado. Com --tabelas soma-se a passada (3): inventario de TODAS as cargas catalogadas e das que apontam para cada janela, na direcao oposta a das passadas 1-2",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Pulseman (Japan) (Translated En) (Translated PtBr).zip",
+  "nome": "pulseman",
+  "sha256_arquivo": "0745e1a248548bcec0fcd50343c0df1f2b9cfd0303c07010ca6ef933e5b4ec43",
+  "size_bytes": 2097152,
+  "procedencia_interna": {
+   "kind": "zip",
+   "member": "Pulseman (Japan) (Translated En).gen",
+   "member_size": 2097152,
+   "member_crc32": "925f7be6"
+  },
+  "internal_name": "PULSEMAN",
+  "product_code": "GM G-4098  -00",
+  "programa_declarado": [
+   "0x0",
+   "0x200000"
+  ]
+ },
+ "enderecos": [],
+ "limitacoes": [
+  "Uma ocorrencia dos 4 bytes de um endereco pode ser dado coincidente; so a classificacao de opcode + contexto indica instrucao real.",
+  "O passo absoluto so casa operando (xxx).L (4 bytes). Formas (xxx).W, modo registrador, (d8,PC), (d16,PC,Xi)/(d8,PC,Xi) com indice, tabelas indexadas a partir de um registrador base e salto via vetor NAO sao detectadas; ausencia de ocorrencia NAO e prova de ausencia de consumidor.",
+  "(d8,PC) (modo 110 registrador 000) esta FORA do catalogo porque o montador do toolchain nao produz codificacao d8 para `lea 12(%pc),%a0` nem sob -m68010 (emitir 41fa 000c = d16): sem encoding confirmado, rotular seria adivinhar. Ver data/rex_corpus_b/recursos/isa-forms.json.",
+  "O passo pc-relativo enumera candidatos por aritmetica de deslocamento (opcode cru no resultado); rotulos so sao emitidos para formas catalogadas (MOVE.L/MOVEA.L/LEA/JSR/JMP), e a classificacao so cobre os modos de enderecamento com codificacao montada e desmontada.",
+  "Rotulos conferidos word a word contra m68k-elf-as (GNU binutils) do toolchain SGDK, fixado por SHA-256; a tabela de modos publica foi usada apenas para a POSICAO dos campos, nunca como unica fonte de codificacao.",
+  "Isto e evidencia de CONSUMIDOR CANDIDATO; a semantica do recurso ainda exige leitura da rotina.",
+  "No modo --tabelas, `cargas_total` e medido sem filtro de janela de proposito: cargas_total=0 significa que a FERRAMENTA nao ve carga catalogada alguma na area escaneada, o que torna nula qualquer conclusao de ausencia de consumidor para uma janela vazia."
+ ],
+ "inventario": {
+  "cargas_total": 4830,
+  "janelas": [
+   {
+    "janela": "0x50430-0x506a0",
+    "total": 2,
+    "por_forma": {
+     "lea (xxx).L,a0": 1,
+     "lea (d16,PC),a4": 1
+    },
+    "sitios": [
+     {
+      "offset": "0x278fe",
+      "opcode": "41f9",
+      "forma": "lea (xxx).L,a0",
+      "operando": "0x00050694",
+      "alvo": "0x50694"
+     },
+     {
+      "offset": "0x49f52",
+      "opcode": "49fa",
+      "forma": "lea (d16,PC),a4",
+      "operando": "0x64fe",
+      "alvo": "0x50452"
+     }
+    ],
+    "omitidos": 0
+   },
+   {
+    "janela": "0x30000-0x300a0",
+    "total": 0,
+    "por_forma": {},
+    "sitios": [],
+    "omitidos": 0
+   },
+   {
+    "janela": "0x14517c-0x1451c0",
+    "total": 0,
+    "por_forma": {},
+    "sitios": [],
+    "omitidos": 0
+   }
+  ]
+ }
+}
