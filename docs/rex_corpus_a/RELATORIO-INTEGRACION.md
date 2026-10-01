@@ -6,8 +6,9 @@ que se pode integrar, o que queda aberto e o que **non** se probou.
 
 | | |
 |---|---|
-| Base declarada | `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` |
-| Base **efectivamente usada** | a mesma, e comprobada: `git merge-base b53ce7a HEAD` → `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` (é ancestral directo de HEAD). `b53ce7a` é a ponta publicada de `codex/rex-mugen-locomotion` (cadea MUGEN); o PR dependente deste fronte usa esa base. A integración no tronco (`codex/rex-integrator-crates-registry`, `0194f94`) coordínaa o integrador — o tronco aínda non contén `b53ce7a` (PRs #87–#95 empilhadas, sen merge). Unha versión anterior desta liña dicía "tronco = `codex/collect-counter-goal`": estaba **incorrecta** e corrixida aqui |
+| Base declarada | `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` (ponta publicada de `codex/rex-mugen-locomotion`) |
+| Base **efectivamente usada** | o fronte construíu sobre `b53ce7a` (ancestral directo, comprobado con `git merge-base`); **após a publicación, a branch foi rebasada** em `codex/rex-integrator-mugen-chain` (`8cf2aec`) — a ponta da mesma cadea, que engade `b0e23a3`/`8cf2aec` e o fix `23df722` do lockfile (brace-expansion). O rebase non tocou territorio deste fronte (diff `b53ce7a…8cf2aec` só en `crates/rex-mugen/`, nodegraph, memory-bank e `package-lock.json`) e o PR dependente passou a apontar á ponta da cadea. A integración no tronco (`codex/rex-integrator-crates-registry`, `0194f94`) coordínaa o integrador — o tronco aínda non contén a cadea (PRs #87–#96 empilhadas, sen merge). Unha versión anterior desta liña dicía "tronco = `codex/collect-counter-goal`": estaba **incorrecta** e corrixida aqui |
+| Rebase | as linhas "Base declarada" das fases 1–5 e as medidas históricas referem-se à base pré-rebase `b53ce7a`, preservada como história; os hashes da táboa §1 son os do rebase |
 | HEAD do frente | este commit — nove commits sobre a base, todos na táboa §1 |
 | Branch | `codex/rex-corpus-a` (publicada; PR #96 → `codex/rex-mugen-locomotion`) |
 | Worktree | `~/RDS-REX-CORPUS-A`, exclusiva deste frente |
@@ -18,15 +19,18 @@ que se pode integrar, o que queda aberto e o que **non** se probou.
 
 | Commit | Que trae |
 |---|---|
-| `ae3cc4c` | Fase 1 — inventario con proveniancia reculada e manifesto determinista |
-| `3af9aea` | Fase 2 — sondeo de recursos e ciclo do codec, con refutación propia |
-| `5b1ba74` | Fase 3 — aceite do codec pola razón declarada, código 6 de aceite incompleto |
-| `56de87e` | Fase 4 — vínculo por carga absoluta longa e refutación das regras |
-| `2c28431` | Fase 5 — contrato de evidencia, perfil fixado por hash, subcomandos `perfil`/`rexistro` |
-| `ac74ebf` | Fase 5 — perfis e rexistros versionados + verificador de forma `tests/artefactos.rs` |
-| `52f9abe` | Fase 6 — relatorio de integracion da rodada anterior |
-| `0a594a3` | Fase 6 (continuación) — contrato de confianza v2 (`vinculo-estrutural`/`referencia-estatica`), táboa non vinculante, morfoloxía do descompresor, parámetros, comparación independente e auditoría da mostra reservada (`FASE6-CADEIA-E-CORREXIONS.md`) |
-| este commit | Reconciliación do relatorio: oito esquemas, niveis v2, correccións da Fase 5 e gates 161 |
+| `592de95` | Fase 1 — inventario con proveniancia reculada e manifesto determinista |
+| `fc24810` | Fase 2 — sondeo de recursos e ciclo do codec, con refutación propia |
+| `62f4781` | Fase 3 — aceite do codec pola razón declarada, código 6 de aceite incompleto |
+| `dd1dced` | Fase 4 — vínculo por carga absoluta longa e refutación das regras |
+| `6a032e4` | Fase 5 — contrato de evidencia, perfil fixado por hash, subcomandos `perfil`/`rexistro` |
+| `c4eb00f` | Fase 5 — perfis e rexistros versionados + verificador de forma `tests/artefactos.rs` |
+| `bb50f28` | Fase 6 — relatorio de integracion da rodada anterior |
+| `9c21535` | Fase 6 (continuación) — contrato de confianza v2 (`vinculo-estrutural`/`referencia-estatica`), táboa non vinculante, morfoloxía do descompresor, parámetros, comparación independente e auditoría da mostra reservada (`FASE6-CADEIA-E-CORREXIONS.md`) |
+| `5b36486` | Reconciliación do relatorio: oito esquemas, niveis v2, correccións da Fase 5 e gates 161 |
+| `326719d` | Base da publicación corrixida — PR #96 |
+| `e1fb2a5` | Aritmética de desvios do 68000 corrixida — rutina medida fim a fim (160 bytes) |
+| este commit | Táboa de commits e base actualizadas tras o rebase |
 
 ## 2. Que se entrega para integrar
 
@@ -130,9 +134,12 @@ ferramenta sobre as imaxes locais e comprovados contra as medidas da Fase 4.
    non é deste frente.
 2. **Promoción de maturidade.** Todo o frente queda `Experimental`.
 3. **Publicación.** Feita nesta rodada, coa autorización do encargo:
-   `push` de `codex/rex-corpus-a` (remoto = local `463cb8a`…, verificado
-   antes para non sobrescribir: a branch non existía na orixe) e PR #96
-   dependente de `codex/rex-mugen-locomotion`. Sen merge.
+   `push` inicial de `codex/rex-corpus-a` (verificado antes para non
+   sobrescribir: a branch non existía na orixe) e PR #96 dependente;
+   tras o diagnóstico do CI (o `npm audit` fallaba polo lockfile da base,
+   non polo código) a branch foi **rebasada** em
+   `codex/rex-integrator-mugen-chain` e actualizada con
+   `--force-with-lease`. Sen merge.
 4. **Defectos propostos en territorio compartido** (reprodución mínima no
    informe da Fase 5 §9; **aquí non se modificou**):
    - `crates/rex-addressing`: `md_linear::translate` enmascara sen coñecer o
@@ -145,7 +152,8 @@ ferramenta sobre as imaxes locais e comprovados contra as medidas da Fase 4.
 
 ## 6. Gates da entrega final
 
-Executados en `~/RDS-REX-CORPUS-A/scripts/rex_corpus_a` con HEAD `52f9abe`:
+Executados en `~/RDS-REX-CORPUS-A/scripts/rex_corpus_a` (o isolado `6a032e4`
+corresponde ao `2c28431` pre-rebase):
 
 | Gate | Resultado |
 |---|---|

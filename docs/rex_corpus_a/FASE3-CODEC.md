@@ -7,7 +7,7 @@ vector; **ningún recurso do corpus confirmado** (ver «Aceite no corpus»).
 |---|---|
 | Branch | `codex/rex-corpus-a` (worktree exclusiva `~/RDS-REX-CORPUS-A`) |
 | Base declarada | `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` |
-| Fase anterior | `3af9aea` (sondeo de recursos e ciclo do codec) |
+| Fase anterior | `fc24810` (sondeo de recursos e ciclo do codec; `3af9aea` pre-rebase) |
 | Territorio rastreado | `scripts/rex_corpus_a/`, `docs/rex_corpus_a/`, `data/rex_corpus_a/` |
 | Compartido, **só lectura** | `crates/rex-kosinski/`, `data/rex_profiles/codec/kosinski/` |
 

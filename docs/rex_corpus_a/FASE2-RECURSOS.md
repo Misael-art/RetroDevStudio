@@ -7,7 +7,7 @@ corpus foi confirmado**.
 |---|---|
 | Branch | `codex/rex-corpus-a` (worktree exclusiva `~/RDS-REX-CORPUS-A`) |
 | Base declarada | `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` |
-| Fase anterior | `ae3cc4c` (inventario Fase 1) |
+| Fase anterior | `592de95` (inventario Fase 1; `ae3cc4c` pre-rebase) |
 | Territorio rastreado | `scripts/rex_corpus_a/`, `docs/rex_corpus_a/`, `data/rex_corpus_a/` |
 | Artefactos comerciais | **non versionados**; só hashes, offsets e lonxitudes |
 

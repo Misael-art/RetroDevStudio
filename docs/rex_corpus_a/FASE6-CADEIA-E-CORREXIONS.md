@@ -7,7 +7,7 @@ sen executar bytes, e declara a lacuna exacta que queda.
 | | |
 |---|---|
 | Branch | `codex/rex-corpus-a` (worktree exclusiva `~/RDS-REX-CORPUS-A`) |
-| Base desta fase | `52f9abe` (relatorio de integracion) |
+| Base desta fase | `bb50f28` (relatorio de integracion; `52f9abe` pre-rebase) |
 | Territorio | `scripts/rex_corpus_a/`, `docs/rex_corpus_a/`, `data/rex_corpus_a/` |
 | Amostras | 4 de desenvolvemento + 1 reservada, sen tocar o corpus (`stage.sh` só le) |
 
