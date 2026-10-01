@@ -1,0 +1,159 @@
+{
+ "schema_version": "rex-corpus-b/recurso-contextual/1",
+ "gerado_por": "scripts/rex_corpus_b/compor-recurso.py",
+ "recurso": {
+  "tipo": "nametable-64x32",
+  "rotulo": "mapa de nivel (plano VDP 64x32 entradas)",
+  "rom": {
+   "caminho": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
+   "membro": "Sonic the Hedgehog (USA, Europe).bin",
+   "sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+   "size_bytes": 531577
+  },
+  "offset_stream": "0x656ac",
+  "output_size": 4096,
+  "output_sha256": "4b5ac5ea3391a5146e935474137df1ae74bb3926354bb63a321e03020f12733d",
+  "bytes_consumed": 1042,
+  "codec": "enigma (variante plain)"
+ },
+ "consumidor_medido": {
+  "evidencia": "data/rex_corpus_b/recursos/consumidor-sonic1-mapas.json",
+  "cadeia": [
+   {
+    "offset": "0x1b694",
+    "instrucao": "cmpi.b #6,($FFFFFE57).b",
+    "significado": "guarda: nivel 6 segue outro caminho; indices 0..5 usam este bloco"
+   },
+   {
+    "offset": "0x1b6b6",
+    "instrucao": "lsl.w #2,d0",
+    "significado": "indice de nivel x 4 = byte offset na tabela"
+   },
+   {
+    "offset": "0x1b6b8",
+    "instrucao": "lea (-0x56,PC,D0.w),A1",
+    "significado": "pares auxiliares em 0x1b664 -> $FFFFD008/D00C"
+   },
+   {
+    "offset": "0x1b6c4",
+    "instrucao": "movea.l (-122,PC,D0.w),A0",
+    "significado": "ENTRADA DA TABELA 0x1b64c + indice*4 (ponteiro da stream)"
+   },
+   {
+    "offset": "0x1b6c8",
+    "instrucao": "lea $FF4000,A1",
+    "significado": "destino = PORTA DE DADOS VDP (escrita de nametable em VRAM)"
+   },
+   {
+    "offset": "0x1b6ce",
+    "instrucao": "move.w #0,d0",
+    "significado": "VALUE_OFFSET = 0 (medido no sitio de chamada)"
+   },
+   {
+    "offset": "0x1b6d2",
+    "instrucao": "jsr $171E",
+    "significado": "decodificador Enigma 68k (unico jsr absoluto a $171E na ROM)"
+   }
+  ],
+  "semantica_do_decodificador_68k": {
+   "inc_cursor": "a2 = incrementing_value + d0 (ADD, $171E+0x10..0x12)",
+   "common": "a4 = common_value + d0 (ADD, $171E+0x14..0x16)",
+   "inline": "valor = d0 OR/ADD bits altos lidos pela mascara 15..11 ($17DC)",
+   "value_offset_medido": 0
+  },
+  "empacotamento_no_rom": "streams encadeadas na ordem da tabela; consumo word-rounded (1 byte de pad antes da stream 6: 0x662f4+1233=0x667c5, proxima em 0x667c6)"
+ },
+ "vinculos": {
+  "mapa_para_vram": "PROVADO (porta de dados VDP $FF4000 no consumidor)",
+  "tiles_para_mapa": {
+   "status": "not-evidenced",
+   "referencia_faltante": "qual stream de arte (Kosinski, frente A) e carregada em VRAM antes da escrita do mapa, e em qual base — exige a rotina de carga de arte"
+  },
+  "paleta": {
+   "status": "not-evidenced",
+   "referencia_faltante": "carga de CRAM (cores) para o nivel; a rotina medida nao toca CRAM"
+  }
+ },
+ "estatisticas": {
+  "entradas": 2048,
+  "indices_distintos": 78,
+  "faixa_indice": [
+   0,
+   1836
+  ],
+  "campos": {
+   "com_prioridade": 0,
+   "com_paleta_nao_zero": 158,
+   "com_hflip": 164,
+   "com_vflip": 104,
+   "total": 2048
+  }
+ },
+ "negativos": {
+  "identidade": {
+   "descricao": "decode duplo deterministico",
+   "sha1": "4b5ac5ea3391a5146e935474137df1ae74bb3926354bb63a321e03020f12733d",
+   "sha2": "4b5ac5ea3391a5146e935474137df1ae74bb3926354bb63a321e03020f12733d",
+   "identico": true
+  },
+  "limites": {
+   "truncada_recusada": true,
+   "erro": "CodecError",
+   "mensagem": "truncated: bitstream ended mid-token (2 bits)"
+  },
+  "flips": {
+   "descricao": "hflip/vflip sao campos da entrada; inverte-los muda a saida",
+   "sha_hflip_invertido": "17c775c904e99f28a3d3fb264696e1cd121ecf72416faa78a44607db4f219da6",
+   "sha_vflip_invertido": "1fdf88593dcfddf387a201947021933c6acb531c727ee953184511825cec9431"
+  },
+  "base_de_tiles": {
+   "descricao": "value_offset 0x400 mudaria todos os indices; contradiz o consumidor medido (d0=0) — registrado como negativo, nao como hipotese",
+   "primeiro_indice_medido": 0,
+   "primeiro_indice_seria_com_base_0x400": 1024,
+   "recusado": true
+  },
+  "associacao_incorreta": {
+   "descricao": "interpretar os 4096 bytes como tile art 4bpp e associacao incorreta: os bits 15..12 de nametable sao campos, nao planos de pixel; a prova e o consumidor que escreve a saida na porta de dados VDP",
+   "assinatura_de_nametable": {
+    "com_prioridade": 0,
+    "com_paleta_nao_zero": 158,
+    "com_hflip": 164,
+    "com_vflip": 104,
+    "total": 2048
+   },
+   "rotulo_proibido": "tile sheet / cena"
+  }
+ },
+ "provas_visuais": {
+  "indice": {
+   "caminho": "/tmp/rex-corpus-b/composicao/mapa-656ac-indice.png",
+   "sha256": "481190cb35a4cd81c772c05daa8391267758165054fe37b27d6edbaa32829378",
+   "escala": 3,
+   "cor": "cinza (indice/valor do campo); sem paleta RGB"
+  },
+  "paleta": {
+   "caminho": "/tmp/rex-corpus-b/composicao/mapa-656ac-paleta.png",
+   "sha256": "3c14d74b35d86bf0f80fedd4f123b1e670ac52ee190e9e6b266002ccf0f0b519",
+   "escala": 3,
+   "cor": "cinza (indice/valor do campo); sem paleta RGB"
+  },
+  "hflip": {
+   "caminho": "/tmp/rex-corpus-b/composicao/mapa-656ac-hflip.png",
+   "sha256": "f8e500cbeff9c251b4f64200c4bc3233b544da00895772af3e79ba0931f10cdb",
+   "escala": 3,
+   "cor": "cinza (indice/valor do campo); sem paleta RGB"
+  },
+  "vflip": {
+   "caminho": "/tmp/rex-corpus-b/composicao/mapa-656ac-vflip.png",
+   "sha256": "ad4fa4c2dfff30c4312902e2796846e86a30c47fe032e6654698a673bd194c98",
+   "escala": 3,
+   "cor": "cinza (indice/valor do campo); sem paleta RGB"
+  },
+  "prioridade": {
+   "caminho": "/tmp/rex-corpus-b/composicao/mapa-656ac-prioridade.png",
+   "sha256": "2e708130f85b552e6570d4728ece59a6858113d6f453ee983e3db422f02ce48f",
+   "escala": 3,
+   "cor": "cinza (indice/valor do campo); sem paleta RGB"
+  }
+ }
+}

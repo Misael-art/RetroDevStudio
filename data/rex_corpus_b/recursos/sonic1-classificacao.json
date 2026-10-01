@@ -1,0 +1,346 @@
+{
+ "schema_version": "rex-corpus-b/sonic1-classificacao/1",
+ "gerado_por": "scripts/rex_corpus_b/classificar-sonic1.py",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
+  "sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "size_bytes": 531577
+ },
+ "regra": "codec e recurso so existem com span dentro do arquivo e consumidor; decode rc=0 do oraculo que le alem do EOF e falsa aceitacao",
+ "consumidor_medido": {
+  "evidencia": "consumidor-sonic1-mapas.json",
+  "composicao": "sonic1-mapa-0x65432.json",
+  "unico_jsr_para_171E": "0x1b6d2, com value_offset d0=0 e destino $FF4000"
+ },
+ "classificacoes": [
+  {
+   "offset": "0x64a00",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "decoded",
+     "oraculo_output": 8160,
+     "classificacao_final": "falsa-aceitacao do oraculo (tellg=-1: le alem do EOF)",
+     "motivo": "meu decoder recusa: InvalidReferenceError: registro de tabela com comprimento de codigo 0: referencia inatingivel por qualq"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "fora-do-dominio",
+     "motivo": "meu decoder recusa: CodecError: malformed-header: packet_length 0 outside variant domain (1, 11)"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "nao-recurso"
+  },
+  {
+   "offset": "0x64b9a",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: TruncatedError: EOF no meio do bitstream: falta(m) bit(s) alem de 952032"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "empty",
+     "oraculo_output": 0,
+     "classificacao_final": "fora-do-dominio",
+     "motivo": "meu decoder recusa: CodecError: malformed-header: packet_length 0 outside variant domain (1, 11)"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "nao-recurso"
+  },
+  {
+   "offset": "0x64c62",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: TruncatedError: EOF no meio do bitstream: falta(m) bit(s) alem de 950432"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "decoded",
+     "oraculo_output": 42,
+     "classificacao_final": "fora-do-dominio",
+     "motivo": "meu decoder recusa: CodecError: malformed-header: packet_length 0 outside variant domain (1, 11)"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "nao-recurso"
+  },
+  {
+   "offset": "0x64df2",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: TruncatedError: EOF no meio do bitstream: falta(m) bit(s) alem de 947232"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "empty",
+     "oraculo_output": 0,
+     "classificacao_final": "fora-do-dominio",
+     "motivo": "meu decoder recusa: CodecError: malformed-header: packet_length 0 outside variant domain (1, 11)"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "nao-recurso"
+  },
+  {
+   "offset": "0x64fe6",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: TruncatedError: EOF no meio do bitstream: falta(m) bit(s) alem de 943232"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "fora-do-dominio",
+     "motivo": "meu decoder recusa: CodecError: malformed-header: packet_length 0 outside variant domain (1, 11)"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "nao-recurso"
+  },
+  {
+   "offset": "0x651da",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: TruncatedError: EOF no meio do bitstream: falta(m) bit(s) alem de 939216"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "empty",
+     "oraculo_output": 0,
+     "classificacao_final": "fora-do-dominio",
+     "motivo": "meu decoder recusa: CodecError: malformed-header: packet_length 0 outside variant domain (1, 11)"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "nao-recurso"
+  },
+  {
+   "offset": "0x65432",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: InvalidReferenceError: registro de tabela com comprimento de codigo 0: referencia inatingivel por qualq"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "decoded",
+     "oraculo_output": 4096,
+     "classificacao_final": "recurso",
+     "motivo": "meu decode 4096 B, consumido 634, dentro=True"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "recurso (enigma)"
+  },
+  {
+   "offset": "0x656ac",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: InvalidReferenceError: registro de tabela com comprimento de codigo 0: referencia inatingivel por qualq"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "decoded",
+     "oraculo_output": 4096,
+     "classificacao_final": "recurso",
+     "motivo": "meu decode 4096 B, consumido 1042, dentro=True"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "recurso (enigma)"
+  },
+  {
+   "offset": "0x65abe",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: InvalidReferenceError: registro de tabela com comprimento de codigo 0: referencia inatingivel por qualq"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "decoded",
+     "oraculo_output": 4096,
+     "classificacao_final": "recurso",
+     "motivo": "meu decode 4096 B, consumido 860, dentro=True"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "recurso (enigma)"
+  },
+  {
+   "offset": "0x65e1a",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: InvalidReferenceError: registro de tabela com comprimento de codigo 0: referencia inatingivel por qualq"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "decoded",
+     "oraculo_output": 4096,
+     "classificacao_final": "recurso",
+     "motivo": "meu decode 4096 B, consumido 1242, dentro=True"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "recurso (enigma)"
+  },
+  {
+   "offset": "0x662f4",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "decoded",
+     "oraculo_output": 90592,
+     "classificacao_final": "falsa-aceitacao do oraculo (tellg=-1: le alem do EOF)",
+     "motivo": "meu decoder recusa: InvalidReferenceError: registro de tabela com comprimento de codigo 0: referencia inatingivel por qualq",
+     "associacao_incorreta": "mesmo offset decodifica como enigma confirmado pelo consumidor; atribuicao nemesis do oraculo nao tem consumidor"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "decoded",
+     "oraculo_output": 4096,
+     "classificacao_final": "recurso",
+     "motivo": "meu decode 4096 B, consumido 1233, dentro=True"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "recurso (enigma)"
+  },
+  {
+   "offset": "0x667c6",
+   "por_codec": [
+    {
+     "codec": "nemesis",
+     "status_oraculo": "refused",
+     "oraculo_output": 0,
+     "classificacao_final": "nao-recurso",
+     "motivo": "meu decoder recusa: InvalidReferenceError: registro de tabela com comprimento de codigo 0: referencia inatingivel por qualq"
+    },
+    {
+     "codec": "enigma",
+     "status_oraculo": "decoded",
+     "oraculo_output": 4096,
+     "classificacao_final": "recurso",
+     "motivo": "meu decode 4096 B, consumido 784, dentro=True"
+    },
+    {
+     "codec": "kosinski",
+     "status_oraculo": "oracle-pin-mismatch",
+     "oraculo_output": null,
+     "classificacao_final": "nao-recurso",
+     "motivo": null
+    }
+   ],
+   "final": "recurso (enigma)"
+  }
+ ],
+ "resumo": {
+  "recursos": 6,
+  "nao-recursos": 6
+ }
+}
