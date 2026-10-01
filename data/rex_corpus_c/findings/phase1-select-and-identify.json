@@ -1,0 +1,76 @@
+{
+  "schema": "rex-corpus-c-findings/1",
+  "phase": "1-select-and-identify",
+  "generated_on": "2026-09-30",
+  "method": {
+    "screen": "scripts/rex_corpus_c/identify.mjs over 76 read-only corpus members; identity from first-party in-ROM ASCII banners only",
+    "not_used": [
+      "franchise or filename inference",
+      "vgmrips/GMIC catalog labels as local evidence",
+      "executing any ROM byte"
+    ],
+    "corpus_note": "Every donor in this corpus comes from a translated (PtBr) zip, a homebrew build or an Unl dump; no pristine commercial dump was available locally. `Sonic the Hedgehog (USA, Europe).bin` is 531577 B with appended non-ROM bytes and `Aladdin (USA).bin` fails its own SEGA checksum, so both were excluded rather than repaired."
+  },
+  "selected": [
+    {
+      "member": "Story of Thor, The (Europe).gen",
+      "role": "primary",
+      "container_sha256": "86e79eeaa90fbd7cebbc121a6dada007a4ee406b8f9946495950b9b8b06a265b",
+      "container_size_bytes": 3145728,
+      "normalized_sha256": "9afb0388a7f045241f9fddb87afe20ade65acbed9f1605637d8cbe23c0fd6415",
+      "normalized_trimmed_bytes": 5398,
+      "header": { "name": "THE STORY OF THOR", "checksum_valid": true },
+      "driver_family": "ancient-music-driver",
+      "declared_version": "1.06",
+      "banner_offsets": ["0x60010", "0x62e58"],
+      "profile": "data/rex_corpus_c/profiles/ancient-md-sot-v1.json"
+    },
+    {
+      "member": "Streets of Rage 3 (USA).gen",
+      "role": "reserved_validation",
+      "container_sha256": "8855f797591823855cfe6440a0e33daac005b2531ecd2720ddc0c8718ed2ebe4",
+      "container_size_bytes": 3145728,
+      "normalized_sha256": "8855f797591823855cfe6440a0e33daac005b2531ecd2720ddc0c8718ed2ebe4",
+      "normalized_trimmed_bytes": 0,
+      "header": { "name": "BARE KNUCKLE3", "checksum_valid": true },
+      "driver_family": "ancient-music-driver",
+      "declared_version": "1.00",
+      "banner_offsets": ["0x1a8010", "0x1a9fce"],
+      "profile": "data/rex_corpus_c/profiles/ancient-md-sor3-v1.json",
+      "why_reserved": "declared before tuning, and different driver version plus different ROM, so it tests generalisation rather than recall"
+    },
+    {
+      "member": "Streets of Rage 2 (USA).bin",
+      "role": "not_selected",
+      "container_sha256": "a6faf732f7038c5ff3951001bc22628015d1028a33c452c22ad39f61b8afcf4a",
+      "container_size_bytes": 2097152,
+      "header": { "checksum_valid": true },
+      "driver_family": "mucom-md",
+      "declared_version": "0.85",
+      "banner_offsets": ["0x4000f"],
+      "why_not_selected": "no byte-level documentation exists for Mucom-MD in any source found, and reconstructing its chain was out of budget for one front; recorded as follow-up"
+    }
+  ],
+  "rejected_candidates": [
+    { "member": "Aladdin (USA).bin", "signal": "GEMS", "reason": "the match is the menu string 'ACHE MAIS GEMS', not a driver banner" },
+    { "member": "Sagaia (USA).gen", "signal": "GEMS", "reason": "credits text" },
+    { "member": "Sonic Delta Reloaded (Brazil) (Unl).bin", "signal": "GM 00001009-0", "reason": "track names, not a driver signature" },
+    { "member": "Kunio no Nekketsu School Fighters (beta v.01) (Brazil) (Unl).bin", "signal": "GM 1/2/4", "reason": "asset names ('Game BGM 1'), not 'GM <n>' driver tags" },
+    { "member": "Wonder Boy in Monster World (USA, Europe).gen", "signal": "Ancient", "reason": "story/credit text; Ancient the developer is credited, no driver banner" },
+    { "member": "Turma da Monica na Terra dos Monstros (Brazil).md", "signal": "Ancient", "reason": "same as above" },
+    { "member": "Addams Family, The (USA, Europe).gen", "signal": "GM @0x180", "reason": "cart serial field, not a signature" }
+  ],
+  "phase1_correction": {
+    "claim_retired": "no SMPS ROM exists in this local corpus",
+    "why_it_was_wrong": "the screen keyed on ASCII banners, but SMPS-Z80 drivers publish no version string in ROM; banner-only detection is necessary and not sufficient",
+    "evidence": "Mega Man - The Wily Wars (Europe).gen at 0x1e505a contains Z80 code 2a 02 1c (ld hl,($1C02)), the SMPS comm-queue data-start word; container sha-256 b9e41127281edbfc16b680d99d8187234c00b0e7c4cd4182d8a93aface9a0787, 2102230 B",
+    "consequence": "SMPS-Z80 remains an open front with a pinnable first-party spec; the Ancient profile delivered here does not depend on this claim"
+  },
+  "invariants_observed_across_both_ancient_roms": [
+    "Z80 banner sits at z80_image_start + 0x20",
+    "8 KiB Z80 image copied to $a00000 with `move.w #$1fff,d0` and byte-by-byte (a1)+/(a2)+ loop",
+    "song index read as `andi.w #$ff,d0 / lsl.w #$2,d0 / move.l (a0,d0.w),d1 / adda.l d1,a0`",
+    "stream dispatch prologue `movea.l $2(a6),a0 / moveq #$0,d2 / move.b (a0)+,d2 / cmpi.b #$f0,d2 / bcc / tst.b d2 / bne / bclr.b #$7,d2`, three instances in each ROM",
+    "index values strictly increasing; 177 used slots in v1.06, 128 in v1.00"
+  ]
+}
