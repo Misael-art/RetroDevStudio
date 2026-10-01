@@ -2201,3 +2201,21 @@ por vez, com CI re-medido no destino. Pendências com dono: reformulação SMPS 
 de C; resolução do relatório de A; correção da ref remota velha de
 `rex-integrator-profiles-codecs` (opcional, cosmética). Sem merge remoto, release ou
 promoção de maturidade nesta rodada.
+
+**Adenda da mesma rodada (ainda 2026-10-01).** PRs abertas, **sem merge**: **#92**
+(`codex/rex-integrator-mugen-chain`, `b0e23a3` → `codex/rex-integrator-crates-registry`),
+**#93** (curadoria C `a055777`), **#94** (curadoria D `5fba745`) — ambas empilhadas
+sobre a cadeia. CI verificado por consulta pontual: **success** nas três branches de
+curadoria (o audit de brace-expansion desapareceu com a base nova, como previsto).
+Curadoria de A também preparada: **#95** (`codex/rex-integrator-corpus-a`,
+`0c651de` = cherry-picks `-x` dos 7 commits de A sobre `2793430`, + `f1b271c`
+adenda do integrador no relatório: re-medição no destino **157/0/0** +
+`check:tree` OK, veredicto consumidor+variante+saída, e correção factual — a
+afirmação «o tronco é `codex/collect-counter-goal`» está apenas no diff NÃO
+commitado de A e não entra na cadeia; a adenda §7 do relatório registra a correção
+para a agente aplicar ao rebasear). Ref remota velha de
+`codex/rex-integrator-profiles-codecs` corrigida por push fast-forward
+(`d0744b0..7003d2a`) — a branch local deixa de parecer «ahead 2». CI da branch de A
+em andamento no momento do registro; veredicto por SHA a conferir na PR #95.
+Permanecem sem merge, release ou promoção; pendências com dono: SMPS de C, WIP do
+relatório de A, B (untracked, trabalho em curso), auditoria de segurança completa.
