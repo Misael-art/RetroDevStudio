@@ -6,18 +6,22 @@ paleta e nao afirma que um plain seja um tilemap. Ele responde a duas perguntas
 verificaveis:
 
   1) As palavras tem a assinatura de distribicao esperada de uma tabela de
-     entradas de nametable (bit15 prioridade, bit14 vflip, bit13 hflip,
-     bits12-11 paleta, bits10-0 indice de tile)?
+     entradas de nametable (bit15 prioridade, bit14-13 paleta, bit12 vflip,
+     bit11 hflip, bits10-0 indice de tile)?
   2) Existe periodo vertical (largura de linha) nas palavras? Medido de quatro
      maneiras e reportado junto: igualdade dos valores crus, igualdade da mascara
      "palavra != 0", e as versoes corrigidas pelo acaso (kappa). A mascara e a
      correcao existem porque plains de jogo sao almofadados com 0x0000, e ai a
      igualdade bruta sobe em QUALQUER passo — so ela nao prova periodo.
 
-A divisao de campos e uma HIPOTESE vinda da documentacao publica do VDP, nao uma
-propriedade da stream: as saidas sao rotuladas `hipotese_*` e o veredito e sempre
-derivado das medidas. Um plain que viola a hipotese (por ex. bit15 setado) e
-reportado como violacao, nao como "outro formato".
+A hipotese e o plain SER uma tabela de entradas de nametable; a divisao de campos
+usada para testar essa hipotese nao e chute — vem do toolchain oficial
+(tools/rescomp/src/sgdk/rescomp/type/Tile.java, mask 0x7FF / hflip 11 / vflip 12 /
+palette 13-14 / priority 15) e e confrontada por teste com md-tiles.py. As saidas
+continuam rotuladas `hipotese_*` porque descrevem o que o plain SIGNIFICARIA se a
+hipotese valer, e o veredito e sempre derivado das medidas. Um plain que viola a
+hipotese (por ex. bit15 setado) e reportado como violacao, nao como "outro
+formato".
 
 Uso (somente-leitura no corpus):
   python3 scripts/rex_corpus_b/nametable-structure.py --rom CAMINHO \
@@ -38,14 +42,25 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA_VERSION = "rex-corpus-b/nametable-structure/1"
 
-# --- Hipotese de campos da entrada de nametable (Mega Drive / VDP) --------------
+# --- Divisao de campos da entrada de nametable (Mega Drive / VDP) ---------------
 # (bit_inicial, bit_final, dominio_de_valor). O dominio e o que o HARDWARE
 # representa; um valor fora dele e uma violacao da hipotese, nao um campo valido.
+#
+# As POSICOES vem de fonte oficial do toolchain, medida no arquivo:
+#   tools/rescomp/src/sgdk/rescomp/type/Tile.java
+#     mascara de indice 0x7FF (2048 tiles), HFLIP bit 11, VFLIP bit 12,
+#     PALETTE bits 13-14, PRIORITY bit 15
+# e batem com md-tiles.py, que reescave as mesmas posicoes e e confrontado por
+# teste (test-nametable-structure.py: as duas leituras da palavra 0xD923).
+#
+# Registro de correcao: esta tabela original rotulava vflip=bit14, hflip=bit13 e
+# paleta=bits12-11. As contas por bit feitas com ela continuam validas (os bits
+# medidos sao os mesmos); o que estava errado era o NOME pendurado nos bits 11-14.
 CAMPOS = {
     "priority": (15, 15, (0, 1)),
-    "vflip": (14, 14, (0, 1)),
-    "hflip": (13, 13, (0, 1)),
-    "palette": (11, 12, (0, 3)),
+    "vflip": (12, 12, (0, 1)),
+    "hflip": (11, 11, (0, 1)),
+    "palette": (13, 14, (0, 3)),
     "tile": (0, 10, (0, 0x7FF)),
 }
 HIPOTESE_CAMPOS = {k: (v[2][0], v[2][1]) for k, v in CAMPOS.items()}
@@ -111,7 +126,7 @@ def word_stats(words):
         "bit15_setadas": sum(1 for w in words if w & 0x8000),
         "bit14_setadas": sum(1 for w in words if w & 0x4000),
         "bit13_setadas": sum(1 for w in words if w & 0x2000),
-        "palette_nao_zero": sum(1 for w in words if _extrai(w, 11, 12)),
+        "palette_nao_zero": sum(1 for w in words if _extrai(w, *CAMPOS["palette"][:2])),
         "deltas_top": _ordena_deltas(deltas)[:DELTA_TOP],
     }
 
@@ -339,7 +354,7 @@ def main(argv):
         "purpose": "medir distribuicao e periodo; NAO compor imagem nem afirmar tilemap",
         "streams": [measure_stream(data, int(x, 16), eni) for x in a.offset],
         "limitacoes": [
-            "A divisao de campos e HIPOTESE de documentacao publica do VDP; nada aqui prova que as palavras sejam entradas de nametable.",
+            "As POSICOES dos campos vem do toolchain oficial (SGDK Tile.java) e nao de suposicao; ainda assim nada aqui prova que as palavras SEJAM entradas de nametable. A hipotese testada e a assinatura de distribuicao, e ela e consistente com pertenca, nao identica a pertenca.",
             "Nenhum vinculo comprovado entre mapa, tiles e paleta: permanecem recursos separados. Nenhuma imagem e montada.",
             "value_offset (base de tile) e parametro EXTERNO nao evidenciado: nao aplicado.",
             "Larguras testadas: 4..64 palavras. Mapa mais largo, irregular ou com linhas de comprimentos diferentes nao e detectado.",

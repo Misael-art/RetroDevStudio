@@ -1,6 +1,6 @@
 {
  "schema_version": "rex-corpus-b/nametable-structure/1",
- "gerado_em": "2026-09-30T17:40:57-03:00",
+ "gerado_em": "2026-09-30T22:31:35-03:00",
  "rom": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
  "rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
  "origem": {
@@ -36,7 +36,7 @@
     "bit15_setadas": 0,
     "bit14_setadas": 3,
     "bit13_setadas": 107,
-    "palette_nao_zero": 111,
+    "palette_nao_zero": 110,
     "deltas_top": [
      [
       0,
@@ -115,18 +115,17 @@
      "0": 2048
     },
     "vflip": {
-     "0": 2045,
-     "1": 3
+     "0": 1971,
+     "1": 77
     },
     "hflip": {
-     "0": 1941,
-     "1": 107
+     "0": 1945,
+     "1": 103
     },
     "palette": {
-     "0": 1937,
-     "1": 34,
-     "2": 8,
-     "3": 69
+     "0": 1938,
+     "1": 107,
+     "2": 3
     },
     "tile": {
      "0": 1832,
@@ -317,7 +316,7 @@
     "bit15_setadas": 0,
     "bit14_setadas": 5,
     "bit13_setadas": 153,
-    "palette_nao_zero": 183,
+    "palette_nao_zero": 158,
     "deltas_top": [
      [
       0,
@@ -396,18 +395,17 @@
      "0": 2048
     },
     "vflip": {
-     "0": 2043,
-     "1": 5
+     "0": 1944,
+     "1": 104
     },
     "hflip": {
-     "0": 1895,
-     "1": 153
+     "0": 1884,
+     "1": 164
     },
     "palette": {
-     "0": 1865,
-     "1": 79,
-     "2": 19,
-     "3": 85
+     "0": 1890,
+     "1": 153,
+     "2": 5
     },
     "tile": {
      "0": 1699,
@@ -618,7 +616,7 @@
     "bit15_setadas": 0,
     "bit14_setadas": 0,
     "bit13_setadas": 198,
-    "palette_nao_zero": 206,
+    "palette_nao_zero": 198,
     "deltas_top": [
      [
       0,
@@ -697,17 +695,16 @@
      "0": 2048
     },
     "vflip": {
-     "0": 2048
+     "0": 1922,
+     "1": 126
     },
     "hflip": {
-     "0": 1850,
-     "1": 198
+     "0": 1853,
+     "1": 195
     },
     "palette": {
-     "0": 1842,
-     "1": 80,
-     "2": 11,
-     "3": 115
+     "0": 1850,
+     "1": 198
     },
     "tile": {
      "0": 1733,
@@ -916,7 +913,7 @@
     "bit15_setadas": 0,
     "bit14_setadas": 3,
     "bit13_setadas": 216,
-    "palette_nao_zero": 263,
+    "palette_nao_zero": 219,
     "deltas_top": [
      [
       0,
@@ -995,18 +992,17 @@
      "0": 2048
     },
     "vflip": {
-     "0": 2045,
-     "1": 3
+     "0": 1891,
+     "1": 157
     },
     "hflip": {
-     "0": 1832,
-     "1": 216
+     "0": 1817,
+     "1": 231
     },
     "palette": {
-     "0": 1785,
-     "1": 106,
-     "2": 32,
-     "3": 125
+     "0": 1829,
+     "1": 216,
+     "2": 3
     },
     "tile": {
      "0": 1612,
@@ -1234,7 +1230,7 @@
     "bit15_setadas": 0,
     "bit14_setadas": 6,
     "bit13_setadas": 176,
-    "palette_nao_zero": 208,
+    "palette_nao_zero": 182,
     "deltas_top": [
      [
       0,
@@ -1313,18 +1309,17 @@
      "0": 2048
     },
     "vflip": {
-     "0": 2042,
-     "1": 6
+     "0": 1923,
+     "1": 125
     },
     "hflip": {
-     "0": 1872,
-     "1": 176
+     "0": 1863,
+     "1": 185
     },
     "palette": {
-     "0": 1840,
-     "1": 83,
-     "2": 23,
-     "3": 102
+     "0": 1866,
+     "1": 176,
+     "2": 6
     },
     "tile": {
      "0": 1625,
@@ -1559,7 +1554,7 @@
     "bit15_setadas": 0,
     "bit14_setadas": 1,
     "bit13_setadas": 122,
-    "palette_nao_zero": 138,
+    "palette_nao_zero": 123,
     "deltas_top": [
      [
       0,
@@ -1638,18 +1633,17 @@
      "0": 2048
     },
     "vflip": {
-     "0": 2047,
-     "1": 1
+     "0": 1964,
+     "1": 84
     },
     "hflip": {
-     "0": 1926,
-     "1": 122
+     "0": 1927,
+     "1": 121
     },
     "palette": {
-     "0": 1910,
-     "1": 54,
-     "2": 17,
-     "3": 67
+     "0": 1925,
+     "1": 122,
+     "2": 1
     },
     "tile": {
      "0": 1793,
@@ -1812,7 +1806,7 @@
   }
  ],
  "limitacoes": [
-  "A divisao de campos e HIPOTESE de documentacao publica do VDP; nada aqui prova que as palavras sejam entradas de nametable.",
+  "As POSICOES dos campos vem do toolchain oficial (SGDK Tile.java) e nao de suposicao; ainda assim nada aqui prova que as palavras SEJAM entradas de nametable. A hipotese testada e a assinatura de distribuicao, e ela e consistente com pertenca, nao identica a pertenca.",
   "Nenhum vinculo comprovado entre mapa, tiles e paleta: permanecem recursos separados. Nenhuma imagem e montada.",
   "value_offset (base de tile) e parametro EXTERNO nao evidenciado: nao aplicado.",
   "Larguras testadas: 4..64 palavras. Mapa mais largo, irregular ou com linhas de comprimentos diferentes nao e detectado.",

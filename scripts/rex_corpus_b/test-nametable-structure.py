@@ -14,6 +14,9 @@ sys.path.insert(0, HERE)
 spec = importlib.util.spec_from_file_location("nts", os.path.join(HERE, "nametable-structure.py"))
 NTS = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(NTS)
+spec_md = importlib.util.spec_from_file_location("md_tiles", os.path.join(HERE, "md-tiles.py"))
+MD = importlib.util.module_from_spec(spec_md)
+spec_md.loader.exec_module(MD)
 
 checks = {"ok": 0, "fail": 0}
 fails = []
@@ -53,44 +56,58 @@ def lancar(nome, fn, exc_esperada):
     print(f"[FAIL] {nome}: nao levantou nenhuma excecao")
 
 
-# 1) DIVISAO DE CAMPOS por hipotese (bit15 prioridade, bit14 vflip, bit13 hflip,
-#    bits12-11 paleta, bits10-0 indice de tile). Resposta sabida bit a bit.
+# 1) DIVISAO DE CAMPOS. As POSICOES vem de fonte oficial, nao de documentacao
+#    secundaria: SGDK tools/rescomp/src/sgdk/rescomp/type/Tile.java define
+#    mascara de indice 0x7FF (bits10-0), HFLIP bit 11, VFLIP bit 12, PALETTE
+#    bits 14-13, PRIORITY bit 15. O que continua hipotese e se uma plain
+#    decodificada SE COMPORTA como entrada de nametable; a divisao em si e fato
+#    de hardware.
+#    Registro historico: esta secao rotulava vflip=bit14, hflip=bit13 e
+#    paleta=bits12-11. As medidas bit a bit feitas com aquela tabela continuam
+#    validas -- o que estava errado era a ROTULAGEM de tres campos. Os casos
+#    abaixo foram reescritos contra a fonte ANTES de mexer na tabela do modulo.
 eq("palavra 0x0000: todos os campos zerados",
    NTS.entry_fields(0x0000),
    {"priority": 0, "vflip": 0, "hflip": 0, "palette": 0, "tile": 0})
-eq("palavra 0x8000: somente prioridade",
+eq("palavra 0x8000: somente prioridade (bit15)",
    NTS.entry_fields(0x8000),
    {"priority": 1, "vflip": 0, "hflip": 0, "palette": 0, "tile": 0})
-eq("palavra 0x4000: somente vflip (bit14, NAO hflip)",
-   NTS.entry_fields(0x4000),
-   {"priority": 0, "vflip": 1, "hflip": 0, "palette": 0, "tile": 0})
-eq("palavra 0x2000: somente hflip (bit13, NAO vflip)",
-   NTS.entry_fields(0x2000),
-   {"priority": 0, "vflip": 0, "hflip": 1, "palette": 0, "tile": 0})
-eq("palavra 0x0800: bit11 isolado = paleta 1, tile 0",
-   NTS.entry_fields(0x0800),
-   {"priority": 0, "vflip": 0, "hflip": 0, "palette": 1, "tile": 0})
-eq("palavra 0x1000: bit12 isolado = paleta 2 (campo de 2 bits em 12-11)",
+eq("palavra 0x1000: bit12 isolado = vflip, NAO paleta",
    NTS.entry_fields(0x1000),
+   {"priority": 0, "vflip": 1, "hflip": 0, "palette": 0, "tile": 0})
+eq("palavra 0x0800: bit11 isolado = hflip, NAO paleta",
+   NTS.entry_fields(0x0800),
+   {"priority": 0, "vflip": 0, "hflip": 1, "palette": 0, "tile": 0})
+eq("palavra 0x2000: bit13 isolado = paleta 1 (bit pouco significativo)",
+   NTS.entry_fields(0x2000),
+   {"priority": 0, "vflip": 0, "hflip": 0, "palette": 1, "tile": 0})
+eq("palavra 0x4000: bit14 isolado = paleta 2 (bit mais significativo)",
+   NTS.entry_fields(0x4000),
    {"priority": 0, "vflip": 0, "hflip": 0, "palette": 2, "tile": 0})
-eq("palavra 0x1800: paleta 3",
-   NTS.entry_fields(0x1800),
+eq("palavra 0x6000: bits14-13 = paleta 3",
+   NTS.entry_fields(0x6000),
    {"priority": 0, "vflip": 0, "hflip": 0, "palette": 3, "tile": 0})
-eq("palavra 0x07FF: dominio maximo do campo de tile",
+eq("palavra 0x07FF: dominio maximo do campo de tile (11 bits)",
    NTS.entry_fields(0x07FF),
    {"priority": 0, "vflip": 0, "hflip": 0, "palette": 0, "tile": 2047})
+# Palavra-ancora compartilhada com test-md-tiles.py, que afirma
+# make_entry(0x123, palette=2, hflip=1, vflip=1, priority=1) == 0xD923. Se os dois
+# modulos divergirem na divisao da mesma palavra, esta resposta conhecida cai.
+eq("palavra 0xD923: tile 0x123 + paleta 2 + hflip + vflip + prioridade",
+   NTS.entry_fields(0xD923),
+   {"priority": 1, "vflip": 1, "hflip": 1, "palette": 2, "tile": 0x123})
 eq("palavra 0xE805: campos combinados",
    NTS.entry_fields(0xE805),
-   {"priority": 1, "vflip": 1, "hflip": 1, "palette": 1, "tile": 5})
+   {"priority": 1, "vflip": 0, "hflip": 1, "palette": 3, "tile": 5})
 # NEGATIVO: a mascara de tile tem 11 bits; um bit acima dela NAO pode vazar para o
 # indice (erro classique de mascara 0xFFF), senao o tile "cresce" e a hipotese
 # e avaliada contra um campo que nao existe no hardware.
-eq("bit11 nao entra no campo de tile (mascara de 11 bits)",
+eq("bit11 (hflip) nao entra no campo de tile (mascara de 11 bits)",
    NTS.entry_fields(0x0801),
-   {"priority": 0, "vflip": 0, "hflip": 0, "palette": 1, "tile": 1})
-eq("bit13 nao entra no campo de tile",
+   {"priority": 0, "vflip": 0, "hflip": 1, "palette": 0, "tile": 1})
+eq("bit13 (paleta) nao entra no campo de tile",
    NTS.entry_fields(0x2005),
-   {"priority": 0, "vflip": 0, "hflip": 1, "palette": 0, "tile": 5})
+   {"priority": 0, "vflip": 0, "hflip": 0, "palette": 1, "tile": 5})
 lancar("word acima de 16 bits e recusada", lambda: NTS.entry_fields(0x10000), ValueError)
 lancar("word negativa e recusada", lambda: NTS.entry_fields(-1), ValueError)
 
@@ -104,7 +121,13 @@ eq("maximo", st["max"], 0x4000)
 eq("bit15 nunca setado aqui", st["bit15_setadas"], 0)
 eq("bit14 setado uma vez (0x4000)", st["bit14_setadas"], 1)
 eq("bit13 nunca setado", st["bit13_setadas"], 0)
-eq("campo de paleta nao-zero em uma palavra (0x4000 -> paleta 0)", st["palette_nao_zero"], 0)
+# palette_nao_zero e o UNICO contador desta secao derivado de campo (os bit*_setadas
+# acima sao posicoes cruas). Ele le a posicao da tabela CAMPOS por nome, entao nao
+# pode mais dessincronizar da divisao. Bits 14-13 = paleta: 0x4000 e bit14, ou seja
+# paleta 2, e conta.
+eq("campo de paleta nao-zero: 0x4000 = bit14 = paleta 2, conta 1", st["palette_nao_zero"], 1)
+eq("hflip/vflip (bits 11 e 12) nao contam como paleta",
+   NTS.word_stats([0x0800, 0x1000])["palette_nao_zero"], 0)
 eq("delta adjacente mais frequente", st["deltas_top"][0], (0, 1))
 # O total de zeros e medido a parte: em plains de jogo almofadados com 0x0000 a
 # maioria bruta decide sozinha qualquer "periodo" por igualdade, e o leitor
@@ -230,6 +253,15 @@ eq("resumo da hipotese traz as fontes de campo",
    sorted(NTS.HIPOTESE_CAMPOS.keys()),
    ["hflip", "palette", "priority", "tile", "vflip"])
 eq("dominio do campo de tile declarado na hipotese", NTS.HIPOTESE_CAMPOS["tile"], (0, 0x7FF))
+eq("posicoes dos campos batem com Tile.java (indice 0-10, hflip 11, vflip 12, paleta 13-14, prioridade 15)",
+   {k: NTS.CAMPOS[k][:2] for k in sorted(NTS.CAMPOS)},
+   {"hflip": (11, 11), "palette": (13, 14), "priority": (15, 15),
+    "tile": (0, 10), "vflip": (12, 12)})
+# Consistencia entre modulos da mesma frente: os dois leem a MESMA palavra de
+# nametable. Sem isto, um rotulo corrigido em um arquivo e esquecido no outro.
+eq("este medidor e md-tiles.py dividem a mesma divisao de palavra",
+   [NTS.entry_fields(w) for w in (0x0000, 0x0800, 0x1000, 0x2000, 0x4000, 0xD923, 0xFFFF)],
+   [MD.nametable_entry(w) for w in (0x0000, 0x0800, 0x1000, 0x2000, 0x4000, 0xD923, 0xFFFF)])
 lancar("hipotese nao aceita campo desconhecido",
        lambda: NTS.fields_from_words([0x0001], "naoexiste"), KeyError)
 
