@@ -16,6 +16,7 @@ use std::process::ExitCode;
 
 use rex_corpus::inventory::{inspect, inventory_json, parse_provenance, Item, Provenance};
 use rex_corpus::json::render;
+use rex_corpus::resource::{Confidence, ResourceRecord};
 use rex_corpus::spec::{negativo_de, token_declarado};
 
 const LIMITE_BYTES: u64 = 16 * 1024 * 1024;
@@ -59,6 +60,33 @@ Subcomandos:
                o contén e se é o operando dun `lea abs.l,An` (así chega un fluxo
                á súa rutina; a chamada vai á rutina, non ao fluxo). `vinculo=non`
                e un resultado medido.
+  perfil       --imaxe FICHEIRO [--out FICHEIRO] [--perfil-id ID] [--codec C]
+               [--variante V] [--estado-revision S] [--ata N]
+               [--ventanxa-chamada N] [--min-entradas N] [--max-bytes N]
+               Escribe o perfil reutilizable `rex-corpus-perfil/v1`: o SHA-256
+               dos bytes entregados, a orientacion medida por `layout::detect` e
+               os limites de sondeo. Un perfil non adivina o codec nin a
+               revision: o defecto di `descoecida`.
+  rexistro     --imaxe FICHEIRO --perfil FICHEIRO --endereco N [--endereco N]
+               [--max-bytes N]
+               Rexistro `rex-corpus-resource/v1` dun enderezo: bytes consumidos,
+               saida e **quen o chama**. `--endereco` acepta decimal ou
+               hexadecimal (`0x1CAEC`); un token que non é número é un erro de
+               uso (codigo 2), nunca un enderezo descartado en silencio.
+               A traduccion enderezo->offset faiña `rex-addressing` (perfil
+               md-linear); un enderezo fora do barramento devolve o seu codigo
+               de erro e un offset que cae na zona de recheo dunha imaxe que non
+               es potencia de 2 declarase `offset-fora-da-imaxe`: nese offset non
+               hai bytes que medir. Esixe --perfil: o perfil pinna o SHA-256 da
+               imaxe, e se os bytes non coinciden a ferramenta para con
+               PERFIL-DIVERXENCIA (codigo 5) en vez de transplantar offsets
+               doutra revision. A confianza soe ser `confirmado-estaticamente`
+               cando hai evidencia que vincule (`rex-corpus-evidence/v1`); sen
+               ela, `candidato`.
+               Os rexistros do corpus real estan versionados en
+               `data/rex_corpus_a/evidencia/*.jsonl` e os seus perfis en
+               `data/rex_corpus_a/perfis/*.json`; só levan hashes, offsets e
+               lonxitudes, nin un byte comercial nin un camiño local.
   verify       --referencia DIR [--max-saida N] [--orzamento N]
                [--limite-negativos N] [--max-bytes N]
                Aceite do noso camiño de consumo contra fixtures autorais
@@ -278,6 +306,20 @@ fn num_opt(args: &[String], nome: &str, defecto: usize) -> usize {
     opt(args, nome)
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(defecto)
+}
+
+/// Enderezo de CPU como decimal ou hexadecimal (`0x1CAEC`).
+///
+/// Os informes do corpus escriben os offsets en hexadecimal; obrigar a
+/// reconverter a man introduce un erro que non se ve (un dígito de máis dá un
+/// offset válido noutro sitio). Un token que non é número **non** se descarta:
+/// ver `cmd_rexistro`.
+fn enderezo_de(token: &str) -> Option<u32> {
+    let t = token.trim();
+    match t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        Some(hex) => u32::from_str_radix(hex, 16).ok(),
+        None => t.parse::<u32>().ok(),
+    }
 }
 
 /// Barrido acoutado de candidatos Kosinski nunha imaxe.
@@ -718,6 +760,284 @@ fn cmd_consumidor(args: &[String]) -> i32 {
     0
 }
 
+/// A orientación que [`rex_corpus::layout::detect`] mide, na forma que declara
+/// un perfil (`rex-corpus-perfil/v1`).
+fn orientacion_de(layout: rex_corpus::layout::Layout) -> &'static str {
+    match layout {
+        rex_corpus::layout::Layout::Lineal => "lineal",
+        rex_corpus::layout::Layout::InterlazadoSmd { .. } => "interlazado-smd",
+        rex_corpus::layout::Layout::NonIdentificado => "non-identificada",
+    }
+}
+
+/// Escribe o perfil reutilizable dunha imaxe: o seu SHA-256, a orientación
+/// medida e os límites coos que se sondeou.
+///
+/// Non adiviña códec nin revisión: `--codec`, `--variante` e `--estado-revision`
+/// son declaracións de quen executa, e o defecto di `descoecida` — que é certo
+/// cando non se mediu outra coisa — en vez dunha revisión inventada.
+fn cmd_perfil(args: &[String]) -> i32 {
+    let Some(camiño) = opt(args, "--imaxe") else {
+        eprintln!("ERRO: perfil precisa --imaxe FICHEIRO");
+        return 2;
+    };
+    let imaxe = match ler_imaxe(args, &camiño) {
+        Ok(b) => b,
+        Err(c) => return c,
+    };
+    let d = rex_corpus::scan::ScanLimits::DEFAULT;
+    let perfil = rex_corpus::perfil::Perfil {
+        perfil_id: opt(args, "--perfil-id")
+            .unwrap_or_else(|| rex_addressing::md_linear::PROFILE_ID.to_string()),
+        imaxe_normalizada_sha256: rex_kosinski::edit::sha256_hex(&imaxe),
+        orientacion: orientacion_de(rex_corpus::layout::detect(&imaxe)).to_string(),
+        codec: opt(args, "--codec").unwrap_or_else(|| "kosinski".to_string()),
+        variante: opt(args, "--variante").unwrap_or_else(|| "base".to_string()),
+        estado_revision: opt(args, "--estado-revision").unwrap_or_else(|| "descoecida".to_string()),
+        desde: d.from,
+        ata: opt(args, "--ata")
+            .and_then(|v| v.parse::<usize>().ok())
+            .or(d.to),
+        stride: d.stride,
+        min_saida: d.min_output,
+        max_saida: d.max_output,
+        orzamento: d.work_limit,
+        ventanxa_chamada: num_opt(args, "--ventanxa-chamada", 16),
+        min_entradas: num_opt(args, "--min-entradas", 3),
+        limite_bytes: max_bytes(args),
+    };
+    let texto = render(&perfil.to_json());
+    match opt(args, "--out") {
+        Some(out) => {
+            if let Err(e) = std::fs::write(&out, format!("{texto}\n")) {
+                eprintln!("ERRO: non podo escribir {out}: {e}");
+                return 4;
+            }
+            eprintln!(
+                "PERFIL esquema={} ficheiro={out}",
+                rex_corpus::perfil::SCHEMA_PERFIL
+            );
+        }
+        None => println!("{texto}"),
+    }
+    let _ = std::io::stdout().flush();
+    0
+}
+
+/// Rexistro `rex-corpus-resource/v1` dun enderezo: que bytes consume, que
+/// produce e **quen o chama**.
+///
+/// Esixe `--perfil` porque sen imaxe pinada non hai rexistro reutilizable: o
+/// perfil fixa o SHA-256 dos bytes que se lle entregan. Se non coincide, isto
+/// para con `PERFIL-DIVERXENCIA` (código 5) en vez de aplicar offsets doutra
+/// revisión — que é exactamente o que a misión prohibe.
+///
+/// A tradución de enderezo a offset faiña `rex-addressing` (`md_linear`), non un
+/// `addr as usize` propio: un enderezo fóra do barramento devolve o seu código
+/// de erro e non un offset 0.
+fn cmd_rexistro(args: &[String]) -> i32 {
+    let Some(camiño) = opt(args, "--imaxe") else {
+        eprintln!("ERRO: rexistro precisa --imaxe FICHEIRO");
+        return 2;
+    };
+    let Some(perfil_ruta) = opt(args, "--perfil") else {
+        eprintln!("ERRO: rexistro precisa --perfil FICHEIRO :: sen imaxe pinada non hai rexistro");
+        return 2;
+    };
+    let tokens = opt_todos(args, "--endereco");
+    if tokens.is_empty() {
+        eprintln!("ERRO: rexistro precisa polo menos un --endereco N");
+        return 2;
+    }
+    let mut enderezos: Vec<u32> = Vec::with_capacity(tokens.len());
+    for token in &tokens {
+        let Some(v) = enderezo_de(token) else {
+            eprintln!("ERRO: --endereco {token} non é decimal nin 0x… hexadecimal");
+            return 2;
+        };
+        enderezos.push(v);
+    }
+    let imaxe = match ler_imaxe(args, &camiño) {
+        Ok(b) => b,
+        Err(c) => return c,
+    };
+    let texto_perfil = match std::fs::read_to_string(&perfil_ruta) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("ERRO: non executado :: non podo ler o perfil {perfil_ruta}: {e}");
+            return 4;
+        }
+    };
+    let perfil = match rex_corpus::perfil::Perfil::parse(&texto_perfil) {
+        Ok(p) => p,
+        Err(m) => {
+            eprintln!("ERRO: perfil ilexible ({m}) en {perfil_ruta}");
+            return 3;
+        }
+    };
+    let sha = rex_kosinski::edit::sha256_hex(&imaxe);
+    if !perfil.encaza(&sha) {
+        eprintln!(
+            "ERRO: PERFIL-DIVERXENCIA :: declarado={} medido={sha}",
+            perfil.imaxe_normalizada_sha256
+        );
+        return 5;
+    }
+    let orientacion_medida = orientacion_de(rex_corpus::layout::detect(&imaxe));
+    if perfil.orientacion != orientacion_medida {
+        eprintln!(
+            "ERRO: ORIENTACION-DIVERXENCIA :: declarado={} medido={orientacion_medida}",
+            perfil.orientacion
+        );
+        return 5;
+    }
+
+    // `md-linear` esixe rom_size potencia de 2; cando a imaxe non o é, traduce
+    // coa potencia superior e dixo na limitación — a normalización é un dato,
+    // non unha modificación do arquivo.
+    let rom_efectivo = (imaxe.len() as u64).next_power_of_two();
+    let estado = rex_addressing::MapperState::rom_size(rom_efectivo);
+    let estado_mapper = format!("rom_size={rom_efectivo:#x}");
+
+    let desde = perfil.desde.min(imaxe.len());
+    let ata = perfil.ata.unwrap_or(imaxe.len()).min(imaxe.len());
+    let todas_cargas = rex_corpus::consumer::cargas_abs_l(&imaxe, desde, ata, usize::MAX);
+    let todas_chamadas = rex_corpus::consumer::call_sites(&imaxe, desde, ata, usize::MAX);
+
+    let mut rexistros = 0usize;
+    let mut confirmados = 0usize;
+    let mut candidatos = 0usize;
+    let mut sen_fluxo = 0usize;
+    let mut non_traducibles = 0usize;
+    let mut rexeitados = 0usize;
+    for addr in &enderezos {
+        let offset = match rex_addressing::md_linear::translate(*addr, &estado) {
+            rex_addressing::Translate::Rom { offset } => offset as usize,
+            rex_addressing::Translate::Device { region, .. } => {
+                non_traducibles += 1;
+                println!("REXISTRO 0x{addr:05X} non-traducible=non-rom/{region:?}");
+                continue;
+            }
+            rex_addressing::Translate::Invalid(e) => {
+                non_traducibles += 1;
+                println!("REXISTRO 0x{addr:05X} non-traducible={}", e.code.as_str());
+                continue;
+            }
+        };
+        // `md-linear` enmascara co rom_size, así que nunha imaxe que non é
+        // potencia de 2 o offset pode caer na zona de recheo, fóra dos bytes
+        // reais. Un offset que non existe no arquivo non e unha medida.
+        if offset >= imaxe.len() {
+            non_traducibles += 1;
+            println!(
+                "REXISTRO 0x{addr:05X} non-traducible=offset-fora-da-imaxe offset=0x{offset:05X} imaxe=0x{:05X}",
+                imaxe.len()
+            );
+            continue;
+        }
+        let decodificado =
+            match rex_kosinski::decode(&imaxe[offset..], perfil.max_saida, perfil.orzamento) {
+                Ok(d) => d,
+                Err(e) => {
+                    sen_fluxo += 1;
+                    println!(
+                        "REXISTRO 0x{addr:05X} non-fluxo motivo={} offset=0x{offset:05X}",
+                        motivo_decode(&e)
+                    );
+                    continue;
+                }
+            };
+
+        // Evidencia medida nesta imaxe, nas tres formas que a Fase 4 separou.
+        let mut evidencias: Vec<rex_corpus::evidence::Evidencia> = Vec::new();
+        for c in todas_cargas.iter().filter(|c| c.operando == *addr) {
+            let d0 = c.offset + 6;
+            let chamada = todas_chamadas
+                .iter()
+                .find(|s| s.offset >= d0 && s.offset <= d0 + perfil.ventanxa_chamada);
+            evidencias.push(rex_corpus::evidence::Evidencia::desde_carga(c, chamada));
+        }
+        for s in todas_chamadas.iter().filter(|s| s.target == *addr) {
+            evidencias.push(rex_corpus::evidence::Evidencia::desde_chamada(s));
+        }
+        for t in rex_corpus::consumer::tables_for(&imaxe, &[*addr], perfil.min_entradas, 16) {
+            evidencias.push(rex_corpus::evidence::Evidencia::desde_taboa(&t));
+        }
+        let confianza = if evidencias.iter().any(|e| e.vincula()) {
+            Confidence::ConfirmadoEstaticamente
+        } else {
+            Confidence::Candidato
+        };
+        let mut limitacions = vec![
+            "proba estatica: sen execucion da ROM".to_string(),
+            "sen reinsercion: non se escribe unha ROM modificada".to_string(),
+        ];
+        if rom_efectivo as usize != imaxe.len() {
+            limitacions.push(format!(
+                "rom_size efective {rom_efectivo:#x} nunha imaxe de {} bytes: md-linear esixe potencia de 2 e o arquivo non se modificou",
+                imaxe.len()
+            ));
+        }
+        if confianza == Confidence::Candidato {
+            limitacions.push(
+                "decodifica sen evidencia de consumidor: non e un recurso confirmado".to_string(),
+            );
+        }
+        let rexistro = ResourceRecord {
+            rom_sha256: sha.clone(),
+            normalized_sha256: perfil.imaxe_normalizada_sha256.clone(),
+            profile_id: perfil.perfil_id.clone(),
+            offset: Some(offset as u64),
+            input_span: Some((imaxe.len() - offset) as u64),
+            codec: perfil.codec.clone(),
+            variant: perfil.variante.clone(),
+            bytes_consumed: Some(decodificado.bytes_consumed as u64),
+            output_size: Some(decodificado.output.len() as u64),
+            output_sha256: Some(rex_kosinski::edit::sha256_hex(&decodificado.output)),
+            consumer_evidence: rex_corpus::evidence::cadeas(&evidencias),
+            confidence: confianza,
+            limitations: limitacions,
+            mapper_profile: Some(perfil.perfil_id.clone()),
+            mapper_state: Some(estado_mapper.clone()),
+        };
+        match rexistro.validar() {
+            Err(m) => {
+                rexeitados += 1;
+                println!("REXISTRO 0x{addr:05X} rexeitado={m}");
+            }
+            Ok(()) => {
+                rexistros += 1;
+                if rexistro.confidence == Confidence::ConfirmadoEstaticamente {
+                    confirmados += 1;
+                } else {
+                    candidatos += 1;
+                }
+                println!(
+                    "REXISTRO 0x{addr:05X} perfil={} confianza={} consumo={} saida={} evidencia={}",
+                    perfil.perfil_id,
+                    rexistro.confidence.as_str(),
+                    decodificado.bytes_consumed,
+                    decodificado.output.len(),
+                    evidencias.len(),
+                );
+                println!("{}", render(&rexistro.to_json()));
+            }
+        }
+    }
+    if rexistros == 0 {
+        println!("REXISTRO sen rexistros :: ningún enderezo deu un fluxo medible e valido");
+    }
+    println!(
+        "RESUMO rexistros={rexistros} confirmados={confirmados} candidatos={candidatos} sen_fluxo={sen_fluxo} non_traducibles={non_traducibles} rexeitados={rexeitados}"
+    );
+    let _ = std::io::stdout().flush();
+    if rexeitados > 0 {
+        5
+    } else {
+        0
+    }
+}
+
 /// Etiqueta de esquema do sondeo de aceptacion (Fase 3).
 const SCHEMA_VERIFICACION: &str = "rex-corpus-verify/v1";
 
@@ -1032,6 +1352,8 @@ fn executar(args: &[String]) -> i32 {
         Some("roundtrip") => cmd_roundtrip(&args[1..]),
         Some("magia") => cmd_magia(&args[1..]),
         Some("consumidor") => cmd_consumidor(&args[1..]),
+        Some("perfil") => cmd_perfil(&args[1..]),
+        Some("rexistro") => cmd_rexistro(&args[1..]),
         Some("verify") => cmd_verify(&args[1..]),
         Some(outro) => {
             eprintln!("ERRO: subcomando '{outro}' non implementado");
