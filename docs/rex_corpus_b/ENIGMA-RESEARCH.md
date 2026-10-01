@@ -92,12 +92,36 @@ Contrato v1 exige span exato. Registro dois números por stream:
 
 O stream NÃO contém: `value_offset` (base de tiles/pattern adicionada aos
 valores decodificados — nos jogos clássicos), `write_destination` (endereço de
-escrita, ex. VRAM) nem `write_size`. Evidência nesta frente: **nenhuma** — os
-fixtures roundtripiam valores crus. Registro em todas as saídas JSON:
-`{"parameter": null, "status": "not-evidenced"}`. O CLI aceita `--offset N`
-como hipótese explícita do operador (`status: operator-supplied-hypothesis`,
-aplicado como `(v+N) mod 2^16` — convenção NÃO verificada). Provar esses
-parâmetros exige o consumidor real na ROM (próximo passo da missão corpus-B).
+escrita, ex. VRAM) nem `write_size`.
+
+**RESOLVIDO para o Sonic 1 (2026-10-01), pelo consumidor real — não pela
+aparência da imagem:**
+
+* O decodificador 68k do Sonic 1 está em `$171E` e tem **um único sítio de
+  chamada na ROM inteira**: `jsr $171E` em `0x1b6d2` (varredura de
+  `4E B9 00 00 17 1E` na ROM toda).
+* No sítio de chamada (rotina de carga do mapa, tabela de ponteiros em
+  `0x1b64c`): `movea.l (-122,PC,D0.w),A0` (`0x1b6c4`, entrada da tabela) →
+  `lea $FF4000,A1` (`0x1b6c8`, **destino = porta de dados VDP**) →
+  `move.w #0,d0` (`0x1b6ce`) → `jsr $171E` (`0x1b6d2`).
+  **`value_offset = 0` medido, não escolhido.**
+* Semântica do decodificador 68k (desassemblado por bytes): `movea.w d0,A3`
+  guarda o offset; `adda.w A3,A2` / `adda.w A3,A4` aplicam o offset por
+  **SOMA** aos cursores incrementing/common; na leitura inline (`$17DC`) o
+  offset inicia `D3` e recebe **OR/ADD** dos bits altos lidos pela máscara
+  (bits 15..11). Com `d0=0` tudo colapsa em valores crus.
+* A saída vai direto para a porta de dados VDP → o recurso é um **nametable**
+  (64×32 entradas), não tile art. Evidência completa:
+  `data/rex_corpus_b/recursos/sonic1-mapa-0x65432.json` (e irmãos dos outros
+  5 offsets) e `data/rex_corpus_b/recursos/consumidor-sonic1-mapas.json`.
+* Empacotamento real confirmado: as 6 streams encadeiam na ordem da tabela com
+  consumo word-rounded (1 byte de pad antes da 6ª: `0x662f4+1233=0x667c5`,
+  próxima em `0x667c6`) — confirma `consumed_word_rounded` (§4) em ROM real.
+
+Para streams sem consumidor localizado (ex.: as 24 Enigma do Pulseman), o
+registro permanece `{"parameter": null, "status": "not-evidenced"}`. O CLI
+aceita `--offset N` como hipótese explícita do operador (`status:
+operator-supplied-hypothesis`, aplicado como `(v+N) mod 2^16`).
 
 ## 6. Variantes: implementada vs blocked
 
@@ -136,13 +160,20 @@ bash scripts/rex_corpus_b/enigma-validate.sh            # re-run completo (limpa
 
 ## 8. O que permanece NÃO provado
 
-1. Semântica/combinação do `value_offset` externo (soma vs OR, base de
-   arte, endereço de destino) — §5.
-2. Equivalência com o decoder 68k clássico dos cartuchos (2º oráculo absent).
+1. ~~Semântica/combinação do `value_offset` externo~~ — **FECHADO para o
+   consumidor do Sonic 1** (§5: soma nos cursores, OR/ADD nos bits altos
+   inline, valor medido 0 no único sítio de chamada). Outros jogos/streams sem
+   consumidor localizado continuam `not-evidenced` — cada ROM prova o seu.
+2. Equivalência com o decoder 68k clássico de Sonic 2 (2º oráculo absent).
 3. Enigma modular (múltiplos blocos 4 KiB + tabela de offsets) — não
    exercitado.
-4. Domínio real de ROM: streams com terminador ausente/lixo entre blocos —
-   só provado em fixtures autorais; corpus BYOR é etapa seguinte da frente B.
+4. Domínio real de ROM além do Sonic 1: as 24 streams Enigma do Pulseman têm
+   paridade byte a byte confirmada (196/196 com as Nemesis — ver
+   `pulseman-oraculo-completo.json`) mas CONSUMIDOR NÃO LOCALIZADO nas formas
+   varridas (negativo delimitado: `consumidor-pulseman-streams.json`);
+   `value_offset`/destino delas permanecem `not-evidenced`.
 5. Encode do produto (recusa de plain ímpar com erro estruturado
    `input-not-in-domain` é obrigação registrada; este arquivo não implementa
    encoder — e01 é tratado no lado decode como header incompleto → `truncated`).
+6. Observação da composição NO JOGO (emulação) — exige janela do integrador;
+   o que está provado aqui é a cadeia estática decode→porta VDP.

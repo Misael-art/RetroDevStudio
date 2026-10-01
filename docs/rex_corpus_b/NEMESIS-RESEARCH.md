@@ -65,6 +65,20 @@ erros estruturados): (i) padriça entrada fora de domínio (medido: 6B→32,
 `oracle_end_offset = None` em `b:ff32`/`b:z32`), (iii) aceita stream truncada
 com tamanho pleno (n05). Cada divergência é medida, não presumida.
 
+**Quarta divergência registrada com fixture (2026-10-01): registro de tabela
+com comprimento de código 0.** A referência armazena
+`codemap[Code{code, 0}]` sem checagem e a decodificação nunca consulta
+`(code, 0)` (o acumulador começa em `len = 1`), então o oráculo aceita streams
+com registros `len=0` inatingíveis. Meu decoder em `strict=True` (contrato do
+produto) recusa com `InvalidReferenceError`; em `strict=False` (`--lenient`)
+decodifica byte-idêntico ao oráculo e registra o registro em
+`unreachable_records`. Fixture e prova:
+`scripts/rex_corpus_b/test-nemesis-len0.py` (oráculo rc=0 com 32 B,
+lenient byte-idêntico, strict recusa) → evidência
+`data/rex_corpus_b/nemesis/evidence/len0-fixture.json`. A descoberta veio de
+uma blob "real" do Sonic 1 (`0x64a00`) que NÃO é stream Nemesis — classificado
+em `data/rex_corpus_b/recursos/sonic1-classificacao.json`.
+
 ## 4. Variantes implementadas vs bloqueadas
 
 Implementadas **por evidência**: `nemesis-raw` e `nemesis-alt-xor` (as duas
@@ -145,9 +159,14 @@ canônico atual é `nemesis-validate.sh` → `nemesis_validate.py`.
 
 ## 7. O que permanece NÃO provado
 
-- Streams reais de ROM (prefixos de alinhamento/pad e extensões que o empacotador
-  mdcomp adiciona) — este corpus só cobre streams nuas geradas pelo próprio
-  oráculo; a varredura do corpus ROM é etapa posterior.
+- **Streams reais de ROM — PARCIALMENTE FECHADO (2026-10-01):** as 172 streams
+  Nemesis do locator de Pulseman foram TODAS confirmadas byte a byte contra o
+  oráculo (`scripts/rex_corpus_b/confirmar-oraculo-pulseman.py`,
+  196/196 recursos byte-idênticos incluindo as 24 Enigma, todos com span
+  dentro do arquivo; evidência `data/rex_corpus_b/recursos/pulseman-oraculo-completo.json`).
+  O que segue aberto: streams de OUTRAS ROMs do corpus; e o CONSUMIDOR das
+  streams de Pulseman — não localizado nas formas varridas (negativo
+  delimitado: `data/rex_corpus_b/recursos/consumidor-pulseman-streams.json`).
 - Lado de **compressão** (nenhum byte do meu trabalho empacota; toda comparação
   de (c) usa o oráculo como empacotador).
 - Profundidade de plano 2B/4B/8B como propriedade do codec (bloqueada — §4).

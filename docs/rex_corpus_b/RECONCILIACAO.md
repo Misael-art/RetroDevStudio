@@ -64,12 +64,32 @@ superconjunto compatível (mapeamento documentado na entrega).
 
 1. Nemesis/Enigma nunca tiveram **recurso real em ROM** (perfis fixture-only;
    identificação cabia ao integrador — agora é escopo B com corpus BYOR
-   read-only).
+   read-only). **Estado em 2026-10-01:** FECHADO para duas ROMs — Pulseman:
+   196/196 streams do locator confirmadas byte a byte contra o oráculo
+   (`pulseman-oraculo-completo.json`); Sonic 1: 6 nametables Enigma com
+   CONSUMIDOR medido (tabela `0x1b64c`, `jsr $171E` único, `value_offset=0`,
+   destino porta VDP `$FF4000`) e compostas como recurso contextual real
+   (`sonic1-mapa-*.json`, `sonic1-classificacao.json`). Consumidor das
+   streams de Pulseman: NÃO localizado nas formas varridas (negativo
+   delimitado com controle positivo: `consumidor-pulseman-streams.json`).
 2. Goldens literais blocked: esta frente NÃO reabre por suposição — usa os
    roundtrips publicados +_decode do produto candidato vs oráculo_ sobre
    streams reais extraídas (prova externa, não espelho).
 3. Reconstrução gráfica (tiles 4bpp empacotados, tilemap, paleta, sprite) é
    território novo: sem painel segundo, sem produto, só scripts próprios.
+   **Estado em 2026-10-01:** contrato de tile/nametable/paleta fixado por
+   teste (`md-tiles.py` 48 checks, `test-nametable-structure.py` 57), layout
+   chunky sustentado por duas linhas independentes, mapa→VRAM provado por
+   consumidor; tiles→mapa e paleta→mapa permanecem `not-evidenced` com a
+   referência faltante registrada por recurso.
 4. Corpus anterior varrido (megadrive/) não tinha Sonic; a missão aponta
    também `genesis/` e `megadrivejp/` — varredura por hash obrigatória antes
    de qualquer alegação.
+5. **Nova (2026-10-01):** divergência len=0 do Nemesis registrada com fixture
+   (oráculo tolera registros `len=0` inatingíveis; meu decoder strict recusa,
+   lenient é byte-idêntico) — `test-nemesis-len0.py`,
+   `nemesis/evidence/len0-fixture.json`.
+6. **Nova (2026-10-01):** falsas aceitações do oráculo em offsets "reais" do
+   Sonic 1 (`0x64a00` lê além do EOF; `0x64c62` fora de domínio; `0x662f4`
+   atribuído a dois codecs) — reclassificadas por regra e não por rc=0:
+   `sonic1-classificacao.json`.
