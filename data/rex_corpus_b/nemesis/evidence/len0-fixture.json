@@ -1,0 +1,49 @@
+{
+ "schema_version": "rex-corpus-b/nemesis-len0/1",
+ "stream_hex": "00018f01000011ff0000000000000000",
+ "tabela": {
+  "size_word": "0x0001",
+  "flag_alt": 0,
+  "rtiles": 1,
+  "declared_out": 32,
+  "registros": [
+   {
+    "bytes": "8f 01 00",
+    "significado": "nibble=0xF; (code=0x00, len=1) -> (0xF, 1)"
+   },
+   {
+    "bytes": "00 11",
+    "significado": "(code=0x11, len=0) -> (0xF, 1); len=0 INATINGIVEL"
+   },
+   {
+    "bytes": "ff",
+    "significado": "terminador"
+   }
+  ],
+  "bitstream": "8 bytes 0x00 (64 bits zero) -> 64 hits de (0,1) -> 64 nibbles 0xF"
+ },
+ "stream_sha256": "43db7ac633dbe9b29db6464ad8ffff7fd3834af8ba87deedb01bd65b3a0a1042",
+ "oraculo": {
+  "rc": 0,
+  "output_size": 32,
+  "output_sha256": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+  "saida_e_32x_ff": true
+ },
+ "meu_lenient": {
+  "output_size": 32,
+  "output_sha256": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+  "unreachable_records": [
+   [
+    17,
+    0,
+    15
+   ]
+  ],
+  "bytes_consumed": 16,
+  "igual_oraculo": true
+ },
+ "meu_strict": {
+  "recusa": "InvalidReferenceError",
+  "mensagem": "registro de tabela com comprimento de codigo 0: referencia inatingivel por qualquer bitstream"
+ }
+}
