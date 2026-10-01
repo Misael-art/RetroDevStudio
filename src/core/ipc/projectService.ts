@@ -175,13 +175,15 @@ export function importExternalProject(
   projectName: string,
   baseDir: string,
   profileId: string,
-  projectPath: string
+  projectPath: string,
+  mugenReview?: import("../mugenReview").MugenReviewOptions
 ): Promise<OpenProjectResult> {
   return invoke("import_external_project", {
     projectName,
     baseDir,
     profileId,
     projectPath,
+    mugenReview: mugenReview ?? null,
   });
 }
 

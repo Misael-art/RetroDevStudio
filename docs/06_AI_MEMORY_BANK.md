@@ -1,5 +1,123 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-09-30 (o) — MUGEN: **cadeia original do Ken (Stand_X) convertida da fonte e comparada com referência independente** (Experimental mantido)
+
+Frente `codex/rex-mugen-original-chain`, dependente de `codex/rex-mugen-real` (PR #90 @ `508db51b20c701f61a8fcdbc9bf43a642d28fa3c`);
+PR dependente publicado sem merge/release. Detalhe, auditoria com arquivo:linha, tabela operação → implementação → teste → resultado → limite em
+`docs/rex_profiles/mugen_sgdk/ORIGINAL_CHAIN.md`; hashes e números em `ORIGINAL_CHAIN_EVIDENCE.json`; contrato em `crates/rex-mugen/CONTRACT.md` («Cadeia original»).
+Conserve (i)–(o) na integração futura (`0194f94` continua fora da base).
+**Atualização do merge de consolidação (2026-10-02): `0194f94` foi incorporado
+nesta base pelo merge da cadeia (#92); (i)–(o) estão todos presentes, sem duplicação.**
+
+**Cadeia.** `ken.cmd:963` `[State -1]` (comando `x`, `command != "holddown"`, `statetype = S`, `ctrl = 1`, reentrada `stateno = 200` + `time > 5`) → `ken.cns:285` Statedef 200
+(`ctrl 0`, `velset 0,0`, `anim 200`) → AIR 2+2+2 → `ken.cns:343` `ChangeState 0 ctrl 1` em `AnimTime = 0`. **`common1.cns` não existe** (pacote nem máquina): o estado 0 é um
+**stand-in autoral declarado**; HitDef, PlaySnd, poweradd, juggle, movetype, physics e 55 dos 56 controladores do `-1` ficam **não convertidos**, listados com origem e motivo.
+Estado 200 = parcial; estado 0 = autoral. Nenhuma instalação externa foi presumida equivalente.
+
+**Produto.** `core/mugen_chain.rs` (subconjunto mínimo e reutilizável: comandos de 1 elemento, gatilhos simples, `ChangeState`, `Statedef type/ctrl/anim/velset`), nó
+`mugen_state_program` (programa como string JSON + digest que cobre o mapeamento de fonte; adulterar bloqueia o build), runtime `rds_mc_<v>_*` na ordem comandos → −1 → estado
+atual → rastro → avanço, anel de rastreio na RAM (pad amostrado, estado, `vtimer`), revisão de origem na UI (4 classes: convertido/aproximado/autoral/não convertido), opção
+`original_chain` + escolha de cadeia no assistente. `authored_visual_demo` segue padrão. O editor de grafos só conhece parâmetros string/número e rejeitava tipos
+desconhecidos (corrigido, com teste).
+
+**Prova.** Referência independente `scripts/verify-mugen-chain.py` (lê CMD/CNS/AIR sozinha, lógica de 3 valores sobre todos os controladores do `-1`/`-2`, alimentada pelo pad que a ROM amostrou):
+**0 divergências** no core direto (197 ticks) e na UI real com teclado nativo (336 ticks), 7 controles negativos recusados, 184/295 quadros de pixels idênticos ao Pillow
+(defasagem 0 vblank pelo `vtimer`; 1 tick = 1 vblank). Toque → 1 ataque de 6 ticks; segurar → 1 ataque; 2º toque cedo ignorado; `Time = 6` reentra; X+baixo não ataca.
+Fluxo UI: importar → revisar origem → salvar → reiniciar → reabrir (relatório e digest idênticos; editor de grafos intacto) → Build & Run → teclado nativo. Instâncias independentes
+provadas na ROM real. Negativos: dependência ausente, condição não suportada, comando incorreto/ausente, mapeamento adulterado, estado ambíguo/animação ausente.
+
+**Caminho de input.** Sem lotes: `emulator_run_frame` quadro a quadro (core de debug ≈ 10,6 quadros/s); os «dez ticks» vinham do harness (duas requisições + polling ≈ 1 s). Entrega pode cair
+no quadro em curso ou no seguinte; semântica de comando = borda (segurar não repete). **Limitação medida, não corrigida:** o joypad é nível, não fila: 1 de 9 toques nativos (6 ms) se perdeu;
+recomendação: latch de 1 pressão por quadro em `emulator_send_input` (afeta todos os cenários; fora desta frente).
+
+**Regressões e gates.** Reexecutados no binário final (app `2f8457a9432b1fee7cf595ad9d6fe61546a752b1dda43a3fe541a21c06bdb39d`): `mugen-real` + oráculo Pillow (204/211 quadros), `mugen-import`,
+`mugen-control`, `mugen-locomotion`, strider real e provas reais da cadeia. `mugen-real` falhou 2× sob carga do host (flutuação do harness) antes de passar sem mudança de código. Gates: tree, lint, tsc, fmt,
+clippy `-D warnings`, frontend 831/0/6, Rust 832/0/75, `crates:gates` 4 pacotes. ROM UI `028158917e7cb847276b7f536204424fed6f743548b53034332398fbfc47d513`,
+ELF `ad21039b6677685719cd0b0f4da90fa0218cbc75231b26cdd7891b1af3e02d6d`; ROM backend `c421c92d5065e4d8ff8de22aa3541e3b5d4795e27f249190f2a0959cbc6ae666`; programa `87cbd0bbee56468bc12db16790deaffbdabd5609841996526917f9eeefb58a14`;
+core Genesis Plus GX v1.7.4 `46a5521` (`07c10476…`). CI por SHA: consultar no PR.
+
+**Não provado:** conversão integral do Ken, colisão/dano/combate, facing, andar/pular/agachar (dependem do `common1.cns`), fidelidade ao motor MUGEN real (nenhum runtime original executou; borda do botão simples e `buffer.time` padrão não confirmados na doc primária), PAL, tempo real.
+
+### Checkpoint 2026-09-30 (n) — Ken Majik real: triagem, revisão visual e cadeia SGDK → ROM → core → UI comprovadas (Experimental mantido)
+
+Frente isolada `codex/rex-mugen-real`, dependente de `codex/rex-mugen-locomotion`
+@ `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` (PR #87 confirmado aberto,
+base UX v2 `d1b5a4d2bc37d4a9d3c78ea708b899ed44a38d7a`). Worktree
+`/home/misael/Projects/REX-MUGEN-REAL-2026-09-30`; checkout canônico e seus
+arquivos não rastreados preservados. `0194f9465e759a3ba3d6fae84b4f5aef0576a4af`
+estava fora desta base e foi conservado: incorporado pelo merge de consolidação
+de 2026-10-02 ((i)–(n) presentes, sem duplicação). Sem merge/release.
+Matriz única, comparação Forge → RetroDev, limites e reprodução em
+`docs/rex_profiles/mugen_sgdk/REAL_MISSION.md`; manifesto completo de hashes
+e metadados em `REAL_EVIDENCE.json`, sem pixels/ROM/corpus BYOR no Git.
+
+**Fonte e diagnóstico.** Operador autorizou expressamente `Ken_Majik_.zip`,
+SHA `b244ec9a105fa0131b37c075dc06b032a87cf0f839f46ec7054ac60d9bd6f14c`;
+`ken8.def`, SFF v1.0.1.0 com 201 sprites, AIR 102 ações, `ken1.act`;
+`common1.cns` ausente e introdução absoluta registrados. Consulta Forge
+somente leitura, licença MIT conferida, sem transplante/preparo do doador.
+Pillow PCX independente confrontou os 201 índices/paletas com Rust sem
+divergência: a primeira falha era **ACT ignorada**, não decoder. Outra falha
+na fronteira BMP/tiles perdia 172 pixels de preto opaco no idle por associar
+RGB preto ao índice de máscara 0; corrigida e coberta por regressão.
+Corrigidos também pares numéricos escalares que causavam panic e orçamento
+que contava atlas inteiro residente apesar do streaming SGDK existente.
+
+**Produto.** Triagem Rust reutilizável anterior à conversão: DEF inequívoco,
+duplicados/case/referências ausentes ou ambíguas, versões, inventário de
+sprites/ações/controllers e localização; digest conferido novamente ao
+importar. Seleção ACT/ações explícita, fonte intacta e derivados rastreáveis.
+Wizard canônico recebe revisão com miniaturas reais, ação/quadro, original e
+RGB333 na mesma escala, checker, eixo opcional e duração AIR; escolhas,
+relatório e pixels reabrem. Stage/screenpack continuam na rota existente.
+Piloto seleciona 0/20/21/200, 21 elementos AIR/18 células, 104×104, âncora
+(51,98), durações 6/5/2; 15 cores opacas, zero fusões e sem redução de resolução.
+**CNS original não convertido:** modo `authored_visual_demo` explicitamente
+rotulado, grafo/controllers originais preservados como referência, facing
+fixo à direita, sem acerto/dano/colisão. Nenhum flip nas ações selecionadas.
+
+**Aceite real.** UI Tauri: selecionar/analisar/inspecionar/importar → editar
+VelSet do estado 20 (2,5 → 1,5) → salvar/encerrar/reabrir → Build & Run oficial
+→ teclado nativo →/←/Z, acks mesma sessão/seq → core/canvas integralmente
+iguais. App `9b602ff3519f179804722da1f3ba3b35d28bdb1deeb2fb3d646c7a29d4ce5d36`;
+ROM UI `0e8af2eb8015beb6830b5074f8ed52e8537d4e9bf86f48d023d9d27f8febe6fe`;
+ELF `6e3eae8d525cbe1361c3d70812998122fabfbb6c6dee8bf302ab359a020b7fec`.
+Core oficial Genesis Plus GX v1.7.4 `46a5521`, hash
+`07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1`.
+Oráculo externo independente passou em 21 prévias, 27 frames compilados por
+projeto, 204 core e 212 UI: pixels/máscara, geometria, ordem e ticks exatos;
+paleta/sprite/eixo/flip/imagem antiga alterados são recusados. Galeria de
+mesma pose fonte/prévia/core/UI e sequência GIF inspecionadas, locais em
+`~/.retrodev/mugen-real-2026-09-30/oracle/`.
+UI mede caminhada 384/256, volta −448/256, paradas imóveis. Solicitação de
+toque nativo foi observada em lote de 10 ticks: **dois** ataques completos
+de 6 ticks, idle entre eles e depois; comando autoral de nível pode repetir
+enquanto pressionado. Backend de um tick prova um ciclo. Não alegar input
+instantâneo/um único ataque na UI. Curva RGB565 do core verificada pela fonte
+imutável `46a55214d0dab654e5a525ae0c54921ca9716872`, separada da prévia RGB.
+Custos compilados: 96 tiles/3.072 B residentes, até 8 peças, pico 4 peças e
+104 px/scanline, até 3.072 B de tiles por troca. CPU/DMA temporal, hardware
+físico, PAL e FPS real não medidos; warning conservador permanece.
+
+**Validação.** `mugen-import`, `mugen-control`, `mugen-locomotion` verdes no
+mesmo app; 14 processos próprios por cenário, 0 vivos. Gates: tree, lint,
+tsc, fmt, clippy `-D warnings`, frontend 828/0/6 (834), Rust 818/0/72 (890),
+`crates:gates` quatro pacotes, syntax harness e oráculo. Patch transitivo
+único `brace-expansion` 5.0.9 → 5.0.12 remove vulnerabilidades altas; audit
+no limiar high passa com quatro moderadas Vitest registradas como dívida de
+teste. RustSec passa com oito avisos informacionais herdados, cadeias e IDs
+registrados no documento de missão; nenhuma dependência Rust nova/alterada.
+Licenças reexecutadas (334 npm/499 Cargo/15 toolchains). Host READY,
+fingerprint `60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2`.
+`host:certify` passou: READY, frontend 831/0/3 com ambiente oficial habilitado,
+Rust 818/0/72 e validação upstream Linux SGDK/PVSnesLib/core `success: true`.
+
+Commits de produto `90481e7d50b047ff0711d09290abbfe2b6269041`, QA
+`44a850c8e11b14d178683129dbb3ff9a454b2a99`, segurança
+`23df72290ccdf29acbe5322756c35979d9af23f0`. Publicar PR dependente da branch
+de #87, consultar CI pelo SHA final (não presumido neste checkpoint).
+Esta prova é do piloto delimitado; não promove suporte geral MUGEN nem maturidade.
+
 ### Checkpoint 2026-09-29 (i) — integrador, **PR #86 MUGEN → SGDK MESCLADO no tronco do integrador; `rex-mugen` promovido a `fluxo-do-usuario-comprovado` co escopo medido; frente MUGEN UX v2 aberta** (Experimental mantido; sen release)
 
 **Ordem recibida:** "Revisar PR #86 para merge humano no tronco de integración.
@@ -43,6 +161,31 @@ código nesta rolda), por orde: (1) relatorio de compatibilidade reabrible;
 SFF v2, som e stage. **Fechado por ordem do operador:** merge e promoción.
 **Aberto:** licenza do runtime `mg_*`, soporte xeral de MUGEN e calquera
 release.
+
+### Checkpoint 2026-09-29 (m) — MUGEN UX v2, lote 4: **locomoção horizontal por `VelSet` (x constante, Q8.8) importada, editável e comprovada na ROM** (Experimental mantido)
+Rama `codex/rex-mugen-locomotion` (dependente de `codex/rex-mugen-ux-v2` @ `d1b5a4d`, CI verde por SHA). `0194f94` (checkpoint (i), só docs) segue fóra das duas ramas: conservar (i), (j), (k), (l) e (m) na integración sen duplicar.
+**Subconjunto** (contrato completo em `crates/rex-mugen/CONTRACT.md`, «Locomoção horizontal»): `VelSet x = N` / `value = N[, 0]`, `N` literal decimal, `trigger1 = 1`; px por tick (1 tick = 1 quadro emulado), x+ = direita, facing fixo à direita, Q8.8 com arredondamento ao mais próximo, deslocamento = `floor(Σ vx_q8/256)`; estado sen `VelSet` mantém a velocidade. Recusado com motivo (`unsupported`, sen ligar o nó): expressão/`const()`, outro gatilho, y≠0, x omitido, parámetro extra, fóra da faixa. **`PosAdd`/`PosSet`/`VelAdd` seguen fóra.**
+**Cadea:** CNS → `parse_velset` → nós `set_velocity` de perfil (corpo + entrada) no grafo da entidade (persistido em `graph_ref`) → Inspector («Velocidade dos estados», px/tick, aviso de arredondamento, diagnóstico) → `LogicOp::MugenSetVelocityX` → runtime (`vx`/`xacc` por entidade). **Corrixido:** a máquina de estados era global (`fsm_state`); agora `fsm_state_<entidade>` (duas entidades con FSM non compartían estado por accidente).
+**Prova nova.** Rust: 7 testes de produto + `mugen_strider_real_build_run_locomotion` (ROM/core reais, 195 quadros, 0 divergências vs contrato). Desktop `mugen-locomotion` (build final: app `f74e17be99abdf19a095d778dafa96f27edfdb72d4865a7787003def1fc24796`, `dist/index.html` `ad9b20abad2ffc865376095121a1ebbf1fc74b308bf610953604b039d8888ac0`, ROM `fda7472c023fca6e29cbb6678963ed9e032bdc41b0b71dd4071437b357246fc9`, ELF `b20bbd08d430b62ce3dbc19e22bf910c345ac067ce148c0dfa894377e21632a8`, fixture `strider.*` em `mugen-locomotion-2026-09-29T19-01-27-240Z-report.json`; 480 quadros): importar → relatório (4 VelSet `direct`) → digitar velocidade (`x`, `const(...)`, `200` recusados; `2.4` com aviso; **2.5 → 3.75**) → duplicar (2ª entidade parada) → salvar → reiniciar → reabrir → Build & Run → teclas nativas: sen input parado em x=96; Right e Left deslocam; troca Right→Left segurando; soltura → idle com posição constante; velocidade editada (960/256) e não editada (−448/256) batem **em todos os quadros** (0 divergências; x final 204 = esperado 204); animação 4/6 ticks independente da velocidade (19 trechos); ataque 3/8; outra entidade em x=288 intacta (visual e RAM); RAM em repouso = visual. Negativo: import con `x = const(...)` recusado e visível.
+**Regressões reexecutadas no mesmo código (verdes; hash do app por execução, o build muda o hash):** `mugen-import` app `d00dcc3bbb2fccbd6d90731a5930ab17218cfc4a283cdf291bbb36ec700faeec`, ROMs `9108cb9a…` (idle 5/9) e `8e7e4a22…` (20/9); `mugen-control` app `567c94879d1757e7eefc5c4409f5f6003c85fe07676c844d094026d5e4b20408`, ROM `3c1fc3e8…`. Detalhe: `mugen-import` (relatório reabrível, 5/9 → 20/9), `mugen-control` (ataque por teclado, duração 4→12), coerência das duas representações (testes Rust), encerramento de sesións en sucesso e falla controlada (14 procesos acompañados, 0 vivos). A repetición da dixitación do Inspector agora é o helper `typeIntoInputAndExpect` (≤3 tentativas registadas; só acepta campo = texto dixitado + evidencia específica); nas execucións deste lote todas as entradas foron aceitas na 1ª tentativa; a causa do timeout antigo segue **sen atribuír**.
+**Limitações:** PAL non medido; tempo real non certificado (core de debug ≪ 60 fps; medida en quadros emulados); sen colisión, límite de pantalla, chan, física, facing nin combate; fixture usa `command = 5` (neutro, extensión RetroDev); só un personaxe/fixture; SFF v2/son/stage fóra. Non se consultou o SGDK Forge nin se copiou código seu; a semántica de `VelSet` segue o coñecemento do MUGEN, sen cópia de documentación.
+
+### Checkpoint 2026-09-29 (l) — MUGEN UX v2, lote 3: **coerência de duração no backend, limpeza própria do harness e personagem importado controlado pelo teclado** (Experimental mantido)
+Rama `codex/rex-mugen-ux-v2` sobre `916da06` (CI de `916da06`: `CI` e `Desktop E2E` ainda `in_progress` na última consulta — não presumido; consultar por SHA). `0194f94` (checkpoint (i), só docs) segue fóra da rama; conservar (i), (j), (k) e (l) na integración sen duplicar.
+**1. Coerência.** `mugen_anim_table` valida `frame_durations` × `mugen_frames[].duration` na geração: valor diferente ou comprimento diferente **bloqueia o build** (`#error`) com animação, quadro e valores; legado sen `frame_durations` usa `mugen_frames` só na geración (proxecto nunca reescrito); Inspector mostra o conflito e non edita. Testes Rust novos (5 unitarios + regresión de divergencia ponta a ponta); a proba 5/9 → 20/9 reexecutada verde. Política em `crates/rex-mugen/CONTRACT.md`.
+**2. Limpeza do harness.** Falla real: a 2ª instância do app (após reiniciar) escapaba ao `finally`. Agora o harness acompanha sesións e PIDs (starttime de `/proc`), fecha todas as sesións no `finally`, espera limitada, SIGTERM→SIGKILL só a PIDs seus. Prova: sucesso e **falla controlada** (`RDS_E2E_INJECT_FAILURE=after-restart`) com 14 procesos acompañados (driver, driver nativo, as 2 instâncias do app e filhos), 0 vivos, confirmado por `ps` externo.
+**3. Controle pelo teclado** (`--scenario mugen-control`, fixture autoral `walker`; app `83933a2e…`, frontend `dist/index.html` `75038b65…`, ROM `5b152a96…`, ELF `0a32e7a2…`, fixture `walker.{def,air,cmd,cns,sff}` sha em `mugen-control-2026-09-29T14-43-50-116Z-report.json`): importar → compatibilidade (sprites/animações/comandos/estados direct; colisões/som/stage ausentes) → duração da caminhada 4→12 pelo Inspector (`0` recusado, «Mantido: 4») → salvar → reiniciar → reabrir → relatório reaberto → Build & Run (ROM em execução = compilada) → foco → ArrowRight/KeyZ **nativos**. Observado: intenção e ack da mesma sessão/seq; sen input, idle o tempo todo (RAM=0); segurando →: verde **12**, azul **6**, gap de idle 1 tick, RAM=animação de caminhada; solto: volta ao idle; KeyZ: hitA **3**, hitB **8** uma só vez, RAM=animação de ataque; sen input outra vez: idle. Ação declarada como «animação de ataque».
+**Prova herdada:** relatório reabrível, 5/9 → 20/9 (`mugen-import` reexecutado no binário do lote, verde). **Limitações:** **sen movimento de posición** (VelSet/PosAdd non convertidos; borda esquerda constante); só comando direção segurada e botão; sen acerto/dano/colisão; PAL e tempo real non medidos (core de debug ≪ 60 fps; medida em quadros emulados); leitura de RAM dependente do símbolo `rds_mugen_<v>_anim` no ELF; SFF v2/som/stage fóra.
+Gates: `check:tree`, `lint`, `tsc`, `npm test` 821/0/6, `cargo fmt --check`, `clippy --lib` e `clippy` `-D warnings`, `cargo test --lib` 803/0/70, `crates:gates` (4 pacotes), `node --check`.
+
+### Checkpoint 2026-09-29 (k) — MUGEN UX v2, etapa 2: **tempo por quadro editável no Inspector, em ticks de 1/60 s** (Experimental mantido)
+Rama `codex/rex-mugen-ux-v2`, sobre `2522569` (CI `CI` + `Desktop E2E` `success`, consultado por SHA). **Integração futura:** `0194f94` (checkpoint (i), só docs) está fóra desta rama (`0194f94...HEAD` = 1 vs 1); conservar (i) e este (j)/(k) ao integrar, sen duplicar nin reescrever historia.
+**Achado da auditoria** (unidades em `crates/rex-mugen/CONTRACT.md`, «Unidades de duração»): a duración é por elemento, em ticks de 1/60 s (`-1` = parado; gerador aceita `-1|1..=255`); o Inspector expunha só «Animacoes (FPS)», campo que **não altera a ROM** das animações MUGEN. Agora: animações MUGEN mostram «Quadro N (ticks)» (ajuda para iniciantes, `= s`), gravando `frame_durations[i]` **e** `mugen_frames[i].duration` só do quadro editado; entradas `0`, `<-1`, `>255`, vazias ou não inteiras dão diagnóstico com «Mantido: N» e não mudam o estado; sen ação que uniformice. Animações nativas seguem com FPS.
+**Prova nova** (`--scenario mugen-import`, pela UI: importar → editar → salvar → encerrar → reabrir → Build & Run; binário `c44f5305…`, `dist/index.html` `f8c27a72…`): idle `action_0` 5/9 ticks; editado o quadro 1 para 20 → ROM `9b521159…` → `5f75177a…`; **medido no core em quadros emulados** (cada `putImageData` do viewport = 1 quadro): original 5/9 (23 e 22 trechos, todos exatos), editado 20/9 (10 e 11 trechos, todos exatos), 0 trechos fora; `action_200` 3,6,4,2 intacta no disco; valores recusados `0`, `-2`, `x` mantêm 20; relatório MUGEN reabrível. Instância pós-reinício encerrada.
+**Limitações:** em ms de parede o core de debug roda ~7× abaixo do tempo real no harness (razão 0,548 ≈ 5/9 correcta) — por isso a medida é em quadros; um só personagem/animação (probe), não é suporte geral a animações MUGEN; `frame_durations` vs `mugen_frames.duration` sen conferência no gerador; PAL não medido. Gates: `check:tree`, `lint`, `tsc`, `npm test`; Rust não tocado (gates Rust não reexecutados).
+
+### Checkpoint 2026-09-29 (j) — MUGEN UX v2, etapa 1: **relatório de compatibilidade reabrible** (Experimental mantido)
+Rama `codex/rex-mugen-ux-v2`. Novo menú Projeto → «Relatorio MUGEN» (`menu-action-mugen-report`) reabre o panel a partir de `assets/mugen/<id>_import_report.json` no disco (`showMugenCompatibility(dir, true)`), sen depender do estado da sesión que importou; «Fechar» limpa o estado. Sen relatorio → aviso explicativo. Proba: `npm test` 813/0/6, E2E desktop `--scenario mugen-import` verde co paso novo `report_reopened_after_restart` (importar → reiniciar app → reabrir proxecto → menú → mesmas categorías, totais e perdas que o panel da importación e que o JSON gravado). Fóra de escopo (non iniciado): SFF v2, son, stage, comandos de golpe.
 
 ### Checkpoint 2026-09-29 (h) — integrador, **PR #85 MUGEN → SGDK integrado na árbore do integrador: importación de personaje, panel de compatibilidade e edición persistente probados na UI** (Experimental; publicado como PR #86 sen merge, sen release, sen promoción de maturidade naquele intre — o merge e a promoción rexístranse no checkpoint (i))
 
@@ -1992,3 +2135,137 @@ decisión do operador. O siguiente degrau para B é fluxo do usuario (UI que cha
 decode/encode) ou reinserción na transación canónica — ambos requiren decisión explícita
 do operador antes de calquera promoción.
 
+### 2026-10-01 — retomada da integração: preservação, revisões (#91, A, C, D) e curadorias preparatórias
+
+**Tronco confirmado, não presumido.** `origin/main` está em `616abdb` (merge do PR
+#60, 2026-09-10) e **não** é o tronco de trabalho: o tronco é a linha do integrador
+`codex/rex-integrator-crates-registry` @ `0194f94` (checkpoint i), da qual descende
+linearmente toda a cadeia MUGEN: `d1b5a4d` (UX v2, checkpoint l) → `b53ce7a` (#87
+locomoção, checkpoint m) → `508db51` (#90 Ken real) → `2793430` (#91 cadeia original).
+Todos publicados e com CI verde por SHA (consultas pontuais `gh` em 2026-10-01:
+CI + Desktop E2E success nos cinco SHAs).
+
+**Preservação antes de integração (nada foi destruído).** Mapeadas 14 worktrees; as
+branches `codex/rex-corpus-a`, `codex/rex-corpus-b`, `codex/rex-corpus-e` e
+`pr-85-mugen` são locais (sem upstream). Backup verificável em
+`~/Projects/REX-HANDOFF-2026-10-01/backup-integracao-2026-10-01/`: bundle `--all`
+(`refs-todas-2026-10-01.bundle`, verify OK, SHA no manifesto), cópias dos untracked
+relevantes com `MANIFEST-COPIAS.sha256`, `MANIFEST-canonical-local.sha256` (2613
+arquivos, 228 MB de evidência local que fica no lugar) e
+`MANIFEST-E-staging-ROM.sha256` (ROM comercial BYOR — **fora do Git**, só hash).
+Patches de A/B do handoff `084414Z` validados contra o estado vivo
+(`A-unstaged.patch` idêntico; staged de A/B e unstaged de B vazios, correto).
+**A branch antiga `codex/rex-integrator-profiles-codecs` está `ahead 2` só porque a
+ref remota dela é velha: os dois commits (`ea92a61`, `7003d2a` — docs TiledImage/aPLib)
+JÁ ESTÃO no tronco `0194f94` e em `2793430`.** Nada perdido, nada a resgatar; não
+duplicado. Sem `reset --hard`, sem `clean`, sem force-push, sem remoção de worktree.
+
+**Worktree exclusiva de integração:** `~/Projects/REX-INTEGRATION-2026-10-01`, branch
+`codex/rex-integrator-mugen-chain` @ `2793430`. Gates reproduzidos no destino em
+2026-10-01: `npm test` **831 passed / 6 skipped (837)**, `cargo test --lib`
+**832 / 0 / 75**, `check:tree` OK, `tsc --noEmit` rc=0, `lint` rc=0 — idênticos aos
+números de `ORIGINAL_CHAIN_EVIDENCE.json`. Host **READY** (fingerprint `60249508…`,
+gerado 2026-09-30). SGDK/E2E completos e `host:certify` ficam para as pernas de
+integração efetiva, um por vez.
+
+**Revisão #91 (cadeia original do Ken) — aprovada, com um limite registrado.**
+Evidência do próprio cenário confere: `ORIGINAL_CHAIN_EVIDENCE.json` reexecuta as
+provas do Ken real neste binário (oráculo Pillow 21/204/211 quadros + controles
+negativos; e2e `mugen-import`/`mugen-control`/`mugen-locomotion` no mesmo app SHA).
+Estado 0 autoral separado de arte original (`origin: stand_in`/`source` no programa,
+verificado no `mugen_chain.rs`; UI com passo `source_and_origin_review`). Semântica de
+botão reconciliada: a borda de subida é **observada, não imposta** (CONTRACT «Semântica
+de entrada»), a janela `buffer.time` fica em classe `approximate` por `cmd.html` não
+confirmado (403). Input solicitado/aceito/consumido separados no `input_path` do JSON
+(driver_requests / keydowns vistos pela página / ticks de A no jogo; 1 de 9 toques
+perdido, medido). Limites do oráculo declarados (§4: a mesma leitura de doc nos dois
+lados; nenhum runtime MUGEN executado). Falha de host tem diagnóstico (carga ≈ 9;
+terceira execução verde sem mudança de código). **Nenhum latch global de input entrou
+no diff** (só harness e2e + script de verificação). **Limite registrado:** o digest do
+programa cobre o mapeamento **como selado** — pega mutação isolada do programa (teste
+`tampered_program_is_refused_by_validate` muta condição/linha/texto), mas NÃO re-lê os
+CMD/CNS/AIR em disco no build: divergência coerente programa+digest regenerados, ou
+drift da fonte pós-conversão, não é detectada. A formulação do ORIGINAL_CHAIN.md §3
+(«cobre o mapeamento») é literalmente verdadeira, mas não deve ser lida como
+«verifica contra a fonte». Follow-up sugerido (não executado): re-verificar
+`SourceRef.text`/hash do pacote no build.
+
+**Revisão A (Kosinski) — aprovada; 1 correção de documento pendente.** O ciclo fecha
+consumidor + variante + saída: o alvo do LEA é o próprio offset do stream
+(`lea $3F09A,A0` @ `0x03082` → recurso `offset:258202`), variante declarada `base`
+(sem alegar modular/Kosinski+), saída verificada contra `koscmp` (21 decodificações +
+5 rejeitos), e o relatório **não** alega ausência de codec — só ausência de marcadores
+de fluxo (0/5 imagens), com §4 separando o que não foi provado (nenhuma execução de
+ROM; `0x085A2` não é declarado descompressor). Gates re-medidos nesta retomada:
+`cargo test --offline` **157/0/0** (bate com o relatório). Pendente: a edição NÃO
+commitada de `RELATORIO-INTEGRACION.md` (diff em `084414Z/A-unstaged.patch`) afirma
+que «o tronco é `codex/collect-counter-goal`» — **falso** (o repo tem `origin/main` e
+o tronco é a linha do integrador); resolver na integração de A, não acatar. Nota de
+procedência: a imagem "Sonic 1" local (531577 bytes, SHA `c7da53a1…`) tem checksum de
+cabeçalho divergente do varejo (declarado 57871, observado 30221) — A e D usam a
+mesma imagem, pinada por SHA.
+
+**Revisão C (áudio Ancient) — aprovada com um achado.** A tabela BE32 confere com as
+instruções e registradores (`move.l (a0,d0.w),d1` = long big-endian; `adda.l d1,a0` =
+alvo relativo à TABLE; `andi.w #$ff`+`lsl.w #$2` = 256×4) e o leitor
+(`readSongIndex`/`u32be`) implementa exatamente isso. Extração de eventos NÃO é
+promovida a reprodução sonora (§3: sem captura, «cadeia é estrutural, não acústica»).
+Testes re-medidos: vitest **23/23**. **Achado:** o §5 diz que o padrão isolado
+`2a 02 1c` «confirma um controlador da família SMPS» em Mega Man Wily Wars — padrão
+de 3 bytes **não identifica família**; vale como refutação da detecção por banner
+(necessária mas insuficiente, como o próprio §5 admite), não como identificação.
+Reformular para «candidato SMPS não refutado» ou acrescentar vínculo estrutural
+(forma da tabela de dispatch, protocolo de barramento 68k→Z80) antes de qualquer
+alegação SMPS. O perfil Ancient entregue não depende dessa frase.
+
+**Revisão D (sprites Sonic 1) — aprovada.** Mapping/DPLC/arte/paleta cada um com
+verificação por padrão de bytes + hash, e o papel do DPLC (tile_slot = ordem de carga,
+não índice de arte) registrado antes da interpretação. **Duas** fontes independentes:
+oráculo reimplementado do s1disasm fixado (`064e3c6…`) e oráculo do piloto anterior,
+byte-idênticos; amostra reservada `fr_Stop1` passou sem mudança de implementação.
+A distância entre prova estática e observação de jogo está dita onde deve (§3:
+DMA/VRAM por frame NÃO executado; «plausibilidade visual não é prova»); a comparação
+visual com captura de jogo fica rotulada como comparação. Testes re-medidos: vitest
+**44/44**. Runtime em emulador permanece a pendência declarada.
+
+**CI das frentes de corpus — causa raiz, sem culpa de código.** C (`cc540d4`) e D
+(`c2635d5`) estão **vermelhas por `npm audit`** (6 vulnerabilidades, advisory
+brace-expansion) porque partem de `b53ce7a`, que é anterior ao fix `23df722`
+(presente na cadeia #90/#91). Não é infraestrutura nem defeito das frentes. As
+curadorias abaixo resolvem por base.
+
+**Curadorias preparatórias (locais, revisáveis, sem push/merge).** Em
+`~/Projects/REX-INTEGRATION-2026-10-01`, sobre `2793430` (que já contém o fix de
+deps), por território isolado: `codex/rex-integrator-corpus-c` @ `a055777`
+(`cherry-pick -x` de `8077900`→`19f3b84`→`cc540d4`; vitest 23/23; `check:tree` OK) e
+`codex/rex-integrator-corpus-d` @ `5fba745` (`cherry-pick -x` de `3ae412a`→`c2635d5`;
+vitest 44/44; `check:tree` OK). As worktrees das agentes não foram tocadas; nenhum
+commit delas foi reescrito. A entra depois que o relatório dela for resolvido (ver
+acima); B segue com trabalho untracked em curso na worktree dela (4 arquivos,
+preservados com SHA) — nada a integrar ainda.
+
+**Próxima ação.** Abrir PRs revisáveis: (1) `codex/rex-integrator-mugen-chain` →
+tronco (cadeia UX v2→#87→#90→#91 inteira, linear, sem duplicação); (2)
+`codex/rex-integrator-corpus-c` e (3) `codex/rex-integrator-corpus-d` → cadeia, um
+por vez, com CI re-medido no destino. Pendências com dono: reformulação SMPS do §5
+de C; resolução do relatório de A; correção da ref remota velha de
+`rex-integrator-profiles-codecs` (opcional, cosmética). Sem merge remoto, release ou
+promoção de maturidade nesta rodada.
+
+**Adenda da mesma rodada (ainda 2026-10-01).** PRs abertas, **sem merge**: **#92**
+(`codex/rex-integrator-mugen-chain`, `b0e23a3` → `codex/rex-integrator-crates-registry`),
+**#93** (curadoria C `a055777`), **#94** (curadoria D `5fba745`) — ambas empilhadas
+sobre a cadeia. CI verificado por consulta pontual: **success** nas três branches de
+curadoria (o audit de brace-expansion desapareceu com a base nova, como previsto).
+Curadoria de A também preparada: **#95** (`codex/rex-integrator-corpus-a`,
+`0c651de` = cherry-picks `-x` dos 7 commits de A sobre `2793430`, + `f1b271c`
+adenda do integrador no relatório: re-medição no destino **157/0/0** +
+`check:tree` OK, veredicto consumidor+variante+saída, e correção factual — a
+afirmação «o tronco é `codex/collect-counter-goal`» está apenas no diff NÃO
+commitado de A e não entra na cadeia; a adenda §7 do relatório registra a correção
+para a agente aplicar ao rebasear). Ref remota velha de
+`codex/rex-integrator-profiles-codecs` corrigida por push fast-forward
+(`d0744b0..7003d2a`) — a branch local deixa de parecer «ahead 2». CI da branch de A
+em andamento no momento do registro; veredicto por SHA a conferir na PR #95.
+Permanecem sem merge, release ou promoção; pendências com dono: SMPS de C, WIP do
+relatório de A, B (untracked, trabalho em curso), auditoria de segurança completa.

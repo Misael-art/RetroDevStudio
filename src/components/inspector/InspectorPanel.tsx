@@ -12,6 +12,19 @@ import HardwareLimitsPanel from "./HardwareLimitsPanel";
 import RuntimeContractsPanel from "./RuntimeContractsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
+import {
+  describeTicks,
+  durationConflicts,
+  effectiveDurations,
+  isMugenAnimation,
+  parseTicks,
+  withFrameDuration,
+} from "../../core/mugenAnimationTiming";
+import {
+  parseVelocity,
+  readMugenVelocities,
+  withMugenVelocity,
+} from "../../core/mugenVelocity";
 import { persistActiveScene } from "../../core/scenePersistence";
 import {
   constrainSpriteFrameSize,
@@ -553,6 +566,10 @@ function buildNestedRecordPatch(
   };
 }
 
+function omitKey(record: Record<string, string>, key: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(record).filter(([name]) => name !== key));
+}
+
 function buildEntityPatch(entity: Entity, path: string[], value: unknown): Partial<Entity> {
   const [root, ...tail] = path;
   if (!root) {
@@ -921,6 +938,64 @@ export default function InspectorPanel() {
     scheduleAutoSave();
   }
 
+  function handleMugenFrameTicksChange(animationName: string, index: number, raw: string) {
+    const key = `${animationName}:${index}`;
+    setMugenTickDrafts((current) => ({ ...current, [key]: raw }));
+    const parsed = parseTicks(raw);
+    if (!parsed.ok) {
+      setMugenTickErrors((current) => ({ ...current, [key]: parsed.message }));
+      return;
+    }
+    setMugenTickErrors((current) => omitKey(current, key));
+    const def = entity?.components.sprite?.animations?.[animationName];
+    if (!entity || !selectedEntityId || !def) return;
+    updateEntity(
+      selectedEntityId,
+      buildEntityPatch(
+        entity,
+        ["components", "sprite", "animations", animationName],
+        withFrameDuration(def, index, parsed.value)
+      )
+    );
+    scheduleAutoSave();
+  }
+
+  function handleMugenFrameTicksBlur(animationName: string, index: number) {
+    const key = `${animationName}:${index}`;
+    setMugenTickDrafts((current) => omitKey(current, key));
+    setMugenTickErrors((current) => omitKey(current, key));
+  }
+
+  function handleMugenVelocityChange(stateNo: number, raw: string) {
+    const key = String(stateNo);
+    setMugenVelocityDrafts((current) => ({ ...current, [key]: raw }));
+    const parsed = parseVelocity(raw);
+    if (!parsed.ok) {
+      setMugenVelocityErrors((current) => ({ ...current, [key]: parsed.message }));
+      return;
+    }
+    setMugenVelocityErrors((current) => omitKey(current, key));
+    if (!entity || !selectedEntityId || !entity.components.logic) return;
+    // O que se grava e o literal digitado; o aviso de arredondamento e mostrado abaixo do campo.
+    const graph = withMugenVelocity(entity, stateNo, raw.trim());
+    if (graph === null) return;
+    updateEntity(
+      selectedEntityId,
+      buildEntityPatch(entity, ["components", "logic"], {
+        ...entity.components.logic,
+        graph,
+        graph_origin: "user_edited_ref",
+      })
+    );
+    scheduleAutoSave();
+  }
+
+  function handleMugenVelocityBlur(stateNo: number) {
+    const key = String(stateNo);
+    setMugenVelocityDrafts((current) => omitKey(current, key));
+    setMugenVelocityErrors((current) => omitKey(current, key));
+  }
+
   /**
    * Duplicates the selected entity under a fresh id, offset to the right. The resolved
    * copy (with inherited prefab components) goes to the active scene so it renders and
@@ -929,6 +1004,10 @@ export default function InspectorPanel() {
    */
   /** Logica manual (fora de comportamentos) que a duplicata NAO herda. */
   const [pendingDuplicate, setPendingDuplicate] = useState<{ manualNodes: number | null } | null>(null);
+  const [mugenTickDrafts, setMugenTickDrafts] = useState<Record<string, string>>({});
+  const [mugenTickErrors, setMugenTickErrors] = useState<Record<string, string>>({});
+  const [mugenVelocityDrafts, setMugenVelocityDrafts] = useState<Record<string, string>>({});
+  const [mugenVelocityErrors, setMugenVelocityErrors] = useState<Record<string, string>>({});
   function manualLogicOf(candidate: Entity | null | undefined): { manualNodes: number | null; graph: NodeGraph } {
     const logic = candidate?.components.logic;
     const graph = deserializeNodeGraph(logic?.graph);
@@ -1319,13 +1398,134 @@ export default function InspectorPanel() {
                 </div>
               </div>
             ) : null}
-            {entity.components.sprite && Object.keys(entity.components.sprite.animations ?? {}).length > 0 ? (
+            {readMugenVelocities(entity).length > 0 ? (
+              <div
+                data-testid="inspector-mugen-velocity"
+                className="space-y-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]"
+              >
+                <span className="text-[9px] uppercase tracking-[0.14em]">Velocidade dos estados (MUGEN, Experimental)</span>
+                <p data-testid="inspector-mugen-velocity-help" className="leading-relaxed text-[#7f849c]">
+                  Quantos pixels o personagem anda a cada tick (1 tick = 1/60 s) enquanto esta naquele estado.
+                  Positivo = direita, negativo = esquerda, 0 = parado; o personagem sempre olha para a direita.
+                  Vai de -127,99 a 127,99 em passos de 1/256 px. So muda a horizontal e nao cria colisao nem limite de tela.
+                </p>
+                <div className="flex flex-wrap items-start gap-2">
+                  {readMugenVelocities(entity).map((state) => {
+                    const key = String(state.stateNo);
+                    const shown = mugenVelocityDrafts[key] ?? state.vx;
+                    const parsed = parseVelocity(shown);
+                    const error = mugenVelocityErrors[key];
+                    return (
+                      <label key={key} className="flex flex-col gap-0.5">
+                        <span>Estado {state.stateNo} (px/tick)</span>
+                        <input
+                          data-testid={`inspector-mugen-velocity-state-${state.stateNo}`}
+                          type="text"
+                          inputMode="decimal"
+                          aria-invalid={error ? true : undefined}
+                          value={shown}
+                          onChange={(event) => handleMugenVelocityChange(state.stateNo, event.target.value)}
+                          onBlur={() => handleMugenVelocityBlur(state.stateNo)}
+                          className={`w-20 rounded border bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4] ${
+                            error ? "border-[#f38ba8]" : "border-[#45475a]"
+                          }`}
+                        />
+                        {parsed.ok ? (
+                          <span
+                            data-testid={`inspector-mugen-velocity-state-${state.stateNo}-note`}
+                            className="max-w-40 text-[9px] text-[#7f849c]"
+                          >
+                            {parsed.exact
+                              ? `${parsed.q8}/256 px/tick`
+                              : `Arredondado para ${parsed.effective} (${parsed.q8}/256).`}
+                          </span>
+                        ) : null}
+                        {error ? (
+                          <span
+                            data-testid={`inspector-mugen-velocity-state-${state.stateNo}-error`}
+                            className="max-w-40 text-[9px] text-[#f38ba8]"
+                          >
+                            {error} Mantido: {state.vx}.
+                          </span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            {entity.components.sprite &&
+            Object.values(entity.components.sprite.animations ?? {}).some((def) => isMugenAnimation(def)) ? (
+              <div
+                data-testid="inspector-mugen-animations"
+                className="space-y-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]"
+              >
+                <span className="text-[9px] uppercase tracking-[0.14em]">Tempo dos quadros (MUGEN, Experimental)</span>
+                <p data-testid="inspector-mugen-timing-help" className="leading-relaxed text-[#7f849c]">
+                  Cada numero e quanto tempo aquele quadro fica na tela, em ticks (1 tick = 1/60 s; 60 ticks = 1 s).
+                  Cada quadro tem o seu proprio tempo e so o quadro editado muda. Use -1 para o quadro ficar parado.
+                  Valores validos: 1 a 255 ou -1.
+                </p>
+                {Object.entries(entity.components.sprite.animations ?? {})
+                  .filter(([, def]) => isMugenAnimation(def))
+                  .sort(([left], [right]) => left.localeCompare(right))
+                  .map(([name, def]) => (
+                    <div key={name} data-testid={`inspector-mugen-anim-${name}`}>
+                      <div className="mb-1 font-mono text-[#89b4fa]">{name}</div>
+                      {durationConflicts(def).length > 0 ? (
+                        <div
+                          data-testid={`inspector-mugen-anim-${name}-conflict`}
+                          className="rounded border border-[#f38ba8]/60 bg-[#f38ba8]/10 p-1.5 text-[#f38ba8]"
+                        >
+                          Tempos inconsistentes no projeto; o build sera bloqueado ate corrigir. Nenhum valor foi
+                          escolhido nem alterado: {durationConflicts(def).join("; ")}.
+                        </div>
+                      ) : null}
+                      <div className="flex flex-wrap items-start gap-2">
+                        {(durationConflicts(def).length > 0 ? [] : effectiveDurations(def)).map((ticks, index) => {
+                          const key = `${name}:${index}`;
+                          const error = mugenTickErrors[key];
+                          return (
+                            <label key={key} className="flex flex-col gap-0.5" title={describeTicks(ticks)}>
+                              <span>Quadro {index + 1} (ticks)</span>
+                              <input
+                                data-testid={`inspector-mugen-anim-${name}-frame-${index}`}
+                                type="text"
+                                inputMode="numeric"
+                                aria-invalid={error ? true : undefined}
+                                value={mugenTickDrafts[key] ?? String(ticks)}
+                                onChange={(event) => handleMugenFrameTicksChange(name, index, event.target.value)}
+                                onBlur={() => handleMugenFrameTicksBlur(name, index)}
+                                className={`w-16 rounded border bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4] ${
+                                  error ? "border-[#f38ba8]" : "border-[#45475a]"
+                                }`}
+                              />
+                              <span className="text-[9px] text-[#7f849c]">{describeTicks(ticks)}</span>
+                              {error ? (
+                                <span
+                                  data-testid={`inspector-mugen-anim-${name}-frame-${index}-error`}
+                                  className="max-w-40 text-[9px] text-[#f38ba8]"
+                                >
+                                  {error} Mantido: {ticks}.
+                                </span>
+                              ) : null}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ) : null}
+            {entity.components.sprite &&
+            Object.values(entity.components.sprite.animations ?? {}).some((def) => !isMugenAnimation(def)) ? (
               <div
                 data-testid="inspector-animations"
                 className="flex flex-wrap items-center gap-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]"
               >
                 <span className="text-[9px] uppercase tracking-[0.14em]">Animacoes (FPS)</span>
                 {Object.entries(entity.components.sprite.animations ?? {})
+                  .filter(([, animation]) => !isMugenAnimation(animation))
                   .sort(([left], [right]) => left.localeCompare(right))
                   .map(([name, animation]) => (
                     <label key={name} className="flex items-center gap-1" title={`frames ${animation.frames.join(",")}`}>
@@ -1593,7 +1793,10 @@ export default function InspectorPanel() {
                           <span className="text-[#89b4fa]">{name}</span>
                           <span className="text-[#45475a]"> — </span>
                           <span>
-                            {def.frames?.length ?? 0} quadros @ {def.fps ?? "?"} fps
+                            {def.frames?.length ?? 0} quadros{" "}
+                            {isMugenAnimation(def)
+                              ? `(${(def.frame_durations ?? []).join(", ")} ticks de 1/60 s)`
+                              : `@ ${def.fps ?? "?"} fps`}
                             {def.loop ? " (loop)" : ""}
                           </span>
                         </li>

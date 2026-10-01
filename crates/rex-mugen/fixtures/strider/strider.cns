@@ -1,0 +1,40 @@
+[Statedef 0]
+type = S
+anim = 0
+
+[State 0, Stop]
+type = VelSet
+x = 0
+trigger1 = 1
+
+[Statedef 20]
+type = S
+anim = 20
+
+[State 20, Walk]
+type = VelSet
+x = 2.5
+trigger1 = 1
+
+[Statedef 21]
+type = S
+anim = 21
+
+[State 21, Walk]
+type = VelSet
+x = -1.75
+trigger1 = 1
+
+[Statedef 200]
+type = S
+anim = 200
+
+[State 200, Still]
+type = VelSet
+x = 0
+trigger1 = 1
+
+[State 200, End]
+type = ChangeState
+value = 0
+trigger1 = AnimTime = 0

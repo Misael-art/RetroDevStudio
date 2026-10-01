@@ -11,10 +11,23 @@ export interface AnimationDef {
   frames: number[];
   fps: number;
   loop: boolean;
+  /** Ticks de 1/60 s por quadro (-1 = parado). Fonte da ROM nas animacoes MUGEN. */
   frame_durations?: number[];
   loop_start?: number;
+  /** Presente so nas animacoes importadas de MUGEN; `duration` espelha `frame_durations`. */
+  mugen_frames?: MugenAnimationFrame[];
   onion_skin?: SpriteAnimationOnionSkin;
   hitboxes?: SpriteAnimationHitbox[];
+}
+
+export interface MugenAnimationFrame {
+  group: number;
+  image: number;
+  axis?: Pivot | null;
+  duration: number;
+  flags?: string[];
+  clsn1?: unknown[];
+  clsn2?: unknown[];
 }
 
 export interface SpriteAnimationOnionSkin {

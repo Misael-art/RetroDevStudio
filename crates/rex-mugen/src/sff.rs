@@ -20,6 +20,18 @@ pub const MAX_DECODED_BYTES: usize = 64 * 1024 * 1024;
 
 pub type Rgb = [u8; 3];
 
+/// ACT MUGEN: 256 RGB em ordem invertida (índice 0 no final).
+pub fn read_act(bytes: &[u8]) -> Result<Vec<Rgb>, &'static str> {
+    if bytes.len() != 768 {
+        return Err("paleta ACT deve conter exatamente 768 bytes");
+    }
+    Ok(bytes
+        .chunks_exact(3)
+        .rev()
+        .map(|c| [c[0], c[1], c[2]])
+        .collect())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sprite {
     pub group: i32,
@@ -425,6 +437,18 @@ pub mod write {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn act_reverses_rgb_entries_and_rejects_partial_or_extended_files() {
+        let mut bytes = vec![0; 768];
+        bytes[0..3].copy_from_slice(&[7, 8, 9]);
+        bytes[765..768].copy_from_slice(&[1, 2, 3]);
+        let palette = super::read_act(&bytes).unwrap();
+        assert_eq!(palette[0], [1, 2, 3]);
+        assert_eq!(palette[255], [7, 8, 9]);
+        assert!(super::read_act(&bytes[..767]).is_err());
+        bytes.push(0);
+        assert!(super::read_act(&bytes).is_err());
+    }
     use super::write::{sff_v1, Image};
     use super::*;
 

@@ -40,6 +40,16 @@ fn check_committed(name: &str, f: fixture::Files) {
 }
 
 #[test]
+fn committed_strider_is_reproducible() {
+    check_committed("strider", fixture::strider());
+}
+
+#[test]
+fn committed_walker_is_reproducible() {
+    check_committed("walker", fixture::walker());
+}
+
+#[test]
 fn committed_warden_is_reproducible() {
     check_committed("warden", fixture::warden());
 }

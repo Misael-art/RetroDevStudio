@@ -144,6 +144,7 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   rom_state_write: entry("rom_state_write", "bridge_source_mapping", "ROM recuperada", "Escrita de estado", "chip", "Escribe un valor nun enderezo de estado cando a regra cumpre ou non (so lectura).", ["address", "value"]),
   rom_external_call: entry("rom_external_call", "bridge_source_mapping", "ROM recuperada", "Chamada externa", "warning-triangle", "Chamada a unha rutina que NON se recuperou: coñecense alvo e argumentos, non o corpo. Opaca, sen edicion.", ["target"]),
   rom_region_exit: entry("rom_region_exit", "bridge_source_mapping", "ROM recuperada", "Saida da rexion", "chip", "Enderezo da ROM onde remata a rutina recuperada (so lectura)."),
+  mugen_state_program: entry("mugen_state_program", "bridge_source_mapping", "MUGEN", "Programa de estados (cadeia original)", "chip", "Cadeia do CMD/CNS original convertida, com mapeamento de fonte e digest (somente leitura; editar fora do produto bloqueia o build)."),
   bridge_unconverted_source: entry("bridge_unconverted_source", "bridge_source_mapping", "Hardware", "Bridge de Fonte", "chip", "Trecho de codigo importado que ainda nao virou no editavel (somente leitura)."),
   event_vblank: entry("event_vblank", "vdp_dma_palette", "Eventos", "Evento VBlank", "flash", "Roda no intervalo vertical do video."),
   event_hblank: entry("event_hblank", "vdp_dma_palette", "Eventos", "Evento HBlank", "flash", "Roda a cada linha horizontal do video."),

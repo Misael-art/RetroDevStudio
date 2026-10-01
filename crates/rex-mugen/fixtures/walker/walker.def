@@ -1,0 +1,9 @@
+[Info]
+name = "Walker"
+author = "RetroDev Studio (autoral)"
+
+[Files]
+cmd = walker.cmd
+cns = walker.cns
+sprite = walker.sff
+anim = walker.air
