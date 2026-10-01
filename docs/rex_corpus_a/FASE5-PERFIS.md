@@ -164,6 +164,15 @@ unha casualidade de bytes.
 A mostra reservada entra aquí **só** como medida estática dos vínculos que a
 Fase 4 xa intentou refutar; non se empregou para axustar ningunha regra.
 
+> **Corrección (Fase 6 §7):** esta afirmación estaba **incorrecta**. A
+> reservada orixinou as regras R6 (carga `lea abs.l`) e R7 e a ventá de 16
+> bytes — naceron da medida nela (Fase 4 §6–7). A validación non vista desas
+> regras acabou sendo Sonic 1. Os rexistros da reservada son in-sample para a
+> regra que os detectou; ademais, o vocabulario `confirmado-estaticamente`
+> desta fase retirouse no contrato `rex-corpus-resource/v2` (os mesmos
+> oito rexistros, rexenerados coas medidas intactas, quedan en
+> `referencia-estatica` / `vinculo-estrutural`).
+
 ### 5.2 Reprodución
 
 ```bash
