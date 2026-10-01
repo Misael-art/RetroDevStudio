@@ -5371,7 +5371,7 @@ fn sgdk_asset_destination(kind: &str, asset_path: &str) -> Option<String> {
     }
 }
 
-fn sgdk_entity_id(name: &str) -> String {
+pub(crate) fn sgdk_entity_id(name: &str) -> String {
     let mut id = String::new();
     for character in name.chars() {
         if character.is_ascii_alphanumeric() {
@@ -7093,6 +7093,94 @@ fn imported_mugen_fighting_logic_graph(
     )
 }
 
+/// Grafo de uma cadeia original: um no `mugen_state_program` com o programa e seu mapeamento
+/// de fonte (somente leitura; adulterar o programa bloqueia o build).
+fn original_chain_graph(
+    entity_id: &str,
+    program: &crate::core::mugen_chain::Program,
+    report: &serde_json::Value,
+) -> (String, Vec<serde_json::Value>) {
+    let node = mugen_node(
+        "mugen_state_program",
+        "mugen_state_program",
+        "Programa de estados (cadeia original)",
+        40,
+        80,
+        serde_json::json!({
+            "target": entity_id,
+            "profile": crate::core::mugen_chain::PROFILE,
+            "program_sha256": program.digest,
+            // string: o editor de grafos so conhece parametros string/numero
+            "program_json": serde_json::to_string(program).unwrap_or_default(),
+        }),
+    );
+    let mut behavior = Vec::new();
+    let map_class = |c: &str| match c {
+        "converted" => "direct",
+        "approximate" => "approximate",
+        "authored" => "manual",
+        _ => "unsupported",
+    };
+    for (i, op) in report["operations"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let id = op["id"].as_str().unwrap_or("?");
+        let item = match op["kind"].as_str().unwrap_or("") {
+            "command" | "input_binding" => format!("command:{id}"),
+            "controller" | "trigger" => format!("controller:{id}"),
+            _ => format!("statedef:{id}#{i}"),
+        };
+        let src = &op["source"];
+        let source = src["file"]
+            .as_str()
+            .map(|f| format!("{f}:{}", src["line"].as_u64().unwrap_or(0)));
+        behavior.push(serde_json::json!({
+            "item": item, "source": source.unwrap_or_default(),
+            "fidelity": map_class(op["class"].as_str().unwrap_or("")),
+            "target": serde_json::Value::Null,
+            "reason": op["implementation"], "consequence": op["limit"],
+            "chain_class": op["class"],
+        }));
+    }
+    let mut groups: BTreeMap<String, (usize, String)> = BTreeMap::new();
+    for u in report["unconverted_controllers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        let id = u["id"].as_str().unwrap_or("");
+        if id.starts_with("state.") {
+            continue; // ja listado individualmente em `operations`
+        }
+        let reason = u["reason"].as_str().unwrap_or("").to_string();
+        let scope = id.rsplit_once(".controller.").map(|(a, _)| a).unwrap_or(id);
+        let entry = groups
+            .entry(format!("{scope}|{reason}"))
+            .or_insert((0, reason));
+        entry.0 += 1;
+    }
+    for (key, (count, reason)) in groups {
+        let scope = key.split('|').next().unwrap_or("");
+        behavior.push(serde_json::json!({
+            "item": format!("controller:{scope}#nao-convertidos"), "source": "",
+            "fidelity": "unsupported", "target": serde_json::Value::Null,
+            "reason": format!("{count} controlador(es): {reason}"),
+            "consequence": "o efeito original destes controladores nao acontece no jogo convertido",
+            "chain_class": "unconverted",
+        }));
+    }
+    (
+        serde_json::json!({
+            "version": 1, "nodes": [node], "edges": [], "gaps": []
+        })
+        .to_string(),
+        behavior,
+    )
+}
+
 fn mugen_node(
     id: &str,
     node_type: &str,
@@ -7268,6 +7356,41 @@ fn import_mugen_character_with_review(
     // Tudo que le/valida o pacote vem antes de qualquer gravacao no projeto:
     // uma falha aqui nao deixa arquivo parcial.
     let original_model = collect_mugen_character_fighting_model(&candidate.root_dir, files)?;
+    let chain = match review {
+        Some(r) if r.original_chain => {
+            if r.authored_demo {
+                return Err(LoadError(
+                    "Escolha comportamento autoral OU cadeia original, nao os dois.".into(),
+                ));
+            }
+            let state = r.chain_state.ok_or_else(|| {
+                LoadError("Cadeia original sem estado escolhido na revisao.".into())
+            })?;
+            let ad = rex_mugen::air::parse(&read_text_lossy(&anim_path)?, anim_rel);
+            let totals = crate::core::mugen_profile::action_totals(&ad, &r.actions);
+            let def_name = candidate
+                .def_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let input = crate::core::mugen_profile::chain_input(
+                &candidate.root_dir,
+                &def_content,
+                &def_name,
+                state,
+                &totals,
+                &sgdk_entity_id(&candidate.display_name),
+            )?;
+            let analysis = crate::core::mugen_chain::analyze(&input);
+            match analysis.program {
+                Ok(program) => Some((program, analysis.report)),
+                Err(why) => {
+                    return Err(LoadError(format!("Cadeia original recusada: {why}")));
+                }
+            }
+        }
+        _ => None,
+    };
     let fighting_model = if review.is_some_and(|r| r.authored_demo) {
         authored_mugen_visual_demo()?
     } else {
@@ -7346,8 +7469,14 @@ fn import_mugen_character_with_review(
     let has_fighting_logic = !fighting_model.commands.is_empty()
         || !fighting_model.states.is_empty()
         || !fighting_model.controllers.is_empty();
-    let command_bindings = mugen_command_bindings(&fighting_model, &animations);
-    let (graph, behavior) = if has_fighting_logic {
+    let command_bindings = if chain.is_some() {
+        Vec::new()
+    } else {
+        mugen_command_bindings(&fighting_model, &animations)
+    };
+    let (graph, behavior) = if let Some((program, report)) = &chain {
+        original_chain_graph(&entity_id, program, report)
+    } else if has_fighting_logic {
         imported_mugen_fighting_logic_graph(&entity_id, &fighting_model, &animations)
     } else {
         (imported_mugen_idle_logic_graph(&entity_id), Vec::new())
@@ -7356,10 +7485,17 @@ fn import_mugen_character_with_review(
     if let Some(review) = review {
         import_report["behavior_mode"] = serde_json::json!(if review.authored_demo {
             "authored_visual_demo"
+        } else if chain.is_some() {
+            "original_chain"
         } else {
             "original_subset"
         });
-        import_report["behavior_notice"] = serde_json::json!(if review.authored_demo {
+        if let Some((_, chain_report)) = &chain {
+            import_report["original_chain"] = chain_report.clone();
+        }
+        import_report["behavior_notice"] = serde_json::json!(if chain.is_some() {
+            "Cadeia original delimitada convertida do CMD/CNS do pacote (comando, condicao, estado, animacao, retorno). O estado 0 vem de common1.cns, ausente: stand-in autoral declarado. Nao e conversao integral do personagem; sem colisao, dano ou combate."
+        } else if review.authored_demo {
             "Comportamento autoral RetroDev: direcao segurada e botao A demonstram as imagens importadas. Nao e conversao do CNS original. Facing fixo a direita; sem acerto, dano ou fisica."
         } else {
             "Apenas o subconjunto declarado do CNS original e convertido; dependencias externas e controllers desconhecidos nao executam."

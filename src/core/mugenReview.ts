@@ -6,7 +6,27 @@ export interface MugenReviewOptions {
   actions: number[];
   palette_file: string | null;
   authored_demo: boolean;
+  original_chain?: boolean;
+  chain_state?: number | null;
   source_sha256: string | null;
+}
+export interface MugenChainSource { file: string; section: string; line: number; text: string }
+export interface MugenChainOperation {
+  id: string; kind: string; class: "converted" | "approximate" | "authored" | "unconverted";
+  source: MugenChainSource | null; implementation: string; test: string; limit: string;
+}
+export interface MugenChainReport {
+  status: string; notice?: string; program_sha256?: string; command_bits?: string[];
+  summary?: { converted: number; approximate: number; authored: number; unconverted: number };
+  dependencies?: Array<{ name: string | null; declared_in?: string; status: string; sha256: string | null; consequence: string }>;
+  state_status?: Array<{ state: number; origin: string; converted: number; unconverted: number; verdict: "completo" | "parcial" | "autoral" }>;
+  operations?: MugenChainOperation[];
+  unconverted_controllers?: Array<{ id: string; source: MugenChainSource; reason: string }>;
+  errors?: string[];
+}
+export interface MugenChainCandidates {
+  available: Array<{ state: number; commands: string[]; entries: Array<{ source: MugenChainSource }> }>;
+  refused: Array<{ state: number; reason: string }>;
 }
 export interface MugenVisualFrame {
   action: number; element: number; group: number; image: number;
@@ -30,6 +50,8 @@ export interface MugenSourceAnalysis {
   actions: Array<{ number: number; frames: number; line: number }>;
   palettes: string[]; diagnostics: MugenReportDiagnostic[];
   options?: MugenReviewOptions;
+  original_chain?: MugenChainReport;
+  original_chain_candidates?: MugenChainCandidates;
   report: (MugenImportReport & { visual_review?: MugenVisualReview }) | null;
 }
 export function analyzeMugenSource(projectPath: string, options?: MugenReviewOptions) {

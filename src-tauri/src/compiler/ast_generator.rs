@@ -297,6 +297,12 @@ pub enum LogicOp {
         target_var: String,
         vx_q8: i32,
     },
+    /// Perfil `mugen.original_chain.v1`: um passo (tick) do programa de estados convertido
+    /// do CMD/CNS original (`core/mugen_chain.rs`); validado no compilador do grafo.
+    MugenProgramStep {
+        target_var: String,
+        program: Box<crate::core::mugen_chain::Program>,
+    },
     SetTile {
         layer: String,
         tile: LogicMathExpr,
@@ -1465,6 +1471,15 @@ fn compile_logic_graph(
 
     if let Some(fsm_script) = compile_fsm_script(graph, entity_id, runtime_entities, &mut output) {
         output.scripts.push(fsm_script);
+    }
+    for node in graph
+        .nodes
+        .iter()
+        .filter(|node| node.node_type == "mugen_state_program")
+    {
+        output.scripts.push(LogicScript {
+            ops: vec![compile_mugen_program(node, runtime_entities)],
+        });
     }
     let hardware_event_scripts =
         compile_hardware_event_scripts(graph, runtime_entities, &mut output);
@@ -2783,7 +2798,7 @@ fn collect_unsupported_from_ops(
                 collect_unsupported_from_math(vx, found);
                 collect_unsupported_from_math(vy, found);
             }
-            LogicOp::MugenSetVelocityX { .. } => {}
+            LogicOp::MugenSetVelocityX { .. } | LogicOp::MugenProgramStep { .. } => {}
             LogicOp::SetTile { tile, x, y, .. } => {
                 collect_unsupported_from_math(tile, found);
                 collect_unsupported_from_math(x, found);
@@ -2975,6 +2990,40 @@ fn overlap_expr_for_node(
 
 /// `set_velocity` do perfil MUGEN: x literal decimal (px/tick) -> Q8.8; o que nao for
 /// representavel bloqueia o build (`#error`), nunca vira 0 nem e aproximado em silencio.
+/// Programa de estados do perfil `mugen.original_chain.v1`. Programa ausente, malformado ou
+/// adulterado (digest/mapeamento de fonte) vira `SourceBridgeError`: bloqueia o build.
+fn compile_mugen_program(
+    node: &StoredNodeGraphNode,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+) -> LogicOp {
+    let bridge = |why: String| LogicOp::SourceBridgeError {
+        gap: format!("mugen_program: {why}"),
+        source_file: node.id.clone(),
+        source_line: 0,
+    };
+    let raw_target = param_string(node, "target").unwrap_or_default();
+    let Some(sprite) = runtime_entities
+        .get(&raw_target)
+        .and_then(|runtime| runtime.sprite.as_ref())
+    else {
+        return bridge(format!("entidade '{raw_target}' sem sprite"));
+    };
+    let Some(text) = param_string(node, "program_json") else {
+        return bridge("parametro 'program_json' ausente".into());
+    };
+    let program: crate::core::mugen_chain::Program = match serde_json::from_str(&text) {
+        Ok(p) => p,
+        Err(e) => return bridge(format!("programa ilegivel: {e}")),
+    };
+    if let Err(why) = program.validate() {
+        return bridge(why);
+    }
+    LogicOp::MugenProgramStep {
+        target_var: sprite.var_name.clone(),
+        program: Box::new(program),
+    }
+}
+
 fn mugen_set_velocity_op(
     node: &StoredNodeGraphNode,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
@@ -3138,6 +3187,7 @@ fn collect_logic_sound_names_from_ops(
             | LogicOp::SetSpritePosition { .. }
             | LogicOp::SetVelocity { .. }
             | LogicOp::MugenSetVelocityX { .. }
+            | LogicOp::MugenProgramStep { .. }
             | LogicOp::SetAnimationState { .. }
             | LogicOp::SetTile { .. }
             | LogicOp::CameraFollow { .. }

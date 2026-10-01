@@ -55,6 +55,7 @@ export type NodeType =
   | "rom_external_call"
   | "rom_region_exit"
   | "bridge_unconverted_source"
+  | "mugen_state_program"
   | "event_vblank"
   | "event_hblank"
   | "event_dma_done";
@@ -207,6 +208,7 @@ export function isNodeType(value: unknown): value is NodeType {
     value === "rom_external_call" ||
     value === "rom_region_exit" ||
     value === "bridge_unconverted_source" ||
+    value === "mugen_state_program" ||
     value === "event_vblank" ||
     value === "event_hblank" ||
     value === "event_dma_done"

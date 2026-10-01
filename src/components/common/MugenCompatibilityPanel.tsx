@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 import Dialog from "./Dialog";
 import MugenVisualComparison from "./MugenVisualComparison";
-import { visualReviewOf } from "../../core/mugenReview";
+import MugenChainReview from "./MugenChainReview";
+import { visualReviewOf, type MugenChainReport } from "../../core/mugenReview";
 import { readProjectAssetBytes } from "../../core/ipc/toolsService";
 import {
   FIDELITY_HINT,
@@ -67,6 +68,7 @@ function CharacterReport({ projectDir, loaded }: { projectDir: string | null; lo
   return (
     <section data-testid={`mugen-compat-character-${loaded.id}`} className="space-y-3">
       {typeof loaded.report.behavior_notice === "string" && <p className="text-xs text-[#f9e2af]">{loaded.report.behavior_notice}</p>}
+      {loaded.report.original_chain ? <MugenChainReview chain={loaded.report.original_chain as MugenChainReport} /> : null}
       {visualReviewOf(loaded.report) && <MugenVisualComparison visual={visualReviewOf(loaded.report)!} />}
       <div className="flex items-start gap-3">
         <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded border border-[#313244] bg-[#11111b]">
