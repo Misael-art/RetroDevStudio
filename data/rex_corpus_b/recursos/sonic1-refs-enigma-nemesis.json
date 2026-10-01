@@ -1,0 +1,291 @@
+{
+ "schema_version": 1,
+ "gerado_por": "scripts/rex_corpus_b/find-references.py",
+ "metodo": "duas passadas: (1) padrao de 4 bytes big-endian do endereco absoluto, com classificacao do opcode anterior pelo ISA publico 68000; (2) instrucoes lea/movea.l/move.l com deslocamento de 16 bits relativo ao PC cujo alvo calculado e o endereco consultado. Com --tabelas soma-se a passada (3): inventario de TODAS as cargas catalogadas e das que apontam para cada janela, na direcao oposta a das passadas 1-2",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
+  "nome": "sonic1-enigma-offsets",
+  "sha256_arquivo": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "size_bytes": 531577,
+  "procedencia_interna": {
+   "kind": "raw",
+   "member": "Sonic the Hedgehog (USA, Europe).bin",
+   "member_size": 531577
+  },
+  "internal_name": "SONIC THE",
+  "product_code": "GM 00001009-00",
+  "programa_declarado": [
+   "0x0",
+   "0x805a6"
+  ]
+ },
+ "enderecos": [
+  {
+   "endereco": "0x65432",
+   "absoluto": {
+    "total_ocorrencias": 1,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x1b64c",
+      "opcode_anterior": "0x0",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "4b4c4d4e4b4c4d4e0000",
+      "depois": "000656ac00065abe00065e1a000662f4"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 2,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x64420",
+      "opcode": "0xf9f4",
+      "candidato_instrucao": null,
+      "disp": "0x1010",
+      "alvo": "0x65432",
+      "antes": "f1f1101010101010",
+      "depois": "101010101010101010101010"
+     },
+     {
+      "offset": "0x6b230",
+      "opcode": "0x1d0",
+      "candidato_instrucao": null,
+      "disp": "-0x5e00",
+      "alvo": "0x65432",
+      "antes": "10a002b09a001100",
+      "depois": "1158032ca512117003773600"
+     }
+    ],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x656ac",
+   "absoluto": {
+    "total_ocorrencias": 1,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x1b650",
+      "opcode_anterior": "0x5432",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "4b4c4d4e000000065432",
+      "depois": "00065abe00065e1a000662f4000667c6"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 1,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x6469a",
+      "opcode": "0x1010",
+      "candidato_instrucao": null,
+      "disp": "0x1010",
+      "alvo": "0x656ac",
+      "antes": "1010101010101010",
+      "depois": "0e0210101010101010100800"
+     }
+    ],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x65abe",
+   "absoluto": {
+    "total_ocorrencias": 1,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x1b654",
+      "opcode_anterior": "0x56ac",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "000000065432000656ac",
+      "depois": "00065e1a000662f4000667c603d002e0"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 0,
+    "instrucoes_classificadas": 0,
+    "candidatos": [],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x65e1a",
+   "absoluto": {
+    "total_ocorrencias": 1,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x1b658",
+      "opcode_anterior": "0x5abe",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "5432000656ac00065abe",
+      "depois": "000662f4000667c603d002e003280574"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 0,
+    "instrucoes_classificadas": 0,
+    "candidatos": [],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x662f4",
+   "absoluto": {
+    "total_ocorrencias": 1,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x1b65c",
+      "opcode_anterior": "0x5e1a",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "56ac00065abe00065e1a",
+      "depois": "000667c603d002e00328057404e402e0"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 0,
+    "instrucoes_classificadas": 0,
+    "candidatos": [],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x667c6",
+   "absoluto": {
+    "total_ocorrencias": 1,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x1b660",
+      "opcode_anterior": "0x62f4",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "5abe00065e1a000662f4",
+      "depois": "03d002e00328057404e402e003ad02e0"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 0,
+    "instrucoes_classificadas": 0,
+    "candidatos": [],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x64a00",
+   "absoluto": {
+    "total_ocorrencias": 2,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x4100",
+      "opcode_anterior": "0x4e75",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "e54821fb0006f7964e75",
+      "depois": "00064b9a00064c6200064df200064fe6"
+     },
+     {
+      "offset": "0x51b2",
+      "opcode_anterior": "0x21fc",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "61001afc61001aaa21fc",
+      "depois": "f79646fc230041f90006175e43f89400"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 2,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x639ee",
+      "opcode": "0x1010",
+      "candidato_instrucao": null,
+      "disp": "0x1010",
+      "alvo": "0x64a00",
+      "antes": "1010101010101010",
+      "depois": "101010101010101010101010"
+     },
+     {
+      "offset": "0x64aac",
+      "opcode": "0x4fff",
+      "candidato_instrucao": null,
+      "disp": "-0xae",
+      "alvo": "0x64a00",
+      "antes": "525338ff3e32ff4e",
+      "depois": "534c4d000014ff00ff150000"
+     }
+    ],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x64c62",
+   "absoluto": {
+    "total_ocorrencias": 1,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x4108",
+      "opcode_anterior": "0x4b9a",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "4e7500064a0000064b9a",
+      "depois": "00064df200064fe6000651da43f8fe5e"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 1,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x65a90",
+      "opcode": "0xcc00",
+      "candidato_instrucao": null,
+      "disp": "-0xe30",
+      "alvo": "0x64c62",
+      "antes": "f0003e8f0003efb7",
+      "depois": "000008481f7391e000000880"
+     }
+    ],
+    "omitidos": 0
+   }
+  }
+ ],
+ "limitacoes": [
+  "Uma ocorrencia dos 4 bytes de um endereco pode ser dado coincidente; so a classificacao de opcode + contexto indica instrucao real.",
+  "O passo absoluto so casa operando (xxx).L (4 bytes). Formas (xxx).W, modo registrador, (d8,PC), (d16,PC,Xi)/(d8,PC,Xi) com indice, tabelas indexadas a partir de um registrador base e salto via vetor NAO sao detectadas; ausencia de ocorrencia NAO e prova de ausencia de consumidor.",
+  "(d8,PC) (modo 110 registrador 000) esta FORA do catalogo porque o montador do toolchain nao produz codificacao d8 para `lea 12(%pc),%a0` nem sob -m68010 (emitir 41fa 000c = d16): sem encoding confirmado, rotular seria adivinhar. Ver data/rex_corpus_b/recursos/isa-forms.json.",
+  "O passo pc-relativo enumera candidatos por aritmetica de deslocamento (opcode cru no resultado); rotulos so sao emitidos para formas catalogadas (MOVE.L/MOVEA.L/LEA/JSR/JMP), e a classificacao so cobre os modos de enderecamento com codificacao montada e desmontada.",
+  "Rotulos conferidos word a word contra m68k-elf-as (GNU binutils) do toolchain SGDK, fixado por SHA-256; a tabela de modos publica foi usada apenas para a POSICAO dos campos, nunca como unica fonte de codificacao.",
+  "Isto e evidencia de CONSUMIDOR CANDIDATO; a semantica do recurso ainda exige leitura da rotina.",
+  "No modo --tabelas, `cargas_total` e medido sem filtro de janela de proposito: cargas_total=0 significa que a FERRAMENTA nao ve carga catalogada alguma na area escaneada, o que torna nula qualquer conclusao de ausencia de consumidor para uma janela vazia."
+ ]
+}

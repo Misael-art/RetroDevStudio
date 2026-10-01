@@ -1,0 +1,433 @@
+{
+ "schema_version": "rex-corpus-b/md-layout/1",
+ "gerado_por": "scripts/rex_corpus_b/measure-md-layout.py",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Pulseman (Japan) (Translated En) (Translated PtBr).zip",
+  "membro": "Pulseman (Japan) (Translated En).gen",
+  "sha256": "0745e1a248548bcec0fcd50343c0df1f2b9cfd0303c07010ca6ef933e5b4ec43",
+  "size_bytes": 2097152,
+  "internal_name": "PULSEMAN",
+  "product_code": "GM G-4098  -00"
+ },
+ "insumo": {
+  "localizar": "/home/misael/RDS-REX-CORPUS-B/data/rex_corpus_b/recursos/locate-Pulseman (Japan) (Translated En) (Translated PtBr).json",
+  "codec": "nemesis"
+ },
+ "criterio": {
+  "descricao": "taxa de pares de pixels adjacentes desiguais (horizontal + vertical) sobre o plain montado; vence a leitura com taxa <= margem x a outra, senao inconclusivo",
+  "margem": 0.6,
+  "larguras_testadas": [
+   1,
+   2,
+   4,
+   6,
+   8,
+   12
+  ],
+  "preso_por_teste": "scripts/rex_corpus_b/test-md-tiles.py (secao 8)",
+  "calibrado_em": "verdade de solo sintetica nos dois layouts; o caso em que a leitura errada fica mais suave esta preso como negativo ('limite: caso ambiguo')"
+ },
+ "recursos": [
+  {
+   "tabela_offset": "0x502f4",
+   "ponteiro_offset": "0x502f4",
+   "offset_stream": "0x979d4",
+   "variante": "nemesis-raw",
+   "bytes_consumidos": 486,
+   "output_size": 1408,
+   "output_sha256": "8027dadd897339974fd9e58f9e83ee76c612ee1d7ee74929945abb618b23b282",
+   "tiles": 44,
+   "confirmacao_externa": "byte-identico (mdcomp nemcmp)",
+   "prova_visual": {
+    "chunky": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-979d4-chunky.png",
+     "sha256": "957c6a54253310159a298ea6aa69f89b14b00ff1ddb695046135029153294c85",
+     "escala": 6,
+     "largura_tiles": 4
+    },
+    "planar": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-979d4-planar.png",
+     "sha256": "a0d65c50a62466d89778b8515c3d66b095b8f6b89a2ee365f213b523e3902878",
+     "escala": 6,
+     "largura_tiles": 4
+    }
+   },
+   "por_largura": {
+    "1": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.28547,
+     "taxa_planar": 0.342944,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "2": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.319669,
+     "taxa_planar": 0.369485,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "4": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.315856,
+     "taxa_planar": 0.375907,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "6": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    },
+    "8": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    },
+    "12": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    }
+   },
+   "veredito_unanime": "inconclusivo"
+  },
+  {
+   "tabela_offset": "0x502f4",
+   "ponteiro_offset": "0x502f8",
+   "offset_stream": "0x97bba",
+   "variante": "nemesis-alt-xor",
+   "bytes_consumidos": 491,
+   "output_size": 1792,
+   "output_sha256": "c90dd30d53a666bd0be3a9db193038ad48d229424da5e550141db174b561b14c",
+   "tiles": 56,
+   "confirmacao_externa": "byte-identico (mdcomp nemcmp)",
+   "prova_visual": {
+    "chunky": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-97bba-chunky.png",
+     "sha256": "a111115ce1a1ec872d0ca6b10469e5a18d31a4774c20c76046989cf644bae98d",
+     "escala": 6,
+     "largura_tiles": 8
+    },
+    "planar": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-97bba-planar.png",
+     "sha256": "d939804039d606559548b1bc2fd83cbe6fe20d0315feb43f0d706870598f1a2a",
+     "escala": 6,
+     "largura_tiles": 8
+    }
+   },
+   "por_largura": {
+    "1": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.274732,
+     "taxa_planar": 0.255215,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "2": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.290416,
+     "taxa_planar": 0.277714,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "4": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.286019,
+     "taxa_planar": 0.282887,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "6": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    },
+    "8": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.286748,
+     "taxa_planar": 0.285187,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "12": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    }
+   },
+   "veredito_unanime": "inconclusivo"
+  },
+  {
+   "tabela_offset": "0x502f4",
+   "ponteiro_offset": "0x502fc",
+   "offset_stream": "0x97da6",
+   "variante": "nemesis-raw",
+   "bytes_consumidos": 443,
+   "output_size": 1280,
+   "output_sha256": "a09301cfafc09a3dccdf763a543e04bcba0cbfadb8cc946affcea4b68627d13e",
+   "tiles": 40,
+   "confirmacao_externa": "byte-identico (mdcomp nemcmp)",
+   "prova_visual": {
+    "chunky": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-97da6-chunky.png",
+     "sha256": "c4548d224b432a3f4768188b5a6a5ebd863193c3ee94f70c11682e28b0754d38",
+     "escala": 6,
+     "largura_tiles": 8
+    },
+    "planar": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-97da6-planar.png",
+     "sha256": "c596c2479f4c3fb955e7463598b3a0d906e1b16bf5b4c05746fae4e1c31dcb79",
+     "escala": 6,
+     "largura_tiles": 8
+    }
+   },
+   "por_largura": {
+    "1": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.251252,
+     "taxa_planar": 0.292362,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "2": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.289846,
+     "taxa_planar": 0.322006,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "4": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.294728,
+     "taxa_planar": 0.33147,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "6": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    },
+    "8": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.294258,
+     "taxa_planar": 0.333333,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "12": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    }
+   },
+   "veredito_unanime": "inconclusivo"
+  },
+  {
+   "tabela_offset": "0x502f4",
+   "ponteiro_offset": "0x50300",
+   "offset_stream": "0x981aa",
+   "variante": "nemesis-alt-xor",
+   "bytes_consumidos": 1104,
+   "output_size": 2048,
+   "output_sha256": "2084d46c8e809d51afc7a786b8a4e83f5733ce7a34ecafdf264be5482e2b151b",
+   "tiles": 64,
+   "confirmacao_externa": "byte-identico (mdcomp nemcmp)",
+   "prova_visual": {
+    "chunky": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-981aa-chunky.png",
+     "sha256": "f3ea7ae080300291c9680e7a12df273117c391088ddee4ce4cef12d8205beb57",
+     "escala": 6,
+     "largura_tiles": 8
+    },
+    "planar": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-981aa-planar.png",
+     "sha256": "0784ee1c63d1e833b995d5aac3dbd3af1ff62a696c250c7cc5e38faf8a563ca3",
+     "escala": 6,
+     "largura_tiles": 8
+    }
+   },
+   "por_largura": {
+    "1": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.348801,
+     "taxa_planar": 0.47732,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "2": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.373611,
+     "taxa_planar": 0.504167,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "4": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.376868,
+     "taxa_planar": 0.505852,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "6": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    },
+    "8": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.376116,
+     "taxa_planar": 0.50682,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "12": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    }
+   },
+   "veredito_unanime": "inconclusivo"
+  },
+  {
+   "tabela_offset": "0x502f4",
+   "ponteiro_offset": "0x50304",
+   "offset_stream": "0x99112",
+   "variante": "nemesis-raw",
+   "bytes_consumidos": 208,
+   "output_size": 512,
+   "output_sha256": "93fc429e173ba9a0c3fb8b9ae2bc926f298c2ef063f45fa722cf068bb20c7016",
+   "tiles": 16,
+   "confirmacao_externa": "byte-identico (mdcomp nemcmp)",
+   "prova_visual": {
+    "chunky": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-99112-chunky.png",
+     "sha256": "0c0f3eacdbcf1c74787e2a95334944482ec63936801313706e35400400e7b208",
+     "escala": 6,
+     "largura_tiles": 8
+    },
+    "planar": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-99112-planar.png",
+     "sha256": "23a009db894113d10a9ec4b897d8687f498d39f48744520ce8630bc9746ae193",
+     "escala": 6,
+     "largura_tiles": 8
+    }
+   },
+   "por_largura": {
+    "1": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.366109,
+     "taxa_planar": 0.472803,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "2": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.379573,
+     "taxa_planar": 0.488821,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "4": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.383065,
+     "taxa_planar": 0.492944,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "6": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    },
+    "8": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.376524,
+     "taxa_planar": 0.490346,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "12": {
+     "veredito": "nao-medivel",
+     "motivo": "numero de tiles nao e multiplo da largura"
+    }
+   },
+   "veredito_unanime": "inconclusivo"
+  },
+  {
+   "tabela_offset": "0x5033c",
+   "ponteiro_offset": "0x5033c",
+   "offset_stream": "0xec144",
+   "variante": "nemesis-alt-xor",
+   "bytes_consumidos": 723,
+   "output_size": 1536,
+   "output_sha256": "bb90237dfcee5fe1370c1884aed7aeef201b9b487d3ffcc60ab4cf0b472191c5",
+   "tiles": 48,
+   "confirmacao_externa": "byte-identico (mdcomp nemcmp)",
+   "prova_visual": {
+    "chunky": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-ec144-chunky.png",
+     "sha256": "95c44195ed5be1c5a5fd63b3f1f90b6240b25e52a36ddfc2a5eb7519184a1d42",
+     "escala": 6,
+     "largura_tiles": 8
+    },
+    "planar": {
+     "caminho": "/tmp/rex-corpus-b/layout-visual/pulseman-layout-medido-ec144-planar.png",
+     "sha256": "bd6bc4385ceafb0a2a6af2e6ea3a6117840ee5a4c38aeaf1e1a85ef4c56c41e8",
+     "escala": 6,
+     "largura_tiles": 8
+    }
+   },
+   "por_largura": {
+    "1": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.613352,
+     "taxa_planar": 0.390473,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "2": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.618093,
+     "taxa_planar": 0.409535,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "4": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.61752,
+     "taxa_planar": 0.4124,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "6": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.618203,
+     "taxa_planar": 0.414788,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "8": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.621187,
+     "taxa_planar": 0.414622,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    },
+    "12": {
+     "veredito": "inconclusivo",
+     "taxa_chunky": 0.615691,
+     "taxa_planar": 0.413231,
+     "margem": 0.6,
+     "criterio": "pares adjacentes desiguais sobre o plain inteiro; vence quem tiver taxa <= margem x a do outro"
+    }
+   },
+   "veredito_unanime": "inconclusivo"
+  }
+ ],
+ "descartados_decode_divergente": 0,
+ "resumo": {
+  "medidos": 6,
+  "vereditos": {
+   "inconclusivo": 6
+  },
+  "soma_vereditos": 6
+ },
+ "nota_prova_visual": "Os PNGs sao gerados nas duas hipoteses para inspecao humana; a leitura que mostra formas coerentes e a que mostra listas verticais rigidas (assinatura de ler nibble como plano) e registrada em docs/rex_corpus_b/, com o SHA-256 de cada arquivo.",
+ "limitacoes": [
+  "A largura real do plain nao e conhecida sem o nametable; o veredito so e afirmado quando todas as larguras testadas concordam.",
+  "O indicador de adjacencia e estatistico: ha imagens (variacao a cada pixel) em que a leitura errada e mais suave — por isso o criterio pode responder 'inconclusivo' e responde.",
+  "Nada aqui associa paleta, prioridade ou flip a um tile: e so o layout dos bytes de padrao."
+ ]
+}

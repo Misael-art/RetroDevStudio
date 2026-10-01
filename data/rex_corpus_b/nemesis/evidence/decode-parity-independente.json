@@ -1,0 +1,500 @@
+{
+ "schema_version": 1,
+ "gerado_por": "scripts/rex_corpus_b/nemesis-validate.py",
+ "modulo_validado": "scripts/rex_corpus_b/nemesis_research.py",
+ "limites": {
+  "max_out": 4194304,
+  "work_limit": 67108864
+ },
+ "oraculo": {
+  "binario": "/home/misael/.cache/rex-codecs/oracle-tools/bin/nemcmp",
+  "presente": true,
+  "sha256": "7563a1522b01a89774dc8909204de433a1f4f87f8a99f6f10311989be2022a27",
+  "commit_referencia": "72c6df405a75d322c5b3722da46c3abb864d3793"
+ },
+ "rollup": {
+  "a": {
+   "total": 9,
+   "PASS": 9,
+   "FAIL": 0,
+   "SKIP": 0,
+   "DIVERGE": 0
+  },
+  "b": {
+   "total": 9,
+   "PASS": 9,
+   "FAIL": 0,
+   "SKIP": 0,
+   "DIVERGE": 0
+  },
+  "c": {
+   "total": 10,
+   "PASS": 10,
+   "FAIL": 0,
+   "SKIP": 0,
+   "DIVERGE": 0
+  },
+  "d": {
+   "total": 7,
+   "PASS": 6,
+   "FAIL": 0,
+   "SKIP": 0,
+   "DIVERGE": 1
+  },
+  "d2": {
+   "total": 3,
+   "PASS": 3,
+   "FAIL": 0,
+   "SKIP": 0,
+   "DIVERGE": 0
+  },
+  "e": {
+   "total": 4,
+   "PASS": 4,
+   "FAIL": 0,
+   "SKIP": 0,
+   "DIVERGE": 0
+  }
+ },
+ "casos": [
+  {
+   "categoria": "a",
+   "caso": "alt_55_aa_96",
+   "status": "PASS",
+   "saida": 96,
+   "esperado": 96,
+   "consumido": 16,
+   "len_stream": 16,
+   "tiles": null,
+   "variante": "nemesis-alt-xor",
+   "meu_sha": "778650cf7bc4e70f7f39c9645557110e8a732709ce1fa5d1cc9ca8a33b677c34",
+   "esperado_sha": "778650cf7bc4e70f7f39c9645557110e8a732709ce1fa5d1cc9ca8a33b677c34",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "alt_55_aa_96",
+   "status": "PASS",
+   "oracle_len": 96,
+   "meu_len": 96,
+   "oracle_sha": "778650cf7bc4e70f7f39c9645557110e8a732709ce1fa5d1cc9ca8a33b677c34",
+   "meu_sha": "778650cf7bc4e70f7f39c9645557110e8a732709ce1fa5d1cc9ca8a33b677c34",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "a",
+   "caso": "ff32",
+   "status": "PASS",
+   "saida": 32,
+   "esperado": 32,
+   "consumido": 7,
+   "len_stream": 7,
+   "tiles": null,
+   "variante": "nemesis-raw",
+   "meu_sha": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+   "esperado_sha": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "ff32",
+   "status": "PASS",
+   "oracle_len": 32,
+   "meu_len": 32,
+   "oracle_sha": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+   "meu_sha": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "a",
+   "caso": "nib_ramp_512",
+   "status": "PASS",
+   "saida": 512,
+   "esperado": 512,
+   "consumido": 310,
+   "len_stream": 310,
+   "tiles": null,
+   "variante": "nemesis-alt-xor",
+   "meu_sha": "1c7454fdb5783a77693d566de1ea54b3f3ba558f48aae8f782c199c84e355143",
+   "esperado_sha": "1c7454fdb5783a77693d566de1ea54b3f3ba558f48aae8f782c199c84e355143",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "nib_ramp_512",
+   "status": "PASS",
+   "oracle_len": 512,
+   "meu_len": 512,
+   "oracle_sha": "1c7454fdb5783a77693d566de1ea54b3f3ba558f48aae8f782c199c84e355143",
+   "meu_sha": "1c7454fdb5783a77693d566de1ea54b3f3ba558f48aae8f782c199c84e355143",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "a",
+   "caso": "planes_64k",
+   "status": "PASS",
+   "saida": 65536,
+   "esperado": 65536,
+   "consumido": 21275,
+   "len_stream": 21275,
+   "tiles": null,
+   "variante": "nemesis-alt-xor",
+   "meu_sha": "e2cac2839133ff6f7f4dafef836d359906b59399999d316680a82b245b8fb3d0",
+   "esperado_sha": "e2cac2839133ff6f7f4dafef836d359906b59399999d316680a82b245b8fb3d0",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "planes_64k",
+   "status": "PASS",
+   "oracle_len": 65536,
+   "meu_len": 65536,
+   "oracle_sha": "e2cac2839133ff6f7f4dafef836d359906b59399999d316680a82b245b8fb3d0",
+   "meu_sha": "e2cac2839133ff6f7f4dafef836d359906b59399999d316680a82b245b8fb3d0",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "a",
+   "caso": "random_tile_like_1k",
+   "status": "PASS",
+   "saida": 1024,
+   "esperado": 1024,
+   "consumido": 885,
+   "len_stream": 885,
+   "tiles": null,
+   "variante": "nemesis-alt-xor",
+   "meu_sha": "465e9033e32e9af62816b631e4f1de5a84f4ede2cb32c086efa368db88ad4d34",
+   "esperado_sha": "465e9033e32e9af62816b631e4f1de5a84f4ede2cb32c086efa368db88ad4d34",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "random_tile_like_1k",
+   "status": "PASS",
+   "oracle_len": 1024,
+   "meu_len": 1024,
+   "oracle_sha": "465e9033e32e9af62816b631e4f1de5a84f4ede2cb32c086efa368db88ad4d34",
+   "meu_sha": "465e9033e32e9af62816b631e4f1de5a84f4ede2cb32c086efa368db88ad4d34",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "a",
+   "caso": "repeat_far_4k",
+   "status": "PASS",
+   "saida": 4064,
+   "esperado": 4064,
+   "consumido": 2057,
+   "len_stream": 2057,
+   "tiles": null,
+   "variante": "nemesis-alt-xor",
+   "meu_sha": "ee08bc93d26665dc022f0b1cb4f57d133596b8788200dceb970c8fc58940b987",
+   "esperado_sha": "ee08bc93d26665dc022f0b1cb4f57d133596b8788200dceb970c8fc58940b987",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "repeat_far_4k",
+   "status": "PASS",
+   "oracle_len": 4064,
+   "meu_len": 4064,
+   "oracle_sha": "ee08bc93d26665dc022f0b1cb4f57d133596b8788200dceb970c8fc58940b987",
+   "meu_sha": "ee08bc93d26665dc022f0b1cb4f57d133596b8788200dceb970c8fc58940b987",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "a",
+   "caso": "runs_160",
+   "status": "PASS",
+   "saida": 160,
+   "esperado": 160,
+   "consumido": 20,
+   "len_stream": 20,
+   "tiles": null,
+   "variante": "nemesis-alt-xor",
+   "meu_sha": "0efd73736d3d73edeb6571643e83bace1707db07d2984eaa5370e5f7a8863776",
+   "esperado_sha": "0efd73736d3d73edeb6571643e83bace1707db07d2984eaa5370e5f7a8863776",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "runs_160",
+   "status": "PASS",
+   "oracle_len": 160,
+   "meu_len": 160,
+   "oracle_sha": "0efd73736d3d73edeb6571643e83bace1707db07d2984eaa5370e5f7a8863776",
+   "meu_sha": "0efd73736d3d73edeb6571643e83bace1707db07d2984eaa5370e5f7a8863776",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "a",
+   "caso": "tile_gradient_128",
+   "status": "PASS",
+   "saida": 128,
+   "esperado": 128,
+   "consumido": 22,
+   "len_stream": 22,
+   "tiles": null,
+   "variante": "nemesis-alt-xor",
+   "meu_sha": "01292f14b6a98e99bad04755108ec11182e59962003783effeefdc2a8d9c744f",
+   "esperado_sha": "01292f14b6a98e99bad04755108ec11182e59962003783effeefdc2a8d9c744f",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "tile_gradient_128",
+   "status": "PASS",
+   "oracle_len": 128,
+   "meu_len": 128,
+   "oracle_sha": "01292f14b6a98e99bad04755108ec11182e59962003783effeefdc2a8d9c744f",
+   "meu_sha": "01292f14b6a98e99bad04755108ec11182e59962003783effeefdc2a8d9c744f",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "a",
+   "caso": "z32",
+   "status": "PASS",
+   "saida": 32,
+   "esperado": 32,
+   "consumido": 7,
+   "len_stream": 7,
+   "tiles": null,
+   "variante": "nemesis-raw",
+   "meu_sha": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+   "esperado_sha": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "b",
+   "caso": "z32",
+   "status": "PASS",
+   "oracle_len": 32,
+   "meu_len": 32,
+   "oracle_sha": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+   "meu_sha": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "run_ceros_32",
+   "status": "PASS",
+   "variante": "nemesis-raw",
+   "tiles": null,
+   "consumido": 7,
+   "len_stream": 7,
+   "oracle_sha": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+   "meu_sha": "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "run_ceros_256",
+   "status": "PASS",
+   "variante": "nemesis-raw",
+   "tiles": null,
+   "consumido": 14,
+   "len_stream": 14,
+   "oracle_sha": "5341e6b2646979a70e57653007a1f310169421ec9bdd9f1a5648f75ade005af1",
+   "meu_sha": "5341e6b2646979a70e57653007a1f310169421ec9bdd9f1a5648f75ade005af1",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "run_ceros_1024",
+   "status": "PASS",
+   "variante": "nemesis-raw",
+   "tiles": null,
+   "consumido": 38,
+   "len_stream": 38,
+   "oracle_sha": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+   "meu_sha": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "nibble_max",
+   "status": "PASS",
+   "variante": "nemesis-raw",
+   "tiles": null,
+   "consumido": 7,
+   "len_stream": 7,
+   "oracle_sha": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+   "meu_sha": "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "tabula_switch",
+   "status": "PASS",
+   "variante": "nemesis-alt-xor",
+   "tiles": null,
+   "consumido": 67,
+   "len_stream": 67,
+   "oracle_sha": "b11eb469e77f6577dbc8d7ca1562f599efc5701b26868d2726ae5581099df6a1",
+   "meu_sha": "b11eb469e77f6577dbc8d7ca1562f599efc5701b26868d2726ae5581099df6a1",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "alternado_fino",
+   "status": "PASS",
+   "variante": "nemesis-alt-xor",
+   "tiles": null,
+   "consumido": 14,
+   "len_stream": 14,
+   "oracle_sha": "baf8cf0e1fe2529db7d91f835f10ae9ea1a5e11c05ee7b5fba95ac89cdb2f5d6",
+   "meu_sha": "baf8cf0e1fe2529db7d91f835f10ae9ea1a5e11c05ee7b5fba95ac89cdb2f5d6",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "degradau_8tiles",
+   "status": "PASS",
+   "variante": "nemesis-alt-xor",
+   "tiles": null,
+   "consumido": 211,
+   "len_stream": 211,
+   "oracle_sha": "cd0f337ab3e6f7b4f9a40b8278670d102c8101075f064e9960dd29729702712e",
+   "meu_sha": "cd0f337ab3e6f7b4f9a40b8278670d102c8101075f064e9960dd29729702712e",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "ruido_semeado",
+   "status": "PASS",
+   "variante": "nemesis-alt-xor",
+   "tiles": null,
+   "consumido": 95,
+   "len_stream": 95,
+   "oracle_sha": "aecbfe72a82c5bb548c5b907cea524d207f60d43fadb6f2e334e79e957b9a135",
+   "meu_sha": "aecbfe72a82c5bb548c5b907cea524d207f60d43fadb6f2e334e79e957b9a135",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "bordas_2k",
+   "status": "PASS",
+   "variante": "nemesis-alt-xor",
+   "tiles": null,
+   "consumido": 79,
+   "len_stream": 79,
+   "oracle_sha": "f0d6dfad70107b413e63546ce382fdff78fea59761b1647433a0a3e4e2eeed5c",
+   "meu_sha": "f0d6dfad70107b413e63546ce382fdff78fea59761b1647433a0a3e4e2eeed5c",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "c",
+   "caso": "linhas_xor",
+   "status": "PASS",
+   "variante": "nemesis-alt-xor",
+   "tiles": null,
+   "consumido": 23,
+   "len_stream": 23,
+   "oracle_sha": "4e4581d08ac0ba2223c5d09c1a04c408298c34fc77a18c4e3879a476fe850d44",
+   "meu_sha": "4e4581d08ac0ba2223c5d09c1a04c408298c34fc77a18c4e3879a476fe850d44",
+   "primeiro_divergente": null
+  },
+  {
+   "categoria": "d",
+   "caso": "n01_align_input_6b",
+   "status": "PASS",
+   "codigo": "input-not-in-domain",
+   "esperado": "input-not-in-domain (alinhamento Art Word: plain % 32 == 0 e plain > 0)"
+  },
+  {
+   "categoria": "d",
+   "caso": "n02_align_input_100b",
+   "status": "PASS",
+   "codigo": "input-not-in-domain",
+   "esperado": "input-not-in-domain (alinhamento)"
+  },
+  {
+   "categoria": "d",
+   "caso": "n03_empty_stream",
+   "status": "PASS",
+   "codigo": "truncated",
+   "esperado": "truncated",
+   "limite": null
+  },
+  {
+   "categoria": "d",
+   "caso": "n04_garbage_ff_64b",
+   "status": "PASS",
+   "codigo": "truncated",
+   "obrigacao": "falha estruturada e limitada; nunca > max_out",
+   "esperado": "bounded-failure: o produto DEVE falhar com erro estruturado (work-limit / invalid / cancelled) e NUNCA emitir mais que max_out",
+   "limite": null
+  },
+  {
+   "categoria": "d",
+   "caso": "n05_truncated_last_byte",
+   "status": "PASS",
+   "codigo": "truncated",
+   "esperado": "truncated",
+   "limite": null
+  },
+  {
+   "categoria": "d",
+   "caso": "n06_hanging_prefix",
+   "status": "DIVERGE",
+   "codigo": "truncated",
+   "esperado": "work-limit",
+   "motivo": "erro estruturado dentro dos limites, código difere do spec",
+   "limite": null,
+   "obrigacao_de_seguranca": "confirmada: falha em trabalho limitado, sem loop (referencia faz SIGKILL aqui)",
+   "sonda_orcamento_64": "truncated",
+   "detalhe_sonda": "tabela de codigos sem terminator 0xFF: EOF em 8/8"
+  },
+  {
+   "categoria": "d",
+   "caso": "n07_maxout_real_stream",
+   "status": "PASS",
+   "codigo": "excessive-output",
+   "esperado": "excessive-output",
+   "limite": 1024
+  },
+  {
+   "categoria": "d2",
+   "caso": "work-limit-orcamento-64",
+   "status": "PASS",
+   "codigo": "work-limit",
+   "detalhe": "limite de trabalho atingido: 65 > 64"
+  },
+  {
+   "categoria": "d2",
+   "caso": "cancelamento-cooperativo",
+   "status": "PASS",
+   "codigo": "cancelled",
+   "consultas": 1,
+   "saida_parcial": null,
+   "completo": 21275,
+   "detalhe": null
+  },
+  {
+   "categoria": "d2",
+   "caso": "excessive-output-max_out-1023",
+   "status": "PASS",
+   "codigo": "excessive-output",
+   "detalhe": "saida declarada excede max_out: 65536 > 1023"
+  },
+  {
+   "categoria": "e",
+   "caso": "alt_55_aa_96",
+   "status": "PASS"
+  },
+  {
+   "categoria": "e",
+   "caso": "ff32",
+   "status": "PASS"
+  },
+  {
+   "categoria": "e",
+   "caso": "nib_ramp_512",
+   "status": "PASS"
+  },
+  {
+   "categoria": "e",
+   "caso": "planes_64k",
+   "status": "PASS"
+  }
+ ]
+}

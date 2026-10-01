@@ -1,0 +1,149 @@
+{
+ "schema_version": 1,
+ "gerado_por": "scripts/rex_corpus_b/find-references.py",
+ "metodo": "duas passadas: (1) padrao de 4 bytes big-endian do endereco absoluto, com classificacao do opcode anterior pelo ISA publico 68000; (2) instrucoes lea/movea.l/move.l com deslocamento de 16 bits relativo ao PC cujo alvo calculado e o endereco consultado",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Pulseman (Japan) (Translated En) (Translated PtBr).zip",
+  "nome": "pulseman",
+  "sha256_arquivo": "0745e1a248548bcec0fcd50343c0df1f2b9cfd0303c07010ca6ef933e5b4ec43",
+  "size_bytes": 2097152,
+  "procedencia_interna": {
+   "kind": "zip",
+   "member": "Pulseman (Japan) (Translated En).gen",
+   "member_size": 2097152,
+   "member_crc32": "925f7be6"
+  },
+  "internal_name": "PULSEMAN",
+  "product_code": "GM G-4098  -00",
+  "programa_declarado": [
+   "0x0",
+   "0x200000"
+  ]
+ },
+ "enderecos": [
+  {
+   "endereco": "0x50468",
+   "absoluto": {
+    "total_ocorrencias": 0,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 0,
+    "instrucoes_classificadas": 0,
+    "candidatos": [],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x50430",
+   "absoluto": {
+    "total_ocorrencias": 0,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 1,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x5042a",
+      "opcode": "0x9092",
+      "candidato_instrucao": null,
+      "disp": "0x4",
+      "alvo": "0x50430",
+      "antes": "9606000f8fe6000f",
+      "depois": "2e60000427ec0004340e0004"
+     }
+    ],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x14517c",
+   "absoluto": {
+    "total_ocorrencias": 0,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 2,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x145154",
+      "opcode": "0x2c7b",
+      "candidato_instrucao": null,
+      "disp": "0x26",
+      "alvo": "0x14517c",
+      "antes": "00fffad4d040d040",
+      "depois": "200e660a13fc001f00ffface"
+     },
+     {
+      "offset": "0x14517a",
+      "opcode": "0x4e75",
+      "candidato_instrucao": null,
+      "disp": "0x0",
+      "alvo": "0x14517c",
+      "antes": "fad4523900ffface",
+      "depois": "b9160000b9ca001451e80014"
+     }
+    ],
+    "omitidos": 0
+   }
+  },
+  {
+   "endereco": "0x3008c",
+   "absoluto": {
+    "total_ocorrencias": 2,
+    "instrucoes_classificadas_na_area_de_programa": 0,
+    "ocorrencias": [
+     {
+      "offset": "0x4f5fc",
+      "opcode_anterior": "0x0",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "00880000000303de0000",
+      "depois": "0000000303ee00000003009400000003"
+     },
+     {
+      "offset": "0x4fb3c",
+      "opcode_anterior": "0x0",
+      "candidato_instrucao": null,
+      "na_area_de_programa_declarada": true,
+      "antes": "0000000000032be80000",
+      "depois": "0000000303ee00000003562200000003"
+     }
+    ],
+    "omitidas": 0
+   },
+   "pc_relativo": {
+    "total": 1,
+    "instrucoes_classificadas": 0,
+    "candidatos": [
+     {
+      "offset": "0x32a6c",
+      "opcode": "0x66c",
+      "candidato_instrucao": null,
+      "disp": "-0x29e2",
+      "alvo": "0x3008c",
+      "antes": "2b16000600320000",
+      "depois": "0ef0f000e61e0010e800ee0e"
+     }
+    ],
+    "omitidos": 0
+   }
+  }
+ ],
+ "limitacoes": [
+  "Uma ocorrencia dos 4 bytes de um endereco pode ser dado coincidente; so a classificacao de opcode + contexto indica instrucao real.",
+  "O passo absoluto so casa operando (xxx).L (4 bytes). Formas (xxx).W, modo registrador, (d8,PC), (d16,PC,Xi)/(d8,PC,Xi) com indice, tabelas indexadas a partir de um registrador base e salto via vetor NAO sao detectadas; ausencia de ocorrencia NAO e prova de ausencia de consumidor.",
+  "(d8,PC) (modo 110 registrador 000) esta FORA do catalogo porque o montador do toolchain nao produz codificacao d8 para `lea 12(%pc),%a0` nem sob -m68010 (emitir 41fa 000c = d16): sem encoding confirmado, rotular seria adivinhar. Ver data/rex_corpus_b/recursos/isa-forms.json.",
+  "O passo pc-relativo enumera candidatos por aritmetica de deslocamento (opcode cru no resultado); rotulos so sao emitidos para formas catalogadas (MOVE.L/MOVEA.L/LEA/JSR/JMP), e a classificacao so cobre os modos de enderecamento com codificacao montada e desmontada.",
+  "Rotulos conferidos word a word contra m68k-elf-as (GNU binutils) do toolchain SGDK, fixado por SHA-256; a tabela de modos publica foi usada apenas para a POSICAO dos campos, nunca como unica fonte de codificacao.",
+  "Isto e evidencia de CONSUMIDOR CANDIDATO; a semantica do recurso ainda exige leitura da rotina."
+ ]
+}

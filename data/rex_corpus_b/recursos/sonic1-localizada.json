@@ -1,0 +1,485 @@
+{
+ "schema_version": 1,
+ "gerado_por": "scripts/rex_corpus_b/locate-streams.py",
+ "origem": {
+  "arquivo": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe) (Translated PtBr).zip",
+  "membro": "Sonic the Hedgehog (USA, Europe).bin",
+  "zip": true,
+  "sha256_arquivo": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "crc32_arquivo": "0x1DE03238"
+ },
+ "rom": {
+  "header_base": 0,
+  "internal_name": "SONIC THE",
+  "product_code": "GM 00001009-00",
+  "declared_checksum": "0xE20F",
+  "computed_checksum_full": "0x760D",
+  "computed_checksum_declared_range": "0x7766",
+  "declared_rom_end_from_header": "0x805a5",
+  "file_size": 531577,
+  "_programa_sha256": "b34f8fba4e7e619beb60c11d1b7a79b563263a51104feab86801aa32f866669f",
+  "programa_fim": "0x805a6"
+ },
+ "hashes_normalizados": {
+  "arquivo_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "area_de_programa_sha256": "b34f8fba4e7e619beb60c11d1b7a79b563263a51104feab86801aa32f866669f"
+ },
+ "sonda": {
+  "corridas_analisadas": 33,
+  "alvos_decodificados": 225,
+  "min_run": 4
+ },
+ "corridas_de_ponteiros_total": 33,
+ "tabelas_com_recursos": [
+  {
+   "tabela_offset": "0x1b64c",
+   "tabela_entradas": 6,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 6,
+   "fracao": 1.0,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 4096,
+     "bytes_consumed": 634,
+     "output_sha256": "322a14830b8f3be05d59507ccf41c7a57ff8e835cd2727573943cd61d4c944d0",
+     "header_hex": "0b0f00020000",
+     "stats": null,
+     "ponteiro_offset": 112204,
+     "ponteiro_valor": "0x65432",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 634,
+      "oracle_size": 4096,
+      "oracle_sha256": "322a14830b8f3be05d59507ccf41c7a57ff8e835cd2727573943cd61d4c944d0"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 4096,
+     "bytes_consumed": 1042,
+     "output_sha256": "4b5ac5ea3391a5146e935474137df1ae74bb3926354bb63a321e03020f12733d",
+     "header_hex": "0b0f00000000",
+     "stats": null,
+     "ponteiro_offset": 112208,
+     "ponteiro_valor": "0x656ac",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 1042,
+      "oracle_size": 4096,
+      "oracle_sha256": "4b5ac5ea3391a5146e935474137df1ae74bb3926354bb63a321e03020f12733d"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 4096,
+     "bytes_consumed": 860,
+     "output_sha256": "3643e681d5260a6d51a3e0cd4558ded3b189663d62258dbee189f2167d6c3954",
+     "header_hex": "0b0700020000",
+     "stats": null,
+     "ponteiro_offset": 112212,
+     "ponteiro_valor": "0x65abe",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 860,
+      "oracle_size": 4096,
+      "oracle_sha256": "3643e681d5260a6d51a3e0cd4558ded3b189663d62258dbee189f2167d6c3954"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 4096,
+     "bytes_consumed": 1242,
+     "output_sha256": "04b5a97a675e9f84790932fc94c801aafd0c34a05ad450437da3a01feac5e9c7",
+     "header_hex": "0b0f00020000",
+     "stats": null,
+     "ponteiro_offset": 112216,
+     "ponteiro_valor": "0x65e1a",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 1242,
+      "oracle_size": 4096,
+      "oracle_sha256": "04b5a97a675e9f84790932fc94c801aafd0c34a05ad450437da3a01feac5e9c7"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 4096,
+     "bytes_consumed": 1233,
+     "output_sha256": "5841c3fbaf8a648593914121ea0af13f2339c29754b59167a4b21178dfceacd8",
+     "header_hex": "0b0f00020000",
+     "stats": null,
+     "ponteiro_offset": 112220,
+     "ponteiro_valor": "0x662f4",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 1233,
+      "oracle_size": 4096,
+      "oracle_sha256": "5841c3fbaf8a648593914121ea0af13f2339c29754b59167a4b21178dfceacd8"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 4096,
+     "bytes_consumed": 784,
+     "output_sha256": "78a2093e623f11fc227fe10390cd9f3d4afc234a838ba70bd2641b5637128c94",
+     "header_hex": "0b0f00020000",
+     "stats": null,
+     "ponteiro_offset": 112224,
+     "ponteiro_valor": "0x667c6",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 784,
+      "oracle_size": 4096,
+      "oracle_sha256": "78a2093e623f11fc227fe10390cd9f3d4afc234a838ba70bd2641b5637128c94"
+     }
+    }
+   ]
+  },
+  {
+   "tabela_offset": "0x23060",
+   "tabela_entradas": 4,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 4,
+   "fracao": 1.0,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 2884,
+     "bytes_consumed": 388,
+     "output_sha256": "b83a2c1b901c25ad3be6b41b0ade729f9b301e886425a7504547b8dbc9bd84c3",
+     "header_hex": "030305050505",
+     "stats": null,
+     "ponteiro_offset": 143456,
+     "ponteiro_valor": "0xdd10",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 388,
+      "oracle_size": 2884,
+      "oracle_sha256": "b83a2c1b901c25ad3be6b41b0ade729f9b301e886425a7504547b8dbc9bd84c3"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 2884,
+     "bytes_consumed": 388,
+     "output_sha256": "b83a2c1b901c25ad3be6b41b0ade729f9b301e886425a7504547b8dbc9bd84c3",
+     "header_hex": "030305050505",
+     "stats": null,
+     "ponteiro_offset": 143460,
+     "ponteiro_valor": "0xdd10",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 388,
+      "oracle_size": 2884,
+      "oracle_sha256": "b83a2c1b901c25ad3be6b41b0ade729f9b301e886425a7504547b8dbc9bd84c3"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 2884,
+     "bytes_consumed": 388,
+     "output_sha256": "b83a2c1b901c25ad3be6b41b0ade729f9b301e886425a7504547b8dbc9bd84c3",
+     "header_hex": "030305050505",
+     "stats": null,
+     "ponteiro_offset": 143464,
+     "ponteiro_valor": "0xdd10",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 388,
+      "oracle_size": 2884,
+      "oracle_sha256": "b83a2c1b901c25ad3be6b41b0ade729f9b301e886425a7504547b8dbc9bd84c3"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 2884,
+     "bytes_consumed": 388,
+     "output_sha256": "b83a2c1b901c25ad3be6b41b0ade729f9b301e886425a7504547b8dbc9bd84c3",
+     "header_hex": "030305050505",
+     "stats": null,
+     "ponteiro_offset": 143468,
+     "ponteiro_valor": "0xdd10",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 388,
+      "oracle_size": 2884,
+      "oracle_sha256": "b83a2c1b901c25ad3be6b41b0ade729f9b301e886425a7504547b8dbc9bd84c3"
+     }
+    }
+   ]
+  },
+  {
+   "tabela_offset": "0x235a8",
+   "tabela_entradas": 4,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 2,
+   "fracao": 0.5,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 382,
+     "bytes_consumed": 75,
+     "output_sha256": "96565e956566fb68c8e29185ec8c5e7455295fe45f470e7737e4e295e3ff80c5",
+     "header_hex": "0b003ce8f40b",
+     "stats": null,
+     "ponteiro_offset": 144808,
+     "ponteiro_valor": "0x8100",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 75,
+      "oracle_size": 382,
+      "oracle_sha256": "96565e956566fb68c8e29185ec8c5e7455295fe45f470e7737e4e295e3ff80c5"
+     }
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 382,
+     "bytes_consumed": 75,
+     "output_sha256": "96565e956566fb68c8e29185ec8c5e7455295fe45f470e7737e4e295e3ff80c5",
+     "header_hex": "0b003ce8f40b",
+     "stats": null,
+     "ponteiro_offset": 144812,
+     "ponteiro_valor": "0x8100",
+     "confirmacao_externa": {
+      "status": "byte-identico",
+      "span_lido": 75,
+      "oracle_size": 382,
+      "oracle_sha256": "96565e956566fb68c8e29185ec8c5e7455295fe45f470e7737e4e295e3ff80c5"
+     }
+    }
+   ]
+  },
+  {
+   "tabela_offset": "0x25e88",
+   "tabela_entradas": 4,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 2,
+   "fracao": 0.5,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 622,
+     "bytes_consumed": 77,
+     "output_sha256": "0073cdf16deb842f6bd491079d61ac4cf253318400f553ec66c6a77bf4c70433",
+     "header_hex": "050008000c05",
+     "stats": null,
+     "ponteiro_offset": 155272,
+     "ponteiro_valor": "0xcc00",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 654,
+     "bytes_consumed": 105,
+     "output_sha256": "1a84d404b5ea41d208d6e0cddf1081ca04f0ac0310409b9be35df29a55fce47c",
+     "header_hex": "050026f2f805",
+     "stats": null,
+     "ponteiro_offset": 155284,
+     "ponteiro_valor": "0xcccc",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    }
+   ]
+  },
+  {
+   "tabela_offset": "0x28b68",
+   "tabela_entradas": 4,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 2,
+   "fracao": 0.5,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 622,
+     "bytes_consumed": 77,
+     "output_sha256": "0073cdf16deb842f6bd491079d61ac4cf253318400f553ec66c6a77bf4c70433",
+     "header_hex": "050008000c05",
+     "stats": null,
+     "ponteiro_offset": 166764,
+     "ponteiro_valor": "0xcc00",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 654,
+     "bytes_consumed": 105,
+     "output_sha256": "1a84d404b5ea41d208d6e0cddf1081ca04f0ac0310409b9be35df29a55fce47c",
+     "header_hex": "050026f2f805",
+     "stats": null,
+     "ponteiro_offset": 166772,
+     "ponteiro_valor": "0xcccc",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    }
+   ]
+  },
+  {
+   "tabela_offset": "0x293c0",
+   "tabela_entradas": 7,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 5,
+   "fracao": 0.714,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 1450,
+     "bytes_consumed": 165,
+     "output_sha256": "5696b3aff9e7566e892839b88c02ba91aef4814a2e420c5088785fe4d35e4ab5",
+     "header_hex": "0300040c03ec",
+     "stats": null,
+     "ponteiro_offset": 168904,
+     "ponteiro_valor": "0xd000",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 1450,
+     "bytes_consumed": 165,
+     "output_sha256": "5696b3aff9e7566e892839b88c02ba91aef4814a2e420c5088785fe4d35e4ab5",
+     "header_hex": "0300040c03ec",
+     "stats": null,
+     "ponteiro_offset": 168908,
+     "ponteiro_valor": "0xd000",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 1450,
+     "bytes_consumed": 165,
+     "output_sha256": "5696b3aff9e7566e892839b88c02ba91aef4814a2e420c5088785fe4d35e4ab5",
+     "header_hex": "0300040c03ec",
+     "stats": null,
+     "ponteiro_offset": 168912,
+     "ponteiro_valor": "0xd000",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 1450,
+     "bytes_consumed": 165,
+     "output_sha256": "5696b3aff9e7566e892839b88c02ba91aef4814a2e420c5088785fe4d35e4ab5",
+     "header_hex": "0300040c03ec",
+     "stats": null,
+     "ponteiro_offset": 168916,
+     "ponteiro_valor": "0xd000",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 1450,
+     "bytes_consumed": 165,
+     "output_sha256": "5696b3aff9e7566e892839b88c02ba91aef4814a2e420c5088785fe4d35e4ab5",
+     "header_hex": "0300040c03ec",
+     "stats": null,
+     "ponteiro_offset": 168920,
+     "ponteiro_valor": "0xd000",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    }
+   ]
+  },
+  {
+   "tabela_offset": "0x29de0",
+   "tabela_entradas": 4,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 1,
+   "fracao": 0.25,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 654,
+     "bytes_consumed": 105,
+     "output_sha256": "1a84d404b5ea41d208d6e0cddf1081ca04f0ac0310409b9be35df29a55fce47c",
+     "header_hex": "050026f2f805",
+     "stats": null,
+     "ponteiro_offset": 171500,
+     "ponteiro_valor": "0xcccc",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    }
+   ]
+  },
+  {
+   "tabela_offset": "0x2a020",
+   "tabela_entradas": 4,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 1,
+   "fracao": 0.25,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 654,
+     "bytes_consumed": 105,
+     "output_sha256": "1a84d404b5ea41d208d6e0cddf1081ca04f0ac0310409b9be35df29a55fce47c",
+     "header_hex": "050026f2f805",
+     "stats": null,
+     "ponteiro_offset": 172076,
+     "ponteiro_valor": "0xcccc",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    }
+   ]
+  },
+  {
+   "tabela_offset": "0x66e80",
+   "tabela_entradas": 5,
+   "tabela_terminador_FFFFFFFF": false,
+   "alvos_validados": 2,
+   "fracao": 0.4,
+   "recursos": [
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 622,
+     "bytes_consumed": 77,
+     "output_sha256": "0073cdf16deb842f6bd491079d61ac4cf253318400f553ec66c6a77bf4c70433",
+     "header_hex": "050008000c05",
+     "stats": null,
+     "ponteiro_offset": 421516,
+     "ponteiro_valor": "0xcc00",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    },
+    {
+     "codec": "enigma",
+     "variant": "enigma-plain",
+     "output_size": 622,
+     "bytes_consumed": 77,
+     "output_sha256": "0073cdf16deb842f6bd491079d61ac4cf253318400f553ec66c6a77bf4c70433",
+     "header_hex": "050008000c05",
+     "stats": null,
+     "ponteiro_offset": 421520,
+     "ponteiro_valor": "0xcc00",
+     "confirmacao_externa": "nao-executada (limite do run)"
+    }
+   ]
+  }
+ ],
+ "metodo": {
+  "ancora": "corridas de >=4 ponteiros BE contiguos, nao decrescentes, apontando para a area de programa",
+  "validacao": "header estrito do codec + decodificacao limitada (max_out 128 KiB, work 4 Mi) + dominio de arte",
+  "limitacoes": [
+   "monotonicidade dos ponteiros e hiptese estrutural, no lei do formato",
+   "sem prova de que o consumidor da tabela seja arte de plano de fundo/sprites",
+   "um alvo que decodifica continua sendo candidato ate evidncia de consumo"
+  ]
+ }
+}

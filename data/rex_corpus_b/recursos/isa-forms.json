@@ -1,0 +1,312 @@
+{
+ "schema_version": "rex-corpus-b/isa-forms/1",
+ "gerado_por": "scripts/rex_corpus_b/verify-isa-forms.py",
+ "montador": {
+  "caminho": "/home/misael/.cache/retrodevstudio/6b5d81135a1161447e4cbb49401f1137dd7d93974eee82d3153f5e87e7afd779/toolchains/m68k-elf/bin/m68k-elf-as",
+  "sha256": "20342db5ac551cbb7a17a86f78ee5d58bb90ab2e3fc6f0231298f0f1ebc5af0d",
+  "versao": "GNU assembler (GNU Binutils) 2.41",
+  "flags": [
+   "-m68000"
+  ]
+ },
+ "desmontador": {
+  "caminho": "/home/misael/.cache/retrodevstudio/6b5d81135a1161447e4cbb49401f1137dd7d93974eee82d3153f5e87e7afd779/toolchains/m68k-elf/bin/m68k-elf-objdump",
+  "sha256": "f7d636421bffcf2254cf2024794fbaefd25c9e36086f18ec250fa72cab6e8113"
+ },
+ "metodo": "uma instrucao por objeto montado e desmontado; a primeira word e confrontada com o rotulo exato do classificador (mnemonico + modo + registrador). Sintaxe GAS: 0x..., 0x1234.w, 0x1234(%pc), %a0-%a6/%d0-%d7.",
+ "cpu_alvo": "m68000",
+ "vereditos": {
+  "confirmadas": 21,
+  "divergentes": 0,
+  "sem_rotulo": 0,
+  "nao_montaveis": 0
+ },
+ "formas": [
+  {
+   "fonte": "lea       0x123456, %a0",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "lea (xxx).L,a0",
+   "codificado": "41f900123456",
+   "primeira_word": "41f9",
+   "campo_ea": "39",
+   "desmontagem": "lea 0x123456,%a0",
+   "rotulo_do_classificador": "lea (xxx).L,a0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "lea       0x123456, %a1",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "lea (xxx).L,a1",
+   "codificado": "43f900123456",
+   "primeira_word": "43f9",
+   "campo_ea": "39",
+   "desmontagem": "lea 0x123456,%a1",
+   "rotulo_do_classificador": "lea (xxx).L,a1",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "lea       0x123456, %a6",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "lea (xxx).L,a6",
+   "codificado": "4df900123456",
+   "primeira_word": "4df9",
+   "campo_ea": "39",
+   "desmontagem": "lea 0x123456,%fp",
+   "rotulo_do_classificador": "lea (xxx).L,a6",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "movea.l   0x123456, %a0",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "movea.l (xxx).L,a0",
+   "codificado": "207900123456",
+   "primeira_word": "2079",
+   "campo_ea": "39",
+   "desmontagem": "moveal 0x123456,%a0",
+   "rotulo_do_classificador": "movea.l (xxx).L,a0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "movea.l   0x123456, %a3",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "movea.l (xxx).L,a3",
+   "codificado": "267900123456",
+   "primeira_word": "2679",
+   "campo_ea": "39",
+   "desmontagem": "moveal 0x123456,%a3",
+   "rotulo_do_classificador": "movea.l (xxx).L,a3",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "move.l    0x123456, %d0",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "move.l (xxx).L,d0",
+   "codificado": "203900123456",
+   "primeira_word": "2039",
+   "campo_ea": "39",
+   "desmontagem": "movel 0x123456,%d0",
+   "rotulo_do_classificador": "move.l (xxx).L,d0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "move.l    0x123456, %d7",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "move.l (xxx).L,d7",
+   "codificado": "2e3900123456",
+   "primeira_word": "2e39",
+   "campo_ea": "39",
+   "desmontagem": "movel 0x123456,%d7",
+   "rotulo_do_classificador": "move.l (xxx).L,d7",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "jsr       0x123456",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "jsr (xxx).L",
+   "codificado": "4eb900123456",
+   "primeira_word": "4eb9",
+   "campo_ea": "39",
+   "desmontagem": "jsr 0x123456",
+   "rotulo_do_classificador": "jsr (xxx).L",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "jmp       0x123456",
+   "modo": "(xxx).L",
+   "classe": "classify",
+   "rotulo_esperado": "jmp (xxx).L",
+   "codificado": "4ef900123456",
+   "primeira_word": "4ef9",
+   "campo_ea": "39",
+   "desmontagem": "jmp 0x123456",
+   "rotulo_do_classificador": "jmp (xxx).L",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "lea       0x1234.w, %a0",
+   "modo": "(xxx).W",
+   "classe": "classify_abs_w",
+   "rotulo_esperado": "lea (xxx).W,a0",
+   "codificado": "41f81234",
+   "primeira_word": "41f8",
+   "campo_ea": "38",
+   "desmontagem": "lea 0x1234,%a0",
+   "rotulo_do_classificador": "lea (xxx).W,a0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "lea       0x1234.w, %a6",
+   "modo": "(xxx).W",
+   "classe": "classify_abs_w",
+   "rotulo_esperado": "lea (xxx).W,a6",
+   "codificado": "4df81234",
+   "primeira_word": "4df8",
+   "campo_ea": "38",
+   "desmontagem": "lea 0x1234,%fp",
+   "rotulo_do_classificador": "lea (xxx).W,a6",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "movea.l   0x1234.w, %a0",
+   "modo": "(xxx).W",
+   "classe": "classify_abs_w",
+   "rotulo_esperado": "movea.l (xxx).W,a0",
+   "codificado": "20781234",
+   "primeira_word": "2078",
+   "campo_ea": "38",
+   "desmontagem": "moveal 0x1234,%a0",
+   "rotulo_do_classificador": "movea.l (xxx).W,a0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "move.l    0x1234.w, %d0",
+   "modo": "(xxx).W",
+   "classe": "classify_abs_w",
+   "rotulo_esperado": "move.l (xxx).W,d0",
+   "codificado": "20381234",
+   "primeira_word": "2038",
+   "campo_ea": "38",
+   "desmontagem": "movel 0x1234,%d0",
+   "rotulo_do_classificador": "move.l (xxx).W,d0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "jsr       0x1234.w",
+   "modo": "(xxx).W",
+   "classe": "classify_abs_w",
+   "rotulo_esperado": "jsr (xxx).W",
+   "codificado": "4eb81234",
+   "primeira_word": "4eb8",
+   "campo_ea": "38",
+   "desmontagem": "jsr 0x1234",
+   "rotulo_do_classificador": "jsr (xxx).W",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "jmp       0x1234.w",
+   "modo": "(xxx).W",
+   "classe": "classify_abs_w",
+   "rotulo_esperado": "jmp (xxx).W",
+   "codificado": "4ef81234",
+   "primeira_word": "4ef8",
+   "campo_ea": "38",
+   "desmontagem": "jmp 0x1234",
+   "rotulo_do_classificador": "jmp (xxx).W",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "lea       0x1234(%pc), %a0",
+   "modo": "(d16,PC)",
+   "classe": "classify_pcrel",
+   "rotulo_esperado": "lea (d16,PC),a0",
+   "codificado": "41fa1234",
+   "primeira_word": "41fa",
+   "campo_ea": "3a",
+   "desmontagem": "lea %pc@(0x1236),%a0",
+   "rotulo_do_classificador": "lea (d16,PC),a0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "lea       0x1234(%pc), %a6",
+   "modo": "(d16,PC)",
+   "classe": "classify_pcrel",
+   "rotulo_esperado": "lea (d16,PC),a6",
+   "codificado": "4dfa1234",
+   "primeira_word": "4dfa",
+   "campo_ea": "3a",
+   "desmontagem": "lea %pc@(0x1236),%fp",
+   "rotulo_do_classificador": "lea (d16,PC),a6",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "movea.l   0x1234(%pc), %a0",
+   "modo": "(d16,PC)",
+   "classe": "classify_pcrel",
+   "rotulo_esperado": "movea.l (d16,PC),a0",
+   "codificado": "207a1234",
+   "primeira_word": "207a",
+   "campo_ea": "3a",
+   "desmontagem": "moveal %pc@(0x1236),%a0",
+   "rotulo_do_classificador": "movea.l (d16,PC),a0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "move.l    0x1234(%pc), %d0",
+   "modo": "(d16,PC)",
+   "classe": "classify_pcrel",
+   "rotulo_esperado": "move.l (d16,PC),d0",
+   "codificado": "203a1234",
+   "primeira_word": "203a",
+   "campo_ea": "3a",
+   "desmontagem": "movel %pc@(0x1236),%d0",
+   "rotulo_do_classificador": "move.l (d16,PC),d0",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "jsr       0x1234(%pc)",
+   "modo": "(d16,PC)",
+   "classe": "classify_pcrel",
+   "rotulo_esperado": "jsr (d16,PC)",
+   "codificado": "4eba1234",
+   "primeira_word": "4eba",
+   "campo_ea": "3a",
+   "desmontagem": "jsr %pc@(0x1236)",
+   "rotulo_do_classificador": "jsr (d16,PC)",
+   "veredito": "CONFIRMADO"
+  },
+  {
+   "fonte": "jmp       0x1234(%pc)",
+   "modo": "(d16,PC)",
+   "classe": "classify_pcrel",
+   "rotulo_esperado": "jmp (d16,PC)",
+   "codificado": "4efa1234",
+   "primeira_word": "4efa",
+   "campo_ea": "3a",
+   "desmontagem": "jmp %pc@(0x1236)",
+   "rotulo_do_classificador": "jmp (d16,PC)",
+   "veredito": "CONFIRMADO"
+  }
+ ],
+ "lacunas": [
+  {
+   "fonte": "lea       12(%pc), %a0",
+   "codificado": "41fa000c",
+   "desmontagem": "lea %pc@(0xe),%a0",
+   "primeira_word": "41fa",
+   "rotulos_do_catalogo": {
+    "classify_pcrel": "lea (d16,PC),a0"
+   },
+   "conclusao": "pedido de (d8,PC); o GAS emite d16 (41fa 000c), entao NAO ha codificacao (d8,PC) confirmada para este alvo — o modo fica fora do catalogo."
+  },
+  {
+   "fonte": "movea.l   12(%pc), %a0",
+   "codificado": "207a000c",
+   "desmontagem": "moveal %pc@(0xe),%a0",
+   "primeira_word": "207a",
+   "rotulos_do_catalogo": {
+    "classify_pcrel": "movea.l (d16,PC),a0"
+   },
+   "conclusao": "mesmo pedido de 8 bits na familia movea.l; sem encoding confirmado, a word 0x2070 nao pode ser rotulada."
+  }
+ ],
+ "palavras_nao_catalogadas": {
+  "41f0": {},
+  "2070": {},
+  "4ef0": {},
+  "4bf0": {}
+ },
+ "correcao_mensurada": {
+  "antes": "jmp (d16,PC) = 0x4EDA (registrado em notas antigas)",
+  "depois": "jmp (d16,PC) = 0x4EFA (medido: `jmp 0x1234(%pc)` -> 4efa 04d2)",
+  "consequencia": "0x4EDA nao e jmp pc-relativo; o catalogo monta a forma por base|ea e por isso nao carrega o rotulo errado."
+ },
+ "limite": "Confere so as formas usadas pelo classificador. Regras de outros modos de enderecamento ((a0,d16), (d8,PC,Xi), (xxx).W com sinal, modo registrador) nao sao verificadas aqui e continuam fora do scanner. Isto prova a CODIFICACAO, nao a semantica da rotina que executa o load."
+}

@@ -1,0 +1,66 @@
+{
+ "schema_version": 1,
+ "path": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
+ "container": null,
+ "md_header_base": "0x000",
+ "header": {
+  "console_id": "SEGA MEGA DRIVE ",
+  "copyright": "(C)SEGA 1991.APR",
+  "name_domestic": "SONIC THE   ",
+  "name_usa": "        HEDGEHOG",
+  "name_intl": "                SONIC THE               HEDGEHOG",
+  "reserved_170": "                ",
+  "product_code": "GM 00001009-00",
+  "io_regions": "4a 20 20 20 20 20 20 20 20 20 20 20 20 20 20 20",
+  "rom_start": "0x00000000",
+  "rom_end": "0x000805A5",
+  "ram_start": "0x00FF0000",
+  "ram_end": "0x00FFFFFF",
+  "sram_start": "0x20202020",
+  "sram_end": "0x20202020",
+  "declared_checksum": "0xE20F",
+  "checksum_computed": {
+   "0x200..0x80000 (512 KiB)": "0x3292",
+   "0x200..rom_end+1": "0x7766",
+   "0x200..fim-do-arquivo": "0x760D"
+  },
+  "checksum_ok_any": false
+ },
+ "declared_rom_size_from_header": 525734,
+ "extra_bytes_past_512KiB": 7289,
+ "trailer": {
+  "region": "cauda além de 0x80000",
+  "offset": "0x080000",
+  "end_exclusive": "0x081C79",
+  "size": 7289,
+  "sha256": "092405af3ce924b501413ca8ef517eaff135804c8d9d377a84ba41c6d6928b0d",
+  "md5": "9a44e00be632020bfd8b3473459b47c6",
+  "crc32": "0x5ffb8793",
+  "signature": {
+   "offset": "0x000000",
+   "text": "ESE_S1_TC_V_2.00"
+  },
+  "nonzero_bytes": 6469,
+  "distinct_byte_values": 256
+ },
+ "regions": [
+  {
+   "region": "arquivo inteiro",
+   "offset": "0x000000",
+   "end_exclusive": "0x081C79",
+   "size": 531577,
+   "sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+   "md5": "f4e0a81fcba6c29dbd552c48211fb237",
+   "crc32": "0x1de03238"
+  },
+  {
+   "region": "área de programa 0..0x80000",
+   "offset": "0x000000",
+   "end_exclusive": "0x080000",
+   "size": 524288,
+   "sha256": "76e1ffe0c5ce57d91a443ed373e4d590b8a581ffbabec46145c434e0ca06b1bd",
+   "md5": "b783c0c704c732b5614c73b04a374e6c",
+   "crc32": "0xd7f7fe4c"
+  }
+ ]
+}

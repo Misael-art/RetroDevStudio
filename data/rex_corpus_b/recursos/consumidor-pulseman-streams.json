@@ -1,0 +1,87 @@
+{
+ "schema_version": "rex-corpus-b/consumidor-negativo/1",
+ "gerado_por": "scripts/rex_corpus_b/procurar-consumidor.py",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Pulseman (Japan) (Translated En) (Translated PtBr).zip",
+  "sha256": "0745e1a248548bcec0fcd50343c0df1f2b9cfd0303c07010ca6ef933e5b4ec43",
+  "size_bytes": 2097152
+ },
+ "formas_varridas": [
+  "absoluto .W/.L com classificacao de opcode (find-references.py)",
+  "(d16,PC) por aritmetica de deslocamento (find-references.py)",
+  "(d8,PC,Xi) com familias catalogadas (esta ferramenta)",
+  "carga absoluta longa de base em [tabela-0x400, tabela] + (d8,An,Xi)/(d16,An) em 64 bytes (esta ferramenta)"
+ ],
+ "lacunas_declaradas": [
+  "(d8,An,Xi)/(d16,An) com base carregada FORA da janela de 64 bytes ou por caminho indireto (RAM)",
+  "tabelas alcancadas por vetor de salto com base em registrador",
+  "indice maior que 63",
+  "ausencia de hit NAO prova ausencia de consumidor"
+ ],
+ "alvos": [
+  {
+   "tabela": "0x502f4",
+   "entradas": [
+    "0x502f4"
+   ],
+   "find_references": {
+    "0x502f4": {
+     "absoluto_ocorrencias": 0,
+     "absoluto_classificadas": 0,
+     "pc_relativo_candidatos": 0,
+     "pc_relativo_classificadas": 0
+    }
+   },
+   "indexada_pc_d8": {
+    "hits": [],
+    "instrucoes_varridas": 543
+   },
+   "base_mais_indexada": {
+    "cargas_base": [
+     {
+      "offset": "0x278fe",
+      "opcode": "0x41f9",
+      "base": "0x50694"
+     },
+     {
+      "offset": "0x27932",
+      "opcode": "0x41f9",
+      "base": "0x4fefc"
+     }
+    ],
+    "hits": []
+   },
+   "consumidor_localizado": false
+  },
+  {
+   "tabela": "0x5033c",
+   "entradas": [
+    "0x5033c"
+   ],
+   "find_references": {
+    "0x5033c": {
+     "absoluto_ocorrencias": 0,
+     "absoluto_classificadas": 0,
+     "pc_relativo_candidatos": 0,
+     "pc_relativo_classificadas": 0
+    }
+   },
+   "indexada_pc_d8": {
+    "hits": [],
+    "instrucoes_varridas": 543
+   },
+   "base_mais_indexada": {
+    "cargas_base": [
+     {
+      "offset": "0x278fe",
+      "opcode": "0x41f9",
+      "base": "0x50694"
+     }
+    ],
+    "hits": []
+   },
+   "consumidor_localizado": false
+  }
+ ],
+ "conclusao": "consumidor-nao-localizado-nas-formas-varridas"
+}
