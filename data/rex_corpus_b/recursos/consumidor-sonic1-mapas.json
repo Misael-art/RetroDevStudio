@@ -1,0 +1,136 @@
+{
+ "schema_version": "rex-corpus-b/consumidor-negativo/1",
+ "gerado_por": "scripts/rex_corpus_b/procurar-consumidor.py",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
+  "sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "size_bytes": 531577
+ },
+ "formas_varridas": [
+  "absoluto .W/.L com classificacao de opcode (find-references.py)",
+  "(d16,PC) por aritmetica de deslocamento (find-references.py)",
+  "(d8,PC,Xi) com familias catalogadas (esta ferramenta)",
+  "carga absoluta longa de base em [tabela-0x400, tabela] + (d8,An,Xi)/(d16,An) em 64 bytes (esta ferramenta)"
+ ],
+ "lacunas_declaradas": [
+  "(d8,An,Xi)/(d16,An) com base carregada FORA da janela de 64 bytes ou por caminho indireto (RAM)",
+  "tabelas alcancadas por vetor de salto com base em registrador",
+  "indice maior que 63",
+  "ausencia de hit NAO prova ausencia de consumidor"
+ ],
+ "alvos": [
+  {
+   "tabela": "0x1b64c",
+   "entradas": [
+    "0x1b64c",
+    "0x1b650",
+    "0x1b654",
+    "0x1b658",
+    "0x1b65c",
+    "0x1b660"
+   ],
+   "find_references": {
+    "0x1b64c": {
+     "absoluto_ocorrencias": 0,
+     "absoluto_classificadas": 0,
+     "pc_relativo_candidatos": 1,
+     "pc_relativo_classificadas": 0
+    },
+    "0x1b650": {
+     "absoluto_ocorrencias": 0,
+     "absoluto_classificadas": 0,
+     "pc_relativo_candidatos": 0,
+     "pc_relativo_classificadas": 0
+    },
+    "0x1b654": {
+     "absoluto_ocorrencias": 0,
+     "absoluto_classificadas": 0,
+     "pc_relativo_candidatos": 1,
+     "pc_relativo_classificadas": 0
+    },
+    "0x1b658": {
+     "absoluto_ocorrencias": 0,
+     "absoluto_classificadas": 0,
+     "pc_relativo_candidatos": 1,
+     "pc_relativo_classificadas": 0
+    },
+    "0x1b65c": {
+     "absoluto_ocorrencias": 0,
+     "absoluto_classificadas": 0,
+     "pc_relativo_candidatos": 1,
+     "pc_relativo_classificadas": 0
+    },
+    "0x1b660": {
+     "absoluto_ocorrencias": 0,
+     "absoluto_classificadas": 0,
+     "pc_relativo_candidatos": 2,
+     "pc_relativo_classificadas": 0
+    }
+   },
+   "indexada_pc_d8": {
+    "hits": [
+     {
+      "offset": "0x1b6c4",
+      "opcode": "0x207b",
+      "disp8": -122,
+      "xn": 0,
+      "alvo": "0x1b64c"
+     },
+     {
+      "offset": "0x1b6c4",
+      "opcode": "0x207b",
+      "disp8": -122,
+      "xn": 4,
+      "alvo": "0x1b650"
+     },
+     {
+      "offset": "0x1b6c4",
+      "opcode": "0x207b",
+      "disp8": -122,
+      "xn": 8,
+      "alvo": "0x1b654"
+     },
+     {
+      "offset": "0x1b6c4",
+      "opcode": "0x207b",
+      "disp8": -122,
+      "xn": 12,
+      "alvo": "0x1b658"
+     },
+     {
+      "offset": "0x1b6c4",
+      "opcode": "0x207b",
+      "disp8": -122,
+      "xn": 16,
+      "alvo": "0x1b65c"
+     },
+     {
+      "offset": "0x1b6c4",
+      "opcode": "0x207b",
+      "disp8": -122,
+      "xn": 20,
+      "alvo": "0x1b660"
+     }
+    ],
+    "instrucoes_varridas": 164
+   },
+   "base_mais_indexada": {
+    "cargas_base": [
+     {
+      "offset": "0x1b356",
+      "opcode": "0x41f9",
+      "base": "0x1b43a"
+     },
+     {
+      "offset": "0x1b70c",
+      "opcode": "0x41f9",
+      "base": "0x1b738"
+     }
+    ],
+    "hits": []
+   },
+   "consumidor_localizado": true
+  }
+ ],
+ "conclusao": "consumidor-localizado"
+}
