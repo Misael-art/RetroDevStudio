@@ -1,0 +1,308 @@
+{
+ "schema_version": 1,
+ "pergunta": "o que -x={pointer} faz no CLI do oraculo",
+ "oracle_root": "/home/misael/.cache/rex-codecs/oracle-tools/bin",
+ "sandbox": {
+  "timeout_s": 25,
+  "as": "2GiB",
+  "cpu": "25s",
+  "fsize": "8MiB",
+  "stdin": "devnull"
+ },
+ "resultados": [
+  {
+   "codec": "nemesis",
+   "status": "ok",
+   "fixture": "alt_55_aa_96",
+   "fixture_origem": "fixture-vendored",
+   "fixture_stream_sha256": "bfc3120f25e4d8a1a339d8d18dc3d880954dfca37a3c218c8b2a46c35551c98a",
+   "fixture_plain_sha256": "778650cf7bc4e70f7f39c9645557110e8a732709ce1fa5d1cc9ca8a33b677c34",
+   "synth_sha256": "153e8eba8a25f306de457df516bde1eba07949fc9d871442751db6353a44ab2c",
+   "ptr_addr": "0x20",
+   "stream_addr": "0x100",
+   "chamadas": {
+    "sem_ponteiro": {
+     "argv": [
+      "nemcmp",
+      "-x",
+      "/tmp/probe-x-1l2rdsbz/nemesis_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/nemesis_None.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "curto_com_igual_endereco_ponteiro": {
+     "argv": [
+      "nemcmp",
+      "-x=0x20",
+      "/tmp/probe-x-1l2rdsbz/nemesis_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/nemesis_-x=0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "curto_com_igual_offset_stream": {
+     "argv": [
+      "nemcmp",
+      "-x=0x100",
+      "/tmp/probe-x-1l2rdsbz/nemesis_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/nemesis_-x=0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "curto_anexado_endereco_ponteiro": {
+     "argv": [
+      "nemcmp",
+      "-x0x20",
+      "/tmp/probe-x-1l2rdsbz/nemesis_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/nemesis_-x0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "curto_anexado_offset_stream": {
+     "argv": [
+      "nemcmp",
+      "-x0x100",
+      "/tmp/probe-x-1l2rdsbz/nemesis_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/nemesis_-x0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 96,
+     "equals_fixture_plain": true
+    },
+    "longo_com_igual_endereco_ponteiro": {
+     "argv": [
+      "nemcmp",
+      "--extract=0x20",
+      "/tmp/probe-x-1l2rdsbz/nemesis_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/nemesis_--extract=0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "longo_com_igual_offset_stream": {
+     "argv": [
+      "nemcmp",
+      "--extract=0x100",
+      "/tmp/probe-x-1l2rdsbz/nemesis_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/nemesis_--extract=0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 96,
+     "equals_fixture_plain": true
+    }
+   },
+   "semantica": "OFFSET: o argumento e o offset da propria stream no arquivo"
+  },
+  {
+   "codec": "enigma",
+   "status": "ok",
+   "fixture": "alternating_runs",
+   "fixture_origem": "fixture-vendored",
+   "fixture_stream_sha256": "5fa3a1a3907a599f32c2af736a1142ac7fa4583bfa43661a8f14c4800a299672",
+   "fixture_plain_sha256": "5c09e3d725db5fe88af1107307e04cdf5b59bf9b3b80af7acfb78c98dc5debeb",
+   "synth_sha256": "b1a60c8e0625f9f522c1f217ec62dbeaf2c90069e08055980769def839c66429",
+   "ptr_addr": "0x20",
+   "stream_addr": "0x100",
+   "chamadas": {
+    "sem_ponteiro": {
+     "argv": [
+      "enicmp",
+      "-x",
+      "/tmp/probe-x-1l2rdsbz/enigma_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/enigma_None.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 932,
+     "equals_fixture_plain": false
+    },
+    "curto_com_igual_endereco_ponteiro": {
+     "argv": [
+      "enicmp",
+      "-x=0x20",
+      "/tmp/probe-x-1l2rdsbz/enigma_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/enigma_-x=0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 932,
+     "equals_fixture_plain": false
+    },
+    "curto_com_igual_offset_stream": {
+     "argv": [
+      "enicmp",
+      "-x=0x100",
+      "/tmp/probe-x-1l2rdsbz/enigma_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/enigma_-x=0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 932,
+     "equals_fixture_plain": false
+    },
+    "curto_anexado_endereco_ponteiro": {
+     "argv": [
+      "enicmp",
+      "-x0x20",
+      "/tmp/probe-x-1l2rdsbz/enigma_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/enigma_-x0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 876,
+     "equals_fixture_plain": false
+    },
+    "curto_anexado_offset_stream": {
+     "argv": [
+      "enicmp",
+      "-x0x100",
+      "/tmp/probe-x-1l2rdsbz/enigma_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/enigma_-x0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 1200,
+     "equals_fixture_plain": true
+    },
+    "longo_com_igual_endereco_ponteiro": {
+     "argv": [
+      "enicmp",
+      "--extract=0x20",
+      "/tmp/probe-x-1l2rdsbz/enigma_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/enigma_--extract=0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 876,
+     "equals_fixture_plain": false
+    },
+    "longo_com_igual_offset_stream": {
+     "argv": [
+      "enicmp",
+      "--extract=0x100",
+      "/tmp/probe-x-1l2rdsbz/enigma_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/enigma_--extract=0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 1200,
+     "equals_fixture_plain": true
+    }
+   },
+   "semantica": "OFFSET: o argumento e o offset da propria stream no arquivo"
+  },
+  {
+   "codec": "kosinski",
+   "status": "ok",
+   "fixture": "kosinski-authored",
+   "fixture_origem": "plain-autoral-empacotado-pelo-oraculo",
+   "fixture_stream_sha256": "051756be3434d5bc1ed14c45c88f022ad8a587b12fac6edeb8f819add1cc4b83",
+   "fixture_plain_sha256": "26dcf3327a00556affaced87ed60795383069c73639b056c9191c6150a4346b9",
+   "synth_sha256": "71a9232b3009ca8e0b6e5fab126c1190eceb76cc8394a6efa32857b221b4b441",
+   "ptr_addr": "0x20",
+   "stream_addr": "0x100",
+   "chamadas": {
+    "sem_ponteiro": {
+     "argv": [
+      "koscmp",
+      "-x",
+      "/tmp/probe-x-1l2rdsbz/kosinski_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/kosinski_None.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "curto_com_igual_endereco_ponteiro": {
+     "argv": [
+      "koscmp",
+      "-x=0x20",
+      "/tmp/probe-x-1l2rdsbz/kosinski_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/kosinski_-x=0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "curto_com_igual_offset_stream": {
+     "argv": [
+      "koscmp",
+      "-x=0x100",
+      "/tmp/probe-x-1l2rdsbz/kosinski_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/kosinski_-x=0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "curto_anexado_endereco_ponteiro": {
+     "argv": [
+      "koscmp",
+      "-x0x20",
+      "/tmp/probe-x-1l2rdsbz/kosinski_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/kosinski_-x0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "curto_anexado_offset_stream": {
+     "argv": [
+      "koscmp",
+      "-x0x100",
+      "/tmp/probe-x-1l2rdsbz/kosinski_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/kosinski_-x0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 4096,
+     "equals_fixture_plain": true
+    },
+    "longo_com_igual_endereco_ponteiro": {
+     "argv": [
+      "koscmp",
+      "--extract=0x20",
+      "/tmp/probe-x-1l2rdsbz/kosinski_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/kosinski_--extract=0x20.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 0,
+     "equals_fixture_plain": false
+    },
+    "longo_com_igual_offset_stream": {
+     "argv": [
+      "koscmp",
+      "--extract=0x100",
+      "/tmp/probe-x-1l2rdsbz/kosinski_synth.bin",
+      "/tmp/probe-x-1l2rdsbz/kosinski_--extract=0x100.out"
+     ],
+     "rc": 0,
+     "stdout": null,
+     "out_bytes": 4096,
+     "equals_fixture_plain": true
+    }
+   },
+   "semantica": "OFFSET: o argumento e o offset da propria stream no arquivo"
+  }
+ ]
+}
