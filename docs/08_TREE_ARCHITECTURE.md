@@ -172,6 +172,7 @@ RetroDevStudio/
 |   |-- diagnose-desktop-e2e.ps1
 |   |-- e2e-tauri-build-run.mjs
 |   |-- verify-mugen-real.py
+|   |-- verify-mugen-chain.py
 |   |-- license-inventory.mjs
 |   |-- release-rehearsal-linux.mjs
 |   |-- release-readiness.mjs
