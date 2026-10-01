@@ -1,0 +1,1674 @@
+[
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Addams Family, The (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "85e303f33a0569bf0471da4743d4fee60492525905be8c94f73ed35b824ecf59",
+  "members": [
+   {
+    "name": "Addams Family, The (USA, Europe).gen",
+    "size": 1048576,
+    "sha256": "50241992c65d4b3c7b543bb94f7a414c95618ca29c0d47e0df403cfa4ffcc4b5",
+    "md": {
+     "base": 0,
+     "internal_name": "ADDAMS FAMILY",
+     "declared_checksum": "0xAD37",
+     "computed_checksum": "0xAD37",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Adventures of Batman & Robin, The (USA) (Translated PtBr).zip",
+  "zip_sha256": "ba29fc7fefa020e52f79ff44f3aad067d94175595057dbad589308b39cb2d193",
+  "members": [
+   {
+    "name": "Adventures of Batman & Robin, The (USA).bin",
+    "size": 2097152,
+    "sha256": "a87e79fae59a8545c2529b6c0ce7045884be707a69cf5912e1d0545ff8b9211f",
+    "md": {
+     "base": 0,
+     "internal_name": "THE ADVENTURES OF BATMAN AND",
+     "declared_checksum": "0x4CAE",
+     "computed_checksum": "0x4588",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Aladdin (USA) (Translated PtBr).zip",
+  "zip_sha256": "247f0df125757c46483c3e0cb6053c4204a10cfc7b2827e495558ea4a76efd38",
+  "members": [
+   {
+    "name": "Aladdin (USA).bin",
+    "size": 2097152,
+    "sha256": "bd7a0a821827ffc86aa9395f5542de2dba79333c50511c5b4c1750dfb6ed414d",
+    "md": {
+     "base": 0,
+     "internal_name": "ALADDIN",
+     "declared_checksum": "0x6872",
+     "computed_checksum": "0x6872",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Alien 3 (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "65ae43c328f2d9c3c657c21777ea56bf2eaaf55ed96430a0f81f36cb65c24f4b",
+  "members": [
+   {
+    "name": "Alien 3 (USA, Europe).md",
+    "size": 524288,
+    "sha256": "9e01406d01a655f08260bc053d095f514a8cd5efc1498b2ef8837ccc3f62baff",
+    "md": {
+     "base": 0,
+     "internal_name": "ALIEN 3",
+     "declared_checksum": "0xB245",
+     "computed_checksum": "0xB245",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Alien Soldier (Europe) (Translated PtBr).zip",
+  "zip_sha256": "e00d01bd803fadfad1a86210b68875df865b02e08371d8f07b8ac0be7e4e0468",
+  "members": [
+   {
+    "name": "Alien Soldier (Europe).md",
+    "size": 2097152,
+    "sha256": "dd8659e12a97f60f27ef170080887ef135e311b1c16af5355c25b104f2fae96b",
+    "md": {
+     "base": 0,
+     "internal_name": "ALIEN SOLDIER",
+     "declared_checksum": "0xE8DD",
+     "computed_checksum": "0xE8DD",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Alien Storm (World) (Translated PtBr).zip",
+  "zip_sha256": "19b534037c87222fb7aa3d35efa2f825f7cb96c31d58b71b3edc139b4172785d",
+  "members": [
+   {
+    "name": "Alien Storm (World).md",
+    "size": 524288,
+    "sha256": "a95d56acd905a07106a3f1cbde34f477f642a7b3fbbb984d95592efb540646ab",
+    "md": {
+     "base": 0,
+     "internal_name": "\u0083G\u0083C\u0083\u008a\u0083A\u0083\u0093\u0083X\u0083g\u0081[\u0083\u0080\u0081@\u0081@\u0081@\u0081@\u0081@",
+     "declared_checksum": "0x566B",
+     "computed_checksum": "0x566B",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Altered Beast (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "f6e9d1e07138ac0e508f54cd771c4a98b9fff711bf04e48bf29b38ca533ea833",
+  "members": [
+   {
+    "name": "Altered Beast (USA, Europe).SMD",
+    "size": 524288,
+    "sha256": "a60aff251c3243016008e383c4f28d94a743dd688c6f3110e465b8c7fdef1871",
+    "md": {
+     "base": 0,
+     "internal_name": "\u008fb\u0089\u00a4\u008bL",
+     "declared_checksum": "0xD716",
+     "computed_checksum": "0xD716",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Castle of Illusion Starring Mickey Mouse (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "c5a16f13acf074a551cee0f020afedddb344956b068d08bac79f14e9fb6b13a5",
+  "members": [
+   {
+    "name": "Castle of Illusion Starring Mickey Mouse (USA, Europe).md",
+    "size": 524288,
+    "sha256": "dbc7b2cb0f66f2a5ac4af1b810549802e9c2d7fa380ae9bd791b952d1cfdf603",
+    "md": {
+     "base": 0,
+     "internal_name": "MICKEY MOUSE",
+     "declared_checksum": "0xE1E8",
+     "computed_checksum": "0xE1E8",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Chip 'n Dale - Rescue Rangers (pt) (Translated PtBr).zip",
+  "zip_sha256": "70029aa7cab5e3d2f956f619a4333507a13ee395bcf4c811614bb7848083020d",
+  "members": [
+   {
+    "name": "Chip 'n Dale - Rescue Rangers (pt).bin",
+    "size": 524288,
+    "sha256": "98a4b97cf70942e48778d9a992519f983a235519e9f60462aa571a787ab11eb9",
+    "md": {
+     "base": 0,
+     "internal_name": "Chip and Dale",
+     "declared_checksum": "0x2E1D",
+     "computed_checksum": "0x2E1D",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Contra - Hard Corps (USA, Korea) (Translated PtBr).zip",
+  "zip_sha256": "58f53ec6eca1a588b89791aaa5a86469fe6b1b12783d5eeee47c307bd7b3c697",
+  "members": [
+   {
+    "name": "Contra - Hard Corps (USA, Korea).bin",
+    "size": 2097152,
+    "sha256": "8e178b439e1326e766177450a02c43e2ebcfc976c076d65c3bd786f2881144be"
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/DarkStalkers (Demo#70) (Brazil) (Unl).zip",
+  "zip_sha256": "e5ce11dabd46b6cd269ebae1fbd21e11fcd964fcef35d1bbc466e69bac710ae4",
+  "members": [
+   {
+    "name": "DarkStalkers (Demo#70) (Brazil) (Unl).bin",
+    "size": 524288,
+    "sha256": "3b33c9e63e35cd3ce459a06e43c39d4b1f7839de44bf9e396bb0caa42088da47",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0x2044",
+     "computed_checksum": "0xABED",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Dino Fighters (beta v.0.1) (Brazil) (Unl).zip",
+  "zip_sha256": "086f7e2a7ec1d2d86e342f5eaabad7f5d45c0c7ec06a4a4ef040d3064dc50e71",
+  "members": [
+   {
+    "name": "Dino Fighters (beta v.0.1) (Brazil) (Unl).bin",
+    "size": 1572864,
+    "sha256": "b66548e9bf6a91a76f89ee6497d9576e93db0588652dcc7986dc8672ad45c7fb",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0x3762",
+     "computed_checksum": "0x8589",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/ESWAT - City Under Siege (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "dc10d6254856b4e1b99e6b4b645f6c981a8049a19dd01abff78a071699fe8d5d",
+  "members": [
+   {
+    "name": "ESWAT - City Under Siege (USA, Europe).md",
+    "size": 524288,
+    "sha256": "3f1fa73627386d0fcab2990d029f90cdbf5de5be166ee06bce50b6019bfe683d",
+    "md": {
+     "base": 0,
+     "internal_name": "ESWAT",
+     "declared_checksum": "0x6018",
+     "computed_checksum": "0x6018",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Fatal Fury One (v.1.5) (Brazil) (Unl).zip",
+  "zip_sha256": "0cbe9c1fa6a1940df191af285a288660575ffeba72b3fbb087223cd3dd9ef63d",
+  "members": [
+   {
+    "name": "Fatal Fury One (v.1.5) (Brazil) (Unl).bin",
+    "size": 4194304,
+    "sha256": "b6d0ca68f8c4707743129eba553e72f1a35f43dba03d51350cd19138a0cbd10d",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0x372B",
+     "computed_checksum": "0xF64E",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Fatal Fury Rheo Bout (beta) (RBFFS_LITEv1.2) (Brazil) (Unl).zip",
+  "zip_sha256": "2e047be8943050ccced95169adc541c0496930e8b92ada3f959e55323cd191ea",
+  "members": [
+   {
+    "name": "Fatal Fury Rheo Bout (beta) (RBFFS_LITEv1.2) (Brazil) (Unl).bin",
+    "size": 4194304,
+    "sha256": "5df4645a391e0a0c5234dfe69fe248542b01616c18cc08dafcd9999889c721ab",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0xD614",
+     "computed_checksum": "0xECFB",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Fatal Fury Rheo Bout (v.1) (Brazil) (Unl).zip",
+  "zip_sha256": "1f0a0f80c5a01a1afefc3b659621c9f490d1da0583ff9087380475115321aeb0",
+  "members": [
+   {
+    "name": "Fatal Fury Rheo Bout (v.1) (Brazil) (Unl).bin",
+    "size": 4194304,
+    "sha256": "90d860781360d2b585c136f7f3d5f61af30fac01bf5b6fe893ff67fdad7ee1a4",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0xD617",
+     "computed_checksum": "0xECF6",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Gaiares (Japan, USA) (Translated PtBr).zip",
+  "zip_sha256": "0b1ae203781d5248758c7c16cf80a3ac701a396143157b3244ef545d86dcb533",
+  "members": [
+   {
+    "name": "Gaiares (Japan, USA).md",
+    "size": 1048576,
+    "sha256": "c326805bd01249a7212855d1031f7da12b0bceaae3cb215c5451ccef4aecf529",
+    "md": {
+     "base": 0,
+     "internal_name": "\u0082f\u0082`\u0082h\u0082`\u0082q\u0082d\u0082r\u0081i\u0083K\u0083C\u0083A\u0083\u008c\u0083X\u0081j",
+     "declared_checksum": "0xE7F7",
+     "computed_checksum": "0xE7F7",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Gargoyles (USA) (Translated PtBr).zip",
+  "zip_sha256": "b222361c7280211dec12b8b2fff7fa44d1fc72e032575eaf88f5ab9d225c03b8",
+  "members": [
+   {
+    "name": "Gargoyles (USA).md",
+    "size": 3145728,
+    "sha256": "de4ef5bb385bf58d2d12a5f386473e40f3ec1355db6f57dff2ddcff3c1780fcb",
+    "md": {
+     "base": 0,
+     "internal_name": "GARGOYLES",
+     "declared_checksum": "0xF620",
+     "computed_checksum": "0xF620",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Golden Axe (World) (Translated PtBr).zip",
+  "zip_sha256": "123440e91aa8b03deae86c256009eab36ca5525eedbd9d7f1a73219931a42a13",
+  "members": [
+   {
+    "name": "Golden Axe (World).gen",
+    "size": 524288,
+    "sha256": "75613dde5ae0cc9d16ed5110c3e353bf73f1fabc5656af6165deecd93585df4b"
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Golden Axe II (World) (Translated PtBr).zip",
+  "zip_sha256": "3dc3328b21627eebe24577575c9f2f0a798c7146f1104a2ffc507a630de427dc",
+  "members": [
+   {
+    "name": "Golden Axe II (World).md",
+    "size": 524288,
+    "sha256": "d0b30646604c0daf2ffdcd10c4bcb6a1c5249b6ca9dbb51feb2aa7ed38cf13c6",
+    "md": {
+     "base": 0,
+     "internal_name": "GOLDEN AXE 2",
+     "declared_checksum": "0x01DA",
+     "computed_checksum": "0x01DA",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Golden Axe III (Japan) (Translated PtBr).zip",
+  "zip_sha256": "0a9f438cff4a46a769afc322fe8dca06d5fe68e549b399507fa5e772586c3a9f",
+  "members": [
+   {
+    "name": "Golden Axe III (Japan).bin",
+    "size": 1048576,
+    "sha256": "13767de79810000c54ed1231bb01909c0bcacf2242a3c44e9c89adfa1e00e313",
+    "md": {
+     "base": 0,
+     "internal_name": "GOLDEN AXE 3",
+     "declared_checksum": "0x485E",
+     "computed_checksum": "0x3B1A",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Golden Axe Plus (Mega Drive - MD Play).zip",
+  "zip_sha256": "fed265ceed392d59cd5a8c15cbac214338e24091256a48d1ecb97d13eaaba029",
+  "members": [
+   {
+    "name": "Golden Axe Plus (Mega Drive - MD Play).bin",
+    "size": 2097152,
+    "sha256": "96be73aec9abb0422f0c4e1e33afae6a06e6c18df915b3472a3d540056baafc8",
+    "md": {
+     "base": 0,
+     "internal_name": "\u0082f\u0082n\u0082k\u0082c\u0082d\u0082m\u0081@\u0082`\u0082w\u0082d\u0081@\u0081@\u0081@\u0081@",
+     "declared_checksum": "0xD80A",
+     "computed_checksum": "0xD80A",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Guerra dos Monstros (Unl).zip",
+  "zip_sha256": "0db0d63d2582553f3b1162a06cab9e142c762946c7de9aa4234cb28037e52d8b",
+  "members": [
+   {
+    "name": "Guerra dos Monstros (Unl).md",
+    "size": 156588,
+    "sha256": "8c388071195b7a64529c47b2dc9af34ef30d3a692a159bab2cbbe9f145c85728",
+    "md": {
+     "base": 0,
+     "internal_name": "JogosDevworks",
+     "declared_checksum": "0xA5FB",
+     "computed_checksum": "0x2F9F",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/JuJu Densetsu (J) (Translated PtBr).zip",
+  "zip_sha256": "12a95b5884062ccd573c7f676589dca473379fc37ff4ae24fc31233a640076b8",
+  "members": [
+   {
+    "name": "JuJu Densetsu (J).gen",
+    "size": 524288,
+    "sha256": "0e46a4943598a43d89992ec9d0d5de1f68b1255e68f018fc1aab2916b628c38d",
+    "md": {
+     "base": 0,
+     "internal_name": "\u0082i\u0082t\u0082i\u0082t\u0093`\u0090\u00e0",
+     "declared_checksum": "0x1115",
+     "computed_checksum": "0x944B",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Kunio no Nekketsu School Fighters (beta v.01) (Brazil) (Unl).zip",
+  "zip_sha256": "c954b6dbbc160ec5bda7e99d495695db7ca5c43076984a7534e75537684222ba",
+  "members": [
+   {
+    "name": "Kunio no Nekketsu School Fighters (beta v.01) (Brazil) (Unl).bin",
+    "size": 3538944,
+    "sha256": "aa559a1f5a1bd0e2cc2d58bf4cafa30aa69dc8685833a24e5adcd0115687224f",
+    "md": {
+     "base": 0,
+     "internal_name": "KUNIO NO NEKKETSU SCHOOL FIG",
+     "declared_checksum": "0x70A2",
+     "computed_checksum": "0x2310",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/MUSHA - Metallic Uniframe Super Hybrid Armor (USA) (Translated PtBr).zip",
+  "zip_sha256": "b3bf67dbd03ed85d49f8f50fb5ea55ccd1e6ea790d5f4b9143e6a00b5783eb61",
+  "members": [
+   {
+    "name": "MUSHA - Metallic Uniframe Super Hybrid Armor (USA).gen",
+    "size": 525548,
+    "sha256": "938c97a04f4da7bdfa993111adb8f37235cdceb987e71cbfd35debf656eca896",
+    "md": {
+     "base": 0,
+     "internal_name": "\u0095\u0090\u008e\u00d2\u0083A\u0083\u008c\u0083X\u0083^",
+     "declared_checksum": "0x6C9A",
+     "computed_checksum": "0x6C9A",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Mega Man - The Wily Wars (Europe) (Translated PtBr).zip",
+  "zip_sha256": "58f16c5e2c22b7fbe9b32531544ca87434db2b4dbb65bb8a1605a74ed177a518",
+  "members": [
+   {
+    "name": "Mega Man - The Wily Wars (Europe).gen",
+    "size": 2102230,
+    "sha256": "b9e41127281edbfc16b680d99d8187234c00b0e7c4cd4182d8a93aface9a0787",
+    "md": {
+     "base": 0,
+     "internal_name": "\u00db\u00af\u00b8\u00cf\u00dd \u00d2\u00b6\u00de\u00dc\u00b0\u00d9\u00c4\u00de",
+     "declared_checksum": "0xC52F",
+     "computed_checksum": "0xC52F",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/MegaFinal Fight (Mauro Xavier) ( Demo 2022-12-25) (Unl).zip",
+  "zip_sha256": "c0ee22087dccefaf66a2b69bcdbc0ce5d9ed7157801c1dc5a1357f771a343e71",
+  "members": [
+   {
+    "name": "MegaFinal Fight (Mauro Xavier) ( Demo 2022-12-25) (Unl).bin",
+    "size": 3932160,
+    "sha256": "d695d5f0ea7679e1c3f7a304d857a1c2a6d961e9d7b996ba55901f0098b49ac8",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0x9627",
+     "computed_checksum": "0xC326",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/MegaFinal Fight (Mauro Xavier) ( Public_24-01-20b) (Unl).zip",
+  "zip_sha256": "4a3721525d929d4e9b5f26226179bf4db7ee3896c0f5cc9897bfdfa0d0a274e5",
+  "members": [
+   {
+    "name": "MegaFinal Fight (Mauro Xavier) ( Public_24-01-20b) (Unl).bin",
+    "size": 3670016,
+    "sha256": "8a6ab43fbdb8c031c031da4af89481ec75e51038cad51277938417b0aafcb240",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0x385F",
+     "computed_checksum": "0xF8F5",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Miniplanets REMIX (Rev 04).zip",
+  "zip_sha256": "91f6d62fa94f3925dc26ff42288086035d664a8ebb44e34e9f48eebe71c3c50b",
+  "members": [
+   {
+    "name": "Miniplanets REMIX (Rev 04).bin",
+    "size": 524288,
+    "sha256": "e8aee1b9fedca87b638a7624709d7f6e1a2aff8a5222083346d1cd63963acbe7",
+    "md": {
+     "base": 0,
+     "internal_name": "MINIPLANETS",
+     "declared_checksum": "0x5873",
+     "computed_checksum": "0x5873",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Monster World IV (Japan) (Translated En) (Translated PtBr).zip",
+  "zip_sha256": "eeeea20074eda675f05fba7e07b2442f665d6536d05c2587591c3630dde6fd1c",
+  "members": [
+   {
+    "name": "Monster World IV (Japan) (Translated En).gen",
+    "size": 2097152,
+    "sha256": "f503821a378b96e78fbc318e8c003be5c8857d69a48c7a9d7cd9c2113c12332e",
+    "md": {
+     "base": 0,
+     "internal_name": "Monster World 4",
+     "declared_checksum": "0x3DA0",
+     "computed_checksum": "0x0C4F",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Mortal Kombat Arcade Edition (v1.0a).zip",
+  "zip_sha256": "86434ee9d053a16d0142a75d86a0a13c1f1b634360558630073ad9b29af94287",
+  "members": [
+   {
+    "name": "Mortal Kombat Arcade Edition (v1.0a).md",
+    "size": 4194304,
+    "sha256": "02f907d7ff3fca4a00c8f1be35a3415eed0ece2504d616f7241b3a37da28532d",
+    "md": {
+     "base": 0,
+     "internal_name": "MORTAL KOMBAT ARCADE EDITION",
+     "declared_checksum": "0xDB28",
+     "computed_checksum": "0x8E71",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Mystic Defender (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "b7e0bfc17478db22959e89f6966c3fc64069cc1566775d677f402fb7e0bb8694",
+  "members": [
+   {
+    "name": "Mystic Defender (USA, Europe).gen",
+    "size": 524288,
+    "sha256": "91e1fdad3b6f7b5464eeca1a2e46d8ce7429ee255ceddadbc684522ec09e8ca5",
+    "md": {
+     "base": 0,
+     "internal_name": "\u008dE\u0090\u009d\u0089\u00a4\u0082Q",
+     "declared_checksum": "0xA4ED",
+     "computed_checksum": "0xFB7C",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Paprium.zip",
+  "zip_sha256": "6ce255ac48cad4ee942620f916648ac46217e1680600f50e7d0d59e142e65f99",
+  "members": [
+   {
+    "name": "Paprium.bin",
+    "size": 8388608,
+    "sha256": "f9192ac55b915ac65765688bd4944c98d4ebe2ea994e6d312e2e6e52f7e79d09",
+    "md": {
+     "base": 0,
+     "internal_name": "PAPRIUM (c) WATERMELON GAMES",
+     "declared_checksum": "0xA5FB",
+     "computed_checksum": "0x4657",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Phelios (USA) (Translated PtBr).zip",
+  "zip_sha256": "67e09944a0ec6da02d7a32ebfac4f0664dd8ff8086493bbe7e4218decf8b9faf",
+  "members": [
+   {
+    "name": "Phelios (USA).gen",
+    "size": 524288,
+    "sha256": "842951c2c710cf691a56107934d9b7e495f1519948ffe982ea0ebb68f19298f6",
+    "md": {
+     "base": 0,
+     "internal_name": "PHELIOS",
+     "declared_checksum": "0xEC69",
+     "computed_checksum": "0xEC69",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Pigsy Castlevania Sotn Xmas 2023 Demo - stable but with fewer enemies.zip",
+  "zip_sha256": "d4e95f0e525664670591290f2762eea6a7b44fd9fb8effaf768e8c8a589bb762",
+  "members": [
+   {
+    "name": "Pigsy Castlevania Sotn Xmas 2023 Demo - stable but with fewer enemies.bin",
+    "size": 3670016,
+    "sha256": "c75452a0b0b7d89c5b5a6e411a2669f4d1afd2f71ebb4213e26f91d56f5f21fd",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0x2825",
+     "computed_checksum": "0x02B0",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Pigsy Castlevania Sotn Xmas 2023 Demo - unstable but with more enemies.zip",
+  "zip_sha256": "272dbe159aeea8ec29b2c30b267fd8f834c7a2956fed589ba5a026f98385ae21",
+  "members": [
+   {
+    "name": "Pigsy Castlevania Sotn Xmas 2023 Demo - unstable but with more enemies.bin",
+    "size": 3670016,
+    "sha256": "ede175eb40eb101b216917188057ed870f11d5db79f1a4048a118d0c11629d69",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0xA052",
+     "computed_checksum": "0x9B65",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Pink Goes to Hollywood (USA) (Translated PtBr).zip",
+  "zip_sha256": "220de1d8492e97e580e7517c269c1b6df48a1f9a488b17d1589ee71f491ea445",
+  "members": [
+   {
+    "name": "Pink Goes to Hollywood (USA).md",
+    "size": 1048576,
+    "sha256": "849cc1b9441802ba7e133f435a32dfbaf88a6a0c8f421def2a62d3669fe00adf",
+    "md": {
+     "base": 0,
+     "internal_name": "PINK GOES TO HOLLYWOOD",
+     "declared_checksum": "0x17C5",
+     "computed_checksum": "0x17C5",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Pirates of Dark Water, The (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "c003250c2c9139e2451c028d8392d091dd6b9b69735bd0dc07efb5ff5119a873",
+  "members": [
+   {
+    "name": "Pirates of Dark Water, The (USA, Europe).gen",
+    "size": 2097152,
+    "sha256": "a8b2df966ec957f3b86bef89b0829811c3d5656d665f5efc1f52e9550fc46298",
+    "md": {
+     "base": 0,
+     "internal_name": "THE PIRATES OF DARK WATER",
+     "declared_checksum": "0xB34F",
+     "computed_checksum": "0xB34F",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Power Drive (Europe) (Translated PtBr).zip",
+  "zip_sha256": "38aa986a62d06c26762cf812539f6a9573062601fa94353a50394af4d35eb5e8",
+  "members": [
+   {
+    "name": "Power Drive (Europe).md",
+    "size": 1048576,
+    "sha256": "e0bc578d08c052e7c24d50184846e1cb2d82e30c8735509925c2dcb20cbb9a26",
+    "md": {
+     "base": 0,
+     "internal_name": "POWERDRIVE",
+     "declared_checksum": "0x5E7B",
+     "computed_checksum": "0x5E7B",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Pulseman (Japan) (Translated En) (Translated PtBr).zip",
+  "zip_sha256": "4285cf5654b255e19ebb77b60e2bc3719fd33460a35590c1aebd6220aa501a9c",
+  "members": [
+   {
+    "name": "Pulseman (Japan) (Translated En).gen",
+    "size": 2097152,
+    "sha256": "0745e1a248548bcec0fcd50343c0df1f2b9cfd0303c07010ca6ef933e5b4ec43",
+    "md": {
+     "base": 0,
+     "internal_name": "PULSEMAN",
+     "declared_checksum": "0xE97F",
+     "computed_checksum": "0xE97F",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/RBFFG_vLite2-0.zip",
+  "zip_sha256": "ae2183ef163120c24edf77d01fd1803ccb9e91cd5bfdfb41094b170a91f200f2",
+  "members": [
+   {
+    "name": "RBFFG_vLite2-0.bin",
+    "size": 5242880,
+    "sha256": "e7b0b329df927998a2a401be65bfcb63e89448ab13020ee7e720b0042afe8430"
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Revenge of Shinobi, The (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "37a8ff56c1a9c95ad15f3bf729759c849a70c037e49ecdc707a0531874d90187",
+  "members": [
+   {
+    "name": "Revenge of Shinobi, The (USA, Europe).gen",
+    "size": 524288,
+    "sha256": "da0b9ba10ae84742bbed54fdce212debc6cb060fb3f90ab29d72fc9939005b68",
+    "md": {
+     "base": 0,
+     "internal_name": "O SUPER SHINOBI",
+     "declared_checksum": "0xF8C6",
+     "computed_checksum": "0xF8C6",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Rocket Knight Adventures (USA) (Translated PtBr).zip",
+  "zip_sha256": "26c8e48c0e5b6b8bc22fdedbfad7a4a306207ddb47bd853bf7ed51918f7d1c58",
+  "members": [
+   {
+    "name": "Rocket Knight Adventures (USA).md",
+    "size": 1048576,
+    "sha256": "a30de82de4a8871820a9f295e7275fc3ed9d8a753f021bc794121d9b92eafe34",
+    "md": {
+     "base": 0,
+     "internal_name": "ROCKET KNIGHT ADVENTURES",
+     "declared_checksum": "0x0162",
+     "computed_checksum": "0x0162",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Sagaia (USA) (Translated PtBr).zip",
+  "zip_sha256": "9341f04b4866bbc5b5a0337f53d30e879a0df2956b0d5accf72f3969072ea3e2",
+  "members": [
+   {
+    "name": "Sagaia (USA).gen",
+    "size": 1048576,
+    "sha256": "df045b80593133c090c4b8fd4b5e75cf41ce2aae861e53200c488120543e0776",
+    "md": {
+     "base": 0,
+     "internal_name": "DARIUS 2",
+     "declared_checksum": "0x1F4D",
+     "computed_checksum": "0x1F4D",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Shadow Dancer - The Secret of Shinobi (World) (Translated PtBr).zip",
+  "zip_sha256": "b94e7b024449ec4ecf155721d7784fd1137da407f5746987b3e45d377b200720",
+  "members": [
+   {
+    "name": "Shadow Dancer - The Secret of Shinobi (World).bin",
+    "size": 524288,
+    "sha256": "84f30a72a7d5e4690fa353b588680553a50c7034fc7f156052de141e49958bff",
+    "md": {
+     "base": 0,
+     "internal_name": "SHADOW DANCER   \u0089e\u0082\u00cc\u0095\u0091",
+     "declared_checksum": "0x28F2",
+     "computed_checksum": "0x28F2",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Shinobi III - Return of the Ninja Master (USA) (Translated PtBr).zip",
+  "zip_sha256": "bbe8cd5a4489fb06a0a3e5c41e149172127d1ad18de0d3b5712a960b53136ae7",
+  "members": [
+   {
+    "name": "Shinobi III - Return of the Ninja Master (USA).bin",
+    "size": 1048576,
+    "sha256": "28572709d7cd442dd681109b14641157c2943498943fa7791f524eaf530710ef",
+    "md": {
+     "base": 0,
+     "internal_name": "THE SUPER           SHINOBI",
+     "declared_checksum": "0x0C42",
+     "computed_checksum": "0xD892",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Show do Milhao - Vol. 1 (pt) (Translated PtBr).zip",
+  "zip_sha256": "d6dd856c5e299587439cff3460cef8e7c7d76b3f1acfeec203b7d9c27c4fdf38",
+  "members": [
+   {
+    "name": "Show do Milhao - Vol. 1 (pt).md",
+    "size": 2097152,
+    "sha256": "174bfcbfade324d7cb82d79d7da7370bdfc158bb38260e3272029669d27fc9e6",
+    "md": {
+     "base": 0,
+     "internal_name": "SHOW DO MILHAO",
+     "declared_checksum": "0xBF78",
+     "computed_checksum": "0xC378",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Show do Milhao - Vol. 2 (pt) (Translated PtBr).zip",
+  "zip_sha256": "d87b1fceb2c5162d4d8bac54ed4dfc7ee83f004c1d308f0899439c7e25ecab0f",
+  "members": [
+   {
+    "name": "Show do Milhao - Vol. 2 (pt).md",
+    "size": 2097152,
+    "sha256": "7accf4991efb6c41181deb572a37a8b28ebae998bd7b18bc3ba9f20d6d99c52d",
+    "md": {
+     "base": 0,
+     "internal_name": "SHOW DO MILHAO  VOL 2",
+     "declared_checksum": "0xAA12",
+     "computed_checksum": "0xE7B4",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Sonic Delta Reloaded (Brazil) (Unl).zip",
+  "zip_sha256": "dd9c9957e9b47736d0a51fc4e78e01ba34bccc5ceaac1f4f737404ca2b2ed4d9",
+  "members": [
+   {
+    "name": "Sonic Delta Reloaded (Brazil) (Unl).bin",
+    "size": 5242880,
+    "sha256": "8fd8890206cfe856c8079531982ef00fea099f4cd4c3e120efc93d25faf1ffd6",
+    "md": {
+     "base": 0,
+     "internal_name": "SONIC 2 DELTA - SONIC 3 DELT",
+     "declared_checksum": "0xDFB3",
+     "computed_checksum": "0xA95F",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "4384a0994f81c93791f470e65a303fff47b5ddb3f06c99f04757f5a1346dcde2",
+  "members": [
+   {
+    "name": "Sonic the Hedgehog (USA, Europe).bin",
+    "size": 531577,
+    "sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+    "md": {
+     "base": 0,
+     "internal_name": "SONIC THE               HEDG",
+     "declared_checksum": "0xE20F",
+     "computed_checksum": "0x760D",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Spider-Man vs The Kingpin (W) [!] (Translated PtBr).zip",
+  "zip_sha256": "93151657f5f35518acbeeef330149a06a5a6e9429076c5a81e15c480457de329",
+  "members": [
+   {
+    "name": "Spider-Man vs The Kingpin (W) [!].gen",
+    "size": 524288,
+    "sha256": "c75bda21c81ddd9c288f1dd66c0d796ed2dbff66351e0ab983d1ded5c3c9546b",
+    "md": {
+     "base": 0,
+     "internal_name": "SPIDER-MAN",
+     "declared_checksum": "0xE72D",
+     "computed_checksum": "0xE72D",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Story of Thor, The (Europe) (Translated PtBr).zip",
+  "zip_sha256": "91f0661a3fdf7b46b99e24642e67ae7f6499677117b1e7ad1bf7d596107e0401",
+  "members": [
+   {
+    "name": "Story of Thor, The (Europe).gen",
+    "size": 3145728,
+    "sha256": "86e79eeaa90fbd7cebbc121a6dada007a4ee406b8f9946495950b9b8b06a265b",
+    "md": {
+     "base": 0,
+     "internal_name": "THE STORY OF THOR",
+     "declared_checksum": "0x64CA",
+     "computed_checksum": "0x64CA",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Streets of Rage (World) (Translated PtBr).zip",
+  "zip_sha256": "fbb1f3694132fb85cfd1ccc2d39642da0b0306c523d834fadda792ea3ab68efc",
+  "members": [
+   {
+    "name": "Streets of Rage (World).gen",
+    "size": 524288,
+    "sha256": "304f56ba2560a7cd6b93dd092cb0d17e4cd783b9086cf4bf069d6fdd2cb3961d",
+    "md": {
+     "base": 0,
+     "internal_name": "BARE KNUCKLE",
+     "declared_checksum": "0xAD7E",
+     "computed_checksum": "0xAD7E",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Streets of Rage 2 (USA) (Translated PtBr).zip",
+  "zip_sha256": "ddb70b2f986ac46b8e7d95176eb6d6212d0f64f4c3cbd5a3d59e7ed7c21236ac",
+  "members": [
+   {
+    "name": "Streets of Rage 2 (USA).bin",
+    "size": 2097152,
+    "sha256": "a6faf732f7038c5ff3951001bc22628015d1028a33c452c22ad39f61b8afcf4a",
+    "md": {
+     "base": 0,
+     "internal_name": "STREET OF RAGE 2",
+     "declared_checksum": "0xFC96",
+     "computed_checksum": "0xFC96",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Streets of Rage 3 (USA) (Translated PtBr).zip",
+  "zip_sha256": "9c76f81cdb2ada98d85533d3afaa5e2e938978a1932f8fe066ea7d3e96691c15",
+  "members": [
+   {
+    "name": "Streets of Rage 3 (USA).gen",
+    "size": 3145728,
+    "sha256": "8855f797591823855cfe6440a0e33daac005b2531ecd2720ddc0c8718ed2ebe4",
+    "md": {
+     "base": 0,
+     "internal_name": "BARE KNUCKLE3",
+     "declared_checksum": "0xC673",
+     "computed_checksum": "0xC673",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Strider (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "a24242ee1128e21773b466e98716aad43ba7c52803224d470fec4708965e99e9",
+  "members": [
+   {
+    "name": "Strider (USA, Europe).gen",
+    "size": 1048576,
+    "sha256": "99bbe15a80cc7a47d9a666ec5e9aa6ce51290007090f58dc1371490604a3ec5d",
+    "md": {
+     "base": 0,
+     "internal_name": "",
+     "declared_checksum": "0x3D6A",
+     "computed_checksum": "0x3D6A",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Super Spin (Preview Version) (Unl).zip",
+  "zip_sha256": "49fe921f4bd4967463709345eefaeee88e7c7cdc5859b038be2439a35626ca72",
+  "members": [
+   {
+    "name": "Super Spin (Preview Version) (Unl).gen",
+    "size": 1048576,
+    "sha256": "2e79bdf2a4fb9c8322105e9a0f6e59095b961c570c0f47ab81db2e534a0bb930",
+    "md": {
+     "base": 0,
+     "internal_name": "",
+     "declared_checksum": "0x0000",
+     "computed_checksum": "0xFCAA",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Super Street Fighter II - The New Challengers (USA) (Translated PtBr).zip",
+  "zip_sha256": "75932b70324da64a6e9fb350cf3eddbea3e70e53024a6a596b5459bbce210850",
+  "members": [
+   {
+    "name": "Super Street Fighter II - The New Challengers (USA).bin",
+    "size": 5242880,
+    "sha256": "eaf902ab28e6d79d53f7a0a0acecb7ba38e650aca5bef38f2ab40fcd678e1271",
+    "md": {
+     "base": 0,
+     "internal_name": "SUPER STREET FIGHTER2 The Ne",
+     "declared_checksum": "0x4E38",
+     "computed_checksum": "0x4E38",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Syd of Valis (USA) (Translated PtBr).zip",
+  "zip_sha256": "4a989c06e3b5eb2fe963f2bb7406c172f858fdf05cace69ed53b94ebabf10590",
+  "members": [
+   {
+    "name": "Syd of Valis (USA).gen",
+    "size": 524288,
+    "sha256": "da49acf19cd71e452971d2db1e7eae42908461e5d9597510b7d3e9b9ed828d6d",
+    "md": {
+     "base": 0,
+     "internal_name": "\u0082r\u0082c\u0083\u0094\u0083@\u0083\u008a\u0083X            \u0081@\u0081@",
+     "declared_checksum": "0x8E34",
+     "computed_checksum": "0x8E34",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Taz-Mania (World) (Translated PtBr).zip",
+  "zip_sha256": "07ae4b1aa8fe779bcf219de38ad150aaf5ec1f896a70b21c93ecf19ac7b266ff",
+  "members": [
+   {
+    "name": "Taz-Mania (World).gen",
+    "size": 524288,
+    "sha256": "3ba38ac2befd8ac0550e8cab9b88306cc1f656e832177ff329275f6e33a78cd7",
+    "md": {
+     "base": 0,
+     "internal_name": "TAZ-MANIA",
+     "declared_checksum": "0xFD4A",
+     "computed_checksum": "0xFD4A",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/The Amazing Spider-Man vs. The Kingpin (Translated PtBr).zip",
+  "zip_sha256": "25f4eb4f7d6dafa96c60f26a68a9ea55c2de28c6038a2b5a94a89c509022ecd4",
+  "members": [
+   {
+    "name": "The Amazing Spider-Man vs. The Kingpin.bin",
+    "size": 524288,
+    "sha256": "c75bda21c81ddd9c288f1dd66c0d796ed2dbff66351e0ab983d1ded5c3c9546b",
+    "md": {
+     "base": 0,
+     "internal_name": "SPIDER-MAN",
+     "declared_checksum": "0xE72D",
+     "computed_checksum": "0xE72D",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Toy Story (USA) (Translated PtBr).zip",
+  "zip_sha256": "0484543620eb35aed4c63456a416d3331b44b229b8c733331fcce1527e982cb4",
+  "members": [
+   {
+    "name": "Toy Story (USA).md",
+    "size": 4194304,
+    "sha256": "df86b688eaef6178ff43288561838a9389e0e02d30fcce584616d898da0a78b2",
+    "md": {
+     "base": 0,
+     "internal_name": "TOY STORY",
+     "declared_checksum": "0x6C35",
+     "computed_checksum": "0x6C35",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Truxton (World) (Translated PtBr).zip",
+  "zip_sha256": "461f963c77ca7a1206ae36391d72b54785924a235e3464fe01a6f76c12a0e3eb",
+  "members": [
+   {
+    "name": "Truxton (World).gen",
+    "size": 524288,
+    "sha256": "0bc3d27543840ba98965d54ee7508dfdce77d088533698f8cfb6e11c4ec8a595",
+    "md": {
+     "base": 0,
+     "internal_name": "TATSUJIN",
+     "declared_checksum": "0x15A1",
+     "computed_checksum": "0x15A1",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Turma da Monica na Terra dos Monstros (Brazil) (Translated PtBr).zip",
+  "zip_sha256": "a16286f0221d6fe0da56991e8eb8370f5f666b68053ba4964331613a3d99157a",
+  "members": [
+   {
+    "name": "Turma da Monica na Terra dos Monstros (Brazil).md",
+    "size": 1048576,
+    "sha256": "5f7fe0b1ec6401ef5c9a107ecd961f0d14c8a64acb705cb76828ad80ba04ae40",
+    "md": {
+     "base": 0,
+     "internal_name": "Wonder Boy V Monster World I",
+     "declared_checksum": "0x740D",
+     "computed_checksum": "0x740D",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Twinkle Tale (Japan) (Translated En) (Translated PtBr).zip",
+  "zip_sha256": "9e1ba0dc5a045c948c61bdb3445c627ba64a06f6176fbac81295e6e7e3b6992b",
+  "members": [
+   {
+    "name": "Twinkle Tale (Japan) (Translated En).gen",
+    "size": 1048576,
+    "sha256": "9c736777e9bd6988b51ab97052b6243edd4f7dbb404270e71b15fcf239dd892e",
+    "md": {
+     "base": 0,
+     "internal_name": "\u00c2\u00b2\u00dd\u00b8\u00d9\u00a5\u00c3\u00b0\u00d9",
+     "declared_checksum": "0xAF6F",
+     "computed_checksum": "0xAF6F",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Valis (USA) (Translated PtBr).zip",
+  "zip_sha256": "d148b2382cef0a072b4ed71a56a5ceaf71c16a035d7f66d34f52e5f2d7b4d01f",
+  "members": [
+   {
+    "name": "Valis (USA).gen",
+    "size": 1048576,
+    "sha256": "44268717b23038e96ede9995b7f2b6c1491e90b07108d7674a261b27b3b984da",
+    "md": {
+     "base": 0,
+     "internal_name": "VALIS I",
+     "declared_checksum": "0x4A81",
+     "computed_checksum": "0x4A81",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Valis III (USA) (Translated PtBr).zip",
+  "zip_sha256": "22d01d3da4d78db0432e485f93a87780e83cd587730f5f278562f850dc9c2b8e",
+  "members": [
+   {
+    "name": "Valis III (USA).gen",
+    "size": 1048576,
+    "sha256": "3f409ce7dfbacc5c02afa5d8206d9f3d5f9a1cd778657fc6fd85b4112aab7158",
+    "md": {
+     "base": 0,
+     "internal_name": "\u0083\u0094\u0083@\u0083\u008a\u0083X\u0087V              \u0081@\u0081@",
+     "declared_checksum": "0x808F",
+     "computed_checksum": "0x808F",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Vectorman (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "551f2708d77680fe1c50b153e71335e1b079ae3d54160fb5a5a31f92612e1ad9",
+  "members": [
+   {
+    "name": "Vectorman (USA, Europe).bin",
+    "size": 3145728,
+    "sha256": "ff854c6f554153d86c86c6f30d85c357aff94539b203c4a7049763a044ea87af",
+    "md": {
+     "base": 0,
+     "internal_name": "VECTORMAN 2",
+     "declared_checksum": "0xE2B9",
+     "computed_checksum": "0xA051",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Vectorman 2 (USA) (Translated PtBr).zip",
+  "zip_sha256": "810c94459be5619efe41a686e84e61a9cff064cab6b5138e88f1942d2d82b06d",
+  "members": [
+   {
+    "name": "Vectorman 2 (USA).bin",
+    "size": 3145728,
+    "sha256": "ff854c6f554153d86c86c6f30d85c357aff94539b203c4a7049763a044ea87af",
+    "md": {
+     "base": 0,
+     "internal_name": "VECTORMAN 2",
+     "declared_checksum": "0xE2B9",
+     "computed_checksum": "0xA051",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Where in Time Is Carmen Sandiego (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "5dcb792fa67e7583455d8c16cbe7007074a8622a74265001280c11a4e0e7b062",
+  "members": [
+   {
+    "name": "Where in Time Is Carmen Sandiego (USA, Europe).md",
+    "size": 1048576,
+    "sha256": "c831095a27aa87b02b74b6a0cc4598afc593e82a5d1b7fa84496a37d53091474",
+    "md": {
+     "base": 0,
+     "internal_name": "WHERE IN TIME IS CARMEN SAND",
+     "declared_checksum": "0x312B",
+     "computed_checksum": "0x312B",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Where in the World Is Carmen Sandiego (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "f88d517dbe4082cfa9e8ab7454c635b196f85638e934e6983118700e129ddc55",
+  "members": [
+   {
+    "name": "Where in the World Is Carmen Sandiego (USA, Europe).bin",
+    "size": 1048576,
+    "sha256": "715755c70d6ed1c3d9636ee1a200d1f49c92decf446c7340291bde06607d922f",
+    "md": {
+     "base": 0,
+     "internal_name": "Where in the World is Carmen",
+     "declared_checksum": "0x6D49",
+     "computed_checksum": "0x6D49",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Windjammers  (Pyrons Layr) ( Demo Alpha 8) (Unl).zip",
+  "zip_sha256": "88248c61b7f54b8e37486d55d76fe17fd37ad538f94e52dcac1618f5a1894652",
+  "members": [
+   {
+    "name": "Windjammers  (Pyrons Layr) ( Demo Alpha 8) (Unl).bin",
+    "size": 1048576,
+    "sha256": "9adcdada16ca2bfa5fccd1a71e9b1497655e4037ab40dbf1c4cd410baf4b4e8b",
+    "md": {
+     "base": 0,
+     "internal_name": "SAMPLE PROGRAM",
+     "declared_checksum": "0x743F",
+     "computed_checksum": "0x972C",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Wonder Boy in Monster World (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "0106b8908c52214138add7706da9a48ab144aebc5fe12fb8d945d02096bdf4c6",
+  "members": [
+   {
+    "name": "Wonder Boy in Monster World (USA, Europe).gen",
+    "size": 786432,
+    "sha256": "bea673043b8a227a44a01f6d130c330011f3478b6db64ceb2383376e316e77fe",
+    "md": {
+     "base": 0,
+     "internal_name": "Wonder Boy V Monster World I",
+     "declared_checksum": "0xDBDF",
+     "computed_checksum": "0xDBDF",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/X-Men 2 - Clone Wars (USA, Europe) (Translated PtBr).zip",
+  "zip_sha256": "7d49a468cf54ee9d45d8e1c82c16ec479f940ea13a0837a33bb687e210ea7351",
+  "members": [
+   {
+    "name": "X-Men 2 - Clone Wars (USA, Europe).bin",
+    "size": 2097152,
+    "sha256": "44cf19c0324700d1db12a8ae29453bccd8690a7d61bba3450fdc1edf3b785676",
+    "md": {
+     "base": 0,
+     "internal_name": "X-MEN 2",
+     "declared_checksum": "0xA1A3",
+     "computed_checksum": "0x9D62",
+     "checksum_ok": false
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Yu Yu Hakusho Sunset Fighters (Translated PtBr).zip",
+  "zip_sha256": "950392873e0981f64801c83002da93e2de6a8ca4c1d638afff5936ae177b5a19",
+  "members": [
+   {
+    "name": "Yu Yu Hakusho Sunset Fighters.md",
+    "size": 3145728,
+    "sha256": "e5b2c15a6b7546884cd941661d33b1b61d0d3169313e446040c25471a7fa3546",
+    "md": {
+     "base": 0,
+     "internal_name": "YUYU HAKUSYO",
+     "declared_checksum": "0x6AAF",
+     "computed_checksum": "0x6AAF",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/genesis/Yuu Yuu Hakusho - Makyou Toitsusen (Japan) (Translated En) (Translated PtBr).zip",
+  "zip_sha256": "cf4a6649f79cec7d3b7011206d96be4a8330c94c2f83b26e485853ebb95bf7f8",
+  "members": [
+   {
+    "name": "Yuu Yuu Hakusho - Makyou Toitsusen (Japan) (Translated En).gen",
+    "size": 3155396,
+    "sha256": "8bcd16fe0a8d94adfa710ba72b64624f10629a8b955dbb8a9d54689e8fa33ff8",
+    "md": {
+     "base": 0,
+     "internal_name": "YUYU HAKUSYO",
+     "declared_checksum": "0x5DDC",
+     "computed_checksum": "0x5DDC",
+     "checksum_ok": true
+    }
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/megadrive/Doom (Europe) (MD+) [Hack by D32XR Team v2.2b].zip",
+  "zip_sha256": "f7c7f6fd60b4e79b352523a485d6dbba93d5f49ea2576bbc4710ca86a87c6a6f",
+  "members": [
+   {
+    "name": "Doom (Europe) (MD+).32x",
+    "size": 4194304,
+    "sha256": "6ed9b72acc232267d3f81dd3f098189d33299da3ff9ad99e991a4a925c120a4d",
+    "md": {
+     "base": 0,
+     "internal_name": "DOOM 32X Resurrection v2.2a",
+     "declared_checksum": "0x68F4",
+     "computed_checksum": "0x68F4",
+     "checksum_ok": true
+    }
+   },
+   {
+    "name": "Doom (Europe) (MD+).cue",
+    "size": 2482,
+    "sha256": "2f3b19303c4599e666d3c943e64061d3f6d39fc2c9b49b81e8670441be9405bc"
+   },
+   {
+    "name": "Track 01.wav",
+    "size": 33480756,
+    "sha256": "5501cab4db7b4afe093af59773134bc5296553eead8589ff29fff34d8c1caf18"
+   },
+   {
+    "name": "Track 02.wav",
+    "size": 34482736,
+    "sha256": "3f0d9f6e125bfca7e567038b2411abefdfc2480c2ae4e2007aece8a2192ddccb"
+   },
+   {
+    "name": "Track 03.wav",
+    "size": 42343100,
+    "sha256": "975aebc7ca1c8bf1f90a3c00c72d405cd6a990f470d57a54496f614bd74e6913"
+   },
+   {
+    "name": "Track 04.wav",
+    "size": 28887600,
+    "sha256": "e96657818029d5b01ac1d7b5155f9bfd075327dc3abf1a6a749ffc5897a0029c"
+   },
+   {
+    "name": "Track 05-14.wav",
+    "size": 44434592,
+    "sha256": "6d3b2c96f58ca18a11699bfa44ac34ae9c11d534450bf338e21cfdc67cab9fbe"
+   },
+   {
+    "name": "Track 06.wav",
+    "size": 21506044,
+    "sha256": "3b1d99034d25549607aa3658d2f565d9d173c5990998efe254dae38ce5a8b0f2"
+   },
+   {
+    "name": "Track 07-13-20.wav",
+    "size": 26617244,
+    "sha256": "cfb27d68f019e264c308b6033ba885fc540f10fead98a00ff7f2087f396be457"
+   },
+   {
+    "name": "Track 08.wav",
+    "size": 28674776,
+    "sha256": "a09f9bfcd66199759387c4e3cbcc9cd53f0dbfba1b9a8fdb28168054241c17b4"
+   },
+   {
+    "name": "Track 09.wav",
+    "size": 25878968,
+    "sha256": "5838b601220ffae4a89cb98c84b5295d281c3df7f93273caffa71453fe9aa0b7"
+   },
+   {
+    "name": "Track 10.wav",
+    "size": 28285092,
+    "sha256": "c05af54e39dcf17dd01dba4c0a9537acff3a4c5f3b2c366934a38a708a147e35"
+   },
+   {
+    "name": "Track 11-27.wav",
+    "size": 54903460,
+    "sha256": "0bd99620390eac865e91c949d5d116002cf1a48bff2eaed2f331e1d32899e7ab"
+   },
+   {
+    "name": "Track 12-19.wav",
+    "size": 46575780,
+    "sha256": "236c1b5c310142b073c5905cb0850ee292d89290d6faca3738bcaad65f41c7c8"
+   },
+   {
+    "name": "Track 15-22.wav",
+    "size": 38111776,
+    "sha256": "2884d2b8fb03cde1b591933b0c1c1b5fce3ed6f54791c863518db124c324b54c"
+   },
+   {
+    "name": "Track 16-23.wav",
+    "size": 39219516,
+    "sha256": "4480be654c52b06721e038eaa82eaf7bd573457e0d1b7adbd6f7cc8b9a77f06d"
+   },
+   {
+    "name": "Track 17.wav",
+    "size": 34878676,
+    "sha256": "eed829e0c144b7cd249b23b11c037bdd8a869a10542b85d94b7c103c19d3a17e"
+   },
+   {
+    "name": "Track 18.wav",
+    "size": 23096408,
+    "sha256": "e68157ebfedf274bc1ed5a45d4e8e682fc96505af04040fd97a758aeb66d8479"
+   },
+   {
+    "name": "Track 21.wav",
+    "size": 32549924,
+    "sha256": "377973c3a532b9f5f5e0d74675f361394d9df4eab08e11b9f6b11a9cffca32bf"
+   },
+   {
+    "name": "Track 24.wav",
+    "size": 13184616,
+    "sha256": "f8bebb9173616442d6c90969ca345fee89dd8bad49793bc68fe33eb7f9f31996"
+   },
+   {
+    "name": "Track 25.wav",
+    "size": 36806768,
+    "sha256": "16e403a620e02e3b385b79940a96ea2ea46b6c6038ed56b3985ca58ab012de8c"
+   },
+   {
+    "name": "Track 26.wav",
+    "size": 15439724,
+    "sha256": "737fa9e8a77ab4bcd73158acb8c5b2c12e0bf7cf1f0dc7056de299d908ad6838"
+   },
+   {
+    "name": "Track 28.wav",
+    "size": 1140488,
+    "sha256": "98fa462825a92cc2859e6a053c9ba04f1e504f020b79dfc512e14c3324e03007"
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/megadrive/Mortal Kombat II (Japan, USA) (MD+) [Hack by Jeroen Visser v1.0.4].zip",
+  "zip_sha256": "dede6554f51ee006166f33eed2a76df9a1c2ae332a8872c265f0bc21585da5e9",
+  "members": [
+   {
+    "name": "Mortal Kombat II (Japan, USA) (MD+).32x",
+    "size": 4194304,
+    "sha256": "cdca926ac84a3d3a4363332e05b02460e8b3c78beb3e874eb7d65c307c466caf"
+   },
+   {
+    "name": "Mortal Kombat II (Japan, USA) (MD+).cue",
+    "size": 2411,
+    "sha256": "a26539be55f19d4f26a7a9c39d57246540e2d79fd92577f9a7eaf8019e63478e"
+   },
+   {
+    "name": "Track 01.wav",
+    "size": 6379780,
+    "sha256": "6404030f0bf2a227baead6c542e95ad5237320861bd8f6eba7c0ea9bd15c677f"
+   },
+   {
+    "name": "Track 02.wav",
+    "size": 709772,
+    "sha256": "3cf5a1da32b630e0bf9d9366ac84618439bf0bab78292f5e76bea30279042cd6"
+   },
+   {
+    "name": "Track 03.wav",
+    "size": 577776,
+    "sha256": "353383071fe4494f64b3a402679342ded5a1291321d7c3cc19d5ff7bf55a9b99"
+   },
+   {
+    "name": "Track 04.wav",
+    "size": 709388,
+    "sha256": "b6983cef3e0066dcb5e1aef478e54f158bbea29f77a778b4d04cd88a9107d721"
+   },
+   {
+    "name": "Track 05.wav",
+    "size": 5114512,
+    "sha256": "a0ea4daa99a57326475fd5895244f0037b319279272575c8c2bf7069ba34b983"
+   },
+   {
+    "name": "Track 06.wav",
+    "size": 359468,
+    "sha256": "ab326fabc63b09b5677503699cb0e1e718da8ec07aa1c384ae63b8f62a99c00b"
+   },
+   {
+    "name": "Track 07.wav",
+    "size": 1102416,
+    "sha256": "e9901d6b2f41d3c4f52fefe2cdb9194178bca447a1bb3dc8cc3ef7205028a877"
+   },
+   {
+    "name": "Track 08.wav",
+    "size": 6354604,
+    "sha256": "0ec4a53033a24ed260a8ce935dcce27cdae25cbf7342ddfea3281d9a9fe3b595"
+   },
+   {
+    "name": "Track 09.wav",
+    "size": 268580,
+    "sha256": "85ed1f3b012ca9daa6016b6012e492cf9ff05f99e1b51e6fdbe07dbeb677b60e"
+   },
+   {
+    "name": "Track 10.wav",
+    "size": 2572032,
+    "sha256": "7c6bb6b38a16d62ee4a588ba77cd1b92421b60b1d30b7f14b1478cc944179172"
+   },
+   {
+    "name": "Track 11.wav",
+    "size": 7851476,
+    "sha256": "b0bd986016ad6162d25ef615b831147f35b8e28630b4ff5920224efcd8c14c88"
+   },
+   {
+    "name": "Track 12.wav",
+    "size": 911808,
+    "sha256": "4eee4a3d47828953eb0ec9a78e45c5ba3dc8190cac520fa72795cb56b46a9aa9"
+   },
+   {
+    "name": "Track 13.wav",
+    "size": 1201848,
+    "sha256": "394b296c2cf30f6dec1d1f8a4bc9707380c5b631e51e024b9fce9cfd201f53c4"
+   },
+   {
+    "name": "Track 14.wav",
+    "size": 6149080,
+    "sha256": "0197a87d263ab27b720a7acfe129678607704dee9ffbd8ebad9e54eb94f09941"
+   },
+   {
+    "name": "Track 15.wav",
+    "size": 347564,
+    "sha256": "a350d61021a67c767d1d7a9cae47475718e0ea9cc66ab194948bcfadbb19d11a"
+   },
+   {
+    "name": "Track 16.wav",
+    "size": 1145052,
+    "sha256": "a839f531ba04cb0845194f76d6239bab7a91580dee71ebe1c0c194549243a554"
+   },
+   {
+    "name": "Track 17.wav",
+    "size": 6409700,
+    "sha256": "bdbf1d46120eb7d86d16061a002e3357f52d42529d6768bc0b043f543b671d4f"
+   },
+   {
+    "name": "Track 18.wav",
+    "size": 319796,
+    "sha256": "9190ca5b87337c6507471c27cc3b0604fcb47ac2e4254982a7823dfc024e9117"
+   },
+   {
+    "name": "Track 19.wav",
+    "size": 857488,
+    "sha256": "379faa5b269cd7bde22c23dbe319bfda0fe6412e5c59681e92f926a488a34fb4"
+   },
+   {
+    "name": "Track 20.wav",
+    "size": 7381112,
+    "sha256": "7be588e149968213fa30c770aabd6be33c27fc78a81b91abde7f1a8f256dfa82"
+   },
+   {
+    "name": "Track 21.wav",
+    "size": 340096,
+    "sha256": "8f009a2b7ad31eb63ca69e274ab88372c27d958a65e9c160f68d88e30d56c7c2"
+   },
+   {
+    "name": "Track 22.wav",
+    "size": 1302188,
+    "sha256": "cd0baf5b893e61e54cfef4b6f6aebed269145a1ce393c8e258324467dfb959f9"
+   },
+   {
+    "name": "Track 23.wav",
+    "size": 904156,
+    "sha256": "45491c9a006b13083460fff131d512fdb423a2bcd2effb85622bdb5a6627640f"
+   },
+   {
+    "name": "Track 24.wav",
+    "size": 806636,
+    "sha256": "c3e032b77a9eff0a917782cf7c11c45492d79b5ddcbe143c9e2761083791ee7a"
+   },
+   {
+    "name": "Track 25.wav",
+    "size": 689260,
+    "sha256": "76f6cb4f132bea026a31ae9569dc57dcde2c47caec05b07cb75b2f8c6eaecfe2"
+   },
+   {
+    "name": "Track 26.wav",
+    "size": 729860,
+    "sha256": "85aa29e7e9c4b6e97ce38467d445377f93954a1e87c740cae074cda3d1e39b75"
+   },
+   {
+    "name": "Track 27.wav",
+    "size": 938156,
+    "sha256": "f24700072d3335df191ed18af0407608be54aa2c8366ddc25e06c0413afc6a9f"
+   },
+   {
+    "name": "Track 28.wav",
+    "size": 2738428,
+    "sha256": "a6cff3dcea93bf9d8209176668c5e1397b6a715cc4fbb0ccebebeeceabe716e4"
+   },
+   {
+    "name": "Track 29.wav",
+    "size": 9966856,
+    "sha256": "77c57eec79ecfbc052afa6af10e983db1ea03d06adb9d8450b4c53967c98c514"
+   }
+  ]
+ },
+ {
+  "zip": "/home/misael/emulation/roms/megadrive/RocketPanda_Final_1_0.zip",
+  "zip_sha256": "bc49481d75abf6d86df141b880bb6d59eeb66a8664ff1a6b09345587c4b3375b",
+  "members": [
+   {
+    "name": "RocketPanda_Final_1_0.bin",
+    "size": 2097152,
+    "sha256": "f384269049292e01bf2d86c39ad9ed5cc1e9a6de305f4985079544b73aacdbab",
+    "md": {
+     "base": 0,
+     "internal_name": "Rocket Panda",
+     "declared_checksum": "0xDF87",
+     "computed_checksum": "0xDF87",
+     "checksum_ok": true
+    }
+   }
+  ]
+ }
+]

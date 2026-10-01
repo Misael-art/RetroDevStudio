@@ -1,0 +1,304 @@
+{
+ "schema_version": 1,
+ "gerado_por": "scripts/rex_corpus_b/confirm-by-reference.py",
+ "metodo": "referencia externa decodificando NO OFFSET DA ROM (-x0xADDR); nemcmp -i reporta o fim declarado pela referencia",
+ "sandbox": {
+  "timeout_s": 25,
+  "as_bytes": 2147483648,
+  "cpu_s": 25,
+  "fsize_bytes": 8388608
+ },
+ "semantica_x": "offset da stream no arquivo; forma valida -x0xADDR (o -x=ADDR e ignorado; sonda: scripts/rex_corpus_b/probe-oracle-extract.py)",
+ "rom": {
+  "caminho": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
+  "nome": "sonic1-kosinski",
+  "sha256_arquivo": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "size_bytes": 531577,
+  "procedencia_interna": {
+   "kind": "raw",
+   "member": "Sonic the Hedgehog (USA, Europe).bin",
+   "member_size": 531577
+  },
+  "internal_name": "SONIC THE",
+  "product_code": "GM 00001009-00",
+  "declared_checksum": "0xe20f",
+  "rom_range": [
+   "0x0",
+   "0x805a5"
+  ]
+ },
+ "enderecos_sondados": [
+  "0x64a00",
+  "0x64b9a",
+  "0x64c62",
+  "0x64df2",
+  "0x64fe6",
+  "0x651da",
+  "0x65432",
+  "0x65abe"
+ ],
+ "resultados": [
+  {
+   "offset": "0x64a00",
+   "u32_no_offset": "0xff1a00",
+   "bytes": "00ff1a0000001a00",
+   "por_codec": [
+    {
+     "codec": "kosinski",
+     "offset": "0x64a00",
+     "tool": "koscmp",
+     "invocacao": "-x0x64a00",
+     "rc": 0,
+     "stdout": null,
+     "stderr": null,
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "empty"
+    },
+    {
+     "codec": "kosinski-moduled",
+     "offset": "0x64a00",
+     "tool": "koscmp",
+     "invocacao": "-x0x64a00",
+     "rc": 124,
+     "stdout": null,
+     "stderr": "timeout",
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "timeout-no-sandbox"
+    }
+   ],
+   "fim_referencia": {}
+  },
+  {
+   "offset": "0x64b9a",
+   "u32_no_offset": "0xffffff",
+   "bytes": "00ffffffffffffff",
+   "por_codec": [
+    {
+     "codec": "kosinski",
+     "offset": "0x64b9a",
+     "tool": "koscmp",
+     "invocacao": "-x0x64b9a",
+     "rc": 0,
+     "stdout": null,
+     "stderr": null,
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "empty"
+    },
+    {
+     "codec": "kosinski-moduled",
+     "offset": "0x64b9a",
+     "tool": "koscmp",
+     "invocacao": "-x0x64b9a",
+     "rc": 124,
+     "stdout": null,
+     "stderr": "timeout",
+     "output_size": 35,
+     "output_sha256": "76b01dcb987ae337a4081e3ddc9a38edd4fa8a9f81b26598d7f92a6c55acccfe",
+     "status": "timeout-no-sandbox"
+    }
+   ],
+   "fim_referencia": {}
+  },
+  {
+   "offset": "0x64c62",
+   "u32_no_offset": "0xffffff",
+   "bytes": "00ffffff00181912",
+   "por_codec": [
+    {
+     "codec": "kosinski",
+     "offset": "0x64c62",
+     "tool": "koscmp",
+     "invocacao": "-x0x64c62",
+     "rc": 0,
+     "stdout": null,
+     "stderr": null,
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "empty"
+    },
+    {
+     "codec": "kosinski-moduled",
+     "offset": "0x64c62",
+     "tool": "koscmp",
+     "invocacao": "-x0x64c62",
+     "rc": 124,
+     "stdout": null,
+     "stderr": "timeout",
+     "output_size": 16,
+     "output_sha256": "0270a2a2c74fd64dc5d0b998aaca363f269c29f6670c1755ef55f1a162f94836",
+     "status": "timeout-no-sandbox"
+    }
+   ],
+   "fim_referencia": {}
+  },
+  {
+   "offset": "0x64df2",
+   "u32_no_offset": "0xffffff",
+   "bytes": "00ffffffffffffff",
+   "por_codec": [
+    {
+     "codec": "kosinski",
+     "offset": "0x64df2",
+     "tool": "koscmp",
+     "invocacao": "-x0x64df2",
+     "rc": 0,
+     "stdout": null,
+     "stderr": null,
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "empty"
+    },
+    {
+     "codec": "kosinski-moduled",
+     "offset": "0x64df2",
+     "tool": "koscmp",
+     "invocacao": "-x0x64df2",
+     "rc": 124,
+     "stdout": null,
+     "stderr": "timeout",
+     "output_size": 49,
+     "output_sha256": "fbd79e88bf056af7e2ec90d8ab8ce62b732ddc057519e3e4ba09f9e9b9dd6af3",
+     "status": "timeout-no-sandbox"
+    }
+   ],
+   "fim_referencia": {}
+  },
+  {
+   "offset": "0x64fe6",
+   "u32_no_offset": "0x99ffff",
+   "bytes": "0099ffff97ff0d0e",
+   "por_codec": [
+    {
+     "codec": "kosinski",
+     "offset": "0x64fe6",
+     "tool": "koscmp",
+     "invocacao": "-x0x64fe6",
+     "rc": 0,
+     "stdout": null,
+     "stderr": null,
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "empty"
+    },
+    {
+     "codec": "kosinski-moduled",
+     "offset": "0x64fe6",
+     "tool": "koscmp",
+     "invocacao": "-x0x64fe6",
+     "rc": 124,
+     "stdout": null,
+     "stderr": "timeout",
+     "output_size": 56,
+     "output_sha256": "2f0503f592fbdee7892d96fff844eabca2b935384ddebde31d215bcebb2227ff",
+     "status": "timeout-no-sandbox"
+    }
+   ],
+   "fim_referencia": {}
+  },
+  {
+   "offset": "0x651da",
+   "u32_no_offset": "0x191a1b",
+   "bytes": "00191a1bffffff1b",
+   "por_codec": [
+    {
+     "codec": "kosinski",
+     "offset": "0x651da",
+     "tool": "koscmp",
+     "invocacao": "-x0x651da",
+     "rc": 0,
+     "stdout": null,
+     "stderr": null,
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "empty"
+    },
+    {
+     "codec": "kosinski-moduled",
+     "offset": "0x651da",
+     "tool": "koscmp",
+     "invocacao": "-x0x651da",
+     "rc": 124,
+     "stdout": null,
+     "stderr": "timeout",
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "timeout-no-sandbox"
+    }
+   ],
+   "fim_referencia": {}
+  },
+  {
+   "offset": "0x65432",
+   "u32_no_offset": "0xb0f0002",
+   "bytes": "0b0f000200004808",
+   "por_codec": [
+    {
+     "codec": "kosinski",
+     "offset": "0x65432",
+     "tool": "koscmp",
+     "invocacao": "-x0x65432",
+     "rc": 0,
+     "stdout": null,
+     "stderr": null,
+     "output_size": 2,
+     "output_sha256": "fcf0a6c700dd13e274b6fba8deea8dd9b26e4eedde3495717cac8408c9c5177f",
+     "status": "decoded"
+    },
+    {
+     "codec": "kosinski-moduled",
+     "offset": "0x65432",
+     "tool": "koscmp",
+     "invocacao": "-x0x65432",
+     "rc": 124,
+     "stdout": null,
+     "stderr": "timeout",
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "timeout-no-sandbox"
+    }
+   ],
+   "fim_referencia": {}
+  },
+  {
+   "offset": "0x65abe",
+   "u32_no_offset": "0xb070002",
+   "bytes": "0b07000200006390",
+   "por_codec": [
+    {
+     "codec": "kosinski",
+     "offset": "0x65abe",
+     "tool": "koscmp",
+     "invocacao": "-x0x65abe",
+     "rc": 0,
+     "stdout": null,
+     "stderr": null,
+     "output_size": 2,
+     "output_sha256": "fcf0a6c700dd13e274b6fba8deea8dd9b26e4eedde3495717cac8408c9c5177f",
+     "status": "decoded"
+    },
+    {
+     "codec": "kosinski-moduled",
+     "offset": "0x65abe",
+     "tool": "koscmp",
+     "invocacao": "-x0x65abe",
+     "rc": 124,
+     "stdout": null,
+     "stderr": "timeout",
+     "output_size": 0,
+     "output_sha256": null,
+     "status": "timeout-no-sandbox"
+    }
+   ],
+   "fim_referencia": {}
+  }
+ ],
+ "encadeamento_nemesis_entre_alvos": [],
+ "limitacoes": [
+  "A referencia decodifica no offset e nao valida a tabela que (se) aponta para la: identidade do consumidor continua exigindo evidencia do ponteiro.",
+  "Decodificar NAO prova variante grafica (2B/4B/8B e convencao do consumidor, nao do formato).",
+  "Sem --confirmar por hash do output: a saida e registrada por tamanho+SHA-256, comparavel a qualquer outra medicao."
+ ]
+}
