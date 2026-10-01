@@ -1,0 +1,6 @@
+caso=i20_lits_odd dict=0 stream=16 plain=11 stride=0x200 off=0x0 dict_committed=False
+caso=i21_short_mix dict=0 stream=18 plain=16 stride=0x200 off=0x200 dict_committed=False
+caso=i22_long_far_nodict dict=0 stream=656 plain=620 stride=0x400 off=0x400 dict_committed=False
+caso=i23_long_zero_value dict=0 stream=10 plain=44 stride=0x200 off=0x800 dict_committed=False
+caso=i24_dict_mixed dict=1200 stream=12 plain=34 stride=0x700 off=0xa00 dict_committed=True
+total=5 wam_bytes=0x1100

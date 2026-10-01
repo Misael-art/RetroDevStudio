@@ -1,0 +1,78 @@
+{
+ "schema": "rex-integrator-evidence/v1",
+ "id": "lz4w-recompress-2026-09-26-r7-final-pin",
+ "measured_at": "2026-09-26",
+ "missao": "Objetivo do operador: 'tornar mais recursos comprimidos editáveis sem expansão, medindo a capacidade real do encoder'. PASSO 3 (incremento pequeno de encoder) + PASSO 4 (integrar sem regressões). Esta é a medição ANTES/DEPOIS do incremento de parse por custo explícito, refeita no pino FINAL para que a evidência fique vinculada ao binário que fica no repo.",
+ "supersedes": "2026-09-26-r6-dp-integration (mesma medida com o pino intermediário c38d758d…, só-DP-sem-política de escrita). r6 removido do repositório; os dumps correspondentes ficaram em /tmp e nada de r6 é citável como pino.",
+ "especificacao": {
+  "arquivo": "scripts/rex_profiles/integrator/lz4w_recompress/BENCH_SPEC.md",
+  "sha256": "92ac942c7ab59f8888db5c9f50d7b7f67f5736eb4e15cecf6c8e8954b3158a65",
+  "secoes_congeladas": "§1-§8 congelados antes de qualquer sintonia; §9 traz a emenda do piso por DP de custo explícito",
+  "split_de_validacao": "idx % 5 == 0 -> validação (32 recursos de 160 em S-B; 1 em S-A). Nunca usado para sintonia: as métricas de ajuste e validação saem em colunas separadas.",
+  "colunas": "no-op que preserva o stream original NÃO conta como sucesso do encoder: sai em `noop_preservando_stream` (119 em ambos os lados).",
+  "ferramentas": {
+   "dp_floor.py": "092f4a5c4e8685918bcf1d951f7dceadd294b190dcb5bc73afa68b9400670875",
+   "floor_sweep.py": "841659f5023e3308ba258717591aa2583c19bc24dd565d4ed00331d59c29f1a4",
+   "tokens.py": "a247884e893bcae3a1f9441e104d0debb0ca0df962cf54f34f7a484dccd13b4e"
+  }
+ },
+ "pino_sob_medicao": {
+  "repo_commit": "b8cf3b0 + working tree; os dois arquivos abaixo foram commitados em cde88cc (rex_codecs.rs) e 8a22689 (rex_resources.rs) — os SHA-256 de conteúdo casam com o que estava na árvore durante a medição",
+  "rex_codecs.rs": "6044135b30f51bc746f8b15e6baf6b94cabbbd52c067ce969ea0cb231fa83e18",
+  "rex_resources.rs": "d84776089b3bbc316aff716a2b3d4db25f215c87b64cf9ee3eceef8230d8a0e5",
+  "baseline_anterior": "rex_codecs.rs @ bee8524f78aa288ac2a084a6413aa8318dabbb1c96560226000eb6de052d5e05 (só guloso), medido em 2026-09-26-r5-floor-dump",
+  "orcs": "por_recurso=2000 ms, rodada=120000 ms; estouros: nenhum dos dois lados. Orçamento é de tempo de máquina nenhuma: os limites de parse são determinísticos (DP_MAX_PLAIN_WORDS/DP_MAX_SOURCES_PER_POSITION/DP_MAX_WORD_COMPARISONS), então os bytes medidos não dependem da velocidade do host."
+ },
+ "entradas": {
+  "S-A": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5 (fixture autoral, 1 recurso)",
+  "S-B": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9 (ROM BYOR, 160 recursos LZ4W estruturalmente verificados de 191 candidatos)",
+  "byor": "Nenhum byte da ROM comercial entra no git. Os dumps de material (plain/dict/stream por recurso) vivem em /tmp/rex-lz4w-floor-dumps-r7-2026-09-26; daqui só saem SHA-256 e comprimentos. Os três arquivos binários promovidos são do FIXTURE autoral (S-A), e o dicionário dele saiu só como `.sha256`.",
+  "arquivos_promovidos_sha256": {
+   "sa-plain.bin": "1b47e6a19ceb3544c59032d2a034594211c30ff1451b11f70b861fda6e6e0d0c",
+   "sa-product.stream": "acb42779595d642cb5321e1cf43b9b808b8c0e8381838b95b205a018914350f8",
+   "sa-rescomp.stream": "885e3ca933880fab49318cd7bb4b47863282638929f3f15f142b50d5ec7bf78c",
+   "sa-dict.bin (não promovido; só o hash)": "465450867b40301aeb36fc59e3a231b6bebb9a56a9c5465d43a6d40eba64d3a4"
+  }
+ },
+ "antes_depois_bench": {
+  "campo_a_campo": "todos os campos abaixo vêm de bench.json; r5 = guloso, r7 = custo explícito",
+  "distribuicao_edicao_battery_ajuste": {"r5": {"cabe": 2, "needs_space": 523, "noop_preservando_stream": 119}, "r7": {"cabe": 20, "needs_space": 505, "noop_preservando_stream": 119}},
+  "coube_ajuste": {"r5": 1, "r7": 5},
+  "coube_validacao": {"r5": 0, "r7": 1},
+  "folga_total_S_B_bytes": {"r5": -9156, "r7": -3364},
+  "recursos_com_folga_nao_negativa": {"r5": 1, "r7": 7},
+  "edicao_amostral_24bits_por_recurso": {"ajuste_cabivel_r5": 1, "ajuste_cabivel_r7": 6, "validacao_cabivel_r5": 0, "validacao_cabivel_r7": 1},
+  "estrategia_da_base_r7": {"dp_custo_explicito": 161, "guloso_fallback": 0},
+  "tempo": {"r5_ms_por_recurso": null, "r7_ms_por_recurso": 361, "r7_rodada_ms": 58537, "rodada_estourou": false}
+ },
+ "antes_depois_piso": {
+  "fonte": "floor-sweep.jsonl (161 recursos) — r5 e r7, comparados por stem",
+  "gap_produto_sobre_piso_total_bytes": {"r5": 9394, "r7": 3602, "fechado": 5792, "percentual": 61.7},
+  "recursos": {"produto_menor": 160, "produto_igual": 1, "produto_maior_PERDAS": 0},
+  "unico_empates": "S-A-fixture-0005f988: 444 B -> 444 B, parse diferente (mesmo comprimento, SHA diferente). Neutro em bytes.",
+  "cabida_no_slot": {"r5": {"ja_cabe": 2, "passaria_se_otimo": 124, "nem_o_piso_cabe": 35}, "r7": {"ja_cabe": 8, "passaria_se_otimo": 118, "nem_o_piso_cabe": 35}},
+  "transicoes": "6 recursos passaram de 'caberia se o encoder fosse ótimo' para 'cabe de fato'; NENHUM recurso regrediu de categoria.",
+  "alcance_do_piso": {"recursos_que_atingem_o_piso_em_comprimento": 3, "recursos_byte_a_byte_iguais_ao_piso": 0, "interpretacao_honest": "O DP do produto NÃO atinge o piso medido: 3/161 chegam ao COMPRIMENTO do piso (0x98bf8, 0xc8cc8 e o fixture) e nenhum emite os MESMOS bytes, porque o modelo de piso ignora o teto de 128 candidatos por posição que o produto aplica. Chamar a saída de 'ótima' exigiria prova no modelo sem cap + comparação exaustiva em entradas pequenas; o que está provado é outra coisa: 100% menor-ou-igual ao guloso nas 161 entradas e estritamente menor em 160."
+  }
+ },
+ "verificacao_do_piso": "161/161 streams de piso decodificados pelo decoder do produto (`piso_streams_do_dp_decodificam_pelo_decoder_do_produto`), cada um voltando ao plain exato e consumindo o stream inteiro — ver verificador-decoder-produto.log. O piso medido é margem real, não artefato de modelo Python.",
+ "achado_novo_fora_do_comprimento": {
+  "nome": "pegada de escrita vs dependentes",
+  "descricao": "Comprimento não é a única grandeza que importa para quem escreve num slot fixo. O guloso é um parse LOCAL (mudar 1 pixel muda ~1 byte na stream); a DP é um RE-PARSE GLOBAL (a mesma mudança reescreve a stream inteira). O dicionário de um recurso vizinho é exatamente o prefixo que o antecede na ROM, então uma pegada larga faz outro recurso decodificar diferente e a transação rejeita com `dependent_modified`.",
+  "evidencia": "Com 'DP sempre que coubesse orçamento', a varredura de edições em 0xc8cc8 caiu de `fit=4 aplicados=4` (HEAD) para `fit=60 aplicados=56` — 4 edições recusadas por dependente alterado, não por tamanho. Com a política de escrita (`lz4w_encode_with_dictionary_index_fitting`: guloso se já cabe, DP como resgate) a varredura mede `candidatos=64 fit=60 aplicados=60` e o patch canônico do corpus volta a ser o SHA do baseline.",
+  "decisao": "A política é monotônica em relação ao baseline: onde o guloso cabia, o produto escreve os mesmos bytes de antes (provado byte a byte no i41 do replay 68k); onde não cabia, ganha o resgate da DP. Ela não troca capacidade de edição por quebra de vizinhos."
+ },
+ "reconciliacao_com_os_aceites": {
+  "fixture_aceite": "escrito=436, pixels_sha=917048cc35508e9a67f9ddf1dd10cf3d352b01d03a9ebce8d6d6b84778ec1af1, png_sha=a3513ae638b536e3619437652aa7bee731657ec3f72cddd2e5fc34e6cbeb93e0 — IDÊNTICOS à corrida no pino bee8524f (HEAD). Base medida na mesma rodada: rescomp=444B, re-codificado=444B, folga=0B.",
+  "byor_cadeia": "patch=7cd8f9de19dcefc876dd2cad30644d2843b1b9a6c3499834b287b14d6cd21637, modificado=e5cb5dd9527eec94997f523dbd6edc86fdc8cca3924ca467371b9beb902dfead, preservados=159 — iguais ao baseline r5.",
+  "varredura_0xc8cc8": "[scan 1/19] candidatos=64 fit=60 aplicados=60 (baseline HEAD: candidatos=4 fit=4 aplicados=4)",
+  "replay_68k": "rodada r15 no mesmo pino: 14 casos, vereditos todos esperados, perdas zero (ver data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r15/manifest.json)"
+ },
+ "limite": [
+  "'Editável' não é 'compreendido': 0xc8cc8 continua BLOQUEADO quanto ao que o recurso representa. A medição afirma comprimento e decodificabilidade, não semântica de tile/paleta.",
+  "A capacidade de edição é medida por amostragem (24 bits/recuso) e pela bateria §4-edita de 4 edições por recurso; não é varredura exaustiva de todos os bits.",
+  "S-B cobre os 160 recursos LZ4W estruturalmente verificados, não os 191 candidatos nem o jogo inteiro.",
+  "Nenhuma expansão de ROM, nenhum realoque de ponteiro, nenhum byte comercial escrito: o que não cabe é reportado como needs_space e recusado pela transação."
+ ],
+ "reproducao": "RDS_REX_BENCH_OUT=$PWD/data/rex_profiles/integrator/lz4w-recompress/evidence/2026-09-26-r7-final-pin RDS_REX_BENCH_DUMP_DIR=/tmp/rex-lz4w-floor-dumps-r7-2026-09-26 RDS_REX_LZ4W_FIXTURE_ROM=<rom do fixture> cargo test --manifest-path src-tauri/Cargo.toml --lib lz4w_recompression_benchmark -- --ignored --nocapture; depois python3 scripts/rex_profiles/integrator/lz4w_recompress/floor_sweep.py /tmp/rex-lz4w-floor-dumps-r7-2026-09-26 --jsonl <evidence>/floor-sweep.jsonl --escrever-streams; depois RDS_REX_BENCH_DUMP_DIR=/tmp/rex-lz4w-floor-dumps-r7-2026-09-26 cargo test --manifest-path src-tauri/Cargo.toml --lib piso_streams_do_dp_decodificam -- --ignored --nocapture"
+}

@@ -1,0 +1,15 @@
+{
+  "dst_total": 33280,
+  "cases": [
+    {
+      "id": "i16_beyond_ceiling_16386",
+      "dict_len": 32776,
+      "dict_sha256": "f4572b8ec850fe28043253c1965555cbdd4d782ee129013e18373833663c5cdf",
+      "dict_committed": true,
+      "stream_len": 8,
+      "plain_len": 6,
+      "stride": 33280,
+      "dst_offset": 0
+    }
+  ]
+}

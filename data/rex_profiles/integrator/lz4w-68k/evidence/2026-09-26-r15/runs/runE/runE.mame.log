@@ -1,0 +1,2 @@
+REX-DUMP frames=1 sentinel=DEADBEEF -> /tmp/rex-68k-int-2026-09-26-r15/runE/capture.bin
+capture: /tmp/rex-68k-int-2026-09-26-r15/runE/capture.bin (2816 bytes, sha256=aa69874a202c44a113c48aac95d3e7455735001c6d673208c013b1c9f077c8d4)

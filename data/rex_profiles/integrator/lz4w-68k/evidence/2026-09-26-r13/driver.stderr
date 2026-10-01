@@ -1,0 +1,17 @@
+i20_lits_odd: plain=11 stream=16 dict=0 só literais
+i21_short_mix: plain=16 stream=18 dict=0 curtos off 2/off 1
+i22_long_far_nodict: plain=620 stream=656 dict=0 longo auto-referente
+i23_long_zero_value: plain=44 stream=10 dict=0 longo value=0x0000 (off 1)
+i24_dict_mixed: plain=34 stream=12 dict=1200 dict 600w misto
+i14_encoder_deep_16384: on-disk long não-ROM len=3 off=16384 value=0x4001
+i14_encoder_deep_16384: plain=6 stream=8 dict=32772 emitido pelo encoder; off 16384
+i15_hardware_ceiling_16385: on-disk long não-ROM len=3 off=16385 value=0x4000
+i16_beyond_ceiling_16386: on-disk long não-ROM len=3 off=16386 value=0x3FFF
+i15_hardware_ceiling_16385: plain=6 stream=8 dict=32774 aceito pelo produto
+i16_beyond_ceiling_16386: plain=6 stream=8 dict=32776 recusado pelo produto (invalid_reference)
+i18-slot: stream 150 bytes vs slot original 144 bytes — NÃO cabe: needs_space honesto, nunca sobrescrever vizinhos
+i09_corpus_orig_c8cc8: plain=288 stream=144 dict=4096 original do corpus; prefixo mínimo aceito 4096 bytes
+i18_corpus_edit_c8cc8: plain=288 stream=150 dict=1024 edição canônica pelo encoder atual; prefixo 1024 bytes; slot original 144 bytes
+i31-slot: stream 440 bytes vs slot original 444 bytes — cabe
+i30_fixture_rescomp_orig: plain=512 stream=444 dict=256 stream do rescomp no fixture; 444 bytes; prefixo minimo 256
+i31_fixture_product_edit: plain=512 stream=440 dict=256 edicao plantada (tile 0, linha 5, col 7 -> idx 15) pelo encoder do produto; 440 bytes; slot 444; prefixo minimo 256

@@ -1,0 +1,233 @@
+{
+  "generatedAt": "2026-09-26T12:38:10.977Z",
+  "scenario": "rex-lz4w-fixture-effect",
+  "application": {
+    "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "e69077927863c15788bf2006e344f71f4a4b84408714201c48a67d450fc26574"
+  },
+  "fixture": {
+    "romPath": "/tmp/rex-lz4w-fixture/project/out/rom.bin",
+    "romSha256": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5",
+    "truthPath": "/tmp/rex-lz4w-fixture/project/ground_truth.json",
+    "truthSha256": "5cc90f0b56f8b5005862c74ee9180f07d9a83d0670f8b41769a3f9753326b386",
+    "headerOffset": 95464,
+    "streamOffset": 391560,
+    "slotBytes": 444
+  },
+  "edit": {
+    "tile": 0,
+    "row": 5,
+    "col": 7,
+    "fromIndex": 0,
+    "toIndex": 15
+  },
+  "artifacts": {
+    "modifiedRomPath": "/home/misael/.retrodev/decomp_work/extract/159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5/edits/rex-lz4w-modified-e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9.bin",
+    "modifiedRomSha256": "e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9",
+    "patchPath": "/home/misael/.retrodev/decomp_work/extract/159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5/edits/rex-lz4w-patch-52ce036f071bd54380fcf1ccdd7229cab32d39d9502da651114ccbafaf16e18d.bps",
+    "patchBpsSha256": "52ce036f071bd54380fcf1ccdd7229cab32d39d9502da651114ccbafaf16e18d"
+  },
+  "prediction": {
+    "origemDoBloco": [
+      0,
+      0
+    ],
+    "tela": [
+      7,
+      5
+    ],
+    "preview": [
+      7,
+      5
+    ],
+    "memory": {
+      "wramByte": 94,
+      "vram": {
+        "observed": false,
+        "reason": "o core Genesis Plus GX v1.7.4 46a5521 não expõe a região VIDEO_RAM (total_size=0/0); a cadeia causal fica provada por WRAM + framebuffer"
+      }
+    }
+  },
+  "steps": [
+    {
+      "step": 1,
+      "claim": "terra firme do fonte conferida (plantio em 16/16 tiles, byte 23 pinado)",
+      "observed": {
+        "romSha": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5",
+        "truthPath": "/tmp/rex-lz4w-fixture/project/ground_truth.json",
+        "edit": {
+          "tile": 0,
+          "row": 5,
+          "col": 7,
+          "fromIndex": 0,
+          "toIndex": 15
+        },
+        "expectedOriginalPixelsSha": "19cc30aefe4da564b8d5c066f1707212ed772925ad19f6b0814899a6c06142f3",
+        "expectedEditedPixelsSha": "917048cc35508e9a67f9ddf1dd10cf3d352b01d03a9ebce8d6d6b84778ec1af1"
+      }
+    },
+    {
+      "step": 2,
+      "claim": "descoberta + decode pela UI: recurso único, slot conferido pelo header, prévia == fonte recomposto",
+      "observed": {
+        "resourceOptions": [
+          {
+            "label": "0x5f988 — 16 tiles (stream 444 B)",
+            "value": "5f988"
+          }
+        ],
+        "headerOffset": 95464,
+        "streamOffset": "5f988",
+        "slotBytes": 444,
+        "pixelsSha": "19cc30aefe4da564"
+      }
+    },
+    {
+      "step": 3,
+      "claim": "no-op com zero edições reportado pela transação canônica",
+      "observed": {
+        "result": "desfecho: nooprecursos LZ4W estruturalmente verificados nesta ROM: 1/5 candidatos; preservação garantida apenas para est"
+      }
+    },
+    {
+      "step": 4,
+      "claim": "edição aplicada pela transação; escrita confinada ao slot; bytes comerciais intocados fora dele",
+      "observed": {
+        "modifiedPath": "/home/misael/.retrodev/decomp_work/extract/159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5/edits/rex-lz4w-modified-e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9.bin",
+        "modifiedSha": "e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9",
+        "patchSha": "52ce036f071bd54380fcf1ccdd7229cab32d39d9502da651114ccbafaf16e18d",
+        "patchBytes": 74,
+        "streamSlot": {
+          "start": 391560,
+          "size": 444
+        },
+        "bytesDiferentes": 268,
+        "faixaAlterada": [
+          "5f9a1",
+          "5fb3f"
+        ],
+        "diferenteForaDoSlot": 0
+      }
+    },
+    {
+      "step": 5,
+      "claim": "patch BPS re-aplicado à base reproduz a cópia modificada (hash exato)",
+      "observed": {
+        "appliedSha": "e55dba92015a2a6981c91d52b161285560bc930b5a60cc27b4cf7b299dede6c9",
+        "patchSha": "52ce036f071bd54380fcf1ccdd7229cab32d39d9502da651114ccbafaf16e18d"
+      }
+    },
+    {
+      "step": 6,
+      "claim": "cópia reaberta no produto decodifica exatamente no plain editado (prévia conferida por hash)",
+      "observed": {
+        "editedPixelsSha": "917048cc35508e9a",
+        "esperado": "917048cc35508e9a"
+      }
+    },
+    {
+      "step": 7,
+      "claim": "prova de memória: 1 byte no WRAM (plain descompactado) exatamente onde o fonte do fixture diz; VRAM não legível no core, então a perna de VRAM fica NÃO PROVADA (registrada como limitação, não como sucesso)",
+      "observed": {
+        "frames": 120,
+        "core": {
+          "label": "Genesis Plus GX v1.7.4 46a5521",
+          "path": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so"
+        },
+        "wram": {
+          "available": true,
+          "offset": "0x5e",
+          "before": "f0",
+          "after": "ff"
+        },
+        "vram": {
+          "observed": false,
+          "reason": "o core Genesis Plus GX v1.7.4 46a5521 não expõe a região VIDEO_RAM (total_size=0/0); a cadeia causal fica provada por WRAM + framebuffer",
+          "available": false
+        },
+        "regiões": {
+          "wram": {
+            "total": 65536,
+            "lidos": 65536
+          },
+          "vram": {
+            "total": 0,
+            "lidos": 0
+          }
+        },
+        "controle": {
+          "wram": 0,
+          "vram": null,
+          "framebuffer": 0
+        }
+      }
+    },
+    {
+      "step": 8,
+      "claim": "EFEITO VISUAL CAUSAL PELA INTERFACE: exatamente 1 pixel de tela muda, no coordenada prevista pelo fonte, com a cor da classe de índice certa",
+      "observed": {
+        "framebuffer": "320x224",
+        "origemDoBloco": [
+          0,
+          0
+        ],
+        "pixelPrevisto": [
+          7,
+          5
+        ],
+        "diferencaPorFrame": [
+          1,
+          1
+        ],
+        "antes": "0x212021",
+        "depois": "0x8c008c",
+        "classesDeCor": 11,
+        "indicesComMesmaCor": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          6,
+          7,
+          8,
+          9,
+          10
+        ],
+        "indiceAntes": 0,
+        "indiceDepois": 15
+      }
+    },
+    {
+      "step": 9,
+      "claim": "canvas do app == framebuffer do core (mesmo frame congelado) na ROM modificada",
+      "observed": {
+        "canvas": "320x224",
+        "core": "320x224",
+        "presented": true
+      }
+    },
+    {
+      "step": 10,
+      "claim": "negativos pela UI: fila de intervalo guardada (0 entradas, 0 escritas; controle positivo enfileira 1) e identidade de ROM recusada (arquivo alterado sob o painel)",
+      "observed": {
+        "bounds": {
+          "guardedCount": "0 edição(ões) pendente(s)",
+          "boundsOutcome": "desfecho: nooprecursos LZ4W estruturalmente verificados nesta ROM: 1/5 candidatos; preservação garantida apenas para este conjunto, não para o jogo inteiro",
+          "boundsError": "",
+          "controlePositivo": "tile válido enfileira 1 edição; tile fora do recurso enfileira 0",
+          "recusaDoNucleo": "rex_resources.rs:634 ('tile N fora do recurso') — teste unitário do produto"
+        },
+        "identityError": "rom_identity_mismatch: ROM base mudou: esperado 159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5, atual 4e700a4d07993bc455dd43cd7a25a47ec744405ad81d4634b0a4f47a8271f81d",
+        "fixtureRomIntact": true,
+        "excessiveOutput": "coberto no teste de aceite do produto com varredura exaustiva de 15.360 candidatos de 1 pixel (README do fixture)",
+        "dependentModified": "não alcançável aqui: o fixture tem 1 recurso LZ4W; coberto no BYOR (0x91a00 dependente de 0x8ff8e)"
+      }
+    }
+  ],
+  "limitacoes": [
+    "o core Genesis Plus GX v1.7.4 46a5521 não expõe a região VIDEO_RAM (total_size=0/0); a cadeia causal fica provada por WRAM + framebuffer"
+  ],
+  "semanticState": "VERIFIED — fixture autoral com consumidor provado por construção",
+  "escopo": "esta prova vale para o fixture autoral; o alvo comercial 0xc8cc8 continua com semanticState BLOQUEADO (consumidor não provado)"
+}

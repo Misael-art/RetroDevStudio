@@ -1,0 +1,25 @@
+{
+  "dst_total": 2560,
+  "cases": [
+    {
+      "id": "i18_corpus_edit_c8cc8",
+      "dict_len": 512,
+      "dict_sha256": "5ca2285f238ca245889147b688693949621985c0e5072d18dc7a5452b4db2728",
+      "dict_committed": true,
+      "stream_len": 144,
+      "plain_len": 288,
+      "stride": 1280,
+      "dst_offset": 0
+    },
+    {
+      "id": "i40_corpus_edit_fitting_c8cc8",
+      "dict_len": 512,
+      "dict_sha256": "5ca2285f238ca245889147b688693949621985c0e5072d18dc7a5452b4db2728",
+      "dict_committed": true,
+      "stream_len": 144,
+      "plain_len": 288,
+      "stride": 1280,
+      "dst_offset": 1280
+    }
+  ]
+}

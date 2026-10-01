@@ -1,0 +1,74 @@
+{
+ "schema": "rex-integrator-evidence/v1",
+ "id": "lz4w-68k-oracle-2026-09-26-r15",
+ "measured_at": "2026-09-26",
+ "mission": "docs/handoffs/PROMPT_REX_INTEGRATOR_RESUME_2026-09-26.md — objetivo 'tornar mais recursos comprimidos editáveis sem expansão', PASSO 3 (incremento de encoder) + PASSO 4 (integrar sem regressões). Este replay é a revalidação no desempacotador 68000 OFICIAL depois de o codificador passar a ter DOIS caminhos (DP de custo explícito + guloso) e de a transação escrever por orçamento de espaço.",
+ "supersedes": "data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r14 (mesmo harness, mesma ROM, mesmo jogo de casos + 2 novos: i40/i41)",
+ "subject_under_test": {
+  "repo_commit_at_measurement": "b8cf3b0 + working tree; driver e reproduce commitados em 04d703d, codec em cde88cc e transação em 8a22689 — o conteúdo dos fontes confere com os SHA-256 abaixo",
+  "codec_file": "src-tauri/src/tools/reverse/decomp/rex_codecs.rs",
+  "codec_sha256": "6044135b30f51bc746f8b15e6baf6b94cabbbd52c067ce969ea0cb231fa83e18",
+  "encoder_change_under_test": "novo caminho de parse por custo explícito (DP sobre posição × literais pendentes) com orçamentos determinísticos DP_MAX_*; o guloso histórico permanece como fallback acima do orçamento e como PREFERRED quando já cabe no espaço (lz4w_encode_with_dictionary_index_fitting, o caminho de escrita da transação). Formato, janela (0x4000 words), teto de 128 candidatos e verificação IDA-E-VOLTA inalterados.",
+  "driver_source_file": "scripts/rex_profiles/integrator/lz4w_68k/driver_integrator.rs",
+  "driver_source_sha256": "0aef3c2f2b910cf3f822808777aa0de31710aa06318a1e4f679cf9a4f2c514b7",
+  "driver_binary_sha256": "31b3220e9ecec588ee51c6c38b69ffd9088b1765c88bcef4427bcdcb500ad107",
+  "reproduce_sh_sha256": "44c32300752b7eea1d0a81d55a2336193e4acfb0b57adadf6cd0e8fdb34e05d4",
+  "verbatim_confere": "cmp do working tree contra /tmp/rex-68k-int-2026-09-26-r15/crate/{rex_codecs.rs,main.rs}: ambos IDÊNTICOS",
+  "note_pino": "o campo 'driver-sha256' do ORACLE-RUN.log é o hash do BINÁRIO compilado; os fontes verbatim que rodaram têm os hashes acima",
+  "harness_sha256": {
+   "lib/build-rom.sh": "4fa44daa60846cc5f0f95d21af56cbbf565bf833761da6f952b9a2e3fd4789c9",
+   "lib/run-capture.sh": "29ec1781eaf5b2e72ed67d3f1c1717a9751dd6f09cb35b5538f9193f0da2eb2a",
+   "lib/unpack-jar.sh": "442deabf689e738208c15d95506f526b5fe76924c1dc4004daab5d934b64d9be",
+   "lib/compare_rust.py": "579e2371a733be9b59d9a98ff36e48eecd0ec707681771cf70058cef0d445cf7",
+   "lib/gen_rust_cases.py": "0fbc608c49de7ad2847a582e629877660a490d79bf8eefacb646fa59c5270b1b",
+   "lib/harness2.s": "b69f3e61b6c28483b4c806f60b1292d4fd3aabc6e59535554d3edcaab1e26a5f"
+  },
+  "harness_inalterado_desde": "r14 — os seis hashes acima são os mesmos registrados em 2026-09-26-r14/manifest.json"
+ },
+ "inputs": {
+  "rom_comercial_S_B": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9 (BYOR, nunca no git)",
+  "rom_fixture_autoral_S_A": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5"
+ },
+ "ferramenta_nova_nesta_rodada": "O driver ganhou i40/i41: os casos anteriores codificavam pela entrada DP-first, que é o que o BENCHMARK mede, mas NÃO é o que a transação escreve. i40/i41 usam lz4w_encode_with_dictionary_index_fitting com o slot como orçamento — os bytes reais gravados pelo produto. Sem eles o replay provaria streams que o produto não escreve.",
+ "i14_redesenhado": "Com dicionário de zeros, a DP passou a resolver i14 com um match CURTO auto-referente e o caso deixou de emitir o offset profundo (a asserção on-disk pegou: token 0x1102 vs 0x0001). O dicionário agora tem 16386 words DUAS A DUAS DISTINTAS e o plano é a trinca dict[2..5]: a única fonte possível está exatamente a 16384 words, então guloso e DP são FORÇADOS ao mesmo token longo e o teto da janela continua exercitado pelos dois caminhos.",
+ "casos": {
+  "i20_lits_odd..i24_dict_mixed": "5 casos sintéticos emitidos pela entrada DP-first",
+  "i14_encoder_deep_16384": "8 bytes, match longo off=16384 words emitido pelo encoder (encosta na janela do codificador)",
+  "i15_hardware_ceiling_16385 / i16_beyond_ceiling_16386": "fronteiras construídas À MÃO: 16385 aceita, 16386 recusada pelo produto (invalid_reference)",
+  "i09_corpus_orig_c8cc8": "stream original do recurso 0xc8cc8 (linha de base de regressão)",
+  "i18_corpus_edit_c8cc8": "edição canônica (byte 0 do plano ^ 0xF0) pela entrada DP-first: 144 bytes, slot 144 → CABE",
+  "i40_corpus_edit_fitting_c8cc8": "a mesma edição pelo caminho de escrita (fitting): 144 bytes, estratégia CostDp, byte a byte igual a i18",
+  "i30_fixture_rescomp_orig": "stream do rescomp oficial no fixture autoral: 444 bytes",
+  "i31_fixture_product_edit": "edição plantada no fixture pela entrada DP-first: 436 bytes (parse DIFERENTE de i41, mesmo comprimento)",
+  "i41_fixture_edit_fitting": "edição plantada pelo caminho de escrita: 436 bytes, estratégia Greedy, byte a byte IDÊNTICA ao que o HEAD (só-guloso) escrevia"
+ },
+ "antes_depois_streams": {
+  "nota": "Comparação byte a byte contra o replay promovido em r14 (mesmo harness, codificador pinado em bee8524f… = só guloso; workdir /tmp/rex-68k-int-2026-09-26-r5 ainda em disco). 'identica' = SHA-256 do stream igual.",
+  "i09_corpus_orig_c8cc8": {"head_len": 144, "r15_len": 144, "identica": true, "plain_igual": true},
+  "i30_fixture_rescomp_orig": {"head_len": 444, "r15_len": 444, "identica": true, "plain_igual": true},
+  "i18_corpus_edit_c8cc8": {"head_len": 146, "r15_len": 144, "identica": false, "plain_igual": true, "resultado": "GANHO: -2 bytes e a edição passa de needs_space (146 > slot 144) para CABE (144 == slot)"},
+  "i40_corpus_edit_fitting_c8cc8": {"head_len": 146, "r15_len": 144, "identica": false, "plain_igual": true, "resultado": "o que a transação escreve no corpus: 144 B via resgate da DP (guloso estourava o slot)"},
+  "i31_fixture_product_edit": {"head_len": 436, "r15_len": 436, "identica": false, "plain_igual": true, "resultado": "mesmo comprimento, parse diferente — neutro em bytes, e NÃO é o caminho de escrita"},
+  "i41_fixture_edit_fitting": {"head_len": 436, "r15_len": 436, "identica": true, "plain_igual": true, "sha256_stream_r15": "2776ec2cb542bc43981342447b7843bdc5b614932a96aee4f3794ec40811773e", "sha256_stream_head": "2776ec2cb542bc43981342447b7843bdc5b614932a96aee4f3794ec40811773e", "resultado": "o fixture continua recebendo exatamente os bytes de antes: a pegada de escrita do produto não mudou"},
+  "i20_lits_odd": {"head_len": 16, "r15_len": 16, "identica": true, "plain_igual": true},
+  "i21_short_mix": {"head_len": 18, "r15_len": 18, "identica": true, "plain_igual": true},
+  "i22_long_far_nodict": {"head_len": 656, "r15_len": 656, "identica": true, "plain_igual": true},
+  "i23_long_zero_value": {"head_len": 10, "r15_len": 10, "identica": false, "plain_igual": true, "resultado": "neutro em comprimento (10 B); a DP trocou o parse — os dois decodificados pelo 68k e pelo jar"},
+  "i24_dict_mixed": {"head_len": 12, "r15_len": 12, "identica": true, "plain_igual": true},
+  "i14_encoder_deep_16384": {"head_len": 8, "r15_len": 8, "identica": true, "plain_igual": false, "resultado": "stream idêntica por construção; o PLANO mudou (dicionário com fonte única) — ver 'i14_redesenhado'"},
+  "perdas": "NENHUMA. Nenhum caso ficou maior; as três streams diferentes (i18, i31, i23) têm comprimento igual ou menor e todas re-decodificam o mesmo plain."
+ },
+ "runs": {
+  "runI": {"casos": "i20,i21,i22,i23,i24", "veredito": "TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)", "rom_sha256": "612a8b32304f1626b7daa0cc19ddd50ebf1d02b6241c26f802ec1529447ba363", "capture_sha256": "8440e2c8daec0f2134718d55d8986ecd311e6300a39d5ac0059f938ea277503c"},
+  "runC": {"casos": "i09", "veredito": "IDÊNTICO", "rom_sha256": "fc38f818784b3f3d66b83111fee3f855616f614ec6b96a235a630b6d56b9fbb2", "capture_sha256": "6aa4a4ac1399b5dae4224e4c5e7b04655220797e45c8ec119b1ccbf48cf66ade"},
+  "runE": {"casos": "i18,i40", "veredito": "IDÊNTICO nos dois casos (inclusive o stream novo do caminho de escrita)", "rom_sha256": "51957d1583f9b2839084d9042f8fcdbebb1a2d860b1413c40028850ea0f5f3fe", "capture_sha256": "aa69874a202c44a113c48aac95d3e7455735001c6d673208c013b1c9f077c8d4"},
+  "run14": {"casos": "i14", "veredito": "IDÊNTICO", "rom_sha256": "bac8a3e07129c5810cde633961939ea1c885fa85982da8054b0a06d2953798be", "capture_sha256": "d666133b350caedbd2d5318b0d5f758956d3a95e0887dcf996e1918d554df423"},
+  "run15": {"casos": "i15", "veredito": "IDÊNTICO (teto de hardware 16385 lido pelo 68k)", "rom_sha256": "b3c6aadeead6f44aa339ba803e1c5d723c769d0d626d231890f347f7f1ab601d", "capture_sha256": "c2a491f47cb28160b8996867e72501049a055f92b90b1e3b6a51f4fdf76e89b8"},
+  "run16": {"casos": "i16", "veredito": "DIVERGÊNCIA ESPERADA POR CONTRATO: o 68k lê além do teto e produz bytes errados; o produto recusa a stream (invalid_reference). Veredito INVERTIDO é condição de passagem.", "rom_sha256": "7b2ac68f5d1875cd874cb5d406a38f38a3ab2a660c20a6af618daa6a906fd9ee", "capture_sha256": "c030fb65b58b75d323aa0c85540fe6cde8a64b7ec4293a92234d7aeddc07e24c"},
+  "runF": {"casos": "i30,i31,i41", "veredito": "IDÊNTICO nos três casos", "rom_sha256": "cabd1656a60ff6f6aa19d6cc1eb9f004d4da402ede6433c63d992d0a515812f2", "capture_sha256": "d8728360a6683504f13930e0bd64988b3cfbc5a833badb1bfc38b3159c737720"}
+ },
+ "conclusao": "Os DOIS caminhos do codificador foram lidos byte a byte pelo desempacotador 68000 oficial do SGDK 2.11 (SGDK/wine + MAME 0.289) e coincidem com o oráculo Java lz4w.jar v1.43 e com a expectativa do decoder Rust nos 14 casos. A guarda do teto de hardware (run16) continua correta. Nenhum byte de formato foi alterado. A consequence operacional medida: a edição canônica de 0xc8cc8, que no HEAD estourava o slot em 2 bytes (needs_space), agora cabe exatamente e o hardware a desempacota — sem expansão de ROM e sem tocar vizinhos.",
+ "limite_desta_evidencia": "Cobre o fixture autoral, o recurso 0xc8cc8 (original, edição DP-first e edição do caminho de escrita) e casos sintéticos/fronteira. NÃO é varredura dos 160 recursos do corpus no 68k; a equivalência generalizada do codificador continua sustentada pelo decoder Rust + benchmark congelado + verificador de piso, não por replay exaustivo em hardware. 'Cabe no slot' ≠ 'sabemos o que o recurso representa': 0xc8cc8 segue BLOQUEADO quanto ao conteúdo semântico.",
+ "politica_byor": "Nenhum byte derivado da ROM comercial foi promovido: apenas logs de veredito/build/mame/jar, cases2.json (SHA e comprimentos), rust_meta.tsv e o log da corrida. capture.bin/rom.bin/streams/plain/dict ficaram em /tmp/rex-68k-int-2026-09-26-r15.",
+ "reproducao": "REX_CODECS_SHA=6044135b30f51bc746f8b15e6baf6b94cabbbd52c067ce969ea0cb231fa83e18 RDS_REX_LZ4W_FIXTURE_ROM=<rom do fixture> bash scripts/rex_profiles/integrator/lz4w_68k/reproduce.sh /tmp/rex-68k-int-2026-09-26-r15"
+}

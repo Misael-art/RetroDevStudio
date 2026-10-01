@@ -1,0 +1,2 @@
+caso=i14_encoder_deep_16384 dict=32772 stream=8 plain=6 stride=0x8200 off=0x0 dict_committed=True
+total=1 wam_bytes=0x8200

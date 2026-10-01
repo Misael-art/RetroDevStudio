@@ -1,0 +1,12 @@
+# comparação r3 (medida antes do pino final) x r4 (medida no pino final)
+# comando: python3 abaixo, sobre os dois bench.json versionados
+linhas: 161 161
+linhas divergentes: 0
+campos do resumo divergentes: {'tempo_rodada_ms': (27440, 25526)}
+# streams do fixture (r4):
+885e3ca933880fab49318cd7bb4b47863282638929f3f15f142b50d5ec7bf78c  2026-09-26-r4-final-pin/sa-product.stream
+885e3ca933880fab49318cd7bb4b47863282638929f3f15f142b50d5ec7bf78c  2026-09-26-r4-final-pin/sa-rescomp.stream
+a7c2b1604760a3c6223298dbd142c349893cb96df2d7b478fdb824ec495b7f7e  2026-09-26-r1/sa-product.stream
+cmp produto x rescomp (r4): IDÊNTICOS
+2026-09-26-r4-final-pin/sa-product.stream e 2026-09-26-r1/sa-product.stream são diferentes: byte 341, linha 1
+cmp produto (r4) x produto (r1): DIVERGEM (448 -> 444)

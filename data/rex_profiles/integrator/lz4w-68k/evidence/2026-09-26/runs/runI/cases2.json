@@ -1,0 +1,55 @@
+{
+  "dst_total": 4352,
+  "cases": [
+    {
+      "id": "i20_lits_odd",
+      "dict_len": 0,
+      "dict_sha256": null,
+      "dict_committed": false,
+      "stream_len": 16,
+      "plain_len": 11,
+      "stride": 512,
+      "dst_offset": 0
+    },
+    {
+      "id": "i21_short_mix",
+      "dict_len": 0,
+      "dict_sha256": null,
+      "dict_committed": false,
+      "stream_len": 18,
+      "plain_len": 16,
+      "stride": 512,
+      "dst_offset": 512
+    },
+    {
+      "id": "i22_long_far_nodict",
+      "dict_len": 0,
+      "dict_sha256": null,
+      "dict_committed": false,
+      "stream_len": 656,
+      "plain_len": 620,
+      "stride": 1024,
+      "dst_offset": 1024
+    },
+    {
+      "id": "i23_long_zero_value",
+      "dict_len": 0,
+      "dict_sha256": null,
+      "dict_committed": false,
+      "stream_len": 10,
+      "plain_len": 44,
+      "stride": 512,
+      "dst_offset": 2048
+    },
+    {
+      "id": "i24_dict_mixed",
+      "dict_len": 1200,
+      "dict_sha256": "388a74f06fc30b01e19701f7503f48607d473861e05339a965adc71efaadada8",
+      "dict_committed": true,
+      "stream_len": 12,
+      "plain_len": 34,
+      "stride": 1792,
+      "dst_offset": 2560
+    }
+  ]
+}

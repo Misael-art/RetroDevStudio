@@ -68,6 +68,9 @@ Desktop.ini
 # --- Logs ---
 *.log
 bootstrap.log
+# Evidência REX versionada: logs de corrida do oráculo são a prova auditável
+# (mesmo papel dos JSONs em data/*/evidence). Nada além deste diretório escapa.
+!data/rex_profiles/**/*.log
 
 # --- Environment ---
 .env

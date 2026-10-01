@@ -1,0 +1,13 @@
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.44s
+     Running unittests src/lib.rs (src-tauri/target/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+[bench] dumps de material: 161 recursos em /tmp/rex-lz4w-floor-dumps-2026-09-26
+[bench] S-B=160 coube_ajuste=1 coube_validacao=0 folga_total=-9156B com_folga>=0=1 rodada=23352ms/120000ms
+[bench] distribuição: {"cabe": 2, "needs_space": 523, "noop_preservando_stream": 119}
+[bench] capacidade de edição por amostragem (24 bits/recuso): ajuste 1/128 validação 0/32 — battery §4-edita coube_ajuste=1 coube_validacao=0
+test tools::reverse::decomp::rex_resources::tests::lz4w_recompression_benchmark ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 721 filtered out; finished in 23.49s
+

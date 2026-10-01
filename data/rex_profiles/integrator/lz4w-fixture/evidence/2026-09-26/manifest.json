@@ -1,0 +1,96 @@
+{
+  "schema": "rex-integrator-evidence/v1",
+  "id": "lz4w-fixture-acceptance-2026-09-26",
+  "measured_at": "2026-09-26",
+  "mission": "docs/handoffs/PROMPT_REX_INTEGRATOR_RESUME_2026-09-26.md — ETAPA D: uma edição de recurso comprimido com efeito causal DEMONSTRADO, em dado autoral (sem bytes comerciais)",
+  "fixture": {
+    "package": "scripts/rex_profiles/integrator/lz4w_fixture/",
+    "authored": true,
+    "byor": false,
+    "build_recipe": "bash scripts/rex_profiles/integrator/lz4w_fixture/build-fixture.sh --out DIR (SGDK 2.11 pinado pelo lock do host; rescomp empacota o TileSet com compression=2)",
+    "rom_sha256": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5",
+    "rom_len": 393216,
+    "resource": {
+      "kind": "TileSet LZ4W",
+      "header_offset": 95464,
+      "stream_offset": 391560,
+      "num_tiles": 16,
+      "plain_len": 512,
+      "packer_len": 444
+    },
+    "layout": {
+      "tile_px": 8,
+      "tile_count": 16,
+      "noise_rows": 4,
+      "near_miss_row": 5,
+      "structured_rule": "tile t, linha r>=4, coluna c: v = (t*7 + r*3) & 15",
+      "planted_edit": "linha 5, coluna 7 guarda (v+1)&15 em vez de v; desfazê-lo é a única edição de 1 pixel que encurta o stream"
+    },
+    "versioned_in_git": false,
+    "why_not_git": "a ROM é artefato reconstruído da toolchain; os FONTES autoriais (gen_fixture.py, main.c, main.res, makefile) estão no git e têm SHA-256 registrados em fixture-build-report.json"
+  },
+  "test": {
+    "id": "tools::reverse::decomp::rex_resources::tests::fixture_lz4w_decodes_to_authored_source_and_edit_has_predicted_pixel",
+    "file": "src-tauri/src/tools/reverse/decomp/rex_resources.rs",
+    "file_sha256_at_measurement": "769648c79badfa6320748b07091e7b3f5f49664a7104022d6a0617753395bdfd",
+    "ignored": true,
+    "gate": "exige RDS_REX_LZ4W_FIXTURE_ROM apontando para ROM existente e confere o SHA-256 acima; sem o arquivo o teste FALHA por expect(), nunca retorna PASS silencioso",
+    "steps": [
+      "1: decodificar o stream com o decoder do produto e exigir igualdade com a fonte recomposta do seed + regra (near-miss incluído)",
+      "2: no-op honesto: re-inserir o plain não-editado é recusado/NoOp, não um sucesso fabricado",
+      "3: medir a linha de base ANTES de buscar: re-codificação do plain não-editado vs slot do rescomp",
+      "4: varredura de edições de 1 pixel (plantada primeiro, depois exaustiva sobre 16x8x8x15 = 15.360 candidatos) com filtro barato de comprimento; a transação canônica (identidade, evidência, dependentes, roundtrip, BPS) só roda para quem cabe",
+      "5: aplicar a edição escolhida pela transação real de reinserção",
+      "6: reabrir a ROM modificada e re-decodificar: o recurso lido do disco tem de ser o plain planejado",
+      "7: prever a coordenada de TELA a partir do índice do tile ((t%4)*8+col, (t/4)*8+row), exigir que a prévia renderizada difira do original em EXATAMENTE o pixel previsto (pega a regressão histórica de ler a faixa linearmente) e imprimir o SHA dos pixels e do PNG"
+    ]
+  },
+  "measurement": {
+    "baseline_rescomp_bytes": 444,
+    "product_reencode_of_unedited_plain_bytes": 448,
+    "headroom_bytes": -4,
+    "dictionary_words": 195780,
+    "chosen_edit": {
+      "tile": 0,
+      "row": 5,
+      "col": 7,
+      "from_index": 0,
+      "to_index": 15,
+      "screen_xy": [7, 5],
+      "reencode_bytes": 440,
+      "fits_slot": true,
+      "candidate_position_in_scan": 1
+    },
+    "modified_rom_redecoded": "igual ao plain planejado (assert do passo 6)",
+    "preview": {
+      "size": "128x8",
+      "pixels_sha256": "917048cc35508e9a67f9ddf1dd10cf3d352b01d03a9ebce8d6d6b84778ec1af1",
+      "png_sha256": "a3513ae638b536e3619437652aa7bee731657ec3f72cddd2e5fc34e6cbeb93e0"
+    },
+    "log": "fixture-acceptance.log",
+    "duration_note": "1,21 s no passo plantado; 8,40 s na varredura exaustiva do log anterior"
+  },
+  "negative_evidence": {
+    "log": "fixture-acceptance-exhaustive-before-plant.log",
+    "fixture": "versão ANTERIOR do fixture (sem o plantio do near-miss), slot de 378 bytes",
+    "result": "15.360 candidatos de 1 pixel testados, 0 cabem, menor encode 380B vs slot 378B",
+    "meaning": "o teste é discriminante: sem uma edição que case na granularidade de WORDS, nenhuma alteração de pixel é reinserível, e o produto recusa em vez de forçar",
+    "not_promoted": "o log guarda SHA-256/comprimentos; nenhum byte do fixture vai para o git"
+  },
+  "encoder_finding": {
+    "claim": "o gap de qualidade do codificador do produto foi MEDIDO e não foi escondido",
+    "detail": "no plain não-editado do fixture o rescomp gasta 444 bytes e o codificador guloso+lazy do produto gasta 448 (folga -4). No fixture anterior era 378 vs 380 (-2). Um parse ótimo guloso-não é obrigatório para reinserir, mas sem folga positiva só cabe edição que ENCURTAR o stream",
+    "dp_experiment": "um DP ótimo portado de LZ4W.java foi implementado, passou no suíte completo e PIOROU o resultado (382 vs 380); foi REVERTIDO (git checkout) em vez de ser entregue. Causa: o modelo de custo de 1 palavra ignora o limite de chunk de 15 literais — o custo real de 16 literais + match curto é 20 words, não 17. Um DP correto precisa de estado (posição x literais pendentes mod 15)",
+    "status": "documentado, não resolvido nesta rodada (a rodada não autoriza mudança de codificador sem discriminante nova)"
+  },
+  "hardware_confirmation": {
+    "ref": "data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r13/runs/runF",
+    "verdict": "o stream de 440 bytes ESCRITO PELO PRODUTO desempacota no 68000 oficial para exatamente os 512 bytes planejados, igual ao jar de referência, sem sobrescrever vizinhos",
+    "why_it_matters": "fecha o elo entre a edição prevista e o hardware real: não é só roundtrip Rust<->Rust"
+  },
+  "honest_limits": [
+    "o efeito visual está demonstrado no FIXTURE autoral (decode + transação + predição de tela + prévia + desempacotamento 68k); a tela do app ainda não foi capturada por emulação nesta rodada — isso é ETAPA E",
+    "o bloqueio comercial é o consumidor não provado, não a ausência de espaço: o caso i18 do arnês 68k (byte 0 do plain ^ 0xF0) continua needs_space (150 > 144), enquanto a varredura orçada do produto acha 4 edições cabíveis em 0xc8cc8 — nenhuma delas com consumidor provado. A ROM comercial não foi alterada por esta evidência",
+    "a granularidade do LZ4W é de words: a edição de 1 pixel que cabe existe porque o fixture foi DESIGNED para isso; isso é prova de mecanismo, não de cobertura de alvos reais"
+  ]
+}

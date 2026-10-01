@@ -1,0 +1,3 @@
+caso=i30_fixture_rescomp_orig dict=256 stream=444 plain=512 stride=0x500 off=0x0 dict_committed=True
+caso=i31_fixture_product_edit dict=256 stream=440 plain=512 stride=0x500 off=0x500 dict_committed=True
+total=2 wam_bytes=0xa00
