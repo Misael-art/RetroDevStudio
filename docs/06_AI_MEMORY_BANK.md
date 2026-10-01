@@ -2084,3 +2084,120 @@ implementación.
 decisión do operador. O siguiente degrau para B é fluxo do usuario (UI que chame
 decode/encode) ou reinserción na transación canónica — ambos requiren decisión explícita
 do operador antes de calquera promoción.
+
+### 2026-10-01 — retomada da integração: preservação, revisões (#91, A, C, D) e curadorias preparatórias
+
+**Tronco confirmado, não presumido.** `origin/main` está em `616abdb` (merge do PR
+#60, 2026-09-10) e **não** é o tronco de trabalho: o tronco é a linha do integrador
+`codex/rex-integrator-crates-registry` @ `0194f94` (checkpoint i), da qual descende
+linearmente toda a cadeia MUGEN: `d1b5a4d` (UX v2, checkpoint l) → `b53ce7a` (#87
+locomoção, checkpoint m) → `508db51` (#90 Ken real) → `2793430` (#91 cadeia original).
+Todos publicados e com CI verde por SHA (consultas pontuais `gh` em 2026-10-01:
+CI + Desktop E2E success nos cinco SHAs).
+
+**Preservação antes de integração (nada foi destruído).** Mapeadas 14 worktrees; as
+branches `codex/rex-corpus-a`, `codex/rex-corpus-b`, `codex/rex-corpus-e` e
+`pr-85-mugen` são locais (sem upstream). Backup verificável em
+`~/Projects/REX-HANDOFF-2026-10-01/backup-integracao-2026-10-01/`: bundle `--all`
+(`refs-todas-2026-10-01.bundle`, verify OK, SHA no manifesto), cópias dos untracked
+relevantes com `MANIFEST-COPIAS.sha256`, `MANIFEST-canonical-local.sha256` (2613
+arquivos, 228 MB de evidência local que fica no lugar) e
+`MANIFEST-E-staging-ROM.sha256` (ROM comercial BYOR — **fora do Git**, só hash).
+Patches de A/B do handoff `084414Z` validados contra o estado vivo
+(`A-unstaged.patch` idêntico; staged de A/B e unstaged de B vazios, correto).
+**A branch antiga `codex/rex-integrator-profiles-codecs` está `ahead 2` só porque a
+ref remota dela é velha: os dois commits (`ea92a61`, `7003d2a` — docs TiledImage/aPLib)
+JÁ ESTÃO no tronco `0194f94` e em `2793430`.** Nada perdido, nada a resgatar; não
+duplicado. Sem `reset --hard`, sem `clean`, sem force-push, sem remoção de worktree.
+
+**Worktree exclusiva de integração:** `~/Projects/REX-INTEGRATION-2026-10-01`, branch
+`codex/rex-integrator-mugen-chain` @ `2793430`. Gates reproduzidos no destino em
+2026-10-01: `npm test` **831 passed / 6 skipped (837)**, `cargo test --lib`
+**832 / 0 / 75**, `check:tree` OK, `tsc --noEmit` rc=0, `lint` rc=0 — idênticos aos
+números de `ORIGINAL_CHAIN_EVIDENCE.json`. Host **READY** (fingerprint `60249508…`,
+gerado 2026-09-30). SGDK/E2E completos e `host:certify` ficam para as pernas de
+integração efetiva, um por vez.
+
+**Revisão #91 (cadeia original do Ken) — aprovada, com um limite registrado.**
+Evidência do próprio cenário confere: `ORIGINAL_CHAIN_EVIDENCE.json` reexecuta as
+provas do Ken real neste binário (oráculo Pillow 21/204/211 quadros + controles
+negativos; e2e `mugen-import`/`mugen-control`/`mugen-locomotion` no mesmo app SHA).
+Estado 0 autoral separado de arte original (`origin: stand_in`/`source` no programa,
+verificado no `mugen_chain.rs`; UI com passo `source_and_origin_review`). Semântica de
+botão reconciliada: a borda de subida é **observada, não imposta** (CONTRACT «Semântica
+de entrada»), a janela `buffer.time` fica em classe `approximate` por `cmd.html` não
+confirmado (403). Input solicitado/aceito/consumido separados no `input_path` do JSON
+(driver_requests / keydowns vistos pela página / ticks de A no jogo; 1 de 9 toques
+perdido, medido). Limites do oráculo declarados (§4: a mesma leitura de doc nos dois
+lados; nenhum runtime MUGEN executado). Falha de host tem diagnóstico (carga ≈ 9;
+terceira execução verde sem mudança de código). **Nenhum latch global de input entrou
+no diff** (só harness e2e + script de verificação). **Limite registrado:** o digest do
+programa cobre o mapeamento **como selado** — pega mutação isolada do programa (teste
+`tampered_program_is_refused_by_validate` muta condição/linha/texto), mas NÃO re-lê os
+CMD/CNS/AIR em disco no build: divergência coerente programa+digest regenerados, ou
+drift da fonte pós-conversão, não é detectada. A formulação do ORIGINAL_CHAIN.md §3
+(«cobre o mapeamento») é literalmente verdadeira, mas não deve ser lida como
+«verifica contra a fonte». Follow-up sugerido (não executado): re-verificar
+`SourceRef.text`/hash do pacote no build.
+
+**Revisão A (Kosinski) — aprovada; 1 correção de documento pendente.** O ciclo fecha
+consumidor + variante + saída: o alvo do LEA é o próprio offset do stream
+(`lea $3F09A,A0` @ `0x03082` → recurso `offset:258202`), variante declarada `base`
+(sem alegar modular/Kosinski+), saída verificada contra `koscmp` (21 decodificações +
+5 rejeitos), e o relatório **não** alega ausência de codec — só ausência de marcadores
+de fluxo (0/5 imagens), com §4 separando o que não foi provado (nenhuma execução de
+ROM; `0x085A2` não é declarado descompressor). Gates re-medidos nesta retomada:
+`cargo test --offline` **157/0/0** (bate com o relatório). Pendente: a edição NÃO
+commitada de `RELATORIO-INTEGRACION.md` (diff em `084414Z/A-unstaged.patch`) afirma
+que «o tronco é `codex/collect-counter-goal`» — **falso** (o repo tem `origin/main` e
+o tronco é a linha do integrador); resolver na integração de A, não acatar. Nota de
+procedência: a imagem "Sonic 1" local (531577 bytes, SHA `c7da53a1…`) tem checksum de
+cabeçalho divergente do varejo (declarado 57871, observado 30221) — A e D usam a
+mesma imagem, pinada por SHA.
+
+**Revisão C (áudio Ancient) — aprovada com um achado.** A tabela BE32 confere com as
+instruções e registradores (`move.l (a0,d0.w),d1` = long big-endian; `adda.l d1,a0` =
+alvo relativo à TABLE; `andi.w #$ff`+`lsl.w #$2` = 256×4) e o leitor
+(`readSongIndex`/`u32be`) implementa exatamente isso. Extração de eventos NÃO é
+promovida a reprodução sonora (§3: sem captura, «cadeia é estrutural, não acústica»).
+Testes re-medidos: vitest **23/23**. **Achado:** o §5 diz que o padrão isolado
+`2a 02 1c` «confirma um controlador da família SMPS» em Mega Man Wily Wars — padrão
+de 3 bytes **não identifica família**; vale como refutação da detecção por banner
+(necessária mas insuficiente, como o próprio §5 admite), não como identificação.
+Reformular para «candidato SMPS não refutado» ou acrescentar vínculo estrutural
+(forma da tabela de dispatch, protocolo de barramento 68k→Z80) antes de qualquer
+alegação SMPS. O perfil Ancient entregue não depende dessa frase.
+
+**Revisão D (sprites Sonic 1) — aprovada.** Mapping/DPLC/arte/paleta cada um com
+verificação por padrão de bytes + hash, e o papel do DPLC (tile_slot = ordem de carga,
+não índice de arte) registrado antes da interpretação. **Duas** fontes independentes:
+oráculo reimplementado do s1disasm fixado (`064e3c6…`) e oráculo do piloto anterior,
+byte-idênticos; amostra reservada `fr_Stop1` passou sem mudança de implementação.
+A distância entre prova estática e observação de jogo está dita onde deve (§3:
+DMA/VRAM por frame NÃO executado; «plausibilidade visual não é prova»); a comparação
+visual com captura de jogo fica rotulada como comparação. Testes re-medidos: vitest
+**44/44**. Runtime em emulador permanece a pendência declarada.
+
+**CI das frentes de corpus — causa raiz, sem culpa de código.** C (`cc540d4`) e D
+(`c2635d5`) estão **vermelhas por `npm audit`** (6 vulnerabilidades, advisory
+brace-expansion) porque partem de `b53ce7a`, que é anterior ao fix `23df722`
+(presente na cadeia #90/#91). Não é infraestrutura nem defeito das frentes. As
+curadorias abaixo resolvem por base.
+
+**Curadorias preparatórias (locais, revisáveis, sem push/merge).** Em
+`~/Projects/REX-INTEGRATION-2026-10-01`, sobre `2793430` (que já contém o fix de
+deps), por território isolado: `codex/rex-integrator-corpus-c` @ `a055777`
+(`cherry-pick -x` de `8077900`→`19f3b84`→`cc540d4`; vitest 23/23; `check:tree` OK) e
+`codex/rex-integrator-corpus-d` @ `5fba745` (`cherry-pick -x` de `3ae412a`→`c2635d5`;
+vitest 44/44; `check:tree` OK). As worktrees das agentes não foram tocadas; nenhum
+commit delas foi reescrito. A entra depois que o relatório dela for resolvido (ver
+acima); B segue com trabalho untracked em curso na worktree dela (4 arquivos,
+preservados com SHA) — nada a integrar ainda.
+
+**Próxima ação.** Abrir PRs revisáveis: (1) `codex/rex-integrator-mugen-chain` →
+tronco (cadeia UX v2→#87→#90→#91 inteira, linear, sem duplicação); (2)
+`codex/rex-integrator-corpus-c` e (3) `codex/rex-integrator-corpus-d` → cadeia, um
+por vez, com CI re-medido no destino. Pendências com dono: reformulação SMPS do §5
+de C; resolução do relatório de A; correção da ref remota velha de
+`rex-integrator-profiles-codecs` (opcional, cosmética). Sem merge remoto, release ou
+promoção de maturidade nesta rodada.
