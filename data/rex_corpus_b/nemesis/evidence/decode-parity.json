@@ -1,7 +1,7 @@
 {
   "codec": "nemesis",
   "contract": "REX v1 par. 4 (error codes truncados/invalid-reference/overflow/excessive-output/work-limit/cancelled)",
-  "generated_utc": "2026-09-30T19:35:00Z",
+  "generated_utc": "2026-10-01T19:06:51Z",
   "kind": "decode-parity",
   "oracle": {
     "path": "/home/misael/.cache/rex-codecs/oracle-tools/bin/nemcmp",

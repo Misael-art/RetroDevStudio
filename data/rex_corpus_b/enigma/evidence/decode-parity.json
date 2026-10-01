@@ -1327,7 +1327,7 @@
     {
       "case": "e06",
       "category": "d",
-      "elapsed_s": 0.0,
+      "elapsed_s": 0.0001,
       "mine_error": "malformed-header",
       "note": "byte[0]=0xFF outside packet_length domain 1..11 -> structured malformed-header; bounded",
       "oracle_sha256": "a017430c0a7adadf051d754ed30dfded2ddd875a939a9a047e3f375da5c96d18",
