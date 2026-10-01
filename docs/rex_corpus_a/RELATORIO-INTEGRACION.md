@@ -7,9 +7,9 @@ que se pode integrar, o que queda aberto e o que **non** se probou.
 | | |
 |---|---|
 | Base declarada | `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` |
-| Base **efectivamente usada** | a mesma, e comprobada: `git merge-base b53ce7a HEAD` → `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` (é ancestral directo de HEAD). O depósito non ten rama `main`: o tronco é `codex/collect-counter-goal` |
+| Base **efectivamente usada** | a mesma, e comprobada: `git merge-base b53ce7a HEAD` → `b53ce7a6a474cf2194d82b7f83c82d3fd4085b42` (é ancestral directo de HEAD). `b53ce7a` é a ponta publicada de `codex/rex-mugen-locomotion` (cadea MUGEN); o PR dependente deste fronte usa esa base. A integración no tronco (`codex/rex-integrator-crates-registry`, `0194f94`) coordínaa o integrador — o tronco aínda non contén `b53ce7a` (PRs #87–#95 empilhadas, sen merge). Unha versión anterior desta liña dicía "tronco = `codex/collect-counter-goal`": estaba **incorrecta** e corrixida aqui |
 | HEAD do frente | este commit — nove commits sobre a base, todos na táboa §1 |
-| Branch | `codex/rex-corpus-a` (sen `upstream`: **ningunha entrega publicada**) |
+| Branch | `codex/rex-corpus-a` (publicada; PR #96 → `codex/rex-mugen-locomotion`) |
 | Worktree | `~/RDS-REX-CORPUS-A`, exclusiva deste frente |
 | Territorio rastrexado | `scripts/rex_corpus_a/`, `docs/rex_corpus_a/`, `data/rex_corpus_a/` — nada máis tocouse |
 | Concellos de fase | `FASE1-INVENTARIO.md`, `FASE2-RECURSOS.md`, `FASE3-CODEC.md`, `FASE4-REFUTACION.md`, `FASE5-PERFIS.md`, `FASE6-CADEIA-E-CORREXIONS.md` |
@@ -125,8 +125,10 @@ ferramenta sobre as imaxes locais e comprovados contra as medidas da Fase 4.
    só como *fixture*; a decisión de cómo se expón ao usuario (e se se expón)
    non é deste frente.
 2. **Promoción de maturidade.** Todo o frente queda `Experimental`.
-3. **Publicación.** A branch non ten `upstream`: non se fixo `push` nin PR —
-   queda á espera de orde expresa.
+3. **Publicación.** Feita nesta rodada, coa autorización do encargo:
+   `push` de `codex/rex-corpus-a` (remoto = local `463cb8a`…, verificado
+   antes para non sobrescribir: a branch non existía na orixe) e PR #96
+   dependente de `codex/rex-mugen-locomotion`. Sen merge.
 4. **Defectos propostos en territorio compartido** (reprodución mínima no
    informe da Fase 5 §9; **aquí non se modificou**):
    - `crates/rex-addressing`: `md_linear::translate` enmascara sen coñecer o
