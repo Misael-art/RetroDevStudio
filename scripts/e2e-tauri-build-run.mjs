@@ -1728,7 +1728,17 @@ async function ensureSpriteFrameVisibleAndUnobstructed(sessionId) {
       const y = Math.round(rect.top + rect.height / 2);
       const top = fullyVisible ? document.elementFromPoint(x, y) : null;
       const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
-      const unobstructed = Boolean(top && (top === image || image.contains(top)));
+      const probePoints = [[x, y], [rect.left + borderLeft + 0.5, rect.top + borderTop + 0.5],
+        [rect.right - borderRight - 0.5, rect.top + borderTop + 0.5],
+        [rect.left + borderLeft + 0.5, rect.bottom - borderBottom - 0.5],
+        [rect.right - borderRight - 0.5, rect.bottom - borderBottom - 0.5]];
+      const hitTests = probePoints.map(([px, py]) => {
+        const hit = document.elementFromPoint(px, py);
+        return { x: px, y: py, tag: hit?.tagName ?? '',
+          testId: hit?.closest('[data-testid]')?.getAttribute('data-testid') ?? '',
+          image: Boolean(hit && (hit === image || image.contains(hit))) };
+      });
+      const unobstructed = fullyVisible && hitTests.every((hit) => hit.image);
       const expectedWidth = image.naturalWidth * 3;
       const expectedHeight = image.naturalHeight * 3;
       const exactContentDimensions = Math.abs(contentWidth - expectedWidth) < 0.01 && Math.abs(contentHeight - expectedHeight) < 0.01;
@@ -1744,6 +1754,7 @@ async function ensureSpriteFrameVisibleAndUnobstructed(sessionId) {
         naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
         fullyVisible,
         unobstructed,
+        hitTests,
         exactContentDimensions,
         integerScale,
         pixelated: style.imageRendering === 'pixelated',
@@ -9901,7 +9912,7 @@ async function selectInspectionFrameNative(sessionId, frameId) {
   return { frameId, diagnostic };
 }
 
-async function runSonicMultiframeScenario(sessionId, app, romPath, base, savedId, prefix) {
+async function runSonicMultiframeScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
   const hash = (b) => createHash("sha256").update(b).digest("hex");
   const frames = [["stand",1],["wait-1",2],["look-up",5],["walk-1",6],["walk-2",7],
     ["walk-3",8],["walk-4",9],["walk-5",10],["walk-6",11],["run-1",30]];
@@ -14933,7 +14944,7 @@ async function main() {
         const baseScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-base.png`);
 
         if (sonicMultiframeMode) {
-          sessionId = await runSonicMultiframeScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix);
+          sessionId = await runSonicMultiframeScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
           currentE2eRunContext.sessionId = sessionId;
           return;
         }

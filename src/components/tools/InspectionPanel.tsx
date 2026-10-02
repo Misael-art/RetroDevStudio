@@ -634,7 +634,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const percent = currentProgress ? Math.min(100, Math.round((currentProgress.completed_work / Math.max(currentProgress.total_work, 1)) * 100)) : 0;
 
   return (
-    <div data-testid="reverse-inspection-panel" className="space-y-3">
+    <div data-testid="reverse-inspection-panel" className="min-w-0 max-w-full space-y-3 [overflow-wrap:anywhere]">
       <div className="rounded border border-[#313244] bg-[#11111b] p-3">
         <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[#cba6f7]">Inspeção visual · Experimental</div>
         <p className="mb-3 text-[10px] text-[#94a3b8]">Leitura somente; candidatos heurísticos não promovem bytes e não são sprites montados.</p>
@@ -673,10 +673,10 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
             <span className="rounded-full border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[#cba6f7]">somente leitura</span>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            <div className="font-mono text-[#cdd6f4]">ROM {session.identity.original_sha256}</div>
-            <div className="font-mono text-[#cdd6f4]">normalizada {session.identity.normalized_sha256}</div>
+            <div className="min-w-0 break-all font-mono text-[#cdd6f4]">ROM {session.identity.original_sha256}</div>
+            <div className="min-w-0 break-all font-mono text-[#cdd6f4]">normalizada {session.identity.normalized_sha256}</div>
           </div>
-          <div className="mt-2 text-[#7f849c]">Sessão {session.session_id} · catálogo {session.catalog_artifact.sha256} · desconhecido {session.unknown_bytes} bytes</div>
+          <div className="mt-2 break-all text-[#7f849c]">Sessão {session.session_id} · catálogo {session.catalog_artifact.sha256} · desconhecido {session.unknown_bytes} bytes</div>
           {session.identity.size_note && <div className="mt-2 text-[#f9e2af]">Nota de tamanho: {session.identity.size_note}</div>}
         </div>
       )}
