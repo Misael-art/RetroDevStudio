@@ -637,7 +637,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     <div data-testid="reverse-inspection-panel" className="min-w-0 max-w-full space-y-3 [overflow-wrap:anywhere]">
       <div className="rounded border border-[#313244] bg-[#11111b] p-3">
         <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[#cba6f7]">Inspeção visual · Experimental</div>
-        <p className="mb-3 text-[10px] text-[#94a3b8]">Leitura somente; candidatos heurísticos não promovem bytes e não são sprites montados.</p>
+        <p className="mb-3 text-[10px] text-[#94a3b8]">Inspecione a ROM e edite uma cópia nos perfis assistidos disponíveis. A base é preservada; candidatos heurísticos não são sprites montados.</p>
         <ToolPathField label="ROM BYOR" value={romPath} set={setRomPath} extensions={["md", "gen", "bin", "smd"]} accentColor="cba6f7" />
         <div className="mt-2 flex flex-wrap gap-2">
           <button type="button" data-testid="inspection-identify" onClick={() => void identify()} disabled={busy} className="rounded bg-[#cba6f7] px-3 py-1 text-[10px] font-semibold text-[#1e1e2e]">Identificar base</button>
@@ -670,7 +670,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
               <div className="text-sm font-semibold text-[#e5e7eb]">{session.identity.header_title || "ROM sem título"}</div>
               <div className="mt-1 text-[#94a3b8]">{session.identity.header_console || "Mega Drive"} · {session.identity.variant} · {statusLabel(session.status)}</div>
             </div>
-            <span className="rounded-full border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[#cba6f7]">somente leitura</span>
+            <span className="rounded-full border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[#cba6f7]">base: somente leitura</span>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
             <div className="min-w-0 break-all font-mono text-[#cdd6f4]">ROM {session.identity.original_sha256}</div>
