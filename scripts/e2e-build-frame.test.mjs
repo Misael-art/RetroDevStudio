@@ -11,6 +11,13 @@ function isCurrentBuildFrame(frame, sha, previous) {
   return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", source], { encoding: "utf8" }));
 }
 
+function collectReadiness(observations, sha, previous) {
+  const source = `const { createCurrentBuildFrameGate } = await import(${JSON.stringify(pathToFileURL(path.resolve("scripts/e2e-tauri-build-run.mjs")).href)});
+    const ready = createCurrentBuildFrameGate(${JSON.stringify(sha)}, ${JSON.stringify(previous)});
+    console.log(JSON.stringify(${JSON.stringify(observations)}.map(ready)));`;
+  return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", source], { encoding: "utf8" }));
+}
+
 const expectedSha = "a".repeat(64);
 const previousSession = "joypad-session-1";
 const ready = {
@@ -51,5 +58,15 @@ describe("Build & Run framebuffer identity", () => {
       { ...ready, rendered_frames: Number.NaN }, { ...ready, non_black_pixels: 0 }]) {
       expect(isCurrentBuildFrame(frame, expectedSha, previousSession)).toBe(false);
     }
+  });
+
+  it("waits for rendering after the new session, even with the same SHA and retained counter", () => {
+    const observations = [400, 400, 409, 410].map((rendered_frames) => ({ ...ready, rendered_frames }));
+    expect(collectReadiness(observations, expectedSha, previousSession)).toEqual([false, false, false, true]);
+  });
+
+  it("reanchors if the renderer resets its counter after the load", () => {
+    const observations = [400, 10, 19, 20].map((rendered_frames) => ({ ...ready, rendered_frames }));
+    expect(collectReadiness(observations, expectedSha, previousSession)).toEqual([false, false, false, true]);
   });
 });

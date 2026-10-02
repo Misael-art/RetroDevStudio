@@ -4408,6 +4408,23 @@ export function isCurrentBuildFrame(frame, expectedRomSha256, previousInputSessi
     Number.isInteger(frame.rendered_frames) && frame.rendered_frames >= 10);
 }
 
+export function createCurrentBuildFrameGate(expectedRomSha256, previousInputSession) {
+  let firstConfirmedFrame = null;
+  return (frame) => {
+    if (!isCurrentBuildFrame(frame, expectedRomSha256, previousInputSession)) {
+      firstConfirmedFrame = null;
+      return false;
+    }
+    // A no-op rebuild keeps the same ROM hash and can keep the old UI counter.
+    // Ten frames in that counter alone do not prove rendering after this load.
+    if (firstConfirmedFrame === null || frame.rendered_frames < firstConfirmedFrame) {
+      firstConfirmedFrame = frame.rendered_frames;
+      return false;
+    }
+    return frame.rendered_frames >= firstConfirmedFrame + 10;
+  };
+}
+
 async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifactPrefix) {
   const beforeState = await readAutomationState(sessionId);
   const previousInputSession = (await callAutomationApi(sessionId, "getLastInputObservation"))?.joypadSessionId ?? null;
@@ -4498,11 +4515,12 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
   await assertPathExists(romPath, `ROM gerada nao encontrada para ${label}: ${romPath}`);
   const rom = await assertSegaHeader(romPath);
   const romSha256 = createHash("sha256").update(await readFile(romPath)).digest("hex");
+  const frameReady = createCurrentBuildFrameGate(romSha256, previousInputSession);
 
   const framebuffer = await waitFor(
     async () => {
       const stats = await readFramebufferStats(sessionId);
-      return isCurrentBuildFrame(stats, romSha256, previousInputSession) ? stats : false;
+      return frameReady(stats) ? stats : false;
     },
     30000,
     `Framebuffer da ROM compilada nao foi confirmado na nova sessao para ${label}.`,
