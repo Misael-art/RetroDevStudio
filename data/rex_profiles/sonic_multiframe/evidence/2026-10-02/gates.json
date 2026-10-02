@@ -1,0 +1,107 @@
+{
+  "host": {
+    "state": "READY",
+    "host_fingerprint": "60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2",
+    "lock_digest": "dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377",
+    "official_upstream_success": true,
+    "certify_exit_code": 0
+  },
+  "frontend": {
+    "direct": {
+      "passed": 903,
+      "skipped": 6,
+      "total": 909
+    },
+    "certify_final": {
+      "passed": 906,
+      "skipped": 3,
+      "total": 909
+    },
+    "skip_difference": "Three toolchain-dependent tests execute under host:certify; no tests removed."
+  },
+  "rust": {
+    "passed": 839,
+    "failed": 0,
+    "ignored": 76,
+    "total": 915
+  },
+  "crates": {
+    "packages": 4,
+    "result": "PASS"
+  },
+  "focused_ui": {
+    "passed": 13,
+    "failed": 0
+  },
+  "desktop": [
+    {
+      "scenario": "sonic-multiframe",
+      "display": ":1",
+      "screen": "1920x1080x24",
+      "xvfb_sha256": "5bfd315a8c7bc626d0b183d176e130c34f910a4a1279d9d53ea45769f62a3351",
+      "app_sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0",
+      "rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+      "system_display_modified": false,
+      "exit_code": 0
+    },
+    {
+      "scenario": "inspection-sonic-tiles",
+      "display": ":1",
+      "screen": "1920x1080x24",
+      "xvfb_sha256": "5bfd315a8c7bc626d0b183d176e130c34f910a4a1279d9d53ea45769f62a3351",
+      "app_sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0",
+      "rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+      "system_display_modified": false,
+      "exit_code": 0
+    }
+  ],
+  "security": {
+    "npm_standard": {
+      "exit_code": 1,
+      "error": "EALLOWSCRIPTS",
+      "reason": "User allow-scripts config conflicts with project strict-allow-scripts; no host config changed."
+    },
+    "npm_isolated_userconfig": {
+      "exit_code": 0,
+      "override": "NPM_CONFIG_USERCONFIG=/dev/null (one invocation, project policy preserved)",
+      "threshold": "high",
+      "moderate_findings": 4,
+      "advisory": "GHSA-82fw-gwwq-j7x9",
+      "affected": "Vitest development dependency family; not repaired in this scope."
+    },
+    "cargo_audit": {
+      "exit_code": 0,
+      "allowed_warnings": 8
+    }
+  },
+  "not_reexecuted": [
+    "MUGEN desktop flows",
+    "ADDQ/branch-compare runtime",
+    "Sonic keyboard movement and jump trajectories",
+    "research D compositor"
+  ],
+  "host_certify_log_lines": [
+    {
+      "line": 7,
+      "text": "      Tests  906 passed | 3 skipped (909)"
+    },
+    {
+      "line": 948,
+      "text": "test result: ok. 839 passed; 0 failed; 76 ignored; 0 measured; 0 filtered out; finished in 115.36s"
+    },
+    {
+      "line": 953,
+      "text": "Success: true"
+    },
+    {
+      "line": 954,
+      "text": "RetroDev Studio host: READY"
+    }
+  ],
+  "documentation_close": {
+    "check_tree_exit_code": 0,
+    "git_diff_check_exit_code": 0,
+    "harness_syntax_exit_code": 0,
+    "independent_literal_golden_exit_code": 0
+  }
+}

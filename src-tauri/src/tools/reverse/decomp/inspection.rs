@@ -1341,6 +1341,96 @@ pub fn save(session_id: &str, sprite_frame_id: Option<&str>) -> Result<Inspectio
     Ok(stored.session)
 }
 
+// Serializes Sonic writes so a second command cannot replace a newer snapshot
+// with a copy read before the first edit completed.
+static SONIC_EDIT_GUARD: Mutex<()> = Mutex::new(());
+
+fn persist_sonic_edit(
+    mut stored: StoredInspection,
+    base: &[u8],
+    rom: &[u8],
+    mut edit: InspectionEdit,
+) -> Result<InspectionEdit, String> {
+    use super::sonic_sprite as sonic;
+    let (base_after, _) = rex_read_rom(Path::new(&stored.session.rom_path))?;
+    if base_after.normalized_sha256 != super::sprite_composition::SONIC1_REFERENCE_SHA256 {
+        return Err(error(
+            "edit_base_modified",
+            "A ROM base mudou durante a edição",
+            false,
+        ));
+    }
+    edit.changed_offsets = base
+        .iter()
+        .zip(rom)
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .map(|(i, _)| i as u64)
+        .collect();
+    edit.bytes_changed = edit.changed_offsets.len() as u32;
+    edit.art_tiles = edit
+        .changed_offsets
+        .iter()
+        .filter_map(|&i| {
+            let i = i as usize;
+            (sonic::ART_OFFSET..sonic::ART_OFFSET + sonic::ART_SIZE)
+                .contains(&i)
+                .then(|| ((i - sonic::ART_OFFSET) / 32) as u32)
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let selected = sonic::frame_index(&edit.frame_id)?;
+    edit.shared_with_frames = sonic::dplc_tiles(base)?
+        .iter()
+        .enumerate()
+        .filter(|(i, tiles)| {
+            *i != selected && tiles.iter().any(|t| edit.art_tiles.contains(&(*t as u32)))
+        })
+        .map(|(i, _)| i as u32)
+        .collect();
+    edit.base_rom_sha256_after = Some(base_after.normalized_sha256);
+    edit.modified_rom_sha256 = sha256_hex(rom);
+    let root = canonical_dir_under(
+        &decomp_work_dir(),
+        &["extract", &edit.original_rom_sha256, "edits"],
+    )?;
+    let path = root.join(format!(
+        "sonic1-sprite-{}-{}.bin",
+        edit.format, edit.modified_rom_sha256
+    ));
+    write_file_immutable(&path, rom, &edit.modified_rom_sha256)?;
+    edit.modified_rom_path = path.display().to_string();
+    stored.session.edit = Some(edit.clone());
+    persist_session(&decomp_work_dir(), &stored.session)?;
+    sessions()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(stored.session.session_id.clone(), stored);
+    Ok(edit)
+}
+
+fn sonic_edit_record(frame_id: &str, format: &str) -> InspectionEdit {
+    InspectionEdit {
+        format: format.into(),
+        resource_id: "sonic1_sonic".into(),
+        frame_id: frame_id.into(),
+        palette_index: 0,
+        red: 0,
+        green: 0,
+        blue: 0,
+        original_rom_sha256: super::sprite_composition::SONIC1_REFERENCE_SHA256.into(),
+        modified_rom_sha256: String::new(),
+        modified_rom_path: String::new(),
+        changed_offsets: Vec::new(),
+        bytes_changed: 0,
+        art_tiles: Vec::new(),
+        shared_with_frames: Vec::new(),
+        pixels_changed: None,
+        base_rom_sha256_after: None,
+    }
+}
+
 pub fn edit_sonic_palette(
     session_id: &str,
     resource_id: &str,
@@ -1350,78 +1440,42 @@ pub fn edit_sonic_palette(
     green: u8,
     blue: u8,
 ) -> Result<InspectionEdit, String> {
-    if resource_id != "sonic1_sonic" || frame_id != "sonic1_sonic/stand" {
+    use super::sonic_sprite as sonic;
+    if resource_id != "sonic1_sonic" {
         return Err(error(
             "edit_resource_unsupported",
-            "A edição piloto só aceita sonic1_sonic/stand",
+            "Recurso não comprovado",
             false,
         ));
     }
+    sonic::frame_index(frame_id)?;
     if palette_index == 0 || palette_index >= 16 || red >= 8 || green >= 8 || blue >= 8 {
         return Err(error(
             "edit_palette_invalid",
-            "Use índice de paleta 1..15 e canais MD RGB333 entre 0 e 7",
+            "Use índice 1..15 e canais RGB333 entre 0 e 7",
             false,
         ));
     }
-    let mut stored = get_stored_session(session_id)?;
-    let (identity, mut rom) = rex_read_rom(Path::new(&stored.session.rom_path))?;
-    if identity.normalized_sha256 != super::sprite_composition::SONIC1_REFERENCE_SHA256 {
-        return Err(error(
-            "edit_rom_profile_mismatch",
-            "A edição Sonic exige a ROM BYOR local do perfil comprovado",
-            false,
-        ));
-    }
-    let palette_offset = 0x2388usize + usize::from(palette_index) * 2;
-    let before = rom[palette_offset..palette_offset + 2].to_vec();
+    let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
+    let stored = get_stored_session(session_id)?;
+    let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    sonic::read_frame(&rom, frame_id)?;
+    let offset = sonic::PALETTE_OFFSET + usize::from(palette_index) * 2;
     let word = (u16::from(red) << 1) | (u16::from(green) << 5) | (u16::from(blue) << 9);
-    rom[palette_offset..palette_offset + 2].copy_from_slice(&word.to_be_bytes());
-    let modified_sha = sha256_hex(&rom);
-    let changed_offsets = (0..2)
-        .filter(|index| before[*index] != rom[palette_offset + *index])
-        .map(|index| (palette_offset + index) as u64)
-        .collect::<Vec<_>>();
-    let edit_dir = canonical_dir_under(
-        &decomp_work_dir(),
-        &["extract", &identity.normalized_sha256, "edits"],
-    )?;
-    let modified_path = edit_dir.join(format!(
-        "sonic1-sprite-stand-palette-{palette_index}-{modified_sha}.bin"
-    ));
-    write_file_immutable(&modified_path, &rom, &modified_sha)?;
-    let bytes_changed = changed_offsets.len() as u32;
-    let edit = InspectionEdit {
-        format: "md_rgb333_palette_word".to_string(),
-        resource_id: resource_id.to_string(),
-        frame_id: frame_id.to_string(),
-        palette_index,
-        red,
-        green,
-        blue,
-        original_rom_sha256: identity.normalized_sha256,
-        modified_rom_sha256: modified_sha,
-        modified_rom_path: modified_path.display().to_string(),
-        changed_offsets,
-        bytes_changed,
-        art_tiles: Vec::new(),
-        shared_with_frames: Vec::new(),
-        pixels_changed: None,
-        base_rom_sha256_after: None,
-    };
-    stored.session.edit = Some(edit.clone());
-    persist_session(&decomp_work_dir(), &stored.session)?;
-    sessions()
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(session_id.to_string(), stored);
-    Ok(edit)
+    if rom[offset..offset + 2] == word.to_be_bytes() {
+        return Err(error("edit_noop", "Cor já tem esse valor", false));
+    }
+    rom[offset..offset + 2].copy_from_slice(&word.to_be_bytes());
+    let mut edit = sonic_edit_record(frame_id, "md_rgb333_palette_word");
+    edit.palette_index = palette_index;
+    edit.red = red;
+    edit.green = green;
+    edit.blue = blue;
+    persist_sonic_edit(stored, &base, &rom, edit)
 }
 
-/// Edits palette indices of pixels of the Sonic 1 stand frame directly in its raw 4bpp
-/// art, in place and size-preserving, on a persisted copy of the BYOR ROM. Refuses
-/// unmapped pixels, invalid indices, tiles shared with other DPLC frames (unless allowed),
-/// any resource that is not the verified raw profile, and any write outside the art range.
+/// Applies the selected frame's DPLC/column-major geometry, accumulating edits
+/// on the last verified copy. The BYOR base is never opened for writing.
 pub fn edit_sonic_tiles(
     session_id: &str,
     resource_id: &str,
@@ -1429,148 +1483,236 @@ pub fn edit_sonic_tiles(
     pixels: &[InspectionPixelEdit],
     allow_shared_tiles: bool,
 ) -> Result<InspectionEdit, String> {
-    use super::sprite_composition as comp;
-    if resource_id != "sonic1_sonic" || frame_id != "sonic1_sonic/stand" {
+    use super::sonic_sprite as sonic;
+    if resource_id != "sonic1_sonic" {
         return Err(error(
             "edit_format_unsupported",
-            "Reinsercao de tiles so e suportada para arte 4bpp nao comprimida verificada (sonic1_sonic/stand); formatos comprimidos ou nao verificados sao recusados",
+            "Arte não comprovada",
             false,
         ));
     }
-    if pixels.is_empty() || pixels.len() > 32 * 40 {
+    sonic::frame_index(frame_id)?;
+    let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
+    let stored = get_stored_session(session_id)?;
+    let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    let geometry = sonic::read_frame(&rom, frame_id)?;
+    if pixels.is_empty() || pixels.len() > (geometry.width * geometry.height) as usize {
         return Err(error(
             "edit_pixels_invalid",
-            "Informe de 1 a 1280 pixels do frame 32x40",
+            "Quantidade de pixels fora do limite do frame",
             false,
         ));
     }
-    let mut stored = get_stored_session(session_id)?;
-    let base_path = PathBuf::from(&stored.session.rom_path);
-    let (identity, mut rom) = rex_read_rom(&base_path)?;
-    if identity.normalized_sha256 != comp::SONIC1_REFERENCE_SHA256 {
-        return Err(error(
-            "edit_rom_profile_mismatch",
-            "A edicao Sonic exige a ROM BYOR local do perfil comprovado",
-            false,
-        ));
-    }
-    let original_len = rom.len();
-    let dplc = comp::sonic_dplc_art_tiles(&rom)
-        .map_err(|message| error("edit_references_unverified", message.as_str(), false))?;
-    let mut changed = std::collections::BTreeSet::new();
+    let dplc = sonic::dplc_tiles(&base)?;
     let mut tiles = std::collections::BTreeSet::new();
-    let mut pixels_changed = 0u32;
+    let mut changed = std::collections::BTreeSet::new();
     for pixel in pixels {
         if pixel.index > 15 {
             return Err(error(
                 "edit_pixels_invalid",
-                "Indice de paleta deve estar entre 0 e 15",
+                "Índice deve estar entre 0 e 15",
                 false,
             ));
         }
-        let location = comp::sonic_stand_pixel_location(pixel.x, pixel.y)
-            .map_err(|message| error("edit_references_unverified", message.as_str(), false))?
-            .ok_or_else(|| error(
+        let location = geometry.source_pixel(pixel.x, pixel.y).ok_or_else(|| {
+            error(
                 "edit_pixel_unmapped",
-                format!("Pixel ({},{}) nao pertence a nenhuma peca do mapping stand; nada a reinserir", pixel.x, pixel.y),
+                format!(
+                    "Pixel ({},{}) não pertence ao mapping deste frame",
+                    pixel.x, pixel.y
+                ),
                 false,
-            ))?;
-        if location.byte_offset + 1 > comp::SONIC1_ART_OFFSET + comp::SONIC1_ART_SIZE {
-            return Err(error(
-                "edit_growth_unsupported",
-                "A edicao sairia do intervalo de arte verificado; crescimento nao e suportado",
-                false,
-            ));
-        }
-        let byte = rom[location.byte_offset];
+            )
+        })?;
+        let old = rom[location.byte_offset];
         let next = if location.high_nibble {
-            (byte & 0x0f) | (pixel.index << 4)
+            (old & 15) | (pixel.index << 4)
         } else {
-            (byte & 0xf0) | pixel.index
+            (old & 0xf0) | pixel.index
         };
-        if next != byte {
-            pixels_changed += 1;
+        if old != next {
             rom[location.byte_offset] = next;
-            changed.insert(location.byte_offset as u64);
             tiles.insert(location.art_tile);
+            changed.insert((pixel.x, pixel.y));
         }
     }
     if changed.is_empty() {
         return Err(error(
             "edit_noop",
-            "Os pixels informados ja tem esses indices; nenhuma alteracao",
+            "Pixels já têm esses índices; nenhuma alteração",
             false,
         ));
     }
-    let shared: Vec<u32> = dplc
+    let shared: Vec<usize> = dplc
         .iter()
         .enumerate()
-        .filter(|(frame, frame_tiles)| {
-            *frame != comp::SONIC1_STAND_DPLC_FRAME
-                && frame_tiles.iter().any(|tile| tiles.contains(tile))
-        })
-        .map(|(frame, _)| frame as u32)
+        .filter(|(i, t)| *i != geometry.index && t.iter().any(|tile| tiles.contains(tile)))
+        .map(|(i, _)| i)
         .collect();
     if !shared.is_empty() && !allow_shared_tiles {
-        return Err(error(
-            "edit_tile_shared",
-            format!("Tiles {:?} tambem sao carregados pelos frames DPLC {:?}; confirme a edicao compartilhada", tiles, shared),
-            false,
-        ));
+        return Err(error("edit_tile_shared", format!("Tiles {:?} também são usados pelos frames DPLC {:?}; confirme a edição compartilhada", tiles, shared), false));
     }
-    if rom.len() != original_len {
-        return Err(error(
-            "edit_growth_unsupported",
-            "Tamanho da ROM mudaria; recusado",
-            false,
-        ));
-    }
-    let modified_sha = sha256_hex(&rom);
-    let edit_dir = canonical_dir_under(
-        &decomp_work_dir(),
-        &["extract", &identity.normalized_sha256, "edits"],
-    )?;
-    let modified_path = edit_dir.join(format!("sonic1-sprite-stand-tiles-{modified_sha}.bin"));
-    write_file_immutable(&modified_path, &rom, &modified_sha)?;
-    let (base_after, _) = rex_read_rom(&base_path)?;
-    if base_after.normalized_sha256 != identity.normalized_sha256 {
-        return Err(error(
-            "edit_base_modified",
-            "A ROM base mudou durante a edicao",
-            false,
-        ));
-    }
-    let changed_offsets: Vec<u64> = changed.into_iter().collect();
-    let edit = InspectionEdit {
-        format: "md_4bpp_tile_nibbles".to_string(),
-        resource_id: resource_id.to_string(),
-        frame_id: frame_id.to_string(),
-        palette_index: 0,
-        red: 0,
-        green: 0,
-        blue: 0,
-        original_rom_sha256: identity.normalized_sha256,
-        modified_rom_sha256: modified_sha,
-        modified_rom_path: modified_path.display().to_string(),
-        bytes_changed: changed_offsets.len() as u32,
-        changed_offsets,
-        art_tiles: tiles.into_iter().map(|tile| tile as u32).collect(),
-        shared_with_frames: shared,
-        pixels_changed: Some(pixels_changed),
-        base_rom_sha256_after: Some(base_after.normalized_sha256),
-    };
-    stored.session.edit = Some(edit.clone());
-    persist_session(&decomp_work_dir(), &stored.session)?;
-    sessions()
-        .lock()
-        .map_err(|e| e.to_string())?
-        .insert(session_id.to_string(), stored);
-    Ok(edit)
+    let mut edit = sonic_edit_record(frame_id, "md_4bpp_tile_nibbles");
+    edit.pixels_changed = Some(changed.len() as u32);
+    persist_sonic_edit(stored, &base, &rom, edit)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "BYOR Sonic pinado; RDS_SONIC_MULTIFRAME_ROM obrigatório; escreva em RDS_DECOMP_WORK isolado"]
+    fn sonic_multiframe_byor_accumulates_and_reopens_without_touching_base() {
+        use super::super::{sonic_sprite as sonic, sprite_composition as comp};
+        let path = std::env::var("RDS_SONIC_MULTIFRAME_ROM").expect("BYOR obrigatório");
+        assert!(
+            std::env::var("RDS_DECOMP_WORK").is_ok(),
+            "diretório de prova isolado obrigatório"
+        );
+        let session = open(&path).unwrap();
+        assert_eq!(
+            session.identity.normalized_sha256,
+            comp::SONIC1_REFERENCE_SHA256
+        );
+        let (_, base) = rex_read_rom(Path::new(&path)).unwrap();
+        let mut evidence = Vec::new();
+        for choice in sonic::choices() {
+            let preview =
+                comp::compose_for_session(&session, "sonic1_sonic", &choice.id, false, false)
+                    .unwrap();
+            assert_eq!(
+                preview.sonic_context.as_ref().unwrap().mapping_index,
+                choice.mapping_index
+            );
+            assert_eq!(
+                preview
+                    .sonic_context
+                    .as_ref()
+                    .unwrap()
+                    .pixel_art_tiles
+                    .len(),
+                (preview.width * preview.height) as usize
+            );
+            evidence.push(serde_json::json!({"frame_id":choice.id,"width":preview.width,"height":preview.height,
+                "pixels_sha256":preview.pixels_sha256,"png":preview.artifact,
+                "context":preview.sonic_context}));
+        }
+        let frame_id = "sonic1_sonic/walk-1";
+        let geometry = sonic::read_frame(&base, frame_id).unwrap();
+        let loc = geometry.source_pixel(0, 0).unwrap();
+        let previous = if loc.high_nibble {
+            base[loc.byte_offset] >> 4
+        } else {
+            base[loc.byte_offset] & 15
+        };
+        let index = (previous + 1) % 16;
+        let low_index = if base[loc.byte_offset] & 15 == 15 {
+            14
+        } else {
+            15
+        };
+        let pixels = [
+            InspectionPixelEdit { x: 0, y: 0, index },
+            InspectionPixelEdit {
+                x: 1,
+                y: 0,
+                index: low_index,
+            },
+        ];
+        let refused = edit_sonic_tiles(
+            &session.session_id,
+            "sonic1_sonic",
+            frame_id,
+            &pixels,
+            false,
+        )
+        .unwrap_err();
+        assert!(refused.contains("edit_tile_shared"));
+        assert!(get_stored_session(&session.session_id)
+            .unwrap()
+            .session
+            .edit
+            .is_none());
+        assert!(edit_sonic_tiles(
+            &session.session_id,
+            "sonic1_sonic",
+            frame_id,
+            &[InspectionPixelEdit {
+                x: u32::MAX,
+                y: 0,
+                index
+            }],
+            true
+        )
+        .unwrap_err()
+        .contains("edit_pixel_unmapped"));
+        let first =
+            edit_sonic_tiles(&session.session_id, "sonic1_sonic", frame_id, &pixels, true).unwrap();
+        let first_rom = rex_read_rom(Path::new(&first.modified_rom_path)).unwrap().1;
+        assert_eq!(first_rom.len(), base.len());
+        assert_eq!(first_rom[loc.byte_offset], (index << 4) | low_index);
+        assert_eq!(first.bytes_changed, 1);
+        let palette = edit_sonic_palette(
+            &session.session_id,
+            "sonic1_sonic",
+            "sonic1_sonic/stand",
+            1,
+            7,
+            0,
+            7,
+        )
+        .unwrap();
+        let palette_rom = rex_read_rom(Path::new(&palette.modified_rom_path))
+            .unwrap()
+            .1;
+        assert_eq!(
+            palette_rom[loc.byte_offset], first_rom[loc.byte_offset],
+            "paleta não pode apagar pintura"
+        );
+        let second_loc = geometry.source_pixel(1, 0).unwrap();
+        let second = edit_sonic_tiles(
+            &session.session_id,
+            "sonic1_sonic",
+            frame_id,
+            &[InspectionPixelEdit {
+                x: 1,
+                y: 0,
+                index: 0,
+            }],
+            true,
+        )
+        .unwrap();
+        let edited = rex_read_rom(Path::new(&second.modified_rom_path))
+            .unwrap()
+            .1;
+        assert_eq!(
+            &edited[sonic::PALETTE_OFFSET + 2..sonic::PALETTE_OFFSET + 4],
+            &[0x0e, 0x0e]
+        );
+        assert_eq!(edited[second_loc.byte_offset] & 15, 0);
+        assert_eq!(edited[loc.byte_offset] >> 4, index);
+        let saved = save(&session.session_id, Some(frame_id)).unwrap();
+        sessions().lock().unwrap().remove(&session.session_id);
+        let reopened = reopen(&path, &session.session_id).unwrap();
+        assert_eq!(reopened.sprite_frame_id.as_deref(), Some(frame_id));
+        assert_eq!(reopened.edit, saved.edit);
+        let after =
+            comp::compose_for_session(&reopened, "sonic1_sonic", frame_id, false, false).unwrap();
+        assert_eq!(after.rom_sha256, second.modified_rom_sha256);
+        assert_eq!(
+            rex_read_rom(Path::new(&path)).unwrap().1,
+            base,
+            "BYOR intacta"
+        );
+        let report = serde_json::json!({"base_sha256":comp::SONIC1_REFERENCE_SHA256,"frames":evidence,
+            "edit":second,"reopened_pixels_sha256":after.pixels_sha256,"accumulation":true,"base_unchanged":true});
+        fs::write(
+            decomp_work_dir().join("sonic-multiframe-proof.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
 
     #[test]
     fn session_ids_cannot_become_paths() {

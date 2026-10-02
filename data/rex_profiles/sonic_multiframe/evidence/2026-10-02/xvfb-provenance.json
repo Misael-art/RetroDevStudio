@@ -1,0 +1,9 @@
+{
+  "source": "https://mirrors2.manjaro.org/stable/extra/x86_64/xorg-server-xvfb-21.1.24-1-x86_64.pkg.tar.zst",
+  "package_sha256": "fec274b876d775b2a3a92aad0fd430b554b521ad0f72565c7ed6965e28c75c54",
+  "repository_db_sha256": "56af5112361a48e0fff5b4af244a5f9efaa4ec715c263be225e808d4ddb04a67",
+  "signature_rc": 0,
+  "binary_sha256": "5bfd315a8c7bc626d0b183d176e130c34f910a4a1279d9d53ea45769f62a3351",
+  "binary": "/home/misael/.cache/retrodevstudio/qa-xvfb/21.1.24-1/Xvfb",
+  "scope": "isolated external QA executable; no system installation or repository dependency"
+}

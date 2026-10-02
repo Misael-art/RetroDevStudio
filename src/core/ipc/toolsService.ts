@@ -595,6 +595,17 @@ export interface InspectionSpriteFrame {
   rom_evidence: string[];
   donor_evidence: string[];
   limitations: string[];
+  sonic_context?: {
+    geometry_version: string;
+    mapping_index: number;
+    anchor_x: number;
+    anchor_y: number;
+    dplc_offset: number;
+    palette_rgba: [number, number, number, number][];
+    tile_uses: { art_tile: number; frames: number[] }[];
+    pixel_art_tiles: (number | null)[];
+    frames: { id: string; label: string; mapping_index: number }[];
+  } | null;
 }
 
 export const INSPECTION_PROGRESS_EVENT = "rex://inspection-progress";

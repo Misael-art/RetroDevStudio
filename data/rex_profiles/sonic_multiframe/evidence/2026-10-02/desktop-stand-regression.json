@@ -1,0 +1,163 @@
+{
+  "negatives": [
+    {
+      "label": "pixel fora do mapping",
+      "message": "[Inspeção] Reinserção recusada: Pixel (28,2) não pertence ao mapping deste frame"
+    },
+    {
+      "label": "tiles compartilhados sem confirmacao",
+      "message": "[Inspeção] Reinserção recusada: Tiles {12} também são usados pelos frames DPLC [5]; confirme a edição compartilhada"
+    }
+  ],
+  "inGameDiffPixels": 96,
+  "box": {
+    "x0": 74,
+    "x1": 85,
+    "y0": 170,
+    "y1": 177
+  },
+  "baseFramebuffer": "680faf48878e4639d956c78f9807de72ba070e2e32508c94dfa674b42c9d0cd8",
+  "appliedFramebuffer": "ffcca5dba8daf32ede0ed42b052ce4a79485e681043c51a5ecc7f48d52eb346c",
+  "patchSha256": "b004a5f048f13d5a4892f827562fa616dbb33041a14d845a55003248944c5625",
+  "patchedSha256": "7b3801f791264b56f68bcecdfa524ac1664b227933cdea46dbcdbd4edbf6dabf",
+  "baseSha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "reopened": {
+    "frameId": "sonic1_sonic/stand",
+    "editRestored": true,
+    "composedPixels": {
+      "visualEvidence": {
+        "frameId": "sonic1_sonic/stand",
+        "pngSha256": "0c4ba3fac26c0d975117116ff98ec9b2b32543282f4b3b8c5715c918c90ca4be",
+        "naturalWidth": 32,
+        "pixelsSha256": "d9f68e17850cbb3966d541aadfdac99a7919224c2ce3edff13d8dc13f10550e2",
+        "image": true,
+        "naturalHeight": 40,
+        "resourceId": "sonic1_sonic",
+        "romSha256": "7b3801f791264b56f68bcecdfa524ac1664b227933cdea46dbcdbd4edbf6dabf"
+      },
+      "independentEvidence": {
+        "width": 32,
+        "height": 40,
+        "pixelsSha256": "d9f68e17850cbb3966d541aadfdac99a7919224c2ce3edff13d8dc13f10550e2",
+        "independentPngPixelsSha256": "d9f68e17850cbb3966d541aadfdac99a7919224c2ce3edff13d8dc13f10550e2",
+        "expectedPixelsSha256": "d9f68e17850cbb3966d541aadfdac99a7919224c2ce3edff13d8dc13f10550e2",
+        "expectedIndexSha256": null,
+        "expectedRgbaSha256": "d9f68e17850cbb3966d541aadfdac99a7919224c2ce3edff13d8dc13f10550e2",
+        "offsets": {
+          "tileData": [
+            137982,
+            41248
+          ],
+          "palette": [
+            9096,
+            32
+          ],
+          "descriptor": [
+            135827,
+            21
+          ]
+        }
+      },
+      "actualPngSha256": "0c4ba3fac26c0d975117116ff98ec9b2b32543282f4b3b8c5715c918c90ca4be",
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 96,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 98,
+          "right": 1507.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1459,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 32
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 96
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1459,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    }
+  },
+  "screenshots": [
+    "/home/misael/Projects/REX-SONIC-MULTIFRAME-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-stand-base.png",
+    "/home/misael/Projects/REX-SONIC-MULTIFRAME-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-stand-edited.png",
+    "/home/misael/Projects/REX-SONIC-MULTIFRAME-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-emulator-base.png",
+    "/home/misael/Projects/REX-SONIC-MULTIFRAME-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-emulator-applied.png",
+    "/home/misael/Projects/REX-SONIC-MULTIFRAME-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-stand-reopened.png"
+  ]
+}

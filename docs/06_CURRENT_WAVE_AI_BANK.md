@@ -1,3 +1,105 @@
+### Complemento 2026-10-02 — gate incremental de frames após Build & Run
+
+A proposta #99 continua aberta/draft, dependente de #98, sem merge. O harness
+`reference-platformer` foi endurecido no commit `8166d4f`: depois de confirmar
+ROM compilada = ROM da Game View, nova sessão, nenhum hold e canvas não preto,
+agora exige também avanço de dez frames a partir da primeira observação da nova
+sessão. Isso impede que um contador antigo, preservado por rebuild da mesma ROM,
+seja aceito como captura fresca; contador reiniciado é reancorado.
+
+O cenário desktop local passou 16/16 no app SHA
+`1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0`. A célula
+do tilemap autoral `1001` mudou `0→2`; a ROM autorada/reaberta coincide por SHA,
+e o hash da célula após reabrir é o esperado `1bd5bd07`. Os seis testes focados
+passaram; ao retirar por mutação a condição incremental, falham precisamente os
+dois casos de contador retido/resetado.
+
+`host:certify`: READY, frontend `912/3`, Rust `839/0/76`, upstream SGDK e
+PVSnesLib `Success: true`. No CI do SHA `8166d4f`, a consulta inicial mostrou
+três checks concluídos e três `in_progress`; a consulta terminal às 23:26:04Z
+confirmou 6/6 success, zero falhas e zero pendências. Resumo e manifesto desta
+rodada: `data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/`.
+Relatório: `docs/rex_profiles/sonic_multiframe/REPORT.md`. Nenhuma ROM
+comercial foi versionada, e a proposta permanece Experimental.
+
+### Complemento 2026-10-02 — PR #99 e barreira de identidade no E2E
+
+A proposta Sonic multi-frame segue draft, dependente da #98, sem merge/release.
+Produto/frontend e binário permanecem `f646ccf` / `1845aebf…b8b0`.
+Harness `5b9d2b96a4e6fd47ba938b88b33a463398d96ef4`: a coleta agora exige o SHA
+compilado na Game View, sessão nova fora de hold e dez frames renderizados.
+A aceitação antiga (canvas não preto) podia coletar ROM anterior/boot; quatro
+regressões discriminam esse caso. A comparação exata do tilemap foi mantida.
+
+No CI de `86fb1b8`, um desktop falhou no tilemap após reabertura, reproduzido
+localmente; a repetição remota única passou. A causa dinâmica específica das
+falhas iniciais não é estabelecida por seus logs incompletos. Com a barreira,
+`reference-platformer` passou 16/16 no mesmo app, incluindo pintura/reabertura
+(ROI `1bd5bd07`), teclado e duas passagens. Nova certificação: READY, upstream
+Success:true, frontend910/3, Rust839/0/76. As provas BYOR Sonic continuam separadas.
+
+Evidência complementar em `data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier/`.
+Auditoria histórica: 57/58 hashes reconfirmados; fontes pelo Git pinado. O JSON
+host-readiness anterior foi sobrescrito pela certificação; o log READY permanece
+íntegro. A nova saída tem cópia congelada; não se reescreveu a evidência antiga.
+CI posterior pertence ao SHA consultado na PR, sem alegação de verde herdado.
+Nenhuma frente, corpus ou worktree de outro agente foi alterada.
+
+---
+
+### Checkpoint 2026-10-02 — Sonic multi-frame e pintura visual, proposta isolada (Experimental)
+
+Branch `codex/rex-sonic-multiframe-ui`, base #98 `0ef540e95463faf74bc32202744ed27872592d8e`.
+Código/ frontend provado: `f646ccf6de220f38dc9bf2b175cd56d79ff4be82`; app canônico SHA
+`1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0`.
+Dez frames Sonic assistidos por mapping/DPLC do perfil Rev00, pintura visual pela
+paleta real (0 transparente), confirmação de compartilhamento, cópia cumulativa,
+BPS e salvar→reiniciar app→reabrir. Base BYOR `c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb`
+(531577 B) permanece byte-idêntica. Nenhuma ROM ou imagem comercial foi versionada.
+
+**Defeitos corrigidos com regressões discriminantes:** ordem das células VDP por
+coluna (prévia Sonic herdada e pesquisa D usavam linha; antigo golden concordante
+não era prova independente); edição posterior agora preserva a pintura/paleta
+anterior; selecionar outro frame já invalida uma composição pendente. Geometria
+composição→pintura tem uma única resolução no backend. O teste autoral 2×2 e o
+acesso de pintura (8,8) falharam antes da correção. Stand RGBA correto:
+`7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7`.
+Frente D precisa corrigir seus renders no território próprio; provas históricas
+ficam preservadas, sem recertificar intenção de coordenadas antigas.
+
+**Prova nova no mesmo app:** `sonic-multiframe` passou dez composições com RGBA
+independente, controles nativos, acúmulo pintura/paleta, BPS byte-exato e reabertura
+visual (centro+quatro cantos em IMG, metadados abaixo). Isso é prévia estática,
+não execução dos dez frames. Regressão separada `inspection-sonic-tiles` passou
+recusas, edição/BPS/aplicação, observação de 1200 frames no core e reinício/reabertura:
+96 pixels alterados no Sonic, ROI x=74..85/y=170..177. Não prova teclado/movimento/salto.
+Pillow: dez PNGs exatos e vinte mutações recusadas. Undo age na fila pendente; troca
+de frame não persiste essa fila. Novos bancos/overlap/VRAM herdada são recusados.
+
+**Gates finais:** `host:certify` READY, upstream SGDK/PVSnesLib `Success: true`;
+frontend 906/3 (direto 903/6, total909), Rust839/0/76, UI13/13;
+fmt/clippy(lib/default)/lint/tsc/check:tree/crates:gates4/4 passaram. Fingerprint
+`60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2`, lock `dd99a22f…`.
+Auditoria npm padrão: EALLOWSCRIPTS (config usuário); por chamada isolada preservando
+política repo: rc0 no limiar high, quatro moderados Vitest `GHSA-82fw-gwwq-j7x9`.
+Cargo audit: rc0, oito avisos permitidos. Não se declara zero vulnerabilidades.
+
+**Display:** monitor físico perdeu a resolução; prova final usa Xvfb externo de QA
+fixado e com assinatura verificada, SHA `5bfd315a8c7bc626d0b183d176e130c34f910a4a1279d9d53ea45769f62a3351`,
+autenticação própria/sem TCP, sem sudo/instalação de sistema/mudança dos monitores.
+Processos do cenário e do display foram encerrados. Limites e corridas intermediárias
+estão no relatório; não foi contado timeout como sucesso.
+
+**Evidência e próximo passo:** `docs/rex_profiles/sonic_multiframe/REPORT.md` e
+`data/rex_profiles/sonic_multiframe/evidence/2026-10-02/manifest.json` fixam código,
+app, fontes, resumos e arquivos locais por hash. PNG/base64/arrays RGBA ficam ignorados.
+Proposta dependente da #98 para revisão, sem merge/release/promoção. #97(P1) e #84
+não entram; nenhum checkout de outro agente foi alterado. CI remoto pertence ao SHA
+publicado, não é prova BYOR. Após a revisão, integrar na ordem da base e revalidar o
+fluxo afetado no destino; não usar a prova de um perfil como decompilação universal.
+
+---
+
 ### Fechamento parcial 2026-09-22 — primeiro perfil ROM→Node delimitado (Experimental; implementado; equivalência e causalidade pendentes)
 
 O bloco F agora tem uma implementação mínima e explicitamente limitada para Mega Drive: `rom_recover_logic` reconhece somente os quatro bytes contíguos `ADDQ.W #1,D0; RTS`, registra fronteira, semântica word, flags `N/Z/V/C/X`, ausência de efeitos de memória, estados independentes, hash SHA-256 e source mapping; `rom_patch_recovered_logic` gera uma cópia distinta com imediato `1..8`, protegida pelo hash esperado. O `ReverseWorkspace` expõe a recuperação e o patch como Experimental, e o grafo persistido usa o nó `rom_addq_word` com origem ROM. Callers indiretos/PC-relative, trace dinâmico e bytes fora do corpo exato permanecem limitações declaradas, não são inferidos.

@@ -488,4 +488,23 @@ describe("InspectionPanel", () => {
 
     expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")).toBeNull();
   });
+  it("selecting another frame invalidates the pending preview even without composing again", async () => {
+    const old = createDeferred<Record<string, unknown>>();
+    mocks.inspectionOpen.mockResolvedValue(completedSession);
+    mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
+    mocks.inspectionSpriteFrame.mockReturnValue(old.promise);
+    await act(async () => { root.render(<InspectionPanel logMessage={vi.fn()} />); await flushMicrotasks(); });
+    await act(async () => { setTextInput(container.querySelector("input[type='text']")!, "/roms/test.md"); await flushMicrotasks(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-identify']") as HTMLButtonElement).click(); await flushMicrotasks(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-compose-sprite']") as HTMLButtonElement).click(); await flushMicrotasks(); });
+    await act(async () => {
+      const select = container.querySelector("[data-testid='inspection-sprite-frame-select']") as HTMLSelectElement;
+      select.value = "spr_ryo_100/frame-1"; select.dispatchEvent(new Event("change", { bubbles: true }));
+      await flushMicrotasks();
+    });
+    await act(async () => { old.resolve({ available: true, frame_id: "spr_ryo_100/frame-0", resource_id: "spr_ryo_100", data_url: "old" }); await flushMicrotasks(); });
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")).toBeNull();
+    expect((container.querySelector("[data-testid='inspection-sprite-frame-select']") as HTMLSelectElement).value).toBe("spr_ryo_100/frame-1");
+  });
+
 });
