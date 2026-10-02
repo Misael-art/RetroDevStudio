@@ -9912,6 +9912,25 @@ async function selectInspectionFrameNative(sessionId, frameId) {
   return { frameId, diagnostic };
 }
 
+async function setSonicNumberInputNative(sessionId, testId, value) {
+  const selector = `[data-testid="${testId}"]`;
+  const element = await findElement(sessionId, selector);
+  await clickElementWithDiagnostics(sessionId, element, selector);
+  await webdriverRequest("POST", `/session/${sessionId}/actions`, {actions: [{type:"key",id:"sonic-field-keyboard",actions:[
+    {type:"keyDown",value:"\uE009"},{type:"keyDown",value:"a"},
+    {type:"keyUp",value:"a"},{type:"keyUp",value:"\uE009"},
+    {type:"keyDown",value:"\uE003"},{type:"keyUp",value:"\uE003"}]}]});
+  const text = String(value);
+  await webdriverRequest("POST", `/session/${sessionId}/element/${element}/value`, {text,value:[...text]});
+  await waitFor(async () => executeScript(sessionId,
+    `return document.querySelector(arguments[0])?.valueAsNumber === arguments[1];`, [selector,Number(value)]),
+    5000, `Campo ${testId} não recebeu o valor numérico ${value} pelo teclado nativo`, 50);
+  const observed = await executeScript(sessionId,
+    `const input=document.querySelector(arguments[0]); return {field:arguments[0],value:input?.value,number:input?.valueAsNumber,focused:document.activeElement===input,windowFocused:document.hasFocus()};`, [selector]);
+  console.log("[sonic-field-typed] " + JSON.stringify(observed));
+  return observed;
+}
+
 async function runSonicMultiframeScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
   const hash = (b) => createHash("sha256").update(b).digest("hex");
   const frames = [["stand",1],["wait-1",2],["look-up",5],["walk-1",6],["walk-2",7],
@@ -9963,12 +9982,21 @@ async function runSonicMultiframeScenario(sessionId, app, romPath, base, savedId
   expectedBytes[at.offset] = at.high ? (expectedBytes[at.offset]&15)|(paintIndex<<4) : (expectedBytes[at.offset]&0xf0)|paintIndex;
   await waitFor(async () => (await readRenderedSpriteFramePixels(sessionId))?.romSha256===hash(expectedBytes),30000,"Pintura não confirmou os bytes independentes",100);
   report.steps.push({step:"native_paint",offset:at.offset,index:paintIndex,shared_confirmation_required:true});
-  for (const [field,value] of [["index",1],["red",7],["green",0],["blue",7]])
-    await setInputByTestIdNative(sessionId,`inspection-sonic-palette-${field}`,String(value));
+  for (const [field,value] of [["index",1],["red",7],["green",0],["blue",7]]) {
+    await setSonicNumberInputNative(sessionId, `inspection-sonic-palette-${field}`, value);
+  }
+  console.log("[sonic-palette-fields] " + JSON.stringify(await executeScript(sessionId,
+    `return ['index','red','green','blue'].map((field) => ({field,value:document.querySelector('[data-testid="inspection-sonic-palette-'+field+'"]')?.value}));`)));
   await closeVisibleConsoleDrawer(sessionId,"paleta acumulada");
   await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-sonic-edit");
   expectedBytes.writeUInt16BE(0x0e0e,0x238a);
-  await waitFor(async () => (await readRenderedSpriteFramePixels(sessionId))?.romSha256===hash(expectedBytes),30000,"Paleta apagou pintura ou não foi confirmada",100);
+  await waitFor(async () => (await readRenderedSpriteFramePixels(sessionId))?.romSha256===hash(expectedBytes),30000,"Paleta apagou pintura ou não foi confirmada",100)
+    .catch(async (error) => {
+      const diagnostics = await executeScript(sessionId,
+        `return {body:document.body.innerText.slice(-8000),logs:window.__RDS_E2E__?.getConsoleLogs?.().slice(-8)};`).catch(() => ({unavailable:true}));
+      console.log("[sonic-palette-failure] " + JSON.stringify(diagnostics));
+      throw error;
+    });
   await inspectFrame("walk-1",6,expectedBytes);
   const status = await invokeCoreObserveCommand(sessionId,"rex_inspection_status",{sessionId:savedId});
   if (!status?.session?.edit || status.session.edit.modified_rom_sha256!==hash(expectedBytes)) fail("Snapshot não confirmou a cópia acumulada");
@@ -14987,8 +15015,8 @@ async function main() {
           .map((entry) => String(entry?.message ?? ""))
           .filter((message) => message.includes("Reinserção recusada"));
         const setTileRect = async (rect) => {
-          for (const key of ["x", "y", "w", "h"]) await setInputByTestIdNative(sessionId, `inspection-sonic-tile-${key}`, String(rect[key]));
-          await setInputByTestIdNative(sessionId, "inspection-sonic-tile-index", String(rect.index));
+          for (const key of ["x", "y", "w", "h"]) await setSonicNumberInputNative(sessionId, `inspection-sonic-tile-${key}`, rect[key]);
+          await setSonicNumberInputNative(sessionId, "inspection-sonic-tile-index", rect.index);
         };
         const tileNegatives = [];
         let sonicTileEvidence = null;
