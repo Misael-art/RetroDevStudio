@@ -1,0 +1,14 @@
+{
+  "historical_manifest": "../2026-10-02/manifest.json",
+  "verified_unchanged_artifacts": 57,
+  "historical_sources_verified_from_git": "f646ccf6de220f38dc9bf2b175cd56d79ff4be82",
+  "replaced_mutable_artifact": [
+    {
+      "path": "src-tauri/target-test/validation/host-readiness.json",
+      "historic_sha256": "25026be67dbf4de2d8413c137537d09e9ff81d53d9f8f03b2c76b0de5ebb7982",
+      "current_sha256": "d5220e4271b5d93f4106f21ed1e6ef4ce14fea98e58f530e00e601a78f4f52d7"
+    }
+  ],
+  "limitation": "host:certify rewrites the shared host-readiness.json; original JSON is unavailable at that path. Historical certify log and result summaries remain hash-valid. New certification gets a frozen copy instead of binding only the mutable path.",
+  "observation_scope": "Replacement hash was observed during the new certification; it does not bind the final frozen readiness snapshot."
+}

@@ -174,3 +174,52 @@ O desfazer deste editor age na fila pendente, não no histórico de ROMs aplicad
 trocar o frame descarta a fila pendente. RGB333 da prévia não certifica o DAC do
 hardware. MUGEN, ADDQ/branch-compare e trajetórias Sonic por teclado não foram
 reexecutados nesta rodada. **Experimental, proposta isolada; sem merge/release.**
+
+## Adendo: identidade do framebuffer no E2E de referência
+
+A proposta foi publicada como PR draft #99. No SHA documental `86fb1b8`, os
+quatro jobs validate/linux-validate e o desktop do push passaram. O desktop
+do PR falhou na comparação exata da célula pintada depois de reabrir o projeto
+de referência; a mesma falha foi reproduzida localmente. A repetição remota única
+passou. A falha inicial permanece na evidência, sem atribuição a pressão de
+memória ou a flutuação como causa estabelecida.
+
+O collector herdado aceitava apenas log de build concluído, status ativo e
+canvas não preto. O código do app publica o log antes de terminar a carga
+assíncrona da ROM. A captura podia portanto ser da ROM anterior ou do boot;
+uma execução instrumentada registrou só 689 pixels não pretos no primeiro
+build. Essa condição insuficiente foi demonstrada no código e nos testes;
+os pixels esperados/recebidos das duas falhas iniciais não haviam sido gravados,
+então não são usados para afirmar uma causa dinâmica mais específica.
+
+`5b9d2b96a4e6fd47ba938b88b33a463398d96ef4` reforça somente o harness: SHA
+da ROM compilada igual ao da Game View, sessão de input nova e fora de hold,
+e pelo menos dez frames renderizados (o boot autoral atual tem oito VBlanks).
+A comparação de pixels da célula continua exata e com o mesmo orçamento.
+Agora, uma falha grava baseline, último frame, identidade e pixels da célula.
+Os quatro testes controlados falham ao restaurar a aceitação antiga; restaurada
+a barreira, passam. O primeiro ensaio do teste falhou no loader Vite do shebang,
+sem executar testes, e não foi contado como mutação discriminante. O probe final
+executa o módulo Node real em subprocesso, sem cópia da função avaliada.
+
+O cenário `reference-platformer` passou **16/16** com essa barreira no mesmo app
+`1845aebf…b8b0`/frontend `f646ccf`; pintura e reabertura têm ROI `1bd5bd07`,
+com identidade da ROM conferida e sessão nova. Seus caminhos de build são
+locais reutilizáveis, não cópias imutáveis de cada ROM intermediária; os hashes
+foram conferidos durante a execução e não são apresentados como bytes ainda
+presentes naqueles caminhos. Isto é autoria do template, não recuperação de jogo.
+
+Nova certificação rc=0: **READY**, SGDK/PVSnesLib `Success: true`, frontend
+**910/3** (913 totais, quatro testes novos), Rust **839/0/76**. As provas Sonic
+anteriores são preservadas no mesmo binário; não se atribui o E2E de referência
+como execução dos dez frames Sonic. O CI dos SHAs posteriores deve ser lido
+na PR por SHA, sem transformar ausência, pending ou uma repetição em PASS inicial.
+
+Pacote complementar:
+`data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier/`.
+Na auditoria do pacote anterior, **57/58** identidades foram reconfirmadas;
+as fontes de QA históricas foram lidas dos blobs `f646ccf`, pois o harness mudou.
+O único arquivo não recuperável no caminho original é `host-readiness.json`,
+sobrescrito pela certificação seguinte. O log histórico READY continua íntegro.
+A nova certificação usa uma cópia congelada do JSON; a limitação anterior está
+em `historical-audit.json`, sem alteração retroativa do manifesto antigo.

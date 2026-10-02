@@ -2439,3 +2439,26 @@ Proposta dependente da #98 para revisão, sem merge/release/promoção. #97(P1) 
 não entram; nenhum checkout de outro agente foi alterado. CI remoto pertence ao SHA
 publicado, não é prova BYOR. Após a revisão, integrar na ordem da base e revalidar o
 fluxo afetado no destino; não usar a prova de um perfil como decompilação universal.
+
+### Complemento 2026-10-02 — PR #99 e barreira de identidade no E2E
+
+A proposta Sonic multi-frame segue draft, dependente da #98, sem merge/release.
+Produto/frontend e binário permanecem `f646ccf` / `1845aebf…b8b0`.
+Harness `5b9d2b96a4e6fd47ba938b88b33a463398d96ef4`: a coleta agora exige o SHA
+compilado na Game View, sessão nova fora de hold e dez frames renderizados.
+A aceitação antiga (canvas não preto) podia coletar ROM anterior/boot; quatro
+regressões discriminam esse caso. A comparação exata do tilemap foi mantida.
+
+No CI de `86fb1b8`, um desktop falhou no tilemap após reabertura, reproduzido
+localmente; a repetição remota única passou. A causa dinâmica específica das
+falhas iniciais não é estabelecida por seus logs incompletos. Com a barreira,
+`reference-platformer` passou 16/16 no mesmo app, incluindo pintura/reabertura
+(ROI `1bd5bd07`), teclado e duas passagens. Nova certificação: READY, upstream
+Success:true, frontend910/3, Rust839/0/76. As provas BYOR Sonic continuam separadas.
+
+Evidência complementar em `data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier/`.
+Auditoria histórica: 57/58 hashes reconfirmados; fontes pelo Git pinado. O JSON
+host-readiness anterior foi sobrescrito pela certificação; o log READY permanece
+íntegro. A nova saída tem cópia congelada; não se reescreveu a evidência antiga.
+CI posterior pertence ao SHA consultado na PR, sem alegação de verde herdado.
+Nenhuma frente, corpus ou worktree de outro agente foi alterada.
