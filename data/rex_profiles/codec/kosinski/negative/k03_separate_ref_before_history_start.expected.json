@@ -1,0 +1,1 @@
+{"vector": "k03_separate_ref_before_history_start", "kind": "negative-spec", "expected_error": "invalid-reference", "mirror_condition": "ERR-off", "max_out": null, "stream_len": 4, "note": "Derivado do contrato/formato; o oráculo koscmp NÃO valida histórico nem exige terminator (defeito registrado em build-vectors.sh) e NÃO foi executado sobre este stream."}

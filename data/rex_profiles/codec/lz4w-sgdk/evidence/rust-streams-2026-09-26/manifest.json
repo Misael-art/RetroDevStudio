@@ -1,0 +1,57 @@
+{
+  "pacote": "lz4w-sgdk / replay 68k de streams do encoder Rust (agente-B)",
+  "data": "2026-09-26",
+  "diretiva": "Executar o replay 68000 com streams geradas pelo encoder Rust (casos pequenos discriminantes + stream modificada de 0xc8cc8), comparar saída COMPLETA com Rust e Java sob o mesmo contexto; divergência reduzida ao menor caso antes de qualquer novo codec.",
+  "achado-central": {
+    "resumo": "O desempacotador 68k OFICIAL (SGDK 2.11 tools_a.s, .long_match) usa aritmética de 16 bits: move.w d0; add.w d0,d0; lea -2(a1,d0.w),a2. Referências LONGAS sem flag ROM-source só são endereçáveis para trás quando value >= 0x4000, isto é, offset <= 16385 words. Com 1 <= value <= 0x3FFF (offset >= 16386) a leitura vira PARA FRENTE e aliassa com a ROM (bus de 24 bits), produzindo bytes errados silenciosos.",
+    "evidencia": "r10 (stream da edição canônica pelo encoder pino 07ee9b2c): primeiro byte divergente no offset 160 da saída (68k=0x44, esperado=0x0A), ref deep dist=18555 words (value 0x3786). Redução mínima r11: stream de 8 bytes, 1 match longo não-ROM len=3 words off=16590 (value 0x3F33) -> 68k lê $000204 da ROM (24 6F 00 18 20 2F = movem.l do reset handler) em vez de $BE EF 00 00 00 00; jar e produto decodificam correto. Controle de fronteira r12: off=16385 exato (value 0x4000) -> 68k == jar == esperado.",
+    "impacto_produto": "Encoder legacy (pino 07ee9b2c) permitia off <= 0x8000 para referências não-ROM: streams dele com off >= 16386 decodificam ERRADO no hardware oficial. O WIP do integrador (snapshot 04eaa0b0) já limita a janela não-ROM a 0x4000 words no encoder e recusa off > 0x4000 no decoder; medido aqui: r13 (mesma edição, encoder WIP) decodifica byte-idêntica no 68k, mas tem 150 B > slot 144 B (regra de tamanho de reinsert_transaction recusaria ESTA edição) e o decoder WIP recusa também off=16385 (value 0x4000), que 68k+jar aceitam — 1 word mais conservativo que o teto do empacotador oficial."
+  },
+  "pinos": {
+    "rex_codecs_legacy_sha256": "07ee9b2c8f62ac7116a775bedd86eacba76ca2ccdc5148824e5b15b1cccb3d9d",
+    "rex_codecs_wip_snapshot_sha256": "04eaa0b0c1b2aa97d46ba537c9098904f2f8c62681a48ea095ec5f07a086ee3c",
+    "driver_sha256": "332912125dfcf3333ff93428e51d011bf5970715c72454f740c4a89cab22f7f7 (binário compilado contra o snapshot legacy; o mesmo driver.rs compilado contra o snapshot WIP deu 02ad139bf64164d3d5aeec7072c9fa307d32f5cc9b730754e9d5103c85c3784f; fonte do driver neste pacote: driver.rs)",
+    "driver_rust": "driver.rs neste pacote; cópias verbatim dos encoders em snapshots/",
+    "desempacotador_68k_identidade": "ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787 (objcopy -j .text.asm.lz4w_unpack do master.o == mesmo recorte de libmd.a oficial; provado a cada build-rom.sh)",
+    "tools_a_s_sha256": "34c9e8d67683ad9aa6a723891f86e70742add1007efb9a5f8f497b62bc60e2d0",
+    "lz4w_jar": "v1.43 (Stephane Dallongeville), sha256 bfcf9c692696aac21be23f0d48a9ccf788963a4ae7039cb7af276ed745bca4bb",
+    "rom_harness_runA": "c1801c8be21b3f55feedd0ca7d9d8e696c924846ad9c363cc8a0cb510457d065",
+    "rom_harness_r11": "1a29e2f64a2d045cae636fb7ccb6b2612e4267e58cfe647d0fe5a9e80959bdd8",
+    "rom_harness_r12": "b3c6aadeead6f44aa339ba803e1c5d723c769d0d626d231890f347f7f1ab601d",
+    "rom_harness_r13": "9e2088a634fae43b8754f85798f9a56941fdf9a6de980d64073198e562bf0e40",
+    "ferramentas": "MAME 0.289 (mame0289-dirty), OpenJDK 17.0.20.1, Python 3.14.7, wine-11.17, SGDK 2.11 em /mnt/sdcard/Projects/MegaDrive_DEV/sdk/sgdk-2.11"
+  },
+  "casos": {
+    "r01_lits_odd": "68k==jar==Rust (11 B literais + cauda ímpar 0x80AB)",
+    "r02_short_mix": "68k==jar==Rust (short dist2 + dist1 via O=0)",
+    "r03_long_far_nodict": "68k==jar==Rust (longo não-ROM ~302 words na própria saída)",
+    "r04_long_zero_value": "68k==jar==Rust (longo len=21 off=1, value word 0x0000 vs EOD)",
+    "r05_dict_mixed": "68k==jar==Rust (short ao dict + longo não-ROM off=500 ao dict)",
+    "r09_corpus_orig_c8cc8": "68k==jar==Rust com prefixo-dst de 3072 B; stream ORIGINAL do corpus (baseline de regressão)",
+    "r10_corpus_rust_edit_c8cc8": "DIVERGE 68k @160 (lê ROM aliassada); jar==Rust esperado. Encoder 07ee9b2c, dist 18555 > 16385",
+    "r11_wrap_deep_ref": "DIVERGE 68k @0 (ler $000204 ROM); jar==Rust. MÍNIMO: 8 B de stream, 1 longo não-ROM len=3 off=16590",
+    "r12_boundary_ok_ref": "68k==jar==Rust; fronteira exata off=16385 (value 0x4000) funciona no hardware",
+    "r13_wip_edit_c8cc8": "68k==jar==esperado; mesma edição canônica com encoder WIP 04eaa0b0 (janela <= 0x4000). Observações: 150 B > slot 144 B; decoder WIP recusa off=16385 (teto jar)"
+  },
+  "byor": {
+    "politica": "Bytes derivados da ROM comercial (dicts/stream/plain dos casos r09/r10/r13 e captures/ROMs que os contêm) ficam FORA do git; apenas SHA-256 + offsets, regeneráveis via reproduce.sh com a ROM congelada em posse local.",
+    "rom_corpus_sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+    "rom_corpus_tamanho": 917504,
+    "offsets": {
+      "r09_r10_r13_stream_start": "0xC8CC8",
+      "r09_dict": {"bytes": 3072, "origem": "rom[0x00C80C8..0x00C8CC8]"},
+      "r10_dict": {"bytes": 37120, "origem": "rom[0x00BFBC8..0x00C8CC8]", "obs": "prefixo truncado mínimo medido p/ decodificar idêntico (ref deep 18560 words)"},
+      "r13_dict": {"bytes": 1024, "origem": "rom[0x00C88C8..0x00C8CC8]"}
+    },
+    "excluidos_com_sha": "meta/byor-excluded-sha256.txt"
+  },
+  "arquivos": {
+    "cases-synth/": "streams/plains/dicts SINTÉTICOS (r01-r05, r11, r12) — seguros p/ git",
+    "captures/r11.capture.bin,r12.capture.bin": "dump WRAM dos runs de caso único (só conteúdo sintético + fill 0xFEFE + tabela)",
+    "jar-out-synth/": "saída do oráculo Java p/ casos sintéticos",
+    "meta/rust-meta-legacy.tsv,meta/rust-meta-wip.tsv": "análise de tokens por caso (medidas, sem bytes)",
+    "meta/wip-stdout.log": "recusas medidas do decoder WIP (r10-legacy, r12) e análise r13",
+    "reproduce.sh": "cadeia completa reproduzível (driver -> cases -> ROMs -> MAME -> jar -> comparação)"
+  },
+  "licenca": "tools_a.s/libmd.a/lz4w.jar = LGPL/binário oficial de referência: usados APENAS como oráculo externo; nenhum código transplantado ao produto. rex_codecs.rs é código do próprio projeto (snapshot histórico p/ reprodutibilidade)."
+}

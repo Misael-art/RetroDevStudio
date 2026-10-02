@@ -1,0 +1,70 @@
+{
+  "profile": "enigma",
+  "kind_note": "negative-spec: derivados do CONTRATO v1/domínio do formato (arrays de int16 BE = comprimento PAR; header autodescritivo com modo e comprimento), NÃO do oráculo (a referência aceita truncamento e descarta cauda ímpar em silêncio). Sem espelho Python do decode (empacotador de códigos variáveis blocked), cada spec carrega uma SONDA DETERMINÍSTICA que reproduz o número medido em 2026-09-25; divergência aborta o build.",
+  "header_facts_measured": "MEDIDO apenas o suficiente p/ os specs: byte[0] = flags de modo (observados 0x09 no stream inline const_500 e 0x0b no codificado planes_4k; 0x02 NUNCA observado em 11 streams publicadas — tratado como código inexistente pela variante fixada). NÃO medimos a semântica completa dos cabeçalhos (campos [2..5] em diante permanecem parcialmente desconhecidos — o mutation e03 muda 2 bytes em [4..5] de planes_4k e o oráculo IGNORA a mudança: saída idêntica ao pleno, provando que o decoder do oráculo não confia nessa declaração. A especificação completa do cabeçalho Enigma fica pendente da implementação do produto (fase 3).",
+  "vectors": [
+    {
+      "name": "e01_align_input_odd_5b",
+      "input_kind": "plain",
+      "input_file": "e01_odd_bytes_tail.bin",
+      "input_note": "5 bytes (0x0100 0x0200 + 0xAB órfão) — ímpar, fora do domínio int16",
+      "expected_error": "input-not-in-domain (alinhamento: plain % 2 == 0)",
+      "oracle_probe": "MEDIDO: encode ACEITA e o decode devolve EXATAMENTE 4 bytes — a cauda órfã é descartada em silêncio (5->4); re-asserido no build (tamanho exato)",
+      "product_must": "recusar entrada ímpar; NUNCA truncar silenciosamente (diretriz do integrador 2026-09-25)"
+    },
+    {
+      "name": "e02_truncated_last_byte",
+      "input_kind": "stream",
+      "input_file": "e02_truncated_last_byte.eni",
+      "input_note": "planes_4k.eni sem o último byte (4221/4222)",
+      "expected_error": "truncated",
+      "oracle_probe": "MEDIDO: decode rc=0 devolve 4098 bytes ≠ 4096 (declarado) — o oráculo NÃO sinaliza; o produto DEVE retornar truncated. Sonda re-assert out==4098 (número exato)",
+      "product_must": "EOF no meio de tokens/códigos ⇒ truncated; invariante saida == declarado"
+    },
+    {
+      "name": "e03_declared_length_overflow",
+      "input_kind": "stream",
+      "input_file": "e03_len_inflated.eni",
+      "input_note": "planes_4k.eni com 2 bytes em [4..5] substituídos por 0xffff (sonda de campo declarado inflado; semântica exata do campo não fixada nesta fase)",
+      "expected_error": "nenhuma-obrigação-de-erro: stream continua bem-formada; o spec fixa que DECLARAÇÕES infladas não podem levar a alocação/escrita além dos limites (contract: excessive-output/work-limit se max_out < 4096)",
+      "oracle_probe": "MEDIDO: decode rc=0 devolve 4096 bytes BYTE-IDÊNTICOS ao plain pleno (sha conferido pela sonda) apesar da declaração inflada — o oráculo não confia no campo; o produto deve tratar declarações como entrada não-confiável (validar contra max_out e bytes disponíveis)",
+      "product_must": "comprimento declarado é entrada não-confiável: validar contra max_out e contra bytes disponíveis"
+    },
+    {
+      "name": "e04_invalid_mode_bit",
+      "input_kind": "stream",
+      "input_file": "e04_mode_02.eni",
+      "input_note": "const_500.eni com byte de modo 0x09 substituído por 0x02 (código de modo inexistente)",
+      "expected_error": "malformed-input (código exato do produto mapeado na fase 3; a referência decodifica modo inexistente como se válido — defeito registrado)",
+      "oracle_probe": "MEDIDO: decode rc=0 devolve 400 bytes SHA-IDENTICOS ao decode do stream pleno (372 B de stream) — falsa-aceitação TOTAL de modo inválido; sonda re-assert saída igual ao pleno publicado",
+      "product_must": "rejeitar flags de modo não definidas pela variante fixada"
+    },
+    {
+      "name": "e05_empty_stream",
+      "input_kind": "stream",
+      "input_file": "e05_empty_stream.eni",
+      "input_note": "stream de 0 bytes",
+      "expected_error": "truncated",
+      "oracle_probe": "MEDIDO: decode rc=0 produz 0 bytes (falsa-aceitação)",
+      "product_must": "sem header não há stream: truncated"
+    },
+    {
+      "name": "e06_garbage_ff_255b",
+      "input_kind": "stream",
+      "input_file": "e06_garbage_ff_255b.eni",
+      "input_note": "255 bytes 0xFF — entrada arbitrária não-Enigma",
+      "expected_error": "bounded-failure: erro estruturado (malformed-header/truncated) DENTRO dos limites; nunca crash nem loop",
+      "oracle_probe": "MEDIDO: decode rc=0 produz 0 bytes — aceita lixo silenciosamente; sonda re-assert out==0 && rc==0",
+      "product_must": "parser do produto não define domínio de ROM arbitrária como 'sucesso vazio'"
+    },
+    {
+      "name": "e07_maxout_real_stream",
+      "input_kind": "stream+limit",
+      "input_file": "e07_planes_4k.eni",
+      "input_note": "stream REAL válida (planes_4k.eni, RT-OK publicado) com max_out=1024",
+      "expected_error": "excessive-output",
+      "oracle_probe": "nenhum: stream é bem-formada (prova RT-OK); o limite é obrigação do produto (mesma semântica de k05/l07)",
+      "product_must": "abortar cedo sem emitir além de max_out"
+    }
+  ]
+}

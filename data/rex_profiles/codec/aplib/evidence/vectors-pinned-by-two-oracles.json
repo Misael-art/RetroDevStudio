@@ -1,0 +1,69 @@
+{
+  "claim": "vectors-and-holdout: 8 plains CROSS-OK + 9 goldens GOLDEN-CONFIRMED (g08_eod_trailing incluído) fixados por DOIS oráculos (apultra e APJ/SGDK) antes de qualquer implementação do produto; paridade cruzada byte-exata. 7 negativos NEGATIVE-SPEC derivados do contrato/formato, auto-verificados pelo espelho Python calibrado; oráculos NÃO validam entrada e não foram executados nos negativos (defeito da referência registrado).",
+  "rom": {
+    "sha256": "3a9d7e9e2312a7457003feb8d15214926f84354d3b19aa6039e2a3a3b66bec0d",
+    "size_bytes": 50856,
+    "format": "fixture",
+    "normalization": [
+      {
+        "step": "hash agregado (receita canônica) = sha256( sha256sum ordenado LC_ALL=C dos arquivos de plain/, golden/ e negative/ + bytes de manifest.tsv ); reimpresso pela linha agregado= de scripts/rex_profiles/codecs/aplib/build-vectors.sh (2026-09-25, após adicionar g08 + 7 negativos; os arquivos anteriores permaneceram byte-idênticos)",
+        "sha256_after": "3a9d7e9e2312a7457003feb8d15214926f84354d3b19aa6039e2a3a3b66bec0d"
+      }
+    ]
+  },
+  "locator": {
+    "kind": "offset-range",
+    "offset": 0,
+    "length": 0
+  },
+  "bank_state": {},
+  "expected": {
+    "tool": "apultra CLI (decode+encode) e SGDK apj.jar v1.32 (p/u), ambos externos ao produto; cada um decodifica o stream do outro para a entrada exata; goldens montados à mão só são publicados se AMBOS os oráculos os decodificarem para a saída esperada",
+    "version": "apultra commit 8f340057d7402c10da3d9c76c599f9ab83b8a22d; apj.jar SHA-256 2d8cdc63cc800e4b86ff4d9cdfe514001b77f788abcd02d61974dc319d026204 (SGDK v2.11)",
+    "output_sha256": "3a9d7e9e2312a7457003feb8d15214926f84354d3b19aa6039e2a3a3b66bec0d",
+    "output_len": 50856,
+    "pinned_before_implementation": true
+  },
+  "provenance": "authored-fixture",
+  "negatives": [
+    {
+      "vector": "n01_no_eod",
+      "expected_error": "truncated",
+      "basis": "sem EOD; espelho: EOF ao buscar tag"
+    },
+    {
+      "vector": "n02_rep_first_token",
+      "expected_error": "invalid-reference",
+      "basis": "rep-match sem offset histórico"
+    },
+    {
+      "vector": "n03_far_offset",
+      "expected_error": "invalid-reference",
+      "basis": "off=200 > histórico(1)"
+    },
+    {
+      "vector": "n04_truncated_mid_token",
+      "expected_error": "truncated",
+      "basis": "EOF ao ler off-low de token10 iniciado"
+    },
+    {
+      "vector": "n05_excessive_output",
+      "expected_error": "excessive-output",
+      "basis": "stream válido, 263 bytes de saída com max_out=16"
+    },
+    {
+      "vector": "n06_token110_first",
+      "expected_error": "invalid-reference",
+      "basis": "match off=3 sem histórico"
+    },
+    {
+      "vector": "n07_token111_first",
+      "expected_error": "invalid-reference",
+      "basis": "cópia off4=5 sem histórico"
+    }
+  ],
+  "timestamp": "2026-09-25: build-vectors.sh no worktree codex/rex-b-codecs; agregado 3a9d7e9e… verificado",
+  "reference_defects": [
+    "APJ e apultra (modo raw) leem além do EOF sem validação (UB); aceitação de truncamento pela referência NÃO define comportamento do produto — rejeições derivadas do contrato (PRODUCT-CONTRACT.md §3)."
+  ]
+}

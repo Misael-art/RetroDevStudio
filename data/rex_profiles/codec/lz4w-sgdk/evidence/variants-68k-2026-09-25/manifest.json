@@ -1,0 +1,41 @@
+{
+  "id": "lz4w-sgdk/variants-68k",
+  "date": "2026-09-25",
+  "purpose": "Desempate LZ4W Java (jar v1.43) vs 68000 (tools_a.s SGDK 2.11): executar o desempacotador 68k OFICIAL em ambiente controlado sobre casos discriminantes e comparar bytes de saída completos com o oráculo Java.",
+  "references_pinned": {
+    "lz4w.jar (v1.43, oracle)": "bfcf9c692696aac21be23f0d48a9ccf788963a4ae7039cb7af276ed745bca4bb",
+    "LZ4W.java @ sgdk 2eac605a7744 (master)": "35b0891ae79218d5d6077d1aaa3c47b277ccf4e1f9bba628aaf523250523ece8",
+    "tools_a.s SGDK 2.11 (fonte do decoder montado)": "34c9e8d67683ad9aa6a723891f86e70742add1007efb9a5f8f497b62bc60e2d0",
+    "tools_a.s @ master 2eac605a7744": "0009ce0c64c30bca5c744ca357b8b4bf5465de50050ea2f6263de5dd5fb81811",
+    "secao .text.asm.lz4w_unpack montada (identica a libmd.a oficial)": "ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787",
+    "rom.bin do harness": "7582704530511895f18bb1869b518e943941de1d082b1a09ed91833d351ec5ff",
+    "capture.bin (status 0x100 + 8x0x200 dst)": "98a3fd48fcb6a17aadfa101a557f029824aaf9536d1d65cd27e154a7f325aae6"
+  },
+  "toolchain": "SGDK 2.11 binutils oficiais (cpp/as/ld/objdump/objcopy/ar) sob wine 11.17; prova de identidade: bytes da funcao montada == bytes extraidos de libmd.a oficial (cmp OK, 5056 B).",
+  "emulator": {
+    "binary": "MAME 0.289 (mame0289-dirty, Arch Linux)",
+    "machine": "genesis",
+    "invocation": "mame genesis -cart build/rom.zip -noplugins -hashpath <dir-vazio> -skip_gameinfo -autoboot_script capture.lua",
+    "notes_operacionais": [
+      "cart .bin solto e bloqueado pelo gate de fuzzy-match da softlist (rc=6, 'approximately matches the following supported software items'); o mesmo arquivo empacotado em ZIP carrega normalmente",
+      "-skip_gameinfo e obrigatorio: a tela modal 'Genesis (USA, NTSC) ... Press any key to continue' bloqueia o frame loop e o harness nunca roda (espera por input humano, sem limite de recurso)",
+      "-noplugins: o plugin 'data' deste build quebra em reset ('attempt to assign to const variable info' em load_dat.lua:163)",
+      "-hashpath vazio: neutraliza o fuzzy-match da softlist megadriv",
+      "captura via lua: manager.machine.devices[':maincpu'].spaces['program'] (na API 0.289 nao existe global 'machine' nem memory.map() em scripts de autoboot)"
+    ],
+    "rc137_atribuicao": "Os rc=137 observados durante o setup foram SIGKILL enviado pelo NOSSO wrapper 'timeout -k' enquanto o MAME estava parado na tela modal de game-info (esperando tecla). Nao foi limite de memoria/CPU do sandbox nem queda do emulador; quem encerrou: timeout(1) do host; motivo da espera: ausencia de -skip_gameinfo."
+  },
+  "cases": {
+    "c01_lits": {"tipo": "sem dicionario, literais", "jar_rc": 0, "jar_len": 4, "mame_len": 4, "veredito": "IDENTICO; casa com plain_expected"},
+    "c02_short_match": {"tipo": "sem dicionario, match inline curto (dist 2 palavras)", "jar_rc": 0, "jar_len": 10, "mame_len": 10, "veredito": "IDENTICO; casa com plain_expected"},
+    "c03_long_norom": {"tipo": "referencia LONG sem ROM-bit ao proprio bloco", "jar_rc": 0, "jar_len": 14, "mame_len": 14, "veredito": "IDENTICO; casa com plain_expected"},
+    "c04_rom_single": {"tipo": "1 referencia fonte-ROM ao dicionario (stream emitida pelo encoder do jar, modo dict@input)", "jar_rc": 0, "jar_len": 24, "mame_len": 24, "veredito": "IDENTICO"},
+    "c05_rom_successive": {"tipo": "2 referencias fonte-ROM sucessivas (encoder do jar)", "jar_rc": 0, "jar_len": 56, "mame_len": 56, "veredito": "IDENTICO"},
+    "c06_edge_raw_min": {"tipo": "fronteira artesanal: ROM-bit raw=1 (menor valor)", "jar_rc": 1, "jar_err": "IndexOutOfBoundsException LZ4W.java:806", "mame_len": 8, "mame_dst_hex": "8000000000005aa5", "veredito": "DIAGNOSTICO da referencia: jar lanca excecao; 68k oficial le over-read no gap 0x5AA5 sem qualquer checagem"},
+    "c07_edge_raw_max": {"tipo": "fronteira artesanal: ROM-bit raw=0x4000", "jar_rc": 1, "jar_err": "IndexOutOfBoundsException LZ4W.java:806", "mame_len": 8, "mame_dst_hex": "0000000000000000", "veredito": "DIAGNOSTICO da referencia: jar lanca excecao; 68k oficial le fora do ROM (zeros), sem checagem de limites"},
+    "c08_published_d01": {"tipo": "stream real do corpus publicado (dict+stream), 2 referencias ROM", "jar_rc": 0, "jar_len": 162, "mame_len": 162, "veredito": "IDENTICO"}
+  },
+  "conclusao_medida": "Nas streams que o proprio encoder do jar v1.43 produz em modo dicionario (c04, c05, c08), o decoder 68000 oficial (tools_a.s 2.11, byte-idempotico com libmd.a) produz bytes de saida IDENTICOS ao decoder Java, com o dicionario posicionado IMEDIATAMENTE ANTES do stream no espaco de endereco da ROM. O contrato de posicionamento das duas variantes coincide nesse layout; nao ha 'variante incompativel' para saida valida do encoder. As unicas divergencias observadas (c06/c07) sao em offsets artesanais que o encoder jamais emite: ali o jar lanca excecao e o 68k le sem limites - ambos sao comportamentos de ferramenta nao-confiavel sob entrada invalida (diagnostico), nao especificacao de produto.",
+  "pendencia": "Caso 'streams emitidas pelo encoder Rust' permanece com o integrador (rex_codecs.rs e arquivo em WIP do integrador; nao tocado por esta agente). Vetores desta evidencia ficam prontos para replay assim que streams Rust existirem.",
+  "reproduce": "python3 scripts/rex_profiles/codecs/lz4w-sgdk/variants/gen_cases.py <work>; bash scripts/rex_profiles/codecs/lz4w-sgdk/variants/build-rom.sh <work>/build <work>; cd <work>/build && zip -q rom.zip rom.bin; REX_CAPTURE=<work>/out/capture.bin bash scripts/rex_profiles/codecs/lz4w-sgdk/variants/run-capture.sh <work>/build/rom.zip"
+}

@@ -1,0 +1,1 @@
+{"vector": "l06_odd_length_stream", "kind": "negative-spec", "expected_error": "truncated", "mirror_condition": "ERR-trunc", "max_out": null, "stream_len": 5, "note": "Derivado do contrato/formato; a referência aceita truncamento em silêncio (defeito registrado) e NÃO foi executada aqui."}

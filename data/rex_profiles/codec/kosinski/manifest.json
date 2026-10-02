@@ -1,0 +1,39 @@
+{
+  "contract_version": 1,
+  "id": "kosinski",
+  "kind": "codec",
+  "version": 1,
+  "platform": "mega-drive",
+  "variant": "Kosinski base, nao-modular (mdcomp src/lib/kosinski.cc, adaptador LZSS): descritor = palavra de 16 bits em 2 bytes little-endian consumida LSB->MSB; reabastecimento EARLY (proximo descritor lido imediatamente apos o 16o bit, antes de bytes de dados seguintes); bit 1 = literal; bits 00 + 2 bits = match inline len 2..5, dist = 0x100 - byte (0 -> 256); bits 01 = match separado Low/High, Count3=High&7 (len Count3+2) ou 3o byte c (0=FIM, 1=continue sem copia, senao len c+1 ate 256), dist = 0x2000 - (((High&0xF8)<<5)|Low); copia byte a byte com eco/sobreposicao. Modo modular (-m, kosinski_mec.nem) e capacidade SEPARADA nao coberta por estes vetores.",
+  "support": "fixture-only",
+  "source": {
+    "name": "mdcomp (Flamewing) koscmp C++ HEAD, src/lib/kosinski.cc + include/mdcomp/lzss.hh + bitstream.hh",
+    "url": "https://github.com/flamewing/mdcomp",
+    "commit": "72c6df405a75d322c5b3722da46c3abb864d3793",
+    "license": "LGPL-3.0-or-later",
+    "license_url": "https://github.com/flamewing/mdcomp/blob/master/COPYING"
+  },
+  "capabilities": {
+    "variant-fixed": "verified",
+    "vectors-and-holdout": "fixture",
+    "oracle-mirror-parity": "verified",
+    "cross-oracle-parity": "blocked",
+    "product-decode-vs-reference": "blocked",
+    "product-encode-vs-reference": "blocked",
+    "structured-negatives": "fixture",
+    "modular-mode": "blocked",
+    "resource-identification-in-rom": "blocked",
+    "reinsertion": "blocked"
+  },
+  "limits": [
+    "ORACULO UNICO nesta rodada: apenas mdcomp koscmp (LGPL, ferramenta externa — nada transplantado). Paridade com um segundo descodificador 68k classico (p.ex. driver de Sonic disassembly) nao foi executada; declarada blocked.",
+    "mdcomp nao valida recursos sob entrada malformada: stream truncada de um byte foi ACEITA pelo oraculo e produziu saida maior que a esperada (8692 vs 8451 bytes); referencia com dist alem do historico le posicao invalida do stringstream de saida e produz resultado nao-deterministico (medido: rc=0, saida 0 bytes). Erros estruturados do contrato v1 (truncated/invalid-reference/excessive-output/work-limit) sao obrigacoes do PRODUTO sem espelho possivel no oraculo.",
+    "O terminador 'continue' (c==1) nao emite copia nem consome mais bytes — quirk preservado do oraculo e exercitado no golden m06; implementacoes do produto devem aceita-lo, nao rejeita-lo.",
+    "Vetores sao fixtures sinteticas autorais (provenance authored-fixture); nenhuma stream real de ROM Kosinski foi usada. Identificacao de recurso em ROM permanece blocked para o integrador.",
+    "Recompressao nao promete bytes identicos ao encoder mdcomp (parser otimo e especifico da ferramenta); o contrato e decodificacao exata nas duas direcoes produto<->oraculo.",
+    "Modo modular (-m), padding por modulo e endereciamento de multiplos modulos nao cobertos; capacidade separada blocked.",
+    "bytes_consumed MEDIDO no oraculo: o koscmp pode emitir 1 byte de padding APOS o terminator (... 00 F0 00 00); o decoder para no terminator, logo bytes_consumed <= tamanho da stream. Confirmado nas 12 streams reais (espelho strict 12/12).",
+    "Negativos (negative/) sao derivados do CONTRATO v1/formato, auto-verificados pelo espelho Python em modo strict; o oraculo NAO e executado sobre eles (a referencia nao valida nada — defeito registrado pelas sondas do build).",
+    "EXCECAO declarada: golden m02_single_with_eod e literal unico SEM terminator — aceito pelo oraculo por exaustao; sob o contrato do produto seria 'truncated' (por isso nao e negativo: prova a aceitacao da referencia). Nome preservado para nao alterar fixture publicada."
+  ]
+}

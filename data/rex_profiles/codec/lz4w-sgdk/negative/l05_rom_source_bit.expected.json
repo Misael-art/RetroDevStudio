@@ -1,0 +1,1 @@
+{"vector": "l05_rom_source_bit", "kind": "negative-spec", "expected_error": "invalid-reference", "mirror_condition": "ERR-rom-offset", "max_out": null, "stream_len": 8, "note": "Derivado do contrato/formato; a referência aceita truncamento em silêncio (defeito registrado) e NÃO foi executada aqui."}

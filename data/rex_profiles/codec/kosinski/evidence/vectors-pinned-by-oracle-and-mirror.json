@@ -1,0 +1,60 @@
+{
+  "claim": "vectors-and-holdout + oracle-mirror-parity + structured-negatives: 12 plains + 10 goldens + 5 negativos em data/rex_profiles/codec/kosinski/ com resultados fixados pelo oráculo externo koscmp (mdcomp HEAD) ANTES de qualquer implementação do produto; cada plain faz roundtrip exato pelo oráculo E é reproduzida byte a byte pelo espelho Python (kos_mirror.py, early-fetch de descritor calibrada contra as streams reais — 12/12 parity e 12/12 strict/contrato); cada golden artesanal é publicado somente se koscmp -x o decodificar para a saída exata (10/10 confirmados, incluindo m09/m10 discriminantes da fronteira de early-fetch — um leitor 'late fetch' desloca todos os bytes e é rejeitado pelo oráculo); os 5 negativos (k01..k05) são derivados do CONTRATO v1, auto-verificados pelo espelho em modo strict, sem execução do oráculo sobre eles.",
+  "rom": {
+    "sha256": "ea866df797126230b36e27b76ca569d4fd8528d291e86fe578491998ec3d96d1",
+    "size_bytes": 172709,
+    "format": "fixture",
+    "normalization": [
+      {
+        "step": "hash agregado = sha256( sha256sum ordenado (LC_ALL=C) dos arquivos de plain/, golden/ e negative/ concatenado com os bytes de manifest.tsv ); reimpresso pela linha 'agregado=' de scripts/rex_profiles/codecs/kosinski/build-vectors.sh; size_bytes = du -sb do diretório do perfil data/rex_profiles/codec/kosinski (incluindo evidence/), mesma receita dos perfis aplib/lz4w-sgdk. Vetores anteriores permaneceram byte-idênticos (diff do manifest.tsv = só +7 linhas: m09, m10, k01..k05). Observação: size_bytes medido com du -sb ANTES desta reescrita da evidência (conteúdo anterior da evidence/); após expandir este arquivo o diretório mede 174537 — a âncora de integridade é o hash agregado, não o tamanho.",
+        "sha256_after": "ea866df797126230b36e27b76ca569d4fd8528d291e86fe578491998ec3d96d1"
+      }
+    ]
+  },
+  "locator": {
+    "kind": "offset-range",
+    "offset": 0,
+    "length": 0
+  },
+  "bank_state": {},
+  "expected": {
+    "tool": "koscmp CLI (mdcomp src/koscmp.cc; externo ao produto; encode+decode do mesmo oráculo — paridade multi-autor declarada blocked no manifest)",
+    "version": "mdcomp commit 72c6df405a75d322c5b3722da46c3abb864d3793; binário local ~/.cache/rex-codecs/oracle-tools/bin/koscmp",
+    "output_sha256": "7b3fcdfd289bd87f44d0389c5796f1504f2d1036bf51d03f62264443ac3c5a53",
+    "output_len": 3503,
+    "pinned_before_implementation": true
+  },
+  "provenance": "authored-fixture",
+  "negatives": [
+    {
+      "input": "k01_no_terminator_after_literal",
+      "expected_error": "truncated (contrato); oráculo aceitaria por exaustão — defeito registrado pelas sondas do build"
+    },
+    {
+      "input": "k02_separate_missing_high_byte",
+      "expected_error": "truncated (token separado interrompido no byte de dados)"
+    },
+    {
+      "input": "k03_separate_ref_before_history_start",
+      "expected_error": "invalid-reference (dist=3 com histórico vazio; o oráculo lê posição inválida sem erro)"
+    },
+    {
+      "input": "k04_inline_dist_beyond_history",
+      "expected_error": "invalid-reference (inline dist=256 sobre 1 byte de histórico)"
+    },
+    {
+      "input": "k05_excessive_output",
+      "expected_error": "excessive-output com max_out=16; stream BEM-FORMADA (512 bytes de saída) que passa no oráculo e no espelho strict — prova de que o limite é obrigação do produto, não defeito da entrada"
+    },
+    {
+      "input": "m05_separate_long_far.kos sem o último byte (EOD incompleto)",
+      "expected_error": "sonda de defeito: oráculo rc=0 ACEITA e produz 8692 bytes (> esperado 8451), sem erro — o produto DEVE retornar 'truncated' e respeitar max-output"
+    },
+    {
+      "input": "stream artesanal com match separado dist=1 e histórico vazio (02 00 FF FF)",
+      "expected_error": "sonda de defeito: oráculo rc=0 com comportamento não-determinístico de leitura fora do histórico (medido: saída 0 bytes) — o produto DEVE retornar 'invalid-reference'"
+    }
+  ],
+  "timestamp": "2026-09-25: execução de build-vectors.sh no worktree codex/rex-b-codecs (conjunto determinístico e regenerável)",
+  "timestamps_extra": "2026-09-25: camada strict/contrato (kos_mirror strict=True), goldens early-fetch m09/m10 confirmados pelo oráculo, negativos k01..k05 negative-spec; build reproduzido 2x com agregado idêntico ea866df7…; padding de 1 byte pós-terminator medido nas streams do koscmp."
+}

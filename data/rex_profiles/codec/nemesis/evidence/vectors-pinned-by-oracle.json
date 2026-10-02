@@ -1,0 +1,58 @@
+{
+  "claim": "vectors-and-holdout (roundtrip-only): 9 plains no domínio (múltiplos de 32) codificados por nemcmp e decodificados por nemcmp -x com saída EXATA; cada par (plain .bin, stream .nem) publicado com hashes. Stream artesanal (golden literal) bloqueada com motivo declarado — ver manifest. Negativos medidos documentam padding silencioso fora do domínio. + structured-negatives: 7 negativos negative-spec (n01..n07) com sondas determinísticas re-asseridas a cada build (padding 6->32/100->128, garbage 64B->1048544B exatos, truncado com tamanho pleno e conteúdo divergente, prefixo que mata o oráculo no limite do sandbox rc=137, stream real p/ max_out).",
+  "rom": {
+    "sha256": "87f4f1609669e0cccf8942f59e1f6d038ec8c1789ec03e29d92b0bf43de84993",
+    "size_bytes": 96183,
+    "format": "fixture",
+    "normalization": [
+      {
+        "step": "hash agregado = sha256( sha256sum ordenado (LC_ALL=C) dos arquivos de plain/ e negative/ concatenado com os bytes de manifest.tsv ); reimpresso pela linha 'agregado=' do build-vectors.sh; size_bytes = du -sb do diretório do perfil data/rex_profiles/codec/nemesis medido ANTES desta reescrita da evidência; a âncora de integridade é o hash agregado, não o tamanho. Vetores publicados anteriores byte-idênticos (diff do manifest.tsv puramente aditivo).",
+        "sha256_after": "87f4f1609669e0cccf8942f59e1f6d038ec8c1789ec03e29d92b0bf43de84993"
+      }
+    ],
+    "size_bytes_pre_evidence_rewrite": 150560
+  },
+  "locator": {
+    "kind": "offset-range",
+    "offset": 0,
+    "length": 0
+  },
+  "bank_state": {},
+  "expected": {
+    "tool": "nemcmp CLI (mdcomp src/nemcmp.cc; externo ao produto; encode+decode do mesmo oráculo — paridade multi-autor blocked)",
+    "version": "mdcomp commit 72c6df405a75d322c5b3722da46c3abb864d3793; binário local ~/.cache/rex-codecs/oracle-tools/bin/nemcmp",
+    "output_sha256": "5cd6c9107ba7dd694b5c667b7706d6f750a19eb959473cdb50d49ef2927b5a98",
+    "output_len": 1519,
+    "pinned_before_implementation": true
+  },
+  "provenance": "authored-fixture",
+  "negatives": [
+    {
+      "input": "plain de 6 bytes (fora do domínio múltiplo-de-32)",
+      "expected_error": "oráculo: aceita no encode e devolve 32 bytes no decode (padding silencioso) — produto deve retornar erro estruturado, não replicar"
+    },
+    {
+      "input": "plain de 100 bytes (fora do domínio)",
+      "expected_error": "oráculo: decode devolve 128 bytes (padding)"
+    },
+    {
+      "input": "bytes não-Nemesis dados a nemcmp -x (registrado em ORACLE-INVENTORY limitação 1)",
+      "expected_error": "oráculo: loop sem limite de trabalho consumindo CPU >60s — toda invocação exige timeout; produto deve ter work-limit/cancelamento"
+    }
+  ],
+  "timestamp": "2026-09-25: execução de build-vectors.sh no worktree codex/rex-b-codecs | 2026-09-25 (2ª rodada): negativos negative-spec + sondas re-assertivas no build",
+  "negative_spec": {
+    "source": "scripts/rex_profiles/codecs/nemesis/negative-spec.json (publicado em negative/)",
+    "files": [
+      "n01_align_input_6b.bin",
+      "n02_align_input_100b.bin",
+      "n03_empty_stream.nem",
+      "n04_garbage_ff_64b.nem",
+      "n05_truncated_last_byte.nem",
+      "n06_hanging_prefix.nem",
+      "n07_planes_64k.nem",
+      "negative-spec.json"
+    ],
+    "method": "derivados do CONTRATO v1/domínio, NÃO do oráculo; cada spec tem sonda determinística no build que reproduz o número medido (2026-09-25) — divergência aborta; o oráculo nunca é verificador do spec (a referência não valida: segfault no encode vazio, padding silencioso, truncado falsa-aceito, loop morto só pelo sandbox)"
+  }
+}
