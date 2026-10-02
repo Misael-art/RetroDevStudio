@@ -2269,3 +2269,71 @@ para a agente aplicar ao rebasear). Ref remota velha de
 em andamento no momento do registro; veredicto por SHA a conferir na PR #95.
 Permanecem sem merge, release ou promoção; pendências com dono: SMPS de C, WIP do
 relatório de A, B (untracked, trabalho em curso), auditoria de segurança completa.
+
+### 2026-10-02 — consolidação das frentes no destino único: #92/#93/#94/#96 incorporados; #97 bloqueado por P1; ressalvas C/D e artefato órfão registrados (Experimental; proposta isolada, sem merge remoto/release)
+
+**Topologia real medida antes do merge.** `merge-base 0194f94 8cf2aec = f0d0756`:
+o tronco `codex/rex-integrator-crates-registry` e a cadeia MUGEN são IRMÃOS sobre
+`f0d0756` — a frase do checkpoint de 2026-10-01 ("descende linearmente do
+crates-registry") vale para conteúdo e intenção, não para ancestralidade de
+commits; o merge de consolidação é o que une as linhas de fato. Histórico
+preservado: merge `--no-ff`, checkpoint (i) intacto, nenhum commit reescrito.
+
+**Branch de consolidação isolada:** `codex/rex-integrator-consolidation`
+(worktree `~/Projects/REX-INTEGRATION-2026-10-01`), sobre `0194f94`:
+`2e8b545` merge de `codex/rex-integrator-mugen-chain` @ `8cf2aec` (#92 —
+resolução do conflito do Memory Bank por cronologia dos checkpoints:
+(o)→(n)→(i)→(m)→(l)→(k)→(j)→(h), título (h) do tronco, zero duplicação; as duas
+linhas "0194f94 continua fora da base" agora trazem atualização do merge) →
+`dfeb0fe` curadoria C @ `a055777` (#93) → `5da9d1b` curadoria D @ `5fba745`
+(#94) → `052d3d6` frente A @ `c469f27` (#96). Território de cada frente
+verificado contra o HEAD antes de cada merge: só `scripts|docs|data
+/rex_corpus_{a,c,d}/`, nenhum arquivo fora, nenhum binário >200 kB. `#95`
+(abortado) permanece OPEN sem ação — supersedido por #96, fechamento é decisão
+do operador. **#84 (`codex/rex-gameplay-recovery`) fica FORA desta consolidação**
+por falta de revisão específica e coordenação de dependências; nada foi feito
+contra a branch.
+
+**#97 (B) NÃO incorporado — bloqueio verificável.** O review independente
+(`~/Projects/REX-HANDOFF-2026-10-01/review-pr97/review-pr97.json`, commit
+`420e632`) achou P1: `$FF4000` é WRAM (não porta de dados VDP) e o consumidor
+pós-decode copia um layout **64×64 de IDs de bloco em bytes** (stride 128, pad 64
+por linha) para `$FF1020` — não é nametable VDP 64×32; os campos "paleta/flip/
+prioridade" do compositor do #97 não são consumidos por essa rotina. O estado
+remoto de `codex/rex-corpus-b` segue em `420e632` (sem commit de correção). A
+paridade 196/196 contra oráculos não é afetada pelo P1; os vínculos gráficos do
+Sonic 1 SIM. **Nenhum desses vínculos entra no produto** até a frente B corrigir
+em seu território (reclassificar o destino como WRAM/layout de blocos 64×64 e
+re-rotular os renders de mapa como hipótese não-consumida). Bloqueio para a
+integração de B: commit novo em `codex/rex-corpus-b` após `420e632` corrigindo o
+enunciado.
+
+**Ressalvas C/D registradas antes de aceitar alegações (não corrigidas aqui —
+história não reescrita; dono: frentes).** (C) §5 de
+`docs/rex_corpus_c/AUDIO_CHAIN_ANCIENT_MD.md` diz que o padrão `2a 02 1c`
+"confirma um controlador da família SMPS": padrão de 3 bytes não identifica
+família — vale como refutação de detecção por banner (necessária, insuficiente),
+não como identificação; "candidato SMPS não refutado" é o enunciado suportável.
+C não pode concluir ausência de SMPS a partir de banner ausente (SMPS-Z80 não
+publica banner — o próprio §5 documenta). (D) `frame-record.schema.json` não
+inclui `rom_used` no nível do registro (só os manifests do CLI o carregam): o
+catálogo proposto precisa do campo no schema para a invalidação por revisão de
+ROM funcionar; os hashes RGBA precisam ser datados APÓS a mudança RGB/alpha;
+ranges de DPLC continuam com os limites do §8 (mecanismo incremental não
+re-derivado). Nenhuma dessas correções foi feita em território alheio.
+
+**Artefato local órfão registrado sem incorporação.**
+`data/rex_profiles/kosinski_runtime/evidence/2026-09-28-adaptador-backend/
+ci-consulta-a08c2c6.log` (untracked no checkout canônico, 1264 B, polling de CI
+de 2026-09-28, 8 tentativas `in_progress`): permanece no lugar, NÃO incorporado a
+nenhum manifesto de evidência (não verificado contra uma execução reconstituída);
+decisão de incorporar/descartar é da próxima varredura de evidência do
+kosinski_runtime.
+
+**Política npm de scripts.** A política canônica do repo é `.npmrc
+strict-allow-scripts=true` + `allowScripts {esbuild@0.25.12: true, fsevents:
+false}` presa por `scripts/security-contract.test.mjs`. A config global do host
+(`allow-scripts = ["9router,@bonsai-ai/claude-code"]`) é ambiente do operador,
+fora do repo; NADA foi afrouxado. Não existe gate `EALLOWSCRIPTS` no repo; se
+apareceu em log, é do toolchain externo do host — investigar pela configuração
+npm local, sem imprimir valores além da política versionada.
