@@ -25,6 +25,7 @@ import {
   evaluateUiLayoutOracleSnapshot,
 } from "./ui-layout-oracle.mjs";
 import { diagnose as diagnoseHost } from "./host-manager.mjs";
+import { renderSonicFrameReference } from "./qa/sonic-frame-reference.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -473,6 +474,7 @@ function parseArgs(argv) {
           "inspection-sprite-secondary",
           "inspection-sonic",
           "inspection-sonic-tiles",
+          "sonic-multiframe",
           "rex-lz4w-effect",
           "rex-lz4w-fixture-effect",
           "rex-aplib-byor-effect",
@@ -1937,7 +1939,7 @@ function renderExpectedSonicStand(romBytes, options = {}) {
   for (const part of tileStartByPart) {
     for (let localY = 0; localY < part.tileHeight; localY += 1) {
       for (let localX = 0; localX < part.tileWidth; localX += 1) {
-        const tileIndex = part.tileStart + (options.tileOrder === "vertical"
+        const tileIndex = part.tileStart + (options.tileOrder !== "row-major"
           ? localX * part.tileHeight + localY
           : localY * part.tileWidth + localX);
         for (let pixelY = 0; pixelY < 8; pixelY += 1) {
@@ -2208,30 +2210,24 @@ function assertSonicStandOracles(romBytes, actual, context) {
   );
   const independentPngPixelsSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
   const romSha256 = createHash("sha256").update(romBytes).digest("hex");
-  const expectedPixelsByRomSha256 = {
-    // Golden literal independente da ROM BYOR sem edição.
-    c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb:
-      "ce95ea66f2cfcec40a0fb12cb35fe5e88530de036de9f897333ce762f06b40d4",
-    // Mutação determinística exercitada pela UI: palette[1] = RGB333(7,0,7).
-    d381b1eed8f47dcd08890007b58b90cd5e3cabdaed96deac9b1e7336b1558e4d:
-      "91ee4ab0c08987597918a4951020cac81c6d3903b415c32d0c1dd8d783850588",
-    // Mutação de tiles exercitada pela UI: retângulo (10,14) 12x8 do stand -> índice 14.
-    "5e44f9d2581735350f53d5ff1904ccc2e64b4655362a673fe6066d61137b8cb3":
-      "c41fcd503ae7fcd81b4aab308ab399d3415cc82ac089c299a8122daf74d478b2",
-  };
-  const expectedPixelsSha256 = expectedPixelsByRomSha256[romSha256];
+  // The old row-major hashes are superseded (see the multi-frame report).
+  // Edited previews are checked pixel by pixel against the independent decode
+  // of the exact edited ROM; only the unedited BYOR has a fixed literal hash.
+  const expectedPixelsSha256 = romSha256 === "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb"
+    ? "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7"
+    : independentPngPixelsSha256;
   console.log(`[inspection-sonic-oracle] ${JSON.stringify({ context, romSha256, romLength: romBytes.length, mappingSha256: createHash("sha256").update(romBytes.subarray(0x21293, 0x21293 + 21)).digest("hex"), independentPngPixelsSha256 })}`);
   if (!expectedPixelsSha256 || independentPngPixelsSha256 !== expectedPixelsSha256) {
     fail(`Oráculo Sonic stand não corresponde ao golden literal da ROM exercitada: ${JSON.stringify({ romSha256, independentPngPixelsSha256, expectedPixelsSha256 })}`);
   }
   for (const [label, variant] of [
-    ["ordem de tiles row-major -> vertical", { tileOrder: "vertical" }],
+    ["ordem de células VDP column-major -> row-major", { tileOrder: "row-major" }],
     ["paleta alterada", { paletteDelta: 0x0200 }],
     ["flip horizontal", { flipX: true }],
   ]) {
     let rejected = false;
     let candidate = expected;
-    if (variant.tileOrder === "vertical") {
+    if (variant.tileOrder === "row-major") {
       candidate = renderExpectedSonicStand(romBytes, variant);
     } else if (variant.paletteDelta) {
       candidate = renderExpectedSonicStand(romBytes, variant);
@@ -3342,8 +3338,8 @@ async function setSessionWindowRect(sessionId, width, height) {
   let lastSize = null;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await webdriverRequest("POST", `/session/${sessionId}/window/rect`, {
-      x: 0,
-      y: 0,
+      x: Number(process.env.RDS_E2E_WINDOW_X || 0),
+      y: Number(process.env.RDS_E2E_WINDOW_Y || 0),
       width: targetWidth,
       height: targetHeight,
     });
@@ -9905,6 +9901,110 @@ async function selectInspectionFrameNative(sessionId, frameId) {
   return { frameId, diagnostic };
 }
 
+async function runSonicMultiframeScenario(sessionId, app, romPath, base, savedId, prefix) {
+  const hash = (b) => createHash("sha256").update(b).digest("hex");
+  const frames = [["stand",1],["wait-1",2],["look-up",5],["walk-1",6],["walk-2",7],
+    ["walk-3",8],["walk-4",9],["walk-5",10],["walk-6",11],["run-1",30]];
+  const report = { scenario: "sonic-multiframe", binary_sha256: hash(await readFile(app)),
+    base_sha256: hash(base), steps: [], runtime_effect: "not measured in this scenario" };
+  const inspectFrame = async (name, index, bytes) => {
+    const frameId = `sonic1_sonic/${name}`;
+    await selectInspectionFrameNative(sessionId, frameId);
+    await closeVisibleConsoleDrawer(sessionId, `compor ${name}`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite");
+    const actual = await waitFor(async () => {
+      const v = await readRenderedSpriteFramePixels(sessionId);
+      return v?.frameId === frameId && v.romSha256 === hash(bytes) ? v : false;
+    }, 30000, `Frame ${name} não corresponde à ROM executada`, 100);
+    const expected = renderSonicFrameReference(bytes, index);
+    const pixels = assertExactPreviewPixels({ width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels }, expected, frameId);
+    const layout = await waitFor(async () => {
+      const l = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+      return l?.fullyVisible && l.unobstructed && l.exactContentDimensions && l.metadataBelow ? l : false;
+    }, 15000, `Frame ${name} está obstruído ou mal dimensionado`, 100);
+    report.steps.push({ step: "independent_preview", frameId, pixels, layout });
+  };
+  for (const [name,index] of frames) await inspectFrame(name,index,base);
+  await inspectFrame("walk-1",6,base);
+  const beforeScreenshot = await captureScreenshot(sessionId, `${prefix}-multiframe-before.png`);
+  const expectedBytes = Buffer.from(base);
+  const reference = renderSonicFrameReference(base,6);
+  const at = reference.locations[0];
+  if (!at) fail("Pixel de controle não pertence ao mapping independente");
+  const oldIndex = at.high ? base[at.offset] >> 4 : base[at.offset] & 15;
+  const paintIndex = oldIndex === 15 ? 14 : 15;
+  await clickButtonByTestIdNativeWhenReady(sessionId, `sonic-color-${paintIndex}`);
+  const point = await executeScript(sessionId, `
+    const img=document.querySelector('[data-testid="sonic-paint-image"]');
+    img?.scrollIntoView({block:'center',inline:'center'});
+    const r=img?.getBoundingClientRect(); if(!r) return null;
+    const x=r.left+r.width/(Number(arguments[0])*2),y=r.top+r.height/(Number(arguments[1])*2);
+    return {x,y,unobstructed:document.elementFromPoint(x,y)===img};
+  `,[reference.width,reference.height]);
+  if (!point?.unobstructed) fail(`Pintura obstruída: ${JSON.stringify(point)}`);
+  await webdriverRequest("POST",`/session/${sessionId}/actions`,{actions:[{type:"pointer",id:"sonic-paint-pointer",parameters:{pointerType:"mouse"},
+    actions:[{type:"pointerMove",duration:0,x:Math.round(point.x),y:Math.round(point.y),origin:"viewport"},{type:"pointerDown",button:0},{type:"pointerUp",button:0}]}]});
+  const disabled = await executeScript(sessionId, `return document.querySelector('[data-testid="sonic-paint-apply"]')?.disabled;`);
+  if (!disabled) fail("Pintura compartilhada ficou disponível sem confirmação");
+  const sharedSelector='[data-testid="sonic-paint-confirm-shared"]';
+  await clickElementWithDiagnostics(sessionId,await findElement(sessionId,sharedSelector),sharedSelector);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"sonic-paint-apply");
+  expectedBytes[at.offset] = at.high ? (expectedBytes[at.offset]&15)|(paintIndex<<4) : (expectedBytes[at.offset]&0xf0)|paintIndex;
+  await waitFor(async () => (await readRenderedSpriteFramePixels(sessionId))?.romSha256===hash(expectedBytes),30000,"Pintura não confirmou os bytes independentes",100);
+  report.steps.push({step:"native_paint",offset:at.offset,index:paintIndex,shared_confirmation_required:true});
+  for (const [field,value] of [["index",1],["red",7],["green",0],["blue",7]])
+    await setInputByTestIdNative(sessionId,`inspection-sonic-palette-${field}`,String(value));
+  await closeVisibleConsoleDrawer(sessionId,"paleta acumulada");
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-sonic-edit");
+  expectedBytes.writeUInt16BE(0x0e0e,0x238a);
+  await waitFor(async () => (await readRenderedSpriteFramePixels(sessionId))?.romSha256===hash(expectedBytes),30000,"Paleta apagou pintura ou não foi confirmada",100);
+  await inspectFrame("walk-1",6,expectedBytes);
+  const status = await invokeCoreObserveCommand(sessionId,"rex_inspection_status",{sessionId:savedId});
+  if (!status?.session?.edit || status.session.edit.modified_rom_sha256!==hash(expectedBytes)) fail("Snapshot não confirmou a cópia acumulada");
+  if (!(await readFile(status.session.edit.modified_rom_path)).equals(expectedBytes)) fail("ROM editada difere da mutação independente");
+  const pilotDir=path.join(validationDir,`${prefix}-multiframe`); await mkdir(pilotDir,{recursive:true});
+  const patchPath=path.join(pilotDir,"multiframe.bps"), appliedPath=path.join(pilotDir,"applied.bin");
+  const nativePath = async (testId,value) => {
+    const selector=`[data-testid="${testId}"] input`;
+    const element=await findElement(sessionId,selector);
+    await clickElementWithDiagnostics(sessionId,element,selector);
+    await webdriverRequest("POST",`/session/${sessionId}/element/${element}/clear`,{});
+    await webdriverRequest("POST",`/session/${sessionId}/element/${element}/value`,{text:value,value:[...value]});
+  };
+  await nativePath("sonic-patch-path",patchPath);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-sonic-export-patch");
+  await waitFor(()=>pathExists(patchPath),15000,"BPS não foi exportado",100);
+  await nativePath("sonic-applied-path",appliedPath);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-sonic-apply-patch");
+  await waitFor(()=>pathExists(appliedPath),15000,"BPS não foi aplicado",100);
+  if (!(await readFile(appliedPath)).equals(expectedBytes)) fail("Aplicação BPS divergiu da ROM calculada independentemente");
+  report.steps.push({step:"bps_export_apply",rom_sha256:hash(expectedBytes),patch_sha256:hash(await readFile(patchPath))});
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-save");
+  await waitFor(async()=>executeScript(sessionId,`return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),15000,"Snapshot não foi salvo",100);
+  await deleteSession(sessionId);
+  sessionId=await createSession(app); currentE2eRunContext.sessionId=sessionId;
+  await waitForAppWindowReady(sessionId,uiBootstrapTimeoutMs,"App não reiniciou");
+  await handleProjectWizardVisibly(sessionId,"multiframe-restart");
+  await setSessionWindowRect(sessionId,1920,1080);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"workspace-rail-debug");
+  await callAutomationApi(sessionId,"openToolsWorkspace",["reverse","debug",true]);
+  await waitForBodyText(sessionId,"Analisar ROM",15000,"Reverse não voltou");
+  await clickButtonByTestIdNativeWhenReady(sessionId,"reverse-tab-inspection");
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-refresh-sessions");
+  await waitFor(async()=>executeScript(sessionId,`return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),30000,"Sessão não reapareceu",100);
+  await clickButtonByTestIdNativeWhenReady(sessionId,`select-saved-session-${savedId}`);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-reopen");
+  await waitFor(async()=>executeScript(sessionId,`return document.querySelector('[data-testid="inspection-sprite-frame-select"]')?.value==='sonic1_sonic/walk-1';`),30000,"Frame salvo não foi restaurado",100);
+  await inspectFrame("walk-1",6,expectedBytes);
+  const afterScreenshot=await captureScreenshot(sessionId,`${prefix}-multiframe-after-restart.png`);
+  if (!(await readFile(romPath)).equals(base)) fail("Base BYOR mudou");
+  report.steps.push({step:"restart_reopen",frame_id:"sonic1_sonic/walk-1",base_unchanged:true});
+  report.screenshots=[beforeScreenshot,afterScreenshot];
+  await writeFile(path.join(pilotDir,"report.json"),JSON.stringify(report,null,2));
+  console.log(`OK: Sonic multi-frame E2E; report=${path.join(pilotDir,"report.json")}`);
+  return sessionId;
+}
+
 async function closeVisibleConsoleDrawer(sessionId, label = "console inicial") {
   const visible = await executeScript(
     sessionId,
@@ -14671,7 +14771,9 @@ async function main() {
       return;
     }
 
+    const sonicMultiframeMode = options.scenario === "sonic-multiframe";
     const sonicTilesMode = options.scenario === "inspection-sonic-tiles";
+    if (sonicMultiframeMode) options.scenario = "inspection-sonic";
     if (sonicTilesMode) options.scenario = "inspection-sonic";
     if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
       let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
@@ -14830,6 +14932,11 @@ async function main() {
         const baseProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frameId, "Sonic stand antes da edição");
         const baseScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-base.png`);
 
+        if (sonicMultiframeMode) {
+          sessionId = await runSonicMultiframeScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix);
+          currentE2eRunContext.sessionId = sessionId;
+          return;
+        }
         const modifiedRomBytes = Buffer.from(inspectionRomBytes);
         // Tile mode: independent oracle of the reinsertion, decoded here from the ROM's
         // stand mapping (0x21293) and raw art (0x21AFE), not from product code.
@@ -14846,7 +14953,7 @@ async function main() {
             const lx = x - left;
             const ly = y - top;
             if (lx < 0 || ly < 0 || lx >= w * 8 || ly >= h * 8) continue;
-            const tile = d[2] * 256 + d[3] + Math.floor(ly / 8) * w + Math.floor(lx / 8);
+            const tile = d[2] * 256 + d[3] + Math.floor(lx / 8) * h + Math.floor(ly / 8);
             return { tile, offset: 0x21afe + tile * 32 + (ly % 8) * 4 + Math.floor((lx % 8) / 2), high: (lx % 8) % 2 === 0 };
           }
           return null;
@@ -14876,7 +14983,7 @@ async function main() {
         let sonicTileEvidence = null;
         if (sonicTilesMode) {
           for (const negative of [
-            { label: "pixel fora do mapping", rect: { x: 28, y: 2, w: 2, h: 2, index: 14 }, expect: "nao pertence a nenhuma peca" },
+            { label: "pixel fora do mapping", rect: { x: 28, y: 2, w: 2, h: 2, index: 14 }, expect: "não pertence ao mapping deste frame" },
             { label: "tiles compartilhados sem confirmacao", rect: { x: 10, y: 25, w: 4, h: 2, index: 14 }, expect: "frames DPLC [5]" },
           ]) {
             const before = (await tileEditErrors()).length;

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::extract::{canonical_dir_under, reject_if_symlink, write_file_immutable};
 use super::inspection::InspectionSession;
 use super::rom_library::{decomp_work_dir, sha256_hex, ArtifactRef};
+use super::sonic_sprite as sonic;
 use crate::tools::reverse::loader::rex_read_rom;
 
 pub const HAMOOPIG_REFERENCE_SHA256: &str =
@@ -39,7 +40,7 @@ const SONIC1_SOURCE_PALETTE_SHA256: &str =
 const SONIC1_SOURCE_MAPPING_SHA256: &str =
     "18749e9ba7ab2eae27ebafd451a6f8a05e42b426b841d03d6ef28b08ed0abae1";
 const SONIC1_STAND_PIXELS_SHA256: &str =
-    "ce95ea66f2cfcec40a0fb12cb35fe5e88530de036de9f897333ce762f06b40d4";
+    "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7";
 const SONIC1_STAND_MAPPING: [u8; 21] = [
     0x04, 0xec, 0x08, 0x00, 0x00, 0xf0, 0xf4, 0x0d, 0x00, 0x03, 0xf0, 0x04, 0x08, 0x00, 0x0b, 0xf0,
     0x0c, 0x08, 0x00, 0x0e, 0xf8,
@@ -245,6 +246,27 @@ pub struct InspectionSpriteFrame {
     pub rom_evidence: Vec<String>,
     pub donor_evidence: Vec<String>,
     pub limitations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sonic_context: Option<SonicFrameContext>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SonicTileUse {
+    pub art_tile: usize,
+    pub frames: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SonicFrameContext {
+    pub geometry_version: String,
+    pub mapping_index: usize,
+    pub anchor_x: i32,
+    pub anchor_y: i32,
+    pub dplc_offset: usize,
+    pub palette_rgba: Vec<[u8; 4]>,
+    pub tile_uses: Vec<SonicTileUse>,
+    pub pixel_art_tiles: Vec<Option<usize>>,
+    pub frames: Vec<sonic::FrameChoice>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -407,59 +429,56 @@ fn compose_sonic_rgba(
     flip_x: bool,
     flip_y: bool,
 ) -> Result<RgbaImage, String> {
+    let geometry = sonic::Frame {
+        index: 1,
+        mapping_offset: 0,
+        dplc_offset: 0,
+        width,
+        height,
+        anchor_x: 16,
+        anchor_y: 20,
+        pieces: parts
+            .iter()
+            .map(|p| sonic::Piece {
+                slot: p.tile_start,
+                columns: p.tile_width,
+                rows: p.tile_height,
+                x: i32::from(p.x),
+                y: i32::from(p.y),
+                flip_x: false,
+                flip_y: false,
+            })
+            .collect(),
+        slots: (0..tile_data.len() / 32).collect(),
+    };
+    compose_sonic_geometry(tile_data, palette, &geometry, flip_x, flip_y)
+}
+
+fn compose_sonic_geometry(
+    tile_data: &[u8],
+    palette: &[u8],
+    frame: &sonic::Frame,
+    flip_x: bool,
+    flip_y: bool,
+) -> Result<RgbaImage, String> {
     if palette.len() != PALETTE_SIZE {
-        return Err("paleta Sonic 1 incompatível com o manifesto".to_string());
+        return Err("paleta Sonic incompleta".into());
     }
-    let required_tiles = parts
-        .iter()
-        .map(|part| part.tile_start + part.tile_width * part.tile_height)
-        .max()
-        .unwrap_or_default();
-    if tile_data.len() < required_tiles * TILE_BYTES {
-        return Err("art bruto Sonic 1 curto para o mapping stand".to_string());
-    }
-    let mut canvas = RgbaImage::from_pixel(width, height, palette_rgba(palette, 0));
-    let origin_x = 16i32;
-    let origin_y = 20i32;
-    for part in parts {
-        for local_y in 0..part.tile_height {
-            for local_x in 0..part.tile_width {
-                let tile_index = part.tile_start + local_y * part.tile_width + local_x;
-                let tile = &tile_data[tile_index * TILE_BYTES..(tile_index + 1) * TILE_BYTES];
-                for pixel_y in 0..8i32 {
-                    for pixel_x in 0..8i32 {
-                        let packed = tile[pixel_y as usize * 4 + pixel_x as usize / 2];
-                        let palette_index = if pixel_x % 2 == 0 {
-                            packed >> 4
-                        } else {
-                            packed & 0x0f
-                        };
-                        let source_x = origin_x + i32::from(part.x) + local_x as i32 * 8 + pixel_x;
-                        let source_y = origin_y + i32::from(part.y) + local_y as i32 * 8 + pixel_y;
-                        let dest_x = if flip_x {
-                            width as i32 - 1 - source_x
-                        } else {
-                            source_x
-                        };
-                        let dest_y = if flip_y {
-                            height as i32 - 1 - source_y
-                        } else {
-                            source_y
-                        };
-                        if dest_x < 0
-                            || dest_y < 0
-                            || dest_x >= width as i32
-                            || dest_y >= height as i32
-                        {
-                            return Err("mapping Sonic 1 ultrapassa o canvas nativo".to_string());
-                        }
-                        canvas.put_pixel(
-                            dest_x as u32,
-                            dest_y as u32,
-                            palette_rgba(palette, palette_index),
-                        );
-                    }
-                }
+    let mut canvas = RgbaImage::from_pixel(frame.width, frame.height, palette_rgba(palette, 0));
+    for y in 0..frame.height {
+        for x in 0..frame.width {
+            let sx = if flip_x { frame.width - 1 - x } else { x };
+            let sy = if flip_y { frame.height - 1 - y } else { y };
+            if let Some(location) = frame.source_pixel(sx, sy) {
+                let byte = *tile_data
+                    .get(location.byte_offset - sonic::ART_OFFSET)
+                    .ok_or("art Sonic curto para o mapping/DPLC")?;
+                let index = if location.high_nibble {
+                    byte >> 4
+                } else {
+                    byte & 15
+                };
+                canvas.put_pixel(x, y, palette_rgba(palette, index));
             }
         }
     }
@@ -529,152 +548,139 @@ fn artifact_name_component(value: &str) -> String {
         .collect()
 }
 
-fn compose_sonic_stand(
+/// Reads the original and the accumulated copy, authorizing only changes in
+/// the bounded raw art and palette ranges. Shared by preview and edit paths.
+pub(crate) fn read_sonic_session_rom(
     session: &InspectionSession,
+) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let (identity, base) = rex_read_rom(Path::new(&session.rom_path))?;
+    if session.identity.normalized_sha256 != SONIC1_REFERENCE_SHA256
+        || identity.normalized_sha256 != SONIC1_REFERENCE_SHA256
+    {
+        return Err(
+            "sprite_manifest_rom_mismatch: ROM base não corresponde ao perfil Sonic".into(),
+        );
+    }
+    let Some(edit) = &session.edit else {
+        return Ok((base.clone(), base));
+    };
+    if edit.resource_id != "sonic1_sonic" || edit.original_rom_sha256 != SONIC1_REFERENCE_SHA256 {
+        return Err("sprite_edit_identity_mismatch: edição pertence a outra base/recurso".into());
+    }
+    let edits = canonical_dir_under(
+        &decomp_work_dir(),
+        &["extract", SONIC1_REFERENCE_SHA256, "edits"],
+    )?;
+    let path = Path::new(&edit.modified_rom_path);
+    reject_if_symlink(path)?;
+    if fs::canonicalize(path).map_err(|e| e.to_string())?.parent() != Some(edits.as_path()) {
+        return Err("sprite_edit_path_scope: cópia editada fora do diretório autorizado".into());
+    }
+    let (modified, rom) = rex_read_rom(path)?;
+    if modified.normalized_sha256 != edit.modified_rom_sha256 || rom.len() != base.len() {
+        return Err("sprite_edit_identity_mismatch: cópia mudou desde a edição".into());
+    }
+    if base.iter().zip(&rom).enumerate().any(|(i, (a, b))| {
+        a != b
+            && !(sonic::ART_OFFSET..sonic::ART_OFFSET + sonic::ART_SIZE).contains(&i)
+            && !(sonic::PALETTE_OFFSET..sonic::PALETTE_OFFSET + PALETTE_SIZE).contains(&i)
+    }) {
+        return Err("sprite_edit_scope: cópia alterou bytes fora da arte e paleta".into());
+    }
+    Ok((base, rom))
+}
+
+fn compose_sonic_frame(
+    session: &InspectionSession,
+    frame_id: &str,
     flip_x: bool,
     flip_y: bool,
 ) -> Result<InspectionSpriteFrame, String> {
-    let manifest = &SONIC1_MANIFEST;
-    if session.identity.normalized_sha256 != manifest.rom_sha256 {
-        return Err(format!(
-            "sprite_manifest_session_mismatch: {} exige sessão com ROM BYOR {}, observado {}",
-            manifest.resource_id, manifest.rom_sha256, session.identity.normalized_sha256
-        ));
-    }
-    let selected_rom_path = session
-        .edit
-        .as_ref()
-        .map(|edit| edit.modified_rom_path.as_str())
-        .unwrap_or(session.rom_path.as_str());
-    let rom_path = Path::new(selected_rom_path);
-    if session.edit.is_some() {
-        let edits_dir = canonical_dir_under(
-            &decomp_work_dir(),
-            &["extract", &session.identity.normalized_sha256, "edits"],
-        )?;
-        reject_if_symlink(rom_path)?;
-        let canonical_rom_path = fs::canonicalize(rom_path)
-            .map_err(|error| format!("sprite_edit_path_unreadable: {error}"))?;
-        if canonical_rom_path.parent() != Some(edits_dir.as_path()) {
-            return Err(
-                "sprite_edit_path_scope: cópia editada fora do diretório da sessão".to_string(),
-            );
-        }
-    }
-    let (identity, rom) = rex_read_rom(rom_path)?;
-    if let Some(edit) = &session.edit {
-        if edit.resource_id != manifest.resource_id
-            || edit.frame_id != manifest.frame_id
-            || edit.original_rom_sha256 != session.identity.normalized_sha256
-            || edit.modified_rom_sha256 != identity.normalized_sha256
-        {
-            return Err(
-                "sprite_edit_identity_mismatch: edição não corresponde à sessão Sonic".to_string(),
-            );
-        }
-    } else if identity.normalized_sha256 != manifest.rom_sha256 {
-        return Err(format!(
-            "sprite_manifest_rom_mismatch: {} exige ROM BYOR {}, observado {}",
-            manifest.resource_id, manifest.rom_sha256, identity.normalized_sha256
-        ));
-    }
-    let required_end = [
-        manifest.tile_data_offset + manifest.tile_data_size,
-        manifest.palette_offset + PALETTE_SIZE,
-        manifest.descriptor_offset + manifest.descriptors.len(),
-    ]
-    .into_iter()
-    .max()
-    .unwrap();
-    if rom.len() < required_end {
-        return Err("sprite_manifest_rom_short: ROM não contém o recurso Sonic 1".to_string());
-    }
-    let parts = decode_sonic_parts(
-        &rom[manifest.descriptor_offset..manifest.descriptor_offset + manifest.descriptors.len()],
-    )?;
-    let image = compose_sonic_rgba(
-        &rom[manifest.tile_data_offset..manifest.tile_data_offset + manifest.tile_data_size],
-        &rom[manifest.palette_offset..manifest.palette_offset + PALETTE_SIZE],
-        &parts,
-        manifest.width,
-        manifest.height,
+    let (base, rom) = read_sonic_session_rom(session)?;
+    let geometry = sonic::read_frame(&rom, frame_id)?;
+    let palette = &rom[sonic::PALETTE_OFFSET..sonic::PALETTE_OFFSET + PALETTE_SIZE];
+    let image = compose_sonic_geometry(
+        &rom[sonic::ART_OFFSET..sonic::ART_OFFSET + sonic::ART_SIZE],
+        palette,
+        &geometry,
         flip_x,
         flip_y,
     )?;
-    let pixels = image.as_raw();
+    let pixels_sha256 = sha256_hex(image.as_raw());
+    if session.edit.is_none()
+        && frame_id == "sonic1_sonic/stand"
+        && !flip_x
+        && !flip_y
+        && pixels_sha256 != SONIC1_STAND_PIXELS_SHA256
+    {
+        return Err("sprite_oracle_mismatch: stand difere do golden column-major".into());
+    }
     let png = encode_png(&image)?;
     let png_sha256 = sha256_hex(&png);
-    let pixels_sha256 = sha256_hex(pixels);
-    if session.edit.is_none() && !flip_x && !flip_y && pixels_sha256 != SONIC1_STAND_PIXELS_SHA256 {
-        return Err(format!(
-            "sprite_oracle_mismatch: frame stand esperado {}, observado {}",
-            SONIC1_STAND_PIXELS_SHA256, pixels_sha256
-        ));
-    }
-    let previews_dir = canonical_dir_under(
+    let previews = canonical_dir_under(
         &decomp_work_dir(),
-        &["extract", &session.identity.normalized_sha256, "previews"],
+        &["extract", SONIC1_REFERENCE_SHA256, "previews"],
     )?;
-    let path = previews_dir.join(format!(
-        "sprite-frame-{}-{}-{png_sha256}.png",
-        artifact_name_component(manifest.resource_id),
-        artifact_name_component(manifest.frame_id),
+    let path = previews.join(format!(
+        "sprite-frame-sonic1_sonic-{}-{png_sha256}.png",
+        artifact_name_component(frame_id)
     ));
     write_file_immutable(&path, &png, &png_sha256)?;
-    let artifact = ArtifactRef {
-        label: "sprite-frame-composition".to_string(),
-        path: path.display().to_string(),
-        sha256: png_sha256.clone(),
-    };
-    let selected_rom_sha256 = identity.normalized_sha256.clone();
+    let dplc = sonic::dplc_tiles(&rom)?;
+    let tile_uses = geometry
+        .slots
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|tile| SonicTileUse {
+            art_tile: tile,
+            frames: dplc
+                .iter()
+                .enumerate()
+                .filter(|(_, tiles)| tiles.contains(&tile))
+                .map(|(index, _)| index)
+                .collect(),
+        })
+        .collect();
+    let parts = geometry
+        .pieces
+        .iter()
+        .map(|p| SpriteFramePart {
+            tile_start: p.slot as u16,
+            tile_count: (p.rows * p.columns) as u16,
+            tile_width: p.columns as u8,
+            tile_height: p.rows as u8,
+            x: p.x as i16,
+            y: p.y as i16,
+            x_flip: i16::from(p.flip_x),
+            y_flip: i16::from(p.flip_y),
+        })
+        .collect();
     Ok(InspectionSpriteFrame {
-        session_id: session.session_id.clone(),
-        resource_id: manifest.resource_id.to_string(),
-        frame_id: manifest.frame_id.to_string(),
-        available: true,
-        reason: None,
-        width: manifest.width,
-        height: manifest.height,
-        data_url: Some(format!(
-            "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(&png)
-        )),
-        artifact: Some(artifact),
-        png_sha256: Some(png_sha256),
-        pixels_sha256: Some(pixels_sha256),
-        rom_sha256: selected_rom_sha256.clone(),
-        tile_data_offset: manifest.tile_data_offset as u64,
-        tile_data_size: manifest.tile_data_size as u64,
-        palette_offset: manifest.palette_offset as u64,
-        palette_size: PALETTE_SIZE as u64,
-        descriptor_offset: manifest.descriptor_offset as u64,
-        flip_x,
-        flip_y,
-        transparency_index: 0,
-        parts: sonic_parts_wire(&parts),
-        metadata_source: "Perfil assistido Sonic 1 Rev00: mapping público fixado + bytes locais conferidos; não é descoberta automática".to_string(),
-        rom_evidence: vec![
-            format!("base_normalized_sha256={SONIC1_REFERENCE_SHA256}"),
-            format!("selected_rom_sha256={selected_rom_sha256}"),
-            format!("reference_s1disasm_rev00_build_sha256={SONIC1_DISASM_REV00_BUILD_SHA256}"),
-            format!("art_unc=0x{:06X}+0x{:X}", manifest.tile_data_offset, manifest.tile_data_size),
-            format!("palette=0x{:06X}+0x{PALETTE_SIZE:X}", manifest.palette_offset),
-            format!("mapping=0x{:06X}+0x{:X}", manifest.descriptor_offset, manifest.descriptors.len()),
-            format!("art_bytes_sha256={SONIC1_SOURCE_ART_SHA256}"),
-            format!("palette_bytes_sha256={SONIC1_SOURCE_PALETTE_SHA256}"),
-            format!("mapping_bytes_sha256={SONIC1_SOURCE_MAPPING_SHA256}"),
-        ],
-        donor_evidence: vec![
-            "s1disasm 064e3c68… com Revision=0 (Rev00)".to_string(),
-            "_maps/Sonic.asm · MS_Stand · SonicMappingsVer=1".to_string(),
-            "artunc/Sonic.unc + palette/Sonic.bin".to_string(),
-            "decoder independente: tiles MD 4bpp row-major, RGB333, índice 0 transparente".to_string(),
-        ],
-        limitations: vec![
-            "ROM local diverge do build Rev00 em 675 bytes no prefixo de 512 KiB e possui bytes extras após 0x80000; o perfil é restrito ao SHA local".to_string(),
-            "Identidade do recurso, frame e mapping vêm do disassembly doador; os bytes e hashes do recurso foram conferidos na ROM".to_string(),
-            "Não cobre compressão, animação, runtime, lógica recuperada ou extração automática universal".to_string(),
-        ],
+        session_id: session.session_id.clone(), resource_id: "sonic1_sonic".into(), frame_id: frame_id.into(),
+        available: true, reason: None, width: geometry.width, height: geometry.height,
+        data_url: Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png))),
+        artifact: Some(ArtifactRef { label: "sprite-frame-composition".into(), path: path.display().to_string(), sha256: png_sha256.clone() }),
+        png_sha256: Some(png_sha256), pixels_sha256: Some(pixels_sha256), rom_sha256: sha256_hex(&rom),
+        tile_data_offset: sonic::ART_OFFSET as u64, tile_data_size: sonic::ART_SIZE as u64,
+        palette_offset: sonic::PALETTE_OFFSET as u64, palette_size: PALETTE_SIZE as u64,
+        descriptor_offset: geometry.mapping_offset as u64, flip_x, flip_y, transparency_index: 0, parts,
+        metadata_source: "Perfil assistido Sonic 1 Rev00: mapping + DPLC; bytes da base e cópia revalidados".into(),
+        rom_evidence: vec![format!("base_sha256={}", sha256_hex(&base)),
+            format!("mapping_index={}", geometry.index), format!("mapping_offset=0x{:X}", geometry.mapping_offset),
+            format!("dplc_offset=0x{:X}", geometry.dplc_offset), format!("art_bytes_sha256={}", sha256_hex(&rom[sonic::ART_OFFSET..sonic::ART_OFFSET+sonic::ART_SIZE]))],
+        donor_evidence: vec!["s1disasm Rev00 · Map_Sonic / SonicDynPLC; nomes assistidos, não descoberta automática".into(),
+            "VDP sprite: células por coluna; pixels 4bpp high-nibble-first; slots resolvidos por DPLC".into()],
+        limitations: vec!["10 frames de perfil pinado; não cobre todos os frames, compressão ou decompilação universal".into(),
+            "Prévia estática; cadência de animação dependente do jogo não recuperada".into(),
+            "Peças sobrepostas, VRAM herdada e bancos de paleta não comprovados são recusados".into()],
+        sonic_context: Some(SonicFrameContext { geometry_version: "vdp-column-major-dplc/v1".into(),
+            mapping_index: geometry.index, anchor_x: geometry.anchor_x, anchor_y: geometry.anchor_y,
+            dplc_offset: geometry.dplc_offset, palette_rgba: (0..16).map(|i| palette_rgba(palette,i).0).collect(),
+            tile_uses, pixel_art_tiles: (0..geometry.height).flat_map(|y| (0..geometry.width)
+                .map(|x| geometry.source_pixel(x,y).map(|p| p.art_tile)).collect::<Vec<_>>()).collect(),
+            frames: sonic::choices() }),
     })
 }
 
@@ -685,8 +691,9 @@ pub fn compose_for_session(
     flip_x: bool,
     flip_y: bool,
 ) -> Result<InspectionSpriteFrame, String> {
-    if resource_id == SONIC1_MANIFEST.resource_id && frame_id == SONIC1_MANIFEST.frame_id {
-        return compose_sonic_stand(session, flip_x, flip_y);
+    if resource_id == "sonic1_sonic" {
+        sonic::frame_index(frame_id)?;
+        return compose_sonic_frame(session, frame_id, flip_x, flip_y);
     }
     let manifest = manifest_for(resource_id, frame_id)?;
     let rom_path = Path::new(&session.rom_path);
@@ -741,6 +748,7 @@ pub fn compose_for_session(
         sha256: png_sha256.clone(),
     };
     Ok(InspectionSpriteFrame {
+        sonic_context: None,
         session_id: session.session_id.clone(),
         resource_id: manifest.resource_id.to_string(),
         frame_id: manifest.frame_id.to_string(),
@@ -974,6 +982,36 @@ mod tests {
     }
 
     #[test]
+    fn sonic_vdp_two_by_two_tiles_are_column_major() {
+        let mut tiles = vec![0x11; 32];
+        tiles.extend([0x22; 32]);
+        tiles.extend([0x33; 32]);
+        tiles.extend([0x00; 32]);
+        let parts = [SonicPart {
+            tile_start: 0,
+            tile_width: 2,
+            tile_height: 2,
+            x: -16,
+            y: -20,
+        }];
+        let image =
+            compose_sonic_rgba(&tiles, &fixture_palette(), &parts, 16, 16, false, false).unwrap();
+        // Literal hardware layout: tile 0 above tile 1; tile 2 above tile 3.
+        assert_eq!(image.get_pixel(0, 0).0, [252, 0, 0, 255]);
+        assert_eq!(image.get_pixel(0, 8).0, [0, 252, 0, 255]);
+        assert_eq!(image.get_pixel(8, 0).0, [0, 0, 252, 255]);
+        assert_eq!(image.get_pixel(8, 8).0, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn sonic_stand_edit_uses_the_same_column_major_cell() {
+        let location = sonic_stand_pixel_location(8, 8).unwrap().unwrap();
+        assert_eq!(location.art_tile, 5);
+        assert_eq!(location.byte_offset, SONIC1_ART_OFFSET + 5 * 32);
+        assert!(location.high_nibble);
+    }
+
+    #[test]
     fn sonic_wrong_tile_order_palette_and_flip_change_pixels() {
         let mut tiles = vec![0u8; 18 * TILE_BYTES];
         tiles[0] = 0x12;
@@ -1045,55 +1083,37 @@ pub(crate) fn sonic_stand_pixel_location(
     y: u32,
 ) -> Result<Option<SonicPixelLocation>, String> {
     let parts = decode_sonic_parts(&SONIC1_STAND_MAPPING)?;
-    let (x, y) = (x as i32, y as i32);
-    for part in parts {
-        let left = 16 + i32::from(part.x);
-        let top = 20 + i32::from(part.y);
-        let (lx, ly) = (x - left, y - top);
-        if lx < 0 || ly < 0 || lx >= part.tile_width as i32 * 8 || ly >= part.tile_height as i32 * 8
-        {
-            continue;
-        }
-        let art_tile = part.tile_start + (ly as usize / 8) * part.tile_width + lx as usize / 8;
-        let (px, py) = (lx as usize % 8, ly as usize % 8);
-        return Ok(Some(SonicPixelLocation {
-            art_tile,
-            byte_offset: SONIC1_ART_OFFSET + art_tile * TILE_BYTES + py * 4 + px / 2,
-            high_nibble: px % 2 == 0,
-        }));
-    }
-    Ok(None)
+    let frame = sonic::Frame {
+        index: 1,
+        mapping_offset: 0,
+        dplc_offset: 0,
+        width: 32,
+        height: 40,
+        anchor_x: 16,
+        anchor_y: 20,
+        pieces: parts
+            .iter()
+            .map(|p| sonic::Piece {
+                slot: p.tile_start,
+                columns: p.tile_width,
+                rows: p.tile_height,
+                x: i32::from(p.x),
+                y: i32::from(p.y),
+                flip_x: false,
+                flip_y: false,
+            })
+            .collect(),
+        slots: (0..17).collect(),
+    };
+    Ok(frame.source_pixel(x, y).map(|p| SonicPixelLocation {
+        art_tile: p.art_tile,
+        byte_offset: p.byte_offset,
+        high_nibble: p.high_nibble,
+    }))
 }
 
 /// Art tiles referenced by every DPLC frame, read from the ROM. Fails if the table does
 /// not have the verified shape (stand entry at frame 1).
 pub(crate) fn sonic_dplc_art_tiles(rom: &[u8]) -> Result<Vec<Vec<usize>>, String> {
-    let table = SONIC1_DPLC_TABLE_OFFSET;
-    let word = |offset: usize| -> Result<usize, String> {
-        rom.get(offset..offset + 2)
-            .map(|bytes| usize::from(u16::from_be_bytes([bytes[0], bytes[1]])))
-            .ok_or_else(|| "tabela DPLC fora da ROM".to_string())
-    };
-    if word(table)? != SONIC1_DPLC_FRAME_COUNT * 2 {
-        return Err("tabela DPLC Sonic 1 nao tem 88 frames no offset verificado".to_string());
-    }
-    let stand = table + word(table + SONIC1_STAND_DPLC_FRAME * 2)?;
-    if rom.get(stand..stand + SONIC1_STAND_DPLC_ENTRY.len())
-        != Some(SONIC1_STAND_DPLC_ENTRY.as_slice())
-    {
-        return Err("entrada DPLC do frame stand diverge do mapping verificado".to_string());
-    }
-    let mut frames = Vec::with_capacity(SONIC1_DPLC_FRAME_COUNT);
-    for frame in 0..SONIC1_DPLC_FRAME_COUNT {
-        let start = table + word(table + frame * 2)?;
-        let count = usize::from(*rom.get(start).ok_or("entrada DPLC fora da ROM")?);
-        let mut tiles = Vec::new();
-        for entry in 0..count {
-            let value = word(start + 1 + entry * 2)?;
-            let first = value & 0x0fff;
-            tiles.extend(first..first + (value >> 12) + 1);
-        }
-        frames.push(tiles);
-    }
-    Ok(frames)
+    sonic::dplc_tiles(rom)
 }
