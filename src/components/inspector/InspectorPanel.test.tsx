@@ -683,4 +683,153 @@ describe("InspectorPanel", () => {
     expect(imported).toBeInstanceOf(HTMLDetailsElement);
     expect((imported as HTMLDetailsElement).open).toBe(false);
   });
+
+  it("edits MUGEN frame timing in ticks per frame, keeps the others and refuses invalid input", async () => {
+    const hero = spriteFixtureEntity({
+      animations: {
+        action_0: {
+          frames: [0, 1],
+          fps: 4,
+          loop: true,
+          frame_durations: [5, 9],
+          loop_start: 0,
+          mugen_frames: [
+            { group: 0, image: 0, duration: 5 },
+            { group: 0, image: 1, duration: 9 },
+          ],
+        },
+        walk: { frames: [0, 1], fps: 8, loop: true },
+      },
+    });
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: { ...EMPTY_SCENE, entities: [hero] },
+        selectedEntityId: "hero_sprite",
+      });
+      await flush();
+    });
+
+    expect(container.querySelector('[data-testid="inspector-mugen-timing-help"]')?.textContent).toContain("1/60 s");
+    // Animacao nativa segue com FPS; a MUGEN nao expoe FPS.
+    expect(container.querySelector('[data-testid="inspector-anim-walk-fps"]')).toBeInstanceOf(HTMLInputElement);
+    expect(container.querySelector('[data-testid="inspector-anim-action_0-fps"]')).toBeNull();
+
+    const input = (index: number) =>
+      container.querySelector(`[data-testid="inspector-mugen-anim-action_0-frame-${index}"]`) as HTMLInputElement;
+    expect(input(0).value).toBe("5");
+    expect(input(1).value).toBe("9");
+
+    const type = async (el: HTMLInputElement, value: string) => {
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        setter.call(el, value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        await flush();
+      });
+    };
+    const current = () =>
+      useEditorStore.getState().activeScene?.entities[0]?.components.sprite?.animations?.action_0;
+
+    await type(input(0), "20");
+    expect(current()?.frame_durations).toEqual([20, 9]);
+    expect(current()?.mugen_frames?.map((f) => f.duration)).toEqual([20, 9]);
+
+    await type(input(0), "0");
+    expect(current()?.frame_durations).toEqual([20, 9]);
+    expect(container.querySelector('[data-testid="inspector-mugen-anim-action_0-frame-0-error"]')?.textContent).toContain(
+      "Mantido: 20"
+    );
+    await type(input(1), "300");
+    expect(current()?.frame_durations).toEqual([20, 9]);
+
+    await act(async () => {
+      input(0).dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      await flush();
+    });
+    expect(input(0).value).toBe("20");
+  });
+
+  it("shows a conflict instead of editable ticks when MUGEN duration fields diverge", async () => {
+    const hero = spriteFixtureEntity({
+      animations: {
+        action_0: {
+          frames: [0, 1],
+          fps: 4,
+          loop: true,
+          frame_durations: [20, 9],
+          mugen_frames: [
+            { group: 0, image: 0, duration: 5 },
+            { group: 0, image: 1, duration: 9 },
+          ],
+        },
+      },
+    });
+    await act(async () => {
+      useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, entities: [hero] }, selectedEntityId: "hero_sprite" });
+      await flush();
+    });
+    const conflict = container.querySelector('[data-testid="inspector-mugen-anim-action_0-conflict"]');
+    expect(conflict?.textContent).toContain("quadro 1: frame_durations = 20, mugen_frames.duration = 5");
+    expect(conflict?.textContent).toContain("Nenhum valor foi escolhido");
+    expect(container.querySelector('[data-testid="inspector-mugen-anim-action_0-frame-0"]')).toBeNull();
+    expect(useEditorStore.getState().activeScene?.entities[0]?.components.sprite?.animations?.action_0?.frame_durations).toEqual([20, 9]);
+  });
+
+  it("edits MUGEN state velocity in px/tick, explains rounding and keeps the last valid value on bad input", async () => {
+    const node = (id: string, stateNo: number, vx: string, instance: string) => ({
+      id,
+      type: "set_velocity",
+      label: "VelSet",
+      x: 0,
+      y: 0,
+      inputs: [],
+      outputs: [],
+      params: { target: "hero_sprite", vx, vy: 0, mode: "set", profile: "mugen.character.v1", state_no: stateNo, instance, controller: `c${stateNo}` },
+    });
+    const hero = spriteFixtureEntity();
+    hero.components.logic = {
+      graph: JSON.stringify({
+        version: 1,
+        nodes: [node("s20b", 20, "2.5", "body"), node("s20e", 20, "2.5", "enter"), node("s0b", 0, "0", "body")],
+        edges: [],
+      }),
+    };
+    await act(async () => {
+      useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, entities: [hero] }, selectedEntityId: "hero_sprite" });
+      await flush();
+    });
+    expect(container.querySelector('[data-testid="inspector-mugen-velocity-help"]')?.textContent).toContain("1/60 s");
+    const input = (state: number) =>
+      container.querySelector(`[data-testid="inspector-mugen-velocity-state-${state}"]`) as HTMLInputElement;
+    expect(input(20).value).toBe("2.5");
+    expect(input(0).value).toBe("0");
+    const type = async (el: HTMLInputElement, value: string) => {
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+        setter.call(el, value);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        await flush();
+      });
+    };
+    const vxOf = () => {
+      const graph = JSON.parse(
+        useEditorStore.getState().activeScene?.entities[0]?.components.logic?.graph ?? "{}"
+      ) as { nodes: Array<{ params: { state_no: number; vx: string } }> };
+      return graph.nodes.filter((n) => n.params.state_no === 20).map((n) => n.params.vx);
+    };
+    await type(input(20), "3.75");
+    expect(vxOf()).toEqual(["3.75", "3.75"]);
+    await type(input(20), "2.4");
+    expect(vxOf()).toEqual(["2.4", "2.4"]);
+    expect(container.querySelector('[data-testid="inspector-mugen-velocity-state-20-note"]')?.textContent).toContain(
+      "Arredondado para 2.3984375"
+    );
+    await type(input(20), "const(velocity.walk.fwd.x)");
+    expect(vxOf()).toEqual(["2.4", "2.4"]);
+    expect(container.querySelector('[data-testid="inspector-mugen-velocity-state-20-error"]')?.textContent).toContain(
+      "Mantido: 2.4"
+    );
+    await type(input(20), "200");
+    expect(vxOf()).toEqual(["2.4", "2.4"]);
+  });
 });

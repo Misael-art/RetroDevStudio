@@ -1629,7 +1629,9 @@ fn write_indexed_bmp_8bit_with_canvas_palette_limit(
             let color = [pixel[2], pixel[1], pixel[0], 0];
             let palette_index = palette
                 .iter()
-                .position(|entry| *entry == color)
+                .enumerate()
+                .skip(1) // Index zero is transparency, including when RGB is black.
+                .find_map(|(index, entry)| (*entry == color).then_some(index))
                 .or_else(|| {
                     if palette.len() < max_palette_colors {
                         palette.push(color);
@@ -1696,6 +1698,7 @@ fn nearest_palette_index(palette: &[[u8; 4]], color: [u8; 4]) -> Option<usize> {
     palette
         .iter()
         .enumerate()
+        .skip(1) // An opaque pixel must never become transparent during quantization.
         .min_by_key(|(_, candidate)| {
             let db = i32::from(candidate[0]) - i32::from(color[0]);
             let dg = i32::from(candidate[1]) - i32::from(color[1]);
@@ -2904,6 +2907,30 @@ fn repo_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn indexed_bitmap_keeps_opaque_black_distinct_from_transparency() {
+        let destination = std::env::temp_dir().join(format!("rds-mask-{}.bmp", std::process::id()));
+        let image = image::DynamicImage::ImageRgba8(
+            image::RgbaImage::from_raw(3, 1, vec![0, 0, 0, 0, 0, 0, 0, 255, 255, 0, 0, 255])
+                .unwrap(),
+        );
+        super::write_indexed_bmp_8bit_with_canvas_palette_limit(&image, &destination, 3, 1, 3)
+            .unwrap();
+        let bytes = std::fs::read(&destination).unwrap();
+        let offset = u32::from_le_bytes(bytes[10..14].try_into().unwrap()) as usize;
+        assert_eq!(bytes[offset], 0);
+        assert_ne!(
+            bytes[offset + 1],
+            0,
+            "opaque black disappeared into the mask"
+        );
+        assert_ne!(bytes[offset + 2], 0);
+        assert_eq!(
+            super::nearest_palette_index(&[[0, 0, 0, 0], [1, 1, 1, 0]], [0, 0, 0, 0]),
+            Some(1)
+        );
+        std::fs::remove_file(destination).unwrap();
+    }
     use super::*;
     use crate::core::diagnostics::{ActionableDiagnostic, DiagnosticArea, DiagnosticSeverity};
     use crate::tools::photo2sgdk::import_art_asset_internal;

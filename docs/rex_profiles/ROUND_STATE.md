@@ -43,7 +43,26 @@ limites de cobertura da própria célula e as provas herdadas valendo.
   permanente:** a re-execución do job `desktop-smoke` en `ebfa8ea` (fronte A)
   fechou `completed`/`success` xunto con `validate` e `linux-validate`, e o CI
   do PR #86 en `d36df92` está terminal verde (detalle na célula de abaixo e no
-  checkpoint (h) do Memory Bank).
+  checkpoint (h) do Memory Bank). **Janela de consolidação (2026-10-02,
+  ~06:00Z–10:00Z):** gates da branch `codex/rex-integrator-consolidation`
+  (check:tree, lint, tsc, vitest 898/6, cargo fmt/clippy limpos, cargo test
+  --lib 832/0/75, crates:gates 4 pacotes OK), build canônico `build:debug`
+  (binário SHA-256 `06011c6d6c54bfa06fa37af89832de30c731f29869a0eb29c77104c4ca3f6e12`)
+  e `host:certify` rc=0 (READY, lock `dd99a22f…`). A matriz E2E MUGEN
+  (`mugen-import`/`mugen-original`/`mugen-control`/`mugen-locomotion`) ficou
+  **BLOQUEADA por estado do host**: display físico mudou para 1280×800 retrato
+  com escala fracionária ≈1,35 — o `set_window_rect` do WebDriver não é honrado
+  (inner máximo ≈952×567 contra o mínimo exigido pelo assert do harness) e Xvfb
+  não está instalado; 5 tentativas documentadas em
+  `/tmp`-logs da sessão e no checkpoint do Memory Bank de 2026-10-02. A última
+  verde desses cenários é do conteúdo idêntico da cadeia (2026-09-30/10-01,
+  evidência `mugen-original-2026-09-30`), válida como prova herdada dos
+  cenários, não como prova do destino. Próximo comando exato: restaurar display
+  ≥1920×1080 sem escala fracionária, ou instalar Xvfb
+  (`sudo pacman -S xorg-server-xvfb`) e rodar
+  `xvfb-run -s "-screen 0 1920x1080x24" node scripts/e2e-tauri-build-run.mjs
+  --scenario mugen-import --skip-build --app src-tauri/target-test/debug/retro-dev-studio`
+  (e os demais cenários) na branch de consolidação.
 
 ## Matriz de endereçamento (propriedade: agente A)
 

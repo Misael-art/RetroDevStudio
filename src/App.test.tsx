@@ -2582,6 +2582,30 @@ describe("App build flow", () => {
     expect(state.consoleEntries[state.consoleEntries.length - 1]?.message).toContain("Importar Asset");
   });
 
+  it("offers the MUGEN report from the menu and explains when the project has none", async () => {
+    const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
+    if (!(menuTrigger instanceof HTMLButtonElement)) {
+      throw new Error("Topbar menu trigger not found");
+    }
+    await act(async () => {
+      menuTrigger.click();
+      await flush();
+    });
+
+    const reportButton = container.querySelector("[data-testid='menu-action-mugen-report']");
+    expect(reportButton).toBeInstanceOf(HTMLButtonElement);
+    expect((reportButton as HTMLButtonElement).textContent).toContain("Relatorio MUGEN");
+
+    await act(async () => {
+      (reportButton as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='mugen-compat-panel']")).toBeNull();
+    const messages = useEditorStore.getState().consoleEntries.map((entry) => entry.message);
+    expect(messages.some((m) => m.includes("nao tem relatorio de compatibilidade MUGEN"))).toBe(true);
+  });
+
   it("opens project settings with actionable SRAM warnings and saves through project.rds", async () => {
     const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
     if (!(menuTrigger instanceof HTMLButtonElement)) {

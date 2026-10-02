@@ -1,0 +1,69 @@
+{
+  "schema": "rex-corpus-c-profile/1",
+  "profile": "ancient-music-driver-md",
+  "profile_version": "1",
+  "role": "reserved_validation",
+  "derived_from": "Streets of Rage 3 (USA).gen",
+  "derivation": "Anchors re-derived independently from this ROM's own 68000 instructions; the grammar is unchanged from the Story of Thor profile, which is what makes this a generalisation test rather than a re-fit.",
+  "identity": {
+    "banner_68k": {
+      "text": "Ancient Music Driver -MD- 68000 Program Version 1.00",
+      "rom_offset": "0x1a8010"
+    },
+    "banner_z80": {
+      "text": "Ancient Music Driver -MD- Z80 Program Version 1.00",
+      "rom_offset": "0x1a9fce"
+    },
+    "header_name": "BARE KNUCKLE3"
+  },
+  "z80_image": {
+    "rom_offset": "0x1a9fae",
+    "size_bytes": 8192,
+    "dest_cpu_address": "0xa00000",
+    "copy_routine_rom_offset": "0x1a8a66",
+    "bank_register": "0xa11100",
+    "mars_register": "0xa11200",
+    "evidence": "lea.l $1a9fae,a1 / lea.l $a00000,a2 / move.w #$1fff,d0 / move.b (a1)+,(a2)+ / dbra d0 / move.w #$0,$a11200 / move.w #$0,$a11100"
+  },
+  "song_index": {
+    "table_rom_offset": "0x1aa6e4",
+    "slots": 256,
+    "record_bytes": 4,
+    "record_encoding": "big-endian uint32",
+    "value_semantics": "offset of the song header relative to table_rom_offset; 0 = slot not used",
+    "consumer_offsets": [
+      "0x1a84f8",
+      "0x1a8634",
+      "0x1a8698"
+    ]
+  },
+  "track_header": {
+    "record_bytes": 2,
+    "record_encoding": "little-endian uint16",
+    "value_semantics": "offset of the track stream relative to the song header address itself; 0 = empty slot",
+    "evidence": "same LE16 fetch + add.l base idiom as the Story of Thor profile"
+  },
+  "command_jump_table": {
+    "rom_offset": "0x1a912a",
+    "entries": 16,
+    "encoding": "big-endian uint16, relative to the table address",
+    "evidence": "subi.b #$f0,d2 / add.w d2,d2 / move.w $1a912a(pc,d2.w),d2 / jsr $1a912a(pc,d2.w)",
+    "widths_reused_from": "ancient-md-sot-v1.json",
+    "note": "Operand widths were proven handler-by-handler in Story of Thor. This ROM shares the dispatcher shape; per-handler widths were NOT re-derived here, so the extractor applies them and flags any stream that stops on 0xf4/0xfc/0xff."
+  },
+  "pitch_table": {
+    "rom_offset": "0x1a9f1e",
+    "entries": 16,
+    "encoding": "big-endian uint16",
+    "evidence": "move.b (a0)+,d0 / andi.b #$f,d0 / add.w d0,d0 / lea $1a9f1e(pc),a2 / move.w (a2,d0.w),d1"
+  },
+  "stream_event_model_ref": "ancient-md-sot-v1.json#stream_event_model",
+  "limitations": [
+    "Command operand widths are inherited from the Story of Thor profile and were not re-derived per handler in this ROM.",
+    "Instrument, FM/PSG voice and sample representations are out of scope for this profile.",
+    "The pitch word table is an opaque code; no note-name mapping is claimed."
+  ],
+  "rom_sha256": "8855f797591823855cfe6440a0e33daac005b2531ecd2720ddc0c8718ed2ebe4",
+  "rom_sha256_note": "sha-256 of the normalised image; this ROM has no trailing padding run, so it equals the container member hash (3145728 B).",
+  "normalized_sha256": "8855f797591823855cfe6440a0e33daac005b2531ecd2720ddc0c8718ed2ebe4"
+}

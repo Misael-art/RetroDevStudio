@@ -10,3 +10,4 @@ pub mod palette;
 pub mod plan;
 pub mod sff;
 pub mod sha256;
+pub mod source;

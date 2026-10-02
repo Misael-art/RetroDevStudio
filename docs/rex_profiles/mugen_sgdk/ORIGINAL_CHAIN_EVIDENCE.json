@@ -1,0 +1,469 @@
+{
+  "schema": "retrodev.mugen_original_chain_evidence/v1",
+  "maturity": "Experimental",
+  "base": {
+    "pr": 90,
+    "branch": "codex/rex-mugen-real",
+    "head": "508db51b20c701f61a8fcdbc9bf43a642d28fa3c"
+  },
+  "branch": "codex/rex-mugen-original-chain",
+  "source": {
+    "package_sha256": "b244ec9a105fa0131b37c075dc06b032a87cf0f839f46ec7054ac60d9bd6f14c",
+    "analysis_source_sha256": "32f459c49a2262f1126cc8f86f1eeb26f42d7c334b8a2343d520598e59226c9b",
+    "files": {
+      "ken8.def": "fdbe2fb2498be72078232ca68f2cc74fd8347aac2c8304c626d5f15dc68f5fc8",
+      "ken.cmd": "728e914f4de8d6de84af7c572af1e811c03ef142e1b168e49057bc0ba0416e16",
+      "ken.cns": "0b4593b7fec0e555c41b21a032a95ea5efc540b61f201d2504a409cd4d692755",
+      "ken.air": "b1f6c8d093dfd0849091035d7721a5748b59a476084bbc7ebf1ce2e1c6e7ed3a",
+      "ken.sff": "911e21b778af3e7a93cd69fe6132b8e87fb1cacddac757ada5842a8cb1c2172c",
+      "ken1.act": "89942f64862be6cb2bb0c094b2ab0ebb5cb411c06b7f1a6f9d69af64647687f2"
+    },
+    "common1_cns": "ausente do pacote e de toda a maquina (busca por nome); nenhuma outra instalacao presumida"
+  },
+  "app": {
+    "sha256": "2f8457a9432b1fee7cf595ad9d6fe61546a752b1dda43a3fe541a21c06bdb39d"
+  },
+  "chain": {
+    "program_sha256": "87cbd0bbee56468bc12db16790deaffbdabd5609841996526917f9eeefb58a14",
+    "summary": {
+      "approximate": 2,
+      "authored": 2,
+      "converted": 15,
+      "unconverted": 66
+    },
+    "state_status": [
+      {
+        "converted": 0,
+        "origin": "stand_in",
+        "state": 0,
+        "unconverted": 0,
+        "verdict": "autoral"
+      },
+      {
+        "converted": 6,
+        "origin": "source",
+        "state": 200,
+        "unconverted": 6,
+        "verdict": "parcial"
+      }
+    ],
+    "special_minus1": {
+      "converted": 1,
+      "total": 56,
+      "unconverted": 55
+    },
+    "command_bits": [
+      "x",
+      "holddown"
+    ],
+    "ui_import_report_sha256": "2aded225f68451ba7b4b7dafbcdf912e75bec04faea17d1e54b7320c39c48301"
+  },
+  "backend": {
+    "rom_sha256": "c421c92d5065e4d8ff8de22aa3541e3b5d4795e27f249190f2a0959cbc6ae666",
+    "elf_sha256": "4ca05ecfd8b9ac855fad5421bcba11ad2572de40df13c77c8de6860fa21cf5e0",
+    "ticks": 197,
+    "capture_sha256": "c07889d87917a7930fcaea00b14a3397a63fe9e78c708d4c54b9fbe7f20acacc",
+    "oracle_report_sha256": "e360f976aa9d3c43a70108a0795d5ec802061f5c0059bd8d6afe757575a6e738",
+    "mismatch_count": 0,
+    "attack_segments": [
+      {
+        "start_tick": 43,
+        "ticks": 6
+      },
+      {
+        "start_tick": 68,
+        "ticks": 6
+      },
+      {
+        "start_tick": 113,
+        "ticks": 6
+      },
+      {
+        "start_tick": 141,
+        "ticks": 6
+      },
+      {
+        "start_tick": 147,
+        "ticks": 6
+      }
+    ],
+    "pixels_checked": 184,
+    "pixel_lag_vblanks": 0,
+    "tick_span_vblanks": {
+      "1": 196
+    }
+  },
+  "ui": {
+    "rom_sha256": "028158917e7cb847276b7f536204424fed6f743548b53034332398fbfc47d513",
+    "elf_sha256": "ad21039b6677685719cd0b0f4da90fa0218cbc75231b26cdd7891b1af3e02d6d",
+    "core": {
+      "label": "Genesis Plus GX v1.7.4 46a5521",
+      "path": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+      "sha256": "07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1",
+      "frames_run": 383,
+      "framebuffer_sha256": "86890c986bd09809387bb9a477355c9b00f44e144addea7064a6d1dd77f7ed1b"
+    },
+    "core_canvas_equal": true,
+    "ticks": 336,
+    "ticks_before_recording": 41,
+    "recorded_frames": 295,
+    "frame_accounting": {
+      "presented_events": 295,
+      "run_frame_calls": 295,
+      "run_frame_completed": 295,
+      "ticks_executed": 295,
+      "extra_repaints": 0,
+      "vtimer": {
+        "start": 51,
+        "end": 346,
+        "delta": 295,
+        "core_frames_start": 88,
+        "core_frames_end": 383
+      }
+    },
+    "capture_sha256": "1814c43f0b2ef0c669119c5f667960e869651325acaf742d88771d066d3167bb",
+    "ui_report_sha256": "fea5656e986da3a6f80ee48fc9d242180ffcfefb484d7ff60fea4a0cfcf887b9",
+    "oracle_report_sha256": "543745631de733193c4a88e2fedb731eb126d9466c90b5b019243e69f6d3d4e4",
+    "mismatch_count": 0,
+    "attack_segments": [
+      {
+        "start_tick": 94,
+        "ticks": 6
+      },
+      {
+        "start_tick": 124,
+        "ticks": 6
+      },
+      {
+        "start_tick": 154,
+        "ticks": 6
+      },
+      {
+        "start_tick": 184,
+        "ticks": 6
+      },
+      {
+        "start_tick": 214,
+        "ticks": 6
+      },
+      {
+        "start_tick": 255,
+        "ticks": 6
+      }
+    ],
+    "pixels_checked": 295,
+    "pixel_lag_vblanks": 0,
+    "tick_span_vblanks": {
+      "1": 335
+    },
+    "steps": [
+      {
+        "step": "source_and_origin_review",
+        "status": "passed",
+        "actions": [
+          0,
+          20,
+          21,
+          200
+        ],
+        "palette": "ken1.act",
+        "chain_state": 200,
+        "frames": 21
+      },
+      {
+        "step": "import_save_restart_reopen",
+        "status": "passed",
+        "report_sha256": "2aded225f68451ba7b4b7dafbcdf912e75bec04faea17d1e54b7320c39c48301",
+        "program_sha256": "87cbd0bbee56468bc12db16790deaffbdabd5609841996526917f9eeefb58a14",
+        "graph_editor_intact": true
+      },
+      {
+        "step": "recording_started",
+        "status": "passed",
+        "ticks_before": 41
+      },
+      {
+        "step": "official_build_native_keyboard_trace_pixels",
+        "status": "passed",
+        "ticks": 336,
+        "recorded_frames": 295,
+        "independent_verification": "required: verify-mugen-chain.py"
+      }
+    ]
+  },
+  "input_path": {
+    "frame_period_ms": {
+      "median": 94,
+      "min": 85,
+      "max": 199.0,
+      "frames": 295
+    },
+    "effective_fps": 10.6,
+    "keydowns_seen_by_page": 9,
+    "a_runs_seen_by_game": 8,
+    "taps_lost_before_game": 1,
+    "taps": [
+      {
+        "tap": 0,
+        "page_hold_ms": 6,
+        "keydown_to_ipc_ack_ms": 10,
+        "candidate_first_ticks": [
+          66
+        ],
+        "game_ticks_held": 0,
+        "delivery_consistent": null,
+        "lost_before_game": true
+      },
+      {
+        "tap": 1,
+        "page_hold_ms": 89,
+        "keydown_to_ipc_ack_ms": 4,
+        "candidate_first_ticks": [
+          94
+        ],
+        "game_ticks_held": 1,
+        "delivery_consistent": true,
+        "lost_before_game": false
+      },
+      {
+        "tap": 2,
+        "page_hold_ms": 90,
+        "keydown_to_ipc_ack_ms": 3,
+        "candidate_first_ticks": [
+          124
+        ],
+        "game_ticks_held": 1,
+        "delivery_consistent": true,
+        "lost_before_game": false
+      },
+      {
+        "tap": 3,
+        "page_hold_ms": 104,
+        "keydown_to_ipc_ack_ms": 4,
+        "candidate_first_ticks": [
+          154
+        ],
+        "game_ticks_held": 1,
+        "delivery_consistent": true,
+        "lost_before_game": false
+      },
+      {
+        "tap": 4,
+        "page_hold_ms": 205,
+        "keydown_to_ipc_ack_ms": 5.0,
+        "candidate_first_ticks": [
+          183,
+          184
+        ],
+        "game_ticks_held": 2,
+        "delivery_consistent": true,
+        "lost_before_game": false
+      },
+      {
+        "tap": 5,
+        "page_hold_ms": 1285,
+        "keydown_to_ipc_ack_ms": 7,
+        "candidate_first_ticks": [
+          214
+        ],
+        "game_ticks_held": 12,
+        "delivery_consistent": true,
+        "lost_before_game": false
+      },
+      {
+        "tap": 6,
+        "page_hold_ms": 115,
+        "keydown_to_ipc_ack_ms": 4,
+        "candidate_first_ticks": [
+          254,
+          255
+        ],
+        "game_ticks_held": 1,
+        "delivery_consistent": true,
+        "lost_before_game": false
+      },
+      {
+        "tap": 7,
+        "page_hold_ms": 119,
+        "keydown_to_ipc_ack_ms": 4,
+        "candidate_first_ticks": [
+          256,
+          257
+        ],
+        "game_ticks_held": 1,
+        "delivery_consistent": true,
+        "lost_before_game": false
+      },
+      {
+        "tap": 8,
+        "page_hold_ms": 213,
+        "keydown_to_ipc_ack_ms": 3,
+        "candidate_first_ticks": [
+          286
+        ],
+        "game_ticks_held": 2,
+        "delivery_consistent": true,
+        "lost_before_game": false
+      }
+    ],
+    "driver_requests": [
+      {
+        "label": "tap-0ms",
+        "holdMs": 0
+      },
+      {
+        "label": "tap-20ms",
+        "holdMs": 20
+      },
+      {
+        "label": "tap-50ms",
+        "holdMs": 50
+      },
+      {
+        "label": "tap-100ms",
+        "holdMs": 100
+      },
+      {
+        "label": "tap-200ms",
+        "holdMs": 200
+      },
+      {
+        "label": "hold-1200ms",
+        "holdMs": 1200
+      },
+      {
+        "label": "double-60-60-60",
+        "holdMs": 60
+      },
+      {
+        "label": "down-pressed",
+        "holdMs": null
+      },
+      {
+        "label": "down-plus-a",
+        "holdMs": 200
+      },
+      {
+        "label": "down-released",
+        "holdMs": null
+      }
+    ]
+  },
+  "negative_controls_oracle": {
+    "attack_one_tick_late": "rejected",
+    "ctrl_not_cleared": "rejected",
+    "wrong_animation": "rejected",
+    "duration_changed": "rejected",
+    "extra_attack_on_hold": "rejected",
+    "velocity_leak": "rejected",
+    "time_not_reset": "rejected"
+  },
+  "opaque_effects_sample": [
+    {
+      "tick": 94,
+      "effects": [
+        [
+          "poweradd",
+          15,
+          "opaque"
+        ]
+      ]
+    },
+    {
+      "tick": 95,
+      "effects": [
+        [
+          "playsnd",
+          "6,0",
+          "opaque"
+        ]
+      ]
+    },
+    {
+      "tick": 96,
+      "effects": [
+        [
+          "hitdef",
+          "34",
+          "opaque"
+        ]
+      ]
+    },
+    {
+      "tick": 124,
+      "effects": [
+        [
+          "poweradd",
+          15,
+          "opaque"
+        ]
+      ]
+    },
+    {
+      "tick": 125,
+      "effects": [
+        [
+          "playsnd",
+          "6,0",
+          "opaque"
+        ]
+      ]
+    },
+    {
+      "tick": 126,
+      "effects": [
+        [
+          "hitdef",
+          "34",
+          "opaque"
+        ]
+      ]
+    }
+  ],
+  "regressions": {
+    "visual_oracle": {
+      "preview_frames": 21,
+      "core_frames": 204,
+      "ui_frames": 211,
+      "negative_controls": {
+        "wrong_palette": "rejected",
+        "wrong_sprite": "rejected",
+        "shifted_axis": "rejected",
+        "wrong_flip": "rejected",
+        "stale_image": "rejected"
+      },
+      "report_sha256": "bf9a94bdbec8b7f0029c1554276eff18bb07daa0b35b16513fbb4f1ce2b23631"
+    },
+    "e2e": {
+      "mugen-import": {
+        "report": "mugen-import-2026-10-01T01-41-24-708Z-report.json",
+        "report_sha256": "ebbcbd0b2f9f4336e6b6a8d080ed0ba0dba2e37d4cc5386ccd795ab288a12dc2",
+        "tested_app_sha256": "2f8457a9432b1fee7cf595ad9d6fe61546a752b1dda43a3fe541a21c06bdb39d",
+        "steps_all_passed": true
+      },
+      "mugen-control": {
+        "report": "mugen-control-2026-10-01T01-43-06-242Z-report.json",
+        "report_sha256": "70620efe06beaaa561f894bfbce68b9f7b40ac0d4548cbb317464bbd527cea81",
+        "tested_app_sha256": "2f8457a9432b1fee7cf595ad9d6fe61546a752b1dda43a3fe541a21c06bdb39d",
+        "steps_all_passed": true
+      },
+      "mugen-locomotion": {
+        "report": "mugen-locomotion-2026-10-01T01-44-09-196Z-report.json",
+        "report_sha256": "fc7239840c46dde38f677b95b1fccbb5cf389eb33d4377b607d130592f3740fa",
+        "tested_app_sha256": "2f8457a9432b1fee7cf595ad9d6fe61546a752b1dda43a3fe541a21c06bdb39d",
+        "steps_all_passed": true
+      }
+    }
+  },
+  "gates": {
+    "check_tree": "ok",
+    "lint": "ok",
+    "tsc": "ok",
+    "cargo_fmt_check": "ok",
+    "clippy_D_warnings": "ok",
+    "frontend": "Test Files  88 passed | 1 skipped (89)\n      Tests  831 passed | 6 skipped (837)",
+    "rust_lib": "test result: ok. 832 passed; 0 failed; 75 ignored; 0 measured; 0 filtered out; finished in 61.95s",
+    "crates_gates": "OK: 4 pacote(s) registrado(s), gates proprios aprovados."
+  },
+  "flakes": "mugen-real: 2 falhas sob carga alta do host (Select de quadro; timeout de triagem) antes da execucao verde; sem mudanca de codigo"
+}

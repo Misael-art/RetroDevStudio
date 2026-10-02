@@ -291,6 +291,18 @@ pub enum LogicOp {
         target_var: String,
         anim_index: u32,
     },
+    /// Perfil `mugen.character.v1`: velocidade horizontal em Q8.8 (1/256 px por tick de 1/60 s)
+    /// da entidade; integrada por `compiler/mugen_runtime.rs` a cada tick (estado por entidade).
+    MugenSetVelocityX {
+        target_var: String,
+        vx_q8: i32,
+    },
+    /// Perfil `mugen.original_chain.v1`: um passo (tick) do programa de estados convertido
+    /// do CMD/CNS original (`core/mugen_chain.rs`); validado no compilador do grafo.
+    MugenProgramStep {
+        target_var: String,
+        program: Box<crate::core::mugen_chain::Program>,
+    },
     SetTile {
         layer: String,
         tile: LogicMathExpr,
@@ -900,18 +912,47 @@ fn mugen_anim_table(
 ) -> Option<Result<MugenAnimTable, String>> {
     let mugen_frames = animation.mugen_frames.as_ref()?;
     let build = || -> Result<MugenAnimTable, String> {
-        let durations = animation
-            .frame_durations
-            .as_ref()
-            .ok_or("animacao MUGEN sem frame_durations")?;
         let n = animation.frames.len();
-        if durations.len() != n || mugen_frames.len() != n {
-            return Err(format!(
-                "frames ({n}), frame_durations ({}) e mugen_frames ({}) com tamanhos diferentes",
-                durations.len(),
-                mugen_frames.len()
-            ));
-        }
+        // Fonte canonica do tempo: `frame_durations` (ticks de 1/60 s). `mugen_frames[].duration`
+        // espelha o mesmo dado. Politica (crates/rex-mugen/CONTRACT.md, «Coerencia»):
+        // * os dois presentes: comprimentos e valores tem de coincidir; qualquer divergencia
+        //   bloqueia o build (o chamador acrescenta o nome da animacao), com quadro e valores; nenhum e escolhido e o
+        //   projeto nunca e reescrito;
+        // * `frame_durations` ausente (legado): unica fonte e `mugen_frames[].duration`
+        //   (interpretacao inequivoca), usada so na geracao, sem gravar no projeto.
+        let durations: Vec<i32> = match animation.frame_durations.as_ref() {
+            Some(durations) => {
+                if durations.len() != n || mugen_frames.len() != n {
+                    return Err(format!(
+                        "frames ({n}), frame_durations ({}) e mugen_frames ({}) com tamanhos diferentes",
+                        durations.len(),
+                        mugen_frames.len()
+                    ));
+                }
+                if let Some((i, (a, b))) = durations
+                    .iter()
+                    .zip(mugen_frames.iter().map(|f| f.duration))
+                    .enumerate()
+                    .find(|(_, (a, b))| **a != *b)
+                {
+                    return Err(format!(
+                        "quadro {}: frame_durations = {a} mas mugen_frames[{i}].duration = {b}; corrija um dos dois no projeto (nenhum foi escolhido)",
+                        i + 1
+                    ));
+                }
+                durations.clone()
+            }
+            None => {
+                if mugen_frames.len() != n {
+                    return Err(format!(
+                        "frames ({n}) e mugen_frames ({}) com tamanhos diferentes",
+                        mugen_frames.len()
+                    ));
+                }
+                mugen_frames.iter().map(|f| f.duration).collect()
+            }
+        };
+        let durations = &durations;
         if n == 0 || n > 255 {
             return Err(format!("{n} frames (1..=255)"));
         }
@@ -1428,8 +1469,17 @@ fn compile_logic_graph(
             }),
     );
 
-    if let Some(fsm_script) = compile_fsm_script(graph, runtime_entities, &mut output) {
+    if let Some(fsm_script) = compile_fsm_script(graph, entity_id, runtime_entities, &mut output) {
         output.scripts.push(fsm_script);
+    }
+    for node in graph
+        .nodes
+        .iter()
+        .filter(|node| node.node_type == "mugen_state_program")
+    {
+        output.scripts.push(LogicScript {
+            ops: vec![compile_mugen_program(node, runtime_entities)],
+        });
     }
     let hardware_event_scripts =
         compile_hardware_event_scripts(graph, runtime_entities, &mut output);
@@ -1476,9 +1526,13 @@ fn compile_hardware_event_scripts(
 
 fn compile_fsm_script(
     graph: &StoredNodeGraph,
+    entity_id: &str,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
     output: &mut CompiledLogicOutput,
 ) -> Option<LogicScript> {
+    // Uma maquina por entidade: o nome carrega o id da entidade (duas entidades com FSM nao
+    // compartilham o indice de estado).
+    let machine_var = format!("fsm_state_{}", sanitize_identifier(entity_id));
     let mut state_nodes = graph
         .nodes
         .iter()
@@ -1506,7 +1560,7 @@ fn compile_fsm_script(
 
     Some(LogicScript {
         ops: vec![LogicOp::StateMachine {
-            machine_var: "fsm_state".to_string(),
+            machine_var: machine_var.to_string(),
             states,
         }],
     })
@@ -1871,6 +1925,14 @@ fn compile_logic_node(
             } else {
                 Some(CompiledLogicNode::NoOp)
             }
+        }
+        "set_velocity"
+            if param_string(node, "profile").as_deref() == Some(rex_mugen::plan::PROFILE_ID) =>
+        {
+            Some(CompiledLogicNode::Linear(mugen_set_velocity_op(
+                node,
+                runtime_entities,
+            )))
         }
         "set_velocity" => {
             let raw_target = param_string(node, "target").unwrap_or_else(|| "entity".to_string());
@@ -2736,6 +2798,7 @@ fn collect_unsupported_from_ops(
                 collect_unsupported_from_math(vx, found);
                 collect_unsupported_from_math(vy, found);
             }
+            LogicOp::MugenSetVelocityX { .. } | LogicOp::MugenProgramStep { .. } => {}
             LogicOp::SetTile { tile, x, y, .. } => {
                 collect_unsupported_from_math(tile, found);
                 collect_unsupported_from_math(x, found);
@@ -2925,6 +2988,76 @@ fn overlap_expr_for_node(
     }
 }
 
+/// `set_velocity` do perfil MUGEN: x literal decimal (px/tick) -> Q8.8; o que nao for
+/// representavel bloqueia o build (`#error`), nunca vira 0 nem e aproximado em silencio.
+/// Programa de estados do perfil `mugen.original_chain.v1`. Programa ausente, malformado ou
+/// adulterado (digest/mapeamento de fonte) vira `SourceBridgeError`: bloqueia o build.
+fn compile_mugen_program(
+    node: &StoredNodeGraphNode,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+) -> LogicOp {
+    let bridge = |why: String| LogicOp::SourceBridgeError {
+        gap: format!("mugen_program: {why}"),
+        source_file: node.id.clone(),
+        source_line: 0,
+    };
+    let raw_target = param_string(node, "target").unwrap_or_default();
+    let Some(sprite) = runtime_entities
+        .get(&raw_target)
+        .and_then(|runtime| runtime.sprite.as_ref())
+    else {
+        return bridge(format!("entidade '{raw_target}' sem sprite"));
+    };
+    let Some(text) = param_string(node, "program_json") else {
+        return bridge("parametro 'program_json' ausente".into());
+    };
+    let program: crate::core::mugen_chain::Program = match serde_json::from_str(&text) {
+        Ok(p) => p,
+        Err(e) => return bridge(format!("programa ilegivel: {e}")),
+    };
+    if let Err(why) = program.validate() {
+        return bridge(why);
+    }
+    LogicOp::MugenProgramStep {
+        target_var: sprite.var_name.clone(),
+        program: Box::new(program),
+    }
+}
+
+fn mugen_set_velocity_op(
+    node: &StoredNodeGraphNode,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+) -> LogicOp {
+    let bridge = |why: String| LogicOp::SourceBridgeError {
+        gap: format!("mugen_velset: {why}"),
+        source_file: param_string(node, "controller").unwrap_or_else(|| node.id.clone()),
+        source_line: 0,
+    };
+    let raw_target = param_string(node, "target").unwrap_or_default();
+    let Some(sprite) = runtime_entities
+        .get(&raw_target)
+        .and_then(|runtime| runtime.sprite.as_ref())
+    else {
+        return bridge(format!("entidade '{raw_target}' sem sprite"));
+    };
+    if param_string(node, "mode").as_deref().unwrap_or("set") != "set" {
+        return bridge("so mode = set (VelAdd nao faz parte do perfil v1)".to_string());
+    }
+    if param_i32(node, "vy", 0) != 0 {
+        return bridge("vy diferente de 0 (vertical fora do perfil v1)".to_string());
+    }
+    let Some(text) = param_string(node, "vx") else {
+        return bridge("vx ausente ou nao literal".to_string());
+    };
+    match crate::core::mugen_profile::parse_velocity_q8(&text) {
+        Ok(velocity) => LogicOp::MugenSetVelocityX {
+            target_var: sprite.var_name.clone(),
+            vx_q8: velocity.q8,
+        },
+        Err(why) => bridge(why),
+    }
+}
+
 fn param_string(node: &StoredNodeGraphNode, key: &str) -> Option<String> {
     node.params.get(key).and_then(|value| match value {
         Value::String(text) => Some(text.clone()),
@@ -3053,6 +3186,8 @@ fn collect_logic_sound_names_from_ops(
             | LogicOp::RomBranchCompareWord { .. }
             | LogicOp::SetSpritePosition { .. }
             | LogicOp::SetVelocity { .. }
+            | LogicOp::MugenSetVelocityX { .. }
+            | LogicOp::MugenProgramStep { .. }
             | LogicOp::SetAnimationState { .. }
             | LogicOp::SetTile { .. }
             | LogicOp::CameraFollow { .. }
@@ -3256,6 +3391,91 @@ mod tests {
             .join(name)
     }
 
+    fn mugen_test_sprite(
+        frame_durations: Option<Vec<i32>>,
+        mugen_durations: &[i32],
+        frames: usize,
+    ) -> (SpriteComponent, AnimationDef) {
+        let animation = AnimationDef {
+            frames: (0..frames as u32).collect(),
+            fps: 4,
+            looping: true,
+            frame_durations,
+            loop_start: Some(0),
+            mugen_frames: Some(
+                mugen_durations
+                    .iter()
+                    .map(|d| crate::ugdm::components::MugenAnimationFrame {
+                        group: 0,
+                        image: 0,
+                        axis: None,
+                        duration: *d,
+                        flags: Vec::new(),
+                        clsn1: Vec::new(),
+                        clsn2: Vec::new(),
+                    })
+                    .collect(),
+            ),
+            onion_skin: None,
+            hitboxes: Vec::new(),
+        };
+        let sprite = SpriteComponent {
+            asset: "assets/sprites/x.png".to_string(),
+            frame_width: 16,
+            frame_height: 16,
+            pivot: Some(crate::ugdm::components::Pivot { x: 8, y: 16 }),
+            palette_slot: 0,
+            animations: std::collections::BTreeMap::new(),
+            priority: "low".to_string(),
+            meta_sprite: false,
+            commands: Vec::new(),
+        };
+        (sprite, animation)
+    }
+
+    #[test]
+    fn mugen_durations_consistent_fields_generate_the_expected_timers() {
+        let (sprite, anim) = mugen_test_sprite(Some(vec![20, 9, -1]), &[20, 9, -1], 3);
+        let table = mugen_anim_table(&sprite, &anim).unwrap().unwrap();
+        assert_eq!(table.timers, vec![20, 9, 0]);
+    }
+
+    #[test]
+    fn mugen_durations_divergence_blocks_with_frame_and_both_values() {
+        let (sprite, anim) = mugen_test_sprite(Some(vec![20, 9]), &[5, 9], 2);
+        let err = mugen_anim_table(&sprite, &anim).unwrap().unwrap_err();
+        assert!(err.contains("quadro 1"), "{err}");
+        assert!(err.contains("frame_durations = 20"), "{err}");
+        assert!(err.contains("mugen_frames[0].duration = 5"), "{err}");
+        assert!(err.contains("nenhum foi escolhido"), "{err}");
+    }
+
+    #[test]
+    fn mugen_durations_length_mismatch_is_reported_not_truncated() {
+        let (sprite, anim) = mugen_test_sprite(Some(vec![5, 9, 4]), &[5, 9], 2);
+        let err = mugen_anim_table(&sprite, &anim).unwrap().unwrap_err();
+        assert!(err.contains("tamanhos diferentes"), "{err}");
+        let (sprite, anim) = mugen_test_sprite(None, &[5], 2);
+        let err = mugen_anim_table(&sprite, &anim).unwrap().unwrap_err();
+        assert!(err.contains("tamanhos diferentes"), "{err}");
+    }
+
+    #[test]
+    fn mugen_legacy_without_frame_durations_uses_mugen_frames_without_touching_the_project() {
+        let (sprite, anim) = mugen_test_sprite(None, &[5, 9], 2);
+        let before = anim.clone();
+        let table = mugen_anim_table(&sprite, &anim).unwrap().unwrap();
+        assert_eq!(table.timers, vec![5, 9]);
+        assert_eq!(anim, before, "a geracao nao reescreve o projeto");
+    }
+
+    #[test]
+    fn mugen_durations_unrepresentable_value_still_blocks() {
+        let (sprite, anim) = mugen_test_sprite(Some(vec![0, 9]), &[0, 9], 2);
+        assert!(mugen_anim_table(&sprite, &anim).unwrap().is_err());
+    }
+
+    #[test]
     #[test]
     fn generate_ast_uses_default_animation_timing_from_sprite_component() {
         let mut animations = std::collections::BTreeMap::new();
@@ -5789,7 +6009,7 @@ mod tests {
             })
             .expect("fsm graph should compile into a state machine");
 
-        assert_eq!(state_machine.0, "fsm_state");
+        assert_eq!(state_machine.0, "fsm_state_player");
         assert_eq!(state_machine.1.len(), 2);
         assert_eq!(state_machine.1[0].state_name, "idle");
         assert_eq!(state_machine.1[1].state_name, "run");
