@@ -4105,7 +4105,7 @@ async function clickArtStudioFrame(sessionId, sequenceId, frameIndex) {
   );
 }
 
-async function readFramebufferStats(sessionId) {
+async function readFramebufferStats(sessionId, { includeTilePixels = false } = {}) {
   return executeScript(
     sessionId,
     `
@@ -4113,10 +4113,13 @@ async function readFramebufferStats(sessionId) {
       if (!(canvas instanceof HTMLCanvasElement)) return null;
       const context = canvas.getContext("2d");
       if (!context) return null;
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      const input = window.__RDS_E2E__?.getLastInputObservation?.() ?? null;
       const imageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
       let nonBlackPixels = 0;
       let framebufferHash = 2166136261;
       let tilemapCellHash = 2166136261;
+      const tilemapCellPixels = [];
       for (let index = 0; index < imageData.length; index += 4) {
         for (let channel = 0; channel < 4; channel += 1) {
           framebufferHash ^= imageData[index + channel];
@@ -4132,6 +4135,7 @@ async function readFramebufferStats(sessionId) {
           for (let channel = 0; channel < 4; channel += 1) {
             tilemapCellHash ^= imageData[index + channel];
             tilemapCellHash = Math.imul(tilemapCellHash, 16777619);
+            if (arguments[0]) tilemapCellPixels.push(imageData[index + channel]);
           }
         }
       }
@@ -4139,10 +4143,16 @@ async function readFramebufferStats(sessionId) {
         width: canvas.width,
         height: canvas.height,
         non_black_pixels: nonBlackPixels,
+        rom_sha256: identity?.getAttribute("data-rom-sha256") ?? "",
+        rendered_frames: Number(identity?.getAttribute("data-rendered-frames") ?? 0),
+        input_session_id: input?.joypadSessionId ?? null,
+        input_hold: input?.joypadSessionHold ?? true,
         framebuffer_hash: (framebufferHash >>> 0).toString(16).padStart(8, "0"),
         tilemap_cell_hash: (tilemapCellHash >>> 0).toString(16).padStart(8, "0"),
+        ...(arguments[0] ? { tilemap_cell_pixels: tilemapCellPixels } : {}),
       };
-    `
+    `,
+    [includeTilePixels]
   );
 }
 
@@ -4389,8 +4399,18 @@ async function clickTopBarMenuAction(sessionId, label) {
   );
 }
 
+export function isCurrentBuildFrame(frame, expectedRomSha256, previousInputSession) {
+  // The build completion log precedes emulator_load_rom. A non-black canvas
+  // can therefore belong to the previous ROM, or to the new ROM's boot screen.
+  return Boolean(frame && frame.non_black_pixels > 0 &&
+    frame.rom_sha256 === expectedRomSha256 && frame.input_session_id &&
+    frame.input_session_id !== previousInputSession && !frame.input_hold &&
+    Number.isInteger(frame.rendered_frames) && frame.rendered_frames >= 10);
+}
+
 async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifactPrefix) {
   const beforeState = await readAutomationState(sessionId);
+  const previousInputSession = (await callAutomationApi(sessionId, "getLastInputObservation"))?.joypadSessionId ?? null;
   const beforeBuildCount = (beforeState?.consoleEntries ?? []).filter((entry) =>
     String(entry.message ?? "").includes("Build concluido.")
   ).length;
@@ -4477,14 +4497,15 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
   }
   await assertPathExists(romPath, `ROM gerada nao encontrada para ${label}: ${romPath}`);
   const rom = await assertSegaHeader(romPath);
+  const romSha256 = createHash("sha256").update(await readFile(romPath)).digest("hex");
 
   const framebuffer = await waitFor(
     async () => {
       const stats = await readFramebufferStats(sessionId);
-      return stats && stats.non_black_pixels > 0 ? stats : false;
+      return isCurrentBuildFrame(stats, romSha256, previousInputSession) ? stats : false;
     },
     30000,
-    `Framebuffer do Libretro permaneceu vazio para ${label}.`,
+    `Framebuffer da ROM compilada nao foi confirmado na nova sessao para ${label}.`,
     1000
   );
 
@@ -4493,6 +4514,7 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
     rom_path: romPath,
     sega_header: rom.header,
     rom_size_bytes: rom.sizeBytes,
+    rom_sha256: romSha256,
     framebuffer,
   };
 }
@@ -7114,6 +7136,13 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
   );
   report.roms.push(paintedBuild);
   report.frames.push({ label: paintedBuild.label, ...paintedBuild.framebuffer });
+  const paintedFrameDiagnostic = {
+    collected: paintedBuild.framebuffer,
+    later: await readFramebufferStats(sessionId, { includeTilePixels: true }),
+    identity: await readCanonicalGameProgress(sessionId),
+    rom_sha256: createHash("sha256").update(await readFile(paintedBuild.rom_path)).digest("hex"),
+  };
+  report.tilemapAuthoring.frameBaseline = paintedFrameDiagnostic;
   const paintedMainEvidencePath = path.join(
     validationDir,
     `${artifactPrefix}-painted-main.c`
@@ -7451,15 +7480,35 @@ async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCre
     report,
     artifactPrefix
   );
+  let lastReopenedPaintedFrame = null;
   const reopenedPaintedFrame = await waitFor(
     async () => {
       const frame = await readFramebufferStats(sessionId);
+      lastReopenedPaintedFrame = frame;
       return frame?.tilemap_cell_hash === paintedBuild.framebuffer.tilemap_cell_hash ? frame : false;
     },
     15000,
     "ROM reaberta nao refletiu o tilemap persistido no framebuffer.",
     250
-  );
+  ).catch(async (error) => {
+    const diagnostics = {
+      error: error instanceof Error ? error.message : String(error),
+      first: firstBuild.framebuffer,
+      painted: paintedFrameDiagnostic,
+      reopened: {
+        collected: reopenedBuild.framebuffer,
+        last: lastReopenedPaintedFrame,
+        later: await readFramebufferStats(sessionId, { includeTilePixels: true }),
+        identity: await readCanonicalGameProgress(sessionId),
+        rom_sha256: createHash("sha256").update(await readFile(reopenedBuild.rom_path)).digest("hex"),
+      },
+    };
+    const diagnosticPath = path.join(validationDir, `${artifactPrefix}-tilemap-reopen-diagnostics.json`);
+    await writeFile(diagnosticPath, JSON.stringify(diagnostics, null, 2), "utf8");
+    await captureScreenshot(sessionId, `${artifactPrefix}-tilemap-reopen-failure.png`);
+    console.error(`[tilemap-reopen] ${JSON.stringify({ path: diagnosticPath, painted: diagnostics.painted.collected, reopened: diagnostics.reopened.last })}`);
+    throw error;
+  });
   reopenedBuild.framebuffer = reopenedPaintedFrame;
   report.roms.push(reopenedBuild);
   report.frames.push({ label: reopenedBuild.label, ...reopenedBuild.framebuffer });
