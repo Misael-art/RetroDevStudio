@@ -1,0 +1,17 @@
+{
+  "schema": "rex-sonic-frame-barrier-r2-ci/v1",
+  "queried_at_utc": "2026-10-02T23:26:04Z",
+  "head_sha": "8166d4f1d0f105e04cd1faf3a43601da19ad7e2d",
+  "total_checks": 6,
+  "terminal_success": 6,
+  "failed": 0,
+  "pending": 0,
+  "checks": [
+    {"name":"linux-validate","run_id":37075492798,"job_id":111064340009,"started_at":"2026-10-02T23:01:04Z","completed_at":"2026-10-02T23:10:26Z","conclusion":"success","url":"https://github.com/Misael-art/retro-dev-studio/actions/runs/37075492798/job/111064340009"},
+    {"name":"validate","run_id":37075492798,"job_id":111064339807,"started_at":"2026-10-02T23:01:05Z","completed_at":"2026-10-02T23:25:24Z","conclusion":"success","url":"https://github.com/Misael-art/retro-dev-studio/actions/runs/37075492798/job/111064339807"},
+    {"name":"desktop-smoke","run_id":37075492757,"job_id":111064339720,"started_at":"2026-10-02T23:01:03Z","completed_at":"2026-10-02T23:23:32Z","conclusion":"success","url":"https://github.com/Misael-art/retro-dev-studio/actions/runs/37075492757/job/111064339720"},
+    {"name":"desktop-smoke","run_id":37075487476,"job_id":111064324495,"started_at":"2026-10-02T23:01:00Z","completed_at":"2026-10-02T23:17:31Z","conclusion":"success","url":"https://github.com/Misael-art/retro-dev-studio/actions/runs/37075487476/job/111064324495"},
+    {"name":"validate","run_id":37075487390,"job_id":111064324015,"started_at":"2026-10-02T23:01:00Z","completed_at":"2026-10-02T23:23:01Z","conclusion":"success","url":"https://github.com/Misael-art/retro-dev-studio/actions/runs/37075487390/job/111064324015"},
+    {"name":"linux-validate","run_id":37075487390,"job_id":111064323806,"started_at":"2026-10-02T23:01:00Z","completed_at":"2026-10-02T23:16:01Z","conclusion":"success","url":"https://github.com/Misael-art/retro-dev-studio/actions/runs/37075487390/job/111064323806"}
+  ]
+}

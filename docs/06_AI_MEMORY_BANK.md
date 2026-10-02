@@ -1,5 +1,30 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-10-02 — barreira incremental de frames em Build & Run
+
+No branch `codex/rex-sonic-multiframe-ui`, commit de harness `8166d4f1`, a
+coleta do E2E agora espera dez frames novos depois da nova sessão, além de
+conferir o SHA da ROM, sessão diferente, hold encerrado e framebuffer não
+preto. O primeiro gate (`5b9d2b9`) só exigia contador absoluto ≥10 e podia
+aceitar frames de uma ROM idêntica já carregada; a nova barreira ancora no
+primeiro contador pós-sessão, exige delta ≥10 e reancora quando o renderer zera.
+Seis testes Vitest passaram; ao remover o teste incremental por mutação, os dois
+casos de contador retido/resetado falharam como esperado.
+
+Replay local `reference-platformer`, app SHA
+`1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0`: 16/16.
+A célula autoral do tilemap `(25,1)/1001` mudou `0→2`; a ROM construída e a
+reaberta compartilham SHA `fbbdd384…16511d4a`, e a célula reaberta voltou a
+`1bd5bd07`. Relatório bruto local:
+`src-tauri/target-test/validation/reference-platformer-2026-10-02T23-03-26-132Z-report.json`;
+resumo/manifesto versionado em
+`data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/`.
+`host:certify` READY: frontend 912/3, Rust 839/0/76, Clippy, lint, TypeScript,
+check:tree e validação upstream SGDK/PVSnesLib success. CI consultado no SHA
+`8166d4f` tinha três success e três in_progress na primeira consulta; a consulta
+final às 23:26:04Z confirmou CI 6/6 success, sem falhas ou pendências. Sem merge,
+release ou promoção; PR #99 segue draft e depende de #98.
+
 ### Checkpoint 2026-09-30 (o) — MUGEN: **cadeia original do Ken (Stand_X) convertida da fonte e comparada com referência independente** (Experimental mantido)
 
 Frente `codex/rex-mugen-original-chain`, dependente de `codex/rex-mugen-real` (PR #90 @ `508db51b20c701f61a8fcdbc9bf43a642d28fa3c`);

@@ -223,3 +223,46 @@ O único arquivo não recuperável no caminho original é `host-readiness.json`,
 sobrescrito pela certificação seguinte. O log histórico READY continua íntegro.
 A nova certificação usa uma cópia congelada do JSON; a limitação anterior está
 em `historical-audit.json`, sem alteração retroativa do manifesto antigo.
+
+### Barreira incremental e replay final — `8166d4f`
+
+A revisão do primeiro gate encontrou outro caso válido: uma recompilação da
+mesma ROM pode criar uma sessão de input nova sem zerar o contador de frames da
+Game View. Comparar o contador apenas com o mínimo absoluto `10` ainda aceitaria
+frames antigos. O harness agora ancora o contador no primeiro frame observado
+depois da nova sessão e só aceita captura depois de mais dez frames; se o
+renderer zera o contador, ele estabelece uma nova âncora. A identidade da ROM,
+a sessão diferente da anterior, ausência de hold, canvas não preto e o gate de
+pixels exato continuam obrigatórios.
+
+Os seis testes focados passaram pelo runner Vitest (`npm test -- --run
+scripts/e2e-build-frame.test.mjs`): 6/6. Na mutação que retirou o requisito de
+avanço incremental, os dois testes de contador retido/resetado falharam e os
+outros quatro passaram (rc=1, resultado esperado); com o código restaurado, os
+seis passaram. Uma chamada exploratória com `node --test` não é válida para
+esse arquivo, que importa Vitest, e não foi contada como teste de produto.
+
+O `reference-platformer` foi reexecutado no harness `8166d4f` e no app
+`1845aebf…b8b0`: 16/16 passos. O teste pintou a célula `(linha 25, coluna 1,
+índice 1001)` de `0→2`; a ROM autorada e a ROM reaberta têm o mesmo SHA
+`fbbdd384…16511d4a`, a célula mudou de hash `11cc6cc5` para `1bd5bd07`, e o
+hash `1bd5bd07` foi observado novamente após reabrir. A Game View reportou 40
+frames tanto no estado editado como no reaberto, com sessões diferentes e
+`input_hold=false`. ROM original e ROM editada do limiar também estão pinadas
+no resumo de evidência. O relatório bruto permanece local porque é um artefato
+de execução; o resumo versionado não carrega arrays de pixels.
+
+Certificação do mesmo HEAD: READY, frontend **912 passed / 3 skipped**,
+Rust **839 passed / 0 failed / 76 ignored**, `check:tree`, lint, TypeScript,
+Clippy `-D warnings`, Rust serial e upstream oficiais SGDK/PVSnesLib
+`Success: true`. Fingerprint `60249508…14f6e2`, lock
+`dd99a22f…ac011377`. O total de frontend aumentou em dois testes porque o gate
+ganhou as duas regressões de contador.
+
+Na consulta inicial, `linux-validate` push/PR e `desktop-smoke` push estavam
+SUCCESS; `validate` push/PR e `desktop-smoke` PR ainda estavam `in_progress`.
+Consulta terminal ao mesmo SHA às 23:26:04Z confirmou **6/6 success**, zero
+falhas e zero pendências. Sem merge, release ou promoção: PR #99 segue draft,
+dependente da #98. O pacote complementar
+`data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/`
+fixa os resumos, hashes e caminhos locais necessários para auditar esta rodada.

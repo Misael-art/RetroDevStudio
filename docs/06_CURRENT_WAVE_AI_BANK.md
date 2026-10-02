@@ -1,3 +1,27 @@
+### Complemento 2026-10-02 — gate incremental de frames após Build & Run
+
+A proposta #99 continua aberta/draft, dependente de #98, sem merge. O harness
+`reference-platformer` foi endurecido no commit `8166d4f`: depois de confirmar
+ROM compilada = ROM da Game View, nova sessão, nenhum hold e canvas não preto,
+agora exige também avanço de dez frames a partir da primeira observação da nova
+sessão. Isso impede que um contador antigo, preservado por rebuild da mesma ROM,
+seja aceito como captura fresca; contador reiniciado é reancorado.
+
+O cenário desktop local passou 16/16 no app SHA
+`1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0`. A célula
+do tilemap autoral `1001` mudou `0→2`; a ROM autorada/reaberta coincide por SHA,
+e o hash da célula após reabrir é o esperado `1bd5bd07`. Os seis testes focados
+passaram; ao retirar por mutação a condição incremental, falham precisamente os
+dois casos de contador retido/resetado.
+
+`host:certify`: READY, frontend `912/3`, Rust `839/0/76`, upstream SGDK e
+PVSnesLib `Success: true`. No CI do SHA `8166d4f`, a consulta inicial mostrou
+três checks concluídos e três `in_progress`; a consulta terminal às 23:26:04Z
+confirmou 6/6 success, zero falhas e zero pendências. Resumo e manifesto desta
+rodada: `data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/`.
+Relatório: `docs/rex_profiles/sonic_multiframe/REPORT.md`. Nenhuma ROM
+comercial foi versionada, e a proposta permanece Experimental.
+
 ### Complemento 2026-10-02 — PR #99 e barreira de identidade no E2E
 
 A proposta Sonic multi-frame segue draft, dependente da #98, sem merge/release.

@@ -1,0 +1,67 @@
+{
+  "schema": "rex-sonic-frame-barrier-r2-gates/v1",
+  "code_head": "8166d4f1d0f105e04cd1faf3a43601da19ad7e2d",
+  "application_sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0",
+  "focused_frame_gate_tests": {
+    "command": "rtk proxy npm test -- --run scripts/e2e-build-frame.test.mjs",
+    "runner": "Vitest 4.1.10",
+    "passed": 6,
+    "failed": 0,
+    "skipped": 0,
+    "duration_seconds": 2.84,
+    "cases": [
+      "rejects the previous non-black ROM even after the build completion log",
+      "requires a new load even when the rebuilt ROM has the same hash",
+      "accepts only after load and boot have finished, without depending on elapsed time",
+      "refuses missing identity and a black frame",
+      "waits for rendering after the new session, even with the same SHA and retained counter",
+      "reanchors if the renderer resets its counter after the load"
+    ]
+  },
+  "mutation_discrimination": {
+    "mutation": "removed the rendered-frame delta requirement from the harness gate",
+    "expected_result": "test failure",
+    "exit_code": 1,
+    "passed": 4,
+    "failed": 2,
+    "failed_cases": [
+      "waits for rendering after the new session, even with the same SHA and retained counter",
+      "reanchors if the renderer resets its counter after the load"
+    ],
+    "restored_source_focused_result": "6/6 passed"
+  },
+  "host_certification": {
+    "command": "CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=<managed-host-cargo-target> npm run host:certify",
+    "exit_code": 0,
+    "state": "READY",
+    "host_fingerprint": "60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2",
+    "lock_digest": "dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377",
+    "frontend": {
+      "passed": 912,
+      "failed": 0,
+      "skipped": 3,
+      "total": 915
+    },
+    "rust": {
+      "passed": 839,
+      "failed": 0,
+      "ignored": 76
+    },
+    "gates": {
+      "check:tree": "passed",
+      "lint": "passed",
+      "typescript": "passed",
+      "frontend-tests": "passed",
+      "rust-clippy-lib-D-warnings": "passed",
+      "rust-tests-serial": "passed",
+      "official-upstream-validation": "passed"
+    },
+    "official_upstream": {
+      "success": true,
+      "ghidra_headless_probe": "passed",
+      "official_sgdk_smoke": "passed",
+      "official_pvsneslib_smoke": "passed"
+    }
+  },
+  "runner_note": "A tentativa inicial com `node --test` não é um teste válido para este arquivo, que importa a API Vitest. O comando canônico de foco via npm/Vitest foi executado e passou 6/6."
+}

@@ -1,0 +1,53 @@
+{
+  "schema": "rex-sonic-frame-barrier-r2-reference-desktop/v1",
+  "scenario": "reference-platformer",
+  "run_timestamp_utc": "2026-10-02T23:03:26.132Z",
+  "result": {
+    "passed_steps": 16,
+    "failed_steps": 0,
+    "exit_code": 0
+  },
+  "tested_application": {
+    "commit_with_harness": "8166d4f1d0f105e04cd1faf3a43601da19ad7e2d",
+    "product_frontend_commit": "f646ccf6de220f38dc9bf2b175cd56d79ff4be82",
+    "binary_sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0"
+  },
+  "roms": {
+    "initial_build_sha256": "6d9ff53207bdda07dfbab69bb618e049af765f320797cae9c019b7038b10f877",
+    "edited_goal_threshold_sha256": "3bfe0d4c5ffe38033b058765c7abeeef7465dd165c862136c3bcdb71d9ca43ba",
+    "tilemap_authored_sha256": "fbbdd3842ca6ce830b7ba614f97d8930369774858a972bcce54b861d16511d4a",
+    "tilemap_reopened_sha256": "fbbdd3842ca6ce830b7ba614f97d8930369774858a972bcce54b861d16511d4a"
+  },
+  "tilemap_reopen_assertion": {
+    "cell": {
+      "row": 25,
+      "column": 1,
+      "linear_index": 1001,
+      "before": 0,
+      "after": 2
+    },
+    "initial_tilemap_cell_hash": "11cc6cc5",
+    "edited_tilemap_cell_hash": "1bd5bd07",
+    "reopened_tilemap_cell_hash": "1bd5bd07",
+    "same_hash_after_reopen": true,
+    "edited_rom_rendered_frames": 40,
+    "reopened_rom_rendered_frames": 40,
+    "edited_session": "joypad-session-7",
+    "reopened_session": "joypad-session-8",
+    "both_input_holds_false": true
+  },
+  "limitations": [
+    "This is authored reference-template behavior, not recovery of a commercial ROM.",
+    "The report proves the current framebuffer/ROM/session gate in this run; it does not establish general emulator timing or all load races.",
+    "The tested binary predates the harness-only commit; its exact SHA is pinned above, and the current harness commit is pinned separately."
+  ],
+  "local_raw_report": {
+    "path": "src-tauri/target-test/validation/reference-platformer-2026-10-02T23-03-26-132Z-report.json",
+    "sha256": "36de5e735552a142d5442f6045ee3746da1a112182e8b4e5cd2cc91bc7b147ae"
+  },
+  "local_replay_log": {
+    "path": "src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-barrier-r2.log",
+    "sha256": "b19e95d7ef52aea1f023928e15438b2f8806ab65a81eab84d42a858792edeabe",
+    "exit_code_file_sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  }
+}
