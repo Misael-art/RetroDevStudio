@@ -2337,3 +2337,54 @@ false}` presa por `scripts/security-contract.test.mjs`. A config global do host
 fora do repo; NADA foi afrouxado. Não existe gate `EALLOWSCRIPTS` no repo; se
 apareceu em log, é do toolchain externo do host — investigar pela configuração
 npm local, sem imprimir valores além da política versionada.
+
+**Consolidação (continuação do checkpoint de 2026-10-02) — gates no destino,
+build, bloqueio E2E e publicação.** Gates re-medidos na branch
+`codex/rex-integrator-consolidation` @ `4840266` (merge `2e8b545` + curadorias
+`dfeb0fe`/`5da9d1b` + A `052d3d6` + adendo `4b66fff` + plano da fatia
+`4840266`): `check:tree` OK; `lint` rc=0; `tsc --noEmit` sem erros; `npm test`
+**898 passed / 6 skipped** (831 da retomada + 23 de C + 44 de D — soma exata);
+`cargo fmt --check` rc=0; `cargo clippy -- -D warnings` rc=0; `cargo test --lib`
+**832 / 0 / 75** (idêntico à retomada — frentes de corpus não tocam
+`src-tauri/`); `crates:gates` **4 pacotes OK**; build canônico `build:debug`
+rc=0 em 6m25s, binário
+`src-tauri/target-test/debug/retro-dev-studio` SHA-256
+`06011c6d6c54bfa06fa37af89832de30c731f29869a0eb29c77104c4ca3f6e12`;
+`host:certify` rc=0 (READY regenerado 2026-10-02T09:49Z, lock `dd99a22f…`), com
+evidência de preview LZ4W regenerada (`rom=261618d9…`, `pixels=5dac5c29…`,
+rgba_mod≠rgba_orig).
+
+**Matriz E2E MUGEN no destino: BLOQUEIO DE HOST VERIFICÁVEL.** O display físico
+do host mudou para 1280×800 (modo ativo 800×1280, retrato) com escala
+fracionária ≈1,35 do compositor: `set_window_rect` não é honrado sob Wayland
+(janela presa em 948×314) e sob X11 forçado (`GDK_BACKEND=x11`) a janela redimensiona
+(outer 1280×762) mas o viewport CSS fica ≈952×567 — o assert do harness
+(|inner−alvo|≤64×96 contra 1920×1080) é matematicamente insatisfazível nesse
+display; Xvfb não está instalado. 5 tentativas com logs (1920×1080 nativo ×2,
+1280×780 ×2, GDK_SCALE/DPI ×1). **Não é falha do código e não houve afrouxamento
+de gate.** Cenários afetados: `mugen-import`, `mugen-control`, `mugen-locomotion`,
+`mugen-original`. As últimas verdes desses cenários (2026-09-30/10-01) são do
+CONTEÚDO idêntico da cadeia (os merges não alteram `src-tauri/` nem `scripts/`)
+— valem como prova herdada dos cenários, não como prova do destino. **Próximo
+comando exato:** com display ≥1920×1080 restaurado (ou Xvfb instalado:
+`sudo pacman -S xorg-server-xvfb`) rodar, na branch de consolidação, sobre o
+binário já construído:
+`xvfb-run -s "-screen 0 1920x1080x24" env RDS_MUGEN_REAL_SOURCE=/home/misael/.retrodev/mugen-real-2026-09-30/source/ken8 RDS_E2E_KEEP_PROJECT=1 node scripts/e2e-tauri-build-run.mjs --scenario mugen-original --skip-build --app src-tauri/target-test/debug/retro-dev-studio`
+seguido de `mugen-import`, `mugen-control`, `mugen-locomotion` e do oráculo
+independente `python3 scripts/verify-mugen-real.py --source <ken8> --backend
+<pasta-backend-do-run> --output <json>` — Strider autoral (`mugen-import`,
+fixture do repo) e Ken real (fonte local `ken8`, oráculo Pillow) permanecem em
+trilhas separadas, sem substituição geométrica.
+
+**Publicação da proposta.** Branch `codex/rex-integrator-consolidation` enviada
+com PR sobre o tronco `codex/rex-integrator-crates-registry` (sem merge, sem
+release, sem promoção). Para entrada remota futura: **#92 primeiro** (merge da
+cadeia no tronco); #93/#94/#96 dependem de retarget para a base resultante;
+#97 aguarda a correção P1 pela frente B; #84 segue fora desta consolidação.
+Dívidas de crates apontadas por A (`rex-addressing::md_linear::translate`
+mascara sem conhecer tamanho do arquivo; `tables_for` aceita primeira entrada
+muito abaixo do mapa; glob de aceite `m02` em `rex-kosinski`) permanecem
+registradas para tratamento mediante regressão — nenhuma regressão observada
+(crates:gates 4/4); licenças intocadas. Consultas de CI serão pontuais por SHA
+da branch publicada, sem commit documental por consulta e sem observadores
+vivos.
