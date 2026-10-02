@@ -1,0 +1,111 @@
+{
+  "profile": "md-linear",
+  "kind": "real-file",
+  "container": {
+    "path": "/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin",
+    "sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+    "size_bytes": 531577,
+    "format": "bin sen contêiner"
+  },
+  "rom_member": {
+    "name": "(ficheiro único)",
+    "identity_note": "sen contêiner: identidade do ficheiro = identidade da imaxe",
+    "sha256_membro": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+    "size_bytes": 531577
+  },
+  "normalization": {
+    "rom_size": "0x80000",
+    "steps": [
+      "ficheiro mide 531577 bytes = 0x80000 (imaxe ROM) + 7289 de apêndice de ferramenta (\"ESE_S1_TC_V_2.00\")",
+      "normalizacion: imaxe = primeiros 0x80000 bytes; o apêndice queda FORA do rom_size e non e direccionable — rexistrado, non ocultado"
+    ]
+  },
+  "header_hypothesis": {
+    "fields": {
+      "banner_0x100": "SEGA MEGA DRIVE",
+      "rom_range_declarada": "0x0-0x805a5 (hipótese, solapa co apêndice)",
+      "sram_range_declarada": "0xff0000-0xffffff"
+    },
+    "note": "rango declarado polo header NON e proba: o rango ROM medido da imaxe é 0x80000; o apêndice \"ESE_S1_TC_V_2.00\" e metadatos de ferramenta de tradución/ROM-hack, non mapeado. O rango SRAM $FF0000 e o marcador TMSS habitual, sen SRAM física nesta cartucha (no-intro: Sonic 1 USA/Eu non ten batería).",
+    "references": [
+      "Genesis-Plus-GX@939ce4f md_cart.c: sen mapper= xanela linear por mascara (xa citado na spec do perfil)",
+      "hipótese de header só lectura dirixida, confirmada comportamentalmente abaixo"
+    ]
+  },
+  "behavioral_discrimination": {
+    "claim": "linear sen mapper: calquera byte é idéntico nos seus espellos A, A+0x80000, A+0x280000 dentro da xanela do cartucho",
+    "sampled_addresses": 195,
+    "read_concat_sha256": "d2e7e1a0027bfa70f79fc2ef7a939eb619dcb285af8a264aa9016a9b79c926c1",
+    "alias_pairs_all_equal": true
+  },
+  "parity_engine_vs_profile": {
+    "sample": 6000,
+    "mismatches": 0,
+    "examples": []
+  },
+  "alias_byte_equality": {
+    "offsets_with_aliases": 1500,
+    "alias_reads": 12000,
+    "mismatches": 0,
+    "window_edge_short": 0,
+    "examples": []
+  },
+  "sample_vectors": [
+    {
+      "cpu_address": "0x0",
+      "translated": {
+        "region": "rom",
+        "offset": 0
+      }
+    },
+    {
+      "cpu_address": "0x100",
+      "translated": {
+        "region": "rom",
+        "offset": 256
+      }
+    },
+    {
+      "cpu_address": "0x8000",
+      "translated": {
+        "region": "rom",
+        "offset": 32768
+      }
+    },
+    {
+      "cpu_address": "0x23456",
+      "translated": {
+        "region": "rom",
+        "offset": 144470
+      }
+    },
+    {
+      "cpu_address": "0x7ffd8",
+      "translated": {
+        "region": "rom",
+        "offset": 524248
+      }
+    },
+    {
+      "cpu_address": "0x80000",
+      "translated": {
+        "region": "rom",
+        "offset": 0
+      }
+    },
+    {
+      "cpu_address": "0x3ffff0",
+      "translated": {
+        "region": "rom",
+        "offset": 524272
+      }
+    }
+  ],
+  "header_excerpt": {
+    "at": "0x100",
+    "bytes_sha256": "3894a7c19a857f4fcd9d04ed504326f35e2742f11fa89c0c36ee78cd3d22e4e8"
+  },
+  "generated_by": "scripts/rex_profiles/addressing/real_cases/verify.mjs",
+  "date": "2026-09-25",
+  "corpus_policy": "so-lectura; sen extracción; membros lidos en memoria con unzip -p"
+}

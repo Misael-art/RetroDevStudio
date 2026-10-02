@@ -1,0 +1,128 @@
+{
+  "profile": "md-ssf2",
+  "kind": "real-zip-member",
+  "container": {
+    "path": "/home/misael/emulation/roms/genesis/Super Street Fighter II - The New Challengers (USA) (Translated PtBr).zip",
+    "sha256": "75932b70324da64a6e9fb350cf3eddbea3e70e53024a6a596b5459bbce210850",
+    "size_bytes": 2835408,
+    "format": "zip"
+  },
+  "rom_member": {
+    "name": "Super Street Fighter II - The New Challengers (USA).bin",
+    "sha256": "eaf902ab28e6d79d53f7a0a0acecb7ba38e650aca5bef38f2ab40fcd678e1271",
+    "size_bytes": 5242880,
+    "crc32_inventario": "0198b9f8",
+    "note": "identidade do membro separada da do contêiner"
+  },
+  "normalization": {
+    "rom_size": "0x800000",
+    "steps": [
+      "membro mide 0x500000 (5MB, non potencia de 2): pad 0xFF ata 8MB como esixe o contrato; as xanelas 5-7 da estado identidade leron bytes de recheo — rexistrado, non ocultado"
+    ]
+  },
+  "header_hypothesis": {
+    "fields": {
+      "banner_0x100": "SEGA GENESIS",
+      "rom_range_declarada": "0x0-0x4fffff (casa cos 5MB medidos)",
+      "sram_range_declarada": "0xff0000-0xffffff (SRAM de 32KB habitual; o perfil non modela backing)"
+    },
+    "note": "tradución PtBr: header e checksum modificados; valida-se o mapper (que e do hardware), non a integridade do dump. Este xogo e XUSTAMENTE o documentedor do mapper SSF2 (Trzynadlowski, emu-docs.org/Genesis/ssf2.txt, Wayback 20191212014333; GPGX md_cart.c mapper_ssf2).",
+    "references": [
+      "docs/rex_profiles/addressing/md-ssf2.md (spec derivada de Trzynadlowski + GPGX@939ce4f045f981f89965f24780cef045cc5e52d7 md_cart.c mapper_512k_w/mapper_ssf2_w)"
+    ]
+  },
+  "register_state_initial": [
+    {
+      "cpu_address": "0x0",
+      "translate_identity": {
+        "region": "rom",
+        "offset": 0
+      },
+      "translate_engine": {
+        "region": "rom",
+        "offset": 0
+      }
+    },
+    {
+      "cpu_address": "0x100",
+      "translate_identity": {
+        "region": "rom",
+        "offset": 256
+      },
+      "translate_engine": {
+        "region": "rom",
+        "offset": 256
+      }
+    },
+    {
+      "cpu_address": "0x7fffe",
+      "translate_identity": {
+        "region": "rom",
+        "offset": 524286
+      },
+      "translate_engine": {
+        "region": "rom",
+        "offset": 524286
+      }
+    },
+    {
+      "cpu_address": "0x80000",
+      "translate_identity": {
+        "region": "rom",
+        "offset": 524288
+      },
+      "translate_engine": {
+        "region": "rom",
+        "offset": 524288
+      }
+    },
+    {
+      "cpu_address": "0x380000",
+      "translate_identity": {
+        "region": "rom",
+        "offset": 3670016
+      },
+      "translate_engine": {
+        "region": "rom",
+        "offset": 3670016
+      }
+    }
+  ],
+  "bank_switch_verified": {
+    "write": {
+      "cpu_address": "0xa1300a",
+      "data": 18
+    },
+    "expect_banks": {
+      "5": 18
+    },
+    "probe": {
+      "cpu_address": "0x292345",
+      "perfil_offset": "0x112345",
+      "offset_esperado": "0x112345",
+      "engine_offset": "0x112345"
+    },
+    "bytes_igual_ficheiro": true,
+    "bytes_sha256": "f38455ab693070b21d18f85ecb83a90ed80ede683e41d5008e6b8c10a17fba33"
+  },
+  "parity_engine_vs_profile": {
+    "sample": 6000,
+    "mismatches": 0,
+    "examples": []
+  },
+  "parity_engine_vs_profile_switched": {
+    "sample": 3000,
+    "mismatches": 0
+  },
+  "alias_byte_equality": {
+    "offsets_with_aliases": 0,
+    "alias_reads": 0,
+    "mismatches": 0,
+    "window_edge_short": 0,
+    "examples": [],
+    "note": "offsets_with_aliases=0 e o resultado esperado no estado identidade: as 8 xanelas cubren bases mutuamente exclusivas, polo que NON hai aliases que comparar; a duplicacion de base (dous -> a base de dous -> dous aliases) esta verificada no crosscheck con fixture (exaustivo do bus)"
+  },
+  "generated_by": "scripts/rex_profiles/addressing/real_cases/verify.mjs",
+  "date": "2026-09-25",
+  "corpus_policy": "so-lectura; sen extracción; membros lidos en memoria con unzip -p"
+}

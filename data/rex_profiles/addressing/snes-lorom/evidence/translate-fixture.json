@@ -1,0 +1,52 @@
+{
+  "claim": "translate/invert/read do perfil snes-lorom sem estado de mapper: ROM na metade alta ($8000-$FFFF) dos bancos 00-7D/80-FF com offset=((banco&0x7F)*0x8000+(a&0x7FFF))&(rom_size-1); WRAM 7E/7F; espelho WRAM e I-O nas metades baixas 00-3D/80-BD; SRAM 70-7D/F0-FF; metade baixa de 40-7D/C0-FF e ambiguous (fontes divergem sobre A15 desconectado); invert devolve todos os aliases (paginas mascaradas x alias A15, bancos 7E/7F excluidos, paginas 7E/7F so via FE/FF)",
+  "rom": {
+    "sha256": "145c7b9848d51573bee2ec60c999f89b7acec95ecdda62a41939409cf306a217",
+    "size_bytes": 1048576,
+    "format": "fixture",
+    "normalization": []
+  },
+  "locator": {
+    "kind": "cpu-address",
+    "note": "conjunto completo (18 positivos translate, 10 negativos, 8 inversoes, 10 leituras) em expected/translate-cases.json do mesmo diretorio",
+    "offset": 32760,
+    "length": 8
+  },
+  "bank_state": {
+    "model": "{ rom_size } apenas; chaves extras (ex.: banks) sao rejeitadas com unsupported — LoROM nao tem registradores de mapper",
+    "initial": "sem estado: traducao depende so de rom_size (mascara de espelho)"
+  },
+  "expected": {
+    "tool": "Derivacao manual da especificacao docs/rex_profiles/addressing/snes-lorom.md: bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 boards.bml (LOROM/LOROM-RAM, GPL-3.0, apenas consulta) + snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a memmap.cpp map_lorom:2504-2517/Map_LoROMMap:2736-2744 (Snes9x License nao comercial, apenas consulta) + SNESdev wiki Memory map (CC BY-SA) para A15 desconectado. Nenhuma linha copiada.",
+    "version": "bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 + snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a",
+    "output_sha256": "fc7e30ef3c15e34ba0176e3c72bf244f10a6d0f3f318c5a374be76f7de2fd5d1",
+    "output_len": 10880,
+    "pinned_before_implementation": true,
+    "pinned_at_commit": "2a16914 (pin inicial) -> 81ebca7 (correcoes aritmeticas pre-implementation, ver pinning_history)"
+  },
+  "pinning_history": [
+    "2a16914: expectativas pinadas antes de existir qualquer implementacao (e antes do teste RED 2a03a9c)",
+    "correcao pre-GREEN 81ebca7 (este estado): dois literais errados NAS EXPECTATIVAS foram corrigidos contra a formula pinada no spec — (a) invert 4MB usou 0x01234 com soma errada; reescrito como offset 0x12345 -> aliases 0x02A345/0x82A345; (b) read 0x20FFF8+16 esperava emenda em pagina ROM 0x08000, mas o byte apos 0x20FFFF e 0x210000, metade baixa do banco 21 = espelho WRAM: em LoROM nenhuma leitura ROM emenda em outra pagina ROM. A implementacao nunca passou antes dessas correcoes; nenhum caso foi ajustado para validar a implementacao.",
+    "correcao pre-GREEN (este commit): a linha discriminadora escrita a mao no teste (0x018000 -> 0x010000) contradizia a formula pinada no JSON de expectativas: pagina 1 comeca em 0x8000; o valor 0x010000 e precisamente a formula errada bank*0x10000 contra a qual a linha existe. Corrigido para 0x008000. O JSON de expectativas (fonte pinada, autoridade) nao foi tocado por essa correcao.",
+    "o RED por modulo ausente esta registrado em 2a03a9c (tests 1, pass 0, fail 1)"
+  ],
+  "provenance": "authored-fixture",
+  "negatives": [
+    { "input": "translate(0x401234/0xC01234/0x402100, qualquer rom_size valido)", "expected_error": "ambiguous (A15 desconectado: snes9x ROM vs bsnes open bus; o perfil nao palpita)" },
+    { "input": "translate(0x3E4800, ...)", "expected_error": "unsupported (janela reservada sem dispositivo nas fontes pinadas)" },
+    { "input": "translate(0x1000000, ...)", "expected_error": "out-of-range (barramento 24 bits)" },
+    { "input": "translate(any, mapper_state=null)", "expected_error": "unsupported (estado obrigatorio)" },
+    { "input": "translate(any, mapper_state={rom_size: 8388608})", "expected_error": "unsupported (acima de 4MB: outro mapa, nao LoROM)" },
+    { "input": "translate(any, mapper_state={rom_size: 16384})", "expected_error": "unsupported (abaixo de uma pagina de 32KB)" },
+    { "input": "translate(any, mapper_state={rom_size: 786432})", "expected_error": "unsupported (nao potencia de 2)" },
+    { "input": "translate(any, mapper_state={rom_size, banks})", "expected_error": "unsupported (LoROM nao tem registradores; chave estranha rejeitada)" },
+    { "input": "invert(4096.5, ...)", "expected_error": "out-of-range (offset nao inteiro)" },
+    { "input": "invert(0x100000, rom_size=1MB)", "expected_error": "nenhum — lista vazia e resposta valida (offset alem do fim)" },
+    { "input": "read(0x008000, 0, ...)", "expected_error": "out-of-range (length < 1)" },
+    { "input": "read(0xFFFFF8, 16, ...)", "expected_error": "out-of-range top-level antes de alocar (ultrapassa o barramento)" },
+    { "input": "read sobre ROM 8 bytes menor que rom_size a partir de 0x3FFFF0", "expected_error": "8 bytes validos + out-of-range no trecho faltante (sem clamp)" }
+  ],
+  "timestamp": "deterministic-event:pin 2a16914 -> RED 2a03a9c -> correcoes de expectativa 81ebca7 -> implementacao e este registro no commit seguinte",
+  "test_command": "node --test scripts/rex_profiles/addressing/snes-lorom.test.mjs",
+  "test_result": "8/8 pass (2026-09-25, Node v26.8.1)"
+}

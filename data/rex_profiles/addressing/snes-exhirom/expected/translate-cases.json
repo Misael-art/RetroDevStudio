@@ -1,0 +1,243 @@
+{
+  "profile": "snes-exhirom",
+  "contract_version": 1,
+  "pinned_before_implementation": true,
+  "derived_from": [
+    "docs/rex_profiles/addressing/snes-exhirom.md",
+    "bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4 boards.bml:706-720 (EXHIROM/EXHIROM-RAM) + sfc/cartridge/load.cpp:131-139 (loadMap) + sfc/memory/memory.cpp:63-65 y memory-inline.hpp (mirror/reduce) — GPL-3.0, apenas consulta",
+    "snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a memmap.cpp Map_ExtendedHiROMMap:3120-3128, map_hirom_offset:2555-2568, map_mirror:2486-2502 — Snes9x License nao comercial, apenas consulta",
+    "todas as literais abaixo verificadas ANTES do pin por calculadora independente escrita so a partir da spec (translate por formula de areas, invert por forca bruta nos 16M de enderecos, read por agrupamento byte a byte); divergencias encontradas pela calculadora foram corrigidas na spec, nao nas literais ja conferidas"
+  ],
+  "fixture": {
+    "generator": "scripts/rex_profiles/addressing/build-fixtures.mjs",
+    "rom_size": 8388608,
+    "sha256": "aba2db79e63369ffaa00af73324f7cefe36dba4a638fa78d9eb2d465bd087989"
+  },
+  "translate_cases": [
+    { "name": "banco 00 metade alta: area 2 com base 0x400000", "cpu_address": "0x008000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x408000" } },
+    { "name": "vetores de reset em 0x00FFD8 caem no meio do arquivo de 8MB", "cpu_address": "0x00FFD8", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x40FFD8" } },
+    { "name": "fim da janela de metade alta do banco 3F", "cpu_address": "0x3F8000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x7F8000" } },
+    { "name": "ultimo offset da area 2 em 8MB (banco 3F, $FFFF)", "cpu_address": "0x3FFFFF", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x7FFFFF" } },
+    { "name": "inicio do banco cheio 40: area 2 identidade em 8MB", "cpu_address": "0x400000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x400000" } },
+    { "name": "banco cheio 40, $8000", "cpu_address": "0x408000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x408000" } },
+    { "name": "fim do grupo de bancos cheios 40-7D", "cpu_address": "0x7DFFFF", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x7DFFFF" } },
+    { "name": "banco 80 metade alta: area 1 involutiva com banco 00", "cpu_address": "0x808000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x008000" } },
+    { "name": "banco BF alto: A22/A23 desconectados mascaram para 0x3F8000", "cpu_address": "0xBF8000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x3F8000" } },
+    { "name": "inicio do banco cheio C0: area 1 offset 0", "cpu_address": "0xC00000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x000000" } },
+    { "name": "ultima direcao do barramento: area 1 offset 0x3FFFFF", "cpu_address": "0xFFFFFF", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x3FFFFF" } },
+    { "name": "banco FE cheio alias de area 1 (FE≡3E mod 0x400000)", "cpu_address": "0xFE0000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x3E0000" } },
+    { "name": "wram banco 7E inicio", "cpu_address": "0x7E0000", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "wram", "offset": "0x0000" } },
+    { "name": "wram banco 7F fim", "cpu_address": "0x7FFFFF", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "wram", "offset": "0xFFFF" } },
+    { "name": "wram meio", "cpu_address": "0x7F1234", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "wram", "offset": "0x1234" } },
+    { "name": "sram banco 20 $6000-$7FFF", "cpu_address": "0x206123", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "sram", "offset": "0x0123" } },
+    { "name": "sram banco A1 topo da janela (ganha do io em bancos A0-BF)", "cpu_address": "0xA17FFF", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "sram", "offset": "0x1FFF" } },
+    { "name": "espelho WRAM em banco 00 metade baixa", "cpu_address": "0x001234", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "wram-mirror", "offset": "0x1234" } },
+    { "name": "espelho WRAM em banco 80", "cpu_address": "0x800123", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "wram-mirror", "offset": "0x0123" } },
+    { "name": "io PPU em banco 00", "cpu_address": "0x002100", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "io", "offset": "0x2100" } },
+    { "name": "io topo da janela do banco 00 (em bancos 20-3F/A0-BF o mesmo a seria sram)", "cpu_address": "0x007FFF", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "io", "offset": "0x7FFF" } },
+    { "name": "banco cheio 7D meio: identidade linear em 8MB", "cpu_address": "0x7D5555", "mapper_state": { "rom_size": 8388608 }, "expect": { "region": "rom", "offset": "0x7D5555" } },
+    { "name": "ROM de 6MB: banco 20 alto mod half2=0x200000 => 0x408000", "cpu_address": "0x208000", "mapper_state": { "rom_size": 6291456 }, "expect": { "region": "rom", "offset": "0x408000" } },
+    { "name": "ROM de 6MB: banco 60 cheio cruza a borda do espelho da area 2", "cpu_address": "0x600000", "mapper_state": { "rom_size": 6291456 }, "expect": { "region": "rom", "offset": "0x400000" } },
+    { "name": "ROM de 5MB: banco 10 alto mod half2=0x100000 => 0x408000", "cpu_address": "0x108000", "mapper_state": { "rom_size": 5242880 }, "expect": { "region": "rom", "offset": "0x408000" } }
+  ],
+  "translate_negatives": [
+    { "name": "reservado: banco 3E, a=$4800 (mitade baixa; nao e io nem ROM)", "cpu_address": "0x3E4800", "mapper_state": { "rom_size": 8388608 }, "expect_error": { "code": "unsupported" } },
+    { "name": "reservado: banco BE, a=$4800", "cpu_address": "0xBE4800", "mapper_state": { "rom_size": 8388608 }, "expect_error": { "code": "unsupported" } },
+    { "name": "acima do barramento 24 bits", "cpu_address": "0x1000000", "mapper_state": { "rom_size": 8388608 }, "expect_error": { "code": "out-of-range" } },
+    { "name": "estado ausente", "cpu_address": "0x008000", "mapper_state": null, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size 4MB nao e ExHiROM (perfil snes-hirom)", "cpu_address": "0x008000", "mapper_state": { "rom_size": 4194304 }, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size 7MB: half2=3MB nao e potencia de 2 (pad 0xFF a 8MB registrado)", "cpu_address": "0x008000", "mapper_state": { "rom_size": 7340032 }, "expect_error": { "code": "unsupported" } },
+    { "name": "rom_size acima das duas areas (9MB)", "cpu_address": "0x008000", "mapper_state": { "rom_size": 9437184 }, "expect_error": { "code": "unsupported" } },
+    { "name": "estado com chave desconhecida rejeitada (sem registradores em ExHiROM)", "cpu_address": "0x008000", "mapper_state": { "rom_size": 8388608, "banks": { "1": 2 } }, "expect_error": { "code": "unsupported" } }
+  ],
+  "invert_cases": [
+    {
+      "name": "offset 0 em 8MB: so o inicio do banco cheio C0 (area 2 nao cobre <0x400000; 80-BF altos comecam em 0x8000)",
+      "rom_offset": "0x000000",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": ["0xC00000"]
+    },
+    {
+      "name": "offset 0x400000 em 8MB: inicio do banco cheio 40 (banco 00 alto comeca em 0x408000)",
+      "rom_offset": "0x400000",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": ["0x400000"]
+    },
+    {
+      "name": "offset 0x408000 em 8MB: par involutivo banco 00 alto e banco 40",
+      "rom_offset": "0x408000",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": ["0x008000", "0x408000"]
+    },
+    {
+      "name": "offset 0x40FFD8 (vetores) em 8MB: 0x00FFD8 e 0x40FFD8",
+      "rom_offset": "0x40FFD8",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": ["0x00FFD8", "0x40FFD8"]
+    },
+    {
+      "name": "offset 0x3FFFFF em 8MB: topo da area 1 pelos bancos BF alto e FF cheio",
+      "rom_offset": "0x3FFFFF",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": ["0xBFFFFF", "0xFFFFFF"]
+    },
+    {
+      "name": "offset 0x7FFFFF em 8MB: topo da area 2 so pelo fim do banco 3F",
+      "rom_offset": "0x7FFFFF",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": ["0x3FFFFF"]
+    },
+    {
+      "name": "offset 0x12345 em 8MB: area 1 so pelo banco cheio C1 (bancos altos 80-BF cobrem apenas offsets >= 0x??8000)",
+      "rom_offset": "0x12345",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": ["0xC12345"]
+    },
+    {
+      "name": "offset 0x412345 em 8MB: area 2 so pelo banco cheio 41 (banco 01 baixo nao e ROM)",
+      "rom_offset": "0x412345",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": ["0x412345"]
+    },
+    {
+      "name": "ROM de 6MB: offset 0x400000 tem dois aliases (bancos 40 e 60, mod half2=0x200000)",
+      "rom_offset": "0x400000",
+      "mapper_state": { "rom_size": 6291456 },
+      "expect_aliases": ["0x400000", "0x600000"]
+    },
+    {
+      "name": "ROM de 6MB: offset 0x5FFFFF tem tres aliases (1F, 3F altos e 5F cheio)",
+      "rom_offset": "0x5FFFFF",
+      "mapper_state": { "rom_size": 6291456 },
+      "expect_aliases": ["0x1FFFFF", "0x3FFFFF", "0x5FFFFF"]
+    },
+    {
+      "name": "offset alem do fim da ROM: lista vazia, resposta valida",
+      "rom_offset": "0x800000",
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_aliases": []
+    },
+    {
+      "name": "offset nao inteiro e erro",
+      "rom_offset_value": 4096.5,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_error": { "code": "out-of-range" }
+    },
+    {
+      "name": "invert exige mapper_state valido",
+      "rom_offset": "0x000000",
+      "mapper_state": null,
+      "expect_error": { "code": "unsupported" }
+    }
+  ],
+  "read_cases": [
+    {
+      "name": "banco 00 alto le do meio do arquivo (area 2)",
+      "cpu_address": "0x008000",
+      "length": 8,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x408000", "bytes_hex": "be2640bc8f61261f" }
+      ]
+    },
+    {
+      "name": "contiguidade area 2: 0x40FFF8+16 emenda no banco 41 em UM segmento",
+      "cpu_address": "0x40FFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x40FFF8", "bytes_hex": "599f3c8d801e62246fbf84aac1b2140e" }
+      ]
+    },
+    {
+      "name": "mitade alta para no fim do banco: 0x00FFF8+16 corta e o resto e espelho WRAM classificado",
+      "cpu_address": "0x00FFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x40FFF8", "bytes_hex": "599f3c8d801e6224" },
+        { "region": "wram-mirror", "offset": "0x0000", "error": { "code": "unsupported", "detail_contains": "backing" } }
+      ]
+    },
+    {
+      "name": "alias involutivo area 1: 0x808000 le do comeco do arquivo",
+      "cpu_address": "0x808000",
+      "length": 8,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x008000", "bytes_hex": "339077eee619684b" }
+      ]
+    },
+    {
+      "name": "contiguidade area 1: 0xC0FFF8+16 emenda no banco C1 em UM segmento",
+      "cpu_address": "0xC0FFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x00FFF8", "bytes_hex": "d46412f6d5a76b0e64d0458905ebdc78" }
+      ]
+    },
+    {
+      "name": "fim do grupo 40-7D: 0x7DFFF8+16 corta em WRAM classificado",
+      "cpu_address": "0x7DFFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_segments": [
+        { "region": "rom", "offset": "0x7DFFF8", "bytes_hex": "15d479420be444bb" },
+        { "region": "wram", "offset": "0x0000", "error": { "code": "unsupported", "detail_contains": "backing" } }
+      ]
+    },
+    {
+      "name": "regiao sram: segmento classificatorio sem backing ROM",
+      "cpu_address": "0x206123",
+      "length": 4,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_segments": [
+        { "region": "sram", "offset": "0x0123", "error": { "code": "unsupported", "detail_contains": "backing" } }
+      ]
+    },
+    {
+      "name": "rom 8 bytes menor que rom_size: ultimo trecho da area 2 (0x3FFFF0) e out-of-range sem clamp",
+      "cpu_address": "0x3FFFF0",
+      "length": 16,
+      "mapper_state": { "rom_size": 8388608 },
+      "rom_short_by": 8,
+      "expect_segments": [
+        { "region": "rom", "offset": "0x7FFFF0", "bytes_hex": "bae34828320c3d00" },
+        { "error": { "code": "out-of-range" } }
+      ]
+    },
+    {
+      "name": "ROM de 6MB: wrap do espelho da area 2 corta em dois segmentos (0x5FFFFF -> 0x400000)",
+      "cpu_address": "0x5FFFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 6291456 },
+      "rom_short_by": 2097152,
+      "expect_segments": [
+        { "region": "rom", "offset": "0x5FFFF8", "bytes_hex": "1e0058098c40a676" },
+        { "region": "rom", "offset": "0x400000", "bytes_hex": "4bbd61030b4bdf33" }
+      ]
+    },
+    {
+      "name": "leitura alem do barramento rejeitada antes de alocar",
+      "cpu_address": "0xFFFFF8",
+      "length": 16,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_error": { "code": "out-of-range" }
+    },
+    {
+      "name": "length zero rejeitado",
+      "cpu_address": "0x008000",
+      "length": 0,
+      "mapper_state": { "rom_size": 8388608 },
+      "expect_error": { "code": "out-of-range" }
+    },
+    {
+      "name": "estado invalido rejeitado antes de alocar",
+      "cpu_address": "0x008000",
+      "length": 8,
+      "mapper_state": { "rom_size": 7340032 },
+      "expect_error": { "code": "unsupported" }
+    }
+  ]
+}

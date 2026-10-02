@@ -1,0 +1,33 @@
+{
+  "contract_version": 1,
+  "id": "snes-hirom",
+  "kind": "addressing",
+  "version": 1,
+  "platform": "snes",
+  "variant": "HiROM: offset linear de 24 bits ((banco<<16)|a)&(rom_size-1); bancos 00-3F/80-BF so metade alta, bancos 40-7D/C0-FF completos; WRAM 7E/7F + espelhos; SRAM 20-3F/A0-BF $6000-$7FFF; sem registradores de mapper",
+  "support": "fixture-only",
+  "source": {
+    "name": "bsnes resource/system/boards.bml (HIROM/HIROM-RAM) + snes9x memmap.cpp (map_hirom, Map_HiROMMap, map_HiROMSRAM, map_WRAM, map_System)",
+    "url": "https://github.com/byuu/bsnes ; https://github.com/Snes9x/snes9x",
+    "commit": "bsnes@7d5aa1e656b9171524d01b1b22917197d8121cb4; snes9x@1bcc369e89f08243e0a462882fb1f3e42e51de3a",
+    "license": "bsnes: GPL-3.0; Snes9x: License nao comercial. Ambas consultadas apenas como especificacao; nenhuma linha copiada",
+    "license_url": "https://github.com/byuu/bsnes/blob/master/LICENSE.txt ; https://github.com/Snes9x/snes9x/blob/master/LICENSE"
+  },
+  "capabilities": {
+    "specification": "fixture",
+    "fixture": "fixture",
+    "translate": "fixture",
+    "invert": "fixture",
+    "read": "fixture",
+    "register-write-changes-translation": "not-applicable",
+    "negatives": "fixture",
+    "corpus-identification": "blocked"
+  },
+  "limits": [
+    "corpus-identification blocked: o perfil nao detecta mapa de ROM real; a pontuacao LoROM-vs-HiROM (snes9x Score*ROM) fica como hipotese no inventario do corpus; header nao e prova",
+    "sem ambiguous pinado: HiROM padrao nao tem a divergencia A15 de LoROM (metades baixas 40-7D/C0-FF sao ROM nas duas fontes); a unica divergencia registrada (snes9x map_System 00-3F/80-BF vs bsnes 00-3D/80-BD) e resolvida pela convencao bsnes e documentada na spec",
+    "nao modela ExHiROM (segunda area 4MB com base 0x400000), chips de oclusao (DSP1/2, SuperFX, SA1, CX4), BS-Cart, SRAM 60-67/e0-e7, nem ExpRAM/WRAM ampliada",
+    "exige rom_size potencia de 2 entre 64KB e 4MB; dumps maiores exigem perfil ExHiROM; fora da potencia de 2 exige normalizacao pad 0xFF registrada em evidencia",
+    "janelas de SRAM de 2KB com mascara 0x1FFF (bsnes mask=0xe000 / snes9x map_HiROMSRAM): SRAM fisicas de 8KB (jogo real com $6000-$7FFF inteiro) exigem estado/backup que o perfil v1 nao modela"
+  ]
+}

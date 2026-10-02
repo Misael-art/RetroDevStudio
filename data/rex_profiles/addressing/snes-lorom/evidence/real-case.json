@@ -1,0 +1,111 @@
+{
+  "profile": "snes-lorom",
+  "kind": "real-zip-member",
+  "container": {
+    "path": "/home/misael/emulation/roms/sfc/Kikou Keisatsu Metal Jack (Japan) (Translated En).zip",
+    "sha256": "73d66d8de125a4a82491dc863269e7dc257be4b052f07de3f2d871c28f78d903",
+    "size_bytes": 397714,
+    "format": "zip",
+    "membros_non_rom": [
+      "CDRomance.url",
+      "Metal Jack Readme.txt"
+    ]
+  },
+  "rom_member": {
+    "name": "Kikou Keisatsu Metal Jack (English v2.0).sfc",
+    "sha256": "3a1b64d78802ae60f80ccf46823fb0e8edcc103dfdaf91c4c283e2e40f500881",
+    "size_bytes": 1048576,
+    "crc32_membros_inventario": "1b356ce3",
+    "note": "identidade do membro separada da do contêiner"
+  },
+  "normalization": {
+    "rom_size": "0x100000",
+    "steps": [
+      "sen normalizacion: membro = 1MB exacto, sen cabecera SMC (crc casa co inventario)"
+    ]
+  },
+  "header_hypothesis": {
+    "fields": {
+      "banner_0xFFC0": "",
+      "ffd5": "0x0",
+      "ffd6": "0x0",
+      "checksum": "0x0",
+      "version": ""
+    },
+    "note": "tradución English v2.0: checksum do header e bytes difiren do dump vanilla; o que se valida aquí e o MAPA, non a integridade do dump",
+    "references": [
+      "superfamicom.org/info/kikou-keisatsu-metal-jack (consultado 2026-09-25): \"ROM Bank: LoROM, ROM Size: 8 Mb\" — coincide con $FFD5&0x0F=0 e cos aliases comportamentais abaixo",
+      "bsnes@7d5aa1e boards.bml LOROM (sha256 b8006d80...) xa citado na spec do perfil"
+    ]
+  },
+  "behavioral_discrimination": {
+    "claim": "LoROM: banner visible nos bancos 00/40/80/C0 na metade alta, todos co mesmo offset 0x7FC0&... mask; WRAM 7E/7F excluida; 40-7D baixos ambiguous",
+    "banner_windows": [
+      {
+        "cpu_address": "0xffc0",
+        "region": "rom",
+        "offset": "0x7fc0",
+        "visible_banner": "METAL JACK"
+      },
+      {
+        "cpu_address": "0x40ffc0",
+        "region": "rom",
+        "offset": "0x7fc0",
+        "visible_banner": "METAL JACK"
+      },
+      {
+        "cpu_address": "0x80ffc0",
+        "region": "rom",
+        "offset": "0x7fc0",
+        "visible_banner": "METAL JACK"
+      },
+      {
+        "cpu_address": "0xc0ffc0",
+        "region": "rom",
+        "offset": "0x7fc0",
+        "visible_banner": "METAL JACK"
+      }
+    ],
+    "wram_exclusion": [
+      {
+        "cpu_address": "0x7e0000",
+        "translate": {
+          "region": "wram",
+          "offset": 0
+        }
+      },
+      {
+        "cpu_address": "0x7fffff",
+        "translate": {
+          "region": "wram",
+          "offset": 65535
+        }
+      }
+    ],
+    "ambiguous_kept": [
+      {
+        "cpu_address": "0x401234",
+        "error": "ambiguous"
+      },
+      {
+        "cpu_address": "0xc01234",
+        "error": "ambiguous"
+      }
+    ]
+  },
+  "parity_engine_vs_profile": {
+    "sample": 6000,
+    "mismatches": 0,
+    "examples": []
+  },
+  "alias_byte_equality": {
+    "offsets_with_aliases": 1500,
+    "alias_reads": 11908,
+    "mismatches": 0,
+    "window_edge_short": 0,
+    "examples": []
+  },
+  "generated_by": "scripts/rex_profiles/addressing/real_cases/verify.mjs",
+  "date": "2026-09-25",
+  "corpus_policy": "so-lectura; sen extracción; membros lidos en memoria con unzip -p"
+}

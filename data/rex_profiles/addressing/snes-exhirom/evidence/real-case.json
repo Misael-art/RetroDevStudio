@@ -1,0 +1,14 @@
+{
+  "profile": "snes-exhirom",
+  "kind": "fixture-only",
+  "motivo": "sen caso real adecuado no corpus autorizado: os unicos membros >4MB con sinal de header usan chips personalizados (Star Ocean / Seiken Densetsu 3 con chips de fabrica; Tales of Phantasia / Dragon Quest III = SPC7110). Os dous candidatos con $FFD5&0x0F==5 son traduccions destes xogos NON-ExHiROM de fabrica, polo que o byte do header e unha hipotes refutada pola referencia externa. Os 31 ficheiros sen banner seguen sen clasificar (directiva: \"Não classifique automaticamente os 31 arquivos sem banner como ExHiROM\").",
+  "candidatos_examinados": [
+    "sfc/Dragon Quest III ... (Translated PtBr).7z: membro 6MB, $FFD5&0x0F=5 — pero o xogo físico e SPC7110 (non ExHiROM de fábrica); rexeitado",
+    "sfc/Tales of Phantasia ... (Translated PtBr).7z: membro 6MB, $FFD5&0x0F=5 — placa real SPC7110+DSP; rexeitado",
+    "snesna/Chrono Trigger+ (MSU1) [Hack]: hack MSU1, non carro orixinal; rexeitado"
+  ],
+  "entrega": "validion de ExHiROM queda en fixture+cruzcheck (exaustivo do bus verde); o integrador poderá engadir un caso real cando dispoña dun dump ExHiROM auténtico (p. ex. por BYOR con SHA).",
+  "generated_by": "scripts/rex_profiles/addressing/real_cases/verify.mjs",
+  "date": "2026-09-25",
+  "corpus_policy": "so-lectura; sen extracción; membros lidos en memoria con unzip -p"
+}
