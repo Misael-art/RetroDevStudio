@@ -2388,3 +2388,54 @@ registradas para tratamento mediante regressão — nenhuma regressão observada
 (crates:gates 4/4); licenças intocadas. Consultas de CI serão pontuais por SHA
 da branch publicada, sem commit documental por consulta e sem observadores
 vivos.
+
+### Checkpoint 2026-10-02 — Sonic multi-frame e pintura visual, proposta isolada (Experimental)
+
+Branch `codex/rex-sonic-multiframe-ui`, base #98 `0ef540e95463faf74bc32202744ed27872592d8e`.
+Código/ frontend provado: `f646ccf6de220f38dc9bf2b175cd56d79ff4be82`; app canônico SHA
+`1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0`.
+Dez frames Sonic assistidos por mapping/DPLC do perfil Rev00, pintura visual pela
+paleta real (0 transparente), confirmação de compartilhamento, cópia cumulativa,
+BPS e salvar→reiniciar app→reabrir. Base BYOR `c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb`
+(531577 B) permanece byte-idêntica. Nenhuma ROM ou imagem comercial foi versionada.
+
+**Defeitos corrigidos com regressões discriminantes:** ordem das células VDP por
+coluna (prévia Sonic herdada e pesquisa D usavam linha; antigo golden concordante
+não era prova independente); edição posterior agora preserva a pintura/paleta
+anterior; selecionar outro frame já invalida uma composição pendente. Geometria
+composição→pintura tem uma única resolução no backend. O teste autoral 2×2 e o
+acesso de pintura (8,8) falharam antes da correção. Stand RGBA correto:
+`7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7`.
+Frente D precisa corrigir seus renders no território próprio; provas históricas
+ficam preservadas, sem recertificar intenção de coordenadas antigas.
+
+**Prova nova no mesmo app:** `sonic-multiframe` passou dez composições com RGBA
+independente, controles nativos, acúmulo pintura/paleta, BPS byte-exato e reabertura
+visual (centro+quatro cantos em IMG, metadados abaixo). Isso é prévia estática,
+não execução dos dez frames. Regressão separada `inspection-sonic-tiles` passou
+recusas, edição/BPS/aplicação, observação de 1200 frames no core e reinício/reabertura:
+96 pixels alterados no Sonic, ROI x=74..85/y=170..177. Não prova teclado/movimento/salto.
+Pillow: dez PNGs exatos e vinte mutações recusadas. Undo age na fila pendente; troca
+de frame não persiste essa fila. Novos bancos/overlap/VRAM herdada são recusados.
+
+**Gates finais:** `host:certify` READY, upstream SGDK/PVSnesLib `Success: true`;
+frontend 906/3 (direto 903/6, total909), Rust839/0/76, UI13/13;
+fmt/clippy(lib/default)/lint/tsc/check:tree/crates:gates4/4 passaram. Fingerprint
+`60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2`, lock `dd99a22f…`.
+Auditoria npm padrão: EALLOWSCRIPTS (config usuário); por chamada isolada preservando
+política repo: rc0 no limiar high, quatro moderados Vitest `GHSA-82fw-gwwq-j7x9`.
+Cargo audit: rc0, oito avisos permitidos. Não se declara zero vulnerabilidades.
+
+**Display:** monitor físico perdeu a resolução; prova final usa Xvfb externo de QA
+fixado e com assinatura verificada, SHA `5bfd315a8c7bc626d0b183d176e130c34f910a4a1279d9d53ea45769f62a3351`,
+autenticação própria/sem TCP, sem sudo/instalação de sistema/mudança dos monitores.
+Processos do cenário e do display foram encerrados. Limites e corridas intermediárias
+estão no relatório; não foi contado timeout como sucesso.
+
+**Evidência e próximo passo:** `docs/rex_profiles/sonic_multiframe/REPORT.md` e
+`data/rex_profiles/sonic_multiframe/evidence/2026-10-02/manifest.json` fixam código,
+app, fontes, resumos e arquivos locais por hash. PNG/base64/arrays RGBA ficam ignorados.
+Proposta dependente da #98 para revisão, sem merge/release/promoção. #97(P1) e #84
+não entram; nenhum checkout de outro agente foi alterado. CI remoto pertence ao SHA
+publicado, não é prova BYOR. Após a revisão, integrar na ordem da base e revalidar o
+fluxo afetado no destino; não usar a prova de um perfil como decompilação universal.
