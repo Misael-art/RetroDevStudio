@@ -1051,6 +1051,85 @@ mod tests {
     }
 
     #[test]
+    fn e8_row_major_cell_order_is_rejected_by_the_literal_pixel_oracle() {
+        // Controle de mutacao 1 (E8): trocar a ordem das celulas VDP
+        // (column-major -> row-major) tem de ser pego pelo verificador do
+        // proprio dominio de composicao (pixels literais), com prova de que
+        // o mutante e de fato row-major (controle nao vacuo).
+        let palette = fixture_palette();
+        let mut tiles = vec![0u8; 4 * TILE_BYTES];
+        for (cell, fill) in [0x11u8, 0x22, 0x33, 0x00].iter().enumerate() {
+            for row in 0..8 {
+                tiles[cell * TILE_BYTES + row * 4..cell * TILE_BYTES + row * 4 + 4].fill(*fill);
+            }
+        }
+        let parts = [SonicPart {
+            tile_start: 0,
+            tile_width: 2,
+            tile_height: 2,
+            x: -16,
+            y: -20,
+        }];
+        let column_major =
+            compose_sonic_rgba(&tiles, &palette, &parts, 16, 16, false, false).unwrap();
+        // Verdade do hardware: a coluna 0 empilha celulas 0 e 1; a coluna 1,
+        // celulas 2 e 3 (celula (col,row) le tiles[col*rows + row]).
+        assert_eq!(column_major.get_pixel(0, 8).0, palette_rgba(&palette, 2).0);
+        assert_eq!(column_major.get_pixel(8, 0).0, palette_rgba(&palette, 3).0);
+        let mut row_major_input = tiles.clone();
+        row_major_input[TILE_BYTES..2 * TILE_BYTES]
+            .copy_from_slice(&tiles[2 * TILE_BYTES..3 * TILE_BYTES]);
+        row_major_input[2 * TILE_BYTES..3 * TILE_BYTES]
+            .copy_from_slice(&tiles[TILE_BYTES..2 * TILE_BYTES]);
+        let row_major_mutant =
+            compose_sonic_rgba(&row_major_input, &palette, &parts, 16, 16, false, false).unwrap();
+        assert_eq!(
+            row_major_mutant.get_pixel(0, 8).0,
+            palette_rgba(&palette, 3).0
+        );
+        assert_eq!(
+            row_major_mutant.get_pixel(8, 0).0,
+            palette_rgba(&palette, 2).0
+        );
+        assert_ne!(
+            column_major.as_raw(),
+            row_major_mutant.as_raw(),
+            "controle de ordem de celula e vacuo: linha<->coluna nao mudou pixels"
+        );
+    }
+
+    #[test]
+    fn e8_nibble_swap_is_rejected_by_the_literal_pixel_oracle() {
+        // Controle de mutacao 2 (E8): inverter os nibbles do tile 4bpp
+        // (high-first -> low-first) tem de alterar pixels literais e ser
+        // rejeitado pelo mesmo verificador de composicao.
+        let palette = fixture_palette();
+        let mut tiles = vec![0u8; TILE_BYTES];
+        for row in 0..8 {
+            tiles[row * 4..row * 4 + 4].fill(0x12);
+        }
+        let parts = [SonicPart {
+            tile_start: 0,
+            tile_width: 1,
+            tile_height: 1,
+            x: -16,
+            y: -20,
+        }];
+        let expected = compose_sonic_rgba(&tiles, &palette, &parts, 8, 8, false, false).unwrap();
+        // `md_4bpp_tile_nibbles`: coluna par le o nibble alto.
+        assert_eq!(expected.get_pixel(0, 0).0, palette_rgba(&palette, 1).0);
+        assert_eq!(expected.get_pixel(1, 0).0, palette_rgba(&palette, 2).0);
+        let swapped: Vec<u8> = tiles.iter().map(|byte| byte.rotate_left(4)).collect();
+        let mutant = compose_sonic_rgba(&swapped, &palette, &parts, 8, 8, false, false).unwrap();
+        assert_eq!(mutant.get_pixel(0, 0).0, palette_rgba(&palette, 2).0);
+        assert_ne!(
+            expected.as_raw(),
+            mutant.as_raw(),
+            "controle de nibble e vacuo: troca high/low nao mudou pixels"
+        );
+    }
+
+    #[test]
     fn artifact_name_components_cannot_turn_resource_ids_into_paths() {
         assert_eq!(
             artifact_name_component("spr_ryo_100/frame-1"),

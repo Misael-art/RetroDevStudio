@@ -476,6 +476,7 @@ function parseArgs(argv) {
           "inspection-sonic-tiles",
           "sonic-multiframe",
           "sonic-cadence-journey",
+          "sonic-anim-integrada",
           "rex-lz4w-effect",
           "rex-lz4w-fixture-effect",
           "rex-aplib-byor-effect",
@@ -10207,6 +10208,9 @@ async function readCadencePanelState(sessionId) {
 // observacao, no proprio core, frame a frame.
 async function playCadenceRunLiveGates(sessionId, runOptions) {
   const { buttonTestId, label, expectedBytes, oldGameFrame, report } = runOptions;
+  // Addendum-2 M-1: orcamento do gate de boot e meio de navegacao; o limiar
+  // de 890 frames nao muda e o padrao preserva a jornada de cadencia entregue.
+  const bootBudgetMs = runOptions.bootBudgetMs ?? 120000;
   const expectedSha256 = createHash("sha256").update(expectedBytes).digest("hex");
   await clickButtonByTestIdNativeWhenReady(sessionId, buttonTestId, `jogar ${label} na jornada de cadencia`);
   const identity = await waitFor(
@@ -10236,15 +10240,42 @@ async function playCadenceRunLiveGates(sessionId, runOptions) {
     `A Game View nao avancou 10 frames na corrida ${label}`,
     100
   );
-  const bootFrame = await waitFor(
-    async () => {
-      const progress = await readCanonicalGameProgress(sessionId);
-      return progress && progress.renderedFrames >= 890 ? progress : false;
-    },
-    120000,
-    `A ROM ${label} nao atravessou o boot ate o ponto de entrada na jornada`,
-    100
-  );
+  // Diagnostico cru da perna ao vivo (meio, nao expectativa): se o gate de
+  // boot estourar, persistir a serie de frames (a cada ~5s) + ultimo estado
+  // lido + cauda do console do app antes de repropagar o erro. Distingue
+  // pump morto (serie plana) de pump lento (serie crescente) e revela a
+  // mensagem de falha do frame loop, se houver.
+  const bootStartedAt = Date.now();
+  const bootTrace = [];
+  let lastBootProgress = null;
+  let bootFrame;
+  try {
+    bootFrame = await waitFor(
+      async () => {
+        const progress = await readCanonicalGameProgress(sessionId);
+        if (progress) {
+          lastBootProgress = progress;
+          const elapsedMs = Date.now() - bootStartedAt;
+          if (bootTrace.length === 0 || elapsedMs >= bootTrace[bootTrace.length - 1].t_ms + 5000) {
+            bootTrace.push({ t_ms: elapsedMs, rf: progress.renderedFrames, status: progress.gameStatus });
+          }
+        }
+        return progress && progress.renderedFrames >= 890 ? progress : false;
+      },
+      bootBudgetMs,
+      `A ROM ${label} nao atravessou o boot ate o ponto de entrada na jornada`,
+      100
+    );
+  } catch (error) {
+    const state = await readAutomationState(sessionId).catch(() => null);
+    console.log(`[cadence-journey-live-diagnostic] ${JSON.stringify({
+      label,
+      trace: bootTrace,
+      last_progress: lastBootProgress,
+      console_tail: ((state?.consoleEntries ?? []).slice(-16)).map((entry) => String(entry?.message ?? "")).filter(Boolean),
+    })}`);
+    throw error;
+  }
   await focusGameCanvasNatively(sessionId);
   const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
   await sendNativeGameKey(sessionId, "Enter", "keyDown", `START de entrada da fase ${label} (jornada cadencia)`);
@@ -10636,6 +10667,393 @@ async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, sav
       fail(`Jornada de cadencia INCONCLUSIVA/FAIL frente ao congelado (sem promover nada): ${JSON.stringify({ failed, report_path: path.join(pilotDir, "report.json") })}`);
     }
     console.log(`OK: Sonic cadence journey E2E; allPass=true; report=${path.join(pilotDir, "report.json")}`);
+    return sessionIdRef;
+  } catch (error) {
+    await persistReport({ allPass: false, aborted: true, error: String(error?.message ?? error), finished_at: new Date().toISOString() }).catch(() => null);
+    throw error;
+  }
+}
+
+// Jornada integrada de 10 passos (E9, congelado em
+// docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md): abrir
+// BYOR -> localizar id_Wait -> pintar 1 pixel -> mudar duracao para 40 ->
+// conferir AMBOS na copia por leitura crua -> exportar/reaplicar BPS pela UI
+// -> jogar a copia na Game View com gate de identidade dos bytes carregados
+// -> salvar/destruir/reabrir -> confirmar sequencia+duracao+pixel+
+// procedencia -> restaurar so a duracao e provar o pixel intacto. Cada passo
+// registra um check nomeado; a copia final e conferida byte a byte contra a
+// mutacao independente, nunca contra o proprio produto.
+async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
+  const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const baseSha256 = hash(base);
+  if (base.length !== 531577) fail(`A jornada integrada exige a ROM BYOR pinada de 531577 bytes: ${base.length}`);
+  if (base[CADENCE_JOURNEY_WAIT_ADDR] !== 23) fail(`O byte de intervalo da base nao e $17: ${base[CADENCE_JOURNEY_WAIT_ADDR]}`);
+  if (!CADENCE_JOURNEY_WAIT_FRAMES.every((frame, index) => base[CADENCE_JOURNEY_WAIT_ADDR + 1 + index] === frame)) {
+    fail("A sequencia de frames do script id_Wait na base difere do contrato lido independentemente");
+  }
+  if (base[CADENCE_JOURNEY_WAIT_ADDR + 19] !== 0xfe || base[CADENCE_JOURNEY_WAIT_ADDR + 20] !== 0x02) {
+    fail("O terminador afBack 2 do script id_Wait nao esta na base");
+  }
+  const paintedIndex = 6; // walk-1: mesmo alvo de pintura ja provado pelo cenario multiframe
+  const reference = renderSonicFrameReference(base, paintedIndex);
+  const at = reference.locations[0];
+  if (!at) fail("Pixel de controle nao pertence ao mapping independente do walk-1");
+  const oldIndex = at.high ? base[at.offset] >> 4 : base[at.offset] & 15;
+  const paintIndex = oldIndex === 15 ? 14 : 15;
+  const paintedBytes = Buffer.from(base);
+  paintedBytes[at.offset] = at.high
+    ? (paintedBytes[at.offset] & 0x0f) | (paintIndex << 4)
+    : (paintedBytes[at.offset] & 0xf0) | paintIndex;
+  const journeyBytes = Buffer.from(paintedBytes);
+  journeyBytes[CADENCE_JOURNEY_WAIT_ADDR] = 40;
+  const journeySha256 = hash(journeyBytes);
+  const diffOffsets = (a, b) => {
+    const out = [];
+    for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) out.push(i);
+    return out;
+  };
+  await ensureValidationDir();
+  const pilotDir = path.join(validationDir, `${prefix}-anim-integrada`);
+  await mkdir(pilotDir, { recursive: true });
+  const report = {
+    schema: "rex-sonic-anim-integrada/v1",
+    artifact_prefix: prefix,
+    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (driver R-1..R-4) + EXPECTATIONS-ETAPA5-ADDENDUM-2.md (meio M-1)",
+    binary_sha256: hash(await readFile(app)),
+    base_rom_sha256: baseSha256,
+    expected_journey_sha256: journeySha256,
+    paint: { frame_id: `sonic1_sonic/walk-1`, offset: at.offset, high_nibble: at.high, old_index: oldIndex, new_index: paintIndex },
+    pilot_dir: pilotDir,
+    steps: [],
+    checks: [],
+  };
+  const persistReport = async (extra = {}) => {
+    await writeFile(path.join(pilotDir, "report.json"), JSON.stringify({ ...report, ...extra }, null, 2));
+  };
+  let sessionIdRef = sessionId;
+  try {
+    // PASSO 1 — abrir BYOR: a carga compartilhada ja identificou o recurso
+    // sonic1_sonic e completou a sessao; registra a evidencia pinada.
+    report.checks.push({ name: "passo1.byor_pinado", pass: baseSha256 === "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb" && Boolean(savedId), observed: { base_sha: baseSha256, session_id: savedId } });
+    if (!report.checks.at(-1).pass) throw new Error("PASSO 1: a base BYOR nao esta no pino da jornada");
+    report.steps.push({ step: 1, name: "abrir_byor", rom_path: romPath, base_sha256: baseSha256 });
+
+    // PASSO 2 — localizar id_Wait: 18 quadros com miniaturas reais + linguagem
+    // de iniciante (rotulo "Duracao por etapa" e os botoes Mais lento/Mais
+    // rapido entregues na Etapa 3).
+    const panelBefore = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.panel && state.frameCount === 18 && state.thumbnailDataUrls.every((ok) => ok === 1) ? state : false;
+      },
+      60000,
+      "O painel de cadencia nao mostrou os 18 quadros com miniaturas reais",
+      250
+    );
+    const beginnerLanguage = await executeScript(
+      sessionIdRef,
+      `return {
+        rotulo: document.body.innerText.includes("Duração por etapa"),
+        maisLento: Boolean(document.querySelector("[data-testid='inspection-cadence-slower']")),
+        maisRapido: Boolean(document.querySelector("[data-testid='inspection-cadence-faster']")),
+      };`
+    );
+    report.checks.push({ name: "passo2.id_wait_18_quadros", pass: true, observed: { frame_count: panelBefore.frameCount } });
+    report.checks.push({ name: "passo2.original_23_previsao_24", pass: panelBefore.original.includes("23 ticks") && panelBefore.current.includes("23 ticks") && panelBefore.prediction.includes("byte 23") && panelBefore.prediction.includes("24 frames de tela"), observed: { original: panelBefore.original, current: panelBefore.current, prediction: panelBefore.prediction } });
+    report.checks.push({ name: "passo2.linguagem_iniciante", pass: beginnerLanguage.rotulo && beginnerLanguage.maisLento && beginnerLanguage.maisRapido, observed: beginnerLanguage });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`PASSO 2: painel nao bate com o congelado: ${JSON.stringify({ panelBefore, beginnerLanguage })}`);
+    report.steps.push({ step: 2, name: "localizar_id_wait", frames: panelBefore.frameCount });
+    await captureScreenshot(sessionIdRef, `${prefix}-anim-integrada-passo2.png`);
+
+    // PASSO 3 — pintar 1 pixel permitido no walk-1 pela interface nativa, com
+    // a confirmação de compartilhamento obrigatoria quando presente.
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da pintura integrada");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "compor walk-1 antes da pintura");
+    await waitFor(
+      async () => {
+        const v = await readRenderedSpriteFramePixels(sessionIdRef);
+        return v?.frameId === "sonic1_sonic/walk-1" && v.romSha256 === baseSha256 ? v : false;
+      },
+      30000,
+      "O walk-1 nao compondo os bytes da base antes da pintura",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `sonic-color-${paintIndex}`, "selecionar a cor de pintura");
+    const paintPoint = await executeScript(sessionIdRef, `
+      const img=document.querySelector('[data-testid="sonic-paint-image"]');
+      img?.scrollIntoView({block:'center',inline:'center'});
+      const r=img?.getBoundingClientRect(); if(!r) return null;
+      const x=r.left+r.width/(Number(arguments[0])*2),y=r.top+r.height/(Number(arguments[1])*2);
+      return {x,y,unobstructed:document.elementFromPoint(x,y)===img};
+    `, [reference.width, reference.height]);
+    if (!paintPoint?.unobstructed) fail(`Pintura obstruida: ${JSON.stringify(paintPoint)}`);
+    await webdriverRequest("POST", `/session/${sessionIdRef}/actions`, { actions: [{ type: "pointer", id: "anim-integrada-pintura", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", duration: 0, x: Math.round(paintPoint.x), y: Math.round(paintPoint.y), origin: "viewport" }, { type: "pointerDown", button: 0 }, { type: "pointerUp", button: 0 }] }] });
+    const applyDisabled = await executeScript(sessionIdRef, `return document.querySelector('[data-testid="sonic-paint-apply"]')?.disabled;`);
+    if (!applyDisabled) fail("Pintura compartilhada ficou disponivel sem confirmacao");
+    const sharedSelector = '[data-testid="sonic-paint-confirm-shared"]';
+    await clickElementWithDiagnostics(sessionIdRef, await findElement(sessionIdRef, sharedSelector), sharedSelector);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "sonic-paint-apply", "aplicar pintura do pixel");
+    await waitFor(async () => (await readRenderedSpriteFramePixels(sessionIdRef))?.romSha256 === hash(paintedBytes), 30000, "A pintura nao confirmou os bytes independentes", 100);
+    const paintStatus = await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId });
+    const paintEdit = paintStatus?.session?.edit;
+    const paintCopy = paintEdit?.modified_rom_path ? await readFile(paintEdit.modified_rom_path) : null;
+    report.checks.push({ name: "passo3.pintura_offset_unico", pass: paintEdit?.format === "md_4bpp_tile_nibbles" && JSON.stringify(paintEdit?.changed_offsets) === JSON.stringify([at.offset]) && paintEdit?.bytes_changed === 1, observed: { format: paintEdit?.format, changed_offsets: paintEdit?.changed_offsets, bytes_changed: paintEdit?.bytes_changed }, required: [at.offset] });
+    report.checks.push({ name: "passo3.copia_so_pixel", pass: Boolean(paintCopy) && paintCopy.equals(paintedBytes) && paintEdit.modified_rom_sha256 === hash(paintedBytes), observed: { copy_sha: paintCopy ? hash(paintCopy) : null, edit_sha: paintEdit?.modified_rom_sha256 }, required: hash(paintedBytes) });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`PASSO 3: a pintura divergiu da mutacao independente: ${JSON.stringify(report.checks.slice(-2))}`);
+    report.steps.push({ step: 3, name: "pintar_pixel", frame_id: "sonic1_sonic/walk-1", offset: at.offset, new_index: paintIndex, copy_sha256: paintEdit.modified_rom_sha256 });
+
+    // PASSO 4 — mudar a duracao para 40 pela interface (acumulando na mesma copia).
+    await setSonicNumberInputNative(sessionIdRef, "inspection-cadence-value", 40);
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da aplicacao de cadencia integrada");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-cadence-apply", "aplicar duracao 40 na jornada integrada");
+    const cadenceMessage = await waitFor(
+      async () => {
+        const entries = ((await readAutomationState(sessionIdRef))?.consoleEntries ?? []).map((entry) => String(entry?.message ?? ""));
+        return entries.find((message) => message.includes("Cadência id_Wait aplicada") && message.includes("agora 40 ticks")) ?? false;
+      },
+      30000,
+      "A aplicacao de cadencia nao publicou a mensagem de sucesso no console",
+      100
+    );
+    report.checks.push({ name: "passo4.mensagem_com_sha_da_copia_acumulada", pass: cadenceMessage.includes(journeySha256) && cadenceMessage.includes("0x13BAE"), observed: cadenceMessage, required: journeySha256 });
+    if (!report.checks.at(-1).pass) throw new Error(`PASSO 4: a mensagem nao aponta para a copia acumulada esperada: ${cadenceMessage}`);
+    const panel40 = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.current.includes("40 ticks") && state?.prediction.includes("byte 40") && state?.prediction.includes("41 frames de tela") ? state : false;
+      },
+      30000,
+      "O painel nao passou a mostrar 40 ticks com previsao de 41 frames",
+      100
+    );
+    report.steps.push({ step: 4, name: "duracao_40", painel: { current: panel40.current, prediction: panel40.prediction } });
+
+    // PASSO 5 — conferir AMBOS na copia por leitura crua do arquivo: byte
+    // 0x13BAE = 40 E o nibble pintado no offset do arte, e NENHUM outro byte.
+    const journeyStatus = await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId });
+    const journeyEdit = journeyStatus?.session?.edit;
+    if (!journeyEdit?.modified_rom_path) fail(`A sessao nao expoe a copia editada: ${JSON.stringify(journeyStatus?.session?.status)}`);
+    const journeyCopy = await readFile(journeyEdit.modified_rom_path);
+    const changedAgainstBase = diffOffsets(base, journeyCopy);
+    // E1 congela o DIFF CUMULATIVO da copia contra a base; o produto reporta
+    // changed_offsets/bytes_changed nessa semantica cumulativa (diff base→copia
+    // em inspection.rs:1398), enquanto o por-operacao vive no ledger (offsets
+    // do entry). A assercao abaixo confere o conjunto cumulativo dos dois
+    // dominios, nao um dominio unico.
+    const cumulativeOffsets = [CADENCE_JOURNEY_WAIT_ADDR, at.offset].sort((x, y) => x - y);
+    report.checks.push({ name: "passo5.byte_cadencia_cru", pass: journeyCopy[CADENCE_JOURNEY_WAIT_ADDR] === 40 && journeyEdit.format === "sonic1_wait_interval_byte" && JSON.stringify(journeyEdit.changed_offsets) === JSON.stringify(cumulativeOffsets) && journeyEdit.bytes_changed === 2, observed: { byte: journeyCopy[CADENCE_JOURNEY_WAIT_ADDR], format: journeyEdit.format, changed_offsets: journeyEdit.changed_offsets, bytes_changed: journeyEdit.bytes_changed }, required: cumulativeOffsets });
+    const nibbleAt = (at.high ? journeyCopy[at.offset] >> 4 : journeyCopy[at.offset] & 0x0f);
+    report.checks.push({ name: "passo5.nibble_cru", pass: nibbleAt === paintIndex, observed: { offset: at.offset, high: at.high, nibble: nibbleAt }, required: paintIndex });
+    report.checks.push({ name: "passo5.diff_exatamente_dois_bytes", pass: changedAgainstBase.length === 2 && changedAgainstBase.includes(at.offset) && changedAgainstBase.includes(CADENCE_JOURNEY_WAIT_ADDR), observed: changedAgainstBase.map((i) => `0x${i.toString(16)}`), required: [`0x${at.offset.toString(16)}`, "0x13bae"] });
+    report.checks.push({ name: "passo5.copia_identica_mutacao_independente", pass: journeyCopy.equals(journeyBytes) && journeyEdit.modified_rom_sha256 === journeySha256, observed: { copy_sha: hash(journeyCopy), edit_sha: journeyEdit.modified_rom_sha256 }, required: journeySha256 });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`PASSO 5: a copia nao bate com a mutacao independente: ${JSON.stringify(report.checks.slice(-4))}`);
+    report.steps.push({ step: 5, name: "conferir_copia_crua", changed_offsets: changedAgainstBase, copy_sha256: journeySha256 });
+
+    // PASSO 6 — exportar BPS e reaplicar pela UI canonica.
+    const patchPath = path.join(pilotDir, "anim-integrada.bps");
+    const appliedPath = path.join(pilotDir, "anim-integrada-aplicada.bin");
+    const nativePath = async (testId, value) => {
+      const selector = `[data-testid="${testId}"] input`;
+      const element = await findElement(sessionIdRef, selector);
+      await clickElementWithDiagnostics(sessionIdRef, element, selector);
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/clear`, {});
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/value`, { text: value, value: [...value] });
+    };
+    await nativePath("sonic-patch-path", patchPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-export-patch", "exportar BPS da jornada integrada");
+    await waitFor(() => pathExists(patchPath), 15000, "O BPS integrado nao foi exportado pela UI", 100);
+    await nativePath("sonic-applied-path", appliedPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-apply-patch", "aplicar BPS integrado a base");
+    await waitFor(() => pathExists(appliedPath), 15000, "A ROM aplicada integrada nao foi criada pela UI", 100);
+    const appliedBytes = await readFile(appliedPath);
+    report.checks.push({ name: "passo6.bps_reproduz_copia", pass: appliedBytes.equals(journeyBytes), observed: { applied_sha: hash(appliedBytes), patch_sha: hash(await readFile(patchPath)) }, required: journeySha256 });
+    if (!report.checks.at(-1).pass) throw new Error("PASSO 6: a aplicacao BPS divergiu da ROM calculada independentemente");
+    report.steps.push({ step: 6, name: "bps_export_apply", patch_path: patchPath, applied_path: appliedPath, patch_sha256: hash(await readFile(patchPath)) });
+
+    // PASSO 7 — jogar a copia modificada na Game View com gate de identidade
+    // dos bytes carregados (SHA/size da ROM que o core confirmou ter carga).
+    const oldGameFrame = await readCanonicalGameFrame(sessionIdRef);
+    const modifiedLive = await playCadenceRunLiveGates(sessionIdRef, {
+      buttonTestId: "inspection-sonic-play-modified",
+      label: "modificada-integrada",
+      expectedBytes: journeyBytes,
+      oldGameFrame,
+      report,
+      bootBudgetMs: 300000,
+    });
+    report.steps.push({ step: 7, name: "jogar_modificada", core: modifiedLive.identity.coreLabel });
+
+    // PASSO 8 — salvar, destruir a janela, reiniciar e reabrir do disco.
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-save", "salvar sessao integrada");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),
+      15000,
+      "A sessao integrada salva nao apareceu na lista",
+      100
+    );
+    await deleteSession(sessionIdRef);
+    sessionIdRef = await createSession(app);
+    currentE2eRunContext.sessionId = sessionIdRef;
+    await waitForAppWindowReady(sessionIdRef, uiBootstrapTimeoutMs, "O app da jornada integrada nao reabriu");
+    // Aguarda o wizard montar (evita passe vacuo por ler antes do render);
+    // a ausencia stabile depois da espera tambem e registrada como observacao.
+    const wizardAfterRestart = await waitFor(
+      async () => {
+        const probe = await executeScript(
+          sessionIdRef,
+          `return {
+            visible: Boolean(document.querySelector('[data-testid="project-wizard-body"]')),
+            firstUse: document.body.innerText.includes("Wizard de Primeiro Uso"),
+            explicitClose: Boolean(document.querySelector('[data-testid="wizard-continue-without-project"]')),
+          };`
+        );
+        return probe.visible && probe.firstUse ? probe : false;
+      },
+      15000,
+      "probe de wizard (tolerada ausencia: o fecho explicito so e obrigatorio quando o wizard aparece)",
+      250
+    ).catch(() => executeScript(
+      sessionIdRef,
+      `return {
+        visible: Boolean(document.querySelector('[data-testid="project-wizard-body"]')),
+        firstUse: document.body.innerText.includes("Wizard de Primeiro Uso"),
+        explicitClose: Boolean(document.querySelector('[data-testid="wizard-continue-without-project"]')),
+      };`
+    ));
+    report.checks.push({ name: "passo8.wizard_coexiste_com_fecho_visivel", pass: !wizardAfterRestart.visible || (wizardAfterRestart.firstUse ? wizardAfterRestart.explicitClose : true), observed: wizardAfterRestart, required: "wizard visivel so pode coexistir com fecho explicito visivel (E10)" });
+    if (!report.checks.at(-1).pass) throw new Error(`PASSO 8: o wizard na reabertura nao expoe fecho explicito visivel: ${JSON.stringify(wizardAfterRestart)}`);
+    await handleProjectWizardVisibly(sessionIdRef, "anim-integrada-restart");
+    await setSessionWindowRect(sessionIdRef, 1920, 1080);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "workspace-rail-debug", "reabrir Debug Workspace na jornada integrada");
+    await callAutomationApi(sessionIdRef, "openToolsWorkspace", ["reverse", "debug", true]);
+    await waitForBodyText(sessionIdRef, "Analisar ROM", 20000, "O Reverse Workspace nao voltou na jornada integrada");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "reverse-tab-inspection", "reabrir inspecao na jornada integrada");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-refresh-sessions", "listar sessoes salvas na jornada integrada");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),
+      30000,
+      "A sessao salva integrada nao reapareceu apos destruir a janela",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `select-saved-session-${savedId}`, "selecionar sessao salva integrada");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-reopen", "reabrir sessao integrada");
+    const reopened = await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
+      30000,
+      "A sessao integrada nao foi reaberta com estado completo",
+      100
+    );
+    // A selecao do frame restaurada nao faz parte do congelado (E9 pede
+    // sequencia+duracao+pixel+procedencia): o frame pintado e selecionado de
+    // forma explicita na recomposicao do PASSO 9, como a jornada de cadencia
+    // faz com o stand.
+    report.steps.push({ step: 8, name: "salvar_reabrir", session: reopened.session?.id, wizard: wizardAfterRestart });
+
+    // PASSO 9 — confirmar sequencia + duracao + pixel + procedencia.
+    const reopenedPanel = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.panel && state.frameCount === 18 && state.current.includes("40 ticks") && state.prediction.includes("41 frames de tela") && state.original.includes("23 ticks") ? state : false;
+      },
+      60000,
+      "O painel reaberto nao restaurou 40 ticks, original 23 e previsao 41",
+      250
+    );
+    const reopenedStatus = await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId });
+    const ledger = reopenedStatus?.session?.applied_edits ?? [];
+    const ledgerFormats = ledger.map((entry) => entry.format);
+    const ledgerCadence = ledger.find((entry) => entry.format === "sonic1_wait_interval_byte");
+    const ledgerPaint = ledger.find((entry) => entry.format === "md_4bpp_tile_nibbles");
+    report.checks.push({ name: "passo9.ledger_nomeia_os_dominios", pass: ledgerFormats.includes("md_4bpp_tile_nibbles") && ledgerFormats.includes("sonic1_wait_interval_byte") && ledger.every((entry) => typeof entry.copy_sha256 === "string" && entry.copy_sha256.length === 64) && JSON.stringify(ledgerCadence?.offsets) === JSON.stringify([CADENCE_JOURNEY_WAIT_ADDR]) && JSON.stringify(ledgerCadence?.old_bytes) === JSON.stringify([23]) && JSON.stringify(ledgerCadence?.new_bytes) === JSON.stringify([40]) && JSON.stringify(ledgerPaint?.offsets) === JSON.stringify([at.offset]) && JSON.stringify(ledgerPaint?.old_bytes) === JSON.stringify([base[at.offset]]) && JSON.stringify(ledgerPaint?.new_bytes) === JSON.stringify([paintedBytes[at.offset]]), observed: ledger.map((entry) => ({ seq: entry.seq, format: entry.format, offsets: entry.offsets, old_bytes: entry.old_bytes, new_bytes: entry.new_bytes, copy_sha256: entry.copy_sha256.slice(0, 12) })) });
+    report.checks.push({ name: "passo9.copia_reaberta_e_a_jornada", pass: reopenedStatus?.session?.edit?.modified_rom_sha256 === journeySha256, observed: { edit_sha: reopenedStatus?.session?.edit?.modified_rom_sha256 }, required: journeySha256 });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`PASSO 9: procedencia reaberta nao bate: ${JSON.stringify(report.checks.slice(-2))}`);
+    const reopenedProvenience = await waitFor(
+      async () => {
+        const text = await executeScript(sessionIdRef, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? "";`);
+        return text.includes(journeySha256) ? text : false;
+      },
+      20000,
+      "A proveniencia da edicao (SHA da copia) nao foi restaurada na reabertura",
+      100
+    );
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da recomposicao pos-reabertura integrada");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "recompor walk-1 pos-reabertura integrada");
+    // Verificacao no estilo do cenario multiframe (o caminho generico de
+    // oraculos so cobre stand + quadros hamoopig pinados): pixels do walk-1
+    // conferidos contra a decodificacao independente dos bytes da copia.
+    const recomposed = await waitFor(
+      async () => {
+        const v = await readRenderedSpriteFramePixels(sessionIdRef);
+        return v?.frameId === "sonic1_sonic/walk-1" && v.romSha256 === journeySha256 ? v : false;
+      },
+      30000,
+      "O walk-1 reaberto nao corresponde aos bytes da copia editada",
+      100
+    );
+    const recomposedReference = renderSonicFrameReference(journeyBytes, paintedIndex);
+    const recomposedPixels = assertExactPreviewPixels(
+      { width: recomposed.naturalWidth, height: recomposed.naturalHeight, pixels: recomposed.pixels },
+      recomposedReference,
+      "sonic1_sonic/walk-1 (jornada integrada, pos-reabertura)"
+    );
+    const recomposedLayout = await waitFor(
+      async () => {
+        const l = await ensureSpriteFrameVisibleAndUnobstructed(sessionIdRef);
+        return l?.fullyVisible && l.unobstructed && l.exactContentDimensions && l.metadataBelow ? l : false;
+      },
+      15000,
+      "O walk-1 reaberto ficou obstruido ou mal dimensionado",
+      100
+    );
+    report.steps.push({ step: 9, name: "confirmar_estado_reaberto", painel: { current: reopenedPanel.current, prediction: reopenedPanel.prediction }, ledger_entries: ledger.length, provenvenience: reopenedProvenience.slice(0, 200), recompose: { pixels_checked: recomposedPixels, layout_unobstructed: Boolean(recomposedLayout) } });
+    await captureScreenshot(sessionIdRef, `${prefix}-anim-integrada-passo9.png`);
+
+    // PASSO 10 — restaurar so a duracao: o byte 0x13BAE volta a $17 e o pixel
+    // pintado permanece intacto (prova desktop de E3).
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da restauracao de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-cadence-restore", "restaurar somente a duracao");
+    const restoredEdit = await waitFor(
+      async () => {
+        const status = await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId });
+        const edit = status?.session?.edit;
+        return edit?.modified_rom_path && edit.modified_rom_sha256 === hash(paintedBytes) ? edit : false;
+      },
+      30000,
+      "A restauracao da duracao nao produziu a copia esperada (so o byte de cadencia de volta a 23)",
+      250
+    );
+    const restoredCopy = await readFile(restoredEdit.modified_rom_path);
+    const restoredDiff = diffOffsets(base, restoredCopy);
+    report.checks.push({ name: "passo10.cadencia_volta_23_pixel_intacto", pass: restoredCopy[CADENCE_JOURNEY_WAIT_ADDR] === 23 && restoredCopy[at.offset] === paintedBytes[at.offset] && JSON.stringify(restoredDiff) === JSON.stringify([at.offset]) && JSON.stringify(restoredEdit.changed_offsets) === JSON.stringify([at.offset]) && restoredEdit.bytes_changed === 1, observed: { cadence_byte: restoredCopy[CADENCE_JOURNEY_WAIT_ADDR], pixel_byte: restoredCopy[at.offset], diff: restoredDiff.map((i) => `0x${i.toString(16)}`), edit_offsets: restoredEdit.changed_offsets, edit_bytes_changed: restoredEdit.bytes_changed } });
+    const panelRestored = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.current.includes("23 ticks") ? state : false;
+      },
+      30000,
+      "O painel nao mostrou 23 ticks apos a restauracao",
+      100
+    );
+    const ledgerAfterRestore = (await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId }))?.session?.applied_edits ?? [];
+    report.checks.push({ name: "passo10.ledger_registra_a_restauracao", pass: ledgerAfterRestore.length === ledger.length + 1 && ledgerAfterRestore.at(-1)?.copy_sha256 === hash(paintedBytes), observed: { antes: ledger.length, depois: ledgerAfterRestore.length, ultima_copia: ledgerAfterRestore.at(-1)?.copy_sha256 }, required: hash(paintedBytes) });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`PASSO 10: restauracao seletiva nao bate com o congelado: ${JSON.stringify(report.checks.slice(-2))}`);
+    report.steps.push({ step: 10, name: "restaurar_duracao_pixel_intacto", copy_sha256: hash(paintedBytes), painel: panelRestored.current });
+
+    report.checks.push({ name: "final.base_preservada", pass: (await readFile(romPath)).equals(base), observed: { rom_path: romPath } });
+    if (!report.checks.at(-1).pass) throw new Error("A base BYOR foi alterada durante a jornada integrada");
+    const allPass = report.checks.every((entry) => entry.pass !== false);
+    report.runtime_effect = "pixel+cadencia acumulados na mesma copia, restauracao seletiva provada byte a byte na UI real";
+    await persistReport({ allPass, finished_at: new Date().toISOString() });
+    if (!allPass) {
+      const failed = report.checks.filter((entry) => entry.pass === false);
+      fail(`Jornada integrada INCONCLUSIVA/FAIL frente ao congelado (sem promover nada): ${JSON.stringify({ failed, report_path: path.join(pilotDir, "report.json") })}`);
+    }
+    console.log(`OK: Sonic anim-integrada journey E2E; allPass=true; report=${path.join(pilotDir, "report.json")}`);
     return sessionIdRef;
   } catch (error) {
     await persistReport({ allPass: false, aborted: true, error: String(error?.message ?? error), finished_at: new Date().toISOString() }).catch(() => null);
@@ -15411,9 +15829,11 @@ async function main() {
 
     const sonicMultiframeMode = options.scenario === "sonic-multiframe";
     const sonicCadenceMode = options.scenario === "sonic-cadence-journey";
+    const sonicAnimIntegradaMode = options.scenario === "sonic-anim-integrada";
     const sonicTilesMode = options.scenario === "inspection-sonic-tiles";
     if (sonicMultiframeMode) options.scenario = "inspection-sonic";
     if (sonicCadenceMode) options.scenario = "inspection-sonic";
+    if (sonicAnimIntegradaMode) options.scenario = "inspection-sonic";
     if (sonicTilesMode) options.scenario = "inspection-sonic";
     if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
       let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
@@ -15579,6 +15999,11 @@ async function main() {
         }
         if (sonicCadenceMode) {
           sessionId = await runSonicCadenceJourneyScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
+          currentE2eRunContext.sessionId = sessionId;
+          return;
+        }
+        if (sonicAnimIntegradaMode) {
+          sessionId = await runSonicAnimIntegradaScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
           currentE2eRunContext.sessionId = sessionId;
           return;
         }

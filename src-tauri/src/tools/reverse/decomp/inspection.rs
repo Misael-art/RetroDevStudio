@@ -119,6 +119,8 @@ pub struct InspectionSession {
     pub sprite_frame_id: Option<String>,
     #[serde(default)]
     pub edit: Option<InspectionEdit>,
+    #[serde(default)]
+    pub applied_edits: Vec<SonicAppliedEdit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -144,6 +146,26 @@ pub struct InspectionEdit {
     pub pixels_changed: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_rom_sha256_after: Option<String>,
+    /// No-op explícito: valor já vigente, nenhuma escrita realizada, cadeia
+    /// de SHA inalterada. Idempotência legítima, não falha técnica.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub noop: bool,
+}
+
+/// Registro cumulativo de cada edição Sonic aplicada à cópia da sessão.
+/// A reabertura restaura a proveniência de TODOS os domínios (pixel,
+/// paleta, cadência), não apenas da última operação.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SonicAppliedEdit {
+    pub seq: u32,
+    pub format: String,
+    pub frame_id: String,
+    pub summary: String,
+    pub offsets: Vec<u64>,
+    pub old_bytes: Vec<u8>,
+    pub new_bytes: Vec<u8>,
+    pub copy_sha256: String,
+    pub at_unix: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -933,6 +955,7 @@ pub fn open(rom_path: &str) -> Result<InspectionSession, String> {
         error: None,
         sprite_frame_id: None,
         edit: None,
+        applied_edits: Vec::new(),
     };
     persist_session(&decomp_work_dir(), &session)?;
     sessions().lock().map_err(|e| e.to_string())?.insert(
@@ -1359,6 +1382,7 @@ static SONIC_EDIT_GUARD: Mutex<()> = Mutex::new(());
 fn persist_sonic_edit(
     mut stored: StoredInspection,
     base: &[u8],
+    previous: &[u8],
     rom: &[u8],
     mut edit: InspectionEdit,
 ) -> Result<InspectionEdit, String> {
@@ -1415,6 +1439,51 @@ fn persist_sonic_edit(
     };
     edit.base_rom_sha256_after = Some(base_after.normalized_sha256);
     edit.modified_rom_sha256 = sha256_hex(rom);
+    // Diff pontual desta operação (cópia anterior → cópia nova): entra no
+    // ledger cumulativo como proveniência do domínio editado.
+    let mut offsets: Vec<u64> = Vec::new();
+    let mut old_bytes: Vec<u8> = Vec::new();
+    let mut new_bytes: Vec<u8> = Vec::new();
+    for (i, (a, b)) in previous.iter().zip(rom).enumerate() {
+        if a != b {
+            offsets.push(i as u64);
+            old_bytes.push(*a);
+            new_bytes.push(*b);
+        }
+    }
+    let summary = match edit.format.as_str() {
+        "md_rgb333_palette_word" => format!(
+            "Paleta: indice {} = RGB333({}, {}, {})",
+            edit.palette_index, edit.red, edit.green, edit.blue
+        ),
+        "md_4bpp_tile_nibbles" => format!(
+            "Pixel: {} ponto(s) no frame {}",
+            edit.pixels_changed.unwrap_or(0),
+            edit.frame_id
+        ),
+        _ => {
+            let prev_byte = old_bytes.first().copied().unwrap_or_default();
+            let next_byte = new_bytes.first().copied().unwrap_or_default();
+            format!(
+                "Cadencia id_Wait: {} -> {} ticks (offset {:#07x})",
+                prev_byte,
+                next_byte,
+                super::sonic_cadence::WAIT_ADDR
+            )
+        }
+    };
+    let entry = SonicAppliedEdit {
+        seq: stored.session.applied_edits.len() as u32 + 1,
+        format: edit.format.clone(),
+        frame_id: edit.frame_id.clone(),
+        summary,
+        offsets,
+        old_bytes,
+        new_bytes,
+        copy_sha256: edit.modified_rom_sha256.clone(),
+        at_unix: now_unix(),
+    };
+    stored.session.applied_edits.push(entry);
     let root = canonical_dir_under(
         &decomp_work_dir(),
         &["extract", &edit.original_rom_sha256, "edits"],
@@ -1452,7 +1521,32 @@ fn sonic_edit_record(frame_id: &str, format: &str) -> InspectionEdit {
         shared_with_frames: Vec::new(),
         pixels_changed: None,
         base_rom_sha256_after: None,
+        noop: false,
     }
+}
+
+/// Resultado de no-op: mesmo valor vigente em qualquer domínio. Não escreve
+/// arquivo, não move a cadeia de SHA, não entra no ledger; devolve o estado
+/// atual da cópia com classificação explícita.
+fn sonic_noop_record(
+    stored: &StoredInspection,
+    frame_id: &str,
+    format: &str,
+    rom: &[u8],
+) -> InspectionEdit {
+    let mut edit = sonic_edit_record(frame_id, format);
+    edit.noop = true;
+    match stored.session.edit.as_ref() {
+        Some(last) => {
+            edit.modified_rom_sha256 = last.modified_rom_sha256.clone();
+            edit.modified_rom_path = last.modified_rom_path.clone();
+        }
+        None => {
+            edit.modified_rom_sha256 = sha256_hex(rom);
+            edit.modified_rom_path = stored.session.rom_path.clone();
+        }
+    }
+    edit
 }
 
 pub fn edit_sonic_palette(
@@ -1483,11 +1577,17 @@ pub fn edit_sonic_palette(
     let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
     let stored = get_stored_session(session_id)?;
     let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    let previous = rom.clone();
     sonic::read_frame(&rom, frame_id)?;
     let offset = sonic::PALETTE_OFFSET + usize::from(palette_index) * 2;
     let word = (u16::from(red) << 1) | (u16::from(green) << 5) | (u16::from(blue) << 9);
     if rom[offset..offset + 2] == word.to_be_bytes() {
-        return Err(error("edit_noop", "Cor já tem esse valor", false));
+        return Ok(sonic_noop_record(
+            &stored,
+            frame_id,
+            "md_rgb333_palette_word",
+            &rom,
+        ));
     }
     rom[offset..offset + 2].copy_from_slice(&word.to_be_bytes());
     let mut edit = sonic_edit_record(frame_id, "md_rgb333_palette_word");
@@ -1495,7 +1595,7 @@ pub fn edit_sonic_palette(
     edit.red = red;
     edit.green = green;
     edit.blue = blue;
-    persist_sonic_edit(stored, &base, &rom, edit)
+    persist_sonic_edit(stored, &base, &previous, &rom, edit)
 }
 
 /// Applies the selected frame's DPLC/column-major geometry, accumulating edits
@@ -1519,6 +1619,7 @@ pub fn edit_sonic_tiles(
     let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
     let stored = get_stored_session(session_id)?;
     let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    let previous = rom.clone();
     let geometry = sonic::read_frame(&rom, frame_id)?;
     if pixels.is_empty() || pixels.len() > (geometry.width * geometry.height) as usize {
         return Err(error(
@@ -1561,10 +1662,11 @@ pub fn edit_sonic_tiles(
         }
     }
     if changed.is_empty() {
-        return Err(error(
-            "edit_noop",
-            "Pixels já têm esses índices; nenhuma alteração",
-            false,
+        return Ok(sonic_noop_record(
+            &stored,
+            frame_id,
+            "md_4bpp_tile_nibbles",
+            &rom,
         ));
     }
     let shared: Vec<usize> = dplc
@@ -1578,7 +1680,7 @@ pub fn edit_sonic_tiles(
     }
     let mut edit = sonic_edit_record(frame_id, "md_4bpp_tile_nibbles");
     edit.pixels_changed = Some(changed.len() as u32);
-    persist_sonic_edit(stored, &base, &rom, edit)
+    persist_sonic_edit(stored, &base, &previous, &rom, edit)
 }
 
 /// Wire errors from the cadence core keep their proven contract code.
@@ -1615,19 +1717,21 @@ pub fn edit_sonic_duration(
     let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
     let stored = get_stored_session(session_id)?;
     let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    let previous = rom.clone();
     super::sonic_cadence::validate_base(&base).map_err(cadence_error)?;
     let current = super::sonic_cadence::read_interval(&rom).map_err(cadence_error)?;
     if value == current {
-        return Err(error(
-            "edit_noop",
-            "A duração já tem esse valor na cópia atual; nenhuma alteração",
-            false,
+        return Ok(sonic_noop_record(
+            &stored,
+            "id_Wait",
+            super::sonic_cadence::EDIT_FORMAT,
+            &rom,
         ));
     }
     super::sonic_cadence::set_interval(&mut rom, value).map_err(cadence_error)?;
     let mut edit = sonic_edit_record("id_Wait", super::sonic_cadence::EDIT_FORMAT);
     edit.pixels_changed = None;
-    persist_sonic_edit(stored, &base, &rom, edit)
+    persist_sonic_edit(stored, &base, &previous, &rom, edit)
 }
 
 #[cfg(test)]
@@ -1823,8 +1927,26 @@ mod tests {
             "sonic1_sonic",
             cadence::WAIT_ORIGINAL_INTERVAL,
         )
-        .unwrap_err();
-        assert!(noop.contains("edit_noop"), "{noop}");
+        .unwrap();
+        assert!(noop.noop, "valor vigente deve devolver no-op explícito");
+        assert_eq!(noop.bytes_changed, 0);
+        assert!(noop.changed_offsets.is_empty());
+        assert!(
+            get_stored_session(&session.session_id)
+                .unwrap()
+                .session
+                .edit
+                .is_none(),
+            "no-op não pode registrar edição nem escrever cópia"
+        );
+        assert!(
+            get_stored_session(&session.session_id)
+                .unwrap()
+                .session
+                .applied_edits
+                .is_empty(),
+            "no-op não entra no ledger de proveniência"
+        );
         let wrong_resource =
             edit_sonic_duration(&session.session_id, "sonic1_tails", 40).unwrap_err();
         assert!(wrong_resource.contains("edit_resource_unsupported"));
@@ -1933,6 +2055,333 @@ mod tests {
         });
         fs::write(
             decomp_work_dir().join("sonic-cadence-proof.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// Etapa 2/4 da jornada integrada: pixel + paleta + cadência acumulam na
+    /// MESMA cadeia de cópias, nas duas ordens, com diff byte a byte exato,
+    /// ledger de proveniência por domínio, restauração seletiva e reabertura.
+    #[test]
+    #[ignore = "BYOR Sonic pinado; RDS_SONIC_MULTIFRAME_ROM obrigatório; escreva em RDS_DECOMP_WORK isolado"]
+    fn sonic_anim_integrada_byor_accumulates_all_domains_both_orders() {
+        use super::super::{sonic_cadence as cadence, sonic_sprite as sonic};
+        let path = std::env::var("RDS_SONIC_MULTIFRAME_ROM").expect("BYOR obrigatório");
+        assert!(
+            std::env::var("RDS_DECOMP_WORK").is_ok(),
+            "diretório de prova isolado obrigatório"
+        );
+        let (_, base) = rex_read_rom(Path::new(&path)).unwrap();
+
+        // Dois pixels em bytes de arte distintos + uma cor de paleta + cadência.
+        let geometry = sonic::read_frame(&base, "sonic1_sonic/stand").unwrap();
+        let loc_a = geometry.source_pixel(8, 8).unwrap();
+        let loc_b = geometry.source_pixel(9, 9).unwrap();
+        assert_ne!(
+            loc_a.byte_offset, loc_b.byte_offset,
+            "os dois pixels precisam tocar bytes distintos para a contagem ser exata"
+        );
+        let index_a = {
+            let prev = if loc_a.high_nibble {
+                base[loc_a.byte_offset] >> 4
+            } else {
+                base[loc_a.byte_offset] & 15
+            };
+            (prev + 1) % 16
+        };
+        let index_b = {
+            let prev = if loc_b.high_nibble {
+                base[loc_b.byte_offset] >> 4
+            } else {
+                base[loc_b.byte_offset] & 15
+            };
+            (prev + 7) % 16
+        };
+        assert_ne!(index_b, 0, "transparência não é alvo aqui");
+        let pal_word = sonic::PALETTE_OFFSET + 3 * 2;
+        // word = (red<<1) | (green<<5) | (blue<<9), gravado big-endian.
+        // Byte alto: bits 8..15 (azul em 9..11). Byte baixo: bits 0..7
+        // (vermelho 1..3, verde 5..7). Bit 8 não é usado pelo produto.
+        let pal_new: [u8; 2] = [base[pal_word] ^ 0x02, base[pal_word + 1] ^ 0x02];
+        let pal_red = (pal_new[1] & 0b0000_1110) >> 1;
+        let pal_green = (pal_new[1] & 0b1110_0000) >> 5;
+        let pal_blue = (pal_new[0] & 0b0000_1110) >> 1;
+        let recomputed =
+            (u16::from(pal_red) << 1) | (u16::from(pal_green) << 5) | (u16::from(pal_blue) << 9);
+        assert_eq!(
+            recomputed.to_be_bytes(),
+            pal_new,
+            "canais reconstroem a palavra-alvo"
+        );
+
+        let expected_diff: Vec<usize> = {
+            let mut v = vec![
+                loc_a.byte_offset,
+                loc_b.byte_offset,
+                pal_word,
+                pal_word + 1,
+                cadence::WAIT_ADDR,
+            ];
+            v.sort_unstable();
+            v
+        };
+
+        let run_chain = |order: u8| -> String {
+            let session = open(&path).unwrap();
+            let paint = || {
+                edit_sonic_tiles(
+                    &session.session_id,
+                    "sonic1_sonic",
+                    "sonic1_sonic/stand",
+                    &[
+                        InspectionPixelEdit {
+                            x: 8,
+                            y: 8,
+                            index: index_a,
+                        },
+                        InspectionPixelEdit {
+                            x: 9,
+                            y: 9,
+                            index: index_b,
+                        },
+                    ],
+                    true,
+                )
+                .unwrap()
+            };
+            let palette = || {
+                edit_sonic_palette(
+                    &session.session_id,
+                    "sonic1_sonic",
+                    "sonic1_sonic/stand",
+                    3,
+                    pal_red,
+                    pal_green,
+                    pal_blue,
+                )
+                .unwrap()
+            };
+            let duration = || edit_sonic_duration(&session.session_id, "sonic1_sonic", 40).unwrap();
+            let last = match order {
+                0 => {
+                    paint();
+                    palette();
+                    duration()
+                }
+                _ => {
+                    duration();
+                    palette();
+                    paint()
+                }
+            };
+            assert_eq!(
+                last.changed_offsets,
+                expected_diff.iter().map(|&i| i as u64).collect::<Vec<_>>(),
+                "diff cumulativo da cadeia {order} contra a base precisa ser exatamente os 5 bytes autorizados"
+            );
+            let stored = get_stored_session(&session.session_id).unwrap().session;
+            assert_eq!(
+                stored.applied_edits.len(),
+                3,
+                "ledger com um registro por domínio"
+            );
+            let seqs: Vec<u32> = stored.applied_edits.iter().map(|e| e.seq).collect();
+            assert_eq!(seqs, vec![1, 2, 3]);
+            let formats: Vec<&str> = stored
+                .applied_edits
+                .iter()
+                .map(|e| e.format.as_str())
+                .collect();
+            let expected_formats: &[&str] = if order == 0 {
+                &[
+                    "md_4bpp_tile_nibbles",
+                    "md_rgb333_palette_word",
+                    cadence::EDIT_FORMAT,
+                ]
+            } else {
+                &[
+                    cadence::EDIT_FORMAT,
+                    "md_rgb333_palette_word",
+                    "md_4bpp_tile_nibbles",
+                ]
+            };
+            assert_eq!(formats, expected_formats);
+            // Cada entrada nomeia seus bytes pontuais e o SHA da cópia resultante.
+            let cadence_entry = stored
+                .applied_edits
+                .iter()
+                .find(|e| e.format == cadence::EDIT_FORMAT)
+                .unwrap();
+            assert_eq!(cadence_entry.offsets, vec![cadence::WAIT_ADDR as u64]);
+            assert_eq!(
+                cadence_entry.old_bytes,
+                vec![cadence::WAIT_ORIGINAL_INTERVAL]
+            );
+            assert_eq!(cadence_entry.new_bytes, vec![40]);
+            assert!(cadence_entry.summary.contains("id_Wait"));
+            assert!(cadence_entry.summary.contains("40"));
+            let paint_entry = stored
+                .applied_edits
+                .iter()
+                .find(|e| e.format == "md_4bpp_tile_nibbles")
+                .unwrap();
+            assert!(paint_entry.offsets.contains(&(loc_a.byte_offset as u64)));
+            assert!(paint_entry.offsets.contains(&(loc_b.byte_offset as u64)));
+            assert_eq!(
+                stored.applied_edits.last().unwrap().copy_sha256,
+                last.modified_rom_sha256
+            );
+            last.modified_rom_sha256
+        };
+
+        let sha_a = run_chain(0);
+        let sha_b = run_chain(1);
+        assert_eq!(
+            sha_a, sha_b,
+            "comutatividade byte a byte: as duas ordens convergem para a mesma cópia"
+        );
+
+        // Restauração seletiva: cadeia 0 → volta só a cadência; pixel/paleta intactos.
+        let session = open(&path).unwrap();
+        edit_sonic_tiles(
+            &session.session_id,
+            "sonic1_sonic",
+            "sonic1_sonic/stand",
+            &[
+                InspectionPixelEdit {
+                    x: 8,
+                    y: 8,
+                    index: index_a,
+                },
+                InspectionPixelEdit {
+                    x: 9,
+                    y: 9,
+                    index: index_b,
+                },
+            ],
+            true,
+        )
+        .unwrap();
+        edit_sonic_palette(
+            &session.session_id,
+            "sonic1_sonic",
+            "sonic1_sonic/stand",
+            3,
+            pal_red,
+            pal_green,
+            pal_blue,
+        )
+        .unwrap();
+        edit_sonic_duration(&session.session_id, "sonic1_sonic", 40).unwrap();
+        let restored = edit_sonic_duration(
+            &session.session_id,
+            "sonic1_sonic",
+            cadence::WAIT_ORIGINAL_INTERVAL,
+        )
+        .unwrap();
+        let restored_rom = rex_read_rom(Path::new(&restored.modified_rom_path))
+            .unwrap()
+            .1;
+        let mut expected_restored: Vec<usize> =
+            vec![loc_a.byte_offset, loc_b.byte_offset, pal_word, pal_word + 1];
+        expected_restored.sort_unstable();
+        assert_eq!(
+            (0..base.len())
+                .filter(|&i| base[i] != restored_rom[i])
+                .collect::<Vec<_>>(),
+            expected_restored,
+            "restaurar cadência não pode apagar edição gráfica"
+        );
+        assert_eq!(
+            restored_rom[cadence::WAIT_ADDR],
+            cadence::WAIT_ORIGINAL_INTERVAL
+        );
+        assert_ne!(
+            restored_rom[loc_a.byte_offset], base[loc_a.byte_offset],
+            "pixel pintado permanece"
+        );
+        // No-op por domínio: repetir o valor vigente não escreve nem movimenta a cadeia.
+        let before_sha = restored.modified_rom_sha256.clone();
+        let noop = edit_sonic_duration(
+            &session.session_id,
+            "sonic1_sonic",
+            cadence::WAIT_ORIGINAL_INTERVAL,
+        )
+        .unwrap();
+        assert!(noop.noop);
+        assert_eq!(noop.bytes_changed, 0);
+        let noop_palette = edit_sonic_palette(
+            &session.session_id,
+            "sonic1_sonic",
+            "sonic1_sonic/stand",
+            3,
+            pal_red,
+            pal_green,
+            pal_blue,
+        )
+        .unwrap();
+        assert!(noop_palette.noop);
+        let noop_paint = edit_sonic_tiles(
+            &session.session_id,
+            "sonic1_sonic",
+            "sonic1_sonic/stand",
+            &[InspectionPixelEdit {
+                x: 8,
+                y: 8,
+                index: index_a,
+            }],
+            true,
+        )
+        .unwrap();
+        assert!(noop_paint.noop);
+        let stored = get_stored_session(&session.session_id).unwrap().session;
+        assert_eq!(
+            stored.edit.as_ref().unwrap().modified_rom_sha256,
+            before_sha,
+            "no-op não move a cadeia de SHA"
+        );
+        assert_eq!(
+            stored.applied_edits.len(),
+            4,
+            "3 edições + 1 restauração; no-ops fora"
+        );
+
+        // Reabertura restaura conjunto + proveniência de todos os domínios.
+        let saved = save(&session.session_id, None).unwrap();
+        sessions().lock().unwrap().remove(&session.session_id);
+        let reopened = reopen(&path, &session.session_id).unwrap();
+        assert_eq!(reopened.edit, saved.edit);
+        assert_eq!(reopened.applied_edits.len(), 4);
+        let info = sonic_cadence_info(&session.session_id).unwrap();
+        assert_eq!(info.current_interval, cadence::WAIT_ORIGINAL_INTERVAL);
+        let final_rom = rex_read_rom(Path::new(&saved.edit.as_ref().unwrap().modified_rom_path))
+            .unwrap()
+            .1;
+        assert_eq!(
+            (0..base.len()).filter(|&i| base[i] != final_rom[i]).count(),
+            4,
+            "estado final: só arte+paleta divergem da base"
+        );
+        assert_eq!(
+            rex_read_rom(Path::new(&path)).unwrap().1,
+            base,
+            "BYOR intacta"
+        );
+        let report = serde_json::json!({
+            "base_sha256": super::super::sprite_composition::SONIC1_REFERENCE_SHA256,
+            "chain_paint_first_sha": sha_a,
+            "chain_cadence_first_sha": sha_b,
+            "commutative": sha_a == sha_b,
+            "diff_bytes": expected_diff,
+            "ledger_entries": 3,
+            "restored_diff_count": 4,
+            "noop_classified": true,
+            "reopened_ledger_entries": 4,
+            "base_unchanged": true,
+        });
+        fs::write(
+            decomp_work_dir().join("sonic-anim-integrada-proof.json"),
             serde_json::to_vec_pretty(&report).unwrap(),
         )
         .unwrap();

@@ -2521,3 +2521,45 @@ Séries brutas, prints e arquivos-ROM ficam LOCAIS (hash pinados no manifesto);
 só metadados/métricas/resumos são versionados. Classificação mantida:
 Experimental / local profile validation — sem merge, release ou promoção de
 maturidade por esta frente; integração é decisão do integrador.
+
+### Checkpoint 2026-10-03 — jornada integrada de animação Sonic 1 (Etapas 1–6, branch própria)
+
+Frente `codex/rex-sonic-anim-integrada` (worktree REX-SONIC-ANIM-INTEGRADA-2026-10-03),
+filha de `codex/rex-sonic-cadence` @ a59e7dc (PR #100); PR desta frente é
+dependente daquela. Entrega: na UI real de inspeção, uma ROM BYOR do usuário
+atravessa abrir → localizar `id_Wait` com 18 quadros reais → pintar 1 pixel
+com confirmação de compartilhamento → mudar a duração para 40 → conferir a
+cópia pelos dois bytes crus → exportar/aplicar BPS → JOGAR a cópia na Game
+View com identidade dos bytes confirmada → salvar/destruir janela/reiniciar/
+reabrir com sequência, duração, pixel e procedência restaurados → restaurar
+SÓ a duração mantendo o pixel intacto. Regra central provada: duas edições de
+domínios diferentes coexistem sem uma desfazer silenciosamente a outra
+(`changed_offsets` cumulativo `[80814, 139582]`, `bytes_changed=2`; ledger
+nomeia por operação; voltar a 23 devolve a cópia só-pixel `b1ed600d…`).
+
+Expectativas congeladas antes das corridas (a657423), com histórico honesto
+de 4 execuções: run-1 FAIL por suposição do driver (não do produto) —
+corrigida pelo Addendum-1 (R-1..R-4, congelado sozinho em 717ec2d); run-2 e
+run-3 FAIL no gate de boot do PASSO 7 — o traço cru da run-3 provou pump
+vivo e lento (~5,5 fps em software rendering Xvfb; série 10→660 crescente,
+zero mensagem de falha), classificado como meio e não expectativa, com única
+correção M-1 (orçamento do gate 120s→300s só nesta jornada; limiar de 890
+frames intocado) congelada no Addendum-2 (03986d0) antes de mexer no harness.
+Run-4: **allPass 24/24 checks nomeados, 10/10 passos, sem aborto**, binário
+`03628796…` reconstruído no HEAD exato `b824e11` (gate de proveniência
+dist==HEAD ativo); pins Xvfb `5bfd315a…`, ROM base `c7da53a1…`, cópia da
+jornada `3274e7c4…` (0x13BAE=40 + nibble 15 em 0x2213E), BPS `4c039980…`.
+
+Gates completos no HEAD final `db57f5d` (inclui correção de um lint que a
+própria frente introduzira em Etapa 4, com teste revalidado): check:tree,
+lint, tsc, npm test 918/0 (6 skipped), fmt, clippy canônico `-D warnings`
+verde, `--all-targets` com dívida preexistente da base registrada em
+`gates.json`, cargo test --lib 850/0/80, host:certify READY. Sem mudança de
+dependências (audits não disparados). CX (E10): roteiro de três tarefas
+entregue com **validação humana pendente** por design — a frente não afirma
+"iniciante consegue" sem participante. Série bruta, logs, prints e
+arquivos-ROM ficam LOCAIS (hashes pinados no manifesto em
+`data/rex_profiles/sonic_anim_integrada/evidence/2026-10-03-journey/`).
+Classificação mantida: Experimental / local profile validation — sem merge,
+release ou promoção de maturidade por esta frente; integração é decisão do
+integrador.

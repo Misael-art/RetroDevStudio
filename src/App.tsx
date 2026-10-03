@@ -4899,13 +4899,11 @@ export default function App() {
               data-testid="project-wizard-actions"
               className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#313244] bg-[#181825] pt-3"
             >
-              {activeProjectDir ? (
-                <ToolbarButton
-                  label="Cancelar"
-                  onClick={() => setShowProjectWizard(false)}
-                  testId="wizard-cancel"
-                />
-              ) : null}
+              <ToolbarButton
+                label={activeProjectDir ? "Cancelar" : "Continuar sem projeto"}
+                onClick={() => setShowProjectWizard(false)}
+                testId={activeProjectDir ? "wizard-cancel" : "wizard-continue-without-project"}
+              />
               <ToolbarButton
                 label="Abrir Projeto"
                 onClick={() => void handleOpenProject()}

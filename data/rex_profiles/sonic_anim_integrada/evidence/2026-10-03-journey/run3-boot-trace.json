@@ -1,0 +1,141 @@
+{
+  "provenance": {
+    "purpose": "serie bruta do gate de boot (run-3, HEAD 2bfb513) que classificou o FAIL como pump vivo e lento; base do Addendum-2 M-1",
+    "run_log_sha256": "c08f6ee1fcf631daab9b338782bd802ca13bdd72b9f14b8f67195198611f3cbf",
+    "report_sha256": "a5d65cf09cface4d061f0e14030716bf17016984269e042714583de6fac5662f",
+    "binary_sha256": "54bc04dfb5611a0e1cd7752131a209d9b642d4ec4039b4ef4d0d6bba4cce5c55"
+  },
+  "label": "modificada-integrada",
+  "threshold_frames": 890,
+  "budget_ms_at_failure": 120000,
+  "boot_trace": [
+    {
+      "t_ms": 328,
+      "rf": 10,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 5338,
+      "rf": 40,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 10419,
+      "rf": 90,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 15573,
+      "rf": 120,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 20664,
+      "rf": 150,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 25930,
+      "rf": 190,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 31006,
+      "rf": 240,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 36163,
+      "rf": 290,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 41349,
+      "rf": 330,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 46584,
+      "rf": 360,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 51785,
+      "rf": 380,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 56990,
+      "rf": 420,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 62109,
+      "rf": 450,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 67188,
+      "rf": 470,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 72593,
+      "rf": 490,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 77897,
+      "rf": 510,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 83343,
+      "rf": 520,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 88662,
+      "rf": 550,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 93891,
+      "rf": 570,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 99006,
+      "rf": 590,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 104013,
+      "rf": 600,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 109034,
+      "rf": 620,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 114143,
+      "rf": 640,
+      "status": "Emulador ativo"
+    },
+    {
+      "t_ms": 119181,
+      "rf": 660,
+      "status": "Emulador ativo"
+    }
+  ],
+  "last_progress": {
+    "renderedFrames": 660,
+    "gameStatus": "Emulador ativo",
+    "romSha256": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a",
+    "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+    "romPath": "/home/misael/Projects/REX-SONIC-ANIM-INTEGRADA-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T12-17-46-050Z-anim-integrada/anim-integrada-aplicada.bin"
+  },
+  "console_tail_has_frame_failure": false
+}
