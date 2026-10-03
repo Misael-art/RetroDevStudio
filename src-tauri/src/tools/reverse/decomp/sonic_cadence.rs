@@ -334,6 +334,44 @@ mod tests {
     }
 
     #[test]
+    fn e8_cadence_mutations_stay_confined_to_the_interval_byte() {
+        // Controle de mutacao 3 (E8): escrita fora do dominio da cadencia.
+        let base = authored_base();
+        // Valores reservados ($00, $80; e o token $FE do terminador) sao
+        // recusados antes de tocar no buffer — nenhum outro byte muda.
+        for value in [0x00u8, 0x80, 0xfe] {
+            let mut rom = base.clone();
+            assert!(set_interval(&mut rom, value)
+                .unwrap_err()
+                .contains("cadence_value_reserved"));
+            assert_eq!(rom, base, "edicao recusada nao pode tocar na copia");
+        }
+        // Depois da edicao legal, as 18 molduras e o terminador FE 02
+        // permanecem byte a byte intactos: o dominio do editor e so 0x13BAE.
+        let mut rom = base.clone();
+        set_interval(&mut rom, 40).unwrap();
+        let tail = WAIT_ADDR + 1 + WAIT_FRAMES.len();
+        assert_eq!(&rom[WAIT_ADDR + 1..tail], &WAIT_FRAMES[..]);
+        assert_eq!(
+            &rom[tail..tail + WAIT_TERMINATOR.len()],
+            &WAIT_TERMINATOR[..]
+        );
+        assert_eq!(
+            (0..rom.len())
+                .filter(|&i| rom[i] != base[i])
+                .collect::<Vec<_>>(),
+            vec![WAIT_ADDR]
+        );
+        // Inversamente, uma copia com o terminador adulterado e recusada pelo
+        // verificador de estrutura — a cadencia nunca aceita byte alheio.
+        let mut tampered = base.clone();
+        tampered[tail + 1] = 0x03;
+        assert!(validate_base(&tampered)
+            .unwrap_err()
+            .contains("cadence_structure_mismatch"));
+    }
+
+    #[test]
     fn zero_padding_entries_before_scripts_base_refuse() {
         let mut rom = authored_base();
         // Entry that resolves inside the table itself (offset 0): the real
