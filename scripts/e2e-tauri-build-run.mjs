@@ -17,6 +17,7 @@ import path from "node:path";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
+import zlib from "node:zlib";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   UI_LAYOUT_ORACLE_RESOLUTIONS,
@@ -477,6 +478,7 @@ function parseArgs(argv) {
           "sonic-multiframe",
           "sonic-cadence-journey",
           "sonic-anim-integrada",
+          "sonic-anim-visual-diagnostico",
           "rex-lz4w-effect",
           "rex-lz4w-fixture-effect",
           "rex-aplib-byor-effect",
@@ -2443,6 +2445,228 @@ function assertExactPreviewPixels(actual, expected, context) {
     height: actual.height,
     pixelsSha256: createHash("sha256").update(actualPixels).digest("hex"),
   };
+}
+
+// --- Prova visual da missao visual (ETAPA 1, congelado em
+// docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-VISUAL-ETAPA1.md) ---
+// O raster autoritativo da janela e o pixmap X11 capturado por fora do
+// WebView (ImageMagick `import -window root`), para que a captura nao
+// compartilhe o caminho de apresentacao em teste. O decoder PNG e minimo
+// (8-bit, nao-interlaced, RGB/RGBA) e usa apenas node:zlib: nenhuma
+// dependencia nova e introduzida.
+function decodeWindowPng(buffer) {
+  if (buffer.length < 24 || buffer.readUInt32BE(0) !== 0x89504e47) fail("Captura de janela sem assinatura PNG.");
+  if (buffer.readUInt32BE(12) !== 0x49484452) fail("Captura de janela sem IHDR primeiro chunk.");
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const idat = [];
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+  if (bitDepth !== 8 || interlace !== 0 || (colorType !== 2 && colorType !== 6)) {
+    fail(`Captura de janela fora do suporte do prova-visual: depth=${bitDepth} colorType=${colorType} interlace=${interlace}`);
+  }
+  const channels = colorType === 6 ? 4 : 3;
+  const inflated = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const pixels = Buffer.alloc(stride * height);
+  let previous = Buffer.alloc(stride);
+  let cursor = 0;
+  for (let y = 0; y < height; y += 1) {
+    const filterType = inflated[cursor];
+    cursor += 1;
+    const line = inflated.subarray(cursor, cursor + stride);
+    cursor += stride;
+    const current = Buffer.alloc(stride);
+    for (let x = 0; x < stride; x += 1) {
+      const a = x >= channels ? current[x - channels] : 0;
+      const b = previous[x];
+      const c = x >= channels ? previous[x - channels] : 0;
+      let value;
+      if (filterType === 0) value = line[x];
+      else if (filterType === 1) value = line[x] + a;
+      else if (filterType === 2) value = line[x] + b;
+      else if (filterType === 3) value = line[x] + ((a + b) >> 1);
+      else if (filterType === 4) {
+        const estimate = a + b - c;
+        const pa = Math.abs(estimate - a);
+        const pb = Math.abs(estimate - b);
+        const pc = Math.abs(estimate - c);
+        value = line[x] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+      } else fail(`Filtro PNG nao suportado na captura de janela: ${filterType}`);
+      current[x] = value & 0xff;
+    }
+    current.copy(pixels, y * stride);
+    previous = current;
+  }
+  return { width, height, channels, pixels };
+}
+
+// Raster esperado na janela: referencia independente ampliada em escala
+// inteira vizinho-mais-proximo sobre o fundo CSS do <img> (alfa 0 => fundo;
+// alfa 255 => cor do pixel). Exatamente o que uma apresentacao correta deve
+// pintar, calculado sem nenhum codigo do produto.
+function renderPresentedFrameRaster(reference, scale, background) {
+  const { width, height, pixels } = reference;
+  const out = Buffer.alloc(width * scale * height * scale * 3);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const source = (y * width + x) * 4;
+      const transparent = pixels[source + 3] === 0;
+      const red = transparent ? background[0] : pixels[source];
+      const green = transparent ? background[1] : pixels[source + 1];
+      const blue = transparent ? background[2] : pixels[source + 2];
+      for (let dy = 0; dy < scale; dy += 1) {
+        for (let dx = 0; dx < scale; dx += 1) {
+          const target = ((y * scale + dy) * width * scale + x * scale + dx) * 3;
+          out[target] = red;
+          out[target + 1] = green;
+          out[target + 2] = blue;
+        }
+      }
+    }
+  }
+  return { width: width * scale, height: height * scale, pixels: out };
+}
+
+function cropWindowRgb(decoded, cropX, cropY, cropWidth, cropHeight) {
+  if (decoded.width < cropX + cropWidth || decoded.height < cropY + cropHeight) {
+    fail(`Recorte fora da captura de janela: ${JSON.stringify({ capture: [decoded.width, decoded.height], crop: [cropX, cropY, cropWidth, cropHeight] })}`);
+  }
+  const out = Buffer.alloc(cropWidth * cropHeight * 3);
+  for (let y = 0; y < cropHeight; y += 1) {
+    for (let x = 0; x < cropWidth; x += 1) {
+      const shot = ((cropY + y) * decoded.width + cropX + x) * decoded.channels;
+      const target = (y * cropWidth + x) * 3;
+      out[target] = decoded.pixels[shot];
+      out[target + 1] = decoded.pixels[shot + 1];
+      out[target + 2] = decoded.pixels[shot + 2];
+    }
+  }
+  return out;
+}
+
+function classifyWindowCrop(crop, cropWidth) {
+  const counts = new Map();
+  for (let p = 0; p < crop.length / 3; p += 1) {
+    const key = `${crop[p * 3]},${crop[p * 3 + 1]},${crop[p * 3 + 2]}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const total = crop.length / 3;
+  return {
+    sha256: createHash("sha256").update(crop).digest("hex"),
+    distinctColors: counts.size,
+    solidColor: counts.size === 1 ? sorted[0][0] : null,
+    topColors: sorted.slice(0, 6).map(([color, count]) => ({ color, count, fraction: count / total })),
+  };
+}
+
+function compareWindowCropToExpected(crop, cropWidth, expected) {
+  let mismatches = 0;
+  let firstDifference = null;
+  for (let y = 0; y < expected.height; y += 1) {
+    for (let x = 0; x < expected.width; x += 1) {
+      const shot = (y * cropWidth + x) * 3;
+      const exp = (y * expected.width + x) * 3;
+      if (crop[shot] !== expected.pixels[exp] || crop[shot + 1] !== expected.pixels[exp + 1] || crop[shot + 2] !== expected.pixels[exp + 2]) {
+        mismatches += 1;
+        if (!firstDifference) {
+          firstDifference = {
+            x, y,
+            observed: [crop[shot], crop[shot + 1], crop[shot + 2]],
+            expected: [expected.pixels[exp], expected.pixels[exp + 1], expected.pixels[exp + 2]],
+          };
+        }
+      }
+    }
+  }
+  return { total: expected.width * expected.height, mismatches, firstDifference };
+}
+
+async function captureWindowRaster(sessionId, filename) {
+  await ensureValidationDir();
+  const outputPath = path.join(validationDir, filename);
+  try {
+    await new Promise((resolve, reject) => {
+      execFile("import", ["-window", "root", outputPath], { env: process.env, timeout: 15000 }, (error) => (error ? reject(error) : resolve()));
+    });
+    return { path: outputPath, source: "x11-root-pixmap" };
+  } catch (error) {
+    console.log(`[visual-proof] captura X11 indisponivel (${String(error?.message ?? error)}); usando screenshot WebDriver como fonte secundaria`);
+    const fallback = await captureScreenshot(sessionId, filename);
+    return { path: fallback, source: "webdriver-snapshot" };
+  }
+}
+
+// Observacao completa de uma apresentacao: identidade no canvas (dados) +
+// recorte da janela real (apresentacao). Nunca altera o produto.
+async function captureVisualObservation(sessionId, label, prefix, reference, background) {
+  const layout = await waitFor(
+    async () => {
+      const next = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+      return next?.fullyVisible && next.unobstructed && next.exactContentDimensions ? next : false;
+    },
+    15000,
+    `Frame ${label} ficou obstruido, invisivel ou mal dimensionado antes da observacao visual`,
+    100
+  );
+  const canvas = await readRenderedSpriteFramePixels(sessionId);
+  const dpr = await executeScript(sessionId, "return window.devicePixelRatio;");
+  const raster = await captureWindowRaster(sessionId, `${prefix}-visual-${label}.png`);
+  const decoded = decodeWindowPng(await readFile(raster.path));
+  const observation = {
+    label,
+    capture_source: raster.source,
+    capture_path: raster.path,
+    device_pixel_ratio: dpr,
+    canvas: canvas
+      ? { image: true, frameId: canvas.frameId, romSha256: canvas.romSha256, pngSha256: canvas.pngSha256, pixelsSha256: canvas.pixelsSha256, naturalWidth: canvas.naturalWidth, naturalHeight: canvas.naturalHeight }
+      : null,
+    layout_rect: layout.rect,
+    layout_borders: layout.borders,
+  };
+  if (canvas?.pixels) {
+    const canvasPixels = Buffer.from(canvas.pixels);
+    observation.canvas_pixels_sha256 = createHash("sha256").update(canvasPixels).digest("hex");
+    observation.canvas_matches_reference = canvasPixels.length === reference.pixels.length && canvasPixels.equals(reference.pixels);
+  }
+  if (dpr !== 1) {
+    observation.window_proof = { error: `devicePixelRatio ${dpr} != 1; o congelado pinna GDK_SCALE=1 e a comparacao exige escala 1:1` };
+    return observation;
+  }
+  const cropX = Math.round(layout.rect.x + layout.borders.left);
+  const cropY = Math.round(layout.rect.y + layout.borders.top);
+  const expected = renderPresentedFrameRaster(reference, 3, background);
+  if (Math.round(layout.content.width) !== expected.width || Math.round(layout.content.height) !== expected.height) {
+    observation.window_proof = { error: `conteudo CSS ${layout.content.width}x${layout.content.height} != referencia 3x ${expected.width}x${expected.height}` };
+    return observation;
+  }
+  const crop = cropWindowRgb(decoded, cropX, cropY, expected.width, expected.height);
+  observation.window_crop = {
+    ...classifyWindowCrop(crop, expected.width),
+    ...compareWindowCropToExpected(crop, expected.width, expected),
+  };
+  observation.window_crop_matches_expected = observation.window_crop.mismatches === 0;
+  return observation;
 }
 
 async function createUnavailablePreviewFixture() {
@@ -11061,6 +11285,319 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
   }
 }
 
+// Cenario de diagnostico da missao visual (ETAPA 1, congelado em
+// docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-VISUAL-ETAPA1.md):
+// separa DADOS (pixels do canvas vs referencia independente) de
+// APRESENTACAO (recorte do pixmap X11 da janela real vs raster esperado) em
+// cada transicao de estado da jornada: instancia 1 (O0/O1), pump do core na
+// mesma instancia (O2) e reabertura pos-destruicao da janela (O3). Sondas
+// P1..P3 classificam o mecanismo quando o defeito se reproduz. Nada aqui
+// altera o produto nem promove entregas.
+async function runSonicAnimVisualDiagnosticoScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
+  const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const baseSha256 = hash(base);
+  if (base.length !== 531577 || baseSha256 !== "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb") {
+    fail(`O diagnostico visual exige a ROM BYOR pinada de Sonic 1 (USA, Europe): ${baseSha256}`);
+  }
+  const compositingDisabled = process.env.WEBKIT_DISABLE_COMPOSITING_MODE === "1";
+  await ensureValidationDir();
+  const pilotDir = path.join(validationDir, `${prefix}-anim-visual`);
+  await mkdir(pilotDir, { recursive: true });
+  const report = {
+    schema: "rex-sonic-anim-visual-diagnostico/v1",
+    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-VISUAL-ETAPA1.md",
+    binary_sha256: hash(await readFile(app)),
+    base_rom_sha256: baseSha256,
+    webkit_disable_compositing_mode: process.env.WEBKIT_DISABLE_COMPOSITING_MODE ?? null,
+    observations: [],
+    checks: [],
+  };
+  const persistReport = async (extra = {}) => {
+    await writeFile(path.join(pilotDir, "report.json"), JSON.stringify({ ...report, ...extra }, null, 2));
+  };
+  const pushCheck = (entry) => {
+    report.checks.push(entry);
+    return entry;
+  };
+  let sessionIdRef = sessionId;
+  try {
+    // O0 — instancia 1 com o stand ja composto e verificado pelo preload.
+    const standReference = renderSonicFrameReference(base, 1);
+    const o0 = await captureVisualObservation(sessionIdRef, "o0-stand-instancia1", prefix, standReference, [255, 0, 255]);
+    report.observations.push(o0);
+    await persistReport();
+
+    // O1 — walk-1 da base na mesma instancia.
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes de compor walk-1 (O1)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "compor walk-1 base (O1)");
+    const walkBaseReference = renderSonicFrameReference(base, 6);
+    await waitFor(
+      async () => {
+        const v = await readRenderedSpriteFramePixels(sessionIdRef);
+        return v?.frameId === "sonic1_sonic/walk-1" && v.romSha256 === baseSha256 ? v : false;
+      },
+      30000,
+      "O walk-1 da base nao compondo na instancia 1 (O1)",
+      100
+    );
+    const o1 = await captureVisualObservation(sessionIdRef, "o1-walk1-instancia1", prefix, walkBaseReference, [255, 0, 255]);
+    report.observations.push(o1);
+    await persistReport();
+
+    // Pintura de 1 pixel pela interface nativa para habilitar a copia e o
+    // play da modificada — transicoes de estado do caminho real da jornada.
+    const paintedReferenceProbe = renderSonicFrameReference(base, 6);
+    const at = paintedReferenceProbe.locations[0];
+    if (!at) fail("Pixel de controle nao pertence ao mapping independente do walk-1");
+    const oldIndex = at.high ? base[at.offset] >> 4 : base[at.offset] & 15;
+    const paintIndex = oldIndex === 15 ? 14 : 15;
+    const paintedBytes = Buffer.from(base);
+    paintedBytes[at.offset] = at.high
+      ? (paintedBytes[at.offset] & 0x0f) | (paintIndex << 4)
+      : (paintedBytes[at.offset] & 0xf0) | paintIndex;
+    const paintedSha256 = hash(paintedBytes);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `sonic-color-${paintIndex}`, "selecionar a cor de pintura (diagnostico)");
+    const paintPoint = await executeScript(sessionIdRef, `
+      const img=document.querySelector('[data-testid="sonic-paint-image"]');
+      img?.scrollIntoView({block:'center',inline:'center'});
+      const r=img?.getBoundingClientRect(); if(!r) return null;
+      const x=r.left+r.width/(Number(arguments[0])*2),y=r.top+r.height/(Number(arguments[1])*2);
+      return {x,y,unobstructed:document.elementFromPoint(x,y)===img};
+    `, [paintedReferenceProbe.width, paintedReferenceProbe.height]);
+    if (!paintPoint?.unobstructed) fail(`Pintura do diagnostico obstruida: ${JSON.stringify(paintPoint)}`);
+    await webdriverRequest("POST", `/session/${sessionIdRef}/actions`, { actions: [{ type: "pointer", id: "sonic-paint-pointer", parameters: { pointerType: "mouse" },
+      actions: [{ type: "pointerMove", duration: 0, x: Math.round(paintPoint.x), y: Math.round(paintPoint.y), origin: "viewport" }, { type: "pointerDown", button: 0 }, { type: "pointerUp", button: 0 }] }] });
+    const sharedSelector = '[data-testid="sonic-paint-confirm-shared"]';
+    const sharedVisible = await executeScript(sessionIdRef, `return Boolean(document.querySelector(${JSON.stringify(sharedSelector)}));`);
+    if (sharedVisible) {
+      await clickElementWithDiagnostics(sessionIdRef, await findElement(sessionIdRef, sharedSelector), sharedSelector);
+    }
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "sonic-paint-apply", "aplicar pintura do diagnostico");
+    await waitFor(
+      async () => (await readRenderedSpriteFramePixels(sessionIdRef))?.romSha256 === paintedSha256,
+      30000,
+      "A pintura do diagnostico nao confirmou os bytes independentes",
+      100
+    );
+
+    // Exportar/aplicar BPS para habilitar "Jogar ROM modificada" pelo fluxo
+    // real da superficie (mesmo caminho da jornada multiframe).
+    const patchPath = path.join(pilotDir, "diagnostico.bps");
+    const appliedPath = path.join(pilotDir, "diagnostico-aplicada.bin");
+    const nativePathInput = async (testId, value) => {
+      const selector = `[data-testid="${testId}"] input`;
+      const element = await findElement(sessionIdRef, selector);
+      await clickElementWithDiagnostics(sessionIdRef, element, selector);
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/clear`, {});
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/value`, { text: value, value: [...value] });
+    };
+    await nativePathInput("sonic-patch-path", patchPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-export-patch", "exportar BPS do diagnostico");
+    await waitFor(() => pathExists(patchPath), 15000, "O BPS do diagnostico nao foi exportado", 100);
+    await nativePathInput("sonic-applied-path", appliedPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-apply-patch", "aplicar BPS do diagnostico");
+    await waitFor(() => pathExists(appliedPath), 15000, "O BPS do diagnostico nao foi aplicado", 100);
+    if (!(await readFile(appliedPath)).equals(paintedBytes)) fail("A aplicacao BPS do diagnostico divergiu da ROM calculada independentemente");
+
+    // O2 — pump do core na MESMA instancia (orcamento limitado e
+    // diagnosticavel: traco cru de frames, sem sleep arbitrario).
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-play-modified", "pump do core na instancia 1 (O2)");
+    await waitFor(
+      async () => {
+        const frame = await readCanonicalGameFrame(sessionIdRef);
+        return frame && frame.romSha256 === paintedSha256 && frame.romSize === paintedBytes.length ? frame : false;
+      },
+      30000,
+      "A Game View nao confirmou a identidade da copia pintada (O2)",
+      100
+    );
+    const pumpStartedAt = Date.now();
+    const pumpTrace = [];
+    let pumpLast = null;
+    const pumpGoal = await waitFor(
+      async () => {
+        const progress = await readCanonicalGameProgress(sessionIdRef);
+        if (progress) {
+          pumpLast = progress;
+          const elapsedMs = Date.now() - pumpStartedAt;
+          if (pumpTrace.length === 0 || elapsedMs >= pumpTrace[pumpTrace.length - 1].t_ms + 5000) {
+            pumpTrace.push({ t_ms: elapsedMs, rf: progress.renderedFrames, status: progress.gameStatus });
+          }
+        }
+        return progress && progress.renderedFrames >= 120 ? progress : false;
+      },
+      120000,
+      "O pump do core nao alcancou 120 frames no orcamento do diagnostico",
+      100
+    ).catch(() => null);
+    report.pump = { reached: Boolean(pumpGoal), trace: pumpTrace, last: pumpLast };
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "viewport-pause", "pausar o pump antes da observacao O2");
+    const rfHoldBefore = await readCanonicalGameProgress(sessionIdRef);
+    await waitFor(
+      async () => {
+        const after = await readCanonicalGameProgress(sessionIdRef);
+        return after && after.renderedFrames === rfHoldBefore.renderedFrames ? after : false;
+      },
+      5000,
+      "O pump da Game View nao estabilizou com viewport-pause antes da O2",
+      250
+    );
+    await persistReport();
+
+    // Recompor walk-1 (copia pintada) apos o pump na mesma instancia. A
+    // troca para stand desmonta o <img> (condicao verificavel de saida), e a
+    // volta exige composicao nova com a identidade da copia — nunca se
+    // compara um elemento antigo remanescente.
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/stand");
+    await waitFor(
+      async () => (await readRenderedSpriteFramePixels(sessionIdRef)) === null,
+      15000,
+      "A troca para stand nao desmontou o frame composto na instancia 1 (O2)",
+      100
+    );
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes de recompor walk-1 pos-pump (O2)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "recompor walk-1 pos-pump (O2)");
+    const paintedReference = renderSonicFrameReference(paintedBytes, 6);
+    await waitFor(
+      async () => {
+        const v = await readRenderedSpriteFramePixels(sessionIdRef);
+        return v?.frameId === "sonic1_sonic/walk-1" && v.romSha256 === paintedSha256 ? v : false;
+      },
+      30000,
+      "O walk-1 recomposto nao corresponde copia pintada apos o pump (O2)",
+      100
+    );
+    const o2 = await captureVisualObservation(sessionIdRef, "o2-walk1-pos-pump", prefix, paintedReference, [255, 0, 255]);
+    report.observations.push(o2);
+    await persistReport();
+
+    // O3 — salvar, destruir a janela, recriar a instancia e reabrir.
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-save", "salvar sessao no diagnostico visual");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),
+      15000,
+      "A sessao salva do diagnostico nao apareceu na lista",
+      100
+    );
+    await deleteSession(sessionIdRef);
+    sessionIdRef = await createSession(app);
+    currentE2eRunContext.sessionId = sessionIdRef;
+    await waitForAppWindowReady(sessionIdRef, uiBootstrapTimeoutMs, "O app do diagnostico visual nao reabriu");
+    await handleProjectWizardVisibly(sessionIdRef, "anim-visual-diagnostico-restart");
+    await setSessionWindowRect(sessionIdRef, 1920, 1080);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "workspace-rail-debug", "reabrir Debug Workspace no diagnostico");
+    await callAutomationApi(sessionIdRef, "openToolsWorkspace", ["reverse", "debug", true]);
+    await waitForBodyText(sessionIdRef, "Analisar ROM", 20000, "O Reverse Workspace nao voltou no diagnostico");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "reverse-tab-inspection", "reabrir inspecao no diagnostico");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-refresh-sessions", "listar sessoes no diagnostico");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),
+      30000,
+      "A sessao salva nao reapareceu apos destruir a janela (diagnostico)",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `select-saved-session-${savedId}`, "selecionar sessao salva (diagnostico)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-reopen", "reabrir sessao (diagnostico)");
+    await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
+      30000,
+      "A sessao do diagnostico nao foi reaberta com estado completo",
+      100
+    );
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da recomposicao pos-reabertura (O3)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "recompor walk-1 pos-reabertura (O3)");
+    await waitFor(
+      async () => {
+        const v = await readRenderedSpriteFramePixels(sessionIdRef);
+        return v?.frameId === "sonic1_sonic/walk-1" && v.romSha256 === paintedSha256 ? v : false;
+      },
+      30000,
+      "O walk-1 reaberto nao corresponde copia pintada (O3)",
+      100
+    );
+    const o3 = await captureVisualObservation(sessionIdRef, "o3-walk1-pos-reabertura", prefix, paintedReference, [255, 0, 255]);
+    report.observations.push(o3);
+    await persistReport();
+
+    // Gates do congelado: dados intactos em toda observacao; apresentacao
+    // correta nas observacoes de linha de base; reproducao/classificacao na
+    // reabertura.
+    for (const observation of [o0, o1, o2, o3]) {
+      pushCheck({ name: `dados.canvas_igual_referencia.${observation.label}`, pass: observation.canvas_matches_reference === true, observed: { canvas_sha: observation.canvas_pixels_sha256, capture_source: observation.capture_source } });
+    }
+    pushCheck({ name: "apresentacao.baseline_o0_o1_o2_janela_igual_raster", pass: [o0, o1, o2].every((observation) => observation.window_crop_matches_expected === true), observed: [o0, o1, o2].map((observation) => ({ label: observation.label, matches: observation.window_crop_matches_expected, mismatches: observation.window_crop?.mismatches, solid: observation.window_crop?.solidColor })) });
+    const defeitoReproduzido = o3.canvas_matches_reference === true && o3.window_crop_matches_expected === false;
+    pushCheck({
+      name: compositingDisabled ? "ab.com_pos_reabertura_apresentacao_correta" : "reproducao.defeito_pos_reabertura",
+      pass: compositingDisabled ? o3.window_crop_matches_expected === true : defeitoReproduzido,
+      observed: { compositing_disabled: compositingDisabled, canvas_ok: o3.canvas_matches_reference, crop_matches: o3.window_crop_matches_expected, mismatches: o3.window_crop?.mismatches, solid: o3.window_crop?.solidColor, magenta_fraction: (o3.window_crop?.topColors ?? []).find((entry) => entry.color === "255,0,255")?.fraction ?? 0 },
+      required: compositingDisabled ? "com WEBKIT_DISABLE_COMPOSITING_MODE=1 a janela deve bater com o raster esperado" : "na execucacao sem mitigacao a janela deve divergir com dados intactos (achado do run-4)",
+    });
+    report.defeito_reproduzido = defeitoReproduzido;
+
+    // Sondas discriminantes somente quando o defeito se reproduziu.
+    if (defeitoReproduzido) {
+      const imageSelector = "[data-testid=\"inspection-sprite-frame-image\"]";
+      await executeScript(sessionIdRef, `const img=document.querySelector(${JSON.stringify(imageSelector)}); img.style.backgroundColor='transparent'; return true;`);
+      const p1 = await captureVisualObservation(sessionIdRef, "p1-fundo-transparente", prefix, paintedReference, [11, 15, 25]);
+      report.observations.push(p1);
+      await executeScript(sessionIdRef, `const img=document.querySelector(${JSON.stringify(imageSelector)}); img.style.backgroundColor=''; return true;`);
+      await executeAsyncScript(sessionIdRef, `
+        const done = arguments[arguments.length - 1];
+        const img = document.querySelector(${JSON.stringify(imageSelector)});
+        img.style.display = 'none';
+        void img.offsetWidth;
+        img.style.display = 'block';
+        requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
+      `);
+      const p2 = await captureVisualObservation(sessionIdRef, "p2-repaint-display", prefix, paintedReference, [255, 0, 255]);
+      report.observations.push(p2);
+      await executeAsyncScript(sessionIdRef, `
+        const done = arguments[arguments.length - 1];
+        const img = document.querySelector(${JSON.stringify(imageSelector)});
+        const src = img.getAttribute('src');
+        img.removeAttribute('src');
+        requestAnimationFrame(() => {
+          img.onload = () => done(true);
+          setTimeout(() => done(false), 8000);
+          img.setAttribute('src', src);
+        });
+      `);
+      const p3 = await captureVisualObservation(sessionIdRef, "p3-reatribuicao-src", prefix, paintedReference, [255, 0, 255]);
+      report.observations.push(p3);
+      report.probes = {
+        p1: { crop_matches: p1.window_crop_matches_expected, solid: p1.window_crop?.solidColor, mismatches: p1.window_crop?.mismatches },
+        p2: { crop_matches: p2.window_crop_matches_expected, solid: p2.window_crop?.solidColor, mismatches: p2.window_crop?.mismatches },
+        p3: { crop_matches: p3.window_crop_matches_expected, solid: p3.window_crop?.solidColor, mismatches: p3.window_crop?.mismatches },
+      };
+      await persistReport();
+    }
+
+    const allPass = report.checks.every((entry) => entry.pass !== false);
+    report.veredito = allPass
+      ? (compositingDisabled
+        ? "A/B: com compositing desabilitado a apresentacao bate com o raster independente na reabertura"
+        : "Reproduzido: dados intactos e janela sem bitmap pintado na reabertura; sondas registradas para classificacao do mecanismo")
+      : "Diagnostico nao classificou conforme o congelado — ver checks e observacoes cruas";
+    await persistReport({ allPass, finished_at: new Date().toISOString() });
+    if (!allPass) {
+      const failed = report.checks.filter((entry) => entry.pass === false);
+      fail(`Diagnostico visual INCONCLUSIVO/FAIL frente ao congelado (sem promover nada): ${JSON.stringify({ failed, report_path: path.join(pilotDir, "report.json") })}`);
+    }
+    console.log(`OK: Sonic anim-visual diagnostico E2E; allPass=true; report=${path.join(pilotDir, "report.json")}`);
+    return sessionIdRef;
+  } catch (error) {
+    await persistReport({ allPass: false, aborted: true, error: String(error?.message ?? error), finished_at: new Date().toISOString() }).catch(() => null);
+    throw error;
+  }
+}
+
 async function closeVisibleConsoleDrawer(sessionId, label = "console inicial") {
   const visible = await executeScript(
     sessionId,
@@ -15830,10 +16367,12 @@ async function main() {
     const sonicMultiframeMode = options.scenario === "sonic-multiframe";
     const sonicCadenceMode = options.scenario === "sonic-cadence-journey";
     const sonicAnimIntegradaMode = options.scenario === "sonic-anim-integrada";
+    const sonicAnimVisualMode = options.scenario === "sonic-anim-visual-diagnostico";
     const sonicTilesMode = options.scenario === "inspection-sonic-tiles";
     if (sonicMultiframeMode) options.scenario = "inspection-sonic";
     if (sonicCadenceMode) options.scenario = "inspection-sonic";
     if (sonicAnimIntegradaMode) options.scenario = "inspection-sonic";
+    if (sonicAnimVisualMode) options.scenario = "inspection-sonic";
     if (sonicTilesMode) options.scenario = "inspection-sonic";
     if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
       let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
@@ -16004,6 +16543,11 @@ async function main() {
         }
         if (sonicAnimIntegradaMode) {
           sessionId = await runSonicAnimIntegradaScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
+          currentE2eRunContext.sessionId = sessionId;
+          return;
+        }
+        if (sonicAnimVisualMode) {
+          sessionId = await runSonicAnimVisualDiagnosticoScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
           currentE2eRunContext.sessionId = sessionId;
           return;
         }
