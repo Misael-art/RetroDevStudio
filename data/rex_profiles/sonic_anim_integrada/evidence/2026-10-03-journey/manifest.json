@@ -1,0 +1,69 @@
+{
+  "schema": "rex-sonic-anim-integrada-journey-evidence/v1",
+  "date": "2026-10-03",
+  "classification": "Experimental / local profile validation; claim limitado a Sonic 1 (USA, Europe) Rev00 BYOR no core Genesis Plus GX v1.7.4 46a5521; sem merge, release ou promocao de maturidade por esta frente",
+  "branch": "codex/rex-sonic-anim-integrada",
+  "base_chain": "codex/rex-sonic-cadence @ a59e7dc (PR #100, base main); PR desta frente e dependente dela",
+  "evidence_commits": {
+    "etapa1_contrato_expectativas": "a657423",
+    "etapa2_integridade_transacoes": "60447fb",
+    "etapa3_cx_iniciante": "d46cafd",
+    "etapa4_provas_negativas_mutacao": "c5db2df",
+    "etapa5_cenario_wiring": "d141a49",
+    "etapa5_cx_roteiro": "39d2277",
+    "driver_selecao_explicita_walk1": "7f82ff7",
+    "addendum_1_congelado": "717ec2d",
+    "driver_r1_r4": "43d945d",
+    "traco_diagnostico_boot": "2bfb513",
+    "addendum_2_congelado": "03986d0",
+    "driver_m1": "b824e11",
+    "clippy_fix_frente": "db57f5d"
+  },
+  "proof_head": "b824e11a7c1fd812f89ca6f40c211b867a4fd97b",
+  "binary_sha256_run4": "03628796c1fdfd8ad9630fd4634e0d62dc81dde5bf7c897a05b1552d367e053a",
+  "binary_sha256_by_run": {
+    "run1_f4727240": "f4727240c7c9edf4ba53bf2e7ca6923a8adca4db2bb9341e01652bcd4da15ec2",
+    "run2_bac04729": "bac04729052b254066b3edfe6a1f70ece079eebacf95499e4ad84d96fc584ed5",
+    "run3_54bc04df": "54bc04dfb5611a0e1cd7752131a209d9b642d4ec4039b4ef4d0d6bba4cce5c55",
+    "run4_03628796": "03628796c1fdfd8ad9630fd4634e0d62dc81dde5bf7c897a05b1552d367e053a"
+  },
+  "base_rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "base_rom_size": 531577,
+  "paint_only_copy_sha256": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86",
+  "journey_copy_sha256": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a",
+  "journey_copy_bytes": { "0x13BAE": 40, "0x2213E_nibble_alto": 15 },
+  "bps_sha256": "4c03998059c8f0b6d418510611cf7e7dcd6a24c8c5cd0b880cd5b7088b739255",
+  "xvfb_sha256": "5bfd315a8c7bc626d0b183d176e130c34f910a4a1279d9d53ea45769f62a3351",
+  "core": "Genesis Plus GX v1.7.4 46a5521",
+  "expectations": [
+    "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md",
+    "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-ETAPA5-ADDENDUM-1.md",
+    "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-ETAPA5-ADDENDUM-2.md"
+  ],
+  "run_history": {
+    "run1": "FAIL em passo5.byte_* por suposicao do DRIVER (dominio unico de changed_offsets); produto provou cumulativo; corrigida por Addendum-1 R-1..R-4. report 2b45421c2cbeb58c9330ba5a737289075f7d528bd955ae8ae594334423d8cbc2, run.log 65e2bbebc5555834b20c2ef859ca51fdae8412ef2194b749870392512d8b045d",
+    "run2": "FAIL no gate de boot do PASSO 7 (890 frames/120s) sem traco cru; PASSO 1..6 verdes (12 checks). report 30cf2c75a78d1ceaca056d730f5c59e9e5b19d5e69bf644054d67aefec6b7b9a, run.log 0a1e94b3927a2f5906b1be9e92bcf145fee4965118719b27c0269b24c49b96f6",
+    "run3": "FAIL no mesmo gate COM traco: serie crescente 10..660 em 119s (~5,5 fps; regime final ~4 fps), status 'Emulador ativo', zero mensagem de falha de frame — pump vivo e lento (renderizacao por software Xvfb + debug), nao pump morto nem defeito de produto; unica correcao de meio M-1 congelada em Addendum-2. report a5d65cf09cface4d061f0e14030716bf17016984269e042714583de6fac5662f, run.log c08f6ee1fcf631daab9b338782bd802ca13bdd72b9f14b8f67195198611f3cbf",
+    "run4": "allPass: 24/24 checks nomeados, 10/10 passos, sem aborto, no HEAD exato b824e11 com binario 03628796… (gate de proveniencia dist==HEAD ativo). report 2bbd348beeec1aa7df540be495d7b2299838c3d834d67a2ee7e01a725856d5b1, run.log 40695f2179fb46559a01aff335fb6965323dc2bc231322992dc4769c5dee0c53, run.json 992974dfe90fcfcee96868f397bb3e9622a88914ad0936fe4d2eefd2cf97d70d, passos: abrir_byor, localizar_id_wait, pintar_pixel, duracao_40, conferir_copia_crua, bps_export_apply, jogar_modificada, salvar_reabrir, confirmar_estado_reaberto, restaurar_duracao_pixel_intacto"
+  },
+  "verdict": "Jornada integrada completa provada na UI desktop real: duas edicoes independentes (pixel + cadencia) coexistem na mesma copia sem se desfazerem; BPS reproduz a copia byte a byte; o core carrega a copia com identidade confirmada; reinicio/reabertura restauram sequencia, duracao, pixel e procedencia; restaurar SO a duracao devolve a copia so-pixel b1ed600d com o pixel intacto",
+  "artifacts": [
+    { "file": "report-journey-run4.json", "sha256": "2bbd348beeec1aa7df540be495d7b2299838c3d834d67a2ee7e01a725856d5b1" },
+    { "file": "run3-boot-trace.json", "sha256": "e9379071a2526ff7901a9bcb986d8cfe6fd655eaaf4ade4a5d4839217cb1241e" },
+    { "file": "E-REQUISITO-MAP.md", "sha256": "cf291c4f9bcd3330e44e490d26e1fd62acc517e5c906890484152659f94065ac" },
+    { "file": "gates.json", "sha256": "2e486ed069c26e1dd561e1d2cd849e535ecf471b9852235a8c8db30d283f782b" }
+  ],
+  "local_evidence": {
+    "scratch_runs": [
+      "~/rds-scratch/anim-integrada-journey-20261003-01/",
+      "~/rds-scratch/anim-integrada-journey-20261003-02/",
+      "~/rds-scratch/anim-integrada-journey-20261003-03/",
+      "~/rds-scratch/anim-integrada-journey-20261003-04/"
+    ],
+    "screenshots_local": [
+      "src-tauri/target-test/validation/inspection-2026-10-03T12-27-57-691Z-anim-integrada-passo2.png",
+      "src-tauri/target-test/validation/inspection-2026-10-03T12-27-57-691Z-anim-integrada-passo9.png"
+    ]
+  },
+  "commercial_content": "ROM, copias derivadas (.bin), BPS e prints permanecem LOCAIS (ignorados pelo Git); apenas SHA-256, metricas, series resumidas e relatorios JSON sao versionados (BYOR; AGENTS.md)"
+}
