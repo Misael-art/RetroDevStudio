@@ -11311,6 +11311,10 @@ async function runSonicAnimVisualDiagnosticoScenario(sessionId, app, romPath, ba
     webkit_disable_compositing_mode: process.env.WEBKIT_DISABLE_COMPOSITING_MODE ?? null,
     observations: [],
     checks: [],
+    notes: [
+      "adaptacao de conducao 1 (evidencia run 2026-10-03T16:28): a troca nativa de frame nao confirma selecao com o runtime da Game View vivo no mesmo contexto; a recomposicao da O2 passa a ocorrer depois do encerramento pelo caminho visivel 'Parar' (stopEmulator).",
+      "adaptacao de conducao 2 (evidencia run 2026-10-03T16:36): 'Parar' navega para o workspace Scene (App.tsx resetEmulatorSession(true)) e a sessao de inspecao e useState local (InspectionPanel.tsx:85); a volta a superficie se faz reabrindo a sessao salva, salva antes do pump. O contrato de observacoes O0..O3 e os gates permanecem os congelados em EXPECTATIONS-VISUAL-ETAPA1.md (08d3918).",
+    ],
   };
   const persistReport = async (extra = {}) => {
     await writeFile(path.join(pilotDir, "report.json"), JSON.stringify({ ...report, ...extra }, null, 2));
@@ -11400,6 +11404,20 @@ async function runSonicAnimVisualDiagnosticoScenario(sessionId, app, romPath, ba
     await waitFor(() => pathExists(appliedPath), 15000, "O BPS do diagnostico nao foi aplicado", 100);
     if (!(await readFile(appliedPath)).equals(paintedBytes)) fail("A aplicacao BPS do diagnostico divergiu da ROM calculada independentemente");
 
+    // Salvar a sessao ANTES do pump: o controle visivel "Parar" devolve o
+    // app ao workspace Scene (App.tsx: resetEmulatorSession(true)) e a
+    // sessao de inspecao vive em useState local (InspectionPanel.tsx:85).
+    // A volta pelo proprio produto se faz reabrindo a sessao salva; salvar
+    // continua precedendo destruir nas duas pernas (O2 intra-instancia,
+    // O3 restart), preservando o congelado "salvar -> destruir -> reabrir".
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-save", "salvar sessao antes do pump (diagnostico visual)");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),
+      15000,
+      "A sessao salva do diagnostico nao apareceu na lista antes do pump",
+      100
+    );
+
     // O2 — pump do core na MESMA instancia (orcamento limitado e
     // diagnosticavel: traco cru de frames, sem sleep arbitrario).
     await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-play-modified", "pump do core na instancia 1 (O2)");
@@ -11461,15 +11479,36 @@ async function runSonicAnimVisualDiagnosticoScenario(sessionId, app, romPath, ba
       100
     );
 
-    // Recompor walk-1 (copia pintada) apos o pump na mesma instancia. A
-    // troca para stand desmonta o <img> (condicao verificavel de saida), e a
-    // volta exige composicao nova com a identidade da copia — nunca se
-    // compara um elemento antigo remanescente.
-    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/stand");
+    // Voltar a area de inspecao pelo caminho real do produto: o "Parar"
+    // navegou para Scene. Reabrir a sessao salva restaura o estado pela
+    // persistencia (nao por memoria de UI) e o painel remonta sem frame —
+    // a recomposicao exige selecao + compose novos, nunca um elemento antigo.
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "workspace-rail-debug", "voltar ao Debug Workspace apos o Parar (O2)");
+    await callAutomationApi(sessionIdRef, "openToolsWorkspace", ["reverse", "debug", true]);
+    await waitForBodyText(sessionIdRef, "Analisar ROM", 20000, "O Reverse Workspace nao voltou apos o Parar (O2)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "reverse-tab-inspection", "reabrir a aba de inspecao apos o Parar (O2)");
     await waitFor(
       async () => (await readRenderedSpriteFramePixels(sessionIdRef)) === null,
       15000,
-      "A troca para stand nao desmontou o frame composto na instancia 1 (O2)",
+      "A inspecao remontada ainda exibia frame composto antes do reabrir (O2)",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-refresh-sessions", "listar sessoes apos o Parar (O2)");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),
+      30000,
+      "A sessao salva nao reapareceu na lista apos o Parar (O2)",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `select-saved-session-${savedId}`, "selecionar sessao salva apos o Parar (O2)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-reopen", "reabrir sessao apos o Parar (O2)");
+    await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
+      30000,
+      "A sessao nao foi reaberta com estado completo apos o Parar (O2)",
       100
     );
     await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
@@ -11489,14 +11528,10 @@ async function runSonicAnimVisualDiagnosticoScenario(sessionId, app, romPath, ba
     report.observations.push(o2);
     await persistReport();
 
-    // O3 — salvar, destruir a janela, recriar a instancia e reabrir.
-    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-save", "salvar sessao no diagnostico visual");
-    await waitFor(
-      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),
-      15000,
-      "A sessao salva do diagnostico nao apareceu na lista",
-      100
-    );
+    // O3 — destruir a janela, recriar a instancia e reabrir do disco. A
+    // sessao ja foi salva antes do pump e nada altera a sessao entre O2 e
+    // O3 (a recomposicao e leitura), entao o salvar -> destruir -> reabrir
+    // do congelado permanece integro na ordem.
     await deleteSession(sessionIdRef);
     sessionIdRef = await createSession(app);
     currentE2eRunContext.sessionId = sessionIdRef;
