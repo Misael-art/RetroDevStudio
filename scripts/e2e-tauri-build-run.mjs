@@ -10350,17 +10350,27 @@ async function observeCadenceRunOnCore(sessionId, runOptions) {
     failCheck("observacao_orcamento_e_ancoragem", { start_before: start.frames_before, start_after: start.frames_after, tail_after: tail.frames_after, start_rows: start.rows.length }, `warmup=${obs.warmupFrames}, START em ${obs.warmupFrames + 1}..${obs.warmupFrames + obs.startFrames}, total=${obs.totalFrames}, 0 linhas antes de ${obs.recordFrom}`);
   }
   const rows = tail.rows ?? [];
-  const expectedCount = obs.recordTo - obs.recordFrom + 1;
-  if (rows.length !== expectedCount || rows[0]?.frame !== obs.recordFrom || rows[rows.length - 1]?.frame !== obs.recordTo) {
-    failCheck("observacao_janela_completa", { rows: rows.length, first: rows[0]?.frame ?? null, last: rows[rows.length - 1]?.frame ?? null }, `${expectedCount} linhas de ${obs.recordFrom} a ${obs.recordTo}`);
+  // Retificacao A do Addendum: record_from e inclusivo ate o ultimo frame
+  // executado (2901), entao o bruto correto e a sequencia continua
+  // 1500..2901 (1402 linhas) — prova de orcamento integral e nao-intercalacao.
+  // A janela CONGELADA de analise continua 1500..2900 (1401 amostras); a linha
+  // de 2901, fora da janela, e descartada antes das metricas e o descarte e
+  // registrado na serie persistida.
+  const expectedRawCount = obs.totalFrames - obs.recordFrom + 1;
+  if (rows.length !== expectedRawCount || rows[0]?.frame !== obs.recordFrom || rows[rows.length - 1]?.frame !== obs.totalFrames) {
+    failCheck("observacao_janela_completa", { rows: rows.length, first: rows[0]?.frame ?? null, last: rows[rows.length - 1]?.frame ?? null }, `${expectedRawCount} linhas continuas de ${obs.recordFrom} a ${obs.totalFrames}`);
   }
   for (let i = 1; i < rows.length; i += 1) {
     if (rows[i].frame !== rows[i - 1].frame + 1) failCheck("observacao_janela_completa", { gap_entre: rows[i - 1].frame, e: rows[i].frame }, "indices de frame consecutivos, sem buracos");
   }
+  const windowRows = rows.filter((row) => row.frame <= obs.recordTo);
+  if (windowRows.length !== obs.recordTo - obs.recordFrom + 1 || windowRows[0].frame !== obs.recordFrom || windowRows.at(-1).frame !== obs.recordTo) {
+    failCheck("observacao_janela_completa", { janela: windowRows.length, first: windowRows[0]?.frame ?? null, last: windowRows.at(-1)?.frame ?? null }, `janela congelada ${obs.recordFrom}..${obs.recordTo}`);
+  }
   if (tail.rom_sha256 !== expectedSha256 || tail.rom_path !== romPath) {
     failCheck("observacao_identidade_rom", { sha: tail.rom_sha256, path: tail.rom_path }, `${expectedSha256} @ ${romPath}`);
   }
-  const samples = rows.map((row) => {
+  const samples = windowRows.map((row) => {
     const bytes = Buffer.from(row.bytes_hex, "hex");
     return [row.frame, bytes[0x1b], bytes[0x1d], bytes[0x1f]];
   });
@@ -10368,7 +10378,7 @@ async function observeCadenceRunOnCore(sessionId, runOptions) {
   const checks = [
     { name: `${label}.observacao_rota_ok`, pass: true, observed: { epoch: route.epoch, core: tail.core_label } },
     { name: `${label}.observacao_orcamento_e_ancoragem`, pass: true, observed: { frames_before: start.frames_before, frames_after: tail.frames_after } },
-    { name: `${label}.observacao_janela_completa`, pass: true, observed: { rows: rows.length, first: rows[0].frame, last: rows[rows.length - 1].frame } },
+    { name: `${label}.observacao_janela_completa`, pass: true, observed: { bruto: rows.length, janela: windowRows.length, descartada_fora_da_janela: rows.length - windowRows.length, first: rows[0].frame, last: rows.at(-1).frame } },
     { name: `${label}.observacao_identidade_rom`, pass: true, observed: { sha: tail.rom_sha256, path: tail.rom_path } },
     { name: `${label}.cobertura_idle`, pass: metrics.idle_coverage_ratio !== null && metrics.idle_coverage_ratio >= 0.4, observed: metrics.idle_coverage_ratio, required: ">=0.40" },
     { name: `${label}.candidato_timer_decrementa_1`, pass: metrics.timer_decrement_one_ratio !== null && metrics.timer_decrement_one_ratio >= 0.8, observed: metrics.timer_decrement_one_ratio, required: ">=0.80 em pares adjacentes idle" },
@@ -10388,6 +10398,7 @@ async function observeCadenceRunOnCore(sessionId, runOptions) {
     interval_byte: intervalByte,
     core_label: tail.core_label,
     route: { ...obs, epoch: route.epoch, frames_before_start: start.frames_before, frames_after_tail: tail.frames_after, start_batch_rows: start.rows },
+    dropped_outside_window: rows.filter((row) => row.frame > obs.recordTo).map((row) => row.frame),
     checks,
     metrics,
     raw_rows: rows,
