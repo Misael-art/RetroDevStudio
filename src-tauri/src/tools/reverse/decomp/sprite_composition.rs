@@ -1119,7 +1119,7 @@ mod tests {
         // `md_4bpp_tile_nibbles`: coluna par le o nibble alto.
         assert_eq!(expected.get_pixel(0, 0).0, palette_rgba(&palette, 1).0);
         assert_eq!(expected.get_pixel(1, 0).0, palette_rgba(&palette, 2).0);
-        let swapped: Vec<u8> = tiles.iter().map(|byte| (byte >> 4) | (byte << 4)).collect();
+        let swapped: Vec<u8> = tiles.iter().map(|byte| byte.rotate_left(4)).collect();
         let mutant = compose_sonic_rgba(&swapped, &palette, &parts, 8, 8, false, false).unwrap();
         assert_eq!(mutant.get_pixel(0, 0).0, palette_rgba(&palette, 2).0);
         assert_ne!(
