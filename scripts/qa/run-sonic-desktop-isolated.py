@@ -27,7 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("xvfb", "xvfb-sha256", "rom", "app", "work", "log"):
         parser.add_argument(f"--{name}", required=True)
-    parser.add_argument("--scenario", choices=("sonic-multiframe", "inspection-sonic-tiles"), default="sonic-multiframe")
+    parser.add_argument("--scenario", choices=("sonic-multiframe", "inspection-sonic-tiles", "sonic-cadence-journey"), default="sonic-multiframe")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     xvfb, app, rom = (Path(value).resolve(strict=True) for value in (args.xvfb, args.app, args.rom))

@@ -475,6 +475,7 @@ function parseArgs(argv) {
           "inspection-sonic",
           "inspection-sonic-tiles",
           "sonic-multiframe",
+          "sonic-cadence-journey",
           "rex-lz4w-effect",
           "rex-lz4w-fixture-effect",
           "rex-aplib-byor-effect",
@@ -10111,6 +10112,438 @@ async function runSonicMultiframeScenario(sessionId, app, romPath, base, savedId
   return sessionId;
 }
 
+const CADENCE_JOURNEY_WAIT_ADDR = 0x13bae;
+const CADENCE_JOURNEY_WAIT_FRAMES = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 2, 2, 2, 3, 4];
+const CADENCE_JOURNEY_SAMPLE_WINDOW = [[1500, 1967], [1967, 2434], [2434, 2901]];
+
+async function sampleCadenceBurst(sessionId, startFrame, stopFrame, budgetMs) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const stopFrame = Number(arguments[1]);
+      const budgetMs = Number(arguments[2]);
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (!identity || typeof invoke !== "function") { done({ ok: false, error: "identidade da Game View ou invoke indisponivel" }); return; }
+      const samples = [];
+      const deadline = Date.now() + budgetMs;
+      const tick = () => {
+        const current = Number(identity.getAttribute('data-rendered-frames') || 0);
+        if (current >= stopFrame || Date.now() > deadline) {
+          done({ ok: true, samples, stoppedAt: current, deadlineHit: current < stopFrame });
+          return;
+        }
+        requestAnimationFrame(() => {
+          const readAt = Number(identity.getAttribute('data-rendered-frames') || 0);
+          invoke("emulator_read_memory", { region: 2, offset: 0xd000, length: 0x40 })
+            .then((value) => {
+              const d = value?.data ?? [];
+              samples.push([readAt, d[0x1b] ?? null, d[0x1d] ?? null, d[0x1f] ?? null]);
+              tick();
+            })
+            .catch((error) => done({ ok: false, error: String(error), samples, stoppedAt: readAt }));
+        });
+      };
+      tick();
+    `,
+    [startFrame, stopFrame, budgetMs]
+  );
+  if (!result?.ok) fail(`Burst de amostragem de cadencia recusado: ${JSON.stringify({ startFrame, stopFrame, error: result?.error })}`);
+  return result;
+}
+
+function analyzeCadenceRunSamples(samples, expectedByte) {
+  let adjacentIdlePairs = 0;
+  let timerDecrementOne = 0;
+  let adjacentFrameTransitions = 0;
+  const reloadFrames = [];
+  let idleSamples = 0;
+  for (const sample of samples) if (sample[2] === 5) idleSamples += 1;
+  for (let i = 1; i < samples.length; i += 1) {
+    const [rfA, frameA, animA, timeA] = samples[i - 1];
+    const [rfB, frameB, animB, timeB] = samples[i];
+    if (animA !== 5 || animB !== 5) continue;
+    if (rfB - rfA === 1) {
+      adjacentIdlePairs += 1;
+      if (timeA >= 1 && timeB === timeA - 1) timerDecrementOne += 1;
+      if (frameA !== frameB) adjacentFrameTransitions += 1;
+      if (timeA === 0 && timeB === expectedByte) reloadFrames.push(rfB);
+    }
+  }
+  const gaps = [];
+  for (let i = 1; i < reloadFrames.length; i += 1) {
+    const gap = reloadFrames[i] - reloadFrames[i - 1];
+    if (gap > 0 && gap <= 600) gaps.push(gap);
+  }
+  const histogram = {};
+  for (const gap of gaps) histogram[gap] = (histogram[gap] ?? 0) + 1;
+  let gapMode = null;
+  let gapModeCount = 0;
+  for (const [gap, count] of Object.entries(histogram)) {
+    if (count > gapModeCount) { gapMode = Number(gap); gapModeCount = count; }
+  }
+  const firstIdle = samples.find((sample) => sample[2] === 5)?.[0] ?? null;
+  const lastFrame = samples.at(-1)?.[0] ?? null;
+  return {
+    expected_interval_byte: expectedByte,
+    samples: samples.length,
+    idle_coverage_ratio: samples.length ? Number((idleSamples / samples.length).toFixed(4)) : null,
+    adjacent_idle_pairs: adjacentIdlePairs,
+    timer_decrement_one_ratio: adjacentIdlePairs ? Number((timerDecrementOne / adjacentIdlePairs).toFixed(4)) : null,
+    adjacent_frame_transitions: adjacentFrameTransitions,
+    clean_reloads_zero_to_byte: reloadFrames.length,
+    reload_frames: reloadFrames,
+    gaps,
+    gap_histogram: histogram,
+    gap_mode: gapMode,
+    gap_mode_ratio: gaps.length ? Number((gapModeCount / gaps.length).toFixed(4)) : null,
+    frames_after_first_idle: firstIdle !== null && lastFrame !== null ? lastFrame - firstIdle : null,
+  };
+}
+
+async function readCadencePanelState(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const q = (selector) => document.querySelector(selector);
+      const frames = Array.from(document.querySelectorAll("[data-testid^='inspection-cadence-frame-']"));
+      return {
+        panel: Boolean(q("[data-testid='inspection-sonic-cadence-panel']")),
+        frameCount: frames.length,
+        thumbnailDataUrls: frames.map((el) => (el.querySelector("img")?.getAttribute("src") ?? "").startsWith("data:image") ? 1 : 0),
+        original: q("[data-testid='inspection-cadence-original']")?.textContent ?? "",
+        current: q("[data-testid='inspection-cadence-current']")?.textContent ?? "",
+        prediction: q("[data-testid='inspection-cadence-prediction']")?.textContent ?? "",
+        error: q("[data-testid='inspection-cadence-error']")?.textContent ?? "",
+      };
+    `
+  );
+}
+
+async function playAndSampleCadenceRun(sessionId, runOptions) {
+  const { buttonTestId, label, expectedBytes, intervalByte, oldGameFrame, report } = runOptions;
+  const expectedSha256 = createHash("sha256").update(expectedBytes).digest("hex");
+  await clickButtonByTestIdNativeWhenReady(sessionId, buttonTestId, `jogar ${label} na jornada de cadencia`);
+  const identity = await waitFor(
+    async () => {
+      const frame = await readCanonicalGameFrame(sessionId);
+      return frame && frame.romSha256 === expectedSha256 && frame.romSize === expectedBytes.length && frame.coreLabel && frame.corePath ? frame : false;
+    },
+    20000,
+    `Game View nao confirmou a identidade da ROM ${label} na jornada de cadencia`,
+    100
+  );
+  const reanchored = await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.romSha256 === expectedSha256 && progress.renderedFrames >= 1 && progress.renderedFrames <= 1200 ? progress : false;
+    },
+    15000,
+    `O contador de frames nao reancorou na carga da ROM ${label} (janela de amostragem seria invalida)`,
+    100
+  );
+  await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= 10 ? progress : false;
+    },
+    10000,
+    `A Game View nao avancou 10 frames na corrida ${label}`,
+    100
+  );
+  const bootFrame = await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= 890 ? progress : false;
+    },
+    120000,
+    `A ROM ${label} nao atravessou o boot ate o ponto de entrada na jornada`,
+    100
+  );
+  await focusGameCanvasNatively(sessionId);
+  const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  await sendNativeGameKey(sessionId, "Enter", "keyDown", `START de entrada da fase ${label} (jornada cadencia)`);
+  await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= bootFrame.renderedFrames + 30 ? progress : false;
+    },
+    15000,
+    `START nao segurou por 30 frames na corrida ${label}`,
+    100
+  );
+  await sendNativeGameKey(sessionId, "Enter", "keyUp", `liberacao de START da corrida ${label}`);
+  const startInput = await waitFor(
+    async () => {
+      const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return current?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0) ? current : false;
+    },
+    10000,
+    `START nativo nao foi confirmado pelo produto na corrida ${label}`,
+    100
+  );
+  await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= 1500 ? progress : false;
+    },
+    120000,
+    `A corrida ${label} nao alcancou a janela de amostragem (frame 1500)`,
+    100
+  );
+  const samples = [];
+  const bursts = [];
+  for (const [from, to] of CADENCE_JOURNEY_SAMPLE_WINDOW) {
+    const burst = await sampleCadenceBurst(sessionId, from, to, 20000);
+    if (burst.deadlineHit) {
+      fail(`A amostragem da corrida ${label} nao acompanhou os frames de tela: ${JSON.stringify({ from, to, stoppedAt: burst.stoppedAt, samples: burst.samples.length })}`);
+    }
+    bursts.push({ from, to, stoppedAt: burst.stoppedAt, sample_count: burst.samples.length });
+    samples.push(...burst.samples);
+  }
+  const gameplayFrame = await readCanonicalGameFrame(sessionId);
+  const staleImageRejected = Boolean(oldGameFrame) ? oldGameFrame.framebufferSha256 !== gameplayFrame.framebufferSha256 : true;
+  if (!staleImageRejected) fail(`A Game View reutilizou o framebuffer da corrida anterior em ${label}: ${gameplayFrame.framebufferSha256}`);
+  const negativeBefore = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  await sendNativeGameKey(sessionId, "KeyQ", "keyDown", `negativo de tecla nao mapeada na corrida ${label}`);
+  await sendNativeGameKey(sessionId, "KeyQ", "keyUp", `liberacao do negativo na corrida ${label}`);
+  const negativeAfter = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  const unmappedInputRejected = negativeAfter?.lastJoypadAck?.seq === negativeBefore?.lastJoypadAck?.seq;
+  if (!unmappedInputRejected) fail(`Entrada nao mapeada foi aceita como input do jogo na corrida ${label}`);
+  const metrics = analyzeCadenceRunSamples(samples, intervalByte);
+  const checks = [
+    { name: `${label}.cobertura_idle`, pass: metrics.idle_coverage_ratio !== null && metrics.idle_coverage_ratio >= 0.4, observed: metrics.idle_coverage_ratio, required: ">=0.40" },
+    { name: `${label}.candidato_timer_decrementa_1`, pass: metrics.timer_decrement_one_ratio !== null && metrics.timer_decrement_one_ratio >= 0.8, observed: metrics.timer_decrement_one_ratio, required: ">=0.80 em pares adjacentes idle" },
+    { name: `${label}.recargas_0_para_byte`, pass: metrics.clean_reloads_zero_to_byte >= 3, observed: metrics.clean_reloads_zero_to_byte, required: ">=3" },
+    { name: `${label}.transicoes_de_frame`, pass: metrics.adjacent_frame_transitions >= 5, observed: metrics.adjacent_frame_transitions, required: ">=5" },
+    { name: `${label}.frames_avancados_tras_primeira_observacao`, pass: metrics.frames_after_first_idle !== null && metrics.frames_after_first_idle >= 10, observed: metrics.frames_after_first_idle, required: ">=10" },
+    { name: `${label}.modo_dos_gaps`, pass: metrics.gap_mode === intervalByte + 1, observed: metrics.gap_mode, required: `==${intervalByte + 1}` },
+    { name: `${label}.razao_do_modo`, pass: metrics.gap_mode_ratio !== null && metrics.gap_mode_ratio >= 0.8, observed: metrics.gap_mode_ratio, required: ">=0.80" },
+    { name: `${label}.identidade_rom`, pass: identity.romSha256 === expectedSha256 && identity.romSize === 531577, observed: { sha: identity.romSha256, size: identity.romSize }, required: expectedSha256 },
+    { name: `${label}.reancoragem_do_contador`, pass: reanchored.renderedFrames <= 1200, observed: reanchored.renderedFrames, required: "<=1200 apos carga" },
+    { name: `${label}.ack_de_start`, pass: startInput?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0), observed: startInput?.lastJoypadAck, required: "sequencia ACK avancou" },
+    { name: `${label}.negativo_tecla_nao_mapeada`, pass: unmappedInputRejected, observed: negativeAfter?.lastJoypadAck, required: "ACK inalterado por KeyQ" },
+    { name: `${label}.framebuffer_nao_reutilizado`, pass: staleImageRejected, observed: gameplayFrame.framebufferSha256, required: "diversos do frame anterior" },
+  ];
+  for (const entry of checks) report.checks.push(entry);
+  console.log(`[cadence-journey-run] ${JSON.stringify({ label, core: identity.coreLabel, bursts, metrics })}`);
+  const seriesPath = path.join(validationDir, `${report.artifact_prefix}-cadence-journey-series-${label}.json`);
+  await writeFile(seriesPath, JSON.stringify({ label, rom_sha256: expectedSha256, interval_byte: intervalByte, core: { label: identity.coreLabel, path: identity.corePath }, window: CADENCE_JOURNEY_SAMPLE_WINDOW, bursts, checks, metrics, samples }, null, 2));
+  return { identity, metrics, checks, seriesPath, samples };
+}
+
+async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
+  const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const baseSha256 = hash(base);
+  if (base.length !== 531577) fail(`A jornada exige a ROM BYOR pinada de 531577 bytes: ${base.length}`);
+  if (base[CADENCE_JOURNEY_WAIT_ADDR] !== 23) fail(`O byte de intervalo da base nao e $17: ${base[CADENCE_JOURNEY_WAIT_ADDR]}`);
+  if (!CADENCE_JOURNEY_WAIT_FRAMES.every((frame, index) => base[CADENCE_JOURNEY_WAIT_ADDR + 1 + index] === frame)) {
+    fail("A sequencia de frames do script id_Wait na base difere do contrato lido independentemente");
+  }
+  if (base[CADENCE_JOURNEY_WAIT_ADDR + 19] !== 0xfe || base[CADENCE_JOURNEY_WAIT_ADDR + 20] !== 0x02) {
+    fail("O terminador afBack 2 do script id_Wait nao esta na base");
+  }
+  const expectedBytes = Buffer.from(base);
+  expectedBytes[CADENCE_JOURNEY_WAIT_ADDR] = 40;
+  const modifiedSha256 = hash(expectedBytes);
+  await ensureValidationDir();
+  const pilotDir = path.join(validationDir, `${prefix}-cadence-journey`);
+  await mkdir(pilotDir, { recursive: true });
+  const report = {
+    schema: "rex-sonic-cadence-journey/v1",
+    artifact_prefix: prefix,
+    expectations: "docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA5.md",
+    binary_sha256: hash(await readFile(app)),
+    base_rom_sha256: baseSha256,
+    expected_modified_sha256: modifiedSha256,
+    pilot_dir: pilotDir,
+    steps: [],
+    checks: [],
+  };
+  const persistReport = async (extra = {}) => {
+    await writeFile(path.join(pilotDir, "report.json"), JSON.stringify({ ...report, ...extra }, null, 2));
+  };
+  let sessionIdRef = sessionId;
+  try {
+    const panelBefore = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.panel && state.frameCount === 18 && state.thumbnailDataUrls.every((ok) => ok === 1) ? state : false;
+      },
+      60000,
+      "O painel de cadencia nao mostrou os 18 quadros com miniaturas reais",
+      250
+    );
+    report.checks.push({ name: "painel.ordem_e_miniaturas", pass: true, observed: { frame_count: panelBefore.frameCount, thumbnails: panelBefore.thumbnailDataUrls.length } });
+    report.checks.push({ name: "painel.original_23", pass: panelBefore.original.includes("23 ticks"), observed: panelBefore.original });
+    report.checks.push({ name: "painel.current_23", pass: panelBefore.current.includes("23 ticks"), observed: panelBefore.current });
+    report.checks.push({ name: "painel.previsao_24", pass: panelBefore.prediction.includes("byte 23") && panelBefore.prediction.includes("24 frames de tela"), observed: panelBefore.prediction });
+    report.checks.push({ name: "painel.sem_erro", pass: !panelBefore.error.trim(), observed: panelBefore.error });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`Painel de cadencia inicial nao bate com o congelado: ${JSON.stringify(panelBefore)}`);
+    await captureScreenshot(sessionIdRef, `${prefix}-cadence-journey-panel-23.png`);
+
+    await setSonicNumberInputNative(sessionIdRef, "inspection-cadence-value", 40);
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da aplicacao de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-cadence-apply", "aplicar duracao 40 pela interface");
+    const appliedMessage = await waitFor(
+      async () => {
+        const entries = ((await readAutomationState(sessionIdRef))?.consoleEntries ?? []).map((entry) => String(entry?.message ?? ""));
+        return entries.find((message) => message.includes("Cadência id_Wait aplicada") && message.includes("agora 40 ticks")) ?? false;
+      },
+      30000,
+      "A aplicacao de cadencia nao publicou a mensagem de sucesso no console",
+      100
+    );
+    report.checks.push({ name: "editar.mensagem_com_sha_independente", pass: appliedMessage.includes(modifiedSha256), observed: appliedMessage, required: modifiedSha256 });
+    report.checks.push({ name: "editar.mensagem_aponta_0x13BAE", pass: appliedMessage.includes("0x13BAE"), observed: appliedMessage });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`Edicao de cadencia nao bate com a mutacao independente: ${appliedMessage}`);
+    const panelAfter = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.current.includes("40 ticks") && state?.prediction.includes("byte 40") && state?.prediction.includes("41 frames de tela") ? state : false;
+      },
+      30000,
+      "O painel nao passou a mostrar 40 ticks com previsao de 41 frames",
+      100
+    );
+    report.checks.push({ name: "painel.original_permanece_23", pass: panelAfter.original.includes("23 ticks"), observed: panelAfter.original });
+    const status = await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId });
+    const edit = status?.session?.edit;
+    report.checks.push({ name: "pipeline.edit_formato_offset_unico", pass: edit?.format === "sonic1_wait_interval_byte" && edit?.bytes_changed === 1 && Array.isArray(edit?.changed_offsets) && edit.changed_offsets.length === 1 && edit.changed_offsets[0] === CADENCE_JOURNEY_WAIT_ADDR, observed: { format: edit?.format, bytes_changed: edit?.bytes_changed, changed_offsets: edit?.changed_offsets } });
+    if (!edit?.modified_rom_path) fail(`A sessao nao expoe a copia editada: ${JSON.stringify(status?.session?.status)}`);
+    const copyBytes = await readFile(edit.modified_rom_path);
+    report.checks.push({ name: "pipeline.copia_bytes_exatos", pass: copyBytes.equals(expectedBytes) && edit.modified_rom_sha256 === modifiedSha256, observed: { copy_sha: hash(copyBytes), edit_sha: edit.modified_rom_sha256 }, required: modifiedSha256 });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`Etapa de edicao 40 divergiu do congelado: ${JSON.stringify(report.checks.slice(-4))}`);
+    report.steps.push({ step: "cadence_edit_40", console_message: appliedMessage, edit });
+    await captureScreenshot(sessionIdRef, `${prefix}-cadence-journey-panel-40.png`);
+
+    const patchPath = path.join(pilotDir, "cadence-40.bps");
+    const appliedPath = path.join(pilotDir, "cadence-40-applied.bin");
+    const nativePath = async (testId, value) => {
+      const selector = `[data-testid="${testId}"] input`;
+      const element = await findElement(sessionIdRef, selector);
+      await clickElementWithDiagnostics(sessionIdRef, element, selector);
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/clear`, {});
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/value`, { text: value, value: [...value] });
+    };
+    await nativePath("sonic-patch-path", patchPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-export-patch", "exportar BPS da cadencia");
+    await waitFor(() => pathExists(patchPath), 15000, "O BPS de cadencia nao foi exportado pela UI", 100);
+    await nativePath("sonic-applied-path", appliedPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-apply-patch", "aplicar BPS da cadencia a base");
+    await waitFor(() => pathExists(appliedPath), 15000, "A ROM aplicada de cadencia nao foi criada pela UI", 100);
+    const appliedBytes = await readFile(appliedPath);
+    report.checks.push({ name: "bps.aplicado_igual_mutacao_independente", pass: appliedBytes.equals(expectedBytes), observed: { applied_sha: hash(appliedBytes), patch_sha: hash(await readFile(patchPath)) }, required: modifiedSha256 });
+    if (!report.checks.at(-1).pass) throw new Error("A aplicacao BPS divergiu da ROM calculada independentemente");
+    report.steps.push({ step: "bps_export_apply", patch_path: patchPath, applied_path: appliedPath, patch_sha256: hash(await readFile(patchPath)) });
+
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-save", "salvar sessao de cadencia");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),
+      15000,
+      "A sessao de cadencia salva nao apareceu na lista",
+      100
+    );
+    await deleteSession(sessionIdRef);
+    sessionIdRef = await createSession(app);
+    currentE2eRunContext.sessionId = sessionIdRef;
+    await waitForAppWindowReady(sessionIdRef, uiBootstrapTimeoutMs, "O app da jornada de cadencia nao reabriu");
+    await handleProjectWizardVisibly(sessionIdRef, "cadence-journey-restart");
+    await setSessionWindowRect(sessionIdRef, 1920, 1080);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "workspace-rail-debug", "reabrir Debug Workspace na jornada de cadencia");
+    await callAutomationApi(sessionIdRef, "openToolsWorkspace", ["reverse", "debug", true]);
+    await waitForBodyText(sessionIdRef, "Analisar ROM", 20000, "O Reverse Workspace nao voltou na jornada de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "reverse-tab-inspection", "reabrir inspecao na jornada de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-refresh-sessions", "listar sessoes salvas na jornada de cadencia");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),
+      30000,
+      "A sessao salva de cadencia nao reapareceu apos destruir a janela",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `select-saved-session-${savedId}`, "selecionar sessao salva de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-reopen", "reabrir sessao de cadencia");
+    const reopened = await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
+      30000,
+      "A sessao de cadencia nao foi reaberta com estado completo",
+      100
+    );
+    const reopenedPanel = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.panel && state.frameCount === 18 && state.current.includes("40 ticks") && state.prediction.includes("41 frames de tela") && state.original.includes("23 ticks") ? state : false;
+      },
+      60000,
+      "O painel reaberto nao restaurou 40 ticks, original 23 e previsao 41",
+      250
+    );
+    const reopenedProvenience = await waitFor(
+      async () => {
+        const text = await executeScript(sessionIdRef, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? "";`);
+        return text.includes(modifiedSha256) ? text : false;
+      },
+      20000,
+      "A proveniencia da edicao (SHA da copia) nao foi restaurada na reabertura",
+      100
+    );
+    report.checks.push({ name: "reabrir.restaura_40_previsao_41_proveniencia", pass: true, observed: { current: reopenedPanel.current, prediction: reopenedPanel.prediction, session: reopened.session?.id } });
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/stand");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da recomposicao pos-reabertura");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "recompor stand apos reabrir a jornada de cadencia");
+    const reopenedProof = await verifyRenderedSpriteFrame(sessionIdRef, expectedBytes, "sonic1_sonic/stand", "Sonic stand reaberto (jornada de cadencia)");
+    report.steps.push({ step: "restart_reopen", reopened_proof: reopenedProof, provenvenience_text: reopenedProvenience.slice(0, 200) });
+    await captureScreenshot(sessionIdRef, `${prefix}-cadence-journey-reopened.png`);
+    report.checks.push({ name: "pipeline.base_preservada_ate_jogo", pass: (await readFile(romPath)).equals(base), observed: { rom_path: romPath } });
+    if (!report.checks.at(-1).pass) throw new Error("A base BYOR foi alterada antes mesmo do jogo");
+
+    const oldGameFrame = await readCanonicalGameFrame(sessionIdRef);
+    const baseRun = await playAndSampleCadenceRun(sessionIdRef, {
+      buttonTestId: "inspection-sonic-play-base",
+      label: "base",
+      expectedBytes: base,
+      intervalByte: 23,
+      oldGameFrame,
+      report,
+    });
+    const modifiedRun = await playAndSampleCadenceRun(sessionIdRef, {
+      buttonTestId: "inspection-sonic-play-modified",
+      label: "modificada",
+      expectedBytes,
+      intervalByte: 40,
+      oldGameFrame: null,
+      report,
+    });
+    report.checks.push({
+      name: "discriminante.modos_diferentes",
+      pass: baseRun.metrics.gap_mode !== modifiedRun.metrics.gap_mode,
+      observed: { base: baseRun.metrics.gap_mode, modificada: modifiedRun.metrics.gap_mode },
+      required: "modos distintos entre as duas corridas",
+    });
+    if ((await readFile(romPath)).equals(base) === false) fail("A base BYOR mudou durante a jornada");
+    report.checks.push({ name: "jogo.base_preservada_no_final", pass: true, observed: baseSha256 });
+    const allPass = report.checks.every((entry) => entry.pass !== false);
+    report.runtime_effect = {
+      base: { interval_byte: 23, measured_gap_mode: baseRun.metrics.gap_mode, verdict_expected: "H_N+1 => 24" },
+      modificada: { interval_byte: 40, measured_gap_mode: modifiedRun.metrics.gap_mode, verdict_expected: "H_N+1 => 41" },
+    };
+    await persistReport({ allPass, finished_at: new Date().toISOString() });
+    if (!allPass) {
+      const failed = report.checks.filter((entry) => entry.pass === false);
+      fail(`Jornada de cadencia INCONCLUSIVA/FAIL frente ao congelado (sem promover nada): ${JSON.stringify({ failed, report_path: path.join(pilotDir, "report.json") })}`);
+    }
+    console.log(`OK: Sonic cadence journey E2E; allPass=true; report=${path.join(pilotDir, "report.json")}`);
+    return sessionIdRef;
+  } catch (error) {
+    await persistReport({ allPass: false, aborted: true, error: String(error?.message ?? error), finished_at: new Date().toISOString() }).catch(() => null);
+    throw error;
+  }
+}
+
 async function closeVisibleConsoleDrawer(sessionId, label = "console inicial") {
   const visible = await executeScript(
     sessionId,
@@ -14878,8 +15311,10 @@ async function main() {
     }
 
     const sonicMultiframeMode = options.scenario === "sonic-multiframe";
+    const sonicCadenceMode = options.scenario === "sonic-cadence-journey";
     const sonicTilesMode = options.scenario === "inspection-sonic-tiles";
     if (sonicMultiframeMode) options.scenario = "inspection-sonic";
+    if (sonicCadenceMode) options.scenario = "inspection-sonic";
     if (sonicTilesMode) options.scenario = "inspection-sonic";
     if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
       let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
@@ -15040,6 +15475,11 @@ async function main() {
 
         if (sonicMultiframeMode) {
           sessionId = await runSonicMultiframeScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
+          currentE2eRunContext.sessionId = sessionId;
+          return;
+        }
+        if (sonicCadenceMode) {
+          sessionId = await runSonicCadenceJourneyScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
           currentE2eRunContext.sessionId = sessionId;
           return;
         }
