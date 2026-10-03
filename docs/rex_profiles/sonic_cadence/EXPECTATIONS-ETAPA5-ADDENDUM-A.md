@@ -88,3 +88,35 @@ estruturalmente incapaz de medir.
   UI; nenhuma promessa de maturidade. Veredito continua allPass somente com
   todos os portões acima na ordem; qualquer desvio numérico ⇒ FAIL/INCONCLUSIVE
   registrado com a série bruta persistida.
+
+## RETIFICAÇÃO A do Addendum (congelada antes da correção — corrida 3, 2026-10-03)
+
+Corrida 3 (HEAD 59fba41, binário 974b31919c89eec19bf177b86fe558699e3e1225dfec2af80b670b8dfbf49914)
+falhou em UM único portão, e a falha é de semântica de borda deste Addendum,
+não do produto nem dos números:
+
+- 26/26 portões anteriores PASSARAM na ordem: painel (5), edição 40 com SHA/offset (3),
+  cópia byte a byte (2), BPS aplicado (1), reabrir com proveniência (1), base preservada
+  até o jogo (1), portões ao vivo das duas corridas (12, incluindo o novo
+  frames-avançados-após-ACK medido ao vivo), `observacao.pump_pausado` (1).
+- A observação base abortou com `rows=1402, first=1500, last=2901`. Causa: a
+  redação deste Addendum pediu 1401 linhas "1500..2900", mas o comando que ele
+  mesmo especificou grava com `record_from` INCLUSIVO até o último frame
+  executado (2901). As duas frases do próprio Addendum são inconsistentes
+  entre si; o driver implementou a segunda.
+- Evidência hash-pinada em `~/rds-scratch/cadence-journey-20261003-03/evidence-run3/`:
+  `report.json` = ba2e3ebb172daf549c8b2c7f3f68f6e69edcb6cb5c489e428238399b01a12269;
+  `desktop-e2e-failure-sonic-cadence-journey.json` = 939b6eebff5073a1f0cd8adb47d312c892b8c223a833805aa08cc0a9b0e3ef91;
+  `desktop-run3.log` = 0134b6145a3bc1dfb11d7014260e3769c9ab3ac2fe0073f2d773f00555058441.
+
+Contrato substituto (sem tocar em nenhum número):
+
+1. A rota amostrada permanece EXATAMENTE a congelada (load → 900 → START 2
+   frames → 1999; total 2901). O retorno bruto DEVE ser a sequência contínua
+   1500..2901 com 1402 linhas — isso passa a ser prova adicional de orçamento
+   integral e de ausência de intercalação.
+2. A janela congelada de ANÁLISE continua 1500..2900 (1401 amostras). A linha
+   do frame 2901, fora da janela, é descartada antes de qualquer métrica, e o
+   descarte fica registrado na série persistida (campo `dropped_outside_window`).
+3. Gates de métricas, tabela 23→24 / 40→41, recargas, cobertura,
+   discriminante e ordem da jornada: inalterados.
