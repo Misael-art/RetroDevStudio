@@ -1,0 +1,16 @@
+caso	plain_len	oraculo_stream_len	produto_stream_len	delta	produto_menor
+abcdef	6	12	11	-1	sim
+ab_repeat	800	20	19	-1	sim
+empty	0	6	5	-1	sim
+far_window_40k	40048	1086	1085	-1	sim
+near_window_2k	1680	76	76	0	nao
+noisy_runs_16k	16384	1526	2084	558	nao
+odd3	5	10	10	0	nao
+pseudo_random_8k	8192	394	394	0	nao
+single	1	6	6	0	nao
+text_rep	6000	106	105	-1	sim
+tile_like	8192	164	163	-1	sim
+zeros_64k	65536	838	838	0	nao
+lit14_mod16	14	-	21	-	-
+lit15_straddle	15	-	22	-	-
+sep_pair	16	-	15	-	-

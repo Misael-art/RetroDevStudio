@@ -48,6 +48,32 @@ fn build_main_c_with_collision(
     project_name: &str,
     collision_map_data: Option<&[u8]>,
 ) -> String {
+    // Tile ground/walls need rds_solid_at, which exists only with collision map data.
+    let tile_helpers = collision_map_data.is_some_and(|data| !data.is_empty());
+    let bodies: std::collections::HashMap<String, (u32, u32)> = if tile_helpers {
+        collect_physics_applications(ast)
+            .into_iter()
+            .filter(|physics| physics.gravity)
+            .filter_map(|physics| {
+                physics
+                    .ground
+                    .map(|g| (physics.var_name, (g.body_width, g.body_height)))
+            })
+            .collect()
+    } else {
+        Default::default()
+    };
+    WALL_BODIES.with(|cell| *cell.borrow_mut() = bodies);
+    let main_c = build_main_c_inner(ast, project_name, collision_map_data);
+    WALL_BODIES.with(|cell| cell.borrow_mut().clear());
+    main_c
+}
+
+fn build_main_c_inner(
+    ast: &AstOutput,
+    project_name: &str,
+    collision_map_data: Option<&[u8]>,
+) -> String {
     let mut out = String::new();
     let collision_checks = collect_collision_checks(ast);
     let physics_applications = collect_physics_applications(ast);
@@ -56,13 +82,39 @@ fn build_main_c_with_collision(
     let raster_lines = collect_raster_lines(ast);
     let scroll_tilemap_layers = collect_scroll_tilemap_layers(ast);
     let logic_vars = collect_logic_var_names(ast);
+    let has_rom_addq_word = ast
+        .logic_scripts
+        .iter()
+        .any(|script| ops_contain_rom_addq_word(&script.ops));
+    let has_rom_branch_compare_word = ast
+        .logic_scripts
+        .iter()
+        .any(|script| ops_contain_rom_branch_compare_word(&script.ops));
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let input_commands = collect_input_commands(ast);
     let unsupported_semantics = crate::compiler::ast_generator::collect_unsupported_semantics(ast);
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
+    let logic_velocity_targets = collect_logic_velocity_targets(ast);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
     let runtime_probe_enabled = runtime_evidence_probe_enabled();
+    let managed_sprites = ast
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            if let AstNode::SpawnSprite { resource_name, .. } = node {
+                ast.sprite_assets
+                    .iter()
+                    .find(|a| a.resource_name == *resource_name)
+                    .map(|a| {
+                        u64::from(a.frame_width.div_ceil(8)) * u64::from(a.frame_height.div_ceil(8))
+                    })
+            } else {
+                None
+            }
+        })
+        .sum::<u64>()
+        > 420;
     let runtime_probe_scene_id = stable_runtime_probe_id(project_name);
     let runtime_probe_framebuffer_useful = (!ast.sprite_assets.is_empty()
         || !tilemap_assets.is_empty()
@@ -87,9 +139,29 @@ fn build_main_c_with_collision(
     }
     out.push('\n');
     render_sound_id_macros(&mut out, ast);
+    if managed_sprites {
+        let count = ast
+            .nodes
+            .iter()
+            .filter(|n| matches!(n, AstNode::SpawnSprite { .. }))
+            .count();
+        render_sprite_residency_runtime(&mut out, count);
+    }
 
-    for asset in &ast.sprite_assets {
-        out.push_str(&format!("static Sprite* spr_{};\n", asset.resource_name));
+    let mut sprite_handles: Vec<String> = ast
+        .sprite_assets
+        .iter()
+        .map(|asset| format!("spr_{}", asset.resource_name))
+        .collect();
+    for node in &ast.nodes {
+        if let AstNode::SpawnSprite { var_name, .. } = node {
+            if !sprite_handles.contains(var_name) {
+                sprite_handles.push(var_name.clone());
+            }
+        }
+    }
+    for handle in &sprite_handles {
+        out.push_str(&format!("static Sprite* {handle};\n"));
     }
     if !ast.sprite_assets.is_empty() {
         out.push('\n');
@@ -97,6 +169,28 @@ fn build_main_c_with_collision(
     for physics in &physics_applications {
         out.push_str(&format!("static s32 {}_vel_x = 0;\n", physics.var_name));
         out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
+        // 1 quando o corpo pousou (chao do mapa, fundo do mapa ou piso) neste quadro.
+        out.push_str(&format!("static u8 {}_on_ground = 0;\n", physics.var_name));
+    }
+    for var_name in collect_grounded_vars(ast) {
+        if physics_applications
+            .iter()
+            .any(|physics| physics.var_name == var_name)
+        {
+            continue;
+        }
+        // Sem fisica nunca ha apoio: a condicao compila e fica sempre falsa.
+        out.push_str(&format!("static u8 {}_on_ground = 0;\n", var_name));
+    }
+    for runtime_var in logic_velocity_targets {
+        if physics_applications
+            .iter()
+            .any(|physics| physics.var_name == runtime_var)
+        {
+            continue;
+        }
+        out.push_str(&format!("static s32 {}_vel_x = 0;\n", runtime_var));
+        out.push_str(&format!("static s32 {}_vel_y = 0;\n", runtime_var));
     }
     if !physics_applications.is_empty() {
         out.push('\n');
@@ -110,10 +204,56 @@ fn build_main_c_with_collision(
         out.push('\n');
     }
     for var_name in &logic_vars {
-        out.push_str(&format!("static s32 logic_var_{} = 0;\n", var_name));
+        let initial_value = if has_rom_addq_word && var_name == "rom_d0" {
+            "0x12340058"
+        } else if has_rom_branch_compare_word && var_name == "branch_input" {
+            "3"
+        } else {
+            "0"
+        };
+        out.push_str(&format!(
+            // volatile: o estado logico fica sempre na RAM (observavel e depuravel); sem isso
+            // o GCC pode manter variaveis so de `main` em registradores e eliminar o simbolo.
+            "static volatile s32 logic_var_{} = {};\n",
+            var_name, initial_value
+        ));
     }
     if !logic_vars.is_empty() {
         out.push('\n');
+    }
+    // Sprite positions live at file scope so the runtime state is addressable by ELF symbol
+    // (observable in System RAM) instead of being register/stack-only locals of main().
+    let sprite_positions = collect_sprite_position_vars(ast);
+    for (var_name, x, y) in &sprite_positions {
+        out.push_str(&format!("static s16 {var_name}_x = {x};\n"));
+        out.push_str(&format!("static s16 {var_name}_y = {y};\n"));
+    }
+    if !sprite_positions.is_empty() {
+        out.push('\n');
+    }
+    // Resolved after the body is rendered: only declared when edge input / music guards are used.
+    out.push_str(RUNTIME_STATE_DECL_MARKER);
+    // Perfil MUGEN (Experimental): tabelas e tick de animacao gerados a partir do modelo.
+    out.push_str(&super::mugen_runtime::render_decls(ast));
+    if has_rom_addq_word {
+        out.push_str(
+            "static volatile u32 *const rds_logic_recovery_oracle_value = (volatile u32 *)0xE0FFFF00;\n",
+        );
+        out.push_str(
+            "static volatile u16 *const rds_logic_recovery_oracle_flags = (volatile u16 *)0xE0FFFF04;\n\n",
+        );
+    }
+    if has_rom_branch_compare_word {
+        out.push_str(
+            "static volatile u16 *const rds_branch_recovery_result = (volatile u16 *)0xE0FFFF00;\n",
+        );
+        out.push_str(
+            "static volatile u16 *const rds_branch_recovery_input = (volatile u16 *)0xE0FFFF02;\n",
+        );
+        out.push_str(
+            "static const u16 rds_branch_recovery_inputs[6] = {3, 4, 5, 0, 0xFFFF, 0x1234};\n",
+        );
+        out.push_str("static u16 rds_branch_recovery_index = 0;\n\n");
     }
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
         out.push_str("static s16 retro_hscroll_table[224];\n");
@@ -166,6 +306,22 @@ fn build_main_c_with_collision(
             let entries: Vec<String> = data.iter().map(|b| b.to_string()).collect();
             out.push_str(&entries.join(", "));
             out.push_str("\n};\n\n");
+            if let Some(ground) = collect_physics_applications(ast)
+                .into_iter()
+                .find_map(|physics| physics.ground)
+            {
+                out.push_str(&format!(
+                    "static u8 rds_solid_at(s16 x, s16 y)\n{{\n    if (x < 0 || y < 0) return 0;\n    u16 tx = (u16)x / {tw};\n    u16 ty = (u16)y / {th};\n    if (tx >= {mw} || ty >= {mh}) return 0;\n    return rds_collision_map[ty * {mw} + tx] != 0;\n}}\n\n\
+// Side walls: moving by dx, the body's leading edge (right if dx>0, left if dx<0) must not\n\
+// enter a solid tile, sampled just below its top and just above its feet (the floor under\n\
+// the feet and the trailing edge never block).\n\
+static u8 rds_hits_wall(s16 x, s16 y, u16 w, u16 h, s16 dx)\n{{\n    s16 edge = dx > 0 ? x + (s16)w - 1 : x;\n    return rds_solid_at(edge, y + 1) || rds_solid_at(edge, y + (s16)h - 2);\n}}\n\n",
+                    tw = ground.tile_width,
+                    th = ground.tile_height,
+                    mw = ground.map_width,
+                    mh = ground.map_height,
+                ));
+            }
         }
     }
 
@@ -173,22 +329,6 @@ fn build_main_c_with_collision(
     if runtime_probe_enabled {
         out.push_str("    rds_probe_last_tick = getTick();\n");
         out.push_str("    rds_probe_emulation_status = 1;\n");
-    }
-    let sprite_positions = collect_sprite_position_vars(ast);
-    for (var_name, x, y) in &sprite_positions {
-        out.push_str(&format!(
-            "    s16 {var_name}_x = {x};\n",
-            var_name = var_name,
-            x = x
-        ));
-        out.push_str(&format!(
-            "    s16 {var_name}_y = {y};\n",
-            var_name = var_name,
-            y = y
-        ));
-    }
-    if !sprite_positions.is_empty() {
-        out.push('\n');
     }
     if let Some((plane_width, plane_height)) = plane_size_for_tilemaps(&tilemap_assets) {
         out.push_str(&format!(
@@ -205,7 +345,23 @@ fn build_main_c_with_collision(
     for node in &ast.nodes {
         match node {
             AstNode::SpriteSystemInit => {
-                out.push_str("    SPR_init();\n");
+                if managed_sprites {
+                    let background_tiles = tilemap_assets
+                        .iter()
+                        .map(|a| format!("{}.tileset->numTile", a.resource_name))
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    let background_tiles = if background_tiles.is_empty() {
+                        "0"
+                    } else {
+                        &background_tiles
+                    };
+                    out.push_str(&format!(
+                        "    rds_init_sprite_residency({background_tiles});\n"
+                    ));
+                } else {
+                    out.push_str("    SPR_init();\n");
+                }
             }
             AstNode::LoadTilemap {
                 resource_name,
@@ -229,6 +385,15 @@ fn build_main_c_with_collision(
                     "    // Load spritesheet: {} ({}x{} px, palette {})\n",
                     resource_name, frame_width, frame_height, palette_slot
                 ));
+                let palette_conflicts_with_tilemap =
+                    *palette_slot == 0 && !tilemap_assets.is_empty();
+                if !palette_conflicts_with_tilemap {
+                    out.push_str(&format!(
+                        "    PAL_setPalette({}, {}.palette->data, CPU);\n",
+                        palette_const(*palette_slot),
+                        resource_name
+                    ));
+                }
             }
             AstNode::SpawnSprite {
                 var_name,
@@ -251,10 +416,15 @@ fn build_main_c_with_collision(
                     x = x,
                     y = y
                 ));
-                out.push_str(&format!(
-                    "    {} = SPR_addSprite(&{}, {}_x, {}_y, TILE_ATTR({}, 1, FALSE, {}));\n",
-                    var_name, resource_name, var_name, var_name, palette, priority
-                ));
+                if managed_sprites {
+                    out.push_str(&format!("    rds_register_sprite(&{var_name}, &{resource_name}, &{var_name}_x, &{var_name}_y, TILE_ATTR({palette}, {priority}, FALSE, FALSE));\n"));
+                } else {
+                    out.push_str(&format!(
+                        "    {} = SPR_addSprite(&{}, {}_x, {}_y, TILE_ATTR({}, {}, FALSE, FALSE));\n",
+                        var_name, resource_name, var_name, var_name, palette, priority
+                    ));
+                }
+                out.push_str(&format!("    SPR_setVisibility({}, VISIBLE);\n", var_name));
             }
             AstNode::DrawTilemap {
                 resource_name,
@@ -273,6 +443,46 @@ fn build_main_c_with_collision(
                     (*x).max(0) / 8,
                     (*y).max(0) / 8
                 ));
+                if let Some(asset) = tilemap_assets
+                    .iter()
+                    .find(|asset| asset.resource_name == *resource_name && !asset.cells.is_empty())
+                {
+                    // Painted cells override the base picture. Tile N>0 is tile N-1 of the
+                    // tileset image in row-major order (TILESET ... NONE NONE, no dedup), so
+                    // the ROM shows exactly what the editor palette shows; only the tiles used
+                    // are uploaded after the image tiles. TILEMAP_CELL_EMPTY is a blank tile.
+                    let used = tilemap_overlay_tiles(asset);
+                    let slot_base = format!("{} + {}.tileset->numTile", base_tile, resource_name);
+                    for (slot, value) in used.iter().enumerate() {
+                        out.push_str(&format!(
+                            "    if ({index} < {res}_cells.numTile) VDP_loadTileData({res}_cells.tiles + {offset}, {slot_base} + {slot}, 1, DMA);\n",
+                            index = value - 1,
+                            res = resource_name,
+                            offset = (value - 1) * 8,
+                        ));
+                    }
+                    let origin_x = (*x).max(0) / 8;
+                    let origin_y = (*y).max(0) / 8;
+                    let total =
+                        (asset.map_width as usize).saturating_mul(asset.map_height as usize);
+                    for (index, value) in asset.cells.iter().copied().enumerate().take(total) {
+                        if value == TILEMAP_CELL_BASE {
+                            continue;
+                        }
+                        let cell_x = origin_x as usize + index % asset.map_width as usize;
+                        let cell_y = origin_y as usize + index / asset.map_width as usize;
+                        let tile = if value == TILEMAP_CELL_EMPTY {
+                            "0".to_string()
+                        } else {
+                            let slot = used.iter().position(|used| *used == value).unwrap_or(0);
+                            format!("{slot_base} + {slot}")
+                        };
+                        out.push_str(&format!(
+                            "    VDP_setTileMapXY({}, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {}), {}, {});\n",
+                            plane, tile, cell_x, cell_y
+                        ));
+                    }
+                }
                 if *scroll_x != 0 {
                     out.push_str(&format!(
                         "    VDP_setHorizontalScroll({}, {});\n",
@@ -367,6 +577,8 @@ fn build_main_c_with_collision(
                 max_velocity_y,
                 friction,
                 bounce,
+                floor_y,
+                ground,
             } => render_apply_physics(
                 &mut out,
                 &PhysicsApplication {
@@ -377,6 +589,8 @@ fn build_main_c_with_collision(
                     max_velocity_y: *max_velocity_y,
                     friction: *friction,
                     bounce: *bounce,
+                    floor_y: *floor_y,
+                    ground: ground.clone(),
                 },
             ),
             AstNode::SetAnimation {
@@ -413,6 +627,13 @@ fn build_main_c_with_collision(
                 }
             }
             AstNode::GameLoopBegin => {
+                if managed_sprites {
+                    out.push_str("    rds_sync_sprite_residency();\n");
+                }
+                if has_rom_addq_word {
+                    out.push_str("    *rds_logic_recovery_oracle_value = (u32)logic_var_rom_d0;\n");
+                    out.push_str("    *rds_logic_recovery_oracle_flags = 0;\n");
+                }
                 out.push_str("    {\n");
                 out.push_str("        u16 rds_boot_frame;\n");
                 out.push_str(
@@ -422,6 +643,16 @@ fn build_main_c_with_collision(
                 out.push_str("            SYS_doVBlankProcess();\n");
                 out.push_str("        }\n");
                 out.push_str("    }\n");
+                if has_rom_addq_word {
+                    out.push_str("    {\n");
+                    out.push_str("        u16 rds_logic_recovery_prelude_frame;\n");
+                    out.push_str(
+                        "        for (rds_logic_recovery_prelude_frame = 0; rds_logic_recovery_prelude_frame < 83; rds_logic_recovery_prelude_frame++) {\n",
+                    );
+                    out.push_str("            SYS_doVBlankProcess();\n");
+                    out.push_str("        }\n");
+                    out.push_str("    }\n");
+                }
                 out.push_str("#ifdef RDS_CORPUS_VISIBLE_SMOKE\n");
                 out.push_str("    {\n");
                 out.push_str("        u16 rds_smoke_palette = 0x0EEE;\n");
@@ -449,10 +680,30 @@ fn build_main_c_with_collision(
                     ));
                 }
                 render_logic_scripts(&mut out, &ast.logic_scripts, 8);
+                if has_rom_branch_compare_word {
+                    out.push_str(
+                        "        *rds_branch_recovery_input = (u16)logic_var_branch_input;\n",
+                    );
+                    out.push_str("        rds_branch_recovery_index++;\n");
+                    out.push_str("        logic_var_branch_input = rds_branch_recovery_inputs[rds_branch_recovery_index % 6];\n");
+                }
+                if has_rom_addq_word {
+                    out.push_str(
+                        "        *rds_logic_recovery_oracle_value = (u32)logic_var_rom_d0;\n",
+                    );
+                    out.push_str(
+                        "        *rds_logic_recovery_oracle_flags = (logic_var_rom_d0_n ? 1 : 0) | (logic_var_rom_d0_z ? 2 : 0) | (logic_var_rom_d0_v ? 4 : 0) | (logic_var_rom_d0_c ? 8 : 0) | (logic_var_rom_d0_x ? 16 : 0);\n",
+                    );
+                }
                 render_retrofx_frame(&mut out, &parallax_layers, &raster_lines, 8);
+                out.push_str(&super::mugen_runtime::render_ticks(ast, 8));
+                if managed_sprites {
+                    out.push_str("        rds_sync_sprite_residency();\n");
+                }
                 out.push_str("        SPR_update();\n");
             }
             AstNode::VSync => {
+                out.push_str(JOY_PREV_UPDATE_MARKER);
                 out.push_str("        SYS_doVBlankProcess();\n");
             }
             AstNode::GameLoopEnd => {
@@ -462,7 +713,49 @@ fn build_main_c_with_collision(
     }
 
     out.push_str("\n    return 0;\n}\n");
-    out
+    resolve_runtime_state_markers(out)
+}
+
+thread_local! {
+    /// Sprite vars whose moves are blocked by solid collision-map tiles (body w/h), set
+    /// for the duration of one emission.
+    static WALL_BODIES: std::cell::RefCell<std::collections::HashMap<String, (u32, u32)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+const RUNTIME_STATE_DECL_MARKER: &str = "/*RDS_RUNTIME_STATE_DECL*/\n";
+const JOY_PREV_UPDATE_MARKER: &str = "/*RDS_JOY_PREV_UPDATE*/\n";
+const SGDK_JOY_PORTS: [&str; 4] = ["JOY_1", "JOY_2", "JOY_3", "JOY_4"];
+
+fn pad_suffix(port: &str) -> &str {
+    port.strip_prefix("JOY_").unwrap_or("1")
+}
+
+/// Declares `rds_joy_prev_N` (edge detection for `input_pressed`) and `rds_music_current`
+/// (idempotent `play_music`) only when the rendered body references them.
+fn resolve_runtime_state_markers(out: String) -> String {
+    let used_ports: Vec<&str> = SGDK_JOY_PORTS
+        .iter()
+        .copied()
+        .filter(|port| out.contains(&format!("!(rds_joy_prev_{} &", pad_suffix(port))))
+        .collect();
+    let mut decls = String::new();
+    let mut updates = String::new();
+    for port in &used_ports {
+        let suffix = pad_suffix(port);
+        decls.push_str(&format!("static u16 rds_joy_prev_{suffix} = 0;\n"));
+        updates.push_str(&format!(
+            "        rds_joy_prev_{suffix} = JOY_readJoypad({port});\n"
+        ));
+    }
+    if out.contains("rds_music_current != ") {
+        decls.push_str("static const u8* rds_music_current = NULL;\n");
+    }
+    if !decls.is_empty() {
+        decls.push('\n');
+    }
+    out.replacen(RUNTIME_STATE_DECL_MARKER, &decls, 1)
+        .replace(JOY_PREV_UPDATE_MARKER, &updates)
 }
 
 fn build_resources_res(ast: &AstOutput) -> String {
@@ -475,6 +768,14 @@ fn build_resources_res(ast: &AstOutput) -> String {
             asset.resource_name,
             tilemap_resource_path(&asset.asset_path),
         ));
+        if !tilemap_overlay_tiles(&asset).is_empty() {
+            // Unoptimized, image-ordered tiles for painted cells (see DrawTilemap).
+            out.push_str(&format!(
+                "TILESET {}_cells \"{}\" NONE NONE\n",
+                asset.resource_name,
+                tilemap_resource_path(&asset.asset_path),
+            ));
+        }
     }
 
     for asset in &ast.sprite_assets {
@@ -503,6 +804,106 @@ fn build_resources_res(ast: &AstOutput) -> String {
     }
 
     out
+}
+
+fn render_sprite_residency_runtime(out: &mut String, count: usize) {
+    out.push_str(&format!("#define RDS_SPRITE_SLOTS {count}\n"));
+    out.push_str(r#"
+/* Keep logical state offscreen; only viewport residents consume sprite VRAM.
+ * Macros below adapt the generated operations, not SGDK library internals. */
+typedef struct {
+    Sprite **instance;
+    const SpriteDefinition *definition;
+    s16 *x, *y;
+    u16 attributes;
+    s16 animation, visibility;
+    bool looping;
+} RdsSpriteSlot;
+static RdsSpriteSlot rds_sprite_slots[RDS_SPRITE_SLOTS];
+static u16 rds_sprite_slot_count;
+static volatile u16 rds_residency_error;
+static volatile u16 rds_residency_ticks;
+static bool rds_residency_ready;
+
+static RdsSpriteSlot *rds_sprite_slot(Sprite **instance) {
+    u16 i;
+    for (i = 0; i < rds_sprite_slot_count; i++)
+        if (rds_sprite_slots[i].instance == instance) return &rds_sprite_slots[i];
+    return NULL;
+}
+static void rds_init_sprite_residency(u32 backgroundTiles) {
+    u32 available = TILE_FONT_INDEX - TILE_USER_INDEX;
+    if (backgroundTiles >= available) { rds_residency_error = 1; return; }
+    SPR_initEx((u16)(available - backgroundTiles));
+    rds_residency_ready = TRUE;
+}
+static void rds_register_sprite(Sprite **instance, const SpriteDefinition *definition,
+                               s16 *x, s16 *y, u16 attributes) {
+    RdsSpriteSlot *slot = &rds_sprite_slots[rds_sprite_slot_count++];
+    slot->instance = instance; slot->definition = definition;
+    slot->x = x; slot->y = y; slot->attributes = attributes;
+    slot->animation = 0; slot->visibility = VISIBLE; slot->looping = TRUE;
+    *instance = NULL;
+}
+static bool rds_sprite_in_view(const RdsSpriteSlot *slot) {
+    return slot->visibility != HIDDEN && *slot->x < VDP_getScreenWidth()
+        && *slot->y < VDP_getScreenHeight()
+        && (s32)*slot->x + slot->definition->w > 0
+        && (s32)*slot->y + slot->definition->h > 0;
+}
+static void rds_sync_sprite_residency(void) {
+    u16 i;
+    if (!rds_residency_ready) return;
+    /* Release first, so entrants can use VRAM freed by departures. */
+    for (i = 0; i < rds_sprite_slot_count; i++) {
+        RdsSpriteSlot *slot = &rds_sprite_slots[i];
+        if (*slot->instance && !rds_sprite_in_view(slot)) {
+            SPR_releaseSprite(*slot->instance); *slot->instance = NULL;
+        }
+    }
+    rds_residency_ticks++;
+    for (i = 0; i < rds_sprite_slot_count; i++) {
+        RdsSpriteSlot *slot = &rds_sprite_slots[i];
+        if (!*slot->instance && rds_sprite_in_view(slot)) {
+            Sprite *sprite = SPR_addSprite(slot->definition, *slot->x, *slot->y, slot->attributes);
+            *slot->instance = sprite;
+            if (!sprite) { rds_residency_error = 1; continue; }
+            SPR_setAnim(sprite, slot->animation);
+            SPR_setAnimationLoop(sprite, slot->looping);
+            SPR_setVisibility(sprite, slot->visibility);
+        }
+    }
+    if (rds_residency_error) VDP_drawText("Sprite capacity or animation error", 1, 1);
+}
+static void rds_sprite_position(Sprite **instance, s16 x, s16 y) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) { *slot->x = x; *slot->y = y; }
+    if (*instance) SPR_setPosition(*instance, x, y);
+}
+static void rds_sprite_animation(Sprite **instance, s16 animation) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) {
+        if (animation < 0 || animation >= slot->definition->numAnimation) { rds_residency_error = 2; return; }
+        slot->animation = animation;
+    }
+    if (*instance) SPR_setAnim(*instance, animation);
+}
+static void rds_sprite_loop(Sprite **instance, bool looping) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) slot->looping = looping;
+    if (*instance) SPR_setAnimationLoop(*instance, looping);
+}
+static void rds_sprite_visibility(Sprite **instance, s16 visibility) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) slot->visibility = visibility;
+    if (*instance) SPR_setVisibility(*instance, visibility);
+}
+#define SPR_setPosition(sprite, x, y) rds_sprite_position(&(sprite), (x), (y))
+#define SPR_setAnim(sprite, animation) rds_sprite_animation(&(sprite), (animation))
+#define SPR_setAnimationLoop(sprite, looping) rds_sprite_loop(&(sprite), (looping))
+#define SPR_setVisibility(sprite, visibility) rds_sprite_visibility(&(sprite), (visibility))
+
+"#);
 }
 
 fn runtime_evidence_probe_enabled() -> bool {
@@ -595,6 +996,7 @@ fn render_aabb_helper() -> &'static str {
 fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
     let next_x_var = format!("{}_next_x", physics.var_name);
     let next_y_var = format!("{}_next_y", physics.var_name);
+    out.push_str(&format!("        {}_on_ground = 0;\n", physics.var_name));
 
     if physics.gravity {
         out.push_str(&format!(
@@ -647,6 +1049,50 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
         next_y_var = next_y_var,
         var_name = physics.var_name
     ));
+
+    let tile_helpers = WALL_BODIES.with(|bodies| bodies.borrow().contains_key(&physics.var_name));
+    if let Some(ground) = physics
+        .ground
+        .as_ref()
+        .filter(|_| physics.gravity && tile_helpers)
+    {
+        // Land on the top of the solid collision cell under the body's centre, only while
+        // falling (one-way). Erased cells are pits; the map bottom is the last safety floor.
+        let var_name = &physics.var_name;
+        let body_w = ground.body_width;
+        let body_h = ground.body_height;
+        let tile_h = ground.tile_height;
+        let bottom = (ground.map_height * tile_h) as i64 - i64::from(body_h);
+        out.push_str(&format!(
+            "        if ({var_name}_vel_y >= 0) {{ s16 rds_foot = {next_y_var} + {body_h} - 1; if (rds_solid_at({next_x_var} + {half_w}, rds_foot)) {{ {next_y_var} = (rds_foot / {tile_h}) * {tile_h} - {body_h}; {var_name}_vel_y = 0; {var_name}_on_ground = 1; }} }}\n",
+            half_w = body_w / 2,
+        ));
+        out.push_str(&format!(
+            "        if ({next_y_var} > {bottom}) {{ {next_y_var} = {bottom}; {var_name}_vel_y = 0; {var_name}_on_ground = 1; }}\n"
+        ));
+        // Apoio real: parado sobre um solido (ou no fundo do mapa) conta como apoiado em todo
+        // quadro, nao so nos quadros em que a gravidade acumulada provoca o encaixe.
+        out.push_str(&format!(
+            "        if ({var_name}_vel_y >= 0 && ({next_y_var} >= {bottom} || rds_solid_at({next_x_var} + {half_w}, {next_y_var} + {body_h}))) {var_name}_on_ground = 1;\n",
+            half_w = body_w / 2,
+        ));
+        out.push_str(&format!(
+            "        if ({next_x_var} != {var_name}_x && rds_hits_wall({next_x_var}, {var_name}_y, {body_w}, {body_h}, {next_x_var} - {var_name}_x)) {{ {next_x_var} = {var_name}_x; {var_name}_vel_x = 0; }}\n"
+        ));
+    } else if let Some(floor_y) = physics.floor_y {
+        out.push_str(&format!(
+            "        if ({next_y_var} > {floor_y}) {{ {next_y_var} = {floor_y}; {var_name}_vel_y = 0; {var_name}_on_ground = 1; }}\n",
+            next_y_var = next_y_var,
+            floor_y = floor_y,
+            var_name = physics.var_name
+        ));
+        out.push_str(&format!(
+            "        if ({var_name}_vel_y >= 0 && {next_y_var} >= {floor_y}) {var_name}_on_ground = 1;\n",
+            next_y_var = next_y_var,
+            floor_y = floor_y,
+            var_name = physics.var_name
+        ));
+    }
 
     if physics.bounce > 0 {
         out.push_str(&format!(
@@ -1027,13 +1473,21 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 ));
             }
             LogicOp::MoveSprite { target_var, dx, dy } => {
-                out.push_str(&format!(
-                    "{indent}{target}_x += {dx}; {target}_y += {dy};\n",
-                    indent = indent_str,
-                    target = target_var,
-                    dx = dx,
-                    dy = dy
-                ));
+                let wall_body = WALL_BODIES.with(|bodies| bodies.borrow().get(target_var).copied());
+                match wall_body {
+                    Some((width, height)) if *dx != 0 => out.push_str(&format!(
+                        "{indent}if (!rds_hits_wall({target}_x + {dx}, {target}_y, {width}, {height}, {dx})) {{ {target}_x += {dx}; }}\n{indent}{target}_y += {dy};\n",
+                        indent = indent_str,
+                        target = target_var,
+                    )),
+                    _ => out.push_str(&format!(
+                        "{indent}{target}_x += {dx}; {target}_y += {dy};\n",
+                        indent = indent_str,
+                        target = target_var,
+                        dx = dx,
+                        dy = dy
+                    )),
+                }
                 out.push_str(&format!(
                     "{indent}SPR_setPosition({target}, {target}_x, {target}_y);\n",
                     indent = indent_str,
@@ -1061,11 +1515,39 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     target = target_var
                 ));
             }
+            LogicOp::MugenProgramStep { target_var, .. } => {
+                out.push_str(&format!(
+                    "{indent}rds_mc_{target_var}_step();\n",
+                    indent = indent_str
+                ));
+            }
+            LogicOp::MugenSetVelocityX { target_var, vx_q8 } => {
+                out.push_str(&format!(
+                    "{indent}rds_mugen_{target_var}_vx = {vx_q8};\n",
+                    indent = indent_str
+                ));
+            }
             LogicOp::SetVelocity {
                 target_name,
                 vx,
                 vy,
+                runtime_var,
             } => {
+                let runtime_var = runtime_var
+                    .clone()
+                    .unwrap_or_else(|| sprite_runtime_var(target_name));
+                out.push_str(&format!(
+                    "{indent}{runtime_var}_vel_x = {vx};\n",
+                    indent = indent_str,
+                    runtime_var = runtime_var,
+                    vx = render_math_expr(vx)
+                ));
+                out.push_str(&format!(
+                    "{indent}{runtime_var}_vel_y = {vy};\n",
+                    indent = indent_str,
+                    runtime_var = runtime_var,
+                    vy = render_math_expr(vy)
+                ));
                 out.push_str(&format!(
                     "{indent}logic_var_{target}_vx = {vx};\n",
                     indent = indent_str,
@@ -1186,7 +1668,9 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
             }
             LogicOp::PlaySound { sfx } => {
                 out.push_str(&format!(
-                    "{indent}XGM_startPlayPCM(SFX_{sfx}, 1, SOUND_PCM_CH_AUTO);\n",
+                    // XGM (v1) only accepts SOUND_PCM_CH1..CH4; CH_AUTO is an XGM2/DPCM2 value and
+                    // makes the call a silent no-op. CH1 is left to the music.
+                    "{indent}XGM_startPlayPCM(SFX_{sfx}, 1, SOUND_PCM_CH2);\n",
                     indent = indent_str,
                     sfx = sfx.to_uppercase()
                 ));
@@ -1204,12 +1688,13 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     ));
                 }
                 _ => {
+                    // Idempotent: a play node reached every frame must not restart the track.
                     out.push_str(&format!(
-                            "{indent}XGM_startPlay({track}); /* fade_ms: {fade_ms} - suporte futuro */\n",
-                            indent = indent_str,
-                            track = track,
-                            fade_ms = fade_ms,
-                        ));
+                        "{indent}if (rds_music_current != {track} || !XGM_isPlaying()) {{ XGM_startPlay({track}); rds_music_current = {track}; }} /* fade_ms: {fade_ms} - suporte futuro */\n",
+                        indent = indent_str,
+                        track = track,
+                        fade_ms = fade_ms,
+                    ));
                 }
             },
             LogicOp::SetVar { var_name, value } => {
@@ -1219,6 +1704,32 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     indent = indent_str,
                     var_name = var_name,
                     value_expr = value_expr
+                ));
+            }
+            LogicOp::RomAddQWord {
+                var_name,
+                immediate,
+            } => {
+                out.push_str(&format!(
+                    "{indent}{{ u16 rds_rom_word_before = (u16)logic_var_{var_name}; u16 rds_rom_word_result = (u16)(rds_rom_word_before + {immediate}); logic_var_{var_name} = (logic_var_{var_name} & ~0xFFFF) | rds_rom_word_result; logic_var_{var_name}_n = (rds_rom_word_result & 0x8000) != 0; logic_var_{var_name}_z = rds_rom_word_result == 0; logic_var_{var_name}_v = (rds_rom_word_before == 0x7FFF); logic_var_{var_name}_c = (rds_rom_word_before > (u16)(0xFFFF - {immediate})); logic_var_{var_name}_x = logic_var_{var_name}_c; }}\n",
+                    indent = indent_str,
+                    var_name = var_name,
+                    immediate = immediate
+                ));
+            }
+            LogicOp::RomBranchCompareWord {
+                input_var,
+                bias,
+                threshold,
+                result_var,
+            } => {
+                out.push_str(&format!(
+                    "{indent}{{ u16 rds_branch_arithmetic = (u16)((u16)logic_var_{input_var} + {bias}); logic_var_{result_var} = ((s16)rds_branch_arithmetic >= (s16){threshold}) ? 1 : 0; *rds_branch_recovery_result = (u16)logic_var_{result_var}; }}\n",
+                    indent = indent_str,
+                    input_var = input_var,
+                    bias = bias,
+                    threshold = threshold,
+                    result_var = result_var,
                 ));
             }
             LogicOp::WhileLoop {
@@ -1297,6 +1808,104 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     "#error \"Source Bridge blocks codegen: {gap} at {source_file}:{source_line}. Enable bridge compatibility mode or replace with native nodes.\"\n",
                 ));
             }
+        }
+    }
+}
+
+fn sprite_runtime_var(target_name: &str) -> String {
+    let target = target_name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if target.starts_with("spr_") {
+        target
+    } else {
+        format!("spr_{target}")
+    }
+}
+
+fn collect_logic_velocity_targets(ast: &AstOutput) -> std::collections::BTreeSet<String> {
+    let mut targets = std::collections::BTreeSet::new();
+    for script in &ast.logic_scripts {
+        collect_logic_velocity_targets_from_ops(&script.ops, &mut targets);
+    }
+    targets
+}
+
+fn collect_logic_velocity_targets_from_ops(
+    ops: &[LogicOp],
+    targets: &mut std::collections::BTreeSet<String>,
+) {
+    for op in ops {
+        match op {
+            LogicOp::SourceMapped { op, .. } => {
+                collect_logic_velocity_targets_from_ops(std::slice::from_ref(op.as_ref()), targets);
+            }
+            LogicOp::MugenSetVelocityX { .. } | LogicOp::MugenProgramStep { .. } => {}
+            LogicOp::SetVelocity {
+                target_name,
+                runtime_var,
+                ..
+            } => {
+                targets.insert(
+                    runtime_var
+                        .clone()
+                        .unwrap_or_else(|| sprite_runtime_var(target_name)),
+                );
+            }
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            }
+            | LogicOp::ConditionBool {
+                if_true, if_false, ..
+            } => {
+                collect_logic_velocity_targets_from_ops(if_true, targets);
+                collect_logic_velocity_targets_from_ops(if_false, targets);
+            }
+            LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+                collect_logic_velocity_targets_from_ops(body, targets);
+                collect_logic_velocity_targets_from_ops(done, targets);
+            }
+            LogicOp::TimelineSequence { slots, .. } => {
+                for slot in slots {
+                    collect_logic_velocity_targets_from_ops(&slot.actions, targets);
+                }
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_logic_velocity_targets_from_ops(if_ok, targets);
+                collect_logic_velocity_targets_from_ops(if_warn, targets);
+            }
+            LogicOp::HardwareEvent { ops, .. } => {
+                collect_logic_velocity_targets_from_ops(ops, targets);
+            }
+            LogicOp::StateMachine { states, .. } => {
+                for state in states {
+                    collect_logic_velocity_targets_from_ops(&state.body, targets);
+                    for transition in &state.transitions {
+                        collect_logic_velocity_targets_from_ops(&transition.if_matched, targets);
+                        collect_logic_velocity_targets_from_ops(&transition.if_unmatched, targets);
+                    }
+                }
+            }
+            LogicOp::SetSpritePosition { .. }
+            | LogicOp::MoveSprite { .. }
+            | LogicOp::SetAnimationState { .. }
+            | LogicOp::SetTile { .. }
+            | LogicOp::CameraFollow { .. }
+            | LogicOp::ShowSprite { .. }
+            | LogicOp::HideSprite { .. }
+            | LogicOp::SetVar { .. }
+            | LogicOp::RomAddQWord { .. }
+            | LogicOp::RomBranchCompareWord { .. }
+            | LogicOp::PlaySound { .. }
+            | LogicOp::PlayMusic { .. }
+            | LogicOp::SourceBridgeError { .. } => {}
         }
     }
 }
@@ -1396,9 +2005,22 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
         LogicBoolExpr::Literal(value) => {
             if *value { "TRUE".to_string() } else { "FALSE".to_string() }
         }
-        LogicBoolExpr::Input { pad, button, .. } => {
+        LogicBoolExpr::Input {
+            pad,
+            button,
+            pressed,
+        } => {
             let button_mask = sgdk_button_mask(button).unwrap_or("BUTTON_A");
-            format!("(JOY_readJoypad({}) & {})", sgdk_joypad_port(pad), button_mask)
+            let port = sgdk_joypad_port(pad);
+            if *pressed {
+                // Rising edge: held now, released on the previous frame.
+                format!(
+                    "((JOY_readJoypad({port}) & {button_mask}) && !(rds_joy_prev_{suffix} & {button_mask}))",
+                    suffix = pad_suffix(port)
+                )
+            } else {
+                format!("(JOY_readJoypad({}) & {})", port, button_mask)
+            }
         }
         LogicBoolExpr::InputCommand {
             command_id,
@@ -1430,6 +2052,8 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
                 )
             }
         }
+        LogicBoolExpr::Grounded { var_name } => format!("({var_name}_on_ground)"),
+        LogicBoolExpr::SpriteAnimDone { var_name } => format!("rds_anim_done_{var_name}()"),
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
             left_x = logic_x_expr(left),
@@ -1607,6 +2231,80 @@ fn collect_logic_var_names(ast: &AstOutput) -> std::collections::BTreeSet<String
     vars
 }
 
+fn ops_contain_rom_addq_word(ops: &[LogicOp]) -> bool {
+    ops.iter().any(op_contains_rom_addq_word)
+}
+
+fn ops_contain_rom_branch_compare_word(ops: &[LogicOp]) -> bool {
+    ops.iter().any(op_contains_rom_branch_compare_word)
+}
+
+fn op_contains_rom_branch_compare_word(op: &LogicOp) -> bool {
+    match op {
+        LogicOp::RomBranchCompareWord { .. } => true,
+        LogicOp::SourceMapped { op, .. } => op_contains_rom_branch_compare_word(op),
+        LogicOp::ConditionOverlap {
+            if_true, if_false, ..
+        }
+        | LogicOp::ConditionBool {
+            if_true, if_false, ..
+        } => {
+            ops_contain_rom_branch_compare_word(if_true)
+                || ops_contain_rom_branch_compare_word(if_false)
+        }
+        LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+            ops_contain_rom_branch_compare_word(body) || ops_contain_rom_branch_compare_word(done)
+        }
+        LogicOp::TimelineSequence { slots, .. } => slots
+            .iter()
+            .any(|slot| ops_contain_rom_branch_compare_word(&slot.actions)),
+        LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+            ops_contain_rom_branch_compare_word(if_ok)
+                || ops_contain_rom_branch_compare_word(if_warn)
+        }
+        LogicOp::HardwareEvent { ops, .. } => ops_contain_rom_branch_compare_word(ops),
+        LogicOp::StateMachine { states, .. } => states.iter().any(|state| {
+            ops_contain_rom_branch_compare_word(&state.body)
+                || state.transitions.iter().any(|transition| {
+                    ops_contain_rom_branch_compare_word(&transition.if_matched)
+                        || ops_contain_rom_branch_compare_word(&transition.if_unmatched)
+                })
+        }),
+        _ => false,
+    }
+}
+
+fn op_contains_rom_addq_word(op: &LogicOp) -> bool {
+    match op {
+        LogicOp::RomAddQWord { .. } => true,
+        LogicOp::SourceMapped { op, .. } => op_contains_rom_addq_word(op),
+        LogicOp::ConditionOverlap {
+            if_true, if_false, ..
+        }
+        | LogicOp::ConditionBool {
+            if_true, if_false, ..
+        } => ops_contain_rom_addq_word(if_true) || ops_contain_rom_addq_word(if_false),
+        LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+            ops_contain_rom_addq_word(body) || ops_contain_rom_addq_word(done)
+        }
+        LogicOp::TimelineSequence { slots, .. } => slots
+            .iter()
+            .any(|slot| ops_contain_rom_addq_word(&slot.actions)),
+        LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+            ops_contain_rom_addq_word(if_ok) || ops_contain_rom_addq_word(if_warn)
+        }
+        LogicOp::HardwareEvent { ops, .. } => ops_contain_rom_addq_word(ops),
+        LogicOp::StateMachine { states, .. } => states.iter().any(|state| {
+            ops_contain_rom_addq_word(&state.body)
+                || state.transitions.iter().any(|transition| {
+                    ops_contain_rom_addq_word(&transition.if_matched)
+                        || ops_contain_rom_addq_word(&transition.if_unmatched)
+                })
+        }),
+        _ => false,
+    }
+}
+
 fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<String>) {
     match op {
         LogicOp::SourceMapped { op, .. } => extract_vars_from_op(op, vars),
@@ -1618,6 +2316,7 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             target_name,
             vx,
             vy,
+            ..
         } => {
             vars.insert(format!("{}_vx", target_name));
             vars.insert(format!("{}_vy", target_name));
@@ -1635,6 +2334,22 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
         LogicOp::SetVar { var_name, value } => {
             vars.insert(var_name.clone());
             extract_vars_from_math(value, vars);
+        }
+        LogicOp::RomAddQWord { var_name, .. } => {
+            vars.insert(var_name.clone());
+            vars.insert(format!("{var_name}_n"));
+            vars.insert(format!("{var_name}_z"));
+            vars.insert(format!("{var_name}_v"));
+            vars.insert(format!("{var_name}_c"));
+            vars.insert(format!("{var_name}_x"));
+        }
+        LogicOp::RomBranchCompareWord {
+            input_var,
+            result_var,
+            ..
+        } => {
+            vars.insert(input_var.clone());
+            vars.insert(result_var.clone());
         }
         LogicOp::ConditionOverlap {
             if_true, if_false, ..
@@ -1806,9 +2521,57 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
     }
 }
 
+pub(crate) fn collect_grounded_vars(ast: &AstOutput) -> std::collections::BTreeSet<String> {
+    fn from_bool(expr: &LogicBoolExpr, out: &mut std::collections::BTreeSet<String>) {
+        match expr {
+            LogicBoolExpr::Grounded { var_name } => {
+                out.insert(var_name.clone());
+            }
+            LogicBoolExpr::Not(inner) => from_bool(inner, out),
+            LogicBoolExpr::And { left, right, .. } => {
+                from_bool(left, out);
+                from_bool(right, out);
+            }
+            _ => {}
+        }
+    }
+    fn from_ops(ops: &[LogicOp], out: &mut std::collections::BTreeSet<String>) {
+        for op in ops {
+            match op {
+                LogicOp::SourceMapped { op, .. } => {
+                    from_ops(std::slice::from_ref(op.as_ref()), out)
+                }
+                LogicOp::ConditionBool {
+                    condition,
+                    if_true,
+                    if_false,
+                } => {
+                    from_bool(condition, out);
+                    from_ops(if_true, out);
+                    from_ops(if_false, out);
+                }
+                LogicOp::ConditionOverlap {
+                    if_true, if_false, ..
+                } => {
+                    from_ops(if_true, out);
+                    from_ops(if_false, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    for script in &ast.logic_scripts {
+        from_ops(&script.ops, &mut out);
+    }
+    out
+}
+
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
-        LogicBoolExpr::Literal(_) => false,
+        LogicBoolExpr::Literal(_)
+        | LogicBoolExpr::Grounded { .. }
+        | LogicBoolExpr::SpriteAnimDone { .. } => false,
         LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
@@ -1889,7 +2652,7 @@ fn sgdk_button_mask(button: &str) -> Option<&'static str> {
         "_X" | "X" | "BUTTON_X" => Some("BUTTON_X"),
         "_Y" | "Y" | "BUTTON_Y" => Some("BUTTON_Y"),
         "_Z" | "Z" | "BUTTON_Z" => Some("BUTTON_Z"),
-        "START" => Some("BUTTON_START"),
+        "START" | "BUTTON_START" => Some("BUTTON_START"),
         _ => None,
     }
 }
@@ -2096,8 +2859,29 @@ fn tilemap_base_expression(resource_name: &str, tilemap_assets: &[TilemapAsset])
             break;
         }
         terms.push(format!("{}.tileset->numTile", asset.resource_name));
+        let overlay = tilemap_overlay_tiles(asset).len();
+        if overlay > 0 {
+            terms.push(overlay.to_string());
+        }
     }
     terms.join(" + ")
+}
+
+/// Cell value meaning "no change over the base map".
+const TILEMAP_CELL_BASE: u32 = 0;
+/// Cell value meaning "explicitly empty" (blank tile), distinct from the base map.
+pub(crate) const TILEMAP_CELL_EMPTY: u32 = u32::MAX;
+
+/// Distinct painted tileset tiles (value N = image tile N-1), in first-use order.
+fn tilemap_overlay_tiles(asset: &TilemapAsset) -> Vec<u32> {
+    let total = (asset.map_width as usize).saturating_mul(asset.map_height as usize);
+    let mut used = Vec::new();
+    for value in asset.cells.iter().copied().take(total) {
+        if value != TILEMAP_CELL_BASE && value != TILEMAP_CELL_EMPTY && !used.contains(&value) {
+            used.push(value);
+        }
+    }
+    used
 }
 
 fn tilemap_resource_path(asset_path: &str) -> String {
@@ -2132,12 +2916,31 @@ mod tests {
         LogicScript, SpriteAnimation,
     };
 
+    #[test]
+    fn button_mask_accepts_every_button_offered_by_the_node_editor() {
+        // O NodeGraph grava `BUTTON_*`; nenhum deles pode cair no fallback BUTTON_A.
+        for (stored, mask) in [
+            ("BUTTON_A", "BUTTON_A"),
+            ("BUTTON_B", "BUTTON_B"),
+            ("BUTTON_C", "BUTTON_C"),
+            ("BUTTON_START", "BUTTON_START"),
+            ("BUTTON_UP", "BUTTON_UP"),
+            ("BUTTON_DOWN", "BUTTON_DOWN"),
+            ("BUTTON_LEFT", "BUTTON_LEFT"),
+            ("BUTTON_RIGHT", "BUTTON_RIGHT"),
+        ] {
+            assert_eq!(sgdk_button_mask(stored), Some(mask), "{stored}");
+        }
+        assert_eq!(sgdk_button_mask("BUTTON_NOPE"), None);
+    }
+
     fn sprite_asset_with_animation(frame_time: u32, looping: bool) -> SpriteAsset {
         let animation = SpriteAnimation {
             name: "walk".to_string(),
             frames: vec![0, 1, 2, 3],
             frame_time,
             looping,
+            mugen: None,
         };
         SpriteAsset {
             resource_name: "hero".to_string(),
@@ -2190,6 +2993,79 @@ mod tests {
     }
 
     #[test]
+    fn sprite_priority_controls_priority_bit_without_horizontal_flip() {
+        // SGDK TILE_ATTR(palette, priority, flipV, flipH): foreground and
+        // background selection must not mirror artwork in either allocator.
+        for managed in [false, true] {
+            for high in [false, true] {
+                let mut asset = sprite_asset_with_animation(6, true);
+                if managed {
+                    asset.frame_width = 192;
+                    asset.frame_height = 160;
+                }
+                let ast = AstOutput {
+                    nodes: vec![
+                        AstNode::SpriteSystemInit,
+                        AstNode::LoadSpritesheet {
+                            resource_name: "hero".into(),
+                            asset_path: "assets/sprites/hero.png".into(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            palette_slot: 1,
+                        },
+                        AstNode::SpawnSprite {
+                            var_name: "spr_hero".into(),
+                            resource_name: "hero".into(),
+                            x: 0,
+                            y: 0,
+                            priority_high: high,
+                        },
+                    ],
+                    sprite_assets: vec![asset],
+                    logic_scripts: Vec::new(),
+                };
+                let output = emit_sgdk(&ast, "Priority").main_c;
+                let priority = if high { "TRUE" } else { "FALSE" };
+                assert!(
+                    output.contains(&format!("TILE_ATTR(PAL1, {priority}, FALSE, FALSE)")),
+                    "priority mapping failed: managed={managed}, high={high}"
+                );
+                assert!(output.contains("PAL_setPalette(PAL1, hero.palette->data, CPU);"));
+                assert!(output.contains("SPR_setVisibility(spr_hero, VISIBLE);"));
+            }
+        }
+    }
+
+    #[test]
+    fn large_scene_uses_viewport_residency_before_sprite_update() {
+        let mut asset = sprite_asset_with_animation(6, true);
+        asset.frame_width = 192;
+        asset.frame_height = 160; // 480 tiles, beyond SGDK's default 420.
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::SpriteSystemInit,
+                AstNode::SpawnSprite {
+                    var_name: "spr_hero".into(),
+                    resource_name: "hero".into(),
+                    x: 400,
+                    y: 0,
+                    priority_high: true,
+                },
+                AstNode::SpriteUpdate,
+            ],
+            sprite_assets: vec![asset],
+            logic_scripts: Vec::new(),
+        };
+        let output = emit_sgdk(&ast, "Large scene").main_c;
+        assert!(output.contains("rds_register_sprite(&spr_hero"));
+        assert!(!output.contains("spr_hero = SPR_addSprite"));
+        assert!(output.contains("rds_init_sprite_residency(0)"));
+        let sync = output.rfind("rds_sync_sprite_residency();").unwrap();
+        let update = output.rfind("SPR_update();").unwrap();
+        assert!(sync < update);
+    }
+
+    #[test]
     fn resources_res_preserves_distinct_animation_row_timings() {
         let mut asset = sprite_asset_with_animation(10, true);
         asset.animations[0].frames = vec![0];
@@ -2198,6 +3074,7 @@ mod tests {
             frames: vec![1, 2, 3],
             frame_time: 5,
             looping: true,
+            mugen: None,
         });
         assert_eq!(resource_animation_time(&asset), "[[10][5,5,5]]");
     }
@@ -2262,6 +3139,7 @@ mod tests {
                 asset_path: "assets/tilesets/level.ppm".to_string(),
                 map_width: 32,
                 map_height: 32,
+                cells: vec![],
             }],
             sprite_assets: Vec::new(),
             logic_scripts: Vec::new(),
@@ -2340,7 +3218,10 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("XGM_startPlay(stage_theme); /* fade_ms: 500 - suporte futuro */"));
+            .contains("if (rds_music_current != stage_theme || !XGM_isPlaying()) { XGM_startPlay(stage_theme); rds_music_current = stage_theme; } /* fade_ms: 500 - suporte futuro */"));
+        assert!(output
+            .main_c
+            .contains("static const u8* rds_music_current = NULL;"));
         assert!(output
             .main_c
             .contains("XGM_stopPlay(); /* fade_ms: 0 - suporte futuro */"));
@@ -2480,6 +3361,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.ppm".to_string(),
                     map_width: 64,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "background_tilemap".to_string(),
@@ -2505,6 +3387,60 @@ mod tests {
         ));
         assert!(output.main_c.contains("VDP_setHorizontalScroll(BG_B, 8);"));
         assert!(output.main_c.contains("VDP_setVerticalScroll(BG_B, 4);"));
+    }
+
+    #[test]
+    fn main_c_applies_painted_tilemap_cells_as_sparse_overlay() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::LoadTilemap {
+                    resource_name: "background_tilemap".to_string(),
+                    asset_path: "assets/tilesets/level.ppm".to_string(),
+                    map_width: 2,
+                    map_height: 2,
+                    cells: vec![0, 2, u32::MAX, 1],
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "background_tilemap".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Tilemap Overlay Demo");
+
+        // Value N is image tile N-1 from the unoptimized TILESET, uploaded after the image
+        // tiles in first-use order (2 -> slot 0, 1 -> slot 1); 0 keeps the base map and
+        // u32::MAX writes the blank tile.
+        let base = "TILE_USER_INDEX + background_tilemap.tileset->numTile";
+        assert!(output.main_c.contains(&format!(
+            "if (1 < background_tilemap_cells.numTile) VDP_loadTileData(background_tilemap_cells.tiles + 8, {base} + 0, 1, DMA);"
+        )));
+        assert!(output.main_c.contains(&format!(
+            "if (0 < background_tilemap_cells.numTile) VDP_loadTileData(background_tilemap_cells.tiles + 0, {base} + 1, 1, DMA);"
+        )));
+        assert!(output.main_c.contains(&format!(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {base} + 0), 1, 0);"
+        )));
+        assert!(output.main_c.contains(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, 0), 0, 1);"
+        ));
+        assert!(output.main_c.contains(&format!(
+            "VDP_setTileMapXY(BG_B, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {base} + 1), 1, 1);"
+        )));
+        assert!(
+            !output.main_c.contains(", 0, 0);\n"),
+            "value 0 keeps the base map"
+        );
+        assert!(output
+            .resources_res
+            .contains("TILESET background_tilemap_cells \"assets/tilesets/level.bmp\" NONE NONE"));
+        assert!(!output.main_c.contains("VDP_setTileMapDataRectEx"));
     }
 
     #[test]
@@ -2612,6 +3548,8 @@ mod tests {
                     max_velocity_y: 96,
                     friction: 2,
                     bounce: 35,
+                    floor_y: None,
+                    ground: None,
                 },
                 AstNode::SpriteUpdate,
                 AstNode::VSync,
@@ -2649,6 +3587,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2733,6 +3672,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2746,6 +3686,7 @@ mod tests {
                     asset_path: "assets/tilesets/foreground.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "foreground".to_string(),
@@ -2808,7 +3749,7 @@ mod tests {
         ));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH2);"));
     }
 
     #[test]
@@ -2858,18 +3799,20 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Logic Vars Demo");
 
-        assert!(output.main_c.contains("static s32 logic_var_score = 0;"));
+        assert!(output
+            .main_c
+            .contains("static volatile s32 logic_var_score = 0;"));
         assert!(output
             .main_c
             .contains("logic_var_score = (((logic_var_score + 2) * (6 - 1)) / 5);"));
         assert!(output.main_c.contains("if ((logic_var_score >= 10)) {"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_WIN, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_WIN, 1, SOUND_PCM_CH2);"));
         assert!(output.main_c.contains("} else {"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_LOSE, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_LOSE, 1, SOUND_PCM_CH2);"));
     }
 
     #[test]
@@ -2891,6 +3834,7 @@ mod tests {
                         target_name: "player".to_string(),
                         vx: LogicMathExpr::Literal(2),
                         vy: LogicMathExpr::Literal(0),
+                        runtime_var: None,
                     }),
                 }],
             }],
@@ -2900,11 +3844,51 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("static s32 logic_var_player_vx = 0;"));
+            .contains("static volatile s32 logic_var_player_vx = 0;"));
         assert!(output
             .main_c
-            .contains("static s32 logic_var_player_vy = 0;"));
+            .contains("static volatile s32 logic_var_player_vy = 0;"));
+        assert!(output.main_c.contains("static s32 spr_player_vel_y = 0;"));
         assert!(output.main_c.contains("logic_var_player_vx = 2;"));
+        assert!(output.main_c.contains("spr_player_vel_y = 0;"));
+    }
+
+    #[test]
+    fn main_c_emits_exact_recovered_addq_word_semantics() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::RomAddQWord {
+                    var_name: "rom_d0".to_string(),
+                    immediate: 1,
+                }],
+            }],
+        };
+
+        let output = emit_sgdk(&ast, "Recovered ROM Logic");
+
+        assert!(output
+            .main_c
+            .contains("static volatile s32 logic_var_rom_d0 = 0x12340058;"));
+        assert!(output.main_c.contains("rds_logic_recovery_oracle_value"));
+        assert!(output
+            .main_c
+            .contains("rds_logic_recovery_prelude_frame < 83"));
+        assert!(output
+            .main_c
+            .contains("rds_rom_word_result = (u16)(rds_rom_word_before + 1)"));
+        assert!(output
+            .main_c
+            .contains("logic_var_rom_d0_n = (rds_rom_word_result & 0x8000) != 0"));
+        assert!(output
+            .main_c
+            .contains("logic_var_rom_d0_c = (rds_rom_word_before > (u16)(0xFFFF - 1))"));
     }
 
     #[test]
@@ -2956,7 +3940,7 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("static s32 logic_var_fsm_state = 0;"));
+            .contains("static volatile s32 logic_var_fsm_state = 0;"));
         assert!(output.main_c.contains("if (logic_var_fsm_state == 0) {"));
         assert!(output.main_c.contains("logic_var_fsm_state = 1;"));
         assert!(output
@@ -3007,7 +3991,7 @@ mod tests {
             .contains("for (s16 idx = 0; idx < 3; idx++) {"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH2);"));
     }
 
     #[test]
@@ -3047,7 +4031,7 @@ mod tests {
 
         assert!(output
             .main_c
-            .contains("static s32 logic_var_timeline_intro = 0;"));
+            .contains("static volatile s32 logic_var_timeline_intro = 0;"));
         assert!(output.main_c.contains("logic_var_timeline_intro++;"));
         assert!(output
             .main_c
@@ -3056,7 +4040,7 @@ mod tests {
         assert!(output.main_c.contains("case 30:"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH2);"));
     }
 
     #[test]
@@ -3107,6 +4091,6 @@ mod tests {
             .contains("SYS_setHIntCallback(retro_on_hblank);"));
         assert!(output
             .main_c
-            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH2);"));
     }
 }

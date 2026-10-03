@@ -12,6 +12,19 @@ import HardwareLimitsPanel from "./HardwareLimitsPanel";
 import RuntimeContractsPanel from "./RuntimeContractsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
+import {
+  describeTicks,
+  durationConflicts,
+  effectiveDurations,
+  isMugenAnimation,
+  parseTicks,
+  withFrameDuration,
+} from "../../core/mugenAnimationTiming";
+import {
+  parseVelocity,
+  readMugenVelocities,
+  withMugenVelocity,
+} from "../../core/mugenVelocity";
 import { persistActiveScene } from "../../core/scenePersistence";
 import {
   constrainSpriteFrameSize,
@@ -30,6 +43,8 @@ import {
   type BuildSourceMap,
 } from "../../core/nodegraph/buildProvenance";
 import knowledgeBase from "./knowledgeBase.json";
+import { duplicateBehaviorLogic } from "../../core/nodegraph/behaviorLibrary";
+import type { NodeGraph } from "../../core/nodegraph/nodeTypes";
 
 type KnowledgeSectionId =
   | "transform"
@@ -551,6 +566,10 @@ function buildNestedRecordPatch(
   };
 }
 
+function omitKey(record: Record<string, string>, key: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(record).filter(([name]) => name !== key));
+}
+
 function buildEntityPatch(entity: Entity, path: string[], value: unknown): Partial<Entity> {
   const [root, ...tail] = path;
   if (!root) {
@@ -747,6 +766,7 @@ export default function InspectorPanel() {
     setSelectedEntityId,
     updateBackgroundLayer,
     updateEntity,
+    addEntity,
     clearTilemapCells,
     activeBrush,
     setActiveWorkspace,
@@ -897,6 +917,179 @@ export default function InspectorPanel() {
         setSaveStatus("idle");
       }
     }
+  }
+
+  function handleTransformChange(axis: "x" | "y", raw: string) {
+    if (!entity || !selectedEntityId) return;
+    const value = Number.parseInt(raw, 10);
+    if (!Number.isFinite(value)) return;
+    updateEntity(selectedEntityId, { transform: { ...entity.transform, [axis]: value } });
+    scheduleAutoSave();
+  }
+
+  function handleAnimationFpsChange(animationName: string, raw: string) {
+    if (!entity || !selectedEntityId || !entity.components.sprite) return;
+    const fps = Number.parseInt(raw, 10);
+    if (!Number.isInteger(fps) || fps < 1 || fps > 60) return;
+    updateEntity(
+      selectedEntityId,
+      buildEntityPatch(entity, ["components", "sprite", "animations", animationName, "fps"], fps)
+    );
+    scheduleAutoSave();
+  }
+
+  function handleMugenFrameTicksChange(animationName: string, index: number, raw: string) {
+    const key = `${animationName}:${index}`;
+    setMugenTickDrafts((current) => ({ ...current, [key]: raw }));
+    const parsed = parseTicks(raw);
+    if (!parsed.ok) {
+      setMugenTickErrors((current) => ({ ...current, [key]: parsed.message }));
+      return;
+    }
+    setMugenTickErrors((current) => omitKey(current, key));
+    const def = entity?.components.sprite?.animations?.[animationName];
+    if (!entity || !selectedEntityId || !def) return;
+    updateEntity(
+      selectedEntityId,
+      buildEntityPatch(
+        entity,
+        ["components", "sprite", "animations", animationName],
+        withFrameDuration(def, index, parsed.value)
+      )
+    );
+    scheduleAutoSave();
+  }
+
+  function handleMugenFrameTicksBlur(animationName: string, index: number) {
+    const key = `${animationName}:${index}`;
+    setMugenTickDrafts((current) => omitKey(current, key));
+    setMugenTickErrors((current) => omitKey(current, key));
+  }
+
+  function handleMugenVelocityChange(stateNo: number, raw: string) {
+    const key = String(stateNo);
+    setMugenVelocityDrafts((current) => ({ ...current, [key]: raw }));
+    const parsed = parseVelocity(raw);
+    if (!parsed.ok) {
+      setMugenVelocityErrors((current) => ({ ...current, [key]: parsed.message }));
+      return;
+    }
+    setMugenVelocityErrors((current) => omitKey(current, key));
+    if (!entity || !selectedEntityId || !entity.components.logic) return;
+    // O que se grava e o literal digitado; o aviso de arredondamento e mostrado abaixo do campo.
+    const graph = withMugenVelocity(entity, stateNo, raw.trim());
+    if (graph === null) return;
+    updateEntity(
+      selectedEntityId,
+      buildEntityPatch(entity, ["components", "logic"], {
+        ...entity.components.logic,
+        graph,
+        graph_origin: "user_edited_ref",
+      })
+    );
+    scheduleAutoSave();
+  }
+
+  function handleMugenVelocityBlur(stateNo: number) {
+    const key = String(stateNo);
+    setMugenVelocityDrafts((current) => omitKey(current, key));
+    setMugenVelocityErrors((current) => omitKey(current, key));
+  }
+
+  /**
+   * Duplicates the selected entity under a fresh id, offset to the right. The resolved
+   * copy (with inherited prefab components) goes to the active scene so it renders and
+   * compiles like the original; the source copy keeps only the prefab reference and
+   * local overrides, so inheritance is not flattened into local data.
+   */
+  /** Logica manual (fora de comportamentos) que a duplicata NAO herda. */
+  const [pendingDuplicate, setPendingDuplicate] = useState<{ manualNodes: number | null } | null>(null);
+  const [mugenTickDrafts, setMugenTickDrafts] = useState<Record<string, string>>({});
+  const [mugenTickErrors, setMugenTickErrors] = useState<Record<string, string>>({});
+  const [mugenVelocityDrafts, setMugenVelocityDrafts] = useState<Record<string, string>>({});
+  const [mugenVelocityErrors, setMugenVelocityErrors] = useState<Record<string, string>>({});
+  function manualLogicOf(candidate: Entity | null | undefined): { manualNodes: number | null; graph: NodeGraph } {
+    const logic = candidate?.components.logic;
+    const graph = deserializeNodeGraph(logic?.graph);
+    if (!logic) return { manualNodes: 0, graph };
+    if (!graph.nodes.length && logic.graph_ref) return { manualNodes: null, graph }; // grafo so no arquivo: ha logica manual
+    const owned = new Set((graph.behaviors ?? []).flatMap((instance) => instance.nodeIds));
+    return { manualNodes: graph.nodes.filter((node) => !owned.has(node.id)).length, graph };
+  }
+
+  /** A logica efetiva vem da entidade resolvida (prefab incluso), nao so da cena de origem. */
+  function effectiveLogic() {
+    const resolved = manualLogicOf(entity);
+    const source = manualLogicOf(sourceEntity);
+    const hasLogic = Boolean(entity?.components.logic || sourceEntity?.components.logic);
+    const manualNodes = resolved.manualNodes === null || source.manualNodes === null ? null : Math.max(resolved.manualNodes, source.manualNodes);
+    return { hasLogic, manualNodes, graph: resolved.graph.nodes.length ? resolved.graph : source.graph };
+  }
+
+  function requestDuplicateEntity() {
+    const { manualNodes } = effectiveLogic();
+    if (manualNodes === 0) {
+      handleDuplicateEntity();
+      return;
+    }
+    setPendingDuplicate({ manualNodes });
+  }
+
+  function handleDuplicateEntity() {
+    setPendingDuplicate(null);
+    const state = useEditorStore.getState();
+    const scene = state.activeScene;
+    const resolvedOriginal = entity;
+    if (!resolvedOriginal || !scene) return;
+    const sourceOriginal = sourceEntity ?? resolvedOriginal;
+    const existing = new Set(scene.entities.map((candidate) => candidate.entity_id));
+    let suffix = 2;
+    while (existing.has(`${resolvedOriginal.entity_id}_${suffix}`)) suffix += 1;
+    const entityId = `${resolvedOriginal.entity_id}_${suffix}`;
+    const displayName = `${resolvedOriginal.display_name ?? resolvedOriginal.entity_id} ${suffix}`;
+    const transform = { ...resolvedOriginal.transform, x: resolvedOriginal.transform.x + 24 };
+    // Logica: so comportamentos, com ids/alvos/estado remapeados; nunca o mesmo graph_ref
+    // (o salvamento escreveria as duas entidades no mesmo arquivo).
+    const sceneInstanceIds = scene.entities.flatMap(
+      (candidate) => deserializeNodeGraph(candidate.components.logic?.graph).behaviors?.map((instance) => instance.id) ?? []
+    );
+    const logic = effectiveLogic();
+    const copy = duplicateBehaviorLogic(logic.graph, resolvedOriginal.entity_id, entityId, sceneInstanceIds);
+    const withLogic = (candidate: Entity): Entity => {
+      const components = { ...structuredClone(candidate.components) };
+      // O merge de prefab e profundo e ignora null: a copia sobrescreve explicitamente a
+      // logica herdada (grafo inline so com comportamentos, graph_ref vazio = sem arquivo).
+      if (logic.hasLogic) components.logic = { graph: serializeNodeGraph(copy.graph), graph_ref: "" };
+      else delete components.logic;
+      return { ...candidate, components, entity_id: entityId, display_name: displayName, transform };
+    };
+    const resolvedDuplicate: Entity = withLogic(resolvedOriginal);
+    const sourceDuplicate: Entity = withLogic(sourceOriginal);
+    addEntity(resolvedDuplicate);
+    useEditorStore.setState((current) =>
+      current.activeSceneSource
+        ? {
+            activeSceneSource: {
+              ...current.activeSceneSource,
+              entities: current.activeSceneSource.entities.map((candidate) =>
+                candidate.entity_id === entityId ? sourceDuplicate : candidate
+              ),
+            },
+          }
+        : {}
+    );
+    setSelectedEntityId(entityId);
+    logMessage("info", `[Inspector] Entidade '${resolvedOriginal.entity_id}' duplicada como '${entityId}'.`);
+    if (copy.remappedInstances.length || copy.droppedManualNodes) {
+      logMessage(
+        "info",
+        `[Inspector] Logica da copia: ${copy.remappedInstances.length} comportamento(s) com ids e alvo remapeados para '${entityId}'` +
+          (copy.preservedExternal.length ? `; referencias externas mantidas: ${copy.preservedExternal.join(", ")}` : "") +
+          (copy.droppedManualNodes ? `; ${copy.droppedManualNodes} no(s) de logica manual nao copiados` : "") +
+          "."
+      );
+    }
+    scheduleAutoSave();
   }
 
   function scheduleAutoSave() {
@@ -1163,6 +1356,193 @@ export default function InspectorPanel() {
                 <span>({entity.transform.x}, {entity.transform.y})</span>
               </div>
             </div>
+            <div className="flex items-center gap-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]">
+              <label className="flex items-center gap-1">
+                X
+                <input
+                  data-testid="inspector-transform-x"
+                  type="number"
+                  value={entity.transform.x}
+                  onChange={(event) => handleTransformChange("x", event.target.value)}
+                  className="w-14 rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4]"
+                />
+              </label>
+              <label className="flex items-center gap-1">
+                Y
+                <input
+                  data-testid="inspector-transform-y"
+                  type="number"
+                  value={entity.transform.y}
+                  onChange={(event) => handleTransformChange("y", event.target.value)}
+                  className="w-14 rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4]"
+                />
+              </label>
+              <button
+                type="button"
+                data-testid="inspector-duplicate-entity"
+                onClick={requestDuplicateEntity}
+                className="ml-auto rounded border border-[#45475a] px-2 py-0.5 hover:bg-[#313244]"
+              >
+                Duplicar
+              </button>
+            </div>
+            {pendingDuplicate ? (
+              <div data-testid="inspector-duplicate-warning" className="border-b border-[#313244] bg-[#fab387]/10 px-3 py-1.5 text-[10px] text-[#fab387]">
+                <p>
+                  A copia recebe os comportamentos desta entidade (remapeados para a copia), mas nao a logica manual
+                  {pendingDuplicate.manualNodes ? ` (${pendingDuplicate.manualNodes} no(s))` : " (grafo do projeto)"}: ela continuaria controlando a entidade original.
+                </p>
+                <div className="mt-1 flex gap-1">
+                  <button type="button" data-testid="inspector-duplicate-confirm" onClick={handleDuplicateEntity} className="rounded border border-[#fab387]/60 px-2 py-0.5 font-semibold">Duplicar assim</button>
+                  <button type="button" data-testid="inspector-duplicate-cancel" onClick={() => setPendingDuplicate(null)} className="rounded px-2 py-0.5 text-[#a6adc8]">Cancelar</button>
+                </div>
+              </div>
+            ) : null}
+            {readMugenVelocities(entity).length > 0 ? (
+              <div
+                data-testid="inspector-mugen-velocity"
+                className="space-y-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]"
+              >
+                <span className="text-[9px] uppercase tracking-[0.14em]">Velocidade dos estados (MUGEN, Experimental)</span>
+                <p data-testid="inspector-mugen-velocity-help" className="leading-relaxed text-[#7f849c]">
+                  Quantos pixels o personagem anda a cada tick (1 tick = 1/60 s) enquanto esta naquele estado.
+                  Positivo = direita, negativo = esquerda, 0 = parado; o personagem sempre olha para a direita.
+                  Vai de -127,99 a 127,99 em passos de 1/256 px. So muda a horizontal e nao cria colisao nem limite de tela.
+                </p>
+                <div className="flex flex-wrap items-start gap-2">
+                  {readMugenVelocities(entity).map((state) => {
+                    const key = String(state.stateNo);
+                    const shown = mugenVelocityDrafts[key] ?? state.vx;
+                    const parsed = parseVelocity(shown);
+                    const error = mugenVelocityErrors[key];
+                    return (
+                      <label key={key} className="flex flex-col gap-0.5">
+                        <span>Estado {state.stateNo} (px/tick)</span>
+                        <input
+                          data-testid={`inspector-mugen-velocity-state-${state.stateNo}`}
+                          type="text"
+                          inputMode="decimal"
+                          aria-invalid={error ? true : undefined}
+                          value={shown}
+                          onChange={(event) => handleMugenVelocityChange(state.stateNo, event.target.value)}
+                          onBlur={() => handleMugenVelocityBlur(state.stateNo)}
+                          className={`w-20 rounded border bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4] ${
+                            error ? "border-[#f38ba8]" : "border-[#45475a]"
+                          }`}
+                        />
+                        {parsed.ok ? (
+                          <span
+                            data-testid={`inspector-mugen-velocity-state-${state.stateNo}-note`}
+                            className="max-w-40 text-[9px] text-[#7f849c]"
+                          >
+                            {parsed.exact
+                              ? `${parsed.q8}/256 px/tick`
+                              : `Arredondado para ${parsed.effective} (${parsed.q8}/256).`}
+                          </span>
+                        ) : null}
+                        {error ? (
+                          <span
+                            data-testid={`inspector-mugen-velocity-state-${state.stateNo}-error`}
+                            className="max-w-40 text-[9px] text-[#f38ba8]"
+                          >
+                            {error} Mantido: {state.vx}.
+                          </span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            {entity.components.sprite &&
+            Object.values(entity.components.sprite.animations ?? {}).some((def) => isMugenAnimation(def)) ? (
+              <div
+                data-testid="inspector-mugen-animations"
+                className="space-y-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]"
+              >
+                <span className="text-[9px] uppercase tracking-[0.14em]">Tempo dos quadros (MUGEN, Experimental)</span>
+                <p data-testid="inspector-mugen-timing-help" className="leading-relaxed text-[#7f849c]">
+                  Cada numero e quanto tempo aquele quadro fica na tela, em ticks (1 tick = 1/60 s; 60 ticks = 1 s).
+                  Cada quadro tem o seu proprio tempo e so o quadro editado muda. Use -1 para o quadro ficar parado.
+                  Valores validos: 1 a 255 ou -1.
+                </p>
+                {Object.entries(entity.components.sprite.animations ?? {})
+                  .filter(([, def]) => isMugenAnimation(def))
+                  .sort(([left], [right]) => left.localeCompare(right))
+                  .map(([name, def]) => (
+                    <div key={name} data-testid={`inspector-mugen-anim-${name}`}>
+                      <div className="mb-1 font-mono text-[#89b4fa]">{name}</div>
+                      {durationConflicts(def).length > 0 ? (
+                        <div
+                          data-testid={`inspector-mugen-anim-${name}-conflict`}
+                          className="rounded border border-[#f38ba8]/60 bg-[#f38ba8]/10 p-1.5 text-[#f38ba8]"
+                        >
+                          Tempos inconsistentes no projeto; o build sera bloqueado ate corrigir. Nenhum valor foi
+                          escolhido nem alterado: {durationConflicts(def).join("; ")}.
+                        </div>
+                      ) : null}
+                      <div className="flex flex-wrap items-start gap-2">
+                        {(durationConflicts(def).length > 0 ? [] : effectiveDurations(def)).map((ticks, index) => {
+                          const key = `${name}:${index}`;
+                          const error = mugenTickErrors[key];
+                          return (
+                            <label key={key} className="flex flex-col gap-0.5" title={describeTicks(ticks)}>
+                              <span>Quadro {index + 1} (ticks)</span>
+                              <input
+                                data-testid={`inspector-mugen-anim-${name}-frame-${index}`}
+                                type="text"
+                                inputMode="numeric"
+                                aria-invalid={error ? true : undefined}
+                                value={mugenTickDrafts[key] ?? String(ticks)}
+                                onChange={(event) => handleMugenFrameTicksChange(name, index, event.target.value)}
+                                onBlur={() => handleMugenFrameTicksBlur(name, index)}
+                                className={`w-16 rounded border bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4] ${
+                                  error ? "border-[#f38ba8]" : "border-[#45475a]"
+                                }`}
+                              />
+                              <span className="text-[9px] text-[#7f849c]">{describeTicks(ticks)}</span>
+                              {error ? (
+                                <span
+                                  data-testid={`inspector-mugen-anim-${name}-frame-${index}-error`}
+                                  className="max-w-40 text-[9px] text-[#f38ba8]"
+                                >
+                                  {error} Mantido: {ticks}.
+                                </span>
+                              ) : null}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            ) : null}
+            {entity.components.sprite &&
+            Object.values(entity.components.sprite.animations ?? {}).some((def) => !isMugenAnimation(def)) ? (
+              <div
+                data-testid="inspector-animations"
+                className="flex flex-wrap items-center gap-2 border-b border-[#313244] px-3 py-1.5 text-[10px] text-[#a6adc8]"
+              >
+                <span className="text-[9px] uppercase tracking-[0.14em]">Animacoes (FPS)</span>
+                {Object.entries(entity.components.sprite.animations ?? {})
+                  .filter(([, animation]) => !isMugenAnimation(animation))
+                  .sort(([left], [right]) => left.localeCompare(right))
+                  .map(([name, animation]) => (
+                    <label key={name} className="flex items-center gap-1" title={`frames ${animation.frames.join(",")}`}>
+                      {name}
+                      <input
+                        data-testid={`inspector-anim-${name}-fps`}
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={animation.fps}
+                        onChange={(event) => handleAnimationFpsChange(name, event.target.value)}
+                        className="w-12 rounded border border-[#45475a] bg-[#11111b] px-1 py-0.5 font-mono text-[#cdd6f4]"
+                      />
+                    </label>
+                  ))}
+              </div>
+            ) : null}
             <div className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2">
               <RuntimeContractsPanel compact />
             </div>
@@ -1413,7 +1793,10 @@ export default function InspectorPanel() {
                           <span className="text-[#89b4fa]">{name}</span>
                           <span className="text-[#45475a]"> — </span>
                           <span>
-                            {def.frames?.length ?? 0} quadros @ {def.fps ?? "?"} fps
+                            {def.frames?.length ?? 0} quadros{" "}
+                            {isMugenAnimation(def)
+                              ? `(${(def.frame_durations ?? []).join(", ")} ticks de 1/60 s)`
+                              : `@ ${def.fps ?? "?"} fps`}
                             {def.loop ? " (loop)" : ""}
                           </span>
                         </li>

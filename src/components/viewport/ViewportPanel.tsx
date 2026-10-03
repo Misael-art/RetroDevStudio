@@ -1,5 +1,7 @@
+import { isPpmPath, loadProjectPpmImageData } from "../../core/ppmImage";
+import { loadShellPersona } from "../../core/surfaceRegistry";
+import { isExplicitEmptyCell, tilesetAtlasIndex } from "../../core/tilemapCells";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import Tabs from "../common/Tabs";
 import { useEditorStore } from "../../core/store/editorStore";
 import {
@@ -13,6 +15,8 @@ import {
   emulatorStopRecording,
   keyToJoypad,
   listenToAudioStream,
+  recordAudioOutput,
+  recordReceivedAudioSamples,
   startFrameLoop,
   type AudioPayload,
   type FramePayload,
@@ -44,6 +48,7 @@ import {
 } from "../../core/creatorWorkflow";
 import { applyKeyColorTransparency } from "../../core/keyColorTransparency";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
+import { readProjectAssetBytes } from "../../core/ipc/toolsService";
 import {
   clampViewportPan,
   getSceneEntityBounds,
@@ -342,17 +347,23 @@ function drawTilemapCells(
   const totalCells = mapWidth * mapHeight;
   context.save();
   for (let i = 0; i < Math.min(cells.length, totalCells); i++) {
-    const value = cells[i] | 0;
-    if (value <= 0) continue;
-    const atlasIdx = value - 1;
-    const ax = (atlasIdx % cols) * tileSize;
-    const ay = Math.floor(atlasIdx / cols) * tileSize;
-    if (asset.width && ax + tileSize > asset.width) continue;
-    if (asset.height && ay + tileSize > asset.height) continue;
+    const value = cells[i];
     const col = i % mapWidth;
     const row = (i - col) / mapWidth;
     const dx = originX + col * tileSize - scrollX;
     const dy = originY + row * tileSize - scrollY;
+    if (isExplicitEmptyCell(value)) {
+      // Explicit empty cell: punch the base map out, like the ROM's blank tile.
+      context.clearRect(dx, dy, tileSize, tileSize);
+      continue;
+    }
+    const atlasIdx = tilesetAtlasIndex(value);
+    if (atlasIdx === null) continue;
+    const ax = (atlasIdx % cols) * tileSize;
+    const ay = Math.floor(atlasIdx / cols) * tileSize;
+    if (asset.width && ax + tileSize > asset.width) continue;
+    if (asset.height && ay + tileSize > asset.height) continue;
+    context.clearRect(dx, dy, tileSize, tileSize);
     context.drawImage(
       asset.source,
       ax,
@@ -405,51 +416,6 @@ function drawResizeHandle(
   context.strokeRect(x - half, y - half, RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
 }
 
-function decodePpmP3(content: string): ImageData | null {
-  const cleaned = content
-    .replace(/\r/g, "")
-    .split("\n")
-    .map((line) => line.replace(/#.*$/, "").trim())
-    .filter((line) => line.length > 0)
-    .join(" ")
-    .trim();
-  if (!cleaned.startsWith("P3 ")) {
-    return null;
-  }
-
-  const tokens = cleaned.split(/\s+/);
-  if (tokens.length < 4) {
-    return null;
-  }
-
-  const width = Number(tokens[1]);
-  const height = Number(tokens[2]);
-  const maxValue = Number(tokens[3]);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return null;
-  }
-  if (!Number.isFinite(maxValue) || maxValue <= 0) {
-    return null;
-  }
-
-  const expectedComponents = width * height * 3;
-  const values = tokens.slice(4, 4 + expectedComponents).map((token) => Number(token));
-  if (values.length !== expectedComponents || values.some((value) => !Number.isFinite(value))) {
-    return null;
-  }
-
-  const pixels = new Uint8ClampedArray(width * height * 4);
-  for (let index = 0; index < width * height; index += 1) {
-    const sourceOffset = index * 3;
-    const targetOffset = index * 4;
-    pixels[targetOffset] = Math.round((values[sourceOffset] / maxValue) * 255);
-    pixels[targetOffset + 1] = Math.round((values[sourceOffset + 1] / maxValue) * 255);
-    pixels[targetOffset + 2] = Math.round((values[sourceOffset + 2] / maxValue) * 255);
-    pixels[targetOffset + 3] = 255;
-  }
-
-  return new ImageData(pixels, width, height);
-}
 
 export default function ViewportPanel({
   showWorkspaceTabs = true,
@@ -467,6 +433,9 @@ export default function ViewportPanel({
     hwStatus,
     emulatorLoaded,
     setEmulatorLoaded,
+    emulatorRomIdentity,
+    lastJoypadRequest,
+    lastJoypadAck,
     selectedEntityId,
     setSelectedEntityId,
     updateEntity,
@@ -509,18 +478,25 @@ export default function ViewportPanel({
   const sceneRulerTopRef = useRef<HTMLCanvasElement>(null);
   const sceneRulerLeftRef = useRef<HTMLCanvasElement>(null);
   const [sceneStageSize, setSceneStageSize] = useState({ width: 0, height: 0 });
+  const [renderedFrameCount, setRenderedFrameCount] = useState(0);
   const stopLoopRef = useRef<(() => void) | null>(null);
+  const renderedFrameCounterRef = useRef(0);
   const loopStartingRef = useRef(false);
   const loopTokenRef = useRef(0);
   const activeTabRef = useRef(activeViewportTab);
   const pausedRef = useRef(emulPaused);
   const joypadRef = useRef<JoypadState>(JOYPAD_DEFAULT);
+  const joypadPlatformRef = useRef<"megadrive" | "snes">("megadrive");
+  joypadPlatformRef.current = activeTarget === "snes" ? "snes" : "megadrive";
+  const joypadSeqRef = useRef(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioGainRef = useRef<GainNode | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const audioUnlistenRef = useRef<(() => void) | null>(null);
   const audioQueueRef = useRef<QueuedAudioChunk[]>([]);
   const assetCacheRef = useRef<Map<string, ViewportAssetCacheEntry>>(new Map());
+  // Fallback Image() e benigno (assets acabam renderizando); um unico aviso evita
+  // poluir o console com uma linha por asset em cenas importadas densas.
   const dragRef = useRef<{
     mode: "move" | "resize";
     entityId: string;
@@ -578,7 +554,8 @@ export default function ViewportPanel({
   const [showStagingOverlay, setShowStagingOverlay] = useState(false);
   const [showViewportWarnings, setShowViewportWarnings] = useState(false);
   const [showSceneNavigator, setShowSceneNavigator] = useState(false);
-  const [showCommandDock, setShowCommandDock] = useState(true);
+  // The floating composition card covers the scene; the guided mode starts with it closed.
+  const [showCommandDock, setShowCommandDock] = useState(() => loadShellPersona() !== "guiado");
   const [showKeyColor, setShowKeyColor] = useState(false);
   const [guideSnap, setGuideSnap] = useState(true);
   const [gameViewLight, setGameViewLight] = useState(false);
@@ -1245,7 +1222,6 @@ export default function ViewportPanel({
 
       const cacheEntry: ViewportAssetCacheEntry = { status: "loading" };
       assetCacheRef.current.set(absolutePath, cacheEntry);
-      const assetUrl = convertFileSrc(absolutePath);
       const markLoaded = (source: CanvasImageSource, width: number, height: number) => {
         assetCacheRef.current.set(absolutePath, {
           status: "loaded",
@@ -1269,7 +1245,7 @@ export default function ViewportPanel({
         assetCacheRef.current.set(absolutePath, { status, errorMessage: fullMessage });
         setAssetCacheVersion((current) => current + 1);
       };
-      const loadImageElement = (imageSrc: string, options?: { revokeOnLoad?: boolean; fallbackToAssetUrl?: boolean }) => {
+      const loadImageElement = (imageSrc: string, options?: { revokeOnLoad?: boolean }) => {
         const image = new Image();
         image.onload = () => {
           if (options?.revokeOnLoad && typeof URL.revokeObjectURL === "function") {
@@ -1281,30 +1257,17 @@ export default function ViewportPanel({
           if (options?.revokeOnLoad && typeof URL.revokeObjectURL === "function") {
             URL.revokeObjectURL(imageSrc);
           }
-          if (options?.fallbackToAssetUrl && imageSrc !== assetUrl) {
-            loadImageElement(assetUrl);
-            return;
-          }
           markFailure("error", "Decode/draw Image falhou no WebView.");
         };
         image.src = imageSrc;
       };
 
-      if (relativePath.toLowerCase().endsWith(".ppm")) {
-        void fetch(assetUrl)
-          .then((response) => {
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}`);
-            }
-            return response.text();
-          })
-          .then((content) => {
-            const imageData = decodePpmP3(content);
-            if (!imageData) {
-              throw new Error("PPM P3 invalido");
-            }
+      if (isPpmPath(relativePath)) {
+        // Canonical path: project bytes over IPC + shared P6/P3 decoder (WebKit cannot
+        // decode PPM through asset://).
+        void loadProjectPpmImageData(activeProjectDir, relativePath)
+          .then((imageData) => {
             const processed = applyKeyColorTransparency(imageData, { showKeyColor }).imageData;
-
             const canvas = document.createElement("canvas");
             canvas.width = processed.width;
             canvas.height = processed.height;
@@ -1313,26 +1276,31 @@ export default function ViewportPanel({
               throw new Error("Canvas indisponivel");
             }
             context.putImageData(processed, 0, 0);
-
             markLoaded(canvas, canvas.width, canvas.height);
           })
           .catch((err) => {
             const detail = describeError(err);
-            const status = detail.includes("HTTP 404") ? "missing" : "error";
-            markFailure(status, `PPM fetch falhou: ${detail}`);
+            const status = /not found|nao encontrad|No such file|os error 2/i.test(detail) ? "missing" : "error";
+            markFailure(status, `PPM falhou: ${detail}`);
           });
 
         return cacheEntry;
       }
 
-      void fetch(assetUrl)
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-          }
-          return response.blob();
-        })
+      // Use the same project-byte IPC boundary as PPM. An Image loaded through
+      // asset:// can paint successfully but taint the scene canvas in WebKit.
+      void readProjectAssetBytes(activeProjectDir, relativePath)
+        .then((bytes) => new Blob([Uint8Array.from(bytes)]))
         .then((blob) => {
+          const loadBlobImage = () => {
+            if (typeof URL.createObjectURL === "function") {
+              loadImageElement(URL.createObjectURL(blob), {
+                revokeOnLoad: true,
+              });
+              return;
+            }
+            markFailure("error", "WebView nao oferece createImageBitmap nem URL.createObjectURL.");
+          };
           if (typeof createImageBitmap === "function") {
             return createImageBitmap(blob).then((bitmap) => {
               const canvas = document.createElement("canvas");
@@ -1353,30 +1321,20 @@ export default function ViewportPanel({
               context.putImageData(processed.imageData, 0, 0);
               bitmap.close?.();
               markLoaded(canvas, canvas.width, canvas.height);
+            }).catch(() => {
+              // WebKit may reject otherwise valid PNG variants in createImageBitmap.
+              // Retain the IPC bytes; asset:// Image() would taint
+              // the viewport canvas and make its pixels unreadable to the editor.
+              loadBlobImage();
             });
           }
 
-          if (typeof URL.createObjectURL === "function") {
-            loadImageElement(URL.createObjectURL(blob), {
-              revokeOnLoad: true,
-              fallbackToAssetUrl: true,
-            });
-            return;
-          }
-
-          loadImageElement(assetUrl);
+          loadBlobImage();
         })
         .catch((err) => {
           const detail = describeError(err);
-          if (detail.includes("HTTP 404")) {
-            markFailure("missing", `fetch retornou 404 para ${assetUrl}.`);
-            return;
-          }
-          logMessage(
-            "warn",
-            `[Viewport] fetch do asset '${relativePath}' falhou (${detail}); tentando fallback Image().`
-          );
-          loadImageElement(assetUrl);
+          const status = /not found|nao encontrad|No such file|os error 2/i.test(detail) ? "missing" : "error";
+          markFailure(status, `IPC de asset falhou: ${detail}`);
         });
       return cacheEntry;
     },
@@ -1562,6 +1520,11 @@ export default function ViewportPanel({
     imageData.data.set(new Uint8Array(payload.rgba));
     context.putImageData(imageData, 0, 0);
 
+    renderedFrameCounterRef.current += 1;
+    if (renderedFrameCounterRef.current % 10 === 0) {
+      setRenderedFrameCount(renderedFrameCounterRef.current);
+    }
+
     const now = performance.now();
     if (frameTimingRef.current.lastFrameAt > 0) {
       const deltaMs = now - frameTimingRef.current.lastFrameAt;
@@ -1572,6 +1535,11 @@ export default function ViewportPanel({
     }
     frameTimingRef.current.lastFrameAt = now;
   }, []);
+
+  useEffect(() => {
+    renderedFrameCounterRef.current = 0;
+    setRenderedFrameCount(0);
+  }, [emulatorRomIdentity?.sha256]);
 
   const clearAudioQueue = useCallback(() => {
     audioQueueRef.current = [];
@@ -1595,6 +1563,17 @@ export default function ViewportPanel({
       right[index] = chunk.right[chunk.offset] ?? 0;
       chunk.offset += 1;
     }
+    let nonZero = 0;
+    let peak = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      const magnitude = Math.max(Math.abs(left[index]), Math.abs(right[index]));
+      if (magnitude > 0) nonZero += 1;
+      if (magnitude > peak) peak = magnitude;
+    }
+    recordAudioOutput({
+      addRendered: { frames: left.length, nonZero, peak },
+      contextState: audioContextRef.current?.state ?? null,
+    });
   }, []);
 
   const disposeAudioPlayback = useCallback(() => {
@@ -1649,6 +1628,7 @@ export default function ViewportPanel({
       gainNode.connect(context.destination);
 
       audioContextRef.current = context;
+      recordAudioOutput({ contextSampleRate: context.sampleRate, muted: audioMuted });
       audioGainRef.current = gainNode;
       audioProcessorRef.current = processor;
 
@@ -1671,10 +1651,14 @@ export default function ViewportPanel({
 
     const left = new Float32Array(frameCount);
     const right = new Float32Array(frameCount);
+    let nonZero = 0;
     for (let index = 0; index < frameCount; index += 1) {
       left[index] = (payload.samples[index * 2] ?? 0) / 32768;
       right[index] = (payload.samples[(index * 2) + 1] ?? 0) / 32768;
+      if (left[index] !== 0 || right[index] !== 0) nonZero += 1;
     }
+    recordAudioOutput({ addReceived: { frames: frameCount, nonZero } });
+    recordReceivedAudioSamples(payload.samples, payload.sample_rate);
 
     audioQueueRef.current.push({ left, right, offset: 0 });
     const maxQueuedFrames = Math.max(
@@ -1722,6 +1706,10 @@ export default function ViewportPanel({
   const startEmulatorLoop = useCallback(
     (logStartup: boolean) => {
       if (!emulatorLoaded || loopStartingRef.current || stopLoopRef.current) return;
+      // Sessão carregada pausada não inicia o loop livre: o primeiro frame só
+      // executa via controle visível (Step/Retomar). Sem este gate, uma carga
+      // programática pausada teria frames fantasma antes da primeira ação.
+      if (pausedRef.current) return;
 
       const token = loopTokenRef.current + 1;
       loopTokenRef.current = token;
@@ -1986,6 +1974,53 @@ export default function ViewportPanel({
   useEffect(() => {
     if (activeViewportTab !== "game") return;
 
+    // A confirmação só é registrada quando o backend responde `ok: true`.
+    // `emulator_send_input` sinaliza falha por valor resolvido, não por
+    // rejeição, então tratar apenas o catch deixaria recusa passar como
+    // sucesso. A sequência descarta ack atrasado de transição anterior.
+    function sendJoypad(updated: JoypadState) {
+      // A sessão é capturada aqui, no fechamento do envio: se um stop ou uma
+      // recarga de ROM ocorrer antes da resolução, a resposta chega carregando
+      // a época antiga e é descartada pelo store.
+      const inputState = useEditorStore.getState();
+      const sessionId = inputState.joypadSessionId;
+      if (!sessionId || inputState.joypadSessionHold) {
+        // Envio durante carga/stop: bloqueado e contado — nunca registrado
+        // como request nem aceito como ack na janela de transição.
+        inputState.recordJoypadBlocked();
+        return;
+      }
+      const seq = (joypadSeqRef.current += 1);
+      const snapshot: Record<string, boolean> = { ...updated };
+      useEditorStore.getState().recordJoypadRequest(sessionId, seq, snapshot);
+      // A época do core vai junto: se uma recarga acontecer no meio do voo,
+      // o backend RECUSA (ok: false) em vez de aplicar input ao core novo.
+      emulatorSendInput(updated, useEditorStore.getState().coreEpoch ?? undefined).then(
+        (result) => {
+          if (result?.ok) {
+            useEditorStore.getState().recordJoypadAck(sessionId, seq, snapshot);
+          } else {
+            useEditorStore
+              .getState()
+              .recordJoypadSendError(
+                sessionId,
+                seq,
+                result?.message || "emulator_send_input retornou ok: false",
+              );
+          }
+        },
+        (sendError: unknown) => {
+          useEditorStore
+            .getState()
+            .recordJoypadSendError(
+              sessionId,
+              seq,
+              sendError instanceof Error ? sendError.message : String(sendError),
+            );
+        },
+      );
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       if (
         !event.repeat &&
@@ -2001,20 +2036,20 @@ export default function ViewportPanel({
         return;
       }
 
-      const updated = keyToJoypad(joypadRef.current, event.code, true);
+      const updated = keyToJoypad(joypadRef.current, event.code, true, joypadPlatformRef.current);
       if (!updated) return;
 
       event.preventDefault();
       joypadRef.current = updated;
-      emulatorSendInput(updated).catch(() => {});
+      sendJoypad(updated);
     }
 
     function onKeyUp(event: KeyboardEvent) {
-      const updated = keyToJoypad(joypadRef.current, event.code, false);
+      const updated = keyToJoypad(joypadRef.current, event.code, false, joypadPlatformRef.current);
       if (!updated) return;
 
       joypadRef.current = updated;
-      emulatorSendInput(updated).catch(() => {});
+      sendJoypad(updated);
     }
 
     window.addEventListener("keydown", onKeyDown);
@@ -2451,9 +2486,19 @@ export default function ViewportPanel({
           const hasCells =
             Array.isArray(cellsArr) &&
             cellsArr.length === expectedCells &&
-            cellsArr.some((v) => (v | 0) > 0);
+            cellsArr.some((v) => v > 0);
           if (hasCells) {
-            // WYSIWYG: desenha cada célula pintada com slice real do tileset.
+            // Same as the ROM: the base map, then the edited cells on top.
+            drawRepeatedAsset(
+              context,
+              tilemapAsset,
+              bounds.x,
+              bounds.y,
+              bounds.width,
+              bounds.height,
+              tilemap.scroll_x ?? 0,
+              tilemap.scroll_y ?? 0
+            );
             drawTilemapCells(
               context,
               tilemapAsset,
@@ -2569,13 +2614,13 @@ export default function ViewportPanel({
           const hasCells =
             Array.isArray(cells) &&
             cells.length === expectedCells &&
-            cells.some((v) => (v | 0) > 0);
+            cells.some((v) => v > 0);
           context.save();
           context.globalAlpha = 0.82;
           if (hasCells) {
-            // WYSIWYG: renderiza célula-a-célula usando slices reais do tileset.
-            context.fillStyle = "rgba(148,226,213,0.05)";
-            context.fillRect(x, y, mapWidth, mapHeight);
+            // Same as the ROM: base map first, then the edited cells on top
+            // (value 0 = base shows through; explicit empty = blank cell).
+            context.drawImage(tilemapAsset.source, x, y, mapWidth, mapHeight);
             drawTilemapCells(
               context,
               tilemapAsset,
@@ -4479,6 +4524,7 @@ export default function ViewportPanel({
                 <button
                   key={tool.id}
                   type="button"
+                  data-testid={`viewport-tool-${tool.id}`}
                   onClick={() => setEditorMode(tool.id)}
                   className={`rounded px-2 py-1 text-[10px] font-semibold transition-all ${
                     editorMode === tool.id
@@ -4820,7 +4866,8 @@ export default function ViewportPanel({
                 }}
                 title="Clique para selecionar. Arraste para mover. Espaço+arraste ou botão do meio: pan. Ctrl+Scroll: zoom."
               />
-              {editorMode === "paint" && activeBrush?.kind === "tile" && activeScene ? (
+              {/* Guided mode docks the palette in the side panel instead of over the scene. */}
+              {editorMode === "paint" && activeBrush?.kind === "tile" && activeScene && loadShellPersona() !== "guiado" ? (
                 <div
                   data-testid="viewport-tile-paint-flow-strip"
                   className="absolute z-[6] flex max-h-[min(42vh,340px)] w-full max-w-full flex-col overflow-hidden rounded border border-[#313244] bg-[#11111b]/96 shadow-lg"
@@ -4871,6 +4918,7 @@ export default function ViewportPanel({
                   {activeProjectDir && activeTilemapEntityForPalette?.components.tilemap ? (
                     <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#0b0f19]">
                       <TilePalette
+                        projectDir={activeProjectDir}
                         tilesetAbsolutePath={resolveProjectAssetPath(
                           activeProjectDir,
                           activeTilemapEntityForPalette.components.tilemap.tileset
@@ -5218,7 +5266,25 @@ export default function ViewportPanel({
                   </p>
                 </div>
               )}
-            {activeScene && sceneAssetHealth.referenced > 0 && <SceneAssetHealthBadge health={sceneAssetHealth} />}
+            {activeScene && sceneAssetHealth.referenced > 0 && (
+              <span
+                data-testid="viewport-asset-health-summary"
+                data-ready={sceneAssetHealth.ready}
+                data-referenced={sceneAssetHealth.referenced}
+                data-failed={sceneAssetHealth.failed}
+                data-missing={sceneAssetHealth.missing}
+                data-loading={sceneAssetHealth.loading}
+                className="sr-only"
+              >
+                {sceneAssetHealth.compactSummary}
+              </span>
+            )}
+            {/* Shown only when something needs attention, so it never covers a healthy scene. */}
+            {activeScene &&
+              sceneAssetHealth.referenced > 0 &&
+              (sceneAssetHealth.failed > 0 || sceneAssetHealth.missing > 0) && (
+                <SceneAssetHealthBadge health={sceneAssetHealth} />
+              )}
             <div className="absolute bottom-0 left-0 right-0 shrink-0 border-t border-[#313244] bg-[#181825]/90 px-2 py-1">
             <span className="select-none text-[10px] text-[#6c7086]">
               {activeScene
@@ -5397,6 +5463,22 @@ export default function ViewportPanel({
                 </span>
               )}
               <span>Z=A | X=B | C=C | Enter=Start | Setas=D-Pad | R=Rewind (pausado)</span>
+            </div>
+            <div
+              data-testid="viewport-emulator-identity"
+              data-rom-path={emulatorRomIdentity?.path ?? ""}
+              data-rom-sha256={emulatorRomIdentity?.sha256 ?? ""}
+              data-rom-size={emulatorRomIdentity?.size ?? 0}
+              data-core-label={emulatorRomIdentity?.coreLabel ?? ""}
+              data-core-path={emulatorRomIdentity?.corePath ?? ""}
+              data-rendered-frames={renderedFrameCount}
+              data-last-input-request-seq={lastJoypadRequest?.seq ?? 0}
+              data-last-input-ack-seq={lastJoypadAck?.seq ?? 0}
+              className="break-all rounded border border-[#313244] bg-[#0b1020] px-2 py-1 font-mono text-[9px] text-[#94a3b8]"
+            >
+              {emulatorRomIdentity
+                ? `${emulatorRomIdentity.sourceLabel} · ROM ${emulatorRomIdentity.sha256} · ${emulatorRomIdentity.size} bytes · ${emulatorRomIdentity.coreLabel} · frames renderizados ${renderedFrameCount} · input ACK ${lastJoypadAck?.seq ?? 0}`
+                : "Identidade da ROM ainda não observada"}
             </div>
           </div>
         )}

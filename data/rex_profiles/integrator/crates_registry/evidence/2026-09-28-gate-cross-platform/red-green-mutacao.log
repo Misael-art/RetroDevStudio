@@ -1,0 +1,27 @@
+# Prova de mutacao do reparo cross-platform da gate check:tree (SHA consultado a556e86, run 36373219732).
+# Leitura: no Linux as assercoes comportamentais nao podem falhar (path.join ja imprime '/'); as duas
+# assercoes estaticas da gate sao as que mordem aqui. No Windows (job validate) as comportamentais
+# scripts/check-tree-crates.test.mjs:77 e :96 sao as que pegam — por isso continuam estritas.
+
+## MUTACAO 1 — os dois caminhos exibidos voltam a ser compostos com path.join
+49:const REGISTRO_CRATES = path.join("crates", "registry.json");
+126:      const manifestoEsperado = path.join("crates", nome, "Cargo.toml");
+AssertionError: expected '#!/usr/bin/env node\n/**\n * check-tr…' not to match /const (REGISTRO_CRATES|manifestoEsper…/
+❯ scripts/check-tree-crates.test.mjs:168:21
+Test Files  1 failed (1)
+Tests  1 failed | 8 passed (9)
+
+## MUTACAO 2 — o manifesto declarado volta a passar por path.normalize (veredicto por SO)
+130:      if (pacote.manifesto && path.normalize(pacote.manifesto) !== manifestoEsperado) {
+AssertionError: expected '#!/usr/bin/env node\n/**\n * check-tr…' not to match /path\.normalize\(\s*pacote\.manifesto…/
+❯ scripts/check-tree-crates.test.mjs:175:21
+Test Files  1 failed (1)
+Tests  1 failed | 8 passed (9)
+
+## RESTAURADO — sha256 identico ao arquivo corrigido nas duas pernas
+f85120f6e3b605ad07288c5a0e14eac8454375a21707a998c1aadfc2eec8479a  /tmp/check-tree.cjs.fixed
+f85120f6e3b605ad07288c5a0e14eac8454375a21707a998c1aadfc2eec8479a  scripts/check-tree.cjs
+
+## GREEN — estado corrigido
+Test Files  1 passed (1)
+Tests  9 passed (9)

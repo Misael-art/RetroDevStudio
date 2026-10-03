@@ -89,16 +89,37 @@ export async function reloadSceneFromDisk(projectDir: string, scope: string): Pr
   }
 }
 
+/**
+ * Debounced editors (e.g. the NodeGraph) register how to commit their pending edit to the
+ * store. Saving flushes them first so a save never misses the edit made just before it.
+ */
+const pendingEditFlushers = new Set<() => void>();
+
+export function registerPendingEditFlusher(flush: () => void): () => void {
+  pendingEditFlushers.add(flush);
+  return () => {
+    pendingEditFlushers.delete(flush);
+  };
+}
+
+export function flushPendingEdits(): void {
+  for (const flush of [...pendingEditFlushers]) flush();
+}
+
 export async function persistActiveScene(
   projectDir: string,
   scope: string,
   successMessage?: string
 ): Promise<boolean> {
-  const { activeScene, activeScenePath, activeSceneSource, logMessage } = useEditorStore.getState();
+  flushPendingEdits();
+  const { activeScene, activeScenePath, activeSceneSource, logMessage, sceneRevision, setSceneSaveState } =
+    useEditorStore.getState();
   if (!activeSceneSource || !activeScene) {
     return true;
   }
 
+  setSceneSaveState({ status: "saving", message: null, at: Date.now(), revision: null });
+  let failure: string;
   try {
     const result = await saveSceneData(
       projectDir,
@@ -108,18 +129,22 @@ export async function persistActiveScene(
     );
     if (result.ok) {
       clearSceneDraft(projectDir);
+      setSceneSaveState({ status: "saved", message: null, at: Date.now(), revision: sceneRevision });
       if (successMessage) {
         logMessage("success", `[${scope}] ${successMessage}`);
       }
       return true;
     }
-
-    logMessage("error", `[${scope}] ${result.message}`);
+    failure = result.message;
   } catch (error) {
-    logMessage("error", `[${scope}] ${describeError(error)}`);
+    failure = describeError(error);
   }
 
-  await reloadSceneFromDisk(projectDir, scope);
+  // A failed save must never discard the work in memory: no reload from disk. The
+  // editor keeps the scene, a local draft protects it, and the error is shown.
+  saveActiveSceneDraft(projectDir);
+  setSceneSaveState({ status: "failed", message: failure, at: Date.now(), revision: null });
+  logMessage("error", `[${scope}] Falha ao salvar: ${failure}. As alteracoes continuam no editor (rascunho local mantido).`);
   return false;
 }
 

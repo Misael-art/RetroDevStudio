@@ -1,0 +1,13 @@
+   Compiling rex-mugen v0.1.0 (/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/crates/rex-mugen)
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.35s
+     Running unittests src/lib.rs (target/debug/deps/app_lib-87d5738285bb7ab2)
+
+running 2 tests
+test core::mugen_profile::tests::mugen_warden_real_build_and_run ... warden idle [("w1", 20)]
+warden depois de A [("w1", 1), ("w2_hv", 2), ("w1", 4), ("w0", 4), ("w1", 19)]
+ok
+test core::mugen_profile::tests::warden_report_is_all_direct ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 841 filtered out; finished in 1.07s
+

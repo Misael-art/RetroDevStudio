@@ -1,0 +1,333 @@
+{
+ "schema": "rex-e2e-evidence-manifest/v1",
+ "promovido_em": "2026-09-27",
+ "mission": "Entregas 2 e 3 do briefing do operador na frente aPLib: tornar o índice 0 expressável pela barra (o campo reescrevia 0 para 1 por `min=1` + `Number(value) || 1`) e reexecutar a prova afetada, o BPS e o efeito previsto no core, reconfirmando espaço e hashes em vez de copiá-los.",
+ "verdict": "PASS — o índice 0 é digitado na barra, mantém \"0\" no campo do DOM, entra na fila, completa a transação e a cópia escrita pela barra é byte a byte 69389ec2…, a mesma que a perna 3 executou no desempacotador do próprio jogo. As 5 formas inválidas têm queixa própria com fila vazia asserida; os índices 1..15 do mesmo pixel seguem todos recusados com excessive_output (lado diferencial). A edição 5→4 do passo 5 continua verde como regressão (cópia 80249128…, BPS 58ae4f0b… reaplicado). Nada promove maturidade: sem merge, sem release, produto continua Experimental.",
+ "git": {
+  "branch": "codex/rex-integrator-aplib-decode",
+  "codigo_sob_teste": "ad3ff57",
+  "commits_desta_frente": {
+   "entrega_1_registro_da_matriz": "794033e",
+   "conserto_na_UI": "af5d5d0",
+   "pino_no_codec_e_varredura_v2": "d769629",
+   "regressoes_no_cenario_webdriver": "eae825a",
+   "harness_assentado_e_duracoes": "ad3ff57"
+  },
+  "push_e_ci": "o push desta série e a consulta pontual do CI no SHA final estão registrados na célula 'ENTREGAS 2 e 3' de docs/rex_profiles/ROUND_STATE.md e no checkpoint correspondente de docs/06_AI_MEMORY_BANK.md; este pacote entra no commit de evidência da mesma série.",
+  "fora_da_arvore_enquanto_os_testes_rodaram": [
+   "data/rex_profiles/integrator/aplib/evidence/2026-09-27-entrega2-indice-0-na-barra/* (novo pacote)",
+   "docs/rex_profiles/ROUND_STATE.md (célula das entregas 2 e 3 + a célula corrente da matriz)",
+   "docs/06_AI_MEMORY_BANK.md (checkpoint de fim de sessão)"
+  ],
+  "nao_rastreados_preservados": [
+   ".mimosa/",
+   "APJ-unpack",
+   "a.out",
+   "apultra-decode",
+   "data/canonical-local-2026-09-21/",
+   "scripts/rex_profiles/integrator/aplib/__pycache__/",
+   "src-tauri/.mimosa/",
+   "src-tauri/src-tauri/"
+  ]
+ },
+ "binario_sob_teste": {
+  "app_desktop": {
+   "path": "src-tauri/target-test/debug/retro-dev-studio",
+   "sha256": "d192fd51db378827a780bcf5c5f3f57b2fc6ee81f245387f1490ff1a1380a53d",
+   "nota": "build da corrida 3 (10:52Z), exercitado pelas corridas 3 e 4; código-fonte idêntico ao das corridas 1 e 2, que usaram o build anterior de 10:34Z cujo SHA não foi registrado. O conserto é só de UI (bundle JS) e de testes; nenhuma mudança de produto depois disso."
+  },
+  "harness_de_teste": {
+   "path": "src-tauri/target-test/debug/deps/app_lib-716403bf8cac2e87",
+   "nota": "o mesmo binário de teste produziu o log `cargo-sweep-ignorado-final.log` (7 passed, 0 failed, --ignored) e os relatórios rex05/rex06 desta data."
+  }
+ },
+ "core_sob_teste": {
+  "label": "Genesis Plus GX v1.7.4 46a5521",
+  "path": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+  "sha256": "07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1"
+ },
+ "host": {
+  "state": "READY",
+  "fingerprint": "60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2",
+  "gerado_em": "2026-09-27T11:14:01.970Z (npm run host:certify, rc=0; log `host-certify-2026-09-27.log`)",
+  "confirmado_em": "src-tauri/target-test/validation/host-readiness.json"
+ },
+ "rom": {
+  "policy": "BYOR — a ROM comercial NÃO é versionada neste pacote nem no repositório; só os hashes viajam. Corpus somente-leitura em data/canonical-local-2026-09-21/corpus, nunca tratável como dependência provisionável, e o cenário rex-aplib-byor-effect não roda no CI.",
+  "original_path": "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+  "original_sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+  "bytes": 917504,
+  "identidade_conferida": "o cenário re-hash a ROM antes de cada corrida e recusa qualquer outra (asserção `ROM inesperada`); as corridas 1 a 4 desta célula rodaram todas com 558bea6c…"
+ },
+ "recurso": {
+  "header_tileset": "0x21b20",
+  "stream_offset": "0x2e12a",
+  "codec": "aplib (variante raw SGDK 2.11, sem header \"AP\\0\")",
+  "codec_anunciado_pela_barra": "2e12a|0x2e12a — aplib · 100 tiles (stream 938 B)",
+  "tiles": 100,
+  "plain_bytes": 3200,
+  "slot_bytes": 938
+ },
+ "edicao_do_indice_0": {
+  "pixel": {
+   "tile": 53,
+   "row": 0,
+   "col": 4,
+   "indice_original": 5,
+   "indice_novo": 0
+  },
+  "custo_bytes": 937,
+  "folga_bytes": 1,
+  "copia_sha256": "69389ec2b400220c7a069e4c36326ca3c26d81e85ff0ab81bf798dc9ae4038ac",
+  "copia_gerada_por": "apply_resource_edit chamada pela BARRA (comando Tauri), caminho anunciado no desfecho e re-hashed em disco pelo cenário",
+  "patch_bps_sha256": "8bf6d3df454eb8354464a77f7863ac40554f8935f709e1531c4ddbaf5ce7dd86",
+  "patch_bps_bytes": 853,
+  "bytes_diferentes_na_copia": 781,
+  "bytes_fora_do_slot": 0,
+  "valor_no_campo_apos_digitar_0": "0",
+  "recuperado_em": "re-medido em 2026-09-27 (não copiado do registro): custo e cópia por `cargo test --lib byor_aplib -- --ignored --nocapture` (log `cargo-sweep-ignorado-final.log`), e a mesma cópia conferida byte a byte pelo WebDriver nas corridas 2 e 4",
+  "execucao_no_jogo": "é a cópia da perna 3: rex05 executou exatamente 69389ec2… no desempacotador do próprio jogo (238 pixels em 119 frames, coordenadas [[212,200],[284,128]], primeiro frame 59) — ver `rex05-core-copia-indice-0-report.json`, reexecutado hoje às 10:29Z"
+ },
+ "guarda_anti_descarte_silencioso": {
+  "rex-resource-edit-row=8": {
+   "aviso": "linha 8 fora do tile: use um valor inteiro de 0 a 7. A fila atual foi preservada.",
+   "fila_ficou_vazia": true
+  },
+  "rex-resource-paint-index=16": {
+   "aviso": "índice 16 fora da paleta: use um inteiro de 0 a 15. O índice 0 é o que o VDP lê como transparente; mudar o índice de um pixel não edita a cor RGB de nenhuma entrada da paleta. A fila atual foi preservada.",
+   "fila_ficou_vazia": true
+  },
+  "rex-resource-paint-index=-1": {
+   "aviso": "índice -1 fora da paleta: use um inteiro de 0 a 15. O índice 0 é o que o VDP lê como transparente; mudar o índice de um pixel não edita a cor RGB de nenhuma entrada da paleta. A fila atual foi preservada.",
+   "fila_ficou_vazia": true
+  },
+  "rex-resource-paint-index=1.5": {
+   "aviso": "índice 1.5 não é um inteiro: use um inteiro de 0 a 15. O índice 0 é o que o VDP lê como transparente; mudar o índice de um pixel não edita a cor RGB de nenhuma entrada da paleta. A fila atual foi preservada.",
+   "fila_ficou_vazia": true
+  },
+  "rex-resource-paint-index=(vazio)": {
+   "aviso": "campo de índice vazio: use um inteiro de 0 a 15. O índice 0 é o que o VDP lê como transparente; mudar o índice de um pixel não edita a cor RGB de nenhuma entrada da paleta. A fila atual foi preservada.",
+   "fila_ficou_vazia": true
+  }
+ },
+ "lado_diferencial": {
+  "afirmacao": "os outros 14 índices do MESMO pixel (1..15, exceto o 5 que é o valor original) foram todos recusados pela transação com excessive_output na mesma corrida; logo o 0 aplicado não é outro valor disfarçado",
+  "indices_recusados": [
+   1,
+   2,
+   3,
+   4,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15
+  ],
+  "contagem": 14
+ },
+ "regressao_do_alvo_do_passo_5": {
+  "edicao": {
+   "tile": 53,
+   "row": 7,
+   "col": 5,
+   "indice_original": 5,
+   "indice_novo": 4
+  },
+  "copia_sha256": "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce",
+  "patch_bps_sha256": "58ae4f0b5eb81ebb88579741738a473f144369dfeb1723aad9c8bb0c731331b0",
+  "bytes_diferentes": 800,
+  "bytes_fora_do_slot": 0,
+  "preservados": 163,
+  "patch_reaplicado_sha256": "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce",
+  "execucao_no_jogo": "rex06: 232 pixels em 116 frames, exatamente as coordenadas previstas [[213,207],[285,135]] — ver `rex06-core-copia-da-barra-report.json`, reexecutado hoje às 10:29Z"
+ },
+ "varredura_v2": {
+  "schema": "rex-aplib-capacidade-da-barra/v2",
+  "rom_sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+  "duracao_ms": 82466,
+  "tentativas_totais": 10740,
+  "por_recurso": {
+   "0x2e12a": {
+    "slot_bytes": 938,
+    "piso_indices_da_barra": 932,
+    "piso_sem_indice_0": 934,
+    "cabiveis_na_barra": 1694,
+    "cabiveis_sem_indice_0": 1619,
+    "tentativas": 3930,
+    "pixels_amostrados": 262
+   },
+   "0x2e4d4": {
+    "slot_bytes": 4485,
+    "piso_indices_da_barra": 4540,
+    "piso_sem_indice_0": 4540,
+    "cabiveis_na_barra": 0,
+    "cabiveis_sem_indice_0": 0,
+    "tentativas": 1890,
+    "pixels_amostrados": 126
+   },
+   "0x2f65a": {
+    "slot_bytes": 7420,
+    "piso_indices_da_barra": 7439,
+    "piso_sem_indice_0": 7439,
+    "cabiveis_na_barra": 0,
+    "cabiveis_sem_indice_0": 0,
+    "tentativas": 2040,
+    "pixels_amostrados": 136
+   },
+   "0x2cd94": {
+    "slot_bytes": 609,
+    "piso_indices_da_barra": 607,
+    "piso_sem_indice_0": 607,
+    "cabiveis_na_barra": 78,
+    "cabiveis_sem_indice_0": 77,
+    "tentativas": 2880,
+    "pixels_amostrados": 192
+   }
+  },
+  "o_que_mudou": "a varredura contava 1..15, que era o alcance real da barra defeituosa; agora mede o domínio 0..15 (`piso_indices_da_barra`, `cabiveis_na_barra`) e o antigo 1..15 (`piso_sem_indice_0`, `cabiveis_sem_indice_0`) lado a lado. Em 0x2e12a o índice 0 abre +75 edições (1 694 vs 1 619) e em 0x2cd94 +1 (78 vs 77); 0x2e4d4 e 0x2f65a continuam 0 nos dois domínios.",
+  "higiene_de_mediacao": "o tile 53 era listado duas vezes (varredura completa de 64 pixels + amostra genérica (0,0)/(0,4) por tile); com sort_unstable + dedup as tentativas caem de 10 770 para 10 740 (−30 = 2 pixels duplicados × 15 índices) e os cabíveis de 0x2e12a de 1 695 para 1 694 — o único par duplicado que cabia era o do índice 0. Reproduzido: este JSON (10:04Z, árvore final) é idêntico ao obtido às 07:23Z em todos os campos exceto duracao_ms.",
+  "pino_do_teste": "no_tile_observado == [[0,4,937],[7,5,938],[7,7,938]], pin_cabiveis == vec![0], e cabiveis_sem_indice_0 == contagem das entradas com indice_novo >= 1"
+ },
+ "corridas_do_cenario": [
+  {
+   "id": "1",
+   "quando": "10:34Z",
+   "build": "build de 10:34Z (sha não registrado)",
+   "resultado": "FALHA de harness: campo rex-resource-paint-index ausente no momento do setPanelInput. Causa: a espera era por rex-resource-canvas, e o painel desmonta prévia e campo de índice juntos ao começar a re-decodagem — a sondagem pode ver o canvas do estado anterior."
+  },
+  {
+   "id": "2",
+   "quando": "10:45Z",
+   "build": "mesmo binário da corrida 1",
+   "resultado": "VERDE: 23 marcadores de passo no log (1-3, 4, 5a×5, 5b, 6a×14, 7) e o resumo impresso ao fim traz indice_0_no_campo \"0\", indice_0_sonda \"aplicado\" e indice_0_copia 69389ec2b400220c — cópia conferida em disco, 14 recusas, 5 recusas de guarda, alvo 5→4 com 80249128…. A linha E2E_RC=0 do wrapper só está registrada no log da corrida 4.",
+   "relatorio": "rex-aplib-byor-effect-relatorio-run2.json"
+  },
+  {
+   "id": "3",
+   "quando": "10:52Z",
+   "build": "d192fd51… (build completo novo)",
+   "resultado": "FALHA de orçamento: passou 5a, 5b e os 14 índices de 6a; o desfecho do §6b estourou os 60 s antigos com a edição na fila e sem erro no painel. CAUSA NÃO ESTABELECIDA — a mesma aplicação custa ~7,4 s cronometrados."
+  },
+  {
+   "id": "4",
+   "quando": "10:58Z",
+   "build": "d192fd51… (o mesmo da corrida 3)",
+   "resultado": "VERDE, rc=0, com duracoes_aplicacao registradas (7 621 ms no índice 0, 272-327 ms nas 14 recusas, 7 400 ms no alvo).",
+   "relatorio": "rex-aplib-byor-effect-relatorio-run4.json"
+  }
+ ],
+ "gates": {
+  "npm_run_check_tree": "rc=0",
+  "npm_run_lint": "rc=0",
+  "npx_tsc_noEmit": "rc=0",
+  "npm_test": "706 passed, 0 failed, 6 skipped (arquivo do painel: 10 testes; invariante anterior 702, +4 = as regressões do índice 0)",
+  "invo_cargo": "src-tauri/.cargo/config.toml fixa target-dir=target-test RELATIVO ao diretório de invocação: cd src-tauri && cargo ... cai em src-tauri/target-test, enquanto a forma da raiz (cargo ... --manifest-path src-tauri/Cargo.toml) cai em src-tauri/target — medido com cargo metadata nos dois diretórios. O log gate-cargo-test.log (os 707 testes) mostra target-test/debug/deps/app_lib-716403bf8cac2e87, o mesmo binário deste manifesto em binario_sob_teste.harness_de_teste, então essa corrida é a de src-tauri; os logs de fmt e clippy não imprimem caminho e a forma exata dessas duas invocações não é decidível pela evidência promovida (o que muda é o diretório de alvo, não o veredito).",
+  "cargo_fmt_check": "rc=0",
+  "cargo_clippy_D_warnings": "rc=0 (rodado em src-tauri)",
+  "cargo_test_lib": "707 passed, 0 failed, 63 ignored (invariante anterior 706, +1 = o pino do índice 0 no codec)",
+  "cargo_test_lib_byor_aplib_ignored": "7 passed, 0 failed, 82,69 s (log `cargo-sweep-ignorado-final.log`)",
+  "npm_run_host_certify": "rc=0, state READY (log `host-certify-2026-09-27.log`)",
+  "um_rc_101_registrado_no_meio_da_serie": "erro de invoco: cargo rodado na raiz do repositório sem --manifest-path ('could not find Cargo.toml'); não é falha de código e os logs promovidos são das reexecuções corretas"
+ },
+ "limites": [
+  "é UM dos 4 recursos aPLib de UMA ROM BYOR: nada aqui alega cobertura do resto dos recursos, do jogo ou de hardware",
+  "a barra produz byte a byte a cópia que a perna 3 executou no core; o efeito em tela DO ÍNDICE 0 está provado por identidade de artefato, não por uma corrida nova desta cópia pela barra no emulador",
+  "o bit a bit da edição (nibble do pixel, vizinhos intactos, índice 0 sobrevivendo a re-codificação + decode) é conferido no lib contra o plain re-decodificado, não no WebDriver",
+  "o índice 0 é índice de paleta do pixel, lido como transparente pelo VDP no plano de tiles; nada aqui edita o RGB de uma entrada da paleta",
+  "0x2e4d4 e 0x2f65a continuam ineditáveis em 1 pixel no domínio inteiro 0..15 (piso 4 540 > slot 4 485; 7 439 > 7 420) — o conserto da UI não os alcança",
+  "a corrida 3 estourou um orçamento de 60 s num passo de ~7,4 s por motivo não estabelecido; o harness agora mede durações e o orçamento é 180 s, então uma repetição seria medida, não mascarada",
+  "execução sob o core do harness (Genesis Plus GX v1.7.4 46a5521), não em hardware nem no app distribuído",
+  "BYOR não é provisionável: cenário e aceites --ignored não rodam no CI; o CI atesta o contrato, não esta ROM",
+  "maturidade não promovida: produto continua Experimental; sem merge, sem release"
+ ],
+ "reproducao": [
+  "RDS_REX_RESOURCE_ROM=<caminho da ROM 558bea6c…> node scripts/e2e-tauri-build-run.mjs --scenario rex-aplib-byor-effect  (BYOR explícito; o cenário recusa outra ROM)",
+  "npm test  (os 10 testes de CompressedResourcePanel.test.tsx)",
+  "cd src-tauri && cargo test --lib byor_aplib -- --ignored --nocapture  (varredura v2 + o pino do índice 0 no codec)",
+  "cd src-tauri && cargo test --lib rex05_hamoopig_aplib -- --ignored --nocapture e cargo test --lib rex06_hamoopig_aplib -- --ignored --nocapture  (execução no desempacotador do jogo)"
+ ],
+ "politica_de_capturas": "nenhum PPM/quadro derivado da ROM comercial é versionado; os relatórios de core citam hashes de frames, e os PNG/PPM ficam em src-tauri/target-test/validation (descartável).",
+ "arquivos": {
+  "aplib-capacidade-da-barra-v2.json": {
+   "sha256": "3e71306679a234bc3f7a20886487d44b4e835bb7f218098aab9cafcd1470e8a0",
+   "bytes": 332559
+  },
+  "cargo-sweep-ignorado-final.log": {
+   "sha256": "ab10f5d950fd8fb0f47aa60f3921c89a284a92be1a5b76d91ed4b9c51857970c",
+   "bytes": 336324
+  },
+  "e2e-run1-1034Z-falha-campo-ausente.log": {
+   "sha256": "6873edfcd581be246ffdc6a6ff80e85bec83c72d33a54d8d7cb2cc1839870bb4",
+   "bytes": 4708
+  },
+  "e2e-run2-1045Z-verde.log": {
+   "sha256": "ffef2afd4d0f438824c3a7f07a4db0bfb1d398d5950ae0fbd791c7f51cafdfc4",
+   "bytes": 2512
+  },
+  "e2e-run3-1052Z-orcamento-estourado.log": {
+   "sha256": "4c458ebf06fd7b0e65953f2989562a18f14ae7adf0814b1f747d6da415243591",
+   "bytes": 6070
+  },
+  "e2e-run4-1058Z-verde-com-duracoes.log": {
+   "sha256": "23986cb09978ff8580b43307855c4d3cf5ed423639dd12a3a396dfc9aa47cd06",
+   "bytes": 2761
+  },
+  "gate-cargo-clippy.log": {
+   "sha256": "3a9cae5bf54be3cccbf003aedb0967fec8769a7b514f551e8649e0b241af3bd8",
+   "bytes": 179
+  },
+  "gate-cargo-fmt.log": {
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "bytes": 0
+  },
+  "gate-cargo-test.log": {
+   "sha256": "8c936a5b704b142540da3d038cabc9eb9beb7a02c0b3f65e3f513ddb6bcc7264",
+   "bytes": 86683
+  },
+  "gate-check-tree.log": {
+   "sha256": "97e11479abaf154f4db5501d0305879eae951a40bcd94b6c7dea286111f12f72",
+   "bytes": 152
+  },
+  "gate-lint.log": {
+   "sha256": "1382871e4de427be178b8312ca99c6f5425afb62d2d7d03d31913f87da312bee",
+   "bytes": 100
+  },
+  "gate-npm-test.log": {
+   "sha256": "b1e6e9e2083576522b3f53d8a530551268d4cf0e490b801b32a9a6d562bd7b0b",
+   "bytes": 126714
+  },
+  "gate-tsc.log": {
+   "sha256": "40194098c9e1378e1e6309a476ec448f9491e98fa0614b887595c1ff8f84cb05",
+   "bytes": 71
+  },
+  "gates-resumo.log": {
+   "sha256": "04c8122a04fb63dd2573c83c6bdceb6fe3e853a2788225afab117f2eb5fe843d",
+   "bytes": 292
+  },
+  "host-certify-2026-09-27.log": {
+   "sha256": "be5e580cc5f8dea83fcdda85ad2900e9ebc11ff6b1f7fb76effd6423e73dd4b5",
+   "bytes": 201911
+  },
+  "rex-aplib-byor-effect-relatorio-run2.json": {
+   "sha256": "b24b995f3d797d6721dc46a94fed156501d48f266371e492ebeae7a86103f259",
+   "bytes": 9152
+  },
+  "rex-aplib-byor-effect-relatorio-run4.json": {
+   "sha256": "9e018e06409614544e9eee330c7caa3bd71843e54cbfb408834487124c9cfea4",
+   "bytes": 10672
+  },
+  "rex05-core-copia-indice-0-report.json": {
+   "sha256": "44fa479f4b8d94f4e748c40576753ae78999ddc8353b775c48e4b0818e02fa68",
+   "bytes": 32250
+  },
+  "rex06-core-copia-da-barra-report.json": {
+   "sha256": "5bbfef755fd85e7a5e2238f267f22c7bc73eb22cad6b45ac360074ae575e4c9d",
+   "bytes": 4135
+  }
+ }
+}

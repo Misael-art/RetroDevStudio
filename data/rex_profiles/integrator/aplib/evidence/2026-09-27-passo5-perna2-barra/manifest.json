@@ -1,0 +1,183 @@
+{
+ "schema": "rex-e2e-evidence-manifest/v1",
+ "promoted_at": "2026-09-27",
+ "mission": "Objetivo do operador, passo 5 — fluxo de edição de um recurso real (BYOR) pela frente do produto, preservando LZ4W. Esta célula cobre a PERNA 2 (WebDriver: a barra chamando verificar → selecionar → prévia → aplicar → exportar BPS) e a PERNA 4 (o artefato que a barra escreveu executado pelo desempacotador do próprio jogo).",
+ "verdict": "PASS (pernas 2 e 4) — a interface edita o recurso aPLib real, o que ela escreve é conferido em bytes no disco (cópia, patch, reaplicação, incidência restrita ao slot), e esse mesmo bytes rodam no desempacotador do jogo sob o core produzindo exatamente as duas coordenadas previstas antes de executar. Perna 2 e perna 4 não promovem a linha aPLib da matriz: promoção de maturidade é vetada pela missão.",
+ "git": {
+  "branch": "codex/rex-integrator-aplib-decode",
+  "head_dos_testes": "8f2f3f1",
+  "commits_da_celula": {
+   "varredura_de_capacidade_lib": "7c65cd5",
+   "cenario_webdriver_perna_2": "ce6ed3c",
+   "execucao_no_core_perna_4": "8f2f3f1"
+  },
+  "commits_das_pernas_anteriores": { "perna_1": "5880a22", "perna_3": "d43fdde" },
+  "push": "este pacote e os dois checkpoints de docs entraram em `f633e07`, enviado sobre `94bfa81` (fast-forward, 0 atrás) sem alterar código de produto, de UI ou de teste; o CI consultado nesse SHA está registrado no checkpoint do passo 5 em `docs/rex_profiles/ROUND_STATE.md`",
+  "fora_da_arvore_enquanto_os_testes_rodaram": [
+   "data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna2-barra/* (novo pacote)",
+   "docs/rex_profiles/ROUND_STATE.md (checkpoint do passo 5 inteiro)",
+   "docs/06_AI_MEMORY_BANK.md (checkpoint de fim de sessão)"
+  ]
+ },
+ "binary_under_test": {
+  "app_desktop_perna_2": {
+   "path": "src-tauri/target-test/debug/retro-dev-studio",
+   "sha256": "7a52345d6635b5db68a4f6caccf1e93881afe7f9033769c41ea96b34cf530996",
+   "nota": "construído em 2026-09-27T06:27Z para a perna 2; a perna 2 e a perna 4 não alteraram código de produto nem de UI (só `#[cfg(test)]` e o harness WebDriver), então este é o binário exercitado pelo cenário."
+  },
+  "harness_de_teste_perna_4": {
+   "path": "src-tauri/target-test/debug/deps/app_lib-716403bf8cac2e87",
+   "sha256": "ec26ddae5b080f125ac9466f819200c362ac732c8c9ff03cf92e6e03140810e1",
+   "nota": "hash impresso no fim do log de gates, depois da reexecução pós-`cargo fmt`."
+  }
+ },
+ "core_under_test": {
+  "label": "Genesis Plus GX v1.7.4 46a5521",
+  "path": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+  "sha256": "07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1",
+  "confirmado_em": "src-tauri/target-test/validation/host-readiness.json (state READY, 2026-09-27T07:25:20Z, fingerprint 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2)"
+ },
+ "rom": {
+  "policy": "BYOR — a ROM comercial NÃO é versionada neste pacote nem no repositório; só os hashes viajam. Corpus somente-leitura em data/canonical-local-2026-09-21/corpus, nunca tratável como dependência provisionável.",
+  "original_path": "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+  "original_sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+  "bytes_ROM": 917504,
+  "modificada_sha256": "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce",
+  "modificada_procedencia": "escrita por apply_resource_edit na primeira aplicação pela barra (comando Tauri), em .../extract/<romsha>/edits/rex-aplib-modified-<sha>.bin; a perna 4 chama a mesma função com os mesmos quatro campos e OBRIGA o hash a ser este (asserção 2 do teste). Escrita content-addressed: create_new + re-hash quando existe (write_file_immutable).",
+  "patch_bps_sha256": "58ae4f0b5eb81ebb88579741738a473f144369dfeb1723aad9c8bb0c731331b0"
+ },
+ "recurso": {
+  "header_tileset": "0x21b20",
+  "stream_offset": "0x2e12a",
+  "codec": "aplib (variante raw SGDK 2.11)",
+  "codec_anunciado_pela_barra": "0x2e12a — aplib · 100 tiles (stream 938 B)",
+  "tileset_tiles": 100,
+  "plain_bytes": 3200,
+  "slot_bytes": 938,
+  "escritos_bytes": 938,
+  "edicao": {
+   "tile": 53,
+   "row": 7,
+   "col": 5,
+   "indice": "5 -> 4",
+   "pino_da_escolha": "varredura de capacidade do encoder no produto (7c65cd5): dentro do recurso 0x2e12a, é o primeiro par que a BARRA sabe digitar e que cabe no slot — 938 B, o teto. Não foi escolhido por ser o mais barato: dos 1619 pares cabíveis deste recurso, 533 gastam menos (piso 934) e o tile 53 não está entre eles — seus únicos dois pares cabíveis, [[7,5,938],[7,7,938]], custam ambos o teto, e o teste do lib pin essa lista. O outro recurso editável da ROM, 0x2cd94, tem folga zero e não foi usado porque o pino das pernas 1 e 3 é deste tileset.",
+   "paleta": { "end": "0x2cbc8", "indice_5": "0x0468", "indice_4": "0x0446", "leitura": "145,218,145 → 145,145,109: mudança de cor real, nenhum dos dois é transparente" }
+  },
+  "celulas_do_tilemap": [[35, 16], [26, 25]],
+  "coordenadas_previstas": [[285, 135], [213, 207]]
+ },
+ "perna_2_webdriver": {
+  "cenario": "rex-aplib-byor-effect",
+  "comandos_chamados_pela_superficie": ["rexResourceList (Verificar recursos)", "rexResourcePreview (selecionar o stream)", "rexResourceApplyEdit com zero edições (no-op)", "rexResourceApplyEdit com uma edição", "rexResourceList + preview sobre a cópia"],
+  "rodadas": {
+   "run3": "e2e-run3-par-identico.log (2026-09-27T07:00:50Z)",
+   "run4": "e2e-run4-verde.log (2026-09-27T07:03:22Z, árvore com as asserções do mecanismo)",
+   "reconciliacao": "os dois relatórios viajam no pacote (`rex-aplib-byor-effect-report.json` é o da run4; `e2e-run3-relatorio-comparavel-a-run4.json` é o da run3) e são comparáveis campo a campo sem depender da minha palavra: apliques os dois JSON e confronta as folhas achatadas. Feito aqui: 62 campos idênticos e exatamente um diferente, o texto livre `achado_indice_0_inexpressavel_pela_barra.prova`, que é o que eu editei entre as duas rodadas. Entre os idênticos estão cópia 80249128…, patch 58ae4f0b…, patch reaplicado == cópia, 800 bytes diferentes, 0 fora do slot, 163 preservados, previews a6a4b603…/b469458… e os 164 recursos reabertos. 14 recusas excessive_output no pixel das pernas 1/3 (todos os índices de 1 a 15, menos o 5, que é o valor original e o cenário pula deliberadamente; custos alegados de 939 e 942 bytes contra o slot de 938) e 1 aplicação no alvo medido.",
+   "run2_descartado_como_becodo": "e2e-run2-becodo-que-motivou-a-varredura.log: nenhum índice 1..15 cabia no pixel do pin (938 B de orçamento). Foi essa morte que produziu a varredura de capacidade em vez de uma troca de alvo por opinião."
+  },
+  "o_que_foi_conferido_em_bytes": [
+   "hash anunciado pela barra == sha256 dos bytes da cópia no disco",
+   "tamanho da cópia == tamanho da ROM (sem expansão)",
+   "todos os 800 bytes diferentes caem dentro de [0x2e12a, +938)",
+   "patch_apply_bps sobre cópia íntegra reproduz o hash da cópia",
+   "reabrir a cópia no mesmo painel: 164 recursos verificados de novo, prévia com pixels-sha diferente"
+  ],
+  "limite_do_artefato_superado_por_esta_celula": "o relatório da perna 2 declara em seus limites que 'o efeito em tela desta edição específica não foi executado no core'. Isso era verdade ao fechar a perna 2 e continua verdadeiro para o artefato isolado; a perna 4 abaixo executa exatamente estes bytes (mesmo hash de cópia 80249128…), então a leitura do pacote é o par de documentos, não o relatório sozinho.",
+  "guarda_anti_descarte_silencioso": {
+   "sonda": "linha 8 num tile de 8 linhas, pela barra",
+   "aviso": "linha 8 fora do tile: use um valor inteiro de 0 a 7. A fila atual foi preservada.",
+   "fila_depois_do_aviso": "nenhuma edição (asserção: aviso sem fila vazia seria descarte silencioso)"
+  },
+  "achado_indice_0_inexpressavel_pela_barra": {
+   "premissa_falsa_retirada": "a perna 2 foi escrita assumindo que o painel recusa o índice 0; ele não recusa — o campo reescreve",
+   "mecanismo": "CompressedResourcePanel.tsx:273 faz setPaintIndex(Number(event.target.value) || 1), então 0 vira 1 antes de editRejectReason (linhas 40-42), que reserva 0 como transparente",
+   "medicao": "digitar 0 deixa \"1\" no value do DOM; o desfecho aplicado é byte a byte o mesmo do índice 1 digitado à mão (excessive_output, 942 B contra 938 B). O índice 0 real custou 937 B nas pernas 1 e 3, logo o byte enviado pelo painel não foi 0.",
+   "status": "REGISTRADO, NÃO CORRIGIDO — mudar a semântica de paleta da UI é decisão do operador. O cenário tem asserção que falha se a UI passar a expressar o 0 (comparação com o hash pinado 69389ec2…) e outra que falha se o clamp mudar de valor."
+  }
+ },
+ "perna_4_execucao": {
+  "teste": "core::project_mgr::tests::rex06_hamoopig_aplib_edicao_da_barra_executa_no_core (#[ignore])",
+  "receita": "cargo test --lib rex06_hamoopig_aplib -- --ignored --nocapture (ROM BYOR no caminho canônico ou RDS_REX_HAMOOPIG_ROM)",
+  "rodadas_no_ledger": ["rex06-hamoopig-aplib-barra-edit-1790492866", "rex06-hamoopig-aplib-barra-edit-1790493156"],
+  "reconciliacao": "as duas corridas (uma antes, outra depois do cargo fmt) dão 232 pixels, 116 frames, coordenadas [[213,207],[285,135]], determinismo 0, zero pixel fora das células e candidate_sha256 80249128…",
+  "janela_frames": 180,
+  "power_on": "fresco em cada corrida (restauração de savestate não é fiel neste título — achado REX-00)",
+  "determinismo_original_vs_original": 0,
+  "pixels_alterados_total": 232,
+  "frames_divergentes": 116,
+  "frames_divergentes_sao": "59..179, exceto 60, 61, 62, 66 e 67",
+  "pixels_por_frame_divergente": 2,
+  "coordenadas_distintas": [[213, 207], [285, 135]],
+  "fora_dos_retangulos_das_celulas": 0,
+  "pixels_no_checkpoint_129": [[213, 207], [285, 135]],
+  "checkpoint_0_da_janela": "os frames 59/69/129/179 da ROM íntegra reproduzem byte a byte os quatro hashes de /home/misael/RetroDevStudio/rex-evidence-2026-09-10/backend-hamoopig/checkpoint-rgba-hashes.json (sha256 e7527a83…, arquivo de 2026-09-12, anterior a esta frente)",
+  "cross_check_com_a_perna_3": "os PPMs originais desta célula são os mesmos bytes da perna 3 (059: 936a61aa…, 129: 5f4ce09d…) — a corrida base não mudou entre as duas pernas",
+  "diferenca_nao_atribuida": "a perna 3 viu 119 frames divergentes com 238 pixels; esta vê 116 com 232. A posição do pixel dentro do tile (0,4 → 7,5) é o que muda, e nenhum mecanismo foi medido para os frames 62/66/67; fica como limite da medição, não como alegação."
+ },
+ "gates": {
+  "arquivos": {
+   "gates-rust-2026-09-27.log": "árvore final, HEAD 94bfa81 + os três commits desta célula",
+   "gates-frontend-2026-09-27.log": "check:tree, lint, tsc --noEmit, npm test",
+   "npm-test-completo-2026-09-27.log": "mesmo npm test com saída completa, para reconciliar os skips",
+   "host-certify-2026-09-27.log": "npm run host:certify"
+  },
+  "cargo_fmt_check": "rc=0",
+  "cargo_clippy_lib_D_warnings": "rc=0",
+  "cargo_test_lib_suite": "706 passed / 0 failed / 63 ignored (rc=0)",
+  "cargo_test_lib_varreduraignorada": "1 passed / 0 failed (rc=0, 75,43 s)",
+  "cargo_test_lib_rex06ignorado": "1 passed / 0 failed (rc=0, 12,24 s)",
+  "npm": "check:tree rc=0 · lint rc=0 · tsc --noEmit rc=0 · npm test 702 passed / 0 failed / 6 skipped (708) rc=0",
+  "reconciliacao_dos_skips": "os 6 skips são de ambiente, não desta célula: 4 em scripts/decomp/decomp-scripts.test.mjs (gated por m68k-elf-*/makefile.gen da SGDK/`/opt/ghidra`+java-21) e 2 em src/core/validateUpstreamWindows.test.ts (describe só-win32). O total de 708 contra os 705 do checkpoint anterior é essa mesma janela de toolchains: o invariante é 702 passed / 0 failed.",
+  "host_certify": "READY, fingerprint 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2, lock dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377; dentro dele cargo test --lib 706 passed / 0 failed / 63 ignored"
+ },
+ "frame_dumps_nao_versionados": {
+  "motivo": "quadros derivados de ROM comercial: versionar PPM distribuiria conteúdo derivado do binário BYOR. Os hashes viajam; os bytes ficam no diretório de validação local.",
+  "caminho_local": "src-tauri/target-test/validation/rex-hamoopig-aplib-edit-barra/",
+  "sha256": {
+   "aplib-barra-edit-059-original.ppm": "936a61aa4fb256bed0d58732b36eda285d4abed60fce2834a113a4e80cd08b8a",
+   "aplib-barra-edit-059-modificada.ppm": "cfb00563a476c130aa429628b6797c03d5220ebc89653bb3f612d22b5a7fe847",
+   "aplib-barra-edit-129-original.ppm": "5f4ce09d7e8f618f4b7e4fc5c899a0aacb9261fb7923ed44a6c05b7bb61cda86",
+   "aplib-barra-edit-129-modificada.ppm": "9c26736d71f39f902cc83b33ab3e430b843c58c6f68a6e3080066a7fe68a8b30",
+   "input-script.rds-input.json": "e52d3370383f4cae7667832755bd5af594fd86a2fc2a51038cb1f7f557cc0d72"
+  }
+ },
+ "artefatos_versionados": {
+  "aplib-capacidade-da-barra.json": "7ad847f2e9aead47e1ee2d84089673b2a542b9be4f7f1916d7aa9ae79a76ffd7",
+  "e2e-run2-becodo-que-motivou-a-varredura.log": "ee37b388fb8f3d4d655d2966a8ce75d2bcbaa954b47ab2cf2d29f950a714005f",
+  "e2e-run3-par-identico.log": "b32f8e1f795e00a66e144b93f0ccc6659f72be6d3504f74755243653d50a3edc",
+  "e2e-run4-verde.log": "5abf0bc8f0f4f23bef287fd9ea19d71f6e3c59ddedb8ec241204075f429ffa03",
+  "gates-frontend-2026-09-27.log": "737c1fa2964093d09a715684a25021f05a25b4d2e718fee323d7d0ce57f240cd",
+  "gates-rust-2026-09-27.log": "b188f656db3ea62859ac7c6edb6bc78c1f48e38645f3d79f43e8f8ef3820bab8",
+  "host-certify-2026-09-27.log": "69a9b34d15a33c0bd1dc756dfaff9a8abdf64fa980a258dd9da089e4dd78a0c2",
+  "npm-test-completo-2026-09-27.log": "632a1fc640bdb8319ce79578041cf7d915dd300e7970e61525466c93e7bd6023",
+  "rex-aplib-byor-effect-report.json": "4cf0d3d8b4fefcecc97e225e706ea242c2ea2234822d146a56aa44e83f28adea",
+  "e2e-run3-relatorio-comparavel-a-run4.json": "ba9adc9c4f90f4bfef87539b0918f2f5abcf21b79326380766090f31ba7c9702",
+  "rex06-copia-da-barra-executada-no-core.json": "4e34b8e3e150e729dd79a4d6321e060381132bcc6e5053fcbd6d3a553c0fa53c"
+ },
+ "auditoria_reproduzivel_na_maquina": {
+  "como": "tudo abaixo foi reconferido nesta máquina ao fechar o manifesto, com sha256sum/Python sobre os arquivos do disco — não depende da minha palavra nem de rerodar o produto. Se um hash divergir ao reconferir, o pacote perdeu a validade.",
+  "rom_do_corpus_intacta": "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin → 917.504 B, 558bea6c… (o teste nunca escreve no corpus; a cópia editada vive fora dele, em ~/.retrodev/decomp_work/)",
+  "copia_da_barra_no_disco": "/home/misael/.retrodev/decomp_work/extract/558bea6c…/edits/rex-aplib-modified-80249128….bin → 917.504 B (mesmo tamanho da ROM), sha 80249128…; 800 bytes distintos, faixa [0x2e18f, 0x2e4d2], todos dentro de [0x2e12a, +938)",
+  "binario_do_app": "src-tauri/target-test/debug/retro-dev-studio → 7a52345d… confere com binary_under_test acima",
+  "artefatos_do_pacote": "os 11 arquivos versionados deste diretório foram re-hashados um a um contra `artefatos_versionados`: 11/11 iguais, 0 ausentes, 0 não registrados",
+  "bloco_de_capacidade": "cada um dos 11 campos por recurso em `capacidade_medida_dos_recursos_aplib` foi confrontado campo a campo com `aplib-capacidade-da-barra.json`: 0 divergências"
+ },
+ "capacidade_medida_dos_recursos_aplib": {
+  "fonte": "aplib-capacidade-da-barra.json (varredura com o codificador do produto; schema rex-aplib-capacidade-da-barra/v1; 4 recursos; duracao_ms 75325; rom_sha256 558bea6c… confere com a deste pacote)",
+  "vocabulario_do_json": "as chaves abaixo são as do artefato, copiadas dele. `piso_indices_da_barra` = menor custo encontrado entre os índices que o painel sabe expressar (1..15); `piso_incluindo_indice_0` = o mesmo piso contando o índice 0, que só o backend aceita; `cabiveis_na_barra` = quantos dos pixels amostrados, com índice da barra, cabem no slot; `tentativas`/`pixels_amostrados` = espaço amostrado, não a totalidade dos pixels.",
+  "0x2e12a": { "header": "0x21b20", "tiles": 100, "plain_bytes": 3200, "slot_bytes": 938, "custo_plain_intacto": 937, "folga_base": 1, "piso_indices_da_barra": 934, "piso_incluindo_indice_0": 932, "cabiveis_na_barra": 1619, "pixels_amostrados": 264, "tentativas": 3960 },
+  "0x2e4d4": { "header": "0x21b44", "tiles": 500, "plain_bytes": 16000, "slot_bytes": 4485, "custo_plain_intacto": 4544, "folga_base": 0, "piso_indices_da_barra": 4540, "piso_incluindo_indice_0": 4540, "cabiveis_na_barra": 0, "pixels_amostrados": 126, "tentativas": 1890 },
+  "0x2f65a": { "header": "0x21b68", "tiles": 543, "plain_bytes": 17376, "slot_bytes": 7420, "custo_plain_intacto": 7442, "folga_base": 0, "piso_indices_da_barra": 7439, "piso_incluindo_indice_0": 7439, "cabiveis_na_barra": 0, "pixels_amostrados": 136, "tentativas": 2040 },
+  "0x2cd94": { "header": "0x270de", "tiles": 96, "plain_bytes": 3072, "slot_bytes": 609, "custo_plain_intacto": 609, "folga_base": 0, "piso_indices_da_barra": 607, "piso_incluindo_indice_0": 607, "cabiveis_na_barra": 77, "pixels_amostrados": 192, "tentativas": 2880 },
+  "couberam_na_barra": "lista de 1696 entradas no artefato: 1619 em 0x2e12a e 77 em 0x2cd94, e nenhuma nos outros dois. As duas primeiras são tile 53 linha 7 colunas 5 e 7, custo 938 = teto do slot — o alvo desta célula.",
+  "leitura": "dois dos quatro recursos aPLib desta ROM não aceitam NENHUMA edição de 1 pixel que a barra saiba expressar (o encoder do produto gasta mais que o original), e nesses dois nem contando o índice 0 há piso abaixo do slot (4540 > 4485 e 7439 > 7420): a barra não os edita em nenhuma circunstância. Sobram 0x2e12a (folga_base 1) e 0x2cd94 (folga_base 0).",
+  "limite_da_medida": "varredura por amostragem de pixels, não prova exaustiva de que nenhum pixel dos dois recursos bloqueados caiba no slot; o que prova é que os pisos amostrados já passam do slot em 55 e 19 bytes."
+ },
+ "limites": [
+  "uma edição de 1 pixel, de 1 recurso, de 1 ROM BYOR: não prova o resto dos 4 recursos aPLib, nem o resto do jogo, nem hardware real",
+  "o core da perna 4 é o do harness da lib (Genesis Plus GX sob EmulatorCore), não o app distribuído",
+  "BYOR não é dependência provisionável: o cenário rex-aplib-byor-effect e os dois testes #[ignore] não rodam no CI",
+  "o achado do índice 0 (UI reescreve 0 para 1) está registrado com asserções que o vigiam, mas NÃO corrigido — semântica de paleta da UI é decisão do operador",
+  "a ETAPA E continua aceita apenas no fixture autoral LZ4W; nada desta célula autoriza merge, release ou promoção de maturidade, e a linha aPLib da matriz segue blocked por veto da missão (ainda que a condição declarada do bloqueio — execução do recurso modificado pelo desempacotador do jogo — tenha sido alcançada)"
+ ]
+}

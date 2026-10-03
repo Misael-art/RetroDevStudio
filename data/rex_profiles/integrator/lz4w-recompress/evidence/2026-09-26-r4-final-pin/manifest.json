@@ -1,0 +1,28 @@
+{
+  "schema": "rex-integrator-evidence/v1",
+  "id": "lz4w-recompress-bench-2026-09-26-r4-final-pin",
+  "papel": "rodada VINCULADA AO PINO: reproduz o benchmark no codificador exatamente como será commitado, fechando a lacuna de r2/r3 (que não registraram o hash da fonte no momento da corrida).",
+  "measured_at": "2026-09-26",
+  "sujeito": {
+    "codec_file": "src-tauri/src/tools/reverse/decomp/rex_codecs.rs",
+    "codec_sha256": "bee8524f78aa288ac2a084a6413aa8318dabbb1c96560226000eb6de052d5e05",
+    "mesmo_pino_do_replay_68k": "data/rex_profiles/integrator/lz4w-68k/evidence/2026-09-26-r14/manifest.json",
+    "arvore": "HEAD 47f2c89 + as alterações deste lote (benchmark congelado + busca mesclada)"
+  },
+  "comando": "RDS_REX_BENCH_OUT=<esta pasta, absoluto> RDS_REX_LZ4W_FIXTURE_ROM=<rom do fixture> cargo test --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture lz4w_recompression_benchmark (stdout em bench-final-pin.log)",
+  "resultados": {
+    "recursos_S_B": 160,
+    "folga_total_S_B_bytes": -9156,
+    "recursos_com_folga_nao_negativa": 1,
+    "distribuicao_edicoes": { "cabe": 2, "needs_space": 523, "noop_preservando_stream": 119 },
+    "coube_ajuste": 1,
+    "coube_validacao": 0,
+    "capacidade_amostral": "ajuste 1/128, validação 0/32 (24 bits por recurso)",
+    "tempo_rodada_ms": 25526,
+    "fixture_reencode_bytes": 444
+  },
+  "determinismo": "campo a campo idêntico a ../2026-09-26-r3/bench.json: 161/161 linhas iguais e todos os campos do resumo iguais, exceto tempo_rodada_ms (27 440 -> 25 526, ruído de máquina). Evidência em compare-r3-r4.log.",
+  "fixture": "sa-product.stream (444 B) byte a byte igual a sa-rescomp.stream; diverge de r1 (448 B) a partir do byte 341, que é a posição da decisão de parsing descrita no diagnóstico.",
+  "sa_dumps": "sa-plain.bin idêntico ao de r1; sa-dict.bin removido após verificação de igualdade byte a byte com ../2026-09-26-r1/sa-dict.bin (pino em sa-dict.bin.sha256)",
+  "politica_byor": "nenhum byte da ROM comercial versionado; a ROM BYOR (558bea6c…) é pré-requisito local do comando, e o fixture autoral (159298eb…) é reconstruído pela receita de `docs/rex_profiles/`."
+}

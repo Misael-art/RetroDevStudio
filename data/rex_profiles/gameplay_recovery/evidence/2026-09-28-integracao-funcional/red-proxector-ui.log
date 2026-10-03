@@ -1,0 +1,25 @@
+# RED — proxector de grafo rex-gameplay na UI (ETAPA 3)
+# UTC: 2026-09-28T18:10:58Z
+# comando: npx vitest run src/core/nodegraph/rexGameplayGraph.test.ts
+# fixture: grafo real devolto por rex_gameplay_recover (goal_original_t6.hex, entrada 0x946)
+  2  |  import { REX_GAMEPLAY_PROFILE_ID, projectGameplayGraph } from "./rexGameplayGraph";
+     |                                                                 ^
+  3  |  const GRAFO_REAL = `{
+  4  |    "version": 1,[39m
+[90m [2m❯[22m TransformPluginContext._formatLog node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:[2m42658:41[22m[39m
+[90m [2m❯[22m TransformPluginContext.error node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:[2m42655:16[22m[39m
+[90m [2m❯[22m normalizeUrl node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:[2m40634:23[22m[39m
+[90m [2m❯[22m node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:[2m40753:37[22m[39m
+[90m [2m❯[22m TransformPluginContext.transform node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:[2m40680:7[22m[39m
+[90m [2m❯[22m EnvironmentPluginContainer.transform node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:[2m42453:18[22m[39m
+[90m [2m❯[22m loadAndTransform node_modules/vite/dist/node/chunks/dep-Dm0c1Wj2.js:[2m35845:27[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [2mno tests[22m
+[2m   Start at [22m 15:11:00
+[2m   Duration [22m 1.66s[2m (transform 55ms, setup 67ms, import 0ms, tests 0ms, environment 1.25s)[22m
+
+RED_RC=1  (vitest; fallo de resolucion do modulo: 'Failed to resolve import "./rexGameplayGraph"')

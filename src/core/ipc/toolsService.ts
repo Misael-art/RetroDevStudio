@@ -286,6 +286,20 @@ export interface ProjectionStatus {
   message: string;
 }
 
+export interface RomContainerInfo {
+  kind: string;
+  member?: string | null;
+  note: string;
+}
+
+export interface NormalizationStep {
+  name: string;
+  parameters: string;
+  input_sha256: string;
+  output_sha256: string;
+  reversible: boolean;
+}
+
 export interface RomAnalysisManifest {
   ok: boolean;
   error: string;
@@ -295,6 +309,10 @@ export interface RomAnalysisManifest {
   stripped_header_bytes: number;
   total_size: number;
   hashes: RomHashes;
+  /** REX-02: contêiner de origem e passos de normalização reversíveis; ausentes
+   * em manifestos antigos. */
+  container?: RomContainerInfo;
+  normalization?: NormalizationStep[];
   header: RomHeader;
   mapper: string;
   special_chips: string[];
@@ -320,9 +338,433 @@ export interface DisassemblyResult {
   rows: DisassemblyRow[];
 }
 
+export interface RecoveredOperation {
+  rom_offset: number;
+  bytes: number[];
+  mnemonic: string;
+  semantic: string;
+}
+
+export interface SourceMapping {
+  rom_start: number;
+  rom_end: number;
+  ir_op: string;
+  node_id: string;
+}
+
+export interface IndependentTestState {
+  input_d0: number;
+  input_x: boolean;
+  output_d0: number;
+  output_x: boolean;
+  output_n: boolean;
+  output_z: boolean;
+  output_v: boolean;
+  output_c: boolean;
+  output_result?: number;
+  branch_taken?: boolean;
+  parameter_value?: number;
+}
+
+export interface LogicRecoveryResult {
+  ok: boolean;
+  error: string;
+  profile_id: string;
+  architecture: string;
+  source_path: string;
+  rom_sha256: string;
+  rom_offset: number;
+  rom_end: number;
+  bytes: number[];
+  boundary: string;
+  call_sites: number[];
+  limitations: string[];
+  operations: RecoveredOperation[];
+  inputs: string[];
+  outputs: string[];
+  memory_effects: string[];
+  flags: string[];
+  source_mappings: SourceMapping[];
+  independent_test_states: IndependentTestState[];
+  graph_json: string;
+}
+
+export interface LogicPatchResult {
+  ok: boolean;
+  error: string;
+  profile_id: string;
+  input_path: string;
+  output_path: string;
+  input_sha256: string;
+  output_sha256: string;
+  rom_offset: number;
+  old_bytes: number[];
+  new_bytes: number[];
+  immediate: number;
+}
+
 export interface RomTextExtractionResult {
   text_regions: TextCandidate[];
   pointer_tables: PointerTableCandidate[];
+}
+
+export interface InspectionError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface InspectionRomIdentity {
+  original_sha256: string;
+  normalized_sha256: string;
+  original_size: number;
+  normalized_size: number;
+  variant: string;
+  header_console: string;
+  header_title: string;
+  region?: string | null;
+  version?: string | null;
+  size_note?: string | null;
+}
+
+export interface InspectionArtifactRef {
+  label: string;
+  path: string;
+  sha256: string;
+}
+
+export interface InspectionSession {
+  schema_version: string;
+  session_id: string;
+  rom_path: string;
+  identity: InspectionRomIdentity;
+  catalog_artifact: InspectionArtifactRef;
+  artifact_refs: InspectionArtifactRef[];
+  user_choice_artifacts: InspectionArtifactRef[];
+  discovery_run_id?: string | null;
+  status: string;
+  candidates_total: number;
+  unknown_bytes: number;
+  created_at_unix: number;
+  completed_at_unix?: number | null;
+  error?: InspectionError | null;
+  sprite_frame_id?: string | null;
+  edit?: InspectionEdit | null;
+}
+
+export interface InspectionEdit {
+  format: string;
+  resource_id: string;
+  frame_id: string;
+  palette_index: number;
+  red: number;
+  green: number;
+  blue: number;
+  original_rom_sha256: string;
+  modified_rom_sha256: string;
+  modified_rom_path: string;
+  changed_offsets: number[];
+  bytes_changed: number;
+  /** Tile reinsertion only (format `md_4bpp_tile_nibbles`). */
+  art_tiles?: number[];
+  shared_with_frames?: number[];
+  pixels_changed?: number | null;
+  base_rom_sha256_after?: string | null;
+}
+
+/** Proven `id_Wait` cadence, read from the core contract (never recomputed in the UI). */
+export interface SonicCadenceInfo {
+  anim: number;
+  name: string;
+  script_addr: number;
+  interval_addr: number;
+  original_interval: number;
+  current_interval: number;
+  frames: number[];
+  terminator: string;
+  editable_min: number;
+  editable_max: number;
+  reserved: string[];
+  unit: string;
+  semantics: string;
+  provenience: string[];
+  limitations: string[];
+  contract_path: string;
+}
+
+export interface InspectionPixelEdit {
+  x: number;
+  y: number;
+  index: number;
+}
+
+export interface InspectionProgress {
+  session_id: string;
+  run_id: string;
+  generation: number;
+  phase: string;
+  status: string;
+  completed_work: number;
+  total_work: number;
+  candidates_found: number;
+  message: string;
+}
+
+export interface InspectionRun {
+  run_id: string;
+  session_id: string;
+  generation: number;
+  status: string;
+  progress: InspectionProgress;
+  started_at_unix: number;
+  finished_at_unix?: number | null;
+  error?: InspectionError | null;
+}
+
+export interface InspectionStatus {
+  session: InspectionSession;
+  run?: InspectionRun | null;
+}
+
+export interface InspectionCandidate {
+  id: string;
+  offset: number;
+  size: number;
+  kind: string;
+  status: string;
+  method: string;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  previews: InspectionArtifactRef[];
+}
+
+export interface InspectionUnknownRegion {
+  offset: number;
+  size: number;
+  kind: string;
+  method: string;
+}
+
+export interface InspectionUserChoice {
+  choice_id: string;
+  session_id: string;
+  tile_candidate_id: string;
+  palette_candidate_id: string;
+  source: string;
+  artifact: InspectionArtifactRef;
+}
+
+export interface InspectionCatalogPage {
+  session_id: string;
+  run_id: string;
+  offset: number;
+  limit: number;
+  total_candidates: number;
+  candidates: InspectionCandidate[];
+  unknown_regions: InspectionUnknownRegion[];
+  user_choices: InspectionUserChoice[];
+}
+
+export interface InspectionPreview {
+  session_id: string;
+  candidate_id: string;
+  available: boolean;
+  reason?: string | null;
+  artifact?: InspectionArtifactRef | null;
+  data_url?: string | null;
+  width?: number | null;
+  height?: number | null;
+  png_sha256?: string | null;
+  pixels_sha256?: string | null;
+}
+
+export interface InspectionSpriteFramePart {
+  tile_start: number;
+  tile_count: number;
+  tile_width: number;
+  tile_height: number;
+  x: number;
+  y: number;
+  x_flip: number;
+  y_flip: number;
+}
+
+export interface InspectionSpriteFrame {
+  session_id: string;
+  resource_id: string;
+  frame_id: string;
+  available: boolean;
+  reason?: string | null;
+  width: number;
+  height: number;
+  data_url?: string | null;
+  artifact?: InspectionArtifactRef | null;
+  png_sha256?: string | null;
+  pixels_sha256?: string | null;
+  rom_sha256: string;
+  tile_data_offset: number;
+  tile_data_size: number;
+  palette_offset: number;
+  palette_size: number;
+  descriptor_offset: number;
+  flip_x: boolean;
+  flip_y: boolean;
+  transparency_index: number;
+  parts: InspectionSpriteFramePart[];
+  metadata_source: string;
+  rom_evidence: string[];
+  donor_evidence: string[];
+  limitations: string[];
+  sonic_context?: {
+    geometry_version: string;
+    mapping_index: number;
+    anchor_x: number;
+    anchor_y: number;
+    dplc_offset: number;
+    palette_rgba: [number, number, number, number][];
+    tile_uses: { art_tile: number; frames: number[] }[];
+    pixel_art_tiles: (number | null)[];
+    frames: { id: string; label: string; mapping_index: number }[];
+  } | null;
+}
+
+export const INSPECTION_PROGRESS_EVENT = "rex://inspection-progress";
+
+export function inspectionOpen(romPath: string): Promise<InspectionSession> {
+  return invoke<InspectionSession>("rex_inspection_open", { romPath });
+}
+
+export function inspectionReopen(romPath: string, sessionId: string): Promise<InspectionSession> {
+  return invoke<InspectionSession>("rex_inspection_reopen", { romPath, sessionId });
+}
+
+export function inspectionStart(sessionId: string, generation: number): Promise<InspectionRun> {
+  return invoke<InspectionRun>("rex_inspection_start", { sessionId, generation });
+}
+
+export function inspectionCancel(sessionId: string, runId: string): Promise<InspectionRun> {
+  return invoke<InspectionRun>("rex_inspection_cancel", { sessionId, runId });
+}
+
+export function inspectionStatus(sessionId: string): Promise<InspectionStatus> {
+  return invoke<InspectionStatus>("rex_inspection_status", { sessionId });
+}
+
+export function inspectionListSessions(): Promise<InspectionSession[]> {
+  return invoke<InspectionSession[]>("rex_inspection_list_sessions");
+}
+
+export function inspectionCatalogPage(
+  sessionId: string,
+  offset: number,
+  limit: number,
+  query: string,
+  kind: string
+): Promise<InspectionCatalogPage> {
+  return invoke<InspectionCatalogPage>("rex_inspection_catalog_page", {
+    sessionId,
+    offset,
+    limit,
+    query,
+    kind,
+  });
+}
+
+export function inspectionPreview(sessionId: string, candidateId: string): Promise<InspectionPreview> {
+  return invoke<InspectionPreview>("rex_inspection_preview", { sessionId, candidateId });
+}
+
+export function inspectionSpriteFrame(
+  sessionId: string,
+  resourceId: string,
+  frameId = `${resourceId}/frame-0`,
+  flipX = false,
+  flipY = false
+): Promise<InspectionSpriteFrame> {
+  return invoke<InspectionSpriteFrame>("rex_inspection_sprite_frame", {
+    sessionId,
+    resourceId,
+    frameId,
+    flipX,
+    flipY,
+  });
+}
+
+export function inspectionSavePaletteChoice(
+  sessionId: string,
+  tileCandidateId: string,
+  paletteCandidateId: string
+): Promise<InspectionUserChoice> {
+  return invoke<InspectionUserChoice>("rex_inspection_save_palette_choice", {
+    sessionId,
+    tileCandidateId,
+    paletteCandidateId,
+  });
+}
+
+export function inspectionSave(sessionId: string, spriteFrameId?: string): Promise<InspectionSession> {
+  return invoke<InspectionSession>("rex_inspection_save", { sessionId, spriteFrameId });
+}
+
+export function inspectionEditSonicPalette(
+  sessionId: string,
+  resourceId: string,
+  frameId: string,
+  paletteIndex: number,
+  red: number,
+  green: number,
+  blue: number
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_edit_sonic_palette", {
+    sessionId,
+    resourceId,
+    frameId,
+    paletteIndex,
+    red,
+    green,
+    blue,
+  });
+}
+
+/** Recolors stand-frame pixels in the raw 4bpp art on a copy (size-preserving). */
+export function inspectionEditSonicTiles(
+  sessionId: string,
+  resourceId: string,
+  frameId: string,
+  pixels: InspectionPixelEdit[],
+  allowSharedTiles: boolean
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_edit_sonic_tiles", {
+    sessionId,
+    resourceId,
+    frameId,
+    pixels,
+    allowSharedTiles,
+  });
+}
+
+/** Reads the proven id_Wait cadence (frames, current byte, limits) from the core. */
+export function inspectionSonicCadence(sessionId: string): Promise<SonicCadenceInfo> {
+  return invoke<SonicCadenceInfo>("rex_inspection_sonic_cadence", { sessionId });
+}
+
+/** Writes the single proven duration byte for id_Wait on a revalidated copy. */
+export function inspectionEditSonicDuration(
+  sessionId: string,
+  resourceId: string,
+  value: number
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_edit_sonic_duration", {
+    sessionId,
+    resourceId,
+    value,
+  });
+}
+
+export function listenInspectionProgress(
+  callback: (progress: InspectionProgress) => void
+): Promise<UnlistenFn> {
+  return listen<InspectionProgress>(INSPECTION_PROGRESS_EVENT, (event) => callback(event.payload));
 }
 
 // ── Patch Studio ──────────────────────────────────────────────────────────────
@@ -373,6 +815,10 @@ export function assetsExtract(
 
 export function listProjectAssets(projectDir: string): Promise<ProjectAssetEntry[]> {
   return invoke<ProjectAssetEntry[]>("list_project_assets", { projectDir });
+}
+
+export function readProjectAssetBytes(projectDir: string, relativePath: string): Promise<number[]> {
+  return invoke<number[]>("read_project_asset_bytes", { projectDir, relativePath });
 }
 
 export function readLegacyProjectFile(
@@ -433,10 +879,136 @@ export function romDisassemble(
   return invoke<DisassemblyResult>("rom_disassemble", { romPath, offset, length });
 }
 
+export function romRecoverLogic(romPath: string, offset: number): Promise<LogicRecoveryResult> {
+  return invoke<LogicRecoveryResult>("rom_recover_logic", { romPath, offset });
+}
+
+export function romPatchRecoveredLogic(
+  romPath: string,
+  outputPath: string,
+  expectedSha256: string,
+  offset: number,
+  immediate: number
+): Promise<LogicPatchResult> {
+  return invoke<LogicPatchResult>("rom_patch_recovered_logic", {
+    romPath,
+    outputPath,
+    expectedSha256,
+    offset,
+    immediate,
+  });
+}
+
+// ── Recuperacion de regra de gameplay (crates/rex-gameplay, Experimental) ────
+// DTOs espellos de `src-tauri/src/tools/reverse/decomp/rex_gameplay.rs`
+// (snake_case, `deny_unknown_fields`). Erros: InspectionError con codigo
+// estable — invalid_request, identity_mismatch, range_refused, graph_tampered,
+// profile_refused, io_error, command_interrupted.
+
+export interface GameplayAddressLabel {
+  offset: number;
+  name: string;
+}
+
+export interface GameplayScanRequest {
+  request_id: string;
+  rom_path: string;
+}
+
+export interface GameplayScanCandidate {
+  entry: number;
+  exit: number;
+  counter_addr: number;
+  threshold: number;
+}
+
+export interface GameplayScanResponse {
+  request_id: string;
+  rom_sha256: string;
+  candidates: GameplayScanCandidate[];
+  /** false so cando hai exactamente un candidato; a varredura non escolhe. */
+  ambiguous: boolean;
+}
+
+export interface GameplayRecoverRequest {
+  request_id: string;
+  rom_path: string;
+  entry: number;
+  exits: number[];
+  address_labels: GameplayAddressLabel[];
+}
+
+export interface GameplayRecoverResponse {
+  request_id: string;
+  profile_id: string;
+  rom_sha256: string;
+  entry: number;
+  exits: number[];
+  blocks: [number, number][];
+  operator: string;
+  threshold: number;
+  threshold_range: [number, number];
+  graph_json: string;
+  limitations: string[];
+}
+
+export interface GameplayEditRequest {
+  request_id: string;
+  graph_json: string;
+  threshold: number;
+}
+
+export interface GameplayEditResponse {
+  request_id: string;
+  graph_json: string;
+}
+
+export interface GameplayRebuildRequest {
+  request_id: string;
+  base_path: string;
+  expected_sha256: string;
+  graph_json: string;
+  output_path: string;
+  /** "patch" (so o inmediato) | "regenerate" (remonta a rexion). Non e build do proxecto. */
+  method: string;
+}
+
+export interface GameplayRebuildResponse {
+  request_id: string;
+  method: string;
+  input_sha256: string;
+  output_sha256: string;
+  output_path: string;
+  changed_offsets: number[];
+  authorized_ranges: [number, number][];
+  checksum_updated: boolean;
+}
+
+export function rexGameplayScan(request: GameplayScanRequest): Promise<GameplayScanResponse> {
+  return invoke<GameplayScanResponse>("rex_gameplay_scan", { request });
+}
+
+export function rexGameplayRecover(
+  request: GameplayRecoverRequest
+): Promise<GameplayRecoverResponse> {
+  return invoke<GameplayRecoverResponse>("rex_gameplay_recover", { request });
+}
+
+export function rexGameplayEditThreshold(
+  request: GameplayEditRequest
+): Promise<GameplayEditResponse> {
+  return invoke<GameplayEditResponse>("rex_gameplay_edit_threshold", { request });
+}
+
+export function rexGameplayRebuild(
+  request: GameplayRebuildRequest
+): Promise<GameplayRebuildResponse> {
+  return invoke<GameplayRebuildResponse>("rex_gameplay_rebuild", { request });
+}
+
 export function romGetXrefs(romPath: string): Promise<CodeXref[]> {
   return invoke<CodeXref[]>("rom_get_xrefs", { romPath });
 }
-
 export function romGetCallGraph(romPath: string): Promise<CallGraphEdge[]> {
   return invoke<CallGraphEdge[]>("rom_get_call_graph", { romPath });
 }
@@ -458,4 +1030,213 @@ export function romSaveAnnotations(
   annotations: ReverseAnnotation[]
 ): Promise<number> {
   return invoke<number>("rom_save_annotations", { romPath, annotations });
+}
+
+// ---------------------------------------------------------------------------
+// REX recursos comprimidos (LZ4W) — contratos v1, Experimental
+// ---------------------------------------------------------------------------
+
+export interface RexResourceSummary {
+  header_offset: number;
+  stream_offset: number;
+  num_tiles: number;
+  data_len: number;
+  stream_len: number;
+  /** Codec lido do header verificado: "lz4w" | "aplib". */
+  codec: string;
+}
+
+export interface RexPixelEdit {
+  tile: number;
+  row: number;
+  col: number;
+  index: number;
+}
+
+export interface RexResourceResult {
+  outcome: "preview" | "noop" | "applied";
+  rom_sha256: string;
+  modified_rom_sha256: string | null;
+  modified_rom_path: string | null;
+  patch_bps_sha256: string | null;
+  patch_bps_path: string | null;
+  stream_offset: number;
+  /** Codec do recurso efetivamente processado: "lz4w" | "aplib". */
+  codec: string;
+  stream_written: number | null;
+  original_stream_len: number;
+  verified_preserved: number | null;
+  analyzed_scope: string;
+  preview_png_sha256: string | null;
+  preview_pixels_sha256: string | null;
+  preview_width: number | null;
+  preview_height: number | null;
+  preview_data_url: string | null;
+}
+
+export function rexResourceList(
+  romPath: string
+): Promise<[string, RexResourceSummary[]]> {
+  return invoke<[string, RexResourceSummary[]]>("rex_resource_list", { romPath });
+}
+
+export function rexResourcePreview(
+  romPath: string,
+  streamOffset: number
+): Promise<RexResourceResult> {
+  return invoke<RexResourceResult>("rex_resource_preview", {
+    romPath,
+    streamOffset,
+  });
+}
+
+export function rexResourceApplyEdit(
+  romPath: string,
+  streamOffset: number,
+  edits: RexPixelEdit[],
+  expectedRomSha256: string
+): Promise<RexResourceResult> {
+  return invoke<RexResourceResult>("rex_resource_apply_edit", {
+    romPath,
+    streamOffset,
+    edits,
+    expectedRomSha256,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// REX contexto de imagem (somente leitura) — contrato v1, Experimental
+//
+// Espelha `rex_context.rs`. Nada aqui escreve: a edição continua sendo
+// `rexResourceApplyEdit`, que revalida a identidade da ROM. A UI não envia
+// geometria nenhuma — dimensões, células, flips e ocorrências vêm do núcleo,
+// e o clique é resolvido por ele a partir do pixel natural da camada.
+// ---------------------------------------------------------------------------
+
+/** De onde veio um vínculo. `assistida` o núcleo nunca autodeclara. */
+export type RexProveniencia = "verificada" | "assistida" | "desconhecida";
+
+/** Identidade lida da ROM: offset, codec do header e SHA do conteúdo decodificado. */
+export interface RexIdentidadeRecurso {
+  header_offset: number;
+  stream_offset: number;
+  codec: string;
+  plain_len: number;
+  stream_len: number;
+  plain_sha256: string;
+}
+
+/** Uma célula do TileMap, já decomposta como o VDP a lê. */
+export interface RexCelula {
+  indice: number;
+  col: number;
+  row: number;
+  tile: number;
+  hflip: boolean;
+  vflip: boolean;
+  banco: number;
+  prioridade: boolean;
+}
+
+export interface RexOcorrenciasTile {
+  tile: number;
+  celulas: number[];
+}
+
+export interface RexMapaPublicado {
+  cols: number;
+  rows: number;
+  largura_px: number;
+  altura_px: number;
+  celulas: RexCelula[];
+  ocorrencias_por_tile: RexOcorrenciasTile[];
+  tiles_sem_uso: number[];
+  /** Até onde a contagem de ocorrências vale: um mapa, nunca a ROM. */
+  escopo: string;
+}
+
+export interface RexCamadaPublicada {
+  largura_px: number;
+  altura_px: number;
+  pixels_sha256: string | null;
+  png_data_url: string | null;
+  /** Por que a prévia não está aqui, quando não está. */
+  recusada: string | null;
+}
+
+export interface RexContextoImagem {
+  struct_offset: number;
+  proveniencia: RexProveniencia;
+  /** O que foi conferido — sem isto, "verificada" seria rótulo vazio. */
+  conferido: string[];
+  /** O que a verificação acima não prova. */
+  nao_prova: string[];
+  paleta: RexIdentidadeRecurso;
+  tileset: RexIdentidadeRecurso;
+  tilemap: RexIdentidadeRecurso;
+  mapa: RexMapaPublicado;
+  camada: RexCamadaPublicada;
+}
+
+/** Recurso verificado por decode que nenhum ponteiro `Image` alcança. */
+export interface RexRecursoSemVinculo {
+  tipo: string;
+  proveniencia: RexProveniencia;
+  motivo: string;
+  identidade: RexIdentidadeRecurso;
+}
+
+/** Trinca que parece um struct `Image` mas cujo alvo não verifica. */
+export interface RexVinculoRecusado {
+  struct_offset: number;
+  proveniencia: RexProveniencia;
+  codigo: string;
+  motivo: string;
+}
+
+export interface RexContextoRom {
+  rom_sha256: string;
+  rom_len: number;
+  escopo: string;
+  limite_trabalho: { max_pixels_por_camada: number };
+  imagens: RexContextoImagem[];
+  sem_vinculo: RexRecursoSemVinculo[];
+  recusados: RexVinculoRecusado[];
+}
+
+/** Pixel do TileSet que alimenta o ponto clicado da camada, já sem flip. */
+export interface RexPixelDaFonte {
+  tile: number;
+  linha: number;
+  coluna: number;
+  indice: number;
+}
+
+export interface RexResolucaoClique {
+  rom_sha256: string;
+  struct_offset: number;
+  x: number;
+  y: number;
+  celula: RexCelula;
+  fonte: RexPixelDaFonte;
+  /** Irmãs da célula no **deste** mapa verificado. */
+  ocorrencias: RexCelula[];
+}
+
+export function rexResourceContext(romPath: string): Promise<RexContextoRom> {
+  return invoke<RexContextoRom>("rex_resource_context", { romPath });
+}
+
+export function rexResourceContextHit(
+  romPath: string,
+  structOffset: number,
+  x: number,
+  y: number
+): Promise<RexResolucaoClique> {
+  return invoke<RexResolucaoClique>("rex_resource_context_hit", {
+    romPath,
+    structOffset,
+    x,
+    y,
+  });
 }

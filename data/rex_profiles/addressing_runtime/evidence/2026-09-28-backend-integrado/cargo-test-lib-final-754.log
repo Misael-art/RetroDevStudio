@@ -1,0 +1,900 @@
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.05s
+     Running unittests src/lib.rs (target/debug/deps/app_lib-8a79e4e52b0ce39b)
+
+running 820 tests
+test compiler::ast_generator::tests::animation_frame_time_disables_auto_animation_when_fps_is_zero ... ok
+test compiler::ast_generator::tests::event_start_runs_once_per_match_not_every_frame ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_logic_graph_into_runtime_scripts ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_fsm_builder_into_state_machine_logic ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_action_music_node_into_play_music_op ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_move_camera_nodes_with_follow_sprite_offsets ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_effect_parallax_nodes_into_retrofx_setup ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_flow_nodes_into_runtime_loops ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_hardware_event_nodes_into_event_scripts ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_sprite_anim_nodes_into_setup_set_animation ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_timeline_sequence_into_counter_slots ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_var_math_compare_and_true_false_branching ... ok
+test compiler::ast_generator::tests::generate_ast_emits_aabb_collision_checks_for_compatible_layers ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_logic_and_between_overlap_nodes_into_bool_guard ... ok
+test compiler::ast_generator::tests::generate_ast_emits_apply_physics_for_sprite_entities ... ok
+test compiler::ast_generator::tests::generate_ast_emits_audio_nodes_from_audio_components ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_nocode_game_nodes_to_sgdk_c_without_stable_claim ... ok
+test compiler::ast_generator::tests::generate_ast_emits_input_reads_and_action_bindings ... ok
+test compiler::ast_generator::tests::generate_ast_emits_retrofx_nodes_for_enabled_layers_and_lines ... ok
+test compiler::ast_generator::tests::generate_ast_emits_tilemap_nodes_for_tilemap_component ... ok
+test compiler::ast_generator::tests::generate_ast_skips_aabb_collision_checks_for_non_matching_layers ... ok
+test compiler::ast_generator::tests::generate_ast_uses_default_animation_timing_from_sprite_component ... ok
+test compiler::ast_generator::tests::generate_ast_compiles_scroll_tilemap_nodes_into_runtime_scroll_commands ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::ast_generator::tests::multiframe_sprite_animations_produce_correct_ast_sprite_assets ... ok
+test compiler::ast_generator::tests::generate_ast_with_prefabs_uses_inherited_prefab_components ... ok
+test compiler::build_orch::tests::actionable_diagnostic_serializes_common_contract ... ok
+test compiler::build_orch::tests::artstudio_imported_asset_builds_with_detected_sgdk ... ignored, manual proof with official SGDK toolchain
+test compiler::ast_generator::tests::logic_math_division_by_literal_zero_blocks_instead_of_emitting_trap ... ok
+test compiler::ast_generator::tests::set_velocity_targets_the_physics_var_of_entities_sharing_a_sprite_asset ... ok
+test compiler::ast_generator::tests::generate_ast_maps_all_compare_operators_from_nodegraph ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::ast_generator::tests::logic_math_unsupported_operator_blocks_instead_of_compiling_as_addition ... ok
+test compiler::ast_generator::tests::logic_math_supported_operators_remain_unchanged_and_deterministic ... ok
+test compiler::build_orch::tests::artstudio_multiframe_animation_reaches_resources_res_and_main_c ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_sgdk_project_config_and_rom_header_with_sram_enabled ... ok
+test compiler::build_orch::tests::build_environment_detects_sgdk_from_gdk_env_alias ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_fake_rom_from_nocode_sgdk_game_nodes_as_unit_fallback ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_megadrive_rom_artifact_with_fake_toolchain ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_megadrive_workspace_for_artstudio_imported_asset ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_megadrive_workspace_with_tilemap_assets ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_megadrive_workspace_with_audio_assets ... ok
+test compiler::build_orch::tests::build_fails_when_toolchain_is_missing ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_sgdk_project_config_with_sram_disabled ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::mastering_updates_sgdk_checksum_after_project_header_changes ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_snes_workspace_with_audio_data_files ... ok
+test compiler::build_orch::tests::megadrive_build_forces_windows_os_env_for_sgdk_make ... ok
+test compiler::build_orch::tests::megadrive_build_passes_space_free_sgdk_paths_to_make ... ok
+test compiler::build_orch::tests::megadrive_build_runs_with_detected_sgdk_toolchain_when_present ... ignored, host-local SGDK real: pode falhar por incompatibilidade LTO/compilador da instalação local; rode via validação upstream/manual
+test compiler::build_orch::tests::build_generates_snes_workspace_with_real_asset_staging ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_generates_snes_workspace_with_tilemap_data_files ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::build_rejects_output_dir_that_escapes_project_without_touching_sibling_dir ... ok
+test compiler::build_orch::tests::official_sgdk_build_rejects_unsupported_math_without_returning_old_rom ... ignored, prova operacional: exige SGDK e m68k-elf-gcc oficiais do host certificado
+test compiler::build_orch::tests::prepending_java_preserves_the_selected_shell_path ... ok
+test compiler::build_orch::tests::desktop_launch_finds_managed_compiler_without_shell_setup ... ok
+test compiler::build_orch::tests::pvsneslib_makefile_sets_romname_before_including_snes_rules ... ok
+[legacy-build-delegate] host='/tmp/retro-dev-studio-build-legacy-host-build-2726048-1790587411302161644' overlay='/tmp/retro-dev-studio-build-legacy-host-build-2726048-1790587411302161644/rds'
+test compiler::build_orch::tests::legacy_sgdk_overlay_build_delegates_to_host_workspace ... ok
+test compiler::build_orch::tests::legacy_sgdk_overlay_multi_target_marks_snes_as_unsupported ... ok
+test compiler::build_orch::tests::selected_shell_executes_after_java_path_configuration ... ok
+test compiler::build_orch::tests::sgdk_animation_rows_follow_named_frame_sequences_and_reject_missing_frames ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::megadrive_build_errors_on_lto_mismatch_without_optin ... ok
+test compiler::build_orch::tests::missing_asset_build_returns_actionable_diagnostic ... ok
+test compiler::build_orch::tests::multi_target_build_generates_reports_for_megadrive_and_snes ... ok
+test compiler::build_orch::tests::snes_windows_build_requires_git_bash_or_msys2 ... ok
+test compiler::build_provenance::tests::graph_revision_hash_rejects_any_serialized_revision_change ... ok
+test compiler::build_provenance::tests::source_map_serialization_is_deterministic_and_maps_real_lines ... ok
+test compiler::platform_support::tests::refuses_broken_behavior_references_from_external_edits ... ok
+test compiler::platform_support::tests::snes_refuses_condition_on_ground_but_megadrive_and_other_graphs_pass ... ok
+test compiler::sgdk_emitter::tests::button_mask_accepts_every_button_offered_by_the_node_editor ... ok
+test compiler::sgdk_emitter::tests::large_scene_uses_viewport_residency_before_sprite_update ... ok
+test compiler::sgdk_emitter::tests::main_c_applies_painted_tilemap_cells_as_sparse_overlay ... ok
+test compiler::sgdk_emitter::tests::main_c_blocks_unsupported_input_command_tokens ... ok
+test compiler::sgdk_emitter::tests::main_c_declares_logic_vars_inside_source_mapped_ops ... ok
+test compiler::sgdk_emitter::tests::main_c_disables_loop_for_non_looping_animation ... ok
+test compiler::sgdk_emitter::tests::main_c_draws_tilemap_with_scroll ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_apply_physics_with_velocity_state ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_exact_recovered_addq_word_semantics ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_flow_while_and_for_loops ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_fsm_builder_if_chain ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_hardware_event_handlers_and_registration ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_logic_var_math_and_compare_branching ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_manual_aabb_collision_checks ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_nodegraph_logic_inside_game_loop ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_retrofx_scroll_setup_and_frame_updates ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_ring_buffer_matcher_for_input_command ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_runtime_tilemap_scroll_and_camera_commands ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_timeline_sequence_switch ... ok
+test compiler::sgdk_emitter::tests::main_c_emits_xgm_play_and_stop_for_play_music_node ... ok
+test compiler::sgdk_emitter::tests::main_c_move_camera_falls_back_to_bg_a_without_tilemaps ... ok
+test compiler::sgdk_emitter::tests::main_c_move_camera_scrolls_both_background_planes_when_two_tilemaps_are_active ... ok
+test compiler::sgdk_emitter::tests::main_c_reads_sgdk_input_mappings ... ok
+test compiler::sgdk_emitter::tests::resources_res_and_main_c_emit_audio_resources ... ok
+test compiler::sgdk_emitter::tests::resources_res_emits_image_resource_for_tilemap_assets ... ok
+test compiler::sgdk_emitter::tests::resources_res_preserves_distinct_animation_row_timings ... ok
+test compiler::build_orch::tests::multi_target_build_reports_partial_failure_when_one_toolchain_is_missing ... ok
+test compiler::sgdk_emitter::tests::resources_res_uses_animation_timing_from_ast ... ok
+test compiler::snes_emitter::tests::snes_emitter_declares_logic_vars_inside_source_mapped_ops ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::snes_emitter::tests::snes_emitter_emits_apply_physics_with_velocity_state ... ok
+test compiler::sgdk_emitter::tests::sprite_priority_controls_priority_bit_without_horizontal_flip ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_audio_boot_and_manifest_entries ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_fsm_builder_if_chain ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_flow_while_and_for_loops ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_hardware_event_handlers_and_registration ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_logic_var_math_and_compare_branching ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_manual_aabb_collision_checks ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_nodegraph_logic_inside_game_loop ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_retrofx_hdma_setup_and_frame_updates ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_ring_buffer_matcher_for_input_command ... ok
+test compiler::snes_emitter::tests::snes_emitter_emits_runtime_tilemap_scroll_and_camera_commands ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::snes_emitter::tests::snes_emitter_emits_timeline_sequence_switch ... ok
+test compiler::build_orch::tests::retrofx_scene_config_generates_hdma_parallax_in_snes_main_c ... ok
+test compiler::snes_emitter::tests::snes_emitter_initializes_tilemap_backgrounds ... ok
+test compiler::snes_emitter::tests::snes_emitter_maps_button_aliases_inside_logic_conditions ... ok
+test compiler::snes_emitter::tests::snes_emitter_generates_frame_timer_for_default_animation ... ok
+test compiler::snes_emitter::tests::snes_emitter_move_camera_falls_back_to_bg0_without_tilemaps ... ok
+test compiler::snes_emitter::tests::snes_emitter_move_camera_scrolls_all_active_backgrounds ... ok
+test compiler::snes_emitter::tests::snes_emitter_reads_input_mappings ... ok
+test compiler::snes_emitter::tests::snes_main_c_emits_spc_play_and_stop_for_play_music_node ... ok
+test core::asset_quality::tests::asset_quality_reports_source_to_rom_map_when_res_references_asset ... ok
+test core::asset_quality::tests::asset_quality_flags_palette_overflow_bad_transparency_and_duplicate_tiles ... ok
+test core::compatibility_harness::tests::gamemaker_vertical_compatibility_harness_basic_platform ... ignored, host-local vertical: GameMaker .gmez -> ROM -> Libretro framebuffer
+test core::compatibility_harness::tests::openbor_host_sample_compatibility_harness_when_present ... ignored, host-local OpenBOR sample harness when an extracted module exists
+test core::compatibility_harness::tests::openbor_vertical_compatibility_harness_fixture ... ignored, host-local vertical: OpenBOR fixture -> SGDK C -> ROM -> Libretro framebuffer
+test core::audio_pipeline::tests::audio_pipeline_flags_clipping_dc_offset_bad_padding_and_sample_rate ... ok
+test core::editor_validation::tests::live_preview_matches_authoritative_megadrive_hw_status ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test core::editor_validation::tests::live_preview_matches_authoritative_snes_hw_status ... ok
+test core::editor_validation::tests::rejects_semantically_invalid_scene ... ok
+test core::editor_validation::tests::validates_canonical_megadrive_fixture_draft ... ok
+test core::editor_validation::tests::rejects_invalid_scene_json ... ok
+test core::gml_to_nodes::tests::converts_platformer_player_step_to_native_nodes ... ok
+test core::audio_pipeline::tests::audio_pipeline_reports_xgm_pcm_type_and_channel_ownership_risk ... ok
+test core::gml_to_nodes::tests::generic_object_keeps_bridge_gap_visible ... ok
+test core::input_commands::tests::parses_hadouken_numpad_command ... ok
+test core::input_commands::tests::parses_shoryuken_and_simultaneous_inputs ... ok
+test core::input_commands::tests::unknown_tokens_block_runtime ... ok
+test core::gml_to_nodes::tests::unsupported_complex_gml_bridge_carries_audit_fields ... ok
+test core::parity_harness::tests::aggregate_functional_evidence_requires_all_scenarios_to_pass ... ok
+test core::parity_harness::tests::build_missing_cycle_report_marks_trace_sources_as_missing ... ok
+test core::gml_to_nodes::tests::converts_core_gameplay_gml_constructs_to_native_nodes ... ok
+test core::parity_harness::tests::compare_cross_core_compares_regions_only_when_exposed_on_both ... ok
+test core::parity_harness::tests::compare_cross_core_detects_frame_hash_divergence ... ok
+test core::parity_harness::tests::compare_cross_core_detects_final_state_divergence_when_hashes_agree ... ok
+test core::parity_harness::tests::compare_cross_core_detects_frames_run_mismatch ... ok
+test core::parity_harness::tests::compare_cross_core_detects_rom_sha256_mismatch_early ... ok
+test core::parity_harness::tests::compare_cross_core_keeps_final_state_divergence_when_frame_hash_differs ... ok
+test core::parity_harness::tests::compare_cross_core_returns_empty_for_identical_reports ... ok
+test core::parity_harness::tests::compare_runs_detects_audio_availability_flip ... ok
+test core::parity_harness::tests::compare_runs_detects_audio_stream_divergence ... ok
+test core::parity_harness::tests::compare_runs_detects_frame_hash_divergence ... ok
+test core::parity_harness::tests::compare_runs_detects_frames_run_mismatch ... ok
+test core::parity_harness::tests::compare_runs_detects_non_black_pixels_divergence ... ok
+test core::parity_harness::tests::compare_runs_detects_region_divergence_and_availability_flip ... ok
+test core::parity_harness::tests::compare_runs_detects_rom_sha256_mismatch_early ... ok
+test core::parity_harness::tests::compare_runs_keeps_final_state_divergence_when_frame_hash_differs ... ok
+test core::parity_harness::tests::compare_runs_never_fabricates_audio_divergence_when_not_observed ... ok
+test core::parity_harness::tests::compare_runs_returns_empty_for_identical_reports ... ok
+test core::parity_harness::tests::count_non_black_pixels_skips_pure_black ... ok
+test core::parity_harness::tests::compare_runs_still_rejects_different_roms ... ok
+test core::parity_harness::tests::compare_runs_detects_final_state_divergence ... ok
+test core::parity_harness::tests::cross_core_limitations_flag_opaque_final_state_between_distinct_cores ... ok
+test core::parity_harness::tests::load_golden_rejects_unknown_extension ... ok
+test core::parity_harness::tests::load_golden_parses_input_script_with_canonical_schema ... ok
+test core::parity_harness::tests::load_golden_falls_back_to_replay_when_no_extension_hint ... ok
+test core::parity_harness::tests::load_golden_rejects_unknown_schema ... ok
+test core::parity_harness::tests::load_golden_round_trips_replay_capture ... ok
+test compiler::build_orch::tests::retrofx_scene_config_generates_parallax_and_raster_in_main_c ... ok
+test core::parity_harness::tests::parity_fixture_control_same_rom_is_control_evidence ... ignored, host-local real-core: fixture canonica de parity buildada em target-test via SGDK (blocker preciso sem core/SGDK)
+test core::parity_harness::tests::parity_fixture_negative_mutation_is_detected ... ignored, host-local real-core: fixture canonica de parity buildada em target-test via SGDK (blocker preciso sem core/SGDK)
+test core::parity_harness::tests::parity_fixture_positive_equivalent_roms_is_scenario_evidence ... ignored, host-local real-core: fixture canonica de parity buildada em target-test via SGDK (blocker preciso sem core/SGDK)
+test core::parity_harness::tests::reference_candidate_accepts_different_roms ... ok
+test core::parity_harness::tests::reference_candidate_black_or_static_capture_is_insufficient ... ok
+test core::parity_harness::tests::reference_candidate_detects_core_mismatch ... ok
+test core::parity_harness::tests::reference_candidate_detects_divergent_frame ... ok
+test compiler::build_orch::tests::sanitize_build_output_dir_rejects_paths_outside_project_root ... ok
+test core::parity_harness::tests::parity_report_revision1_json_without_new_fields_still_deserializes ... ok
+test core::parity_harness::tests::parity_markdown_renders_identity_audio_and_regions ... ok
+test core::parity_harness::tests::reference_candidate_asymmetric_extra_region_blocks_parity_even_when_another_matches ... ok
+test core::parity_harness::tests::reference_candidate_real_core_generates_report ... ignored, host-local: real Libretro core reference/candidate parity (needs core .so/.dll + fixture ROM)
+test core::parity_harness::tests::reference_candidate_reaches_observed_state_parity_when_regions_match ... ok
+test core::parity_harness::tests::reference_candidate_region_id_mismatch_is_divergence ... ok
+test core::parity_harness::tests::reference_candidate_region_size_mismatch_is_divergence ... ok
+test core::parity_harness::tests::reference_candidate_detects_observed_state_divergence ... ok
+test core::parity_harness::tests::reference_candidate_observed_state_needs_regions_available_on_both_sides ... ok
+test core::parity_harness::tests::reference_candidate_visual_only_never_becomes_total_equivalence ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::sgdk_managed_vram_overflow_warns_but_native_still_aborts ... ok
+test compiler::build_orch::tests::shell_friendly_path_conversion_matches_windows_layout ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test compiler::build_orch::tests::snes_build_refuses_unsupported_logic_before_codegen_and_drops_stale_roms ... ok
+test core::parity_harness::tests::run_cross_core_parity_rejects_empty_script ... ok
+test core::parity_harness::tests::w7_4_cross_core_real_parity_requires_two_cores ... ignored, host-local W7.4: cross-core exige dois cores Mega Drive reais (falha com blocker preciso se faltar o segundo)
+test core::parity_harness::tests::w7_5_single_core_real_capture_and_cycle_report ... ignored, host-local W7.5: capture + cycle report com um core Mega Drive real (falha com blocker preciso sem core)
+test core::parity_harness::tests::write_cross_core_report_creates_json_and_md ... ok
+test core::parity_harness::tests::write_cross_core_report_shows_divergences_in_markdown ... ok
+test core::parity_harness::tests::write_cycle_report_creates_json_and_markdown_with_limitations ... ok
+test core::parity_harness::tests::write_parity_report_creates_files_with_parity_substring ... ok
+test core::parity_harness::tests::write_parity_report_marks_divergences_in_markdown ... ok
+test core::parity_harness::tests::write_reference_candidate_report_records_hashes_core_inputs_limitations ... ok
+test core::project_asset_scope::tests::arbitrary_directory_is_rejected ... ok
+test core::project_asset_scope::tests::canonical_fixture_is_an_authorized_project_root ... ok
+test core::project_capability::tests::gameplay_parity_flips_to_partial_when_parity_report_exists ... ok
+test core::project_capability::tests::gameplay_parity_starts_blocked_when_report_absent ... ok
+test core::project_capability::tests::project_capability_json_shape_is_stable ... ok
+test core::project_capability::tests::project_capability_report_keeps_all_axes_experimental_and_actionable ... ok
+test core::project_mgr::tests::analyze_godot_gdscript_subset_generates_source_mapped_graph ... ok
+test core::project_mgr::tests::bridge_complex_godot_gdscript_keeps_blocking_entries ... ok
+test core::project_mgr::tests::canonical_project_matches_megadrive_schema ... ok
+test core::project_mgr::tests::code_only_detection_preserves_unsupported_and_unreadable_manifest_errors ... ok
+test core::project_mgr::tests::construct_handles_empty_project_dir ... ok
+test core::project_mgr::tests::construct_handles_lossy_text_or_unicode_paths ... ok
+test core::project_mgr::tests::construct_handles_missing_root_artifact ... ok
+test core::project_mgr::tests::create_project_skeleton_writes_canonical_files ... ok
+test core::project_mgr::tests::create_scene_seeds_starter_scene_when_onboarding_asset_exists ... ok
+test core::project_mgr::tests::discover_project_rds_at_root ... ok
+test core::project_mgr::tests::discover_project_rds_empty_dir_fails ... ok
+test core::project_mgr::tests::discover_project_rds_in_arbitrary_subdir ... ok
+test core::project_mgr::tests::discover_project_rds_in_rds_subdir ... ok
+test core::project_mgr::tests::discover_project_rds_prefers_rds_over_other_subdir ... ok
+test core::project_mgr::tests::discover_project_rds_root_has_priority ... ok
+test core::project_mgr::tests::external_platformer_template_reports_unavailable_when_required_asset_is_missing ... ok
+test core::project_mgr::tests::gamemaker_import_summary_reports_generated_nodes ... ok
+test core::project_mgr::tests::godot_handles_empty_project_dir ... ok
+test core::project_mgr::tests::godot_handles_lossy_text_or_unicode_paths ... ok
+test core::project_mgr::tests::godot_handles_missing_root_artifact ... ok
+test core::project_mgr::tests::ikemen_go_handles_empty_project_dir_via_dispatcher ... ok
+test core::project_mgr::tests::ikemen_go_handles_missing_root_artifact_via_dispatcher ... ok
+test core::project_mgr::tests::import_gamemaker_gmx_project_creates_editable_scene_with_native_node_graph ... ok
+test core::project_mgr::tests::import_gamemaker_project_gmx_file_detects_legacy_project_root ... ok
+test core::project_mgr::tests::import_gamemaker_real_host_samples_when_present ... ignored, host-local validation against F:\Projects GameMaker/GMX samples
+test core::project_mgr::tests::import_gamemaker_room_yy_path_detects_modern_project_root ... ok
+test core::project_mgr::tests::import_gamemaker_yyp_project_creates_scene_with_yy_assets_nodes_and_tile_layer ... ok
+test core::project_mgr::tests::import_godot_complex_fixture_reports_bridge_without_fake_graph ... ok
+test core::project_mgr::tests::import_godot_project_creates_native_scene_with_sprite_audio_camera_and_skips ... ok
+test core::project_mgr::tests::import_godot_real_host_projects_when_present_under_f_projects_godot ... ignored, host-local Godot BYOR samples under F:\Projects\Godot; ignored for CI
+test core::project_mgr::tests::import_godot_subset_fixture_generates_source_mapped_nodegraph_and_sgdk_c ... ok
+test core::project_mgr::tests::import_godot_subset_is_idempotent_with_deterministic_graph_and_bridge_report ... ok
+test core::project_mgr::tests::import_ikemen_go_preserves_profile_and_bridges_unsupported_extensions ... ok
+[legacy-main-c] overlay=/tmp/retro-dev-studio-legacy-overlay-main-c-2726048-1790587414808220112/rds
+test core::project_mgr::tests::import_legacy_sgdk_project_creates_overlay_for_main_c_only_workspace ... ok
+[legacy-full] overlay=/tmp/retro-dev-studio-legacy-overlay-full-2726048-1790587414810155381/rds
+test core::project_mgr::tests::import_legacy_sgdk_project_materializes_assets_and_writes_index ... ok
+test core::project_mgr::tests::import_mugen_character_converts_cmd_air_cns_st_to_fighting_nodes ... ok
+test core::parity_harness::tests::run_cross_core_parity_rejects_missing_core_path ... ok
+test core::project_mgr::tests::import_mugen_project_supports_repo_sample_roots_when_present ... ignored, host-local validation against repo sample roots
+test core::project_mgr::tests::import_mugen_reimport_keeps_commands_and_graph_idempotent ... ok
+test core::project_mgr::tests::import_mugen_stage_background_materializes_tilemap_and_parallax_metadata ... ok
+test core::project_mgr::tests::import_mugen_project_builds_native_scenes_from_character_stage_and_screenpack_roots ... ok
+test core::project_mgr::tests::import_sgdk_project_combines_split_manifests_and_keeps_visual_entities_in_front_of_audio ... ok
+test core::project_mgr::tests::import_sgdk_project_copies_supported_assets_and_skips_forbidden_outputs ... ok
+test core::project_mgr::tests::import_sgdk_project_reimport_keeps_ledger_stable_and_no_history_growth ... ok
+test core::project_mgr::tests::import_sgdk_project_supports_code_only_donor_with_bridge_scene ... ok
+test core::project_mgr::tests::legacy_new_project_shape_is_rejected ... ok
+test core::project_mgr::tests::list_external_import_profiles_exposes_support_matrix ... ok
+test core::project_mgr::tests::list_project_templates_reads_registry_and_builtin_entries_are_available ... ok
+test core::project_mgr::tests::list_scenes_returns_canonical_scene_catalog ... ok
+test core::project_mgr::tests::list_scenes_returns_empty_when_directory_is_missing ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test core::project_mgr::tests::load_legacy_fixture_without_schema_version_is_backward_compatible ... ok
+test core::project_mgr::tests::load_mddev_project_meta_accepts_utf8_bom ... ok
+test core::project_mgr::tests::load_project_accepts_canonical_megadrive_fixture ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test core::project_mgr::tests::load_project_accepts_canonical_snes_fixture ... ok
+test core::project_mgr::tests::migrate_scene_repairs_onboarding_placeholder_and_starter_edge ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test core::project_mgr::tests::migration_chain_upgrades_project_schema_1_0_0_to_1_1_0 ... ok
+test core::project_mgr::tests::import_sgdk_project_report_exposes_rich_fields_and_persists_ledger ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test core::project_mgr::tests::migration_chain_upgrades_project_schema_1_2_0_to_1_3_0 ... ok
+test core::project_mgr::tests::migration_chain_upgrades_project_schema_1_1_0_to_1_2_0 ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test core::project_mgr::tests::migration_chain_upgrades_scene_schema_1_5_0_to_1_6_0_and_promotes_legacy_display_name ... ok
+test core::project_mgr::tests::mugen_handles_empty_project_dir ... ok
+test core::project_mgr::tests::mugen_handles_missing_root_artifact ... ok
+test core::project_mgr::tests::openbor_handles_empty_project_dir ... ok
+test core::project_mgr::tests::openbor_handles_missing_root_artifact ... ok
+test core::project_mgr::tests::openbor_host_local_samples_when_present ... ignored, host-local OpenBOR sample import; requires an extracted BYOR-safe module with data/models.txt or data/levels.txt
+test core::project_mgr::tests::openbor_handles_lossy_text_or_unicode_paths ... ok
+test core::project_mgr::tests::openbor_model_anim_blocks_to_animation_and_hitbox_metadata ... ok
+test core::project_mgr::tests::openbor_level_spawn_music_background_to_nodes_and_bridge ... ok
+test core::project_mgr::tests::parse_godot_tres_resolves_spriteframes_and_tileset_visual_sources ... ok
+test core::project_mgr::tests::parse_godot_tscn_preserves_subset_nodes_subresources_and_source_lines ... ok
+test core::project_mgr::tests::parse_sgdk_manifest_extracts_kind_name_path_and_params ... ok
+test core::project_mgr::tests::parse_sgdk_manifest_ignores_slash_and_semicolon_comment_lines ... ok
+test core::project_mgr::tests::openbor_reimport_beatemup_scene_is_idempotent ... ok
+test core::project_mgr::tests::reference_platformer_template_is_self_contained_and_exercises_the_canonical_components ... ok
+test core::project_mgr::tests::resolve_prefabs_loads_logic_graph_from_graph_ref ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test core::project_mgr::tests::resolve_prefabs_merges_template_with_scene_overrides ... ok
+test core::project_mgr::tests::resolved_template_donor_path_requires_manual_selection_when_registry_has_no_default ... ok
+test core::project_mgr::tests::rex00_hamoopig_same_rom_equivalence_with_defined_inputs ... ignored
+test core::project_mgr::tests::rex00_taiketsu_preview_rejected_by_equivalence_oracles ... ignored
+test core::project_mgr::tests::rex02_md_references_identified_by_content_with_reversible_normalization ... ignored
+test core::project_mgr::tests::rex05_hamoopig_aplib_edit_pelo_produto_executa_no_core ... ignored
+test core::project_mgr::tests::rex06_hamoopig_aplib_edicao_da_barra_executa_no_core ... ignored
+test core::project_mgr::tests::rpg_maker_handles_empty_project_dir ... ok
+test core::project_mgr::tests::rpg_maker_handles_lossy_text_or_unicode_paths ... ok
+test core::project_mgr::tests::rpg_maker_handles_missing_root_artifact ... ok
+test core::project_mgr::tests::runtime_evidence_rejects_frozen_exception_and_allocation_failure ... ok
+test core::project_mgr::tests::save_and_load_project_preserves_project_settings_in_schema ... ok
+test core::project_mgr::tests::save_and_load_scene_preserves_retrofx_config ... ok
+test core::project_mgr::tests::reference_platformer_art_fits_native_sizes_and_md_palette_slots ... ok
+test core::project_mgr::tests::save_and_load_scene_preserves_sprite_animation_payload ... ok
+test core::project_mgr::tests::save_project_replaces_existing_file_without_leaking_temp_files ... ok
+test core::project_mgr::tests::set_entry_scene_repoints_project_to_selected_scene ... ok
+test core::project_mgr::tests::sgdk_corpus_real_build_rom_emulation_report ... ignored, requires local SGDK_Engines corpus, official SGDK and a real Libretro Mega Drive core; writes persistent validation artifacts
+test core::project_mgr::tests::sgdk_corpus_regression_mega_drive_breakout_visible_framebuffer ... ignored, regression: Mega Drive Breakout visible framebuffer with real SGDK/Libretro
+test core::project_mgr::tests::sgdk_corpus_regression_procedural_animation_visible_framebuffer ... ignored, regression: Procedural Animation visible framebuffer with real SGDK/Libretro
+test core::project_mgr::tests::sgdk_handles_empty_project_dir ... ok
+test core::project_mgr::tests::seed_platformer_template_copies_only_allowed_assets ... ok
+test core::project_mgr::tests::sgdk_handles_missing_root_artifact ... ok
+test core::project_mgr::tests::sgdk_matrix_corpus_blaze_engine_partial_flow_documents_build_blocker ... ignored
+test core::project_mgr::tests::sgdk_matrix_corpus_metal_slug_warfare_demo_partial_flow_documents_build_blocker ... ignored
+test core::project_mgr::tests::sgdk_matrix_corpus_mortal_kombat_plus_partial_flow_documents_build_blocker ... ignored
+test core::project_mgr::tests::sgdk_matrix_corpus_nexzr_md_partial_flow_documents_build_blocker ... ignored
+test core::project_mgr::tests::sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker ... ignored
+test core::project_mgr::tests::sgdk_matrix_corpus_platformer_engine_partial_flow_documents_build_blocker ... ignored
+test core::project_mgr::tests::sgdk_matrix_corpus_shadow_dancer_revisitado_partial_flow_documents_build_blocker ... ignored
+SKIP (RDS_SGDK_MATRIX_CORPUS_SKIP=1): donor ausente para sgdk_matrix_corpus_skip_honors_explicit_env_flag_when_donor_missing em /tmp/retro-dev-studio-sgdk-matrix-missing-donor-with-skip-2726048-1790587415252543748
+
+thread 'core::project_mgr::tests::sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing' (2727043) panicked at src/core/project_mgr.rs:24695:9:
+sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing: doador SGDK ausente em /tmp/retro-dev-studio-sgdk-matrix-missing-donor-no-skip-2726048-1790587415252678767. Monte o corpus neste caminho ou defina RDS_SGDK_MATRIX_CORPUS_SKIP=1 para saltar explicitamente. Nao retornar Ok silencioso quando o teste e executado com --ignored.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test core::project_mgr::tests::sgdk_matrix_corpus_skip_honors_explicit_env_flag_when_donor_missing ... ok
+test core::project_mgr::tests::sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing ... ok
+test core::project_mgr::tests::sgdk_matrix_corpus_taiketsu_ultra_hero_genesis_partial_flow_documents_build_blocker ... ignored
+test core::project_mgr::tests::sgdk_normalize_declared_path_preserves_brackets_in_corpus_style_names ... ok
+test core::project_mgr::tests::sgdk_phase_b_import_derives_scene_layers_grouping_entities_coherently ... ok
+test core::project_mgr::tests::sgdk_phase_b_import_keeps_explicit_fallback_when_tilemap_source_is_too_small ... ok
+test core::project_mgr::tests::sgdk_phase_b_import_populates_tilemap_cells_from_png ... ok
+test core::project_mgr::tests::sgdk_phase_b_import_builds_multi_scene_when_multiple_tilemap_anchors_exist ... ok
+test core::project_mgr::tests::sgdk_phase_b_ledger_persists_scene_inventory_and_bumps_schema_version ... ok
+test core::project_mgr::tests::sgdk_phase_c_reimport_preserves_sprite_animations_and_collision_map ... ok
+test core::project_mgr::tests::sgdk_phase_b_reimport_multi_scene_is_idempotent_and_does_not_duplicate_scene_files ... ok
+test core::project_mgr::tests::sgdk_phase_d_audio_without_high_confidence_class_records_family_in_ledger_only ... ok
+test core::project_mgr::tests::sgdk_phase_d_donor_with_xgm_and_snd_pcm_playback_tags_fire_hint_as_audio_backed ... ok
+test core::project_mgr::tests::sgdk_phase_d_beatemup_close_range_fixture_assigns_roles ... ok
+test core::project_mgr::tests::sgdk_phase_d_donor_without_audio_playback_flags_fire_hint_as_unbacked_hypothesis ... ok
+test core::project_mgr::tests::sgdk_phase_d_main_c_missing_keeps_external_refs_empty_and_emits_hint ... ok
+test core::project_mgr::tests::sgdk_phase_d_hybrid_action_scroll_fixture_materializes_hybrid_class ... ok
+test core::project_mgr::tests::sgdk_phase_d_multifile_scan_detects_shmup_vertical_signals ... ok
+test core::project_mgr::tests::sgdk_phase_d_multifile_scan_merges_run_and_gun_signals ... ok
+test core::project_mgr::tests::sgdk_phase_d_platformer_horizontal_scan_fixture_class ... ok
+test core::project_mgr::tests::sgdk_phase_d_resolve_prefabs_hydrates_secondary_graph_ref ... ok
+test core::project_mgr::tests::sgdk_phase_d_semantic_scan_ignores_comments_and_strings_and_tracks_cross_tu_calls ... ok
+[NodeGraph] sprite_anim ignorado para 'hero': animacao 'idle' nao encontrada.
+test core::project_mgr::tests::sgdk_resolver_fails_when_reference_declares_multiple_buildable_candidates ... ok
+test core::project_mgr::tests::sgdk_resolver_follows_mddev_reference_chain_to_upstream_root ... ok
+test core::project_mgr::tests::sgdk_resolver_prefers_requested_disabled_root_when_it_has_manifest ... ok
+test core::project_mgr::tests::smoke_import_construct_project_builds_scene_and_is_idempotent ... ok
+test core::project_mgr::tests::smoke_import_godot_project_is_idempotent ... ok
+test core::project_mgr::tests::smoke_import_ikemen_go_reuses_mugen_adapter_without_losing_assets ... ok
+test core::project_mgr::tests::smoke_import_mugen_project_is_idempotent ... ok
+test core::project_mgr::tests::sgdk_phase_e_import_edit_save_reload_and_build_emits_rom_header ... ok
+test core::project_mgr::tests::smoke_import_rpg_maker_project_builds_scene_and_is_idempotent ... ok
+test core::project_mgr::tests::smoke_import_openbor_project_builds_scene_and_is_idempotent ... ok
+test core::project_mgr::tests::stamp_project_template_metadata_marks_external_sgdk_source_kind_even_without_donor ... ok
+test core::project_mgr::tests::sync_external_graph_refs_writes_graph_file_and_keeps_scene_externalized ... ok
+test core::project_mgr::tests::unknown_schema_version_produces_warning_message ... ok
+test core::project_mgr::tests::update_project_settings_trims_internal_rom_name_before_persisting ... ok
+test core::project_mgr::tests::update_project_target_rewrites_resolution_and_palette_mode ... ok
+test core::project_mgr::tests::validate_project_rejects_unsafe_project_settings ... ok
+test core::rom_mastering::tests::rom_mastering_detects_valid_sega_header_and_matching_checksum ... ok
+test core::rom_mastering::tests::rom_mastering_distinguishes_absent_sram ... ok
+test core::rom_mastering::tests::rom_mastering_json_shape_is_stable ... ok
+test core::rom_mastering::tests::rom_mastering_reports_checksum_divergence_as_blocking ... ok
+test core::rom_mastering::tests::rom_mastering_warns_on_invalid_region ... ok
+test core::rom_mastering::tests::sgdk_checksum_is_distinct_and_still_rejects_corruption ... ok
+test core::runtime_contracts::tests::runtime_contracts_marks_runtime_probe_as_not_instrumented_when_evidence_absent ... ok
+test core::runtime_contracts::tests::runtime_contracts_report_declared_observed_and_missing_states ... ok
+test core::sgdk_corpus_inventory::tests::parse_resource_manifest_ignores_slash_and_semicolon_comment_lines ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_corpus_inventory_real_corpus_report ... ignored, requires local SGDK_Engines corpus outside the repository
+test core::sgdk_corpus_inventory::tests::sgdk_corpus_inventory_report_is_deterministic_and_totals_projects ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_inventory_emits_actionable_gaps_and_node_candidates ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_inventory_extracts_structural_code_resources_and_gaps ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_inventory_keeps_lossy_encoded_source_as_gap_instead_of_aborting ... ok
+test core::project_mgr::tests::smoke_import_sgdk_project_is_idempotent ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_logic_extracts_direct_next_state_assignment ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_logic_extracts_enum_switch_state_machine_and_transitions ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_logic_extracts_joy_buttons_and_motion_actions ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_logic_extracts_define_state_values_and_if_transition ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_logic_extracts_sprite_animation_inside_state ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_logic_keeps_complex_macro_as_bridge_without_fake_transition ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_logic_real_corpus_vertical_reports ... ignored, host-local SGDK_Engines vertical semantic report
+test core::sgdk_pattern_templates::tests::sgdk_pattern_registry_exposes_required_experimental_templates ... ok
+test core::sgdk_pattern_templates::tests::sgdk_pattern_template_contains_traceable_nodes_and_origin ... ok
+test core::sgdk_semantic_graph::tests::auto_layout_keeps_required_system_groups_apart_and_bridges_last ... ok
+test core::sgdk_corpus_inventory::tests::sgdk_logic_handles_blaze_like_state_and_pools_without_false_nodes ... ok
+test core::sgdk_semantic_graph::tests::round_trip_json_preserves_bridge_source_mapping_fields ... ok
+test core::sgdk_semantic_graph::tests::converts_sgdk_semantic_model_to_real_fsm_nodegraph_with_source_mapping ... ok
+test core::sgdk_semantic_reports::tests::hardware_constraint_report_exposes_all_required_axes ... ok
+test core::sgdk_semantic_reports::tests::exported_node_graph_contains_required_semantic_node_families ... ok
+test emulator::frame_buffer::tests::converts_rgb565_to_rgba ... ok
+test emulator::frame_buffer::tests::converts_xrgb8888_to_rgba ... ok
+test core::sgdk_semantic_reports::tests::semantic_ir_report_accounts_coverage_and_writes_named_artifacts ... ok
+test core::parity_harness::tests::run_cross_core_parity_respects_frame_limit ... ok
+test core::parity_harness::tests::run_cycle_report_respects_frame_limit_and_writes_reports ... ok
+test emulator::libretro_ffi::tests::megadrive_autodetect_candidates_include_blastem_when_available ... ok
+test core::parity_harness::tests::run_cycle_report_rejects_empty_script ... ok
+test core::parity_harness::tests::run_parity_capture_against_golden_rejects_empty_script ... ok
+test core::parity_harness::tests::run_parity_capture_against_golden_records_identity_audio_and_regions ... ok
+test core::parity_harness::tests::run_parity_capture_against_golden_respects_frame_limit ... ok
+test emulator::libretro_ffi::tests::audio_sample_batch_callback_buffers_latest_audio_batch ... ok
+test emulator::libretro_ffi::tests::rewind_config_stays_within_memory_budget_for_large_states ... ok
+test emulator::libretro_ffi::tests::detects_megadrive_rom_from_extension_and_header ... ok
+test emulator::libretro_ffi::tests::loads_mock_core_and_runs_frames ... ok
+test emulator::libretro_ffi::tests::mock_core_collects_execution_trace_via_serialized_state ... ok
+test emulator::libretro_ffi::tests::read_memory_requires_a_loaded_core ... ok
+test hardware::constraint_engine::tests::rejects_unknown_target ... ok
+test hardware::constraint_engine::tests::returns_status_for_megadrive_scene ... ok
+test hardware::md_profile::tests::camera_entity_does_not_produce_sprite_errors ... ok
+test hardware::md_profile::tests::collision_map_wider_than_viewport_is_non_fatal_with_warning ... ok
+test hardware::md_profile::tests::collision_map_with_invalid_data_len_keeps_fatal_guardrails ... ok
+test hardware::md_profile::tests::hw_status_residency_breakdown_sums_to_resident_vram ... ok
+test hardware::md_profile::tests::imported_hud_hint_token_takes_precedence_over_name_heuristic ... ok
+test hardware::md_profile::tests::imported_sgdk_project_still_fails_when_resident_overflows ... ok
+test hardware::md_profile::tests::imported_tilemap_hud_hint_from_logic_metadata_is_accounted ... ok
+test hardware::md_profile::tests::live_vram_warning_draft_matches_desktop_e2e_fixture ... ok
+test hardware::md_profile::tests::meta_sprite_bypasses_32x32_limit ... ok
+test hardware::md_profile::tests::meta_sprite_still_counts_vram ... ok
+test hardware::md_profile::tests::non_meta_sprite_still_rejects_above_32x32 ... ok
+test hardware::md_profile::tests::rejects_invalid_palette_slots ... ok
+test hardware::md_profile::tests::rejects_sprite_overflow ... ok
+test hardware::md_profile::tests::reports_hw_status_for_valid_scene ... ok
+test hardware::md_profile::tests::sgdk_managed_warning_includes_residency_category_tokens ... ok
+test hardware::md_profile::tests::sgdk_project_asset_total_can_exceed_limit_without_resident_overflow ... ok
+test hardware::md_profile::tests::warns_when_sprite_pressure_is_high ... ok
+test hardware::md_profile::tests::warns_when_sprite_scanline_limit_exceeded ... ok
+test hardware::snes_profile::tests::collision_map_wider_than_viewport_is_non_fatal_with_warning ... ok
+test hardware::snes_profile::tests::rejects_background_layer_overflow ... ok
+test hardware::snes_profile::tests::rejects_large_sprite_sizes ... ok
+test hardware::snes_profile::tests::rejects_non_square_simple_sprite_shapes ... ok
+test hardware::snes_profile::tests::reports_hw_status_for_valid_scene ... ok
+test hardware::snes_profile::tests::warns_when_sprite_pressure_is_high ... ok
+test hardware::snes_profile::tests::warns_when_sprite_scanline_limit_exceeded ... ok
+test tests::automatic_onboarding_base_dir_supports_canonical_megadrive_build ... ok
+[auto-onboarding] base='/tmp/retro-dev-studio-e2e-onboarding-auto-root-2726048-1790587421958524600/RetroDevProjects' project='/tmp/retro-dev-studio-e2e-onboarding-auto-root-2726048-1790587421958524600/RetroDevProjects/Auto_Starter'
+test tests::create_onboarding_project_allows_empty_base_dir_when_candidates_are_available ... ok
+test tests::create_onboarding_project_auto_suffixes_when_the_default_folder_is_busy ... ok
+test tests::create_onboarding_project_generates_template_scene_and_asset ... ok
+test tests::create_project_from_template_supports_empty_starter_platformer_and_generic_external_seed ... ok
+test tests::diff_asset_fingerprints_detects_added_changed_and_removed_assets ... ok
+test emulator::libretro_ffi::tests::read_memory_returns_predictable_mock_core_bytes ... ok
+test emulator::libretro_ffi::tests::replay_recording_and_playback_restore_the_same_final_framebuffer ... ok
+test emulator::libretro_ffi::tests::rewind_restores_previous_mock_core_snapshot ... ok
+test tests::fixture_copy_skips_generated_build_directories ... ok
+[scene-data-legacy-index] overlay='/tmp/retro-dev-studio-e2e-scene-data-legacy-index-2726048-1790587422775144398/rds' c_files=2 manifests=1
+test tests::get_scene_data_exposes_legacy_sgdk_index_for_overlay_projects ... ok
+test tests::import_external_project_command_supports_construct ... ok
+test tests::import_external_project_command_supports_godot_and_stamps_metadata ... ok
+test tests::import_external_project_command_supports_ikemen_go_metadata ... ok
+test tests::import_external_project_command_supports_openbor ... ok
+test tests::import_external_project_command_supports_rpg_maker ... ok
+[legacy-import-command] /tmp/retro-dev-studio-e2e-legacy-import-command-2726048-1790587422863957141/rds
+test tests::import_legacy_sgdk_project_command_wraps_directory_without_copying_code ... ok
+test tests::import_mugen_project_command_creates_native_project_with_metadata_and_scene ... ok
+test tests::import_sgdk_project_command_creates_native_project_without_forbidden_assets ... ok
+test tests::list_external_import_profiles_returns_support_matrix ... ok
+test tests::list_project_templates_returns_registry_entries ... ok
+test tests::merge_project_notices_preserves_both_contexts ... ok
+test tests::official_sgdk_nocode_game_builds_and_runs_with_real_toolchain ... ignored, Requires provisioned official SGDK, JDK and a real Libretro Mega Drive core; writes persistent validation artifacts
+test tests::official_snes_nocode_game_builds_and_runs_with_real_toolchain ... ignored, Requires provisioned official PVSnesLib and a real Libretro SNES core; writes persistent validation artifacts
+test tests::official_windows_upstream_validation_smoke_test ... ignored, Downloads official upstream dependencies and requires Windows with network access
+test tests::open_project_path_accepts_canonical_fixture ... ok
+test tests::open_project_path_preserves_project_entry_scene_as_preferred_scene ... ok
+test tests::open_project_path_rejects_invalid_directory ... ok
+[open-legacy] /tmp/retro-dev-studio-e2e-open-legacy-sgdk-2726048-1790587422914164946/rds
+test tests::open_project_path_wraps_legacy_sgdk_directory_in_place ... ok
+test tests::patch_create_records_audit_entry_in_project_rds ... ok
+test emulator::libretro_ffi::tests::replay_stop_requires_at_least_one_recorded_frame ... ok
+test tests::platformer_template_build_generates_megadrive_workspace_without_donor_artifacts ... ok
+test tests::profiler_command_reports_detected_sat_activity ... ok
+test tests::project_destination_preview_detects_existing_retrodev_project_and_suggests_opening_it ... ok
+test tests::project_destination_preview_marks_busy_non_project_folder_as_occupied ... ok
+test tests::read_legacy_project_file_returns_read_only_preview_for_wrapped_host_code ... ok
+test tests::reference_platformer_real_animation_timing_contract ... ignored
+test tests::reference_platformer_real_goal_sound_association_contract ... ignored
+test tests::reference_platformer_real_jump_and_goal_audio_contract ... ignored
+test tests::reference_platformer_real_passage_gating_contract ... ignored
+test tests::reference_platformer_real_tile_cells_contract ... ignored
+test tests::reference_platformer_real_toolchain_build ... ignored
+[fallback-base-dir] requested='/tmp/retro-dev-studio-e2e-requested-base-file-2726048-1790587423189206110/not-a-directory' resolved='/tmp/retro-dev-studio-e2e-automatic-base-root-2726048-1790587423189320039/RetroDevProjects'
+test tests::resolve_project_base_dir_with_candidates_falls_back_and_creates_directory ... ok
+scene: schema_version '1.6.0' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.
+test tests::resolve_scene_prefabs_command_returns_resolved_scene_payload ... ok
+test tests::save_scene_data_keeps_graph_ref_externalized_when_resolved_scene_is_supplied ... ok
+test tests::send_input_command_refuses_epoch_bumped_after_prelock_hook ... ok
+test tests::send_input_epoch_race_is_refused_under_lock_without_applying ... ok
+test tests::send_input_refuses_epoch_captured_before_increment ... ok
+test tests::sgdk_logic_import_summary_keeps_phase_d_heuristic_until_extractor_proves_fsm ... ok
+test tests::sgdk_logic_import_summary_preserves_fsm_bridge_mapping_truth ... ok
+test tests::sgdk_logic_import_summary_reads_external_graph_ref_without_promoting_heuristic ... ok
+test tests::snapshot_project_assets_returns_empty_when_project_has_no_assets_directory ... ok
+test tests::sonic1_stand_tile_reinsertion_observed_in_game ... ignored
+test tests::suggested_project_base_dir_path_returns_first_candidate_for_ui_preview ... ok
+test tools::asset_extractor::tests::decode_tile_2bpp_expands_bitplanes_into_palette_indices ... ok
+test tools::asset_extractor::tests::extract_assets_writes_expected_outputs_for_simple_rom ... ok
+test tools::asset_extractor::tests::extract_tiles_from_rom_auto_detects_2bpp_layout ... ok
+test tools::asset_extractor::tests::record_extraction_error_marks_result_failed_once ... ok
+test tools::deep_profiler::tests::find_sat_candidate_prefers_high_score_manual_fixture ... ok
+test tools::deep_profiler::tests::profile_bytes_detects_small_rom_error ... ok
+test tools::deep_profiler::tests::profile_bytes_errors_when_dma_demand_exceeds_budget ... ok
+test tools::deep_profiler::tests::profile_bytes_reports_no_dma_issue_below_budget ... ok
+test emulator::libretro_ffi::tests::runtime_contract_reports_observed_save_ram_from_libretro_memory ... ok
+test tools::deep_profiler::tests::profile_bytes_uses_detected_sat_candidate_for_sprite_heatmap ... ok
+test tools::dependency_manager::tests::missing_common_report_is_blocking_and_actionable ... ok
+test tools::dependency_manager::tests::non_applicable_windows_dependency_does_not_block_linux_report ... ok
+test tools::dependency_manager::tests::rom_dependency_detection_supports_known_extensions ... ok
+test tools::dependency_manager::tests::runtime_report_writes_canonical_json ... ok
+test tools::dependency_manager::tests::runtime_status_uses_common_host_report ... ok
+test tools::dependency_manager::tests::runtime_summary_excludes_not_applicable_dependencies ... ok
+test tools::dependency_manager::tests::sanitizer_redacts_tokens_and_home_directory ... ok
+test tools::dependency_manager::tests::unknown_dependency_id_never_masquerades_as_jdk ... ok
+test tools::patch_studio::tests::apply_bps_rejects_a_different_base_with_the_same_size ... ok
+test tools::patch_studio::tests::create_bps_emits_smaller_patch_when_source_copy_is_available ... ok
+test tools::patch_studio::tests::test_create_and_apply_bps_match ... ok
+test tools::patch_studio::tests::test_create_and_apply_ips_match ... ok
+test tools::photo2sgdk::tests::auto_islands_detects_multiple_components_and_normalizes_frame_size ... ok
+test tools::deep_profiler::tests::profile_bytes_warns_when_dma_demand_is_near_budget ... ok
+test tools::photo2sgdk::tests::detects_alpha_transparency_before_corner_heuristic ... ok
+test tools::photo2sgdk::tests::detects_corner_background_when_no_alpha_exists ... ok
+test emulator::libretro_ffi::tests::save_state_restores_mock_core_progress ... ok
+test tools::photo2sgdk::tests::grid_slicing_skips_fully_empty_cells_and_stays_aligned ... ok
+test tools::photo2sgdk::tests::import_art_asset_internal_creates_canonical_sprite_sheet_inside_project ... ok
+test emulator::libretro_ffi::tests::take_audio_samples_drains_mock_core_audio_with_sample_rate ... ok
+test tests::e2e_build_load_and_run_frame ... ok
+[legacy-build-run] overlay='/tmp/retro-dev-studio-e2e-legacy-build-run-2726048-1790587426577879880/rds' rom='/tmp/retro-dev-studio-e2e-legacy-build-run-2726048-1790587426577879880/out/artifact.md' entries=8
+[legacy-build-run][info] Carregando projeto em: /tmp/retro-dev-studio-e2e-legacy-build-run-2726048-1790587426577879880/rds
+[legacy-build-run][info] Projeto 'retro-dev-studio-e2e-legacy-build-run-2726048-1790587426577879880' carregado. Target: megadrive
+[legacy-build-run][info] Modo overlay SGDK legado detectado. Delegando build para host '/tmp/retro-dev-studio-e2e-legacy-build-run-2726048-1790587426577879880'.
+[legacy-build-run][info] Makefile host localizado: /tmp/retro-dev-studio-e2e-legacy-build-run-2726048-1790587426577879880/Makefile
+[legacy-build-run][info] Toolchain localizada: /tmp/retro-dev-studio-e2e-legacy-fake-sgdk-2726048-1790587426579315572 (make: /tmp/retro-dev-studio-e2e-legacy-fake-sgdk-2726048-1790587426579315572/bin/fake-make.sh)
+[legacy-build-run][info] fake build completed
+[legacy-build-run][info] ROM mastering Mega Drive: internal='RETRO-DEV-STUDIO-E2E-LEGACY-BUILD-RUN-2726048-17' region='JUE' SRAM off no header.
+[legacy-build-run][success] ROM gerada: /tmp/retro-dev-studio-e2e-legacy-build-run-2726048-1790587426577879880/out/artifact.md
+test tests::e2e_legacy_overlay_build_load_and_run_frame ... ok
+test tools::photo2sgdk::tests::process_art_image_quantizes_palette_to_md_limit ... ok
+test tools::photo2sgdk::tests::process_art_image_reports_missing_file_cleanly ... ok
+test tools::photo2sgdk::tests::snap_to_md_level_maps_into_expected_buckets ... ok
+test tools::reverse::annotations::tests::load_annotations_returns_empty_on_hash_mismatch ... ok
+test tools::reverse::annotations::tests::save_and_load_annotations_roundtrip ... ok
+test tools::reverse::audio::tests::analyze_audio_detects_megadrive_signatures ... ok
+test tools::reverse::audio::tests::analyze_audio_detects_snes_brr_candidates ... ok
+test tools::reverse::code::tests::analyze_code_builds_call_graph_for_snes_jsl ... ok
+test tools::reverse::code::tests::analyze_code_handles_ascii_disguised_as_code ... ok
+test tools::reverse::code::tests::analyze_code_handles_pointers_to_middle_of_instructions ... ok
+test tools::reverse::code::tests::analyze_code_walks_multiple_entry_points_and_builds_xrefs ... ok
+test tools::reverse::code::tests::decode_megadrive_bra_bsr_16bit_displacement ... ok
+test tools::reverse::code::tests::decode_megadrive_data_alignment_even ... ok
+test tools::reverse::code::tests::decode_megadrive_indirect_auto_increment_side_effects ... ok
+test tools::reverse::code::tests::decode_megadrive_instruction_coverage ... ok
+test tools::reverse::code::tests::decode_megadrive_terminal_stops_function_walk ... ok
+test tools::reverse::code::tests::decode_megadrive_unknown_opcode_produces_dc_w ... ok
+test tools::reverse::code::tests::decode_snes_bank_crossing_trampolines ... ok
+test tools::reverse::code::tests::decode_snes_direct_page_indirect_long ... ok
+test tools::reverse::code::tests::decode_snes_instruction_coverage ... ok
+test tools::reverse::code::tests::decode_snes_long_and_branch_instructions ... ok
+test tools::reverse::code::tests::decode_snes_unknown_opcode_produces_db ... ok
+test tools::reverse::code::tests::disassemble_region_formats_megadrive_calls ... ok
+test tools::reverse::decomp::decomp_orch::tests::count_object_pairs_classifies_by_bytes ... ok
+test tools::reverse::decomp::decomp_orch::tests::decomp_etapa_a_tier0_pairs ... ignored, host-local Tier 0 pairs (BYOR + Ghidra + SGDK rebuild)
+test tools::reverse::decomp::decomp_orch::tests::double_build_reports_determinism_shape ... ok
+test tools::reverse::decomp::extract::tests::catalog_dir_is_contained_in_work_dir ... ok
+test tools::reverse::decomp::extract::tests::catalog_regions_are_ordered_and_non_overlapping ... ok
+test tools::reverse::decomp::extract::tests::catalog_regions_offsets_and_coverage_are_exact ... ok
+test tools::reverse::decomp::extract::tests::catalog_rejects_identity_mismatch ... ok
+test tools::reverse::decomp::extract::tests::catalog_with_minimum_size_has_no_unknown_region ... ok
+test tools::reverse::decomp::extract::tests::edits_is_a_literal_component_under_a_valid_rom_hash ... ok
+test tools::reverse::decomp::extract::tests::record_extraction_run_persists_catalog_and_ledger_entry ... ok
+test tools::reverse::decomp::extract::tests::regular_file_with_correct_hash_is_reused ... ok
+test tools::reverse::decomp::extract::tests::rex04_hamoopig_extraction_catalog_provenance ... ignored, prova real BYOR: requer ROM de referência no host
+test tools::reverse::decomp::extract::tests::rex04_taiketsu_extraction_catalog_provenance ... ignored, prova real BYOR: requer ROM de referência no host
+test tools::reverse::decomp::extract::tests::second_extraction_run_chains_previous_run ... ok
+test tools::reverse::decomp::extract::tests::sha_component_validation_blocks_traversal ... ok
+test tools::reverse::decomp::extract::tests::symlinked_catalog_file_cannot_redirect_write ... ok
+test tools::reverse::decomp::extract::tests::symlinked_catalog_file_with_identical_content_is_rejected ... ok
+test tools::reverse::decomp::extract::tests::symlinked_sha_dir_is_rejected_before_creation ... ok
+test tools::reverse::decomp::extract::tests::two_sources_same_normalization_keep_both_artifacts ... ok
+test tools::reverse::decomp::fingerprint::tests::fingerprints_functions_and_counts_collisions ... ok
+test tools::reverse::decomp::fingerprint::tests::sha256_matches_known_vector ... ok
+test tools::reverse::decomp::fingerprint::tests::zero_size_functions_are_skipped ... ok
+test tools::reverse::decomp::ghidra_bridge::tests::boundary_metrics_empty_inputs_are_zero ... ok
+test tools::reverse::decomp::ghidra_bridge::tests::boundary_metrics_precision_and_recall ... ok
+test tools::reverse::decomp::ghidra_bridge::tests::malformed_addresses_fail_and_duplicates_do_not_inflate_recall ... ok
+test tools::reverse::decomp::ghidra_bridge::tests::parses_ghidra_funcs_line ... ok
+test tools::reverse::decomp::ghidra_bridge::tests::safe_path_rejects_missing_and_nul ... ok
+test tools::reverse::decomp::graphics_discovery::tests::ar_and_elf_parser_extract_sections_and_symbols ... ok
+test tools::reverse::decomp::graphics_discovery::tests::candidate_coverage_merges_overlapping_candidates ... ok
+test tests::emit_emulator_frame_events_emits_audio_payload_from_mock_core ... ok
+test tools::reverse::decomp::graphics_discovery::tests::chunky_tile_golden_12_34_56_78_is_high_nibble_first ... ok
+test tools::reverse::decomp::graphics_discovery::tests::discovery_artifact_immutable_and_runs_appended ... ok
+test tools::reverse::decomp::graphics_discovery::tests::candidates_never_alter_catalog_unknown_regions ... ok
+test tools::reverse::decomp::graphics_discovery::tests::discovery_rejects_a_valid_but_wrong_catalog_hash ... ok
+test tools::reverse::decomp::graphics_discovery::tests::discovery_rejects_overflow_and_inconsistent_catalog_ranges ... ok
+test tools::reverse::decomp::graphics_discovery::tests::discovery_validates_catalog_link_and_rom_bytes ... ok
+test tools::reverse::decomp::graphics_discovery::tests::fixture_palettes_at_known_offsets ... ok
+test tools::reverse::decomp::graphics_discovery::tests::independent_dense_gradient_tiles_remain_detectable ... ok
+test tools::reverse::decomp::graphics_discovery::tests::fixture_tile_block_at_known_offset_is_candidate ... ok
+test tests::patch_studio_bps_roundtrip_preserves_modified_project_rom_hash ... ok
+test tools::reverse::decomp::graphics_discovery::tests::negative_random_region_has_no_candidates ... ok
+[ArtStudio::AssetProfile] MetalSlug_Backgrounds.png => format=PNG src=1113x627 processed=1113x627 frames=1 bg=alpha transparent=359644 palette=15 bounds=1027x592 aligned=1032x600 suggested=32x32 output=32x24 scale=3 meta=true warnings=4
+test tools::photo2sgdk::tests::metalslug_backgrounds_reduce_palette_and_keep_bounds_aligned ... ok
+test tools::reverse::decomp::graphics_discovery::tests::periodic_stream_guard_keeps_ambiguous_bytes_unknown ... ok
+test tools::reverse::decomp::graphics_discovery::tests::palette_canonical_format_rejects_reserved_bits ... ok
+test tools::reverse::decomp::graphics_discovery::tests::preview_pixels_offsets_and_boundaries_match_reference ... ok
+test tools::reverse::decomp::graphics_discovery::tests::res_decls_and_symbol_classification ... ok
+test tools::reverse::decomp::graphics_discovery::tests::rex04_hamoopig_graphic_discovery_confrontation ... ignored, prova real BYOR: requer ROM de referência + libmd.a + objetos do doador
+test tools::reverse::decomp::graphics_discovery::tests::rex04_taiketsu_graphic_discovery_confrontation ... ignored, prova real BYOR: requer ROM de referência + objetos do doador
+test tools::reverse::decomp::holdout::tests::artificial_all_tile_detector_is_rejected_by_all_negative_regions ... ok
+test tools::reverse::decomp::graphics_discovery::tests::palette_primary_colors_render_independent_png_pixels ... ok
+test tools::reverse::decomp::holdout::tests::dense_gate_is_numeric_below_at_and_above_threshold ... ok
+test tools::reverse::decomp::graphics_discovery::tests::palette_high_bit_breaks_run ... ok
+[ArtStudio::AssetProfile] MegaMan_pequeno.png => format=PNG src=900x1382 processed=900x1382 frames=1 bg=corner transparent=923048 palette=15 bounds=899x1365 aligned=904x1368 suggested=32x32 output=24x32 scale=2 meta=true warnings=4
+test tools::photo2sgdk::tests::megaman_small_snaps_to_supported_md_sprite_sizes ... ok
+test tools::reverse::decomp::holdout::tests::holdout_rom_has_known_categories_with_hashes ... ok
+test tools::reverse::decomp::holdout::tests::malformed_intervals_do_not_overflow_or_count_as_overlap ... ok
+test tools::reverse::decomp::holdout::tests::negative_candidates_outside_or_adjacent_do_not_reject ... ok
+test tools::reverse::decomp::holdout::tests::negative_partial_overlap_is_counted_once ... ok
+test tools::reverse::decomp::holdout::tests::negative_regions_reject_each_forbidden_kind_only_when_overlapping ... ok
+test tools::reverse::decomp::holdout::tests::overlapping_candidates_use_union_without_exceeding_region ... ok
+test tools::reverse::decomp::inspection::tests::candidate_ids_are_stable_and_do_not_expose_arbitrary_offsets ... ok
+test tools::reverse::decomp::inspection::tests::session_ids_cannot_become_paths ... ok
+test tools::reverse::decomp::logic_recovery::tests::patch_requires_hash_and_writes_distinct_copy ... ok
+test tools::reverse::decomp::logic_recovery::tests::recovers_branch_fixture_and_patches_only_threshold ... ok
+test tools::reverse::decomp::logic_recovery::tests::recovers_exact_routine_with_mapping_and_independent_states ... ok
+test tools::reverse::decomp::logic_recovery::tests::reference_flags_cover_word_wrap_and_signed_overflow ... ok
+test tools::reverse::decomp::logic_recovery::tests::rejects_near_miss_instead_of_guessing ... ok
+test tools::reverse::decomp::object_diff::tests::diff_classes_exact_divergent_and_onlys ... ok
+test tools::reverse::decomp::object_diff::tests::parses_objdump_blocks_with_relocations ... ok
+test tools::reverse::decomp::graphics_discovery::tests::preview_export_hashes_and_reuses_files ... ok
+test tools::reverse::decomp::rex_addressing::tests::a_fixture_temporal_se_descarta_ao_saír_do_alcance ... ok
+test tools::reverse::decomp::rex_addressing::tests::a_imaxe_autoral_congelase_no_digest_pinado ... ok
+candidatos sobre áudio: []
+test tools::reverse::decomp::holdout::tests::audio_region_rejects_graphic_candidates ... ok
+holdout padrao_tiles_esparsos: gate [cobertura >= 0.80] cobertura 100.0% candidatos=1
+holdout padrao_tiles_densos: gate [cobertura >= 0.50] cobertura 100.0% candidatos=1
+holdout padrao_tiles_dithering: gate [cobertura > 0.00] cobertura 98.4% candidatos=1
+holdout padrao_paleta: gate [offset/tamanho exatos] cobertura 100.0% candidatos=1
+holdout padrao_codigolike: gate [zero candidatos] cobertura 0.0% candidatos=0
+holdout padrao_audiolike: gate [zero candidatos] cobertura 0.0% candidatos=0
+holdout padrao_comprimidolike: gate [zero candidatos] cobertura 0.0% candidatos=0
+test tools::reverse::decomp::holdout::tests::holdout_categories_measured_gates_hold ... ok
+test tools::reverse::decomp::rex_addressing::tests::enderezo_fora_do_barramento_e_recusado ... ok
+test tools::reverse::decomp::rex_addressing::tests::cada_segmento_leva_o_estado_com_que_foi_lido ... ok
+test tools::reverse::decomp::rex_addressing::tests::chave_de_banco_non_remapable_e_recusada ... ok
+[ArtStudio::AssetProfile] Blackheart_grande.gif => format=GIF src=1024x1671 processed=1024x1671 frames=1 bg=corner transparent=1170105 palette=10 bounds=989x1662 aligned=992x1672 suggested=32x32 output=16x16 scale=1 meta=true warnings=4
+test tools::photo2sgdk::tests::blackheart_gif_profile_is_processed_with_frames_and_palette ... ok
+test tools::reverse::decomp::rex_addressing::tests::estado_sen_rom_size_e_recusado ... ok
+test tools::reverse::decomp::rex_addressing::tests::erro_interno_preserva_codigo_e_detalle_util ... ok
+test tools::reverse::decomp::rex_addressing::tests::identidade_divergente_e_recusada_antes_de_qualquer_enderezamento ... ok
+test tools::reverse::decomp::holdout::tests::holdout_measurements_are_deterministic ... ok
+test tools::reverse::decomp::rex_addressing::tests::lonxitude_cero_e_recusada_antes_de_percorrer ... ok
+test tools::reverse::decomp::rex_addressing::tests::perfil_implementado_na_biblioteca_e_non_expuesto_polo_adaptador_e_recusado ... ok
+test tools::reverse::decomp::rex_addressing::tests::perfil_inexistente_e_recusado_con_a_lista_exposta ... ok
+test tools::reverse::decomp::rex_addressing::tests::cambiar_o_banco_move_a_xanela_esperada ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_corta_no_orcamento_de_trabalho_antes_de_rodar_sem_limite ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_declara_excessive_output_sem_estourar_a_saida ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_decodifica_cada_golden_com_consumo_exato ... ok
+test tools::reverse::decomp::rex_addressing::tests::os_bytes_viaxan_en_base64_co_sha256_lateral ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_detecta_gamma2_sem_fim_como_overflow ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_de_um_byte_e_o_golden_byte_a_byte ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_debita_a_busca_no_orcamento_de_trabalho ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_decodifica_os_dois_oraculos_de_cada_plain_para_os_mesmos_bytes ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_dumpa_os_streams_para_analise_se_pedido ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_emite_111_para_byte_zero_em_vez_de_literal ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_emite_111_para_copia_de_um_byte_perto ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_declara_needs_space_com_os_dois_numeros_quando_nao_cabe ... ok
+test tools::reverse::decomp::rex_addressing::tests::rom_size_fora_do_intervalo_do_perfil_e_recusado ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_reusa_o_ultimo_offset_por_rep_match ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_reproduz_cada_plain_da_fixture_pelo_decoder ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_usa_o_token_10_para_match_longo ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_usa_o_token_110_para_match_curto_em_vez_de_literais ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_nega_stream_vazio_e_max_output_zero ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_recusa_os_negativos_com_o_codigo_estruturado_exato ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_recusa_rep_match_sem_offset_historico ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_rep_match_depois_de_110_e_de_111_usa_o_offset_correto ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_dictionary_stream_decodes_with_dictionary ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_dictionary_stream_rejected ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_tem_a_capacidade_medida_congelada_por_plain ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_empty_stream_decodes_to_empty ... ok
+test tools::reverse::decomp::rex_aplib::tests::aplib_encode_encontra_repeticoes_distantes_fora_da_janela_recente ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_dp_emite_flush_de_15_literais ... ok
+test tools::reverse::decomp::rex_addressing::tests::rexion_non_rom_e_recusada_e_non_se_inventan_bytes ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_dp_acima_do_orcamento_usa_guloso_sem_falhar ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_dp_recorta_a_janela_do_codificador ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_fitting_so_usa_o_resgate_de_dp_quando_o_guloso_nao_cabe ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_index_roundtrip_with_dictionary ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_odd_length_roundtrip ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_pseudorandom_roundtrip ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_short_match_used_for_nearby_repeat ... ok
+test tools::reverse::decomp::rex_addressing::tests::leitura_autoral_devolve_os_bytes_e_a_procedencia_de_cada_segmento ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_excessive_output_limit ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_hamoopig_corpus_streams_decode_with_header_size ... ignored, aceite BYOR: requer ROM local com SHA esperado; rodar com --ignored
+test tools::reverse::decomp::rex_codecs::tests::lz4w_literals_only_roundtrip ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_long_match_encoding_roundtrip ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_match_reference_beyond_history_rejected ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_non_rom_long_offset_16384_words_decodes ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_non_rom_long_offset_16385_words_is_the_measured_ceiling ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_non_rom_long_offset_16386_words_is_rejected ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_non_rom_long_offset_one_word_uses_value_zero ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_odd_single_byte ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_repeated_words_roundtrip_and_shrink ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_rom_source_reference_above_non_rom_ceiling_decodes ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_rom_source_reference_beyond_history_is_rejected ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_truncated_stream_is_structured_error ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_truncations_inside_segments_are_structured ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_work_limit ... ok
+test tools::reverse::decomp::rex_context::tests::cadeia_imagem_e_descoberta_seguindo_os_tres_ponteiros_do_struct ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_dp_fontes_distantes_e_teto_de_comprimento ... ok
+test tools::reverse::decomp::rex_context::tests::celula_decompoe_indice_flip_banco_prioridade_e_posicao_na_ordem_do_mapa ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encoder_never_emits_unreadable_non_rom_offsets ... ok
+test tools::reverse::decomp::rex_context::tests::clique_na_camada_devolve_o_pixel_da_fonte_atingido_respeitando_o_flip ... ok
+test tools::reverse::decomp::rex_context::tests::composicao_recusa_banco_que_a_paleta_nao_tem_cores ... ok
+test tools::reverse::decomp::rex_context::tests::composicao_recusa_referencia_fora_do_tileset_em_vez_de_pintar_ruido ... ok
+test tools::reverse::decomp::rex_context::tests::composicao_respeita_flip_banco_de_paleta_e_transparencia_do_indice_0 ... ok
+test tools::reverse::decomp::rex_context::tests::camada_acima_do_orcamento_recusa_a_previsao_sem_perder_o_contexto ... ok
+test tools::reverse::decomp::rex_context::tests::contexto_da_identidade_de_cada_recurso_lida_da_rom_e_nao_de_parametro ... ok
+test tools::reverse::decomp::rex_context::tests::clique_fora_da_geometria_ou_fora_de_um_vinculo_e_recusado ... ok
+test tools::reverse::decomp::rex_context::tests::contexto_publica_ocorrencias_conhecidas_so_do_mapa_verificado ... ok
+test tools::reverse::decomp::rex_context::tests::fixture_aplib_descobre_a_cadeia_compoe_a_camada_e_preve_o_impacto ... ignored, aceite de fixture autoral: requer ROM compilada; rodar com --ignored
+test tools::reverse::decomp::rex_context::tests::fixture_aplib_edita_pela_transacao_canonica_e_o_diff_e_exatamente_o_previsto ... ignored, aceite de fixture autoral: requer ROM compilada; rodar com --ignored
+test tools::reverse::decomp::rex_context::tests::leitura_da_palette_devolve_as_palavras_na_ordem_exata ... ok
+test tools::reverse::decomp::rex_context::tests::localizacao_de_cadeia_nao_depende_da_ordem_nem_de_duplicatas_dos_candidatos ... ok
+test tools::reverse::decomp::rex_context::tests::contexto_relido_do_arquivo_revalida_a_identidade_e_vinculo_que_nao_verifica_e_registrado ... ok
+test tools::reverse::decomp::rex_context::tests::contexto_rotula_o_vinculo_como_verificado_e_diz_o_que_foi_conferido ... ok
+test tools::reverse::decomp::rex_context::tests::ocorrencias_do_tile_listam_todas_as_celulas_que_o_usam ... ok
+test tools::reverse::decomp::rex_context::tests::pixel_da_fonte_projeta_na_camada_invertendo_eixo_conforme_o_flip ... ok
+test tools::reverse::decomp::rex_context::tests::nucleo_resolve_o_clique_da_camada_em_celula_flip_e_pixel_da_fonte ... ok
+test tools::reverse::decomp::rex_context::tests::referencia_fora_da_geometria_e_recusada_com_a_faixa_na_mensagem ... ok
+test tools::reverse::decomp::rex_context::tests::scan_de_palette_localiza_o_header_e_a_contagem_de_cores ... ok
+test tools::reverse::decomp::rex_context::tests::scan_de_palette_recusa_header_cuja_declaracao_nao_cabe_na_rom ... ok
+test tools::reverse::decomp::rex_context::tests::scan_de_tilemap_declara_dims_e_o_tamanho_celado ... ok
+test tools::reverse::decomp::rex_context::tests::scan_de_tilemap_recusa_codec_que_o_rescomp_nao_emite ... ok
+test tools::reverse::decomp::rex_context::tests::sonda_de_custo_da_descoberta_na_fixture ... ignored, sonda de custo: requer ROM compilada; rodar com --ignored
+test tools::reverse::decomp::rex_context::tests::trinca_fora_da_ordem_ou_com_ponteiro_nao_verificado_nao_e_vinculo ... ok
+test tools::reverse::decomp::rex_context::tests::verificacao_devolve_as_celulas_exatas_do_mapa ... ok
+test tools::reverse::decomp::rex_context::tests::verificacao_recusa_codec_para_o_qual_nao_ha_decodificador_nesta_frente ... ok
+test tools::reverse::decomp::rex_context::tests::verificacao_recusa_stream_que_nao_bate_com_o_celado ... ok
+test tools::reverse::decomp::rex_resources::tests::apply_recusa_identidade_antes_de_procurar_o_recurso ... ok
+test tools::reverse::decomp::rex_context::tests::recurso_verificado_sem_ponteiro_e_publicado_como_vinculo_desconhecido ... ok
+test tools::reverse::decomp::rex_resources::tests::byor_aplib_censa_os_headers_verificaveis_e_o_custo_do_conjunto ... ignored, censo BYOR: requer ROM local com SHA esperado
+test tools::reverse::decomp::rex_resources::tests::byor_aplib_decodifica_os_dois_streams_do_tiledimage_visivel ... ignored, aceite BYOR aPLib: requer ROM local com SHA esperado; rodar com --ignored
+test tools::reverse::decomp::rex_resources::tests::byor_aplib_edite_o_recurso_pelo_fluxo_do_produto ... ignored, fluxo BYOR aPLib: requer ROM local com SHA esperado
+test tools::reverse::decomp::rex_resources::tests::byor_aplib_pina_a_edicao_de_pixel_que_cabe_e_eh_observada_em_tela ... ignored, edição-alvo BYOR aPLib: requer ROM local com SHA esperado
+test tools::reverse::decomp::rex_resources::tests::byor_aplib_re_le_a_cadeia_do_tiledimage_e_pina_o_font_da_toolchain ... ignored, aceite BYOR aPLib: requer ROM local com SHA esperado; rodar com --ignored
+test tools::reverse::decomp::rex_resources::tests::byor_aplib_registra_capacidade_de_reinsercao_no_tileset_visivel ... ignored, registro de capacidade BYOR aPLib: requer ROM local com SHA esperado
+test tools::reverse::decomp::rex_resources::tests::byor_aplib_varre_edicoes_de_um_pixel_que_a_barra_sabe_expressar ... ignored, varredura de capacidade BYOR: requer ROM local e minutos de encoder
+test tools::reverse::decomp::rex_resources::tests::byor_enumerate_fitting_resources ... ignored, aceite BYOR: requer ROM local; rodar com --ignored
+test tools::reverse::decomp::rex_resources::tests::byor_hamoopig_chain_original_noop_modified_and_patch ... ignored, aceite BYOR: requer ROM local com SHA esperado; rodar com --ignored
+test tools::reverse::decomp::rex_context::tests::mapa_grande_posiciona_cada_celula_pelo_indice_linear_real ... ok
+test tools::reverse::decomp::rex_resources::tests::byor_varre_as_edicoes_de_pixel_que_cabem_no_slot ... ignored, varredura BYOR: requer ROM local com SHA esperado
+test tools::reverse::decomp::rex_resources::tests::apply_rejects_tile_outside_resource_without_writing ... ok
+test tools::reverse::decomp::rex_resources::tests::fixture_lz4w_decodes_to_authored_source_and_edit_has_predicted_pixel ... ignored, aceite de fixture: requer ROM local; rodar com --ignored
+test tools::reverse::decomp::rex_resources::tests::conjunto_verificado_reconhece_lz4w_e_aplib_na_mesma_rom ... ok
+test tools::reverse::decomp::rex_resources::tests::lz4w_recompression_benchmark ... ignored, benchmark BYOR: requer ROMs locais e RDS_REX_BENCH_OUT; rodar com --ignored
+test tools::reverse::decomp::rex_resources::tests::md_chunky_golden_literal_asymmetric ... ok
+test tools::reverse::decomp::rex_resources::tests::md_tiles_to_rgba_matches_independent_pixel_recompute ... ok
+test tools::reverse::decomp::rex_resources::tests::md_write_pixel_index_noop_when_same_index ... ok
+test tools::reverse::decomp::rex_resources::tests::palavra_de_cor_do_vdp_vira_rgb_na_escala_cheia ... ok
+test tools::reverse::decomp::rex_resources::tests::piso_streams_do_dp_decodificam_pelo_decoder_do_produto ... ignored, verifica dumps descartáveis de /tmp; exige RDS_REX_BENCH_DUMP_DIR + --escrever-streams
+test tools::reverse::decomp::rex_resources::tests::indice_0_e_do_dominio_4bpp_ate_o_stream_aplib ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_differential_vs_official_jar ... ok
+test tools::reverse::decomp::rex_resources::tests::reinsert_aplib_edita_tile_e_preserva_lz4w_na_mesma_rom ... ok
+test tools::reverse::decomp::rex_resources::tests::reinsert_aplib_exige_identidade_de_rom_e_evidencia_deste_tronco ... ok
+test tools::reverse::decomp::rex_resources::tests::reinsert_aplib_noop_nao_escreve_nada ... ok
+test tools::reverse::decomp::rex_resources::tests::reinsert_aplib_recusa_edicao_que_nao_cabe_no_slot ... ok
+test tools::reverse::decomp::rex_resources::tests::transaction_applies_patch_with_exact_hash_and_preserves_dependents ... ok
+test tools::reverse::decomp::rex_resources::tests::render_resource_png_exposes_edits_in_any_tile_row ... ok
+test tools::reverse::decomp::rex_resources::tests::transaction_noop_writes_nothing ... ok
+test tools::reverse::decomp::rex_resources::tests::transaction_rejects_edited_length_overflow ... ok
+test tools::reverse::decomp::rex_resources::tests::reinsert_aplib_recusa_edicao_que_mudaria_lz4w_dependente ... ok
+test tools::reverse::decomp::rex_resources::tests::transaction_rejects_known_dependent_modified ... ok
+test tools::reverse::decomp::rex_resources::tests::transaction_rejects_rom_identity_mismatch ... ok
+test tools::reverse::decomp::rex_resources::tests::verify_aplib_resource_recusa_tamanho_declarado_divergente_e_header_de_outro_codec ... ok
+test tools::reverse::decomp::rex_resources::tests::verify_lz4w_resource_continua_recusando_header_aplib ... ok
+test tools::reverse::decomp::rom_library::tests::capability_ensure_never_downgrades_existing_records ... ok
+test tools::reverse::decomp::rex_resources::tests::verify_aplib_resource_decodifica_header_aplib_e_para_no_eod ... ok
+test tools::reverse::decomp::rom_library::tests::corpus_identity_is_content_based_across_renames ... ok
+test tools::reverse::decomp::rom_library::tests::corrupt_ledger_is_not_overwritten_and_changed_rom_keeps_history ... ok
+test tools::reverse::decomp::rom_library::tests::ledger_round_trip_and_pair_registration ... ok
+test tools::reverse::decomp::rom_library::tests::concurrent_registrations_preserve_all_entries ... ok
+test tools::reverse::decomp::rom_library::tests::sha256_matches_known_vector ... ok
+test tools::reverse::decomp::rom_library::tests::unknown_ledger_schema_is_rejected_and_file_preserved ... ok
+test tools::reverse::decomp::rom_library::tests::scenario_runs_are_append_only_with_previous_link ... ok
+test tools::reverse::decomp::rom_library::tests::v1_ledger_migrates_to_v2_preserving_history ... ok
+test tools::reverse::decomp::sprite_composition::tests::artifact_name_components_cannot_turn_resource_ids_into_paths ... ok
+test tools::reverse::decomp::sprite_composition::tests::md_nibble_order_and_transparency_are_composed ... ok
+test tools::reverse::decomp::sprite_composition::tests::manifest_exposes_five_hamoopig_frames_and_a_second_resource ... ok
+test tools::reverse::decomp::sprite_composition::tests::sonic_wrong_tile_order_palette_and_flip_change_pixels ... ok
+test tools::reverse::decomp::sprite_composition::tests::unknown_or_mismatched_manifest_is_rejected_without_fallback ... ok
+test tools::reverse::decomp::sprite_composition::tests::sonic_stand_manifest_uses_literal_asymmetric_mapping ... ok
+test tools::reverse::decomp::sprite_composition::tests::wrong_palette_is_detected_by_literal_pixels ... ok
+test tools::reverse::decomp::sprite_composition::tests::wrong_tile_order_is_detected_by_literal_pixels ... ok
+test tools::reverse::decomp::symbols::tests::function_ranges_derive_sizes_from_next_symbol ... ok
+test tools::reverse::decomp::sprite_composition::tests::wrong_flip_is_detected_by_literal_pixels ... ok
+test tools::reverse::decomp::symbols::tests::nm_dash_s_sizes_are_honored ... ok
+test tools::reverse::decomp::symbols::tests::nm_line_annotations_preserve_function_boundaries ... ok
+test tools::reverse::decomp::symbols::tests::parses_nm_lines_and_skips_undefined ... ok
+test tools::reverse::decomp::triage::tests::triage_extracts_header_fields_and_sgdk_signature ... ok
+test tools::reverse::decomp::triage::tests::triage_notes_size_divergence_and_missing_header ... ok
+test tools::reverse::decomp::triage::tests::triage_rejects_tiny_rom ... ok
+test tools::reverse::equivalence::tests::core_identity_mismatch_is_not_equivalence ... ok
+test tools::reverse::equivalence::tests::declared_frame_count_without_hashes_is_not_evidence ... ok
+test tools::reverse::equivalence::tests::default_capability_matrix_has_no_verified_profile_and_covers_all_axes ... ok
+test tools::reverse::equivalence::tests::empty_final_state_is_missing_not_equal ... ok
+test tools::reverse::equivalence::tests::empty_or_mismatched_scenario_never_passes ... ok
+test tools::reverse::equivalence::tests::input_discrimination_reports_absent_instead_of_fake_success ... ok
+test tools::reverse::equivalence::tests::identical_captures_pass_all_oracles ... ok
+test tools::reverse::equivalence::tests::non_black_and_heartbeat_alone_never_pass ... ok
+test tools::reverse::equivalence::tests::input_script_round_trip_keeps_frames ... ok
+test tools::reverse::equivalence::tests::rereview_empty_region_list_is_missing ... ok
+test tools::reverse::equivalence::tests::rereview_frame_indices_must_match ... ok
+test tools::reverse::equivalence::tests::region_missing_on_both_sides_is_gap_and_one_sided_is_rejection ... ok
+test tools::reverse::equivalence::tests::review_different_region_contract_must_not_pass ... ok
+test tools::reverse::equivalence::tests::rereview_non_canonical_index_sequence_is_rejected ... ok
+test tools::reverse::graphics::tests::analyze_graphics_detects_megadrive_tile_runs ... ok
+test tools::reverse::equivalence::tests::review_missing_observations_must_not_pass ... ok
+test tools::reverse::graphics::tests::analyze_graphics_detects_palette_slot_candidates ... ok
+test tools::reverse::graphics::tests::analyze_graphics_detects_snes_tile_runs ... ok
+test tools::reverse::graphics::tests::analyze_graphics_produces_compression_candidates_for_large_runs ... ok
+test tools::reverse::loader::tests::compute_hashes_returns_expected_lengths ... ok
+test tools::reverse::loader::tests::independent_review::review_truncated_header_returns_error_without_panic ... ok
+test tools::reverse::loader::tests::independent_review::review_undo_rejects_wrong_raw_bytes ... ok
+test tools::reverse::loader::tests::load_rom_detects_megadrive_header_and_entrypoint ... ok
+test tools::reverse::loader::tests::independent_review::review_standard_smd_is_recognized ... ok
+test tools::reverse::loader::tests::rex02_ambiguous_candidates_are_rejected_without_arbitrary_choice ... ok
+test tools::reverse::loader::tests::load_rom_detects_snes_and_strips_copier_header ... ok
+PREVIEW_MOD: pixels=5dac5c29a473faf7fbe57694aa0421598b2807eeb07ea829b949199692844222 png=b9c363c9a435b105 rom=261618d9f19f8176
+test tools::reverse::loader::tests::rex02_header_size_divergence_is_a_note_not_an_error ... ok
+test tools::reverse::loader::tests::rex02_identifies_raw_by_content_and_ignores_extension ... ok
+test tools::reverse::loader::tests::rex02_byteswapped_round_trip_restores_original ... ok
+test tools::reverse::loader::tests::rex02_out_of_profile_is_rejected_with_actionable_error ... ok
+test tools::reverse::loader::tests::rex02_probable_smd_truncation_is_rejected_with_provable_signal ... ok
+test tools::reverse::loader::tests::rex02_short_inputs_return_structured_error_without_panic ... ok
+PREVIEW_MOD: headers_para_0xc8cc8=1 byte30=0xf0 numTile=9
+test tools::reverse::loader::tests::rex02_smd_deinterleave_matches_independent_golden ... ok
+test tools::reverse::decomp::rex_addressing::tests::rom_size_que_a_imaxe_non_cobre_e_recusado ... ok
+test tools::reverse::loader::tests::rex02_load_rom_routes_smd_and_manifest_records_transform ... ok
+test tools::reverse::loader::tests::rex02_undo_rejects_legacy_step_name_without_silent_reinterpretation ... ok
+test tools::reverse::matching::tests::binary_diff_scorer_ignores_register_number_differences ... ok
+test tools::reverse::tests::analyze_rom_builds_canonical_manifest_for_megadrive ... ok
+test tools::reverse::loader::tests::rex02_smd_interleaved_round_trip_restores_original_sha ... ok
+test tools::reverse::loader::tests::rex02_smd_without_header_round_trip ... ok
+test tools::reverse::tests::analyze_rom_detects_megadrive_sram_header ... ok
+test tools::reverse::tests::analyze_rom_populates_all_extractors_for_megadrive ... ok
+PREVIEW_MOD: rgba_mod=6f89e127bb2879f2 rgba_orig=95b3e89b21337428 distintos=true
+PREVIEW_MOD: pixels_sha_direto=5dac5c29a473faf7 png_len=627 igual_ao_resultado=true
+test tools::reverse::decomp::rex_resources::tests::byor_preview_of_modified_artifact ... ok
+test tools::reverse::tests::analyze_rom_with_trace_marks_executed_functions_for_megadrive ... ok
+test tools::reverse::text::tests::analyze_text_finds_ascii_regions ... ok
+test tools::reverse::text::tests::analyze_text_finds_megadrive_be32_pointer_table ... ok
+test tools::reverse::text::tests::analyze_text_finds_shift_jis_like_regions ... ok
+test tools::reverse::text::tests::analyze_text_finds_snes_le16_pointer_table ... ok
+test tools::reverse_explorer::tests::inspect_rom_uses_canonical_disassembly_for_megadrive ... ok
+test tools::reverse_explorer::tests::inspect_rom_uses_canonical_disassembly_for_snes ... ok
+test ugdm::components::sprite_command_tests::animation_def_round_trips_artstudio_frame_authoring_metadata ... ok
+test ugdm::components::sprite_command_tests::sprite_component_commands_round_trip_json ... ok
+test ugdm::components::tilemap_tests::legacy_tilemap_without_cells_field_parses_empty ... ok
+test ugdm::components::tilemap_tests::tilemap_with_cells_roundtrips ... ok
+test ugdm::components::tilemap_tests::tilemap_without_cells_roundtrips_without_field ... ok
+test ugdm::serde_helpers::tests::deserialize_f64_to_i32_accepts_float ... ok
+test ugdm::serde_helpers::tests::deserialize_f64_to_i32_accepts_int ... ok
+test tools::reverse::tests::analyze_rom_rejects_inverted_megadrive_sram_range ... ok
+test tools::reverse::tests::analyze_rom_builds_canonical_manifest_for_snes ... ok
+test tools::reverse::decomp::rex_resources::tests::ui_edite_recurso_aplib_pela_mesma_fronteira_do_lz4w ... ok
+test tools::reverse::tests::analyze_rom_populates_all_extractors_for_snes ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_dp_iguala_busca_exaustiva_em_entradas_pequenas ... ok
+[ArtStudio::AssetProfile] KenMasters_normal.png => format=PNG src=1497x5403 processed=1497x5403 frames=1 bg=corner transparent=110144 palette=9 bounds=1481x5387 aligned=1488x5392 suggested=32x32 output=16x32 scale=1 meta=true warnings=4
+test tools::photo2sgdk::tests::kenmasters_uses_corner_background_heuristic_for_transparency ... ok
+test tools::photo2sgdk::tests::earthquake_large_recommends_downscale_and_meta_sprite_handling has been running for over 60 seconds
+[ArtStudio::AssetProfile] Earthquake_large.png => format=PNG src=1912x6822 processed=1912x6822 frames=1 bg=corner transparent=2640546 palette=8 bounds=1908x6818 aligned=1912x6824 suggested=32x32 output=24x32 scale=1 meta=true warnings=4
+test tools::photo2sgdk::tests::earthquake_large_recommends_downscale_and_meta_sprite_handling ... ok
+
+test result: ok. 754 passed; 0 failed; 66 ignored; 0 measured; 0 filtered out; finished in 80.58s
+
+RC=0

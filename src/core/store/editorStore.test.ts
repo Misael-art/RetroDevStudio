@@ -538,8 +538,12 @@ describe("undo/redo", () => {
     );
     expect(state.activeSceneSource?.entities[0]?.prefab).toBe("hero.json");
     expect(state.activeSceneSource?.entities[0]?.components.physics).toEqual({ friction: 1 });
+    // An inherited component becomes a complete local override (the backend rejects a
+    // partial SpriteComponent such as `{ asset }` alone).
     expect(state.activeSceneSource?.entities[0]?.components.sprite).toEqual({
       asset: "assets/sprites/hero_alt.png",
+      frame_width: 16,
+      frame_height: 16,
     });
 
     useEditorStore.getState().undo();
@@ -1027,5 +1031,259 @@ describe("contrato de historico undo/redo", () => {
     useEditorStore.getState().undo();
     expect(useEditorStore.getState().activeScene?.collision_map ?? null).toBeNull();
     expect(useEditorStore.getState().redoStack).toHaveLength(1);
+  });
+});
+
+// ── Observação de input: request vs ack, sessão e sequência (REV-05) ─────────
+
+describe("observação de joypad correlacionada por sessão e sequência", () => {
+  /** Abre uma época de input pelo mesmo caminho do produto e devolve seu id. */
+  function beginSession(): string {
+    useEditorStore.getState().setEmulatorLoaded(true);
+    const sessionId = useEditorStore.getState().joypadSessionId;
+    if (!sessionId) throw new Error("sessão de joypad não foi aberta");
+    return sessionId;
+  }
+
+  beforeEach(() => {
+    useEditorStore.getState().setEmulatorLoaded(false);
+  });
+
+  it("registra a intenção sem confirmá-la", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadRequest).toEqual({ sessionId: s, seq: 1, joypad: { right: true } });
+    // O ponto do REV-05: solicitar não é entregar.
+    expect(state.lastJoypadAck).toBeNull();
+  });
+
+  it("confirma o ack da sequência corrente", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadAck(s, 1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadAck).toEqual({
+      sessionId: s,
+      seq: 1,
+      joypad: { right: true },
+    });
+  });
+
+  it("descarta ack atrasado de uma transição anterior", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadRequest(s, 2, { right: false });
+    // Ack da seq 1 chegando depois que a seq 2 já foi solicitada.
+    useEditorStore.getState().recordJoypadAck(s, 1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+  });
+
+  it("um envio recusado (ok:false) não produz ack e registra erro", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadSendError(s, 1, "emulator_send_input retornou ok: false");
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadAck).toBeNull();
+    expect(state.lastJoypadSendError).toEqual({
+      sessionId: s,
+      seq: 1,
+      message: "emulator_send_input retornou ok: false",
+    });
+  });
+
+  it("uma solicitação pendente limpa o erro anterior sem herdar o ack", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadSendError(s, 1, "recusado");
+    useEditorStore.getState().recordJoypadRequest(s, 2, { left: true });
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadSendError).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+  });
+
+  it("parar o emulador invalida sessão, solicitação e confirmação", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadAck(s, 1, { right: true });
+    expect(useEditorStore.getState().lastJoypadAck).not.toBeNull();
+
+    useEditorStore.getState().setEmulatorLoaded(false);
+
+    const state = useEditorStore.getState();
+    expect(state.joypadSessionId).toBeNull();
+    expect(state.lastJoypadRequest).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+  });
+
+  it("carregar outra ROM abre nova sessão e descarta a observação anterior", () => {
+    const primeira = beginSession();
+    useEditorStore.getState().recordJoypadRequest(primeira, 1, { right: true });
+    useEditorStore.getState().recordJoypadAck(primeira, 1, { right: true });
+
+    const segunda = beginSession();
+
+    expect(segunda).not.toBe(primeira);
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+    expect(useEditorStore.getState().lastJoypadRequest).toBeNull();
+  });
+
+  it("ack de sessão anterior não é aceito na sessão corrente", () => {
+    const primeira = beginSession();
+    useEditorStore.getState().recordJoypadRequest(primeira, 1, { right: true });
+
+    // Recarga acontece com o envio ainda em voo.
+    const segunda = beginSession();
+    useEditorStore.getState().recordJoypadRequest(segunda, 1, { right: true });
+
+    // A resposta da carga anterior chega agora, com a mesma seq.
+    useEditorStore.getState().recordJoypadAck(primeira, 1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+  });
+
+  it("erro de sessão anterior não contamina a sessão corrente", () => {
+    const primeira = beginSession();
+    useEditorStore.getState().recordJoypadRequest(primeira, 1, { right: true });
+    const segunda = beginSession();
+    useEditorStore.getState().recordJoypadRequest(segunda, 1, { right: true });
+
+    useEditorStore.getState().recordJoypadSendError(primeira, 1, "recusado na carga antiga");
+
+    expect(useEditorStore.getState().lastJoypadSendError).toBeNull();
+  });
+
+  it("solicitação de sessão inexistente é ignorada", () => {
+    useEditorStore.getState().recordJoypadRequest("joypad-session-inexistente", 1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadRequest).toBeNull();
+  });
+
+  // ── Janela de hold: invalidação ANTES do await da carga/stop ──────────────
+
+  it("hold no início da operação invalida a época corrente antes da resposta", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+
+    // Primeiro ato da carga: invalidação imediata (não pós-await).
+    useEditorStore.getState().beginJoypadSessionHold();
+
+    const state = useEditorStore.getState();
+    expect(state.joypadSessionHold).toBe(true);
+    expect(state.joypadSessionId).toBeNull();
+    expect(state.lastJoypadRequest).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+
+    // Resposta da época antiga chegando durante o hold: descartada.
+    useEditorStore.getState().recordJoypadAck(s, 1, { right: true });
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+  });
+
+  it("hold bloqueia registro de request e conta o bloqueio", () => {
+    beginSession();
+    useEditorStore.getState().beginJoypadSessionHold();
+    const before = useEditorStore.getState().joypadBlockedCount;
+
+    useEditorStore.getState().recordJoypadBlocked();
+    // Tentativa de request durante o hold: nunca vira observação.
+    useEditorStore
+      .getState()
+      .recordJoypadRequest("joypad-session-qualquer", 9, { right: true });
+
+    const state = useEditorStore.getState();
+    expect(state.joypadBlockedCount).toBe(before + 1);
+    expect(state.lastJoypadRequest).toBeNull();
+  });
+
+  it("release abre época nova e descarta o histórico da anterior", () => {
+    const antiga = beginSession();
+    useEditorStore.getState().recordJoypadRequest(antiga, 1, { right: true });
+    useEditorStore.getState().beginJoypadSessionHold();
+
+    // setEmulatorLoaded é a âncora de rotação do produto (sucesso ou stop).
+    useEditorStore.getState().releaseJoypadSessionHold();
+    useEditorStore.getState().setEmulatorLoaded(true);
+
+    const state = useEditorStore.getState();
+    expect(state.joypadSessionHold).toBe(false);
+    expect(state.joypadSessionId).not.toBeNull();
+    expect(state.joypadSessionId).not.toBe(antiga);
+    expect(state.lastJoypadRequest).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+
+    // Request da época antiga não é aceito na época nova.
+    useEditorStore.getState().recordJoypadRequest(antiga, 1, { right: true });
+    expect(useEditorStore.getState().lastJoypadRequest).toBeNull();
+  });
+});
+
+
+describe("updateEntity on prefab instances", () => {
+  const resolvedPlayer: Entity = {
+    entity_id: "player",
+    prefab: "reference_player.json",
+    transform: { x: 32, y: 184 },
+    components: {
+      sprite: {
+        asset: "assets/sprites/reference_player.ppm",
+        frame_width: 16,
+        frame_height: 16,
+        palette_slot: 1,
+        animations: { idle: { frames: [0, 1], fps: 4, loop: true }, run: { frames: [2, 3], fps: 8, loop: true } },
+      },
+      physics: { gravity: true, gravity_strength: 6, friction: 1, bounce: 0 },
+    },
+  } as unknown as Entity;
+  const sourcePlayer: Entity = {
+    entity_id: "player",
+    prefab: "reference_player.json",
+    transform: { x: 32, y: 184 },
+    components: {},
+  } as Entity;
+
+  beforeEach(() => {
+    const scene = (entities: Entity[]) => ({ scene_id: "main", entities, background_layers: [], palettes: [] }) as unknown as Scene;
+    useEditorStore.setState({
+      activeScene: scene([structuredClone(resolvedPlayer)]),
+      activeSceneSource: scene([structuredClone(sourcePlayer)]),
+      undoStack: [],
+      redoStack: [],
+    });
+  });
+
+  it("materializes only the touched inherited component as a complete override", () => {
+    useEditorStore.getState().updateEntity("player", {
+      components: { sprite: { animations: { idle: { fps: 12 } } } },
+    } as unknown as Partial<Entity>);
+    const source = useEditorStore.getState().activeSceneSource!.entities[0];
+    const sprite = source.components.sprite!;
+    expect(sprite.asset).toBe("assets/sprites/reference_player.ppm");
+    expect(sprite.frame_width).toBe(16);
+    expect(sprite.animations!.idle).toEqual({ frames: [0, 1], fps: 12, loop: true });
+    expect(sprite.animations!.run.fps).toBe(8);
+    // Untouched components remain inherited from the prefab.
+    expect(source.components.physics ?? null).toBeNull();
+    expect(useEditorStore.getState().activeScene!.entities[0].components.sprite!.animations!.idle.fps).toBe(12);
+  });
+
+  it("keeps a second edit merging into the existing local override", () => {
+    const update = useEditorStore.getState().updateEntity;
+    update("player", { components: { sprite: { animations: { idle: { fps: 12 } } } } } as unknown as Partial<Entity>);
+    update("player", { components: { sprite: { palette_slot: 2 } } } as unknown as Partial<Entity>);
+    const sprite = useEditorStore.getState().activeSceneSource!.entities[0].components.sprite!;
+    expect(sprite.animations!.idle.fps).toBe(12);
+    expect(sprite.palette_slot).toBe(2);
+    expect(sprite.asset).toBe("assets/sprites/reference_player.ppm");
+  });
+
+  it("undo restores the inherited state", () => {
+    useEditorStore.getState().updateEntity("player", { components: { sprite: { animations: { idle: { fps: 12 } } } } } as unknown as Partial<Entity>);
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().activeSceneSource!.entities[0].components.sprite ?? null).toBeNull();
+    expect(useEditorStore.getState().activeScene!.entities[0].components.sprite!.animations!.idle.fps).toBe(4);
   });
 });

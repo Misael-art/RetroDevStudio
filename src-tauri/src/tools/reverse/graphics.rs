@@ -158,6 +158,8 @@ mod tests {
             special_chips: Vec::new(),
             segments: Vec::new(),
             entry_points: vec![0],
+            container: None,
+            normalization: Vec::new(),
             trace_note: String::new(),
         }
     }
@@ -204,6 +206,8 @@ mod tests {
             special_chips: Vec::new(),
             segments: Vec::new(),
             entry_points: vec![0],
+            container: None,
+            normalization: Vec::new(),
             trace_note: String::new(),
         };
 
@@ -242,6 +246,8 @@ mod tests {
             special_chips: Vec::new(),
             segments: Vec::new(),
             entry_points: vec![0],
+            container: None,
+            normalization: Vec::new(),
             trace_note: String::new(),
         };
 

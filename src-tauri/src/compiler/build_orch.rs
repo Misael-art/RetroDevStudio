@@ -109,6 +109,28 @@ struct SgdkCompatibilityProfile {
     culled_sprite_count: usize,
 }
 
+/// Remove ROMs deixadas por builds anteriores em `build/<target>/out`.
+fn remove_stale_rom_artifacts(project_dir: &Path, target: &str) -> usize {
+    let out = project_dir.join("build").join(target).join("out");
+    let Ok(entries) = std::fs::read_dir(&out) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            matches!(
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .as_deref(),
+                Some("bin" | "sfc" | "smc" | "md" | "gen")
+            )
+        })
+        .filter(|path| std::fs::remove_file(path).is_ok())
+        .count()
+}
+
 fn failed_build_result(
     target: &str,
     log: Vec<BuildLogLine>,
@@ -693,6 +715,44 @@ where
             return failed_build_result(target.target, log, Some(project_dir));
         }
     };
+
+    // Contrato de suporte por plataforma: recusa antes de gerar codigo, com diagnostico
+    // estruturado, e remove ROMs antigas para nenhum artefato velho parecer o resultado.
+    let mut support_issues =
+        crate::compiler::platform_support::logic_support_issues(target.target, &resolved_scene);
+    support_issues
+        .extend(crate::compiler::platform_support::behavior_reference_issues(&resolved_scene));
+    if !support_issues.is_empty() {
+        for issue in &support_issues {
+            emit!(
+                "error",
+                format!(
+                    "[suporte] {}: entidade '{}' no '{}' ({}) nao suportado: {}.",
+                    issue.platform, issue.entity_id, issue.node_id, issue.node_type, issue.reason
+                )
+            );
+        }
+        let removed = remove_stale_rom_artifacts(project_dir, target.target);
+        if removed > 0 {
+            emit!(
+                "warn",
+                format!(
+                    "{removed} ROM(s) de builds anteriores removida(s) da saida (build recusado)."
+                )
+            );
+        }
+        emit!(
+            "error",
+            "Build recusado: logica com nos nao suportados nesta plataforma."
+        );
+        let mut result = failed_build_result(target.target, log, Some(project_dir));
+        result.diagnostics = support_issues
+            .iter()
+            .map(crate::compiler::platform_support::issue_diagnostic)
+            .chain(result.diagnostics)
+            .collect();
+        return result;
+    }
 
     let source_kind = project
         .template_metadata
@@ -1569,7 +1629,9 @@ fn write_indexed_bmp_8bit_with_canvas_palette_limit(
             let color = [pixel[2], pixel[1], pixel[0], 0];
             let palette_index = palette
                 .iter()
-                .position(|entry| *entry == color)
+                .enumerate()
+                .skip(1) // Index zero is transparency, including when RGB is black.
+                .find_map(|(index, entry)| (*entry == color).then_some(index))
                 .or_else(|| {
                     if palette.len() < max_palette_colors {
                         palette.push(color);
@@ -1636,6 +1698,7 @@ fn nearest_palette_index(palette: &[[u8; 4]], color: [u8; 4]) -> Option<usize> {
     palette
         .iter()
         .enumerate()
+        .skip(1) // An opaque pixel must never become transparent during quantization.
         .min_by_key(|(_, candidate)| {
             let db = i32::from(candidate[0]) - i32::from(color[0]);
             let dg = i32::from(candidate[1]) - i32::from(color[1]);
@@ -2844,6 +2907,30 @@ fn repo_root() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn indexed_bitmap_keeps_opaque_black_distinct_from_transparency() {
+        let destination = std::env::temp_dir().join(format!("rds-mask-{}.bmp", std::process::id()));
+        let image = image::DynamicImage::ImageRgba8(
+            image::RgbaImage::from_raw(3, 1, vec![0, 0, 0, 0, 0, 0, 0, 255, 255, 0, 0, 255])
+                .unwrap(),
+        );
+        super::write_indexed_bmp_8bit_with_canvas_palette_limit(&image, &destination, 3, 1, 3)
+            .unwrap();
+        let bytes = std::fs::read(&destination).unwrap();
+        let offset = u32::from_le_bytes(bytes[10..14].try_into().unwrap()) as usize;
+        assert_eq!(bytes[offset], 0);
+        assert_ne!(
+            bytes[offset + 1],
+            0,
+            "opaque black disappeared into the mask"
+        );
+        assert_ne!(bytes[offset + 2], 0);
+        assert_eq!(
+            super::nearest_palette_index(&[[0, 0, 0, 0], [1, 1, 1, 0]], [0, 0, 0, 0]),
+            Some(1)
+        );
+        std::fs::remove_file(destination).unwrap();
+    }
     use super::*;
     use crate::core::diagnostics::{ActionableDiagnostic, DiagnosticArea, DiagnosticSeverity};
     use crate::tools::photo2sgdk::import_art_asset_internal;
@@ -3183,12 +3270,14 @@ mod tests {
                     frames: vec![0],
                     frame_time: 10,
                     looping: true,
+                    mugen: None,
                 },
                 SpriteAnimation {
                     name: "run".into(),
                     frames: vec![3, 1, 2],
                     frame_time: 5,
                     looping: true,
+                    mugen: None,
                 },
             ],
         };
@@ -4808,6 +4897,84 @@ PY\n"
         assert!(makefile.contains("src/controller_root.pic src/controller_root.pal src/controller_root_data.as: src/controller_root.bmp"));
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn snes_build_refuses_unsupported_logic_before_codegen_and_drops_stale_roms() {
+        let _serial = test_serial_guard();
+        let set_logic = |project_dir: &Path, graph: &str| {
+            let scene_path = project_dir.join("scenes").join("main.json");
+            let mut scene: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&scene_path).expect("read scene"))
+                    .expect("scene json");
+            scene["entities"][0]["components"]["logic"] = serde_json::json!({ "graph": graph });
+            fs::write(&scene_path, serde_json::to_string_pretty(&scene).unwrap())
+                .expect("write scene");
+        };
+        let environment = || {
+            let (pvsneslib_root, make_program) = fake_toolchain("pvsneslib", "sfc");
+            fs::create_dir_all(pvsneslib_root.join("devkitsnes")).expect("create fake devkitsnes");
+            fs::write(
+                pvsneslib_root.join("devkitsnes").join("snes_rules"),
+                "dummy rules",
+            )
+            .expect("write fake snes_rules");
+            BuildEnvironment {
+                pvsneslib_root: Some(pvsneslib_root),
+                pvsneslib_make_program: Some(make_program),
+                pvsneslib_bash_program: Some(fake_bash_program()),
+                disable_auto_detect: true,
+                ..BuildEnvironment::default()
+            }
+        };
+
+        // Com o no: recusado antes de gerar codigo, diagnostico estruturado, ROM velha removida.
+        let project_dir = workspace_copy("snes_dummy");
+        set_logic(
+            &project_dir,
+            r#"{"version":1,"nodes":[{"id":"tick","type":"event_update","params":{}},{"id":"g","type":"condition_on_ground","params":{"target":"controller_root"}}],"edges":[{"id":"e","fromNode":"tick","fromPort":"exec","toNode":"g","toPort":"exec"}]}"#,
+        );
+        let stale = project_dir.join("build").join("snes").join("out");
+        fs::create_dir_all(&stale).expect("create out");
+        fs::write(stale.join("old.sfc"), b"stale").expect("write stale rom");
+        let refused = run_build_with_environment(&project_dir, &environment(), |_| {});
+        assert!(!refused.ok, "log: {:?}", refused.log);
+        assert!(refused.rom_path.is_empty());
+        assert!(
+            !stale.join("old.sfc").exists(),
+            "stale ROM must not survive a refused build"
+        );
+        assert!(
+            !project_dir
+                .join("build")
+                .join("snes")
+                .join("Makefile")
+                .exists(),
+            "no codegen after refusal"
+        );
+        let diagnostic = refused
+            .diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.blocking
+                    && diagnostic.technical_detail.contains(
+                        "platform=snes entity=controller_root node=g type=condition_on_ground",
+                    )
+            })
+            .expect("structured support diagnostic");
+        assert!(diagnostic.user_message.contains("controller_root"));
+        let _ = fs::remove_dir_all(&project_dir);
+
+        // Sem o no: continua compilando.
+        let project_dir = workspace_copy("snes_dummy");
+        set_logic(
+            &project_dir,
+            r#"{"version":1,"nodes":[{"id":"tick","type":"event_update","params":{}},{"id":"m","type":"sprite_move","params":{"target":"controller_root","dx":1,"dy":0}}],"edges":[{"id":"e","fromNode":"tick","fromPort":"exec","toNode":"m","toPort":"exec"}]}"#,
+        );
+        let built = run_build_with_environment(&project_dir, &environment(), |_| {});
+        assert!(built.ok, "log: {:?}", built.log);
+        assert!(built.rom_path.ends_with(".sfc"));
+        let _ = fs::remove_dir_all(&project_dir);
     }
 
     #[test]

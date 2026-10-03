@@ -66,6 +66,7 @@
 - Binarios ativos, Cargo target e caches de compilacao vivem no filesystem nativo por lock digest; o cartao mantem codigo e cache portatil de downloads por SHA-256.
 - Hosts v1: Windows 10/11 x64 e Arch/Manjaro/BigLinux x64. Outros hosts retornam `UNSUPPORTED` sem instalacao.
 - npm opera com `strict-allow-scripts`; somente o `esbuild` fixado pode executar install script e `fsevents` e explicitamente negado.
+- Override transitivo `brace-expansion` fixado em `5.0.12` (2026-09-30): patch das recusas de servico GHSA-q2hr-2g5m-vwhr, GHSA-qhr7-859c-m2p7 e GHSA-6j4f-fj2g-mc7p. Atualizacao de dependencia existente; nenhuma dependencia nova.
 - Updater publico esta desabilitado ate existir certificado, canal, endpoint imutavel e politica de assinatura reais.
 
 ---

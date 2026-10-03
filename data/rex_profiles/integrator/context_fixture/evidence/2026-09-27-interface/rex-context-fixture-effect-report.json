@@ -1,0 +1,368 @@
+{
+  "schema": "rex-context-fixture-effect/v1",
+  "etapa": "passo 7 — contexto da imagem provado pela interface",
+  "fixture": {
+    "rom": {
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-context-fixture/project/out/rom.bin",
+      "sha256": "705b72eb848fadf11cdefd4302ef8c6751d005bd1c762918aea3b0860b20da86"
+    },
+    "manifesto": {
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-context-fixture/project/ground_truth.json",
+      "schema": "rex-context-aplib-fixture-ground-truth/v1"
+    },
+    "receita": {
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-context-fixture/fixture-build-report.json",
+      "schema": "rex-context-aplib-fixture-build/v1"
+    },
+    "externo": {
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-context-fixture/external-verify.json",
+      "schema": "rex-context-aplib-external-verify/v1",
+      "ferramenta": "apj.jar (SGDK 2.11, APJ.unpack cru)",
+      "sha256": "2d8cdc63cc800e4b86ff4d9cdfe514001b77f788abcd02d61974dc319d026204"
+    },
+    "offsets": {
+      "struct": "0x1750a",
+      "palette": {
+        "header": "0x174e8",
+        "stream": "0x5f208"
+      },
+      "tileset": {
+        "header": "0x174ee",
+        "stream": "0x5fa38",
+        "slot": 169,
+        "array_simbolico": 170
+      },
+      "tilemap": {
+        "header": "0x174f6",
+        "stream": "0x5f9f0"
+      },
+      "ghost": {
+        "header": "0x17500",
+        "stream": "0x5fa26"
+      }
+    },
+    "camada_esperada_sha256_rgb": "7dc94b0254acda9139a7b54cb6bb8135b2948d78beb7e841ff745bab8479dcbc",
+    "camada_lida_do_webview_sha256_rgb": "7dc94b0254acda9139a7b54cb6bb8135b2948d78beb7e841ff745bab8479dcbc",
+    "camada_divergencias_rgba": 0
+  },
+  "edicao": {
+    "fonte": {
+      "tile": 2,
+      "row": 4,
+      "col": 7,
+      "de": 11,
+      "para": 3
+    },
+    "ocorrencias_previstas": 4,
+    "posicoes_previstas": [
+      [
+        0,
+        3
+      ],
+      [
+        56,
+        4
+      ],
+      [
+        23,
+        12
+      ],
+      [
+        47,
+        27
+      ]
+    ],
+    "posicoes_observadas": [
+      [
+        0,
+        3
+      ],
+      [
+        56,
+        4
+      ],
+      [
+        23,
+        12
+      ],
+      [
+        47,
+        27
+      ]
+    ],
+    "bytes_fora_do_slot": 0,
+    "bytes_alterados": 129,
+    "byte_alterado_em": "0x5fa57",
+    "copia_sha256": "1d6da6d961b216e9e762ca851d93ffc1eda2442a83b4d65deef2ec8016738727",
+    "patch_sha256": "2fafda419411ae9cb99b3409883b392826d6f28022a72059e16f09c05734ce3b",
+    "bps_reaplicado_sha256": "1d6da6d961b216e9e762ca851d93ffc1eda2442a83b4d65deef2ec8016738727",
+    "previa_tileset": {
+      "intacta": "pixels 4d1d0637e6850b23…",
+      "editada": "pixels f1971660c076c6b2…"
+    }
+  },
+  "cliques": [
+    {
+      "posicao": [
+        0,
+        3
+      ],
+      "celula": [
+        0,
+        0
+      ],
+      "flip": "H e V",
+      "hit": "célula (0, 0) · índice 0 · tile 2 · flips H e V · banco 0 · prioridade não · local na célula (0, 3) · tile de origem 2, linha 4, coluna 7 · índice atual 11",
+      "ocorrencias": 4
+    },
+    {
+      "posicao": [
+        56,
+        4
+      ],
+      "celula": [
+        7,
+        0
+      ],
+      "flip": "H",
+      "hit": "célula (7, 0) · índice 7 · tile 2 · flips H · banco 0 · prioridade não · local na célula (0, 4) · tile de origem 2, linha 4, coluna 7 · índice atual 11",
+      "ocorrencias": 4
+    },
+    {
+      "posicao": [
+        23,
+        12
+      ],
+      "celula": [
+        2,
+        1
+      ],
+      "flip": "nenhum",
+      "hit": "célula (2, 1) · índice 17 · tile 2 · flips nenhum · banco 0 · prioridade não · local na célula (7, 4) · tile de origem 2, linha 4, coluna 7 · índice atual 11",
+      "ocorrencias": 4
+    },
+    {
+      "posicao": [
+        47,
+        27
+      ],
+      "celula": [
+        5,
+        3
+      ],
+      "flip": "V",
+      "hit": "célula (5, 3) · índice 50 · tile 2 · flips V · banco 0 · prioridade não · local na célula (7, 3) · tile de origem 2, linha 4, coluna 7 · índice atual 11",
+      "ocorrencias": 4
+    }
+  ],
+  "negativos": {
+    "ghost_sem_vinculo": "Recursos verificados sem vínculo com nenhuma imagem desta ROM:tileset 0x5f354 (aplib, 3072 B) — verificado por decode, mas nenhum ponteiro de struct `Image` alcança este header nesta ROMtilemap 0x5fa2",
+    "recusados": "nenhum",
+    "clique_fora_da_camada": "clique fora da camada (120x72 px): nada foi enviado ao núcleo e a seleção anterior foi mantida.",
+    "resposta_obsoleta": "dois pedidos no mesmo tick: a última resposta é a exibida",
+    "identidade_trocada_leitura": "identidade divergente: o contexto veio com ROM 705b72eb848fadf1… e os recursos verificados são da 1d6da6d961b216e9…. Nenhum contexto é exibido.",
+    "identidade_trocada_escrita": "rom_identity_mismatch: ROM base mudou: esperado 705b72eb848fadf11cdefd4302ef8c6751d005bd1c762918aea3b0860b20da86, atual 558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9. Re-verifique a",
+    "tile_fora_do_conjunto": "tile 16 fora do recurso: são 16 tile(s), numerados de 0 a 15. A fila atual foi preservada.",
+    "troca_de_rom": "contexto descartado ao trocar o caminho (pernas 10/11)"
+  },
+  "byor": {
+    "rom_sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+    "recurso": "2e12a|0x2e12a — aplib · 100 tiles (stream 938 B)",
+    "honestidade_da_previa": "camada reconstruída exibida com a oclusão declarada como não modelada"
+  },
+  "duracoes": {
+    "total_ms": 15638,
+    "etapas": [
+      {
+        "etapa": "leitura da camada intacta (canvas)",
+        "ms": 12
+      },
+      {
+        "etapa": "apply pela barra (contexto → transação)",
+        "ms": 829
+      },
+      {
+        "etapa": "leitura da camada editada (canvas)",
+        "ms": 10
+      }
+    ]
+  },
+  "passos": [
+    {
+      "step": "0",
+      "claim": "receitas autorais lidas e auto-consistentes (symbol.txt + oráculo externo apj.jar + flips recalculados)",
+      "observed": {
+        "rom_sha": "705b72eb848fadf1",
+        "oraculo_sha": "2d8cdc63cc800e4b",
+        "struct": "0x1750a",
+        "tileset_stream": "0x5fa38",
+        "tileset_slot_oraculo": 169,
+        "tileset_array_simbolo": 170,
+        "preenchimento_nonzero": [
+          {
+            "recurso": "tileset",
+            "array": 170,
+            "medido": 169
+          }
+        ],
+        "tilemap_stream": "0x5f9f0",
+        "ghost_stream": "0x5fa26",
+        "ocorrencias": 4,
+        "posicoes": [
+          "0,3",
+          "56,4",
+          "23,12",
+          "47,27"
+        ]
+      }
+    },
+    {
+      "step": "1",
+      "claim": "recurso da imagem localizado na lista verificada pela barra",
+      "observed": {
+        "etiqueta": "5fa38|0x5fa38 — aplib · 16 tiles (stream 169 B)",
+        "aplib": 2,
+        "total": 2
+      }
+    },
+    {
+      "step": "2",
+      "claim": "contexto montado pela interface com identidade, vínculos e limites",
+      "observed": {
+        "imagem": "0x1750a|0x1750a — verificada · 120x72 px · 15x9 células",
+        "geometria": "camada 120x72 px · 15x9 células · tiles sem uso neste mapa: 0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf",
+        "recusados": 0,
+        "semVinculo": "Recursos verificados sem vínculo com nenhuma imagem desta ROM:tileset 0x5f354 (aplib, 3072 B) — verificado por decode, mas nenhum ponteiro de struct `Image` alc"
+      }
+    },
+    {
+      "step": "3",
+      "claim": "RGBA lido do <img> == camada autoral pixel a pixel, e sha RGB == oráculo",
+      "observed": {
+        "pixels_sha_rgb": "7dc94b0254acda91",
+        "bytes": 34560
+      }
+    },
+    {
+      "step": "5",
+      "claim": "os quatro cliques resolvem o MESMO pixel de fonte, com flips e delimitadores conferidos",
+      "observed": {
+        "fonte": "tile 2, linha 4, coluna 7, índice atual 11",
+        "hits": [
+          "0,3 ← H e V",
+          "56,4 ← H",
+          "23,12 ← nenhum",
+          "47,27 ← V"
+        ],
+        "todos_mesmo_fonte": true
+      }
+    },
+    {
+      "step": "6a",
+      "claim": "clique com escala de página 0.75 resolve igual",
+      "observed": {
+        "escala": 0.75,
+        "posicao": [
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "step": "6b",
+      "claim": "clique fora da camada: recusado com motivo e seleção preservada",
+      "observed": {
+        "aviso": "clique fora da camada (120x72 px): nada foi enviado ao núcleo e a seleção anterior foi man"
+      }
+    },
+    {
+      "step": "6c",
+      "claim": "dois pedidos no mesmo tick: a resposta exibida é a última, sem mistura",
+      "observed": {
+        "exibida": "célula (5, 3) · índice 50 · tile 2 · fli"
+      }
+    },
+    {
+      "step": "7",
+      "claim": "edição única enfileirada pelo pixel de fonte e aplicada pela transação",
+      "observed": {
+        "copia": "1d6da6d961b216e9",
+        "patch": "2fafda419411ae9c",
+        "apply_ms": 830
+      }
+    },
+    {
+      "step": "8",
+      "claim": "escrita confina ao slot do tileset; a ROM não expandiu",
+      "observed": {
+        "deslocados": 129,
+        "primeiro": "0x5fa57",
+        "ultimo": "0x5fad8",
+        "dentro_do_slot": true
+      }
+    },
+    {
+      "step": "9",
+      "claim": "impacto observado == impacto previsto: exatamente as quatro posições, e só elas",
+      "observed": {
+        "posicoes": "0,3 23,12 47,27 56,4",
+        "bytes_da_copia": "1d6da6d961b216e9",
+        "previa_tileset": [
+          "pixels 4d1d0637e6850b23…",
+          "pixels f1971660c076c6b2…"
+        ]
+      }
+    },
+    {
+      "step": "10",
+      "claim": "identidade trocada na leitura: recusada, com as duas ROMs nomeadas e nada exibido",
+      "observed": {
+        "erro": "identidade divergente: o contexto veio com ROM 705b72eb848fadf1… e os recursos verificados são da 1d6da6d961b216e9…. Nen"
+      }
+    },
+    {
+      "step": "11",
+      "claim": "identidade trocada na escrita: rom_identity_mismatch, zero artefato, corpus intacto",
+      "observed": {
+        "erro": "rom_identity_mismatch: ROM base mudou: esperado 705b72eb848fadf11cdefd4302ef8c6751d005bd1c762918aea3b0860b20da86, atual "
+      }
+    },
+    {
+      "step": "12",
+      "claim": "tile fora do conjunto: recusa explicada, fila intacta",
+      "observed": {
+        "aviso": "tile 16 fora do recurso: são 16 tile(s), numerados de 0 a 15. A fila atual foi preservada."
+      }
+    },
+    {
+      "step": "13",
+      "claim": "BPS materializado pela barra reproduz a cópia exata",
+      "observed": {
+        "patch": "2fafda419411ae9c",
+        "aplicado": "1d6da6d961b216e9"
+      }
+    },
+    {
+      "step": "14b",
+      "claim": "clique no BYOR resolve e conta por mapa verificado",
+      "observed": {
+        "natural": [
+          320,
+          224
+        ],
+        "contagem": "1018 ocorrências neste mapa verificado — ocorrências contadas só dentro deste mapa verificado (TileMap em 0x21b28, 1120 "
+      }
+    },
+    {
+      "step": "14",
+      "claim": "caso BYOR aberto pelo produto, com a prévia declarada como camada reconstruída",
+      "observed": {
+        "recurso": "2e12a|0x2e12a — aplib · 100 tiles (stream 938 B)",
+        "imagens": 3,
+        "sem_vinculo": null,
+        "recusados": null,
+        "honestidade": "camada reconstruída exibida com a oclusão declarada como não modelada"
+      }
+    }
+  ]
+}

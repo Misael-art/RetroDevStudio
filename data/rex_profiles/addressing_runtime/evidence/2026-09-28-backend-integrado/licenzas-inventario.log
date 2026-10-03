@@ -1,0 +1,5 @@
+npm notice run retrodev-studio@0.1.0 security:licenses
+npm notice run node scripts/license-inventory.mjs
+Inventario de licencas: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/license-inventory.json
+npm=334 cargo=496 toolchains=15
+RC=0

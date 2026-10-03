@@ -1,0 +1,42 @@
+# ETAPA 3 — probas de mutación da capa de interface (rexGameplayGraph.ts)
+# 2026-09-28 · dous roldas, ambas executadas con:
+#   npx vitest run src/core/nodegraph/rexGameplayGraph.test.ts
+# Cada mutacion: marco buscado debe existir exactamente 1 vez (se non,
+# rexistrase MARCO_INEXISTENTE e non se conta como morta); rc tomado do
+# propio cargo/vitest; o arquivo restáurase e confírese byte a byte.
+
+## Rolda 1 — sobre o projetor tal cal estaba ás 15:38 (7+6 probas)
+M1-perfil            rc=1 fallos=1   (morta)  — ignorar profile_id
+M2-version           rc=1 fallos=1   (morta)  — ignorar version!=1
+M3-editable-todo     rc=1 fallos=2   (morta)  — todos os nos "editables"
+M4-readonly-call     rc=1 fallos=1   (morta)  — chamada externa sen readonly
+M6-faixa-mensaxe     rc=1 fallos=1   (morta)  — motivo sen os limites
+M5-boolean-strings   rc=0 fallos=0   SOBREVIVIU
+    (booleano -> "1"/"0" en vez de "true"/"false")
+
+Nota de honestidade: M5 non se disfarizou. O sobrevivente era real: ningunha
+espera fixaba a conversion booleana que `canEditGraphNode` consome. Escribíronse
+entón dúas esperas novas (`params.understood === "false"` e o round-trip
+completo do editor `serialize -> deserialize -> canEditGraphNode`), a primeira
+fallou contra a mutación vella, e reexecutouse todo (rolda 2).
+
+## Rolda 2 — coas 14 probas (incluída a de round-trip)
+M1-perfil            rc=1 fallos=1   (morta)
+M2-version           rc=1 fallos=1   (morta)
+M3-editable-todo     rc=1 fallos=2   (morta)
+M4-non-editable-readonly rc=1 fallos=2 (morta) — quitar readonly aos nos non comparables
+M5-boOLEAN-strings   rc=1 fallos=1   (morta)  — a que antes sobrevivía
+M6-faixa-mensaxe     rc=1 fallos=1   (morta)
+M7-mappings-perdidos rc=1 fallos=1   (morta)  — orixes non propagateadas
+M8-umidade           rc=1 fallos=1   (morta)  — teito de saidas ampliado
+8/8 mortas.
+
+## Restauración
+sha256sum de rexGameplayGraph.ts tras cada rolda = 39fb76db2a9ed530c075d042ae85ce1c9f1414386197825e1f5884585f7e7aeb
+(identico ao estado Green medido en green-capa-ui.log) -> RESTAURACION_OK
+
+## O que NON se mutou aqui
+- O panel React (RexGameplayRulePanel.tsx): sen probas unitarias de render neste repo;
+  a súa comprobación visível corresponde á ETAPA 6 (E2E real).
+- Os wrappers de toolsService.ts: son espellos de tipo + invoke; a súa verdade
+  compróbase no E2E chamando aos comandos reais.

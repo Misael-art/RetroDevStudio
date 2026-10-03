@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "route": "technical_conversion",
+  "asset_id": "fox_stage_backdrop_control",
+  "source": "stage-backdrop-source.png",
+  "source_kind": "concept",
+  "target_width": 320,
+  "target_height": 224,
+  "index0_role": "transparent0",
+  "resize_policy": "NEAREST",
+  "palette_strategy": "weighted_kmedoids_v1",
+  "max_visible_colors": 15,
+  "dithering_strategy": "none",
+  "transparency_policy": "threshold",
+  "alpha_threshold": 128,
+  "oracle": "rescomp",
+  "output_name": "stage-backdrop-320x224.png",
+  "intended_use": "basic_technical_control"
+}

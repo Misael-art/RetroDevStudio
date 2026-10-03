@@ -1,0 +1,21 @@
+# Consulta CI pontual — tronco codex/rex-integrator-crates-registry @ 6f74ea718ebea24a4da0e99e23f107a7cc255725
+# Commit revisado: docs(rex-mugen): curadoria tras o merge do PR #86 (registry.json + 2 docs de estado)
+# Politica: sen monitor permanente; 5 consultas puntuais `gh api .../commits/6f74ea7.../check-runs` entre o push e o rollup terminal.
+# Push do lote: 10c1a3c..6f74ea7 (confirmado por git ls-remote: refs/heads/codex/rex-integrator-crates-registry = 6f74ea718ebea24a4da0e99e23f107a7cc255725)
+
+[consulta 1] validate=in_progress linux-validate=in_progress
+[consulta 2] validate=in_progress linux-validate=in_progress
+[consulta 3] validate=in_progress linux-validate=in_progress
+[consulta 4] linux-validate=completed/success validate=in_progress
+[consulta 5] linux-validate=completed/success validate=completed/success  -> ROLLUP TERMINAL
+
+# Rollup terminal do SHA pinado (metadatos da API, non estimados):
+#   workflow run 36565719916 (run #922, "CI", event=push, head 6f74ea7)
+#   created_at 2026-09-29T12:04:21Z  updated_at 2026-09-29T12:28:06Z  status=completed  conclusion=success
+#   check-run validate        id 109397008723 completed/success
+#   check-run linux-validate  id 109397008309 completed/success
+#   https://github.com/Misael-art/RetroDevStudio/actions/runs/36565719916
+
+# Desktop E2E: non se executou run de push para 6f74ea7 porque o disparador `push` de desktop-e2e.yml filtra por paths e esta emenda só toca crates/registry.json e docs/. O gate de PR en 35d0450 (run 36549838729, completed/success) mantense como a última medição E2E do contido desta fronte; a emenda non cambia código, harness nin manifests de paquetes.
+
+# Contaxes reconciliadas: 2 jobs esperados (validate, linux-validate) = 2 jobs medidos; 0 fallos; 0 pending no rollup.

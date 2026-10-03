@@ -1,0 +1,68 @@
+=== npm run crates:gates — integrador, 2026-09-28T02:48:47Z ===
+branch: codex/rex-integrator-crates-registry | HEAD antes dist: f58ff05
+fixture importada de: codex/rex-kosinski-decoder (data/rex_profiles/codec/kosinski, 57 arquivos)
+crate sob revisao: entrega 3fea06e + 1af7017 (cherry-pick -x), PR #81
+
+npm notice run retrodev-studio@0.1.0 crates:gates
+npm notice run node scripts/crates-gates.mjs
+--- rex-kosinski (crates/rex-kosinski/Cargo.toml) ---
+$ cargo fmt --manifest-path crates/rex-kosinski/Cargo.toml -- --check
+OK: rex-kosinski fmt
+$ cargo clippy --manifest-path crates/rex-kosinski/Cargo.toml --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+OK: rex-kosinski clippy
+$ cargo test --manifest-path crates/rex-kosinski/Cargo.toml --locked
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 22 tests
+test borda_input_vazio_e_degenerado ... ok
+test borda_copia_sobreposta_eco_byte_a_byte ... ok
+test borda_limite_exato_de_saida ... ok
+test borda_referencia_antes_do_historico_sonda_0200ffff ... ok
+test borda_orcamento_de_trabalho_deterministico ... ok
+test borda_truncamentos_sistematicos_de_m01_sem_panic ... ok
+test borda_um_byte_descritor_incompleto ... ok
+test golden_m01_literals ... ok
+test golden_m02_sem_terminador_e_truncated_pelo_contrato ... ok
+test golden_m03_inline_match ... ok
+test golden_m04_separate_short ... ok
+test golden_m08_len10_tres_bytes ... ok
+test golden_m06_continue_edge_quirk_aceito ... ok
+test golden_m09_early_fetch_fronteira_16o_bit ... ok
+test limites_cortam_durante_a_copia_larga_nao_so_no_fim ... ok
+test golden_m07_inline_dist_igual_historico ... ok
+test borda_m05_sem_ultimo_byte_e_truncated_oraculo_aceitava ... ok
+test golden_m10_earlyfetch_straddle_inline ... ok
+test negativos_k01_a_k05_erros_estruturados ... ok
+test golden_m05_separate_long_far ... ok
+test plains_roundtrip_oraculo_reproduzidos_com_padding_parcial ... ok
+test nunca_panic_em_bytes_arbitrarios ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.83s
+
+
+running 3 tests
+test negativo_discriminativo_alteracao_detectada_por_comparacao_independente ... ok
+test truncamentos_sistematicos_todas_as_streams_sem_panic ... ok
+test mutacoes_com_seed_todas_as_streams_sem_panic_e_limites ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.65s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.05s
+     Running unittests src/lib.rs (target/crates-gates/debug/deps/rex_kosinski-78893b71044125f1)
+     Running tests/contract.rs (target/crates-gates/debug/deps/contract-55afa556b6b3225e)
+     Running tests/mutations.rs (target/crates-gates/debug/deps/mutations-32bddae80bc8512b)
+   Doc-tests rex_kosinski
+OK: rex-kosinski test
+
+OK: 1 pacote(s) registrado(s), gates proprios aprovados.
+rc=0

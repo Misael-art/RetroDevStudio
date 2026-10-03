@@ -1,0 +1,195 @@
+{
+  "rom_path_note": "path local; arquivo-ROM nao versionado",
+  "rom_path": "/home/misael/Projects/REX-SONIC-CADENCE-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-03T04-59-43-136Z-cadence-journey/cadence-40-applied.bin",
+  "rom_sha256": "57026bd8fcf04f210988743800e734b54667150637df5ba101301cdf5a60c530",
+  "interval_byte": 40,
+  "core_label": "Genesis Plus GX v1.7.4 46a5521",
+  "route": {
+    "totalFrames": 2901,
+    "warmupFrames": 900,
+    "startFrames": 2,
+    "tailFrames": 1999,
+    "recordFrom": 1500,
+    "recordTo": 2900,
+    "region": 2,
+    "offset": 53248,
+    "length": 64,
+    "epoch": 4,
+    "frames_before_start": 900,
+    "frames_after_tail": 2901,
+    "start_batch_rows": []
+  },
+  "dropped_outside_window": [
+    2901
+  ],
+  "checks": [
+    {
+      "name": "modificada.observacao_rota_ok",
+      "pass": true,
+      "observed": {
+        "epoch": 4,
+        "core": "Genesis Plus GX v1.7.4 46a5521"
+      }
+    },
+    {
+      "name": "modificada.observacao_orcamento_e_ancoragem",
+      "pass": true,
+      "observed": {
+        "frames_before": 900,
+        "frames_after": 2901
+      }
+    },
+    {
+      "name": "modificada.observacao_janela_completa",
+      "pass": true,
+      "observed": {
+        "bruto": 1402,
+        "janela": 1401,
+        "descartada_fora_da_janela": 1,
+        "first": 1500,
+        "last": 2901
+      }
+    },
+    {
+      "name": "modificada.observacao_identidade_rom",
+      "pass": true,
+      "observed": {
+        "sha": "57026bd8fcf04f210988743800e734b54667150637df5ba101301cdf5a60c530",
+        "path": "/home/misael/Projects/REX-SONIC-CADENCE-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-03T04-59-43-136Z-cadence-journey/cadence-40-applied.bin"
+      }
+    },
+    {
+      "name": "modificada.cobertura_idle",
+      "pass": true,
+      "observed": 1,
+      "required": ">=0.40"
+    },
+    {
+      "name": "modificada.candidato_timer_decrementa_1",
+      "pass": true,
+      "observed": 0.975,
+      "required": ">=0.80 em pares adjacentes idle"
+    },
+    {
+      "name": "modificada.recargas_0_para_byte",
+      "pass": true,
+      "observed": 35,
+      "required": ">=3"
+    },
+    {
+      "name": "modificada.transicoes_de_frame",
+      "pass": true,
+      "observed": 30,
+      "required": ">=5"
+    },
+    {
+      "name": "modificada.modo_dos_gaps",
+      "pass": true,
+      "observed": 41,
+      "required": "==41"
+    },
+    {
+      "name": "modificada.razao_do_modo",
+      "pass": true,
+      "observed": 1,
+      "required": ">=0.80"
+    }
+  ],
+  "metrics": {
+    "expected_interval_byte": 40,
+    "samples": 1401,
+    "idle_coverage_ratio": 1,
+    "adjacent_idle_pairs": 1400,
+    "timer_decrement_one_ratio": 0.975,
+    "adjacent_frame_transitions": 30,
+    "clean_reloads_zero_to_byte": 35,
+    "reload_frames": [
+      1505,
+      1546,
+      1587,
+      1628,
+      1669,
+      1710,
+      1751,
+      1792,
+      1833,
+      1874,
+      1915,
+      1956,
+      1997,
+      2038,
+      2079,
+      2120,
+      2161,
+      2202,
+      2243,
+      2284,
+      2325,
+      2366,
+      2407,
+      2448,
+      2489,
+      2530,
+      2571,
+      2612,
+      2653,
+      2694,
+      2735,
+      2776,
+      2817,
+      2858,
+      2899
+    ],
+    "gaps": [
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41,
+      41
+    ],
+    "gap_histogram": {
+      "41": 34
+    },
+    "gap_mode": 41,
+    "gap_mode_ratio": 1,
+    "frames_after_first_idle": 1400
+  },
+  "raw_rows_first_last": [
+    1500,
+    2901
+  ],
+  "raw_rows_count": 1402,
+  "raw_rows_sha256_of_full_json": "59926032f90acbca55f2374ce6b85e7822e04520e6a9fb37deb7b8fbf35f841c",
+  "redacted_fields": [
+    "raw_rows[].bytes_hex removidos (estados de RAM por frame); serie completa fica local e via sha pinado"
+  ]
+}

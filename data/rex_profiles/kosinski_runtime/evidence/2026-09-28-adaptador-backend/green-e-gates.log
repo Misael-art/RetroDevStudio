@@ -1,0 +1,35 @@
+GREEN + gates no destino — adaptador Kosinski (camada codec 10 + camada IPC 6). Branch codex/rex-integrator-crates-registry.
+== 2026-09-28T15:05:06Z cargo test --lib rex_kosinski::tests:: ==
+test tools::reverse::decomp::rex_kosinski::tests::decode_da_stream_rexistrada_devolve_o_plain_e_a_consumcion_oficiais ... ok
+test tools::reverse::decomp::rex_kosinski::tests::descritor_incompleto_recusa_truncated ... ok
+test tools::reverse::decomp::rex_kosinski::tests::encode_respeita_o_limite_de_stream_con_erro_estruturado ... ok
+test tools::reverse::decomp::rex_kosinski::tests::encode_do_plain_espido_devolve_a_stream_minima_rexistrada ... ok
+test tools::reverse::decomp::rex_kosinski::tests::ipc_decode_preserva_o_codigo_e_o_detalle_do_codec ... ok
+test tools::reverse::decomp::rex_kosinski::tests::entrada_espida_recusa_empty_input_non_texto_xeral ... ok
+test tools::reverse::decomp::rex_kosinski::tests::ipc_decode_recusa_base64_inxusto_con_codigo_propio_da_fronteira ... ok
+test tools::reverse::decomp::rex_kosinski::tests::ipc_decode_devolve_base64_sha_e_consumo_da_stream_rexistrada ... ok
+test tools::reverse::decomp::rex_kosinski::tests::encode_respeita_o_orzamento_de_traballo ... ok
+test tools::reverse::decomp::rex_kosinski::tests::encode_decodo_pola_adaptadora_inverte_o_plain_autoral ... ok
+test tools::reverse::decomp::rex_kosinski::tests::ipc_encode_decodo_invertemse_pola_fronteira_do_backend ... ok
+test tools::reverse::decomp::rex_kosinski::tests::ipc_encode_devolve_a_stream_minima_cos_mesmos_hashes_que_a_chamada_directa ... ok
+test tools::reverse::decomp::rex_kosinski::tests::ipc_encode_preserva_o_codigo_stream_limit ... ok
+test tools::reverse::decomp::rex_kosinski::tests::limite_de_saida_estrito_recusa_excessive_output_con_detalle_util ... ok
+test tools::reverse::decomp::rex_kosinski::tests::orzamento_de_traballo_estrito_recusa_work_limit ... ok
+test tools::reverse::decomp::rex_kosinski::tests::sonda_0200ffff_recusa_invalid_reference ... ok
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 820 filtered out; finished in 0.00s
+RC=0
+== 2026-09-28T15:05:07Z cargo test --lib (suite completa) ==
+test result: ok. 770 passed; 0 failed; 66 ignored; 0 measured; 0 filtered out; finished in 52.13s
+RC=0
+== 2026-09-28T15:06:00Z cargo clippy --lib -- -D warnings ==
+    Checking retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.04s
+RC=0
+== 2026-09-28T15:06:12Z cargo fmt -- --check ==
+RC=0
+npm notice run node scripts/check-tree.cjs
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+RC=0
+== 2026-09-28T15:06:13Z SHA do adaptador no momento do rexistro ==
+3b4115ab6f95d7f28740f9dd6c0f86f8db6efe2b59eeb7a988d76701d45eb4e2  src-tauri/src/tools/reverse/decomp/rex_kosinski.rs
+ddab0ac1119e2dc8e370c712a9aa512e15396f9e

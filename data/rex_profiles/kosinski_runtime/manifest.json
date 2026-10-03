@@ -1,0 +1,26 @@
+{
+  "id": "kosinski-runtime-fixtures",
+  "kind": "codec-runtime",
+  "contract": "docs/rex_profiles/kosinski_runtime/CONTRACT.md (v1)",
+  "provenance": "authored-fixture (missão frente B, 2026-09-27); nenhuma ROM/BYOR",
+  "vectors": [
+    {
+      "name": "overlap_echo",
+      "stream_sha256": "ffde8de70ee9a51823cc9ce07a9062c684ab606a7e5aa4c237b98c582c2b7a53",
+      "expected_sha256": "7b346904f63cc07f1d8cc2d88d7dae08a3f088a0e4159d5214c27a6571a51eb4",
+      "expected_text": "XXXX (4 bytes)",
+      "bytes_consumed": 8,
+      "meaning": "copia sobreposta com eco byte a byte (separado dist=1 len=3) + terminator; espera derivada do CONTRATO, nao do decoder",
+      "crosschecks": "espelho strict do perfil (kos_mirror.py strict=True) reproduz b'XXXX' consumed=8; paridade com oraculo koscmp -x registrada em REPORT.md (comando differential-vs-koscmp.sh)"
+    },
+    {
+      "name": "limite_probe",
+      "stream_sha256": "bfc118ff5c2dfa9410de92387dc3152d4571a503a0532bf24ca5afade0b5b79c",
+      "expected_sha256": "77608f24da6140277bd789efec57a179b1c1e57f44045ebd2b39e3c1e7e18d42",
+      "expected_text": "257 bytes 0x41 ('A' ecoado por copia len=256 dist=1)",
+      "bytes_consumed": 9,
+      "meaning": "descritor 0x0015: literal 'A' + separado len=256 dist=1 + segundo separado cujo c==0 e o terminador; espera derivada da gramatica do CONTRATO (secoes 1-2), nao do decoder; usada no teste de enforcement de max_output/work_limit DURANTE a copia (REPORT sec9, revisao PR #81 item 4)",
+      "crosschecks": "oraculo koscmp -x reproduz a espera (linha `limite_probe` na tabela auditavel differential-vs-koscmp.tsv)"
+    }
+  ]
+}

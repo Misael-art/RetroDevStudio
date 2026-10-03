@@ -1,0 +1,195 @@
+{
+  "schema": "rex-e2e-evidence-manifest/v1",
+  "promoted_at": "2026-09-27",
+  "mission": "Objetivo do operador, itens 1 a 4: edição contextual do recurso gráfico aPLib já comprovado — localizar a imagem pelo produto, ver a camada composta, selecionar uma célula, compreender o compartilhamento do tile, editar pelo pipeline canônico e conferir o resultado pela interface. Esta célula cobre a prova pela interface (item 4) e os dois defeitos reais que ela encontrou (item 5), mais a reexecução do caso BYOR já comprovado.",
+  "verdict": "PASS (prova pela interface, fixture autoral) — a barra localiza a imagem sem receber offsets, monta o contexto, desenha a camada composta igual ao esperado do oráculo externo (RGB `7dc94b02…`, alpha conferido à parte: 0 divergências RGBA), os quatro cliques sob flips distintos resolvem o MESMO pixel de fonte, uma edição aplicada pela transação canônica altera exatamente as quatro posições previstas e só elas, a escrita confina ao slot (0 bytes fora), o BPS re-aplicado reproduz o hash da cópia, e os seis negativos obrigatórios são asserções. A reexecução do caso BYOR com o binário novo devolve byte a byte os artefatos pinados das pernas 2 e 3. **Isto não promove maturidade**: a frente continua `Experimental`, sem merge, sem release, e o que a camada EXIBE não é framebuffer do jogo (ver `limites`).",
+  "git": {
+    "branch": "codex/rex-context-aplib-tilemap",
+    "base_canonica": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21",
+    "commits_da_celula": {
+      "fixture_esperido_antes_de_compilar": "c731485",
+      "modelo_de_contexto_no_nucleo": "b9cbe8e",
+      "ipc_somente_leitura": "560347e",
+      "ui_contextual": "896a372",
+      "identidade_antes_da_varredura_nucleo": "e44f39d",
+      "zoom_inteiro_preservado_ui": "16ce6bf",
+      "cenario_de_efeito_e2e": "7e10944"
+    },
+    "head_das_corridas": "7e10944 (três commits acima do HEAD `896a372` que publicou a UI; nenhum deles alterou o fixture nem as receitas)",
+    "push": "fast-forward `896a372..7e10944` (0 atrás, 3 à frente) antes do pacote de evidência; este manifesto e os documentos entram num commit só de texto sobre ele",
+    "fora_da_arvore_enquanto_os_testes_rodaram": [
+      "data/rex_profiles/integrator/context_fixture/evidence/2026-09-27-interface/* (novo pacote)",
+      "docs/rex_profiles/ROUND_STATE.md (linha da matriz + checkpoint)",
+      "docs/06_AI_MEMORY_BANK.md (checkpoint de fim de sessão)",
+      "scripts/rex_profiles/integrator/context_fixture/README.md (contagem de testes e a perna E2E)"
+    ]
+  },
+  "binary_under_test": {
+    "path": "src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "f56be4517058e38c498dfc3b5711bec11af99d079be022356e82d1bfe08ae4a7",
+    "built_at_local": "2026-09-27T18:51:20-03:00 (= 21:51:20Z)",
+    "nota": "build canônico do perfil de teste, feito DEPOIS das duas correções desta célula; nenhum arquivo-fonte do produto é mais novo que este binário (verificado com `find src src-tauri/src scripts/e2e-tauri-build-run.mjs -newer <binario>` → vazio). As duas corridas verdes abaixo (21:51:38Z e 21:59:18Z) exercitaram exatamente este binário. O binário citado nos pacotes anteriores (`9d3c511b…`, `d192fd51…`) está obsoleto para esta célula."
+  },
+  "harness": {
+    "path": "scripts/e2e-tauri-build-run.mjs",
+    "cenario_fixture": "rex-context-fixture-effect (schema `rex-context-fixture-effect/v1`)",
+    "cenario_byor": "rex-aplib-byor-effect (schema `rex-aplib-byor-effect/v2`)",
+    "execucao": "WebDriver contra o WebView real do Tauri; pixels lidos do `<img>` da camada por `drawImage`/`getImageData` dentro da página, nunca por captura de tela"
+  },
+  "roms": {
+    "fixture_autoral": {
+      "path": "src-tauri/target-test/validation/rex-context-fixture/project/out/rom.bin",
+      "sha256": "705b72eb848fadf11cdefd4302ef8c6751d005bd1c762918aea3b0860b20da86",
+      "bytes": 393216,
+      "procedencia": "autoral, compilada pelo SGDK 2.11 pinado pelo lock do host; NÃO é versionada. Refaz com `scripts/rex_profiles/integrator/context_fixture/build-fixture.sh --out src-tauri/target-test/validation/rex-context-fixture` e `verify-external.py` (comandos no README do fixture).",
+      "reescrita_pela_edicao": "nenhuma — a edição escreve cópia content-addressed; a ROM do fixture foi re-hashada no fim da corrida e confere"
+    },
+    "byor": {
+      "policy": "BYOR — a ROM comercial NÃO é versionada neste pacote nem no repositório; só os hashes viajam. Corpus somente-leitura, nunca dependência provisionável.",
+      "path": "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin",
+      "sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+      "bytes": 917504,
+      "modificada_sha256": "80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce",
+      "modificada_procedencia": "cópia escrita por `apply_resource_edit` (comando Tauri) em `~/.retrodev/decomp_work/extract/<romsha>/edits/`; hash IDÊNTICO ao pinado em `data/rex_profiles/integrator/aplib/evidence/2026-09-27-passo5-perna2-barra/` — a reexecução desta célula não mudou um byte do resultado.",
+      "patch_bps_sha256": "58ae4f0b5eb81ebb88579741738a473f144369dfeb1723aad9c8bb0c731331b0",
+      "copia_indice_zero_sha256": "69389ec2b400220c… (mesmo artefato que a perna 3 executou no core Genesis Plus GX)"
+    }
+  },
+  "oraculo_externo": {
+    "arquivo": "external-verify.json",
+    "schema": "rex-context-aplib-external-verify/v1",
+    "ferramenta": "apj.jar (SGDK 2.11, `APJ.unpack` cru) — SHA-256 `2d8cdc63cc800e4b86ff4d9cdfe514001b77f788abcd02d61974dc319d026204`",
+    "independente_do_produto": true,
+    "papel_na_prova": "o cenário exige `independente_do_produto === true`, `rom_sha256` igual ao da ROM aberta, o SHA do próprio jar e `render_pixels_sha256 === manifesto.composed_layer.pixels_sha256` antes de confiar em qualquer número. 18/18 conferências verdes.",
+    "detalhe_que_mudou_a_assercao": "o `data_size` do símbolo (170 B, tileset) é o ARRAY LINKADO, com byte de padding; o stream real medido pelo oráculo é 169 B, e é 169 que a barra anuncia. O cenário exige `medido <= array` e que a cauda seja toda zero, registrando `preenchimento_nonzero` se divergir; a primeira versão desta perna cobrava 170 na barra e estava errada (veja `e2e-run2` no checkpoint)."
+  },
+  "fixtures_e_ofertas": {
+    "ground-truth.json": "esperado escrito ANTES de compilar (`derived_from_compiled_rom: false`)",
+    "fixture-build-report.json": "offsets do `symbol.txt` conferidos contra os headers que o scanner do produto acha por padrão de bytes",
+    "external-verify.json": "decode + re-empacotamento + camada composta por ferramenta externa",
+    "nenhuma_linha_do_produto_las": "o produto só lê a ROM; quem lê as receitas é o teste"
+  },
+  "prova_pela_interface": {
+    "relatorio": "rex-context-fixture-effect-report.json",
+    "relatorio_sha256": "3778e45e436a938e728200741a7aef8c1be6422a5251038c030fbb335401bf79",
+    "log": "e2e-run6-verde-fixture.log",
+    "log_sha256": "91d1af3f3806731fe4f8ead90d52a1e82c8bedb22c6e1dda51e92de0abe065f1",
+    "camada": {
+      "geometria": "120x72 px · 15x9 células · 16 tiles, nenhum sem uso neste mapa",
+      "sha_rgb_lido_do_webview": "7dc94b0254acda9139a7b54cb6bb8135b2948d78beb7e841ff745bab8479dcbc",
+      "sha_rgb_esperado_pelo_oraculo": "7dc94b0254acda9139a7b54cb6bb8135b2948d78beb7e841ff745bab8479dcbc",
+      "divergencias_rgba": 0,
+      "nota_do_oraculo": "`pixels_sha256` é RGB empacotado (3 B/px); RGBA divergiria por construção. O alpha é provado à parte, byte a byte."
+    },
+    "cliques": [
+      { "posicao": [0, 3], "celula": [0, 0], "flip": "H e V", "pixel_de_fonte": "tile 2, linha 4, coluna 7" },
+      { "posicao": [56, 4], "celula": [7, 0], "flip": "H", "pixel_de_fonte": "tile 2, linha 4, coluna 7" },
+      { "posicao": [23, 12], "celula": [2, 1], "flip": "nenhum", "pixel_de_fonte": "tile 2, linha 4, coluna 7" },
+      { "posicao": [47, 27], "celula": [5, 3], "flip": "V", "pixel_de_fonte": "tile 2, linha 4, coluna 7" }
+    ],
+    "contagem_exibida": "4 ocorrências neste mapa verificado — o texto nomeia o escopo (TileMap `0x174f6`); nenhuma alegação sobre o jogo inteiro",
+    "edicao": {
+      "fonte": "tile 2, linha 4, coluna 7: índice 11 → 3",
+      "posicoes_previstas": [[0, 3], [56, 4], [23, 12], [47, 27]],
+      "posicoes_observadas": [[0, 3], [56, 4], [23, 12], [47, 27]],
+      "bytes_alterados": 129,
+      "byte_no_tileset": "0x5fa57",
+      "bytes_fora_do_slot": 0,
+      "copia_sha256": "1d6da6d961b216e9e762ca851d93ffc1eda2442a83b4d65deef2ec8016738727",
+      "patch_bps_sha256": "2fafda419411ae9cb99b3409883b392826d6f28022a72059e16f09c05734ce3b",
+      "bps_reaplicado_sha256": "1d6da6d961b216e9e762ca851d93ffc1eda2442a83b4d65deef2ec8016738727",
+      "reabertura": "a cópia é reaberta pelo produto e re-decodificada; a prévia do TileSet muda de `4d1d0637…` para `f1971660…` e a camada volta a bater com o esperado recomposto",
+      "salvar_reabrir": "o contexto restaurado é o da identidade revalidada (SHA impresso na barra), não uma prévia em cache"
+    },
+    "duracoes_ms": { "total_cenario": 15638, "leitura_da_camada_intacta": 12, "apply_pela_barra": 829, "leitura_da_camada_editada": 10, "recusa_de_identidade_na_escrita": "<=1500 (asserção: chegou no snapshot de 1,5 s) | corrida anterior: >60 000 e sem superfície de erro" },
+    "negativos": {
+      "ghost_sem_vinculo": "alcançado pela UI: `tileset 0x5f354`/`tilemap 0x5fa2…` publicados como verificados sem vínculo; nenhuma cadeia `Image` aponta para `ctx_ghost`",
+      "referencia_invalida": "INALCANÇÁVEL pela UI nesta fixture por construção (a referência inválida vive em `ctx_ghost`, que não tem `Image`); provado no núcleo: `composicao_recusa_referencia_fora_do_tileset_em_vez_de_pintar_ruido`",
+      "banco_sem_cores": "INALCANÇÁVEL pela UI nesta fixture por construção (mesmo motivo); provado no núcleo: `composicao_recusa_banco_que_a_paleta_nao_tem_cores`",
+      "tile_fora_do_conjunto": "alcançado: `tile 16 fora do recurso: são 16 tile(s), numerados de 0 a 15. A fila atual foi preservada.`",
+      "identidade_trocada": "alcançado nas duas pernas — leitura: `identidade divergente: o contexto veio com ROM 705b72eb… e os recursos verificados são da 1d6da6d9…`; escrita: `rom_identity_mismatch` com os dois SHA completos e `nada foi varrido e nada foi escrito`",
+      "resposta_obsoleta": "alcançado: dois pedidos no mesmo tick, a última resposta é a exibida",
+      "troca_de_rom": "alcançado: contexto, seleção e pedidos descartados ao trocar o caminho",
+      "clique_fora_da_camada": "alcançado: `clique fora da camada (120x72 px): nada foi enviado ao núcleo e a seleção anterior foi mantida.`"
+    }
+  },
+  "caso_byor_reexecutado": {
+    "relatorio": "rex-aplib-byor-effect-reexecucao-report.json",
+    "relatorio_sha256": "ea14fd214250dbe6be44e7417ba3dcead3cea019d702c6116692c4b4ba33a481",
+    "log": "e2e-byor-reexecucao-verde.log",
+    "log_sha256": "b280fb346feba50ef80cac11ffc5407d5baba7c907dc30e36f0ea695197d1958",
+    "recurso": "0x2e12a — aplib · 100 tiles (stream 938 B), plain 3200 B; 4 aPLib numa lista de 164 verificados",
+    "resultado": "rc=0, 0 linhas de ERRO: cópia `80249128…`, BPS `58ae4f0b…` reaplicado sobre base íntegra reproduzindo a cópia, 800 bytes distintos, 0 fora de `[0x2e12a, +938)`, 163 recursos preservados, 14 edições recusadas por `excessive_output` (índices 1..15 do pixel do pin) e o índice 0 aplicado produzindo a cópia `69389ec2…` que a perna 3 executou no core",
+    "camada_vs_framebuffer": "a perna 14 do cenário da fixture abre o BYOR pelo produto e mostra a CAMADA RECONSTRUÍDA, declarada como tal (`honestidade_da_previa`), com 3 imagens e a contagem por escopo: `1018 ocorrências neste mapa verificado — ocorrências contadas só dentro deste mapa verificado (TileMap em 0x21b28, 1120 …)`. Não é screenshot do jogo: sprites, janela, scroll e as oclusões de plano não são modelados, e a barra diz isso.",
+    "por_que_reexecutar": "as duas correções desta célula mudam código de produto (núcleo e UI), o que invalida o binário das evidências anteriores; o caso BYOR foi rerodado contra `f56be451…` para provar que nada regrediu."
+  },
+  "defeitos_descobertos_pela_interface": [
+    {
+      "defeito": "a prévia composta não desenhava o zoom pedido",
+      "sintoma": "pedido 4x de uma camada 120x72 → `rect [193,66, 287,99]`: só a largura achatada. Pixel deixou de ser quadrado e `image-rendering: pixelated` perdeu o efeito.",
+      "causa": "preflight `img { max-width: 100% }` + item de flex encolhendo por padrão",
+      "evidencia_da_falha": "e2e-run3-falha-zoom-da-camada.log (sha `31b178c205a855c00a004d758db762524170f8e9e454c0d179117435706f60e2`)",
+      "correcao": "16ce6bf",
+      "regressao": "teste `preserva o zoom pedido quando o painel é mais estreito que a camada` + asserção de `getBoundingClientRect` na perna 4 do E2E"
+    },
+    {
+      "defeito": "a transação varria a ROM inteira antes de conferir a identidade",
+      "sintoma": "com o caminho apontando para outra ROM, a recusa demorou mais de 60 s e veio como `recurso … não verificado nesta ROM`; o timeout do E2E não tinha superfície de erro para mostrar",
+      "causa": "ordem das guardas — a causa (identidade) era checada depois do sintoma (offset inexistente)",
+      "evidencia_da_falha": "e2e-run4-falha-identidade-depois-da-varredura.log (sha `6c6ff7b99c159fee049b68a397567aecfc34e471ebbad3b8bd5baaadeb435e20`)",
+      "correcao": "e44f39d",
+      "regressao": "`apply_recusa_identidade_antes_de_procurar_o_recurso` (núcleo, escrito RED primeiro com offset de outra ROM) + asserção de custo na perna 11 do E2E (recusa em <=1,5 s)"
+    }
+  ],
+  "gates": {
+    "arquivos": ["host-certify-2026-09-27.log", "gates-rust-ts-2026-09-27.log", "e2e-run2-falha-slot-simbolico-na-barra.log"],
+    "shas": {
+      "host-certify-2026-09-27.log": "72df6c443f1a324e0d2a86b22f91ba1f0285825594dae82eaae948aad196b5e8",
+      "gates-rust-ts-2026-09-27.log": "2e9864cdc579b2d031dccb894e930bd4dd879fc4f66ad00538bf7d0e660f19f0",
+      "e2e-run2-falha-slot-simbolico-na-barra.log": "005d06b05f7107ee9afa1136a06c09fab381cf591b95ffd5a4319fa3f35721d4"
+    },
+    "check_tree": "OK — Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md",
+    "lint": "OK (eslint src vite.config.ts --max-warnings=0, dentro do certify)",
+    "tsc_noEmit": "OK",
+    "npm_test": "737 passed | 3 skipped em 78 arquivos (1 skipped)",
+    "cargo_clippy_D_warnings": "OK (sem warnings; Finished dev profile)",
+    "cargo_fmt_check": "OK",
+    "cargo_test_lib": "737 passed; 0 failed; 66 ignored; 0 measured — 104,30 s",
+    "harness": "node --check + eslint do arquivo, ambos limpos",
+    "host_certify": "rc=0, READY, fingerprint `60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2`, lock `dd99a22f…`",
+    "execucao": "um job pesado por vez, serializado: E2E da fixture → E2E do BYOR → host:certify → fmt/tsc/clippy",
+    "onde_cada_numero_esta": "host-certify-2026-09-27.log: `npm test` em :1450 (737 passed | 3 skipped) e `cargo test --lib` em :2335 (737 passed; 0 failed; 66 ignored; finished in 104.30s), READY/fingerprint em :2342/:2344. gates-rust-ts-2026-09-27.log: fmt :2, clippy :4, tsc :8 e `check:tree` repetido às 22:23:37Z DEPOIS de criar este diretório (o certify rodou antes de `data/…/context_fixture/` existir), com rc medido do processo do npm.",
+    "shas_de_todos_os_artefatos_promovidos": {
+      "e2e-byor-reexecucao-verde.log": "b280fb346feba50ef80cac11ffc5407d5baba7c907dc30e36f0ea695197d1958",
+      "e2e-run2-falha-slot-simbolico-na-barra.log": "005d06b05f7107ee9afa1136a06c09fab381cf591b95ffd5a4319fa3f35721d4",
+      "e2e-run3-falha-zoom-da-camada.log": "31b178c205a855c00a004d758db762524170f8e9e454c0d179117435706f60e2",
+      "e2e-run4-falha-identidade-depois-da-varredura.log": "6c6ff7b99c159fee049b68a397567aecfc34e471ebbad3b8bd5baaadeb435e20",
+      "e2e-run6-verde-fixture.log": "91d1af3f3806731fe4f8ead90d52a1e82c8bedb22c6e1dda51e92de0abe065f1",
+      "external-verify.json": "3c35e28b441e05db4caea6538b66af678d517b9b85ede162daed8b7ecd3490bd",
+      "fixture-build-report.json": "b87f749095bb10e9f44e748a73f3eae196c56c7fb00ff4573ea9dcb08b6489bd",
+      "gates-rust-ts-2026-09-27.log": "2e9864cdc579b2d031dccb894e930bd4dd879fc4f66ad00538bf7d0e660f19f0",
+      "ground-truth.json": "4be1ebeb969b48e207f3dd0c58d0ab58e2c7c185e8b852df0a1376df78ed21af",
+      "host-certify-2026-09-27.log": "72df6c443f1a324e0d2a86b22f91ba1f0285825594dae82eaae948aad196b5e8",
+      "rex-aplib-byor-effect-reexecucao-report.json": "ea14fd214250dbe6be44e7417ba3dcead3cea019d702c6116692c4b4ba33a481",
+      "rex-context-fixture-effect-report.json": "3778e45e436a938e728200741a7aef8c1be6422a5251038c030fbb335401bf79"
+    },
+    "como_conferir": "sha256sum data/rex_profiles/integrator/context_fixture/evidence/2026-09-27-interface/* | grep -v manifest.json — o manifesto não hashia a si mesmo; os 12 artefatos acima são todos os arquivos versionados do pacote, medidos às 22:24Z e re-conferidos por `sha256sum` no mesmo minuto."
+  },
+  "ci": {
+    "policy": "consulta pontual, sem monitor de pé (nenhum `gh run watch` vivo ao encerrar)",
+    "b9cbe8e": "validate success, linux-validate success, desktop-smoke success",
+    "896a372": "validate success, linux-validate success, desktop-smoke success",
+    "560347e": "zero check runs — o commit entrou no push cujo tip era outro; ausência explicada, NÃO lida como PASS nem como falha",
+    "7e10944": "runs criados às 22:10:22Z (CI 36354347243, Desktop E2E 36354347306). Consultado duas vezes nesta célula, a última às 22:21:29Z: validate, linux-validate e desktop-smoke todos `in_progress` — veredito ainda não disponível, NÃO lido como PASS nem como falha. A regra terminal da rodada (precedente `19c880f`) proíbe um commit de registro por consulta: a conclusão é reportada fora do repositório. O que o CI desta ROM atesta é o contrato; os dois cenários consomem ROM local e não rodam no CI."
+  },
+  "limites": [
+    "A prévia é a CAMADA RECONSTRUÍDA de um TileMap verificado, não o framebuffer do jogo: sem sprites, janela, raster, scroll nem segunda camada. Na ROM BYOR as oclusões não modeladas ficam declaradas na própria barra.",
+    "A contagem de ocorrências é por mapa verificado (`1018 ocorrências neste mapa verificado`), nunca do jogo inteiro.",
+    "Não existe edição isolada de uma ocorrência: sem duplicação e realocação de tile, isso seria destrutivo — a frente não oferece o controle.",
+    "`Verificada` informa o que foi verificado (ponteiro do struct `Image`, decode com tamanho exato, round-trip pelo oráculo externo) e NÃO prova que o jogo carrega ou exibe o recurso.",
+    "Prova vale para o toolchain pinado (rescomp.jar `502a4670…`, apj.jar `2d8cdc63…`, libmd.a `ef904a37…`) e para os recursos demonstrados; não se generaliza para os outros recursos aPLib da ROM nem para outro SGDK.",
+    "Prioridade (bit 15) é conferida na palavra da célula, mas não é composta na camada esperada — comportamento de VDP, fora desta prova.",
+    "BYOR não é dependência provisionável: os dois cenários consomem ROM local explícita e não rodam no CI; o CI atesta o contrato, não esta ROM.",
+    "Nada aqui promove maturidade: `Experimental`, sem merge, sem release, sem promoção."
+  ]
+}

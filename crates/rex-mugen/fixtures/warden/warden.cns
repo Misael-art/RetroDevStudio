@@ -1,0 +1,17 @@
+[Statedef 0]
+type = S
+anim = 0
+
+[State 0, Go]
+type = ChangeState
+value = 300
+trigger1 = command = "a"
+
+[Statedef 300]
+type = S
+anim = 300
+
+[State 300, End]
+type = ChangeState
+value = 0
+trigger1 = AnimTime = 0

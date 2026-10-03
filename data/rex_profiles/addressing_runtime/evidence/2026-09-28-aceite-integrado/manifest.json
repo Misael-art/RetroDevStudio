@@ -1,0 +1,70 @@
+{
+  "schema": "rex-crate-integration/v1",
+  "descricao": "Evidencia da perna `aceite-integrado` de rex-addressing: os cinco commits novos da fronte A (vectores de aceite con oráculo independente, INVARIANTES, ACEITE-ADAPTADOR, RELATORIO_ACEITE_ADAPTADOR e dúas correccións de forma) integrados en crates/rex-addressing, e a débeda da promoción reparada polo integrador.",
+  "quando_utc": "medición entre 2026-09-28T11:44Z e 12:02Z (UTC)",
+  "quem": "integrador (branch codex/rex-integrator-crates-registry); o contido graduado é propiedade do axente A",
+  "branch": "codex/rex-integrator-crates-registry",
+  "ferramenta": "npm run crates:gates · npm run check:tree · cargo fmt --check · cargo clippy --lib · cargo test --lib · cargo run --example · git ls-remote/ls-tree/diff · sha256sum",
+  "objeto_da_integracao": {
+    "entrega": "30cb311..0e5f804 (5 commits) da branch codex/rex-rust-addressing, PR #82",
+    "como": "0a371b7 e d7e3925 aplícanse con `git show` e reescrita de rutas (o crate de A aí vivía en scripts/rex_profiles/addressing_runtime/rex-addressing; a promoción é miña) conservando autor, data e mensaxe e engadindo `(cherry picked from commit …)`; cc8026c, 785320c e 0e5f804 entran por `git cherry-pick -x` sen conflitos porque só tocan docs/",
+    "commits_locais": "10a8f5d, 32d2e26, 42756e2, d252a5f, aa46265 (os cinco) + daefb43 (reparo da débeda de promoción)",
+    "grade": "`tests/acceptance.rs` (1783 liñas) + `vectors/acceptance-v1.json` (15 casos, 18 774 B, SHA pinado no test) + `docs/rex_profiles/addressing_runtime/{ACEITE-ADAPTADOR,INVARIANTES,RELATORIO_ACEITE_ADAPTADOR_2026-09-28}.md`"
+  },
+  "debeda_de_promocion_reparada": {
+    "descrita": "a promoción (9f83d15) moveu 41 ficheiros pero o cherry-pick da etapa 4 recreara `examples/resource_report.rs` na ruta vella: o paquete graduado ás 08:14Z non tiña exemplo e `clippy --all-targets` nunca o lintaba. Catro ligazóns relativas do README do paquete apuntaban a `../../../../docs/…`, tres niveis por riba da raíz.",
+    "reparo": "exemplo movido a `crates/rex-addressing/examples/` (contido idéntico: blob 7f9a8f5b… en ambas as puntas), ligazóns do README revalidadas (0 rotas), receitas `cd scripts/…` actualizadas a `cd crates/rex-addressing` en `ACEITE-ADAPTADOR.md` §3 e `EXEMPLO-CONSUMIDOR.md`, e `CONTRATO.md` §0.1 (nota miña) deixa de dicir que nada no produto consome o paquete.",
+    "non_reeescrito": "a narración histórica e os rexistros de comandos co worktree de A (`/home/misael/RDS-REX-A2-RUST-ADDR/…`) mantéñense tal cales."
+  },
+  "medicion": {
+    "gates_do_pacote": "rc=0 — rex-addressing 138 executados / 0 fallos / 10 ignorados en 17 targets (fmt, clippy --all-targets -D warnings, test --locked); rex-kosinski 25 / 0 / 0 sen cambios. Os 138 reproducen exactamente os números publicados por A na súa propia árbore.",
+    "exemplo": "rc=0 desde a localización nova; resumo 13 lecturas / 14 recusas / 7 códigos; sha256 do resumo 27bebc7b…",
+    "destino": "cargo test --lib 754 / 0 / 66 con CARGO_RC=0 (as 17 probas do adaptador entre elas); check:tree rc=0; cargo fmt --check rc=0; cargo clippy --lib -D warnings rc=0.",
+    "non_vacuidade": "o ficheiro de aceite leva o seu SHA pinado dentro do test (`FICHEIRO_SHA256`), así que editar o JSON rompe `o_ficheiro_publicado_ten_a_sha_pinada` antes de ler calquera resultado; a rexeneración só ocorre con `REX_ACEITE_ESCRIBIR=1` e `--ignored`, e non se executou aquí. O diff de ficheiros (42 ↔ 42, sen diferenzas) prueba que non se perdeu nada ao relocalizar.",
+    "barra_de_frontend": "rc=0 nas tres (`lint`, `tsc --noEmit`, `npm test` con 749 pasados / 6 saltados / 755) no HEAD 1f304674432bcb882e8772a26bb94d75913d2d6c"
+  },
+  "nao_alega": "Estes vectores gradúan `read_resource` / `read_sequence` da crate de A, superficies que o adaptador do produto NON expón: polo tanto non son evidencia do adaptador nin moven o degrau `backend-integrado`, que queda tal e como estaba rexistrado. Segue sen haber fluxo de usuario, sen corpus BYOR no gate e sen promoción de maturidade; `Experimental`.",
+  "artefatos_promovidos": {
+    "captura-defectuosa-rc-do-pipeline-e-tail30.log": {
+      "sha256": "4dd97df1f99bf74c41fa0af3597899f4c955556be8d7158c032d61d8cd34ed4f",
+      "linhas": 33,
+      "nota": "FALLO MIÑO DE CAPTURA, conservado: a primeira carreira da suíte pipesouse a `tail -30`, polo que o `TEST_LIB_RC=0` que aí aparece é o código de saída de `tail`, non de `cargo`, e perde as liñas de resumo. Non se borra: é o motivo de que `cargo-test-lib-pos-aceite.log` exista."
+    },
+    "cargo-test-lib-pos-aceite.log": {
+      "sha256": "0e36867236d2925d03fa6a22d06ed55a7738c5554e9c5edcb4f5fdde6f426870",
+      "linhas": 829,
+      "nota": "suíte completa do lib do produto despois de integrar a rolda de aceite: `test result: ok. 754 passed; 0 failed; 66 ignored` e `CARGO_RC=0` (o código de saída do propio `cargo`, non dunha tubaxe). 17 liñas `decomp::rex_addressing::tests::` = as probas do adaptador seguen verdes co crate reconstruído."
+    },
+    "check-tree-fmt-clippy-destino.log": {
+      "sha256": "0bed20998a100a30ef2637d9eb18105d0c0478a1f3fb6d7c85dceb75885382c3",
+      "linhas": 12,
+      "nota": "gates do destino que a relocalización pode tocar: `npm run check:tree` rc=0 (o directorio `scripts/rex_profiles/addressing_runtime/rex-addressing/` xa non existe), `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` rc=0 e `cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings` rc=0. Marcas de tempo por comando."
+    },
+    "exemplo-resource-report-pos-promocion.log": {
+      "sha256": "5ee8f359c87877d482df68e231af15719aed6472d9e12734b5339b72b3f20e32",
+      "linhas": 108,
+      "nota": "o exemplo da etapa 4 executado desde a localización nova (`cargo run --manifest-path crates/rex-addressing/Cargo.toml --example resource_report`). Proba de que `examples/resource_report.rs` voltou a ser parte do paquete: `Running target/crates-gates/debug/examples/resource_report` e `RC=0`. Resumo do propio exemplo: `lecturas=13 recusas=14` cos sete códigos de recusa nomeados e `resumo sha256=27bebc7b…`."
+    },
+    "gates-do-pacote.log": {
+      "sha256": "d7d2570e723bce1c937a4fc8ec2c01a3a763455d6903f99ae3b48b3443b512ab",
+      "linhas": 326,
+      "nota": "saída de `npm run crates:gates` (os dous paquetes registrados, tres gates cada un). rex-addressing: 138 executados / 0 fallos / 10 ignorados en 17 targets; rex-kosinski: 25 / 0 / 0 sen cambios. Bloques `--- <pacote> (manifesto) ---`, cada gate imprime o seu `$ cargo ...` e pecha con `OK: <pacote> <gate>`; `RC=0` e a última liña."
+    },
+    "paridade-da-promocion-e-pinos.log": {
+      "sha256": "0c8a8b07c98a5947165879f980ec14d9714fe3dacd69e02e5001e90adb7b3775",
+      "linhas": 31,
+      "nota": "paridade e pinos desta perna, con cada comando escrito antes da súa saída. `git ls-remote` (tip de A: `0e5f804`), os 5 commits `30cb311..0e5f804`, 42 ficheiros no paquete de A ↔ 42 neste tronco sen diferenzas de nome, única diferenza de contido `README.md` (a miña nota de localización), SHA do ficheiro de aceite `54ba2b6e…a216` igual ao `FICHEIRO_SHA256` do test, SHA do adaptador `7bd75ea9…` (sen cambios) e a árbore graduada `9101cfb5fb6ec809b457007ac104b0ef6e0822b2`."
+    },
+    "gates-de-frontend-no-head-final.log": {
+      "sha256": "97f60747a05cde52c4727b46c5788e5357288ece6a57a54f4bc5a0bbe4500412",
+      "linhas": 11,
+      "nota": "barra de frontend de AGENTS.md executada no HEAD final desta perna (`1f30467`): `npm run lint` rc=0, `npx tsc --noEmit` rc=0 e `npm test` rc=0 con 79 ficheiros verdes + 1 saltado e **749 pasados / 6 saltados (755)**. Janela 2026-09-28T12:18:14Z–12:20:26Z, despois do último commit de docs; ningún ficheiro de frontend se modificou nesta perna — a execución é a proba de que a promoción do paquete e a rolda de aceite non regrediron a barra."
+    },
+    "ci-consulta-ebfa8ea.log": {
+      "sha256": "01120079ea70c70dd3816b0da8d7866dadc9eabf0dc6bb559bc9c166910a82b8",
+      "linhas": 14,
+      "nota": "Consultas pontuais do rollup CI por SHA no push da rolda de aceite (ebfa8ea): 8 tentativas sen runs rexistrados, despois rollup do attempt orixinal (CI=success; Desktop E2E=failure cun timeout de 15274 ms sobre orzamento de 15000 ms no paso reference_goal, 'esgotamento de tempo, nao um defeito confirmado') e ROLLUP TERMINAL da reexecución do job fallido no mesmo SHA (15:10Z): desktop-smoke=success. Veredicto por SHA: ebfa8ea verde nas duas pernas; ningún código de produto mudou entre a falla e a reexecución. Non converte retroactivamente en aprobado ningún SHA anterior."
+    }
+  },
+  "como_conferir": "npm run crates:gates; npm run check:tree; cd src-tauri && cargo test --lib && cargo clippy --lib -- -D warnings && cargo fmt -- --check; CARGO_TARGET_DIR=target/crates-gates cargo run --offline --manifest-path crates/rex-addressing/Cargo.toml --example resource_report; sha256sum crates/rex-addressing/vectors/acceptance-v1.json; git diff --stat 0e5f804:scripts/rex_profiles/addressing_runtime/rex-addressing HEAD:crates/rex-addressing"
+}

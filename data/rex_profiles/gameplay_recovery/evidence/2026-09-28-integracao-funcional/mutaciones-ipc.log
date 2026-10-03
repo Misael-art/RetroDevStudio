@@ -1,0 +1,48 @@
+# Controles de mutacion — capa IPC de rex_gameplay (ETAPA 2)
+# UTC inicio: 2026-09-28T17:48:05Z
+# SHA-256 do adaptador na base das mutacions: 0b562d3a419bc0cba724d8a6ef7e327b768b9e5f551b1204e6377a0836c3ab79
+# comando: cargo test --manifest-path src-tauri/Cargo.toml --lib rex_gameplay
+#   (10 probas da capa + 1 ignorada: a prova real con SGDK/Libretro)
+# Resultado: 5/5 mutacions mataron as súas probas e a restauración foi idéntica.
+# Nota de honestidade: na primeira pasada, M3/M4 usaron marcos inexistentes (rc=0
+# enganoso) e M5 non mataba nada. O despiece 'crescimento recusado' do clasificador
+# retirouse por non ter prueba que o fixase (a recusa por faixa pinzase con 'fora de'
+# + 'recusada/recusado') e engadiuse ipc_rebuild_recusa_limiar_fora_da_faixa_no_grafo
+# para fixar o codigo tamén na via de reconstrucion.
+
+## M1 UTC 2026-09-28T17:48:05Z: erro_de_perfil: 'SHA-256 da base diverge' deixa de mapear a identity_mismatch
+test tools::reverse::decomp::rex_gameplay::tests::ipc_rebuild_recusa_resultado_antigo_tras_trocar_a_rom ... FAILED
+test tools::reverse::decomp::rex_gameplay::tests::ipc_rebuild_recusa_fronteira_por_motivo_estruturado ... FAILED
+test result: FAILED. 8 passed; 2 failed; 1 ignored; 0 measured; 836 filtered out; finished in 1.11s
+M1_RC=101  (cargo; 101 = houbo fallos)
+restaurado: 0b562d3a419bc0cba724d8a6ef7e327b768b9e5f551b1204e6377a0836c3ab79
+RESTAURACION_OK
+
+## M2 UTC 2026-09-28T17:48:23Z: ipc_rebuild: deixa de ecoar o request_id da chamada
+test tools::reverse::decomp::rex_gameplay::tests::ipc_rebuild_patch_e_regeneracion_coinciden ... FAILED
+test result: FAILED. 9 passed; 1 failed; 1 ignored; 0 measured; 836 filtered out; finished in 0.62s
+M2_RC=101  (cargo; 101 = houbo fallos)
+restaurado: 0b562d3a419bc0cba724d8a6ef7e327b768b9e5f551b1204e6377a0836c3ab79
+RESTAURACION_OK
+
+## M3 UTC 2026-09-28T17:48:40Z: ipc_scan: a marca de ambiguidade deixa de computedarse (sempre false)
+test tools::reverse::decomp::rex_gameplay::tests::ipc_scan_devolve_candidatos_e_marca_a_ambiguidade ... FAILED
+test result: FAILED. 9 passed; 1 failed; 1 ignored; 0 measured; 836 filtered out; finished in 0.84s
+M3_RC=101  (cargo; 101 = houbo fallos)
+restaurado: 0b562d3a419bc0cba724d8a6ef7e327b768b9e5f551b1204e6377a0836c3ab79
+RESTAURACION_OK
+
+## M4 UTC 2026-09-28T17:48:56Z: ipc_edit: retirase o limite de bytes do grafo (validar_grafo_len)
+test tools::reverse::decomp::rex_gameplay::tests::ipc_edit_permite_so_o_limiar_na_faixa ... FAILED
+test result: FAILED. 9 passed; 1 failed; 1 ignored; 0 measured; 836 filtered out; finished in 0.87s
+M4_RC=101  (cargo; 101 = houbo fallos)
+restaurado: 0b562d3a419bc0cba724d8a6ef7e327b768b9e5f551b1204e6377a0836c3ab79
+RESTAURACION_OK
+
+## M5 UTC 2026-09-28T17:49:14Z: erro_de_perfil: a recusa por faixa deixa de mapear a range_refused
+test tools::reverse::decomp::rex_gameplay::tests::ipc_edit_permite_so_o_limiar_na_faixa ... FAILED
+test tools::reverse::decomp::rex_gameplay::tests::ipc_rebuild_recusa_limiar_fora_da_faixa_no_grafo ... FAILED
+test result: FAILED. 8 passed; 2 failed; 1 ignored; 0 measured; 836 filtered out; finished in 0.84s
+M5_RC=101  (cargo; 101 = houbo fallos)
+restaurado: 0b562d3a419bc0cba724d8a6ef7e327b768b9e5f551b1204e6377a0836c3ab79
+RESTAURACION_OK

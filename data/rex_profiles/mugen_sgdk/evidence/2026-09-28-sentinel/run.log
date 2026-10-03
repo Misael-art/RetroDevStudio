@@ -1,0 +1,38 @@
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.94s
+     Running unittests src/lib.rs (target/debug/deps/app_lib-87d5738285bb7ab2)
+
+running 15 tests
+test core::mugen_profile::tests::mugen_probe_real_build_run_edit_and_effect ... idle A: [("idle1", 6), ("idle0", 5), ("idle1", 9), ("idle0", 5), ("idle1", 9), ("idle0", 5), ("idle1", 3)]
+A: inicio 1 [("punch0", 3), ("punch1", 6), ("punch0_hflip", 4), ("idle0", 7), ("idle1", 9), ("idle0", 5), ("idle1", 9), ("idle0", 5), ("idle1", 1)]
+B: inicio 1 [("punch0", 3), ("punch1", 12), ("punch0_hflip", 4), ("idle0", 7), ("idle1", 9), ("idle0", 5), ("idle1", 9)]
+clsn1 A [0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+clsn1 B [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+relatorio: /home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/validation/rex-mugen/run-1790622561290489352/report.json
+ok
+test core::mugen_profile::tests::mugen_sentinel_real_build_and_run ... sentinel idle [("idle0", 2), ("idle1", 8), ("idle0", 8), ("idle1", 8), ("idle0", 8), ("idle1", 6)]
+sentinel depois de B [("idle1", 1), ("kick0", 4), ("kick1_vflip", 5), ("kick0", 50)]
+clsn2 idle [1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
+clsn1 [0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+ok
+test core::mugen_profile::tests::probe_emits_runtime_tables_from_the_model ... ok
+test core::mugen_profile::tests::probe_import_produces_the_designed_model ... ok
+test core::mugen_profile::tests::sentinel_report_matches_the_registered_prediction ... ok
+test core::project_mgr::tests::import_mugen_character_converts_cmd_air_cns_st_to_fighting_nodes ... ok
+test core::project_mgr::tests::import_mugen_project_builds_native_scenes_from_character_stage_and_screenpack_roots ... ok
+test core::project_mgr::tests::import_mugen_project_supports_repo_sample_roots_when_present ... [mugen-sample-skip] /home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/data/character air
+[mugen-sample-skip] /home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/data/background air
+[mugen-sample-skip] /home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/data/screenpack air
+[mugen-sample-skip] F:\Projects\Engine Template\Games Engines\Ikemen-GO\Screenpacks
+[mugen-sample-skip] F:\Projects\Engine Template\Games Engines\Ikemen-GO\Modules\Engine-Modules\repo\external\mods\ratio\ikemen1
+ok
+test core::project_mgr::tests::import_mugen_reimport_keeps_commands_and_graph_idempotent ... ok
+test core::project_mgr::tests::import_mugen_stage_background_materializes_tilemap_and_parallax_metadata ... ok
+test core::project_mgr::tests::mugen_handles_empty_project_dir ... ok
+test core::project_mgr::tests::mugen_handles_missing_root_artifact ... ok
+test core::project_mgr::tests::smoke_import_ikemen_go_reuses_mugen_adapter_without_losing_assets ... ok
+test core::project_mgr::tests::smoke_import_mugen_project_is_idempotent ... ok
+test tests::import_mugen_project_command_creates_native_project_with_metadata_and_scene ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 826 filtered out; finished in 3.74s
+

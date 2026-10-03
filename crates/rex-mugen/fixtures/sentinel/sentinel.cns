@@ -1,0 +1,21 @@
+[Statedef 0]
+type = S
+anim = 0
+
+[Statedef 210]
+type = S
+anim = 210
+
+[State 210, Push]
+type = VelSet
+trigger1 = 1
+x = 2
+
+[State 210, Back]
+type = ChangeState
+trigger1 = AnimTime = 0
+value = 0
+
+[Statedef 230]
+type = S
+anim = 230

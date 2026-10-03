@@ -1,0 +1,63 @@
+{
+  "schema": "rex-crate-integration/v1",
+  "descricao": "Evidencia da integracion do crate standalone rex-addressing (frente A) na branch do integrador: promocion de localizacion declarada, rexistro e gates propios medidos.",
+  "quando_utc": "2026-09-28T02:58Z",
+  "quem": "integrador da rodada REX (non o axente A)",
+  "branch": "codex/rex-integrator-crates-registry",
+  "ferramenta": "npm run crates:gates (scripts/crates-gates.mjs), CARGO_TARGET_DIR=target/crates-gates, toolchain 1.97.0 via rust-toolchain.toml da raiz",
+
+  "objeto_da_revisao": {
+    "pacote": "crates/rex-addressing",
+    "entregas": "17 commits no intervalo 9b27941..57e51d3 (PR #82, branch codex/rex-rust-addressing)",
+    "pin_conferido_na_hora_da_revisao": "57e51d3",
+    "meio_de_integracao": "git cherry-pick -x do intervalo (17 commits, cero conflitos, autoria e mensaxes preservadas)",
+    "promocion_de_localizacion": "git mv de scripts/rex_profiles/addressing_runtime/rex-addressing a crates/rex-addressing. Este paso xa estaba pedido polo propio perfil: docs/rex_profiles/addressing_runtime/CONTRATO.md seccion 0 rexistraba o conflito de localizacion e a promocion en dous pasos (mover + declarar crates/ en check-tree) como pendente do integrador.",
+    "fora_da_integracao": "o WIP non commitado do axente A no seu worktree (tests/resource_reader.rs, tests/support/banked.rs e tests/support/mod.rs modificado, que corresponde à súa fase de 'leitura de recursos') non se tocou nin se integrou."
+  },
+
+  "gates_mediados_na_localizacion_nova": {
+    "cargo_fmt_check": { "rc": 0, "resultado": "OK" },
+    "cargo_clippy_all_targets_d_warnings": { "rc": 0, "resultado": "OK" },
+    "cargo_test_locked": {
+      "rc": 0,
+      "executados": 81,
+      "falhas": 0,
+      "ignorados": 9,
+      "por_target": {
+        "unittests src/lib.rs": 0,
+        "tests/byor.rs": "0 executados, 8 ignorados (BYOR non provisionable)",
+        "tests/differential.rs": 7,
+        "tests/harness_selfcheck.rs": 5,
+        "tests/inversion.rs": "0 executados, 1 ignorado (preimage exaustiva)",
+        "tests/md_linear_rules.rs": 6,
+        "tests/md_ssf2_rules.rs": 13,
+        "tests/read_semantics_audit.rs": 5,
+        "tests/snes_exhirom_rules.rs": 15,
+        "tests/snes_hirom_rules.rs": 13,
+        "tests/snes_lorom_rules.rs": 11,
+        "tests/ssf2_writes.rs": 2,
+        "doc-tests": 4
+      },
+      "nota": "os 9 ignorados non corren no gate ordinario: e o que exige a regra de que os testes comuns non dependan de ROM BYOR."
+    },
+    "rc_final_do_wrapper": 0,
+    "tambem_verificado": "npm run check:tree OK co rexistro con dous paquetes e co directorio crates/ promovido."
+  },
+
+  "achados_da_revisao": [
+    "RELOCABILIDADE: ao contrario de rex-kosinski, este paquete trae os seus vectores dentro (crates/rex-addressing/vectors/, co SHA proxectado en harness_selfcheck), polo que non depende de data/ externo. Confirmado executando os gates despois do git mv sen importar nada mais.",
+    "15 chamadas .expect() en codigo de producion (md_linear 4, md_ssf2 4, snes_exhirom 3, snes_hirom 2, snes_lorom 2), cada unha coa xustificacion de que unha validacion previa garante o invariante. A cobertura de 'nunca panica' con entradas adversarias non se executa no gate ordinario (a preimage exaustiva vai #[ignore]). Devolto ao axente A como pendencia; o integrador non editou testes alleos.",
+    "O README do paquete afirmaba 'bateria rapida: 72 + 4 doc-tests'; nesta branch medense 77 + 4 = 81 executados (maior, porque a entrega incluia read_semantics_audit e mais regras). Registrame o numero medido, non o anunciado."
+  ],
+
+  "limites_deste_pacote": "Nivel acadado: gates-proprios-aprovados. Non se alega backend-integrado (non hai dependencia por path en src-tauri/Cargo.toml, non hai adaptador, non hai unha chamada real probada polo backend) nin fluxo-do-usuario. O propio lib.rs se declara Experimental: non detecta mapas, non deduce perfil por tamanho nin banner, non modela chips especiais (DSP/SA1/SuperFX/CX4/SVP), non decodifica codecs e non ten UI. A clasificacion dos cinco perfis en tres clases queda en docs/rex_profiles/addressing_runtime/CLASSIFICACION.md.",
+
+  "artefatos_promovidos": {
+    "gates.log": {
+      "sha256": "44ff4d870bc4a7d035fdb130357aa3f9039e3396d24d140f2e43a699b5ad6e0c",
+      "linhas": 245,
+      "onde_cada_numero_esta": "cada comando vai impreso co seu '$ cargo ...'; as liñas 'test result:' levan as contagens por target; 'OK: rex-addressing <gate>' pecha cada gate e 'rc=0' e a ultima liña"
+    }
+  },
+  "como_conferir": "npm run crates:gates (executa os tres gates dos dous paquetes rexistrados e imprime os comandos exactos); npm run check:tree; git log --oneline -- crates/rex-addressing; e a receita do README do pacote xa con cd crates/rex-addressing."
+}

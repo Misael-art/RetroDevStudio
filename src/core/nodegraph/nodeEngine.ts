@@ -3,8 +3,9 @@
  *
  * Modulo puro e deterministico. Ele concentra a validacao canonica do
  * NodeGraph e a execucao local simulada (trace local). Este modulo NAO observa
- * emulador, ROM ou runtime real; nao existe source mapping confiavel
- * ROM/PC -> node (decisao registrada na rodada 79).
+ * emulador, ROM ou runtime real; nao existe source mapping generico
+ * ROM/PC -> node. A unica excecao local e o perfil exacto `rom_addq_word`,
+ * cuja semantica pura fica exposta abaixo para testes independentes.
  *
  * Separacao explicita de evidencia:
  * - `LocalNodeTrace`: unica evidencia produzida aqui; sempre `simulated`.
@@ -40,7 +41,11 @@ export type NodeGraphValidationIssue = {
     | "branch_without_output"
     | "blocking_bridge"
     | "input_command_unbound"
-    | "missing_animation";
+    | "missing_animation"
+    | "broken_entity_ref"
+    | "invalid_param"
+    | "missing_sfx"
+    | "unsupported_on_platform";
   message: string;
   nodeId?: string;
   edgeId?: string;
@@ -54,6 +59,13 @@ export type NodeGraphValidation = {
 export type NodeGraphValidationContext = {
   selectedEntity?: Entity | null;
   sceneEntities?: Entity[];
+  /** Plataforma do projeto; nos sem traducao nela viram erro antes do build. */
+  target?: string | null;
+};
+
+/** Mesmo contrato do backend (`compiler/platform_support.rs`). */
+export const PLATFORM_UNSUPPORTED_NODES: Record<string, Partial<Record<string, string>>> = {
+  snes: { condition_on_ground: "o estado de apoio no chao so existe na fisica do Mega Drive" },
 };
 
 export type NodeEngineErrorCode = "graph_empty" | NodeGraphValidationIssue["code"];
@@ -115,6 +127,39 @@ export type NodeExecutionEvidence =
 
 export const LOCAL_TRACE_EVIDENCE_LABEL =
   "simulado / nao instrumentado (Experimental)";
+
+export type RecoveredRomWordState = {
+  d0: number;
+  n: boolean;
+  z: boolean;
+  v: boolean;
+  c: boolean;
+  x: boolean;
+};
+
+/** Avaliador puro do unico perfil ROM recuperado e aceito nesta wave. */
+export function evaluateRecoveredAddQWord(
+  d0: number,
+  immediate = 1,
+): RecoveredRomWordState {
+  if (!Number.isInteger(immediate) || immediate < 1 || immediate > 8) {
+    throw new Error("ADDQ immediate must be an integer between 1 and 8");
+  }
+  const input = d0 >>> 0;
+  const word = input & 0xffff;
+  const sum = word + immediate;
+  const result = sum & 0xffff;
+  const carry = sum > 0xffff;
+  const overflow = word <= 0x7fff && (result & 0x8000) !== 0;
+  return {
+    d0: (((input & 0xffff0000) >>> 0) | result) >>> 0,
+    n: (result & 0x8000) !== 0,
+    z: result === 0,
+    v: overflow,
+    c: carry,
+    x: carry,
+  };
+}
 
 export function isRuntimeEvidence(
   evidence: NodeExecutionEvidence,
@@ -347,6 +392,103 @@ function isBlockingBridgeNode(node: GraphNode): boolean {
   );
 }
 
+/** Params that name a scene entity, per node type. */
+const ENTITY_REF_PARAMS: Partial<Record<string, string[]>> = {
+  condition_overlap: ["a", "b"],
+  condition_on_ground: ["target"],
+  sprite_move: ["target"],
+  destroy_entity: ["target"],
+  set_velocity: ["target"],
+  set_position: ["target"],
+  sprite_anim: ["target"],
+  set_animation_state: ["target"],
+  camera_follow: ["target"],
+};
+/** Params that must be integers, per node type. */
+const INT_PARAMS: Partial<Record<string, string[]>> = {
+  condition_compare: ["b"],
+  condition_overlap: ["probe_dx", "probe_dy"],
+  sprite_move: ["dx", "dy"],
+  set_velocity: ["vx", "vy"],
+  var_set: ["value"],
+};
+const COMPARE_OPERATORS = new Set(["==", "!=", "<", "<=", ">", ">="]);
+const VAR_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const ENTITY_REF_WILDCARDS = new Set(["self", ""]);
+
+function nodeParamIssues(node: GraphNode, context?: NodeGraphValidationContext): NodeGraphValidationIssue[] {
+  const issues: NodeGraphValidationIssue[] = [];
+  const entities = context?.sceneEntities ?? [];
+  if (entities.length > 0) {
+    const ids = new Set(entities.map((entity) => entity.entity_id));
+    for (const key of ENTITY_REF_PARAMS[node.type] ?? []) {
+      const value = String(node.params[key] ?? "").trim();
+      if (!ENTITY_REF_WILDCARDS.has(value) && !ids.has(value)) {
+        issues.push({
+          severity: "error",
+          code: "broken_entity_ref",
+          nodeId: node.id,
+          message: `No '${node.label}' referencia a entidade '${value}' (param '${key}'), que nao existe na cena.`,
+        });
+      }
+    }
+  }
+  for (const key of INT_PARAMS[node.type] ?? []) {
+    if (!(key in node.params)) continue;
+    const value = node.params[key];
+    const numeric = typeof value === "number" ? value : Number(String(value).trim());
+    if (String(value).trim() === "" || !Number.isInteger(numeric) || numeric < -32768 || numeric > 32767) {
+      issues.push({
+        severity: "error",
+        code: "invalid_param",
+        nodeId: node.id,
+        message: `No '${node.label}': param '${key}' deve ser inteiro entre -32768 e 32767 (recebido '${String(value)}').`,
+      });
+    }
+  }
+  if (node.type === "condition_compare" && "operator" in node.params && !COMPARE_OPERATORS.has(String(node.params.operator))) {
+    issues.push({
+      severity: "error",
+      code: "invalid_param",
+      nodeId: node.id,
+      message: `No '${node.label}': operador '${String(node.params.operator)}' invalido (use ==, !=, <, <=, >, >=).`,
+    });
+  }
+  if (node.type === "action_sound" && (context?.selectedEntity || context?.sceneEntities?.length)) {
+    // The compiler declares SFX from every entity's AudioComponent.
+    const sfx: Record<string, string> = {};
+    for (const entity of [...(context?.sceneEntities ?? []), ...(context?.selectedEntity ? [context.selectedEntity] : [])]) {
+      Object.assign(sfx, entity.components.audio?.sfx ?? {});
+    }
+    const name = String(node.params.sfx ?? "");
+    const asset = sfx[name];
+    if (!asset) {
+      issues.push({
+        severity: "error",
+        code: "missing_sfx",
+        nodeId: node.id,
+        message: `No '${node.label}': som '${name}' nao existe nos efeitos da cena (${Object.keys(sfx).join(", ") || "nenhum"}).`,
+      });
+    } else if (!/\.wav$/i.test(asset)) {
+      issues.push({
+        severity: "error",
+        code: "missing_sfx",
+        nodeId: node.id,
+        message: `No '${node.label}': som '${name}' usa '${asset}'; o driver XGM do Mega Drive so aceita WAV.`,
+      });
+    }
+  }
+  if ((node.type === "var_get" || node.type === "var_set") && !VAR_IDENTIFIER.test(String(node.params.var_name ?? ""))) {
+    issues.push({
+      severity: "error",
+      code: "invalid_param",
+      nodeId: node.id,
+      message: `No '${node.label}': nome de variavel '${String(node.params.var_name ?? "")}' invalido (letras, digitos e _).`,
+    });
+  }
+  return issues;
+}
+
 export function validateNodeGraph(
   graph: NodeGraph,
   context?: NodeGraphValidationContext,
@@ -354,6 +496,18 @@ export function validateNodeGraph(
   const issues: NodeGraphValidationIssue[] = [];
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const connectedNodeIds = new Set<string>();
+  const unsupportedHere = context?.target ? PLATFORM_UNSUPPORTED_NODES[context.target] ?? {} : {};
+  for (const node of graph.nodes) {
+    const reason = unsupportedHere[node.type];
+    if (reason) {
+      issues.push({
+        severity: "error",
+        code: "unsupported_on_platform",
+        nodeId: node.id,
+        message: `No '${node.label}' (${node.type}) nao e suportado em ${context?.target}: ${reason}. O build sera recusado.`,
+      });
+    }
+  }
   const validIncomingExecNodeIds = new Set<string>();
   const outgoingExecByNodePort = new Map<string, Set<string>>();
 
@@ -485,6 +639,10 @@ export function validateNodeGraph(
           node.params.command_id ?? node.label,
         )}' nao tem binding em SpriteComponent.commands.`,
       });
+    }
+
+    for (const issue of nodeParamIssues(node, context)) {
+      issues.push(issue);
     }
 
     if (nodeReferencesMissingAnimation(node, context)) {

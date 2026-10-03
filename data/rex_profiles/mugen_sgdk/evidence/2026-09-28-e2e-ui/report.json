@@ -1,0 +1,177 @@
+{
+  "generatedAt": "2026-09-28T23:46:47.057Z",
+  "scenario": "mugen-import",
+  "maturity": "Experimental",
+  "testedApplication": {
+    "path": "/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "07b5af2ba3d780676871ce5fc5380e150e732e3f639449942bb430b783448573"
+  },
+  "sample": {
+    "fixture": "crates/rex-mugen/fixtures/probe",
+    "sha256": {
+      "probe.def": "4ced8bda71c78b7b2c46cad3867d7de45a9c90e560ed25a4e29de695503974cc",
+      "probe.air": "e342c02fcd136af1c97b9af242a2aacd560f930925053892941216d068482ec6",
+      "probe.cmd": "cb28501b3f0a489baa7a5768e58404ec78928acbc19b59a3919025f352e9a285",
+      "probe.cns": "7184372464ef1b968156b3a8afdf1faeec3e0ca95192c88a5f7f9f3d69a3cf7f",
+      "probe.sff": "f7313b6564aae35ac392a9b5924eb31d9d159ff9ebb4700a1d2f473c62ace990"
+    }
+  },
+  "artifacts": [
+    {
+      "label": "importador externo com perfil MUGEN",
+      "path": "/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/validation/mugen-import-2026-09-28T23-46-10-858Z-01-importer.png"
+    },
+    {
+      "label": "painel de compatibilidade MUGEN",
+      "path": "/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/validation/mugen-import-2026-09-28T23-46-10-858Z-02-compatibility-panel.png"
+    },
+    {
+      "label": "personagem convertido no core",
+      "path": "/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/validation/mugen-import-2026-09-28T23-46-10-858Z-03-core-original.png"
+    },
+    {
+      "label": "projeto reaberto com x editado",
+      "path": "/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/validation/mugen-import-2026-09-28T23-46-10-858Z-04-reopened.png"
+    },
+    {
+      "label": "personagem na posicao editada",
+      "path": "/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/validation/mugen-import-2026-09-28T23-46-10-858Z-05-core-edited.png"
+    },
+    {
+      "label": "importacao recusada sem projeto parcial",
+      "path": "/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/validation/mugen-import-2026-09-28T23-46-10-858Z-06-negative.png"
+    }
+  ],
+  "steps": [
+    {
+      "id": "import_via_ui_and_panel",
+      "status": {
+        "sprites": "direct",
+        "animations": "direct",
+        "commands": "direct",
+        "states": "direct",
+        "collisions": "manual",
+        "sound": "absent",
+        "stage": "absent"
+      },
+      "at": "2026-09-28T23:46:14.776Z",
+      "projectDir": "/home/misael/Documents/RetroDevProjects/Mugen_Probe_1790639173482",
+      "panelDom": {
+        "preview": [
+          64,
+          48
+        ],
+        "collisionLoss": "Precisa de ajuste seuColisoescollisionNo jogo: golpes nao acertam nem recebem dano sozinhos; e preciso ligar a logica de colisao manualmente.Motivo: as caixas sao preservadas por frame, mas nenhuma regra de jogo as usa no perfil v1.Origem: probe.air",
+        "rawLength": 15527,
+        "summary": "12 funcionam igual, 0 com diferenca, 1 precisam de ajuste seu, 0 nao convertidos (0 pontes manuais no grafo).",
+        "stage": "Cenario (stage)Nao existe neste pacotepacote de personagem: cenario nao faz parte desta importacao"
+      },
+      "consoleSummary": "[MUGEN] probe (Experimental): 12 funcionam igual, 0 com diferenca, 1 precisam de ajuste seu, 0 nao convertidos (0 pontes manuais no grafo).",
+      "totals": {
+        "manual": 1,
+        "unsupported": 0,
+        "approximate": 0,
+        "direct": 12
+      }
+    },
+    {
+      "id": "build_run_original",
+      "status": "passed",
+      "at": "2026-09-28T23:46:26.157Z",
+      "rom": "/home/misael/Documents/RetroDevProjects/Mugen_Probe_1790639173482/build/megadrive/out/rom.bin",
+      "rom_sha256": "9ac4afc82e7ed9bcb51577edca338ad0a4bcb51811f78715c316dbb95a86d8a4",
+      "x": 96,
+      "y": 96,
+      "idle": {
+        "idle0": 19,
+        "idle1": 19,
+        "other": 0
+      }
+    },
+    {
+      "id": "edit_and_save",
+      "status": "passed",
+      "at": "2026-09-28T23:46:26.656Z",
+      "from": 96,
+      "to": 140
+    },
+    {
+      "id": "restart_reopen",
+      "status": "passed",
+      "at": "2026-09-28T23:46:30.491Z",
+      "reopenedX": 140
+    },
+    {
+      "id": "build_run_edited",
+      "status": "passed",
+      "at": "2026-09-28T23:46:45.703Z",
+      "rom": "/home/misael/Documents/RetroDevProjects/Mugen_Probe_1790639173482/build/megadrive/out/rom.bin",
+      "rom_sha256": "d95a221c67663015f753e59212b0a4de23081d4ea68f71bf8d4dbb5069b526d0",
+      "idle": {
+        "idle0": 15,
+        "idle1": 25,
+        "other": 0
+      },
+      "oldSpot": {
+        "idle0": 0,
+        "idle1": 0,
+        "other": 41
+      }
+    },
+    {
+      "id": "negative_path_escape",
+      "status": "passed",
+      "at": "2026-09-28T23:46:47.057Z",
+      "userMessage": "Importacao MUGEN recusada por seguranca: o pacote aponta para '../fora.sff', fora da pasta do personagem. Nenhum projeto foi criado.",
+      "suggestedAction": "Coloque o arquivo dentro da pasta do pacote e corrija o caminho no .def antes de importar de novo.",
+      "technicalDetail": "Nao foi possivel importar nenhum modelo MUGEN valido de '/home/misael/Projects/REX-MUGEN-SGDK-2026-09-28/src-tauri/target-test/validation/mugen-import-2026-09-28T23-46-10-858Z-work/escape/probe'. Probe: caminho '../fora.sff' sai do pacote MUGEN; recusado",
+      "baseDir": "/home/misael/Documents/RetroDevProjects",
+      "leftovers": []
+    }
+  ],
+  "runs": [
+    {
+      "label": "original",
+      "x": 96,
+      "y": 96,
+      "canvas": [
+        320,
+        224
+      ],
+      "samples": {
+        "idle0": 19,
+        "idle1": 19,
+        "other": 0
+      }
+    },
+    {
+      "label": "editado",
+      "x": 140,
+      "y": 96,
+      "canvas": [
+        320,
+        224
+      ],
+      "samples": {
+        "idle0": 15,
+        "idle1": 25,
+        "other": 0
+      }
+    },
+    {
+      "label": "posicao antiga apos edicao",
+      "x": 96,
+      "y": 96,
+      "canvas": [
+        320,
+        224
+      ],
+      "samples": {
+        "idle0": 0,
+        "idle1": 0,
+        "other": 41
+      }
+    }
+  ],
+  "dialogSubstitution": "somente o dialogo nativo de escolha de pasta e substituido por setNextExternalImportPath; nome, perfil, botao Importar, painel, Inspector, Salvar, reinicio, reabertura e Build & Run sao a UI visivel"
+}

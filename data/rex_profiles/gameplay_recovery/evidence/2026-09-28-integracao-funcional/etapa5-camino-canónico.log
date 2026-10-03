@@ -1,0 +1,129 @@
+# ETAPA 5 — camiño canónico de escrita da copia (patch / regenerate) e a súa proba no núcleo
+# 2026-09-28 17:13Z–17:45Z · base aa959a9 (ETAPA 4) · árbore con cambios desta etapa
+
+## 1. Que se engadiu e onde
+- `src/core/nodegraph/rexGameplayScene.ts` · `prepararXeracion(regra, romDaBarra, metodo, request_id)`:
+  monta a petición de `rex_gameplay_rebuild` (base = ROM da barra; `expected_sha256` e
+  `graph_json` = bloque gardado; saída = caminho novo derivado da base) e di se é NoOp.
+- `src/components/tools/RexGameplayRulePanel.tsx`: selector de método, paso de confirmación
+  explícito antes de escribir, e mostraxe do que informa o núcleo (método executado, SHA da
+  base lida, SHA da copia, offsets que mudaron, faixas autorizadas, checksum) máis a
+  afirmación de que a base non se escribiu.
+- `src/test/fixtures/rexGameplay.ts` · `respostaRebuild()` para as probas de interface.
+
+## 2. TDD — RED medido antes de GREEN
+`npx vitest run src/core/nodegraph/rexGameplayScene.test.ts` (4 probas novas de contrato):
+    Tests  4 failed | 19 passed (23)   → fallos por 'prepararXeracion is not defined' (función inexistente)
+`npx vitest run src/components/tools/RexGameplayRulePanel.test.tsx` (10 probas novas):
+    Tests  10 failed | 9 passed (19)   → fallos por 'sen boton: rex-gameplay-generate' / 'expected null not to be null'
+GREEN tras implementar:
+    rexGameplayScene.test.ts        Tests 23 passed (23)
+    RexGameplayRulePanel.test.tsx   Tests 19 passed (19)
+    xuntos                          Test Files 2 passed (2) · Tests 42 passed (42)
+
+## 3. Non-vacuidade — batería de mutacións (mutaciones-etapa5.log)
+Script versionado: `scripts/rex_profiles/gameplay_recovery/mutacion/mutaciones-etapa5.sh`
+    bash scripts/rex_profiles/gameplay_recovery/mutacion/mutaciones-etapa5.sh
+8 mutacións sobre o código desta etapa; **8/8 morreron** (rc=1 en todas); SHA-256 dos dous
+arquivos restaurado e conferido tras cada una e ao final:
+    escena=519c5799f4064d2f26c15de892981ab8085df193c1b1cbd721aa8c15930d29b8
+    painel =dc00028aaed177c23ef4a88b7d9f1f6a9ebbf80f54e4a68bbd57a85669221ab1
+    RESTAURACION_OK
+
+Dous achados do propio harness, rexistrados porque din algo do método:
+
+(a) **M4 sobrevIVIU na primeira rola** (1 failed=0). M4 quitaba do efecto de reset
+    `setConfirmacion(null); setXeracion(null);`, que é a liña que invalida unha
+    confirmación pendente cando trocamos a ROM da barra. A test non morria porque, nese
+    camiño, o reset tamén pon `fonte` a `null` e todo o bloque de xeración deixa de
+    renderizarse: a proba fallaba por un efecto colateral, non pola garda que pretendía
+    pinar. Corrección (non se disfrazou de verde): a test reescrita para o camiño no que
+    a garda é a única causa — bloque da escena intacto + `Revalidar identidade` + ROM
+    nova na barra; así `rex-gameplay-source` segue dicindo "escena" (a sección móntase) e
+    a confirmación pendente só pode desaparecer pola liña mutada.
+        rola 2: M4 rc=1 · AssertionError: expected <button …> to be null
+
+(b) **O contador de `rc` do script estaba roto, non as probas.** As dúas primeiras roladas
+    imprimían `rc=0` para mutacións que si mataron (con `Tests 4 failed | 38 passed` na
+    mesma liña). Causa: `rc=${PIPESTATUS[0]}` ler o PIPESTATUS do *pai* despois dunha
+    asignación `out=$(npx … | sed …)`, que non corresponde a vitest; a versión inicial usaba
+    `$?`, que no subshell si daba o código correcto pero quedaba tapado polo `sed`.
+    Arreglado executando vitest a un ficheiro e lendo `$?` directamente (comentario no
+    script). A sinal real sempre foron as contaxes; o `rc` era un instrumento mal calibrado.
+
+Mutacións (todas mortas, coa test que as mata):
+    M1 output_path co limiar recuperado no lugar do actual → 4 fallos (contrato de caminho)
+    M2 `noop: false` constante                          → 2 fallos (control vs edición)
+    M3 garda de método desactivada                      → 1 fallo (recusa de método alleo)
+    M4 confirmación pendente sobrevive a ROM nova       → 1 fallo (vé (a))
+    M5 garda de `input_sha256` desactivada              → 1 fallo (base non verificada)
+    M6 garda de `output_path` desactivada               → 1 fallo (caminho non pedido)
+    M7 botón habilitado sen identidade revalidada       → 1 fallo (non xerar ás cegas)
+    M8 offsets sen `padStart(6)` ("0x961")              → 1 fallo (lectura da evidencia)
+
+
+## 4. Proba canónica no núcleo (medida, non presumida)
+Comando (job pesado único, sen outros jobs na máquina):
+    cargo test --manifest-path src-tauri/Cargo.toml --lib rex_gameplay_real_gate -- --ignored --nocapture
+    test result: ok. 1 passed; finished in 5.24s
+    directorio: src-tauri/target-test/validation/rex-gameplay/run-1790627937439058306/
+    (ruta impreso no log; este directório é descartable — a proba reinvoca o toolchain)
+
+Resultados con SHA-256 reais (arquivos propios do proyecto, sen ROM comercial):
+| artefacto | SHA-256 |
+| original-t6.rom            | 86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e |
+| patched-t12.rom (patch)    | 4030ec74466751b0ee5e2613f92edd4054f58abe40f137859c9faf02fc19b1db |
+| regenerated-t12.rom        | 4030ec74466751b0ee5e2613f92edd4054f58abe40f137859c9faf02fc19b1db |
+| noop-t6.rom (control)      | 86c4e90ded38b9c74fdf209254639716a874f2e8ebd8787b3789cc36dbdb4f7e |
+| sgdk-rebuilt-t12.rom       | 06fe310e823f1a510f06f69877aa8a72bb3df669ba0d59afb37e1564c74f104f |
+| blind-step3-t37.rom        | 55ea591b7ee21dafad953d64ac7c9c897a12df806ba597a15988b9e6f0d64850 |
+
+Lectura dos tres camiños, que son distintos e así se amosan na interface:
+- `patch_moveq_immediate`: un byte mudado — offsets [0x961], faixa autorizada [0x961,0x962).
+- `regenerate_region_from_graph`: 18 faixas autorizadas (toda a rexión), e **a mesma
+  output_sha256** que patch: `4030ec74…`. A equivalencia está verificada, non asumida.
+- control NoOp (grafo sen editar, regenerate): output == base (`86c4e90d…`).
+- recompilación SGDK co limiar 12 (`06fe310e…`): difire da copia patcheadora **só** no
+  campo de checksum do cabecallo (`diff_vs_sgdk_offsets = ["0x00018F"]`,
+  `diff_vs_sgdk_confined_to_header_checksum_0x18E = true`), porque SGDK escribe alí un
+  valor que non é a suma canónica de Mega Drive (`base_has_standard_md_checksum = false`,
+  polo que o patcher, pelo seu contrato, non o toca). Iso é o que separa
+  "aplicar o cambio" de "compilar o proxecto": a pantalla di o método executado polo
+  núcleo e nunca afirma que compilou.
+
+Efeito observado no core (mesma secuencia de input, tres ROMs, 30 cadros):
+    abre em score: original=6 · editada=12 · noop=6
+    cadros en que a orixinal pasa a barreira e a editada está bloqueada: [7,8,9,10,11,12]
+    equivalencia grafo↔core: 80 casos, 80 ok (40 por ROM en original_t6 e blind_step3_t37)
+    `runs["noop_t6"]["frames"] == runs["original_t6"]["frames"]` (control idéntico)
+    `runs["patched_t12"] != runs["original_t6"]` (a observación non é a mesma ROM disfrazada)
+
+## 5. Reexecución contra a evidencia da rolda de gameplay
+`report.json` desta corrida comparado co de
+`data/rex_profiles/gameplay_recovery/evidence/2026-09-28-prova-real/report.json`
+(outro workspace, outra sesión): **idéntico campo a campo tras retirar só os
+`output_path`**, que conteñen o caminho absoluto do directório descartable de cada
+corrida. Os seis artefactos ROM reproducen byte a byte (mesmos SHA-256). Copia do
+report desta corrida versionada como `reex-xecucion-core-report.json` e os hashes en
+`SHA256SUMS-etapa5.txt`.
+
+## 6. Gates medidos nesta etapa
+- `npx vitest run` nos dous arquivos tocados: 42/42 (ver §2).
+- `npm test` (suite frontend completa): **807 passed | 6 skipped** (82+1 arquivos).
+  Reconciliación: a base de ETAPA 4 era 793; +4 de `prepararXeracion` + 10 da superficie
+  de xeración = 807. Cero regresións.
+- `npx tsc --noEmit`: rc=0 sen saída. `npm run lint`: rc=0 sen saída.
+- `npm run check:tree`: OK (estrutura conforme a docs/08_TREE_ARCHITECTURE.md).
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib rex_gameplay`: 10 passed,
+  1 ignored (a proba canónica executada á parte en §4), 0 failed.
+
+## 7. Límites honestos desta etapa
+1. A capa de interface probouse con **mocks** do IPC: as 10 probas novas aserdan o
+   contrato (confirmación antes de escribir, forma exacta da petición, mostraxe do que
+   informa o núcleo, recusas cando o núcleo dice algo distinto do pedido). A escrita real
+   polo produto (WebDriver + binario Tauri) aínda non se executou — é ETAPA 6/8, e o
+   panel di "Experimental" mentres non exista.
+2. A proba canónica de §4 chama o **adaptador do backend** (`rebuild_gameplay_rom`), non o
+   panel React: proba que o produto escribe e executa, non que o usuario preme o botón.
+3. Os artefactos de §4 viven en `src-tauri/target-test/**` (descartable) e reprodúcense
+   co comando de §4; non se versionan ROMs, só os seus SHA-256 e o report.

@@ -11,11 +11,12 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { constants as fsConstants, existsSync } from "node:fs";
+import { constants as fsConstants, existsSync, readdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { execFile, spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   UI_LAYOUT_ORACLE_RESOLUTIONS,
@@ -24,10 +25,50 @@ import {
   evaluateUiLayoutOracleSnapshot,
 } from "./ui-layout-oracle.mjs";
 import { diagnose as diagnoseHost } from "./host-manager.mjs";
+import { renderSonicFrameReference } from "./qa/sonic-frame-reference.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
+
+function parseElf32Symbols(elf) {
+  if (elf.length < 52 || elf.subarray(0, 4).toString("ascii") !== "\x7fELF" || elf[4] !== 1) {
+    throw new Error("Expected the SGDK-linked ELF32 image at out/rom.out");
+  }
+  const littleEndian = elf[5] === 1;
+  const read16 = (offset) => littleEndian ? elf.readUInt16LE(offset) : elf.readUInt16BE(offset);
+  const read32 = (offset) => littleEndian ? elf.readUInt32LE(offset) : elf.readUInt32BE(offset);
+  const sectionOffset = read32(32);
+  const sectionEntrySize = read16(46);
+  const sectionCount = read16(48);
+  if (sectionEntrySize < 40 || sectionOffset + sectionEntrySize * sectionCount > elf.length) {
+    throw new Error("Malformed section table in SGDK ELF image");
+  }
+  const symbols = new Map();
+  for (let index = 0; index < sectionCount; index += 1) {
+    const section = sectionOffset + index * sectionEntrySize;
+    const type = read32(section + 4);
+    if (type !== 2 && type !== 11) continue;
+    const tableOffset = read32(section + 16);
+    const tableSize = read32(section + 20);
+    const stringTableIndex = read32(section + 24);
+    const symbolEntrySize = read32(section + 36);
+    const stringSection = sectionOffset + stringTableIndex * sectionEntrySize;
+    if (!symbolEntrySize || symbolEntrySize < 16 || tableOffset + tableSize > elf.length || stringSection + 40 > elf.length) continue;
+    const stringsOffset = read32(stringSection + 16);
+    const stringsSize = read32(stringSection + 20);
+    if (stringsOffset + stringsSize > elf.length) continue;
+    for (let symbolOffset = tableOffset; symbolOffset + 16 <= tableOffset + tableSize; symbolOffset += symbolEntrySize) {
+      const nameOffset = read32(symbolOffset);
+      if (!nameOffset || nameOffset >= stringsSize) continue;
+      const end = elf.indexOf(0, stringsOffset + nameOffset);
+      if (end < 0) continue;
+      const name = elf.toString("utf8", stringsOffset + nameOffset, end);
+      if (name) symbols.set(name, read32(symbolOffset + 4));
+    }
+  }
+  return symbols;
+}
 
 function resolveLedgerMarker(options, projectMetadata) {
   const suffix = projectMetadata.target === "snes" ? "snes" : "md";
@@ -422,6 +463,31 @@ function parseArgs(argv) {
           "onboarding-shell",
           "qa-rc",
           "create-game-from-zero",
+          "reference-platformer",
+          "authoring-acceptance",
+          "nodegraph-authoring",
+          "behaviors-independence",
+          "collect-goal",
+          "inspection",
+          "inspection-cancel",
+          "inspection-complete",
+          "inspection-sprite-secondary",
+          "inspection-sonic",
+          "inspection-sonic-tiles",
+          "sonic-multiframe",
+          "sonic-cadence-journey",
+          "rex-lz4w-effect",
+          "rex-lz4w-fixture-effect",
+          "rex-aplib-byor-effect",
+          "rex-context-fixture-effect",
+          "inspection-preview-unavailable",
+          "logic-recovery",
+          "logic-recovery-branch",
+          "mugen-import",
+          "mugen-control",
+          "mugen-locomotion",
+          "mugen-real",
+          "mugen-original",
         ].includes(
           value
         )
@@ -1062,7 +1128,7 @@ async function detectBuildFailure(sessionId, sinceIndex = 0) {
   return `build falhou (${failure.diagnostic.area}): ${detail}`;
 }
 
-async function webdriverRequest(method, route, body) {
+async function webdriverRequestDetailed(method, route, body) {
   const response = await fetch(`${driverServerUrl}${route}`, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -1070,18 +1136,36 @@ async function webdriverRequest(method, route, body) {
   });
 
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : {};
+  let payload = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { raw_body: text };
+  }
 
-  if (!response.ok) {
-    const details = payload?.value?.message ?? response.statusText;
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    headers: Object.fromEntries(response.headers.entries()),
+    body: text,
+    payload,
+  };
+}
+
+async function webdriverRequest(method, route, body) {
+  const result = await webdriverRequestDetailed(method, route, body);
+
+  if (!result.ok) {
+    const details = result.payload?.value?.message ?? result.statusText;
     throw new Error(`${method} ${route} falhou: ${details}`);
   }
 
-  if (payload?.value?.error) {
-    throw new Error(payload.value.message ?? `${method} ${route} retornou erro WebDriver.`);
+  if (result.payload?.value?.error) {
+    throw new Error(result.payload.value.message ?? `${method} ${route} retornou erro WebDriver.`);
   }
 
-  return payload;
+  return result.payload;
 }
 
 async function isDriverOnline() {
@@ -1102,6 +1186,100 @@ async function waitForDriverOffline(timeoutMs, label) {
   );
 }
 
+// ── Propriedade de processos do cenario ──────────────────────────────────────────────────
+// O cenario acompanha tudo o que inicia: o tauri-driver (filho direto) e a arvore abaixo dele
+// (driver nativo + app, inclusive a instancia criada apos reiniciar o app), alem das sessoes
+// WebDriver abertas. Cada PID e guardado com o `starttime` de /proc/<pid>/stat; so se encerra um
+// PID cujo starttime ainda coincide (nunca por nome, nunca um PID reaproveitado por outra sessao).
+const ownedSessions = new Set();
+const ownedProcesses = new Map(); // pid -> { start, cmd }
+let ownedDriverPid = null;
+
+function readProcStat(pid) {
+  if (process.platform !== "linux") return null;
+  try {
+    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
+    // pid (comm) state ppid ... starttime = campo 22; comm pode conter espacos/parenteses.
+    const tail = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
+    return { ppid: Number(tail[1]), start: tail[19] };
+  } catch {
+    return null;
+  }
+}
+
+function readProcCmd(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ").slice(0, 200);
+  } catch {
+    return "";
+  }
+}
+
+function listDescendants(rootPid) {
+  if (process.platform !== "linux") return [];
+  const children = new Map();
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    const stat = readProcStat(entry);
+    if (!stat) continue;
+    if (!children.has(stat.ppid)) children.set(stat.ppid, []);
+    children.get(stat.ppid).push(Number(entry));
+  }
+  const out = [];
+  const queue = [rootPid];
+  while (queue.length) {
+    for (const child of children.get(queue.shift()) ?? []) {
+      out.push(child);
+      queue.push(child);
+    }
+  }
+  return out;
+}
+
+function trackOwnedProcesses() {
+  if (!ownedDriverPid) return;
+  for (const pid of [ownedDriverPid, ...listDescendants(ownedDriverPid)]) {
+    if (ownedProcesses.has(pid)) continue;
+    const stat = readProcStat(pid);
+    if (stat) ownedProcesses.set(pid, { start: stat.start, cmd: readProcCmd(pid) });
+  }
+}
+
+function ownedProcessAlive(pid) {
+  const stat = readProcStat(pid);
+  return Boolean(stat) && stat.start === ownedProcesses.get(pid).start;
+}
+
+/** Encerra so o que o cenario iniciou e ainda esta vivo: SIGTERM, espera limitada, SIGKILL, espera limitada. */
+async function cleanupOwnedProcesses() {
+  trackOwnedProcesses();
+  const summary = { tracked: [...ownedProcesses].map(([pid, v]) => ({ pid, cmd: v.cmd })), terminated: [], killed: [], survivors: [] };
+  const alive = () => [...ownedProcesses.keys()].filter(ownedProcessAlive);
+  const waitGone = async (ms) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline && alive().length) await new Promise((resolve) => setTimeout(resolve, 100));
+  };
+  await waitGone(3000);
+  for (const pid of alive()) {
+    try { process.kill(pid, "SIGTERM"); summary.terminated.push(pid); } catch { /* ja saiu */ }
+  }
+  await waitGone(5000);
+  for (const pid of alive()) {
+    try { process.kill(pid, "SIGKILL"); summary.killed.push(pid); } catch { /* ja saiu */ }
+  }
+  await waitGone(3000);
+  summary.survivors = alive();
+  console.log(
+    `[cleanup] processos do cenario: ${summary.tracked.length} acompanhados, ${summary.terminated.length} SIGTERM, ${summary.killed.length} SIGKILL, ${summary.survivors.length} vivos`
+  );
+  for (const t of summary.tracked) console.log(`[cleanup]   pid ${t.pid} ${t.cmd}`);
+  if (summary.survivors.length) {
+    console.error(`[cleanup] ERRO: processos do cenario ainda vivos: ${summary.survivors.join(", ")}`);
+    process.exitCode = 1;
+  }
+  return summary;
+}
+
 async function createSession(applicationPath) {
   const payload = {
     capabilities: {
@@ -1114,10 +1292,15 @@ async function createSession(applicationPath) {
     },
   };
   const response = await webdriverRequest("POST", "/session", payload);
-  return response.value?.sessionId ?? response.sessionId;
+  const created = response.value?.sessionId ?? response.sessionId;
+  if (created) ownedSessions.add(created);
+  trackOwnedProcesses();
+  return created;
 }
 
 async function deleteSession(sessionId) {
+  trackOwnedProcesses();
+  ownedSessions.delete(sessionId);
   try {
     await webdriverRequest("DELETE", `/session/${sessionId}`);
   } catch {
@@ -1126,11 +1309,16 @@ async function deleteSession(sessionId) {
 }
 
 async function executeScript(sessionId, script, args = []) {
-  const response = await webdriverRequest("POST", `/session/${sessionId}/execute/sync`, {
-    script,
-    args,
-  });
-  return response.value;
+  try {
+    const response = await webdriverRequest("POST", `/session/${sessionId}/execute/sync`, {
+      script,
+      args,
+    });
+    return response.value;
+  } catch (error) {
+    const snippet = script.replace(/\s+/g, " ").slice(0, 180);
+    throw new Error(`${error instanceof Error ? error.message : String(error)} [script: ${snippet}]`);
+  }
 }
 
 async function executeAsyncScript(sessionId, script, args = []) {
@@ -1394,6 +1582,1059 @@ async function fillInputBySelector(sessionId, selector, value) {
   }
 }
 
+async function fillInputByLabel(sessionId, labelText, value) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const expected = String(arguments[0] ?? '').trim();
+      const label = Array.from(document.querySelectorAll('label')).find((candidate) => candidate.textContent?.trim() === expected);
+      const input = label?.querySelector('input') ?? label?.parentElement?.querySelector('input');
+      if (!(input instanceof HTMLInputElement)) return false;
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+      if (typeof descriptor?.set !== 'function') return false;
+      input.focus();
+      descriptor.set.call(input, String(arguments[1] ?? ''));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    `,
+    [labelText, value]
+  );
+  if (!result) fail(`Falha ao preencher o campo rotulado: ${labelText}`);
+}
+
+async function readInspectionUiState(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const panel = document.querySelector('[data-testid="reverse-inspection-panel"]');
+      const identify = panel?.querySelector('[data-testid="inspection-identify-state"]');
+      const session = panel?.querySelector('[data-testid="inspection-session"]');
+      const run = panel?.querySelector('[data-testid="inspection-run"]');
+      const input = panel?.querySelector('input[type="text"]');
+      const image = panel?.querySelector('[data-testid="inspection-preview-image"]');
+      return {
+        inputValue: input instanceof HTMLInputElement ? input.value : null,
+        identify: identify ? {
+          state: identify.getAttribute('data-state'),
+          inputValue: identify.getAttribute('data-input-value'),
+          error: identify.getAttribute('data-error'),
+          sessionId: identify.getAttribute('data-session-id'),
+          sessionStatus: identify.getAttribute('data-session-status'),
+        } : null,
+        session: session ? {
+          id: session.getAttribute('data-session-id'),
+          status: session.getAttribute('data-session-status'),
+          identitySha256: session.getAttribute('data-identity-sha256'),
+        } : null,
+        run: run ? {
+          id: run.getAttribute('data-run-id'),
+          status: run.getAttribute('data-run-status'),
+          generation: run.getAttribute('data-run-generation'),
+        } : null,
+        preview: image ? {
+          complete: image.complete,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight,
+          declaredWidth: Number(image.getAttribute('data-preview-width') || 0),
+          declaredHeight: Number(image.getAttribute('data-preview-height') || 0),
+          pngSha256: image.getAttribute('data-png-sha256'),
+          pixelsSha256: image.getAttribute('data-pixels-sha256'),
+          artifactSha256: image.getAttribute('data-artifact-sha256'),
+          src: image.getAttribute('src'),
+        } : null,
+        unavailable: Boolean(panel?.querySelector('[data-testid="inspection-preview-unavailable"]')),
+      };
+    `
+  );
+}
+
+async function readRenderedPreviewPixels(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-preview-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return {
+        image: true,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        pngSha256: image.getAttribute("data-png-sha256") || "",
+        pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+        artifactSha256: image.getAttribute("data-artifact-sha256") || "",
+        src: image.currentSrc || image.src,
+        pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+      };
+    `
+  );
+}
+
+async function readRenderedSpriteFramePixels(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-sprite-frame-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return null;
+      context.drawImage(image, 0, 0);
+      return {
+        image: true,
+        naturalWidth: image.naturalWidth,
+        naturalHeight: image.naturalHeight,
+        romSha256: image.getAttribute("data-sprite-rom-sha256") || "",
+        resourceId: image.getAttribute("data-sprite-resource") || "",
+        frameId: image.getAttribute("data-sprite-frame") || "",
+        pngSha256: image.getAttribute("data-png-sha256") || "",
+        pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+        src: image.currentSrc || image.src,
+        pixels: Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data),
+      };
+    `
+  );
+}
+
+async function ensureSpriteFrameVisibleAndUnobstructed(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-sprite-frame-image"]');
+      const stage = document.querySelector('[data-testid="inspection-sprite-frame-stage"]');
+      const metadata = document.querySelector('[data-testid="inspection-sprite-frame-metadata"]');
+      if (!(image instanceof HTMLImageElement) || !(stage instanceof HTMLElement) || !(metadata instanceof HTMLElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      image.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = image.getBoundingClientRect();
+      const stageRect = stage.getBoundingClientRect();
+      const metadataRect = metadata.getBoundingClientRect();
+      const style = window.getComputedStyle(image);
+      const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0;
+      const borderRight = Number.parseFloat(style.borderRightWidth) || 0;
+      const borderTop = Number.parseFloat(style.borderTopWidth) || 0;
+      const borderBottom = Number.parseFloat(style.borderBottomWidth) || 0;
+      const contentWidth = rect.width - borderLeft - borderRight;
+      const contentHeight = rect.height - borderTop - borderBottom;
+      const cssWidth = Number.parseFloat(style.width) || 0;
+      const cssHeight = Number.parseFloat(style.height) || 0;
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
+      const probePoints = [[x, y], [rect.left + borderLeft + 0.5, rect.top + borderTop + 0.5],
+        [rect.right - borderRight - 0.5, rect.top + borderTop + 0.5],
+        [rect.left + borderLeft + 0.5, rect.bottom - borderBottom - 0.5],
+        [rect.right - borderRight - 0.5, rect.bottom - borderBottom - 0.5]];
+      const hitTests = probePoints.map(([px, py]) => {
+        const hit = document.elementFromPoint(px, py);
+        return { x: px, y: py, tag: hit?.tagName ?? '',
+          testId: hit?.closest('[data-testid]')?.getAttribute('data-testid') ?? '',
+          image: Boolean(hit && (hit === image || image.contains(hit))) };
+      });
+      const unobstructed = fullyVisible && hitTests.every((hit) => hit.image);
+      const expectedWidth = image.naturalWidth * 3;
+      const expectedHeight = image.naturalHeight * 3;
+      const exactContentDimensions = Math.abs(contentWidth - expectedWidth) < 0.01 && Math.abs(contentHeight - expectedHeight) < 0.01;
+      const integerScale = Math.abs(contentWidth / image.naturalWidth - 3) < 0.01 && Math.abs(contentHeight / image.naturalHeight - 3) < 0.01;
+      const metadataBelow = metadataRect.top >= rect.bottom - 0.01;
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        content: { width: contentWidth, height: contentHeight },
+        css: { width: cssWidth, height: cssHeight, boxSizing: style.boxSizing, imageRendering: style.imageRendering },
+        borders: { left: borderLeft, right: borderRight, top: borderTop, bottom: borderBottom },
+        stageRect: { x: stageRect.x, y: stageRect.y, width: stageRect.width, height: stageRect.height },
+        metadataRect: { x: metadataRect.x, y: metadataRect.y, width: metadataRect.width, height: metadataRect.height },
+        naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
+        fullyVisible,
+        unobstructed,
+        hitTests,
+        exactContentDimensions,
+        integerScale,
+        pixelated: style.imageRendering === 'pixelated',
+        metadataBelow,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: topWithTestId?.getAttribute('data-testid') ?? '',
+        stageOverflowX: window.getComputedStyle(stage).overflowX,
+      };
+    `
+  );
+}
+
+function renderExpectedSpriteFrame(romBytes, options = {}) {
+  const frameId = options.frameId ?? "spr_ryo_100/frame-0";
+  const manifests = {
+    "spr_ryo_100/frame-0": {
+      tileDataOffset: 0x863a0,
+      descriptorOffset: 0x22260,
+      tileCount: 64,
+      descriptors: [
+        [0x2c, 0x1c, 0x0f, 0x05, 0x1b, 0x10], [0x0c, 0x3c, 0x0f, 0x04, 0x1c, 0x10],
+        [0x37, 0x11, 0x07, 0x25, 0x0b, 0x08], [0x14, 0x3c, 0x06, 0x24, 0x0c, 0x06],
+        [0x4c, 0x0c, 0x09, 0x05, 0x23, 0x06], [0x57, 0x01, 0x09, 0x25, 0x03, 0x06],
+        [0x58, 0x00, 0x05, 0x00, 0x30, 0x04], [0x04, 0x5c, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-1": {
+      tileDataOffset: 0x86ba0,
+      descriptorOffset: 0x222a2,
+      tileCount: 66,
+      descriptors: [
+        [0x11, 0x37, 0x0f, 0x07, 0x19, 0x10], [0x31, 0x1f, 0x0e, 0x08, 0x18, 0x0c],
+        [0x37, 0x11, 0x07, 0x24, 0x0c, 0x08], [0x11, 0x3f, 0x06, 0x27, 0x09, 0x06],
+        [0x49, 0x0f, 0x09, 0x05, 0x23, 0x06], [0x57, 0x01, 0x09, 0x24, 0x04, 0x06],
+        [0x58, 0x00, 0x09, 0x00, 0x28, 0x06], [0x04, 0x54, 0x09, 0x0c, 0x1c, 0x06],
+      ],
+    },
+    "spr_ryo_100/frame-2": {
+      tileDataOffset: 0x873e0,
+      descriptorOffset: 0x222e4,
+      tileCount: 74,
+      descriptors: [
+        [0x0b, 0x3d, 0x0f, 0x01, 0x1f, 0x10], [0x2b, 0x1d, 0x0f, 0x08, 0x18, 0x10],
+        [0x0b, 0x3d, 0x0b, 0x21, 0x07, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x03, 0x5d, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-3": {
+      tileDataOffset: 0x87d20,
+      descriptorOffset: 0x22320,
+      tileCount: 74,
+      descriptors: [
+        [0x0a, 0x3e, 0x0f, 0x04, 0x1c, 0x10], [0x2a, 0x1e, 0x0f, 0x08, 0x18, 0x10],
+        [0x0a, 0x3e, 0x0b, 0x24, 0x04, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x02, 0x5e, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_ryo_100/frame-4": {
+      tileDataOffset: 0x873e0,
+      descriptorOffset: 0x222e4,
+      tileCount: 74,
+      descriptors: [
+        [0x0b, 0x3d, 0x0f, 0x01, 0x1f, 0x10], [0x2b, 0x1d, 0x0f, 0x08, 0x18, 0x10],
+        [0x0b, 0x3d, 0x0b, 0x21, 0x07, 0x0c], [0x48, 0x00, 0x0b, 0x00, 0x28, 0x0c],
+        [0x48, 0x00, 0x0b, 0x24, 0x04, 0x0c], [0x38, 0x20, 0x05, 0x28, 0x08, 0x04],
+        [0x03, 0x5d, 0x04, 0x15, 0x1b, 0x02],
+      ],
+    },
+    "spr_spark0/frame-0": {
+      tileDataOffset: 0x80060,
+      descriptorOffset: 0x22f94,
+      tileCount: 9,
+      paletteOffset: 0x2e134,
+      width: 24,
+      height: 24,
+      descriptors: [[0x00, 0x00, 0x0a, 0x00, 0x00, 0x09]],
+    },
+  };
+  const manifest = manifests[frameId];
+  if (!manifest) fail(`Manifesto independente ausente para ${frameId}`);
+  const tileDataOffset = manifest.tileDataOffset;
+  const paletteOffset = manifest.paletteOffset ?? 0x2cc68;
+  const width = manifest.width ?? 64;
+  const height = manifest.height ?? 104;
+  const descriptors = manifest.descriptors;
+  const descriptorBytes = Buffer.from(descriptors.flat());
+  if (!descriptorBytes.equals(romBytes.subarray(manifest.descriptorOffset, manifest.descriptorOffset + descriptorBytes.length))) {
+    fail(`Descritores independentes de ${frameId} divergiram da ROM de referência.`);
+  }
+  const pixels = Buffer.alloc(width * height * 4);
+  const tileOrdering = options.tileOrdering ?? "vertical";
+  const paletteDelta = options.paletteDelta ?? 0;
+  const flipX = Boolean(options.flipX);
+  const flipY = Boolean(options.flipY);
+  let tileStart = 0;
+  const color = (index) => {
+    const wordOffset = paletteOffset + index * 2;
+    let word = romBytes.readUInt16BE(wordOffset);
+    if (index === 1) word ^= paletteDelta;
+    return [((word >> 1) & 7) * 36, ((word >> 5) & 7) * 36, ((word >> 9) & 7) * 36, index === 0 ? 0 : 255];
+  };
+  const put = (x, y, index) => {
+    const pixel = (y * width + x) * 4;
+    const rgba = index === 0 && options.transparentRgb === "canvas" ? [0, 0, 0, 0] : color(index);
+    pixels[pixel] = rgba[0];
+    pixels[pixel + 1] = rgba[1];
+    pixels[pixel + 2] = rgba[2];
+    pixels[pixel + 3] = rgba[3];
+  };
+  const transparent = options.transparentRgb === "canvas" ? [0, 0, 0, 0] : color(0);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const offset = pixel * 4;
+    pixels[offset] = transparent[0];
+    pixels[offset + 1] = transparent[1];
+    pixels[offset + 2] = transparent[2];
+    pixels[offset + 3] = transparent[3];
+  }
+  for (const [offsetY, offsetYFlip, size, offsetX, offsetXFlip, tileCount] of descriptors) {
+    const tileWidth = (size >> 2) + 1;
+    const tileHeight = (size & 3) + 1;
+    if (tileCount !== tileWidth * tileHeight) fail(`Descritor com tileCount inconsistente: ${JSON.stringify({ size, tileCount })}`);
+    for (let localX = 0; localX < tileWidth; localX += 1) {
+      for (let localY = 0; localY < tileHeight; localY += 1) {
+        const sourceX = flipX ? tileWidth - 1 - localX : localX;
+        const sourceY = flipY ? tileHeight - 1 - localY : localY;
+        const tileInPart = tileOrdering === "vertical"
+          ? sourceX * tileHeight + sourceY
+          : sourceY * tileWidth + sourceX;
+        const tileIndex = tileStart + tileInPart;
+        const destX = (flipX ? offsetXFlip : offsetX) + localX * 8;
+        const destY = (flipY ? offsetYFlip : offsetY) + localY * 8;
+        for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+          for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+            const sourcePixelX = flipX ? 7 - pixelX : pixelX;
+            const sourcePixelY = flipY ? 7 - pixelY : pixelY;
+            const packedByte = romBytes[tileDataOffset + tileIndex * 32 + sourcePixelY * 4 + Math.floor(sourcePixelX / 2)];
+            const index = sourcePixelX % 2 === 0 ? packedByte >> 4 : packedByte & 0x0f;
+            put(destX + pixelX, destY + pixelY, index);
+          }
+        }
+      }
+    }
+    tileStart += tileCount;
+  }
+  if (tileStart !== manifest.tileCount) fail(`Oráculo independente esperava ${manifest.tileCount} tiles e obteve ${tileStart}`);
+  return { width, height, pixels, frameId };
+}
+
+function renderExpectedSonicStand(romBytes, options = {}) {
+  const mapping = Buffer.from([
+    0x04, 0xec, 0x08, 0x00, 0x00,
+    0xf0, 0xf4, 0x0d, 0x00, 0x03,
+    0xf0, 0x04, 0x08, 0x00, 0x0b,
+    0xf0, 0x0c, 0x08, 0x00, 0x0e, 0xf8,
+  ]);
+  const tileDataOffset = 0x21afe;
+  const tileDataSize = 0xa120;
+  const paletteOffset = 0x2388;
+  const descriptorOffset = 0x21293;
+  const width = 32;
+  const height = 40;
+  if (!mapping.equals(romBytes.subarray(descriptorOffset, descriptorOffset + mapping.length))) {
+    fail("Mapping Sonic stand independente divergiu da ROM.");
+  }
+  if (romBytes.length < tileDataOffset + tileDataSize || romBytes.length < paletteOffset + 0x20) {
+    fail("ROM Sonic independente não contém os intervalos do frame stand.");
+  }
+  const pixels = Buffer.alloc(width * height * 4);
+  const paletteIndices = Buffer.alloc(width * height);
+  const palette = (index) => {
+    let word = romBytes.readUInt16BE(paletteOffset + index * 2);
+    if (index === 1 && Number.isInteger(options.paletteDelta)) word ^= options.paletteDelta;
+    return [((word >> 1) & 7) * 36, ((word >> 5) & 7) * 36, ((word >> 9) & 7) * 36, index === 0 ? 0 : 255];
+  };
+  for (let offset = 0; offset < pixels.length; offset += 4) pixels[offset + 3] = 0;
+  let mappingOffset = 1;
+  const originX = 16;
+  const originY = 20;
+  const tileStartByPart = [];
+  for (let partIndex = 0; partIndex < mapping[0]; partIndex += 1) {
+    const y = mapping[mappingOffset];
+    const size = mapping[mappingOffset + 1];
+    const tileStart = mapping.readUInt16BE(mappingOffset + 2);
+    const x = mapping[mappingOffset + 4] << 24 >> 24;
+    const tileWidth = ((size >> 2) & 3) + 1;
+    const tileHeight = (size & 3) + 1;
+    tileStartByPart.push({ tileStart, tileWidth, tileHeight, x, y: y << 24 >> 24 });
+    mappingOffset += 5;
+  }
+  for (const part of tileStartByPart) {
+    for (let localY = 0; localY < part.tileHeight; localY += 1) {
+      for (let localX = 0; localX < part.tileWidth; localX += 1) {
+        const tileIndex = part.tileStart + (options.tileOrder !== "row-major"
+          ? localX * part.tileHeight + localY
+          : localY * part.tileWidth + localX);
+        for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+          for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+            const packed = romBytes[tileDataOffset + tileIndex * 32 + pixelY * 4 + Math.floor(pixelX / 2)];
+            const paletteIndex = pixelX % 2 === 0 ? packed >> 4 : packed & 0x0f;
+            const sourceX = originX + part.x + localX * 8 + pixelX;
+            const sourceY = originY + part.y + localY * 8 + pixelY;
+            const destX = options.flipX ? width - 1 - sourceX : sourceX;
+            const destY = options.flipY ? height - 1 - sourceY : sourceY;
+            if (destX < 0 || destY < 0 || destX >= width || destY >= height) {
+              fail(`Mapping Sonic fora do canvas: ${destX},${destY} part=${JSON.stringify(part)} local=${localX},${localY} pixel=${pixelX},${pixelY} options=${JSON.stringify(options)}`);
+            }
+            const offset = (destY * width + destX) * 4;
+            const rgba = palette(paletteIndex);
+            paletteIndices[destY * width + destX] = paletteIndex;
+            pixels.set(rgba, offset);
+          }
+        }
+      }
+    }
+  }
+  return { width, height, pixels, paletteIndices, frameId: "sonic1_sonic/stand", tileDataOffset, tileDataSize, paletteOffset, descriptorOffset };
+}
+
+const MD_CHANNEL_LEVELS = [0, 33, 66, 99, 140, 173, 206, 239];
+
+function quantizeMdChannel(value) {
+  let best = 0;
+  let distance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < MD_CHANNEL_LEVELS.length; index += 1) {
+    const nextDistance = Math.abs(value - MD_CHANNEL_LEVELS[index]);
+    if (nextDistance < distance) {
+      distance = nextDistance;
+      best = index;
+    }
+  }
+  return best;
+}
+
+function sonicPaletteCodes(romBytes) {
+  const paletteCodes = [];
+  for (let index = 0; index < 16; index += 1) {
+    const word = romBytes.readUInt16BE(0x2388 + index * 2);
+    paletteCodes.push({
+      r: (word >> 1) & 7,
+      g: (word >> 5) & 7,
+      b: (word >> 9) & 7,
+    });
+  }
+  return paletteCodes;
+}
+
+/**
+ * Localiza Sonic pela aparência do frame independente, não por uma cor ou
+ * região fixa. O template vem do mapping/tile bytes/paleta da ROM já
+ * verificados; o framebuffer é quantizado para os níveis MD e comparado por
+ * índice de paleta. Assim o HUD magenta, mesmo na mesma região, não pode ser
+ * aceito como Sonic.
+ */
+function locateSonicInFramebuffer(frame, romBytes, options = {}) {
+  const template = renderExpectedSonicStand(romBytes, { flipX: options.flipX === true });
+  const { width, height, paletteIndices } = template;
+  const rgba = frame?.rgba;
+  if (!rgba || rgba.length !== frame.width * frame.height * 4) return null;
+  const paletteCodes = sonicPaletteCodes(romBytes);
+  const previous = options.previous ?? null;
+  const minX = Math.max(0, Math.floor(previous?.x ?? 0) - (previous ? 24 : frame.width));
+  const maxX = Math.min(frame.width - width, Math.ceil(previous?.x ?? (frame.width - width)) + (previous ? 24 : 0));
+  const minY = Math.max(0, Math.floor(previous?.y ?? 0) - (previous ? 32 : frame.height));
+  const maxY = Math.min(frame.height - height, Math.ceil(previous?.y ?? (frame.height - height)) + (previous ? 32 : 0));
+  const candidates = [];
+  let opaquePixels = 0;
+  for (const index of paletteIndices) if (index !== 0) opaquePixels += 1;
+  const allowedPaletteCodes = sonicPaletteCodes(romBytes).slice(1).map((code) => `${code.r}:${code.g}:${code.b}`);
+  const allowedPaletteCodeSet = new Set(allowedPaletteCodes);
+  const scoreCandidate = (originX, originY) => {
+    let matchedPixels = 0;
+    let nearPixels = 0;
+    let paletteMatchedPixels = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const paletteIndex = paletteIndices[y * width + x];
+        if (paletteIndex === 0) continue;
+        const offset = ((originY + y) * frame.width + originX + x) * 4;
+        const expected = paletteCodes[paletteIndex];
+        const actualR = quantizeMdChannel(rgba[offset]);
+        const actualG = quantizeMdChannel(rgba[offset + 1]);
+        const actualB = quantizeMdChannel(rgba[offset + 2]);
+        const distance = Math.abs(actualR - expected.r) + Math.abs(actualG - expected.g) + Math.abs(actualB - expected.b);
+        if (distance === 0) matchedPixels += 1;
+        if (distance <= 1) nearPixels += 1;
+        if (allowedPaletteCodeSet.has(`${actualR}:${actualG}:${actualB}`)) paletteMatchedPixels += 1;
+      }
+    }
+    return { originX, originY, matchedPixels, nearPixels, paletteMatchedPixels, score: nearPixels / opaquePixels, paletteScore: paletteMatchedPixels / opaquePixels };
+  };
+  const originStep = previous ? 1 : 8;
+  for (let originY = minY; originY <= maxY; originY += originStep) {
+    for (let originX = minX; originX <= maxX; originX += originStep) {
+      candidates.push(scoreCandidate(originX, originY));
+    }
+  }
+  if (!previous && originStep > 1) {
+    const refinementOrigins = new Set();
+    const remember = (candidate) => {
+      for (let y = Math.max(minY, candidate.originY - originStep + 1); y <= Math.min(maxY, candidate.originY + originStep - 1); y += 1) {
+        for (let x = Math.max(minX, candidate.originX - originStep + 1); x <= Math.min(maxX, candidate.originX + originStep - 1); x += 1) {
+          refinementOrigins.add(`${x},${y}`);
+        }
+      }
+    };
+    [...candidates].sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels).slice(0, 12).forEach(remember);
+    [...candidates].sort((a, b) => b.paletteScore - a.paletteScore || b.paletteMatchedPixels - a.paletteMatchedPixels).slice(0, 12).forEach(remember);
+    for (const origin of refinementOrigins) {
+      const [originX, originY] = origin.split(",").map(Number);
+      candidates.push(scoreCandidate(originX, originY));
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels);
+  let best = candidates[0];
+  let matchMode = "template";
+  if (!best || best.score < 0.12) {
+    candidates.sort((a, b) => b.paletteScore - a.paletteScore || b.paletteMatchedPixels - a.paletteMatchedPixels);
+    best = candidates[0];
+    matchMode = "palette-component";
+    if (!best || best.paletteScore < 0.22) return null;
+    best = { ...best, score: best.paletteScore, matchedPixels: best.paletteMatchedPixels, nearPixels: best.paletteMatchedPixels };
+  }
+  let minOpaqueX = width;
+  let minOpaqueY = height;
+  let maxOpaqueX = -1;
+  let maxOpaqueY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (paletteIndices[y * width + x] === 0) continue;
+      minOpaqueX = Math.min(minOpaqueX, x);
+      minOpaqueY = Math.min(minOpaqueY, y);
+      maxOpaqueX = Math.max(maxOpaqueX, x);
+      maxOpaqueY = Math.max(maxOpaqueY, y);
+    }
+  }
+  return {
+    x: best.originX,
+    y: best.originY,
+    width,
+    height,
+    bounds: { x0: best.originX + minOpaqueX, y0: best.originY + minOpaqueY, x1: best.originX + maxOpaqueX, y1: best.originY + maxOpaqueY },
+    center: { x: best.originX + (minOpaqueX + maxOpaqueX) / 2, y: best.originY + (minOpaqueY + maxOpaqueY) / 2 },
+    score: best.score,
+    matchedPixels: best.matchedPixels,
+    nearPixels: best.nearPixels,
+    opaquePixels,
+    matchMode,
+    flipX: options.flipX === true,
+    reference: { frameId: "sonic1_sonic/stand", descriptorOffset: template.descriptorOffset, tileDataOffset: template.tileDataOffset, paletteOffset: template.paletteOffset },
+  };
+}
+
+function locateSonicPaletteComponent(frame, romBytes, options = {}) {
+  const previous = options.previous ?? null;
+  const rgba = frame?.rgba;
+  if (!previous || !rgba || rgba.length !== frame.width * frame.height * 4) return null;
+  const paletteCodeSet = new Set(sonicPaletteCodes(romBytes).slice(1).map((code) => `${code.r}:${code.g}:${code.b}`));
+  const minX = Math.max(0, Math.floor(previous.bounds.x0) - 56);
+  const maxX = Math.min(frame.width - 1, Math.ceil(previous.bounds.x1) + 56);
+  const minY = Math.max(0, Math.floor(previous.bounds.y0) - 72);
+  const maxY = Math.min(frame.height - 1, Math.ceil(previous.bounds.y1) + 140);
+  const width = maxX - minX + 1;
+  const height = maxY - minY + 1;
+  const mask = new Uint8Array(width * height);
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const offset = (y * frame.width + x) * 4;
+      const code = `${quantizeMdChannel(rgba[offset])}:${quantizeMdChannel(rgba[offset + 1])}:${quantizeMdChannel(rgba[offset + 2])}`;
+      if (paletteCodeSet.has(code)) mask[(y - minY) * width + (x - minX)] = 1;
+    }
+  }
+  const visited = new Uint8Array(mask.length);
+  const components = [];
+  const queue = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (!mask[start] || visited[start]) continue;
+      visited[start] = 1;
+      queue.length = 0;
+      queue.push(start);
+      let count = 0;
+      let minComponentX = x;
+      let maxComponentX = x;
+      let minComponentY = y;
+      let maxComponentY = y;
+      for (let cursor = 0; cursor < queue.length; cursor += 1) {
+        const index = queue[cursor];
+        const cy = Math.floor(index / width);
+        const cx = index - cy * width;
+        count += 1;
+        minComponentX = Math.min(minComponentX, cx);
+        maxComponentX = Math.max(maxComponentX, cx);
+        minComponentY = Math.min(minComponentY, cy);
+        maxComponentY = Math.max(maxComponentY, cy);
+        for (let dy = -1; dy <= 1; dy += 1) {
+          for (let dx = -1; dx <= 1; dx += 1) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+            const next = ny * width + nx;
+            if (!mask[next] || visited[next]) continue;
+            visited[next] = 1;
+            queue.push(next);
+          }
+        }
+      }
+      const bounds = {
+        x0: minX + minComponentX,
+        y0: minY + minComponentY,
+        x1: minX + maxComponentX,
+        y1: minY + maxComponentY,
+      };
+      const componentWidth = bounds.x1 - bounds.x0 + 1;
+      const componentHeight = bounds.y1 - bounds.y0 + 1;
+      const center = { x: (bounds.x0 + bounds.x1) / 2, y: (bounds.y0 + bounds.y1) / 2 };
+      const previousCenter = previous.center ?? { x: (previous.bounds.x0 + previous.bounds.x1) / 2, y: (previous.bounds.y0 + previous.bounds.y1) / 2 };
+      const distance = Math.hypot(center.x - previousCenter.x, center.y - previousCenter.y);
+      if (count >= 24 && componentWidth >= 6 && componentWidth <= 56 && componentHeight >= 8 && componentHeight <= 64 && distance <= 150) {
+        components.push({ bounds, center, count, componentWidth, componentHeight, distance });
+      }
+    }
+  }
+  components.sort((a, b) => b.count - a.count || a.distance - b.distance);
+  const best = components[0];
+  if (!best) return null;
+  return {
+    x: best.bounds.x0,
+    y: best.bounds.y0,
+    width: best.componentWidth,
+    height: best.componentHeight,
+    bounds: best.bounds,
+    center: best.center,
+    score: best.count / Math.max(1, previous.opaquePixels ?? best.count),
+    matchedPixels: best.count,
+    nearPixels: best.count,
+    opaquePixels: previous.opaquePixels ?? best.count,
+    matchMode: "palette-connected-component",
+    flipX: false,
+    reference: { frameId: "sonic1_sonic/component", paletteOffset: 0x2388, previous: { x: previous.x, y: previous.y, bounds: previous.bounds } },
+  };
+}
+
+function locateSonicVisual(frame, romBytes, options = {}) {
+  const direct = locateSonicInFramebuffer(frame, romBytes, options);
+  const flipped = locateSonicInFramebuffer(frame, romBytes, { ...options, flipX: true });
+  const component = locateSonicPaletteComponent(frame, romBytes, options);
+  if (options.previous && component) return component;
+  if (direct && direct.score >= 0.12) return direct;
+  return [direct, flipped, component].filter(Boolean).sort((a, b) => b.score - a.score || b.matchedPixels - a.matchedPixels)[0] ?? null;
+}
+
+function assertSonicStandOracles(romBytes, actual, context) {
+  const expected = renderExpectedSonicStand(romBytes);
+  const independentPng = renderExpectedSonicStand(romBytes);
+  const independent = assertExactPreviewPixels(
+    { width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels },
+    expected,
+    context
+  );
+  const independentPngPixelsSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
+  const romSha256 = createHash("sha256").update(romBytes).digest("hex");
+  // The old row-major hashes are superseded (see the multi-frame report).
+  // Edited previews are checked pixel by pixel against the independent decode
+  // of the exact edited ROM; only the unedited BYOR has a fixed literal hash.
+  const expectedPixelsSha256 = romSha256 === "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb"
+    ? "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7"
+    : independentPngPixelsSha256;
+  console.log(`[inspection-sonic-oracle] ${JSON.stringify({ context, romSha256, romLength: romBytes.length, mappingSha256: createHash("sha256").update(romBytes.subarray(0x21293, 0x21293 + 21)).digest("hex"), independentPngPixelsSha256 })}`);
+  if (!expectedPixelsSha256 || independentPngPixelsSha256 !== expectedPixelsSha256) {
+    fail(`Oráculo Sonic stand não corresponde ao golden literal da ROM exercitada: ${JSON.stringify({ romSha256, independentPngPixelsSha256, expectedPixelsSha256 })}`);
+  }
+  for (const [label, variant] of [
+    ["ordem de células VDP column-major -> row-major", { tileOrder: "row-major" }],
+    ["paleta alterada", { paletteDelta: 0x0200 }],
+    ["flip horizontal", { flipX: true }],
+  ]) {
+    let rejected = false;
+    let candidate = expected;
+    if (variant.tileOrder === "row-major") {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    } else if (variant.paletteDelta) {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    } else if (variant.flipX) {
+      candidate = renderExpectedSonicStand(romBytes, variant);
+    }
+    try {
+      assertExactPreviewPixels(candidate, expected, `${context}: negativo ${label}`);
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) fail(`Negativo Sonic não foi detectado: ${label}`);
+  }
+  return {
+    ...independent,
+    independentPngPixelsSha256,
+    expectedPixelsSha256,
+    expectedIndexSha256: null,
+    expectedRgbaSha256: expectedPixelsSha256,
+    offsets: { tileData: [expected.tileDataOffset, expected.tileDataSize], palette: [expected.paletteOffset, 0x20], descriptor: [expected.descriptorOffset, 21] },
+  };
+}
+
+function assertSpriteFrameOracles(romBytes, actual, context) {
+  if (actual.frameId === "sonic1_sonic/stand") {
+    return assertSonicStandOracles(romBytes, actual, context);
+  }
+  const expected = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId, transparentRgb: "canvas" });
+  const independentPng = renderExpectedSpriteFrame(romBytes, { frameId: actual.frameId });
+  const independent = assertExactPreviewPixels(
+    { width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels },
+    expected,
+    context
+  );
+  const independentPngSha256 = createHash("sha256").update(independentPng.pixels).digest("hex");
+  const expectedIndexSha256 = {
+    "spr_ryo_100/frame-0": "938611103b7d79af7e599fe024fa4adef53a8de898d9a06e00d9da15e451196c",
+    "spr_ryo_100/frame-1": "77b3b0dba715b352c3ace058abefa5d5d1918d2393dc2064b60a9ed01e0e1903",
+    "spr_ryo_100/frame-2": "ef5072905140185e6353b372bc523ec28f71576204424892c30dd20ea3ee3be7",
+    "spr_ryo_100/frame-3": "c8917da4d036451d5090a905e2ddc34f68170cf958e1c2c8a8c16f5c987a4379",
+    "spr_ryo_100/frame-4": "ef5072905140185e6353b372bc523ec28f71576204424892c30dd20ea3ee3be7",
+    "spr_spark0/frame-0": "b474d8c417767ce822d0babf51bea71d342caf51d78d321867596a992784012b",
+  }[actual.frameId];
+  const expectedRgbaSha256 = {
+    "spr_ryo_100/frame-0": "50cba0a2432bb73bcfc5a9c2b0e42668935df3a4c7c2b8e8a0f0e88c3bf46c58",
+    "spr_ryo_100/frame-1": "15dab9d16df147cc1bb81348fbc0d0a7e65458b34d3d77541df536024af768d0",
+    "spr_ryo_100/frame-2": "63d238fcb0f2b7f6f3283d64ab6987be4f78b209f3d5aca11e2e2f2ea6003871",
+    "spr_ryo_100/frame-3": "af33e3e00eff92da8c2582f42b1ef5719b97506384ef1c0874e6fe6525ac53ee",
+    "spr_ryo_100/frame-4": "63d238fcb0f2b7f6f3283d64ab6987be4f78b209f3d5aca11e2e2f2ea6003871",
+    "spr_spark0/frame-0": "55045927d4b5bd9238a69a49264f625456abe51144ba9b14ee949ed8716223b3",
+  }[actual.frameId];
+  const expectedCanvasSha256 = {
+    "spr_ryo_100/frame-0": "c70a3dfcb4726662c8f8588f6c5ab576f9b64ff7f37198fc72dcae151fde22dc",
+    "spr_ryo_100/frame-1": "c63a0fd26c561806f5319fb24380983db10b99998048c678f81d2bf45c7fbde0",
+    "spr_ryo_100/frame-2": "b09f31cd84b5b4b684ab0ef0b5e0fa185e33c0de6ac4ad4d468b9423d77a2a08",
+    "spr_ryo_100/frame-3": "dedd3c0838040bdf12868c7d6a6b93130247efd8b849244348149af95a8c1137",
+    "spr_ryo_100/frame-4": "b09f31cd84b5b4b684ab0ef0b5e0fa185e33c0de6ac4ad4d468b9423d77a2a08",
+    "spr_spark0/frame-0": "601829b5a8ab8853fdc1d9047f95ecdfcc6e0f91f73a88ae226ad55c3e70679f",
+  }[actual.frameId];
+  if (expectedRgbaSha256 !== independentPngSha256 || expectedCanvasSha256 !== independent.pixelsSha256) {
+    fail(`Oráculos RGBA independente/canvas não batem com as referências: ${JSON.stringify({ expectedRgbaSha256, independentPngSha256, expectedCanvasSha256, actualCanvas: independent.pixelsSha256, expectedIndexSha256 })}`);
+  }
+  for (const [label, variant] of [
+    ["ordem vertical -> row-major", { tileOrdering: "row-major" }],
+    ["paleta alterada", { paletteDelta: 0x0200 }],
+    ["flip horizontal", { flipX: true }],
+  ]) {
+    let rejected = false;
+    try {
+      assertExactPreviewPixels(
+        { width: actual.naturalWidth, height: actual.naturalHeight, pixels: renderExpectedSpriteFrame(romBytes, { ...variant, transparentRgb: "canvas" }).pixels },
+        expected,
+        `${context}: negativo ${label}`
+      );
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) fail(`Negativo do frame composto não foi detectado: ${label}`);
+  }
+  return { ...independent, expectedIndexSha256, expectedRgbaSha256, independentPngPixelsSha256: independentPngSha256, expectedCanvasSha256 };
+}
+
+async function verifyRenderedSpriteFrame(sessionId, romBytes, frameId, context) {
+  const romSha256 = createHash("sha256").update(romBytes).digest("hex");
+  let visualEvidence;
+  try {
+    visualEvidence = await waitFor(
+      async () => readRenderedSpriteFramePixels(sessionId),
+      15000,
+      `Frame composto ${frameId} não carregou imagem, dimensões ou pixels`,
+      100
+    );
+  } catch (error) {
+    const uiState = await readInspectionUiState(sessionId);
+    const automation = await readAutomationState(sessionId);
+    const composeButton = await inspectNativeButtonTarget(sessionId, "inspection-compose-sprite");
+    console.log(`[inspection-sprite-frame-failure] ${JSON.stringify({ context, frameId, uiState, composeButton, inspectionLogs: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
+    throw error;
+  }
+  const expectedResourceId = frameId.split("/", 1)[0];
+  if (!visualEvidence?.image || visualEvidence.resourceId !== expectedResourceId || visualEvidence.frameId !== frameId || visualEvidence.romSha256 !== romSha256) {
+    fail(`Identidade do frame composto divergente (${context}): ${JSON.stringify({ expected: { resourceId: expectedResourceId, frameId, romSha256 }, actual: visualEvidence })}`);
+  }
+  const independentEvidence = assertSpriteFrameOracles(romBytes, visualEvidence, `${context}: ${frameId}`);
+  const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+  if (!pngPayload) fail(`Frame composto ${frameId} não expôs uma fonte PNG data: válida.`);
+  const actualPngSha256 = createHash("sha256").update(Buffer.from(pngPayload, "base64")).digest("hex");
+  if (actualPngSha256 !== visualEvidence.pngSha256 || visualEvidence.pixelsSha256 !== independentEvidence.independentPngPixelsSha256 || actualPngSha256 === visualEvidence.pixelsSha256) {
+    fail(`Hashes PNG/RGBA do frame ${frameId} não estão separados ou não batem com o oráculo: ${JSON.stringify({ pngSha256: actualPngSha256, pixelsSha256: visualEvidence.pixelsSha256, expectedPngPixelsSha256: independentEvidence.independentPngPixelsSha256 })}`);
+  }
+  const layout = await waitFor(
+    async () => {
+      const next = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+      return next?.fullyVisible && next.unobstructed && next.exactContentDimensions && next.integerScale && next.pixelated && next.metadataBelow ? next : false;
+    },
+    15000,
+    `Frame composto ${frameId} encolheu, perdeu a escala inteira 3×, ficou obstruído ou sobrepôs os metadados`,
+    100
+  );
+  return { visualEvidence, independentEvidence, actualPngSha256, layout };
+}
+
+function renderExpectedTilePreview(romBytes, offset, size) {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(size) || offset < 0 || size <= 0 || offset + size > romBytes.length) {
+    fail(`Especificação independente de candidato inválida: offset=${offset} size=${size} ROM=${romBytes.length}`);
+  }
+  const tileCount = Math.min(Math.floor(size / 32), 32);
+  if (tileCount < 1) fail(`Candidato conhecido não contém um tile completo: size=${size}`);
+  const width = 16 * 8 * 2;
+  const height = Math.ceil(tileCount / 16) * 8 * 2;
+  const pixels = Buffer.alloc(width * height * 4);
+  for (let tileIndex = 0; tileIndex < tileCount; tileIndex += 1) {
+    const base = offset + tileIndex * 32;
+    const column = tileIndex % 16;
+    const row = Math.floor(tileIndex / 16);
+    for (let pixelY = 0; pixelY < 8; pixelY += 1) {
+      for (let pixelX = 0; pixelX < 8; pixelX += 1) {
+        // Mega Drive/SGDK chunky 4bpp: each byte stores two pixels;
+        // high nibble is the left pixel, low nibble the right pixel.
+        const packedByte = romBytes[base + pixelY * 4 + Math.floor(pixelX / 2)];
+        const value = pixelX % 2 === 0 ? packedByte >> 4 : packedByte & 0x0f;
+        const shade = value * 17;
+        for (let scaleY = 0; scaleY < 2; scaleY += 1) {
+          for (let scaleX = 0; scaleX < 2; scaleX += 1) {
+            const x = column * 16 + pixelX * 2 + scaleX;
+            const y = row * 16 + pixelY * 2 + scaleY;
+            const pixel = (y * width + x) * 4;
+            pixels[pixel] = shade;
+            pixels[pixel + 1] = shade;
+            pixels[pixel + 2] = shade;
+            pixels[pixel + 3] = 255;
+          }
+        }
+      }
+    }
+  }
+  return { width, height, pixels };
+}
+
+function assertChunkyGoldenOracle() {
+  const goldenRows = [
+    [0x12, 0x34, 0x56, 0x78],
+    [0x87, 0x65, 0x43, 0x21],
+    [0x13, 0x57, 0x9b, 0xdf],
+    [0xf0, 0xe1, 0xd2, 0xc3],
+    [0x24, 0x68, 0xac, 0xef],
+    [0xfe, 0xdc, 0xba, 0x98],
+    [0x31, 0x42, 0x53, 0x64],
+    [0x75, 0x86, 0x97, 0xa8],
+  ];
+  const goldenRom = Buffer.alloc(32);
+  goldenRows.forEach((row, index) => row.forEach((value, byteIndex) => { goldenRom[index * 4 + byteIndex] = value; }));
+  const expected = renderExpectedTilePreview(goldenRom, 0, 32);
+  goldenRows.forEach((row, y) => row.flatMap((value) => [value >> 4, value & 0x0f]).forEach((index, x) => {
+    const pixel = (y * 2 * expected.width + x * 2) * 4;
+    const expectedShade = index * 17;
+    if (expected.pixels[pixel] !== expectedShade || expected.pixels[pixel + 1] !== expectedShade || expected.pixels[pixel + 2] !== expectedShade || expected.pixels[pixel + 3] !== 255) {
+      fail(`Golden chunky inválido no oracle: linha=${y} pixel=${x} valor=${index}`);
+    }
+  }));
+}
+
+function assertExactPreviewPixels(actual, expected, context) {
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    fail(`Dimensões independentes divergentes (${context}): ${JSON.stringify({ actual: [actual.width, actual.height], expected: [expected.width, expected.height] })}`);
+  }
+  const actualPixels = Buffer.from(actual.pixels);
+  if (!actualPixels.equals(expected.pixels)) {
+    let firstDifference = -1;
+    for (let index = 0; index < Math.min(actualPixels.length, expected.pixels.length); index += 1) {
+      if (actualPixels[index] !== expected.pixels[index]) {
+        firstDifference = index;
+        break;
+      }
+    }
+    fail(`Pixels RGBA divergentes (${context}): ${JSON.stringify({ firstDifference, actualSha256: createHash("sha256").update(actualPixels).digest("hex"), expectedSha256: createHash("sha256").update(expected.pixels).digest("hex") })}`);
+  }
+  return {
+    width: actual.width,
+    height: actual.height,
+    pixelsSha256: createHash("sha256").update(actualPixels).digest("hex"),
+  };
+}
+
+async function createUnavailablePreviewFixture() {
+  const size = 0x10000;
+  const bytes = Buffer.alloc(size, 0xa5);
+  bytes.fill(0, 0, 0x200);
+  bytes.write("SEGA", 0x100, "ascii");
+  bytes.write("RDS PREVIEW NEGATIVE", 0x120, "ascii");
+  bytes.write("RDS CONTROLLED FIXTURE", 0x150, "ascii");
+  bytes.writeUInt32BE(0x200, 0x1a0);
+  bytes.writeUInt32BE(size - 1, 0x1a4);
+  bytes.write("JUE", 0x1f0, "ascii");
+  for (let candidateIndex = 0; candidateIndex < 17; candidateIndex += 1) {
+    const offset = 0x2000 + candidateIndex * 0x200;
+    for (let tileIndex = 0; tileIndex < 4; tileIndex += 1) {
+      const base = offset + tileIndex * 32;
+      for (let row = 0; row < 8; row += 1) {
+        // Keep the fixture graphic-like without making it an exact short
+        // period. The scanner must accept these 1bpp-like rows while the
+        // two constant-tile gaps keep the 17 blocks separate. The 17th
+        // candidate is intentionally beyond the preview export cap (16),
+        // which exercises a real candidate with no preview artifact.
+        const seed = candidateIndex * 29 + tileIndex * 11 + row * 7;
+        bytes[base + row * 4] = (0x31 + seed) & 0xff;
+        bytes[base + row * 4 + 1] = (0x8d ^ seed) & 0xff;
+        bytes[base + row * 4 + 2] = 0;
+        bytes[base + row * 4 + 3] = 0;
+      }
+    }
+  }
+  const fixtureDir = await mkdtemp(path.join(os.tmpdir(), "rds-inspection-preview-unavailable-"));
+  const romPath = path.join(fixtureDir, "controlled-preview-unavailable.bin");
+  await writeFile(romPath, bytes);
+  return {
+    fixtureDir,
+    romPath,
+    size: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    expectedCandidateCount: 17,
+  };
+}
+
+async function inspectElementInteraction(sessionId, selector) {
+  return executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return { selector: arguments[0], found: false };
+      const rect = target.getBoundingClientRect();
+      const style = getComputedStyle(target);
+      const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const stack = document.elementsFromPoint(point.x, point.y).slice(0, 8).map((node) => ({
+        tag: node.tagName,
+        testId: node.getAttribute?.('data-testid') ?? null,
+        id: node.id || null,
+        className: typeof node.className === 'string' ? node.className.slice(0, 160) : null,
+        text: (node.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 120),
+      }));
+      const active = document.activeElement;
+      const scrollParents = [];
+      let parent = target.parentElement;
+      while (parent) {
+        const parentStyle = getComputedStyle(parent);
+        if (parent.scrollHeight > parent.clientHeight || parent.scrollWidth > parent.clientWidth) {
+          const parentRect = parent.getBoundingClientRect();
+          scrollParents.push({
+            tag: parent.tagName,
+            testId: parent.getAttribute('data-testid'),
+            overflowY: parentStyle.overflowY,
+            scrollTop: parent.scrollTop,
+            scrollHeight: parent.scrollHeight,
+            clientHeight: parent.clientHeight,
+            rect: { top: parentRect.top, height: parentRect.height },
+          });
+        }
+        parent = parent.parentElement;
+      }
+      return {
+        selector: arguments[0],
+        found: true,
+        tag: target.tagName,
+        outerHTML: target.outerHTML.slice(0, 1200),
+        visible: Boolean(rect.width && rect.height && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity) !== 0),
+        disabled: target instanceof HTMLButtonElement || target instanceof HTMLInputElement ? target.disabled : false,
+        ariaDisabled: target.getAttribute('aria-disabled'),
+        focused: active === target,
+        activeElement: active instanceof HTMLElement ? { tag: active.tagName, testId: active.getAttribute('data-testid'), id: active.id || null } : null,
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+        style: { display: style.display, visibility: style.visibility, pointerEvents: style.pointerEvents, zIndex: style.zIndex, position: style.position },
+        elementAtCenter: document.elementFromPoint(point.x, point.y)?.outerHTML?.slice(0, 500) ?? null,
+        overlayStack: stack,
+        scrollParents,
+        viewport: { width: window.innerWidth, height: window.innerHeight, scrollX: window.scrollX, scrollY: window.scrollY, devicePixelRatio: window.devicePixelRatio },
+        effectiveValue: target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ? target.value : null,
+      };
+    `,
+    [selector]
+  );
+}
+
+async function clickElementWithDiagnostics(sessionId, elementId, selector) {
+  const preparation = await executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return false;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      const scrollParents = [];
+      let parent = target.parentElement;
+      while (parent) {
+        const style = getComputedStyle(parent);
+        if (parent.scrollHeight > parent.clientHeight) {
+          const targetRect = target.getBoundingClientRect();
+          const parentRect = parent.getBoundingClientRect();
+          parent.scrollTop += targetRect.top - parentRect.top - (parentRect.height - targetRect.height) / 2;
+          scrollParents.push({ testId: parent.getAttribute('data-testid'), scrollTop: parent.scrollTop });
+        }
+        parent = parent.parentElement;
+      }
+      target.scrollIntoView({ block: "center", inline: "center" });
+      target.focus();
+      return { rect: target.getBoundingClientRect().toJSON?.() ?? null, scrollParents };
+    `,
+    [selector]
+  );
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  console.log(`[inspection-click] preparation=${JSON.stringify(preparation)}`);
+  const before = await inspectElementInteraction(sessionId, selector);
+  let response;
+  try {
+    // O WebKitWebDriver pode conservar a referência geométrica do elemento
+    // antes do scroll. Reencontrar o mesmo nó depois da verificação mantém o
+    // clique nativo, mas evita enviar a operação para a posição anterior.
+    const currentElementId = await findElement(sessionId, selector);
+    if (currentElementId !== elementId) {
+      console.log(`[inspection-click] elemento re-resolvido após scroll: ${elementId} -> ${currentElementId}`);
+    }
+    response = await webdriverRequestDetailed("POST", `/session/${sessionId}/element/${currentElementId}/click`, {});
+  } catch (error) {
+    response = { exception: error instanceof Error ? error.message : String(error) };
+  }
+  const after = await inspectElementInteraction(sessionId, selector);
+  const uiState = await readInspectionUiState(sessionId);
+  console.log(`[inspection-click] selected=${JSON.stringify(before)}`);
+  console.log(`[inspection-click] http=${JSON.stringify(response)}`);
+  console.log(`[inspection-click] after=${JSON.stringify(after)}`);
+  console.log(`[inspection-click] ui=${JSON.stringify(uiState)}`);
+  if (response.exception || !response.ok || response.payload?.value?.error) {
+    throw new Error(`Clique WebDriver falhou com diagnóstico completo: ${JSON.stringify(response)}`);
+  }
+  return { before, response, after, uiState };
+}
+
+async function clickElementWithNativePointer(sessionId, selector, label) {
+  const preparation = await executeScript(
+    sessionId,
+    `
+      const target = document.querySelector(arguments[0]);
+      if (!(target instanceof HTMLElement)) return null;
+      target.scrollIntoView({ block: "center", inline: "center" });
+      target.focus();
+      const rect = target.getBoundingClientRect();
+      return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+    `,
+    [selector]
+  );
+  if (!preparation) fail(`Controle ausente para clique nativo por ponteiro: ${label}`);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const before = await inspectElementInteraction(sessionId, selector);
+  if (!before?.found || !before.visible || before.disabled || !before.elementAtCenter?.includes("inspection-sonic-edit")) {
+    fail(`Clique nativo por ponteiro bloqueado: ${JSON.stringify({ label, before })}`);
+  }
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-native-pointer",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: preparation.x, y: preparation.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
+  const after = await inspectElementInteraction(sessionId, selector);
+  const uiState = await readInspectionUiState(sessionId);
+  console.log(`[inspection-click-pointer] ${JSON.stringify({ label, preparation, before, response, after, uiState })}`);
+  if (!response.ok || response.payload?.value?.error) {
+    throw new Error(`Clique nativo por ponteiro falhou: ${JSON.stringify(response)}`);
+  }
+  return { before, response, after, uiState };
+}
+
 async function waitForBodyText(sessionId, fragment, timeoutMs, label) {
   return waitFor(
     async () =>
@@ -1440,6 +2681,401 @@ async function pressKey(sessionId, key, options = {}) {
   if (!result) {
     fail(`Falha ao disparar atalho de teclado: ${key}`);
   }
+}
+
+const NATIVE_GAME_KEYS = {
+  ArrowRight: "\uE014",
+  ArrowLeft: "\uE012",
+  ArrowUp: "\uE013",
+  ArrowDown: "\uE015",
+  Enter: "\uE007",
+  KeyZ: "z",
+  KeyX: "x",
+  KeyC: "c",
+  KeyQ: "q",
+};
+
+async function sendNativeGameKey(sessionId, code, action, label) {
+  const value = NATIVE_GAME_KEYS[code];
+  if (!value) fail(`Tecla nativa não mapeada para ${label}: ${code}`);
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "key",
+      id: `rds-game-${code}`,
+      actions: [{ type: action, value }],
+    }],
+  });
+  if (!response.ok || response.payload?.value?.error) {
+    fail(`Entrada nativa recusada (${label}): ${JSON.stringify(response)}`);
+  }
+  return response;
+}
+
+async function clickCanvasPointNatively(sessionId, selector, normalizedX, normalizedY, label, button = 0) {
+  const point = await executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector(arguments[0]);
+      if (!(canvas instanceof HTMLElement)) return null;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return null;
+      return {
+        x: Math.round(rect.left + rect.width * arguments[1]),
+        y: Math.round(rect.top + rect.height * arguments[2]),
+        rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      };
+    `,
+    [selector, normalizedX, normalizedY]
+  );
+  if (!point) fail(`Canvas ausente para clique nativo: ${label}`);
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-scene-painter",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: point.x, y: point.y },
+        { type: "pointerDown", button },
+        { type: "pointerUp", button },
+      ],
+    }],
+  });
+  if (!response.ok || response.payload?.value?.error) {
+    fail(`Clique nativo no canvas recusado (${label}): ${JSON.stringify({ point, response })}`);
+  }
+  return { point, response };
+}
+
+async function focusGameCanvasNatively(sessionId) {
+  const canvas = await findElement(sessionId, "[data-testid='viewport-game-canvas']");
+  await webdriverRequest("POST", `/session/${sessionId}/element/${canvas}/click`, {});
+}
+
+async function readCanonicalGameFrame(sessionId, options = {}) {
+  const includePixels = options.includePixels === true;
+  const frame = await executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      if (!(canvas instanceof HTMLCanvasElement) || !(identity instanceof HTMLElement)) return null;
+      const context = canvas.getContext('2d');
+      if (!context || !canvas.width || !canvas.height) return null;
+      const data = Array.from(context.getImageData(0, 0, canvas.width, canvas.height).data);
+      let nonBlackPixels = 0;
+      const magentaLike = [];
+      const sonicRoiMagentaLike = [];
+      for (let offset = 0; offset < data.length; offset += 4) {
+        const r = data[offset];
+        const g = data[offset + 1];
+        const b = data[offset + 2];
+        if (r !== 0 || g !== 0 || b !== 0) nonBlackPixels += 1;
+        if (r >= 224 && g <= 32 && b >= 224) {
+          const pixel = offset / 4;
+          const point = { x: pixel % canvas.width, y: Math.floor(pixel / canvas.width) };
+          magentaLike.push(point);
+          if (point.x < Math.min(canvas.width, 128) && point.y >= Math.floor(canvas.height * 0.55)) sonicRoiMagentaLike.push(point);
+        }
+      }
+      const bounds = magentaLike.length === 0 ? null : {
+        x0: Math.min(...magentaLike.map((point) => point.x)),
+        y0: Math.min(...magentaLike.map((point) => point.y)),
+        x1: Math.max(...magentaLike.map((point) => point.x)),
+        y1: Math.max(...magentaLike.map((point) => point.y)),
+      };
+      const sonicRoiBounds = sonicRoiMagentaLike.length === 0 ? null : {
+        x0: Math.min(...sonicRoiMagentaLike.map((point) => point.x)),
+        y0: Math.min(...sonicRoiMagentaLike.map((point) => point.y)),
+        x1: Math.max(...sonicRoiMagentaLike.map((point) => point.x)),
+        y1: Math.max(...sonicRoiMagentaLike.map((point) => point.y)),
+      };
+      const sonicRoiCentroid = sonicRoiMagentaLike.length === 0 ? null : {
+        x: sonicRoiMagentaLike.reduce((sum, point) => sum + point.x, 0) / sonicRoiMagentaLike.length,
+        y: sonicRoiMagentaLike.reduce((sum, point) => sum + point.y, 0) / sonicRoiMagentaLike.length,
+      };
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        rgba: data,
+        nonBlackPixels,
+        magentaLikePixels: magentaLike.length,
+        magentaLikeBounds: bounds,
+        sonicRoiMagentaLikePixels: sonicRoiMagentaLike.length,
+        sonicRoiMagentaLikeBounds: sonicRoiBounds,
+        sonicRoiMagentaLikeCentroid: sonicRoiCentroid,
+        renderedFrames: Number(identity.getAttribute('data-rendered-frames') || 0),
+        romPath: identity.getAttribute('data-rom-path') || '',
+        romSha256: identity.getAttribute('data-rom-sha256') || '',
+        romSize: Number(identity.getAttribute('data-rom-size') || 0),
+        coreLabel: identity.getAttribute('data-core-label') || '',
+        corePath: identity.getAttribute('data-core-path') || '',
+        lastInputRequestSeq: Number(identity.getAttribute('data-last-input-request-seq') || 0),
+        lastInputAckSeq: Number(identity.getAttribute('data-last-input-ack-seq') || 0),
+      };
+    `
+  );
+  if (!frame) return null;
+  const rgba = Buffer.from(frame.rgba);
+  return {
+    ...frame,
+    rgba: includePixels ? rgba : undefined,
+    framebufferSha256: createHash("sha256").update(rgba).digest("hex"),
+    rgbaBytes: rgba.length,
+  };
+}
+
+async function readCanonicalGameProgress(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      const status = document.querySelector('[data-testid="viewport-game-status"]');
+      if (!(canvas instanceof HTMLCanvasElement) || !(identity instanceof HTMLElement)) return null;
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        renderedFrames: Number(identity.getAttribute('data-rendered-frames') || 0),
+        romPath: identity.getAttribute('data-rom-path') || '',
+        romSha256: identity.getAttribute('data-rom-sha256') || '',
+        romSize: Number(identity.getAttribute('data-rom-size') || 0),
+        coreLabel: identity.getAttribute('data-core-label') || '',
+        corePath: identity.getAttribute('data-core-path') || '',
+        lastInputRequestSeq: Number(identity.getAttribute('data-last-input-request-seq') || 0),
+        lastInputAckSeq: Number(identity.getAttribute('data-last-input-ack-seq') || 0),
+        gameStatus: status?.textContent?.trim() || '',
+      };
+    `
+  );
+}
+
+function readU16le(bytes, offset) {
+  return (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8);
+}
+
+function readI16le(bytes, offset) {
+  const value = readU16le(bytes, offset);
+  return value & 0x8000 ? value - 0x10000 : value;
+}
+
+async function readEmulatorMemory(sessionId, region, offset, length) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const [region, offset, length] = arguments;
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") {
+        done({ ok: false, error: "Tauri invoke indisponivel na janela" });
+        return;
+      }
+      invoke("emulator_read_memory", { region, offset, length })
+        .then((value) => done({ ok: true, value }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [region, offset, length]
+  );
+  if (!result?.ok) fail(`Falha ao ler memoria do core: ${result?.error ?? "sem diagnostico"}`);
+  return result.value;
+}
+
+async function readSonic1PlayerMemory(sessionId) {
+  // Sonic 1 player object candidate in 68k WRAM. The run validates this
+  // candidate by correlating deltas with the independently located initial
+  // framebuffer and with native input ACKs before using it as trajectory oracle.
+  const objectOffset = 0xd000;
+  const result = await readEmulatorMemory(sessionId, 2, objectOffset, 0x40);
+  const bytes = result.data ?? [];
+  return {
+    source: "WRAM region 2, Sonic 1 player object candidate 0xD000",
+    objectOffset,
+    totalSize: result.total_size,
+    rawSha256: createHash("sha256").update(Buffer.from(bytes)).digest("hex"),
+    id: bytes[0] ?? null,
+    renderFlags: bytes[1] ?? null,
+    x: readI16le(bytes, 0x08),
+    xSub: readU16le(bytes, 0x0a),
+    y: readI16le(bytes, 0x0c),
+    ySub: readU16le(bytes, 0x0e),
+    xVel: readI16le(bytes, 0x10),
+    yVel: readI16le(bytes, 0x12),
+    inertia: readI16le(bytes, 0x14),
+    status: bytes[0x22] ?? null,
+  };
+}
+
+async function runCanonicalSonicTrajectory(sessionId, options) {
+  const { buttonTestId, label, expectedSha256, romBytes, artifactPrefix } = options;
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "launch" })}`);
+  await clickButtonByTestIdNativeWhenReady(sessionId, buttonTestId, `jogar ${label} na Game View`);
+  const identity = await waitFor(async () => {
+    const frame = await readCanonicalGameFrame(sessionId);
+    return frame && frame.romSha256 === expectedSha256 && frame.romSize === romBytes.length && frame.coreLabel && frame.corePath ? frame : false;
+  }, 15000, `Game View não confirmou a identidade da ${label}`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "identity", romSha256: identity.romSha256, core: identity.coreLabel })}`);
+  await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 10 ? progress : false;
+  }, 10000, `Game View não produziu frames para a ${label}`, 100);
+  const bootFrame = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 890 ? progress : false;
+  }, 120000, `${label} não atravessou o boot até o ponto de entrada`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "boot", renderedFrames: bootFrame.renderedFrames })}`);
+  await focusGameCanvasNatively(sessionId);
+  const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  await sendNativeGameKey(sessionId, "Enter", "keyDown", `START de entrada da fase ${label}`);
+  const startHoldProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= bootFrame.renderedFrames + 30 ? progress : false;
+  }, 15000, `START não avançou frames para a ${label}`, 100);
+  await sendNativeGameKey(sessionId, "Enter", "keyUp", `liberação de START da ${label}`);
+  const startInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0) ? current : false;
+  }, 10000, `START não foi confirmado para a ${label}`, 100);
+  const gameplayProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= 1800 ? progress : false;
+  }, 120000, `${label} não alcançou a cena de gameplay`, 100);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "gameplay", renderedFrames: gameplayProgress.renderedFrames })}`);
+  const trajectory = [];
+  const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-trajectory.json`);
+  const persistTrajectory = async (extra = {}) => {
+    await writeFile(
+      trajectoryPath,
+      JSON.stringify(
+        {
+          label,
+          romSha256: expectedSha256,
+          core: identity.coreLabel,
+          initial: { onGround, groundTop },
+          input: { start: startInput, right: rightInput, rightReleased, jump: jumpInput, jumpReleased: jumpReleasedInput },
+          frames: trajectory,
+          pause: extra.pause ?? null,
+          ...extra,
+        },
+        null,
+        2
+      )
+    );
+  };
+  let onGround = false;
+  let groundTop = null;
+  let rightInput = null;
+  let rightReleased = null;
+  let jumpInput = null;
+  let jumpReleasedInput = null;
+  const capture = async (captureLabel, input, previous, minFrameExclusive = -1) => {
+    const raw = await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames > minFrameExclusive ? readCanonicalGameFrame(sessionId, { includePixels: true }) : false;
+    }, 10000, `${label}/${captureLabel} não avançou para um novo frame`, 100);
+    const sonic = locateSonicVisual(raw, romBytes, { previous });
+    if (!sonic) fail(`Localizador independente não encontrou Sonic em ${label}/${captureLabel}`);
+    const memory = await readSonic1PlayerMemory(sessionId);
+    const entry = { label: captureLabel, frame: raw.renderedFrames, input, framebufferSha256: raw.framebufferSha256, sonic, memory };
+    trajectory.push(entry);
+    return { raw, sonic, entry };
+  };
+  const gameplayRaw = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  const gameplaySonic = locateSonicVisual(gameplayRaw, romBytes);
+  if (!gameplaySonic) fail(`Localizador independente não encontrou Sonic no gameplay de ${label}`);
+  const gameplayMemory = await readSonic1PlayerMemory(sessionId);
+  console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: "located", frame: gameplayRaw.renderedFrames, sonic: gameplaySonic, memory: gameplayMemory })}`);
+  groundTop = (() => {
+    for (let y = gameplaySonic.bounds.y1 + 1; y < gameplayRaw.height; y += 1) {
+      let greenPixels = 0;
+      for (let x = Math.max(0, gameplaySonic.bounds.x0 - 12); x <= Math.min(gameplayRaw.width - 1, gameplaySonic.bounds.x1 + 12); x += 1) {
+        const offset = (y * gameplayRaw.width + x) * 4;
+        if (gameplayRaw.rgba[offset + 1] > gameplayRaw.rgba[offset] + 20 && gameplayRaw.rgba[offset + 1] > gameplayRaw.rgba[offset + 2] + 10 && gameplayRaw.rgba[offset + 1] >= 90) greenPixels += 1;
+      }
+      if (greenPixels >= 8) return y;
+    }
+    return null;
+  })();
+  onGround = groundTop !== null && groundTop - gameplaySonic.bounds.y1 <= 4;
+  trajectory.push({ label: "before-controls", frame: gameplayRaw.renderedFrames, input: "neutral", framebufferSha256: gameplayRaw.framebufferSha256, sonic: gameplaySonic, memory: gameplayMemory });
+  if (!onGround) {
+    await persistTrajectory({ failure: "initial-not-grounded" });
+    fail(`Situação inicial não comprovou ${label} no chão: ${JSON.stringify({ sonic: gameplaySonic, groundTop })}`);
+  }
+  const before = { raw: gameplayRaw, sonic: gameplaySonic };
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", `movimento ${label}`);
+  rightInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.right === true ? current : false;
+  }, 10000, `ArrowRight não chegou ao core para ${label}`, 100);
+  const movementSamples = [];
+  let movementHoldProgress = null;
+  for (const frames of [45, 90, 135]) {
+    movementHoldProgress = await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= before.raw.renderedFrames + frames ? progress : false;
+    }, 20000, `movimento não avançou ${frames} frames para ${label}`, 100);
+    movementSamples.push(await capture(`movement-held-${frames}`, { right: true }, movementSamples.at(-1)?.sonic ?? before.sonic, movementSamples.at(-1)?.raw.renderedFrames ?? before.raw.renderedFrames));
+    console.log(`[inspection-trajectory] ${JSON.stringify({ label, step: `movement-held-${frames}`, frame: movementSamples.at(-1).raw.renderedFrames, sonic: movementSamples.at(-1).sonic })}`);
+  }
+  const duringMovement = movementSamples.at(-1);
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", `parada do movimento ${label}`);
+  rightReleased = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.right === false ? current : false;
+  }, 10000, `liberação de ArrowRight não chegou para ${label}`, 100);
+  const afterMovement = await capture("movement-released", { right: false }, duringMovement.sonic, duringMovement.raw.renderedFrames);
+  const movementDeltaX = Math.max(...[...movementSamples.map((sample) => sample.entry), afterMovement.entry].map((entry) => Math.abs(entry.memory.x - gameplayMemory.x)));
+  if (movementDeltaX < 2) {
+    await persistTrajectory({ failure: "movement-not-observed", movementDeltaX });
+    fail(`Movimento de ${label} não mudou a posição visual independente`);
+  }
+  const beforeJump = await capture("jump-before", { right: false, a: false }, afterMovement.sonic, afterMovement.raw.renderedFrames);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", `salto A ${label}`);
+  jumpInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.y === true ? current : false;
+  }, 10000, `KeyZ/A não chegou ao core para ${label}`, 100);
+  const jumpHoldProgress = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames >= beforeJump.raw.renderedFrames + 2 ? progress : false;
+  }, 20000, `salto não avançou frames para ${label}`, 100);
+  const jumpHeld = await capture("jump-held", { a: true }, beforeJump.sonic, beforeJump.raw.renderedFrames);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", `liberação do salto ${label}`);
+  jumpReleasedInput = await waitFor(async () => {
+    const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return current?.lastJoypadAck?.joypad?.y === false ? current : false;
+  }, 10000, `liberação de KeyZ/A não chegou para ${label}`, 100);
+  const jumpReleased = await capture("jump-released", { a: false }, jumpHeld.sonic, jumpHeld.raw.renderedFrames);
+  let lastJumpSample = jumpReleased;
+  const after = async (captureLabel, frames) => {
+    await waitFor(async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= jumpReleased.raw.renderedFrames + frames ? progress : false;
+    }, 30000, `${label} não avançou ${frames} frames após o salto`, 100);
+    lastJumpSample = await capture(captureLabel, { a: false }, lastJumpSample.sonic, lastJumpSample.raw.renderedFrames);
+    return lastJumpSample;
+  };
+  const jumpLater = await after("jump-after-15", 15);
+  const jumpMid = await after("jump-after-45", 45);
+  const jumpReturn90 = await after("jump-after-90", 90);
+  const jumpReturn150 = await after("jump-after-150", 150);
+  const jumpReturn240 = await after("jump-after-240", 240);
+  const jumpReturn = [jumpMid, jumpReturn90, jumpReturn150, jumpReturn240].find((sample) => sample.entry.memory.yVel === 0) ?? jumpReturn240;
+  const jumpLift = beforeJump.entry.memory.y - Math.min(...trajectory.filter((entry) => entry.label.startsWith("jump-")).map((entry) => entry.memory.y));
+  const returnedToGround = jumpReturn.entry.memory.yVel === 0 && jumpReturn.entry.memory.y >= beforeJump.entry.memory.y - jumpLift;
+  if (jumpLift < 3 || !returnedToGround) {
+    await persistTrajectory({ failure: "jump-trajectory-not-observed", jumpLift, returnedToGround });
+    fail(`Trajetória de salto não comprovou subida e retorno em ${label}: ${JSON.stringify({ jumpLift, returnedToGround, trajectory })}`);
+  }
+  await clickButtonByTestIdNative(sessionId, "viewport-pause", `pausar ${label}`);
+  await waitFor(async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"), 10000, `pausa não ficou visível em ${label}`, 100);
+  const paused = await readCanonicalGameProgress(sessionId);
+  await clickButtonByTestIdNative(sessionId, "viewport-resume", `retomar ${label}`);
+  const resumed = await waitFor(async () => {
+    const progress = await readCanonicalGameProgress(sessionId);
+    return progress && progress.renderedFrames > paused.renderedFrames + 5 ? progress : false;
+  }, 10000, `retomada não avançou em ${label}`, 100);
+  await persistTrajectory({ pause: { paused, resumed }, movementDeltaX });
+  return { identity, bootFrame, startHoldProgress, gameplayProgress, movement: { before: trajectory.find((entry) => entry.label === "before-controls"), samples: movementSamples.map((sample) => sample.entry), after: afterMovement.entry, holdProgress: movementHoldProgress, deltaX: movementDeltaX }, jump: { before: beforeJump.entry, held: jumpHeld.entry, released: jumpReleased.entry, later: jumpLater.entry, mid: jumpMid.entry, after: jumpReturn.entry, holdProgress: jumpHoldProgress }, pause: { paused, resumed }, trajectoryPath, screenshot: await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-${label}.png`) };
 }
 
 async function clickHierarchyEntityByLabel(sessionId, label) {
@@ -1692,8 +3328,10 @@ async function updateInspectorIntField(sessionId, label, value) {
 }
 
 async function setSessionWindowRect(sessionId, width, height) {
-  const targetWidth = Number(width);
-  const targetHeight = Number(height);
+  const requestedWidth = Number(process.env.RDS_E2E_WINDOW_WIDTH);
+  const requestedHeight = Number(process.env.RDS_E2E_WINDOW_HEIGHT);
+  const targetWidth = Number.isFinite(requestedWidth) && requestedWidth > 0 ? requestedWidth : Number(width);
+  const targetHeight = Number.isFinite(requestedHeight) && requestedHeight > 0 ? requestedHeight : Number(height);
   const widthTolerance = 64;
   const heightTolerance = 96;
   try {
@@ -1712,8 +3350,8 @@ async function setSessionWindowRect(sessionId, width, height) {
   let lastSize = null;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     await webdriverRequest("POST", `/session/${sessionId}/window/rect`, {
-      x: 0,
-      y: 0,
+      x: Number(process.env.RDS_E2E_WINDOW_X || 0),
+      y: Number(process.env.RDS_E2E_WINDOW_Y || 0),
       width: targetWidth,
       height: targetHeight,
     });
@@ -2468,7 +4106,7 @@ async function clickArtStudioFrame(sessionId, sequenceId, frameIndex) {
   );
 }
 
-async function readFramebufferStats(sessionId) {
+async function readFramebufferStats(sessionId, { includeTilePixels = false } = {}) {
   return executeScript(
     sessionId,
     `
@@ -2476,17 +4114,112 @@ async function readFramebufferStats(sessionId) {
       if (!(canvas instanceof HTMLCanvasElement)) return null;
       const context = canvas.getContext("2d");
       if (!context) return null;
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      const input = window.__RDS_E2E__?.getLastInputObservation?.() ?? null;
       const imageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
       let nonBlackPixels = 0;
+      let framebufferHash = 2166136261;
+      let tilemapCellHash = 2166136261;
+      const tilemapCellPixels = [];
       for (let index = 0; index < imageData.length; index += 4) {
+        for (let channel = 0; channel < 4; channel += 1) {
+          framebufferHash ^= imageData[index + channel];
+          framebufferHash = Math.imul(framebufferHash, 16777619);
+        }
         if (imageData[index] !== 0 || imageData[index + 1] !== 0 || imageData[index + 2] !== 0) {
           nonBlackPixels += 1;
+        }
+      }
+      for (let y = 200; y < 208 && y < canvas.height; y += 1) {
+        for (let x = 8; x < 16 && x < canvas.width; x += 1) {
+          const index = (y * canvas.width + x) * 4;
+          for (let channel = 0; channel < 4; channel += 1) {
+            tilemapCellHash ^= imageData[index + channel];
+            tilemapCellHash = Math.imul(tilemapCellHash, 16777619);
+            if (arguments[0]) tilemapCellPixels.push(imageData[index + channel]);
+          }
         }
       }
       return {
         width: canvas.width,
         height: canvas.height,
         non_black_pixels: nonBlackPixels,
+        rom_sha256: identity?.getAttribute("data-rom-sha256") ?? "",
+        rendered_frames: Number(identity?.getAttribute("data-rendered-frames") ?? 0),
+        input_session_id: input?.joypadSessionId ?? null,
+        input_hold: input?.joypadSessionHold ?? true,
+        framebuffer_hash: (framebufferHash >>> 0).toString(16).padStart(8, "0"),
+        tilemap_cell_hash: (tilemapCellHash >>> 0).toString(16).padStart(8, "0"),
+        ...(arguments[0] ? { tilemap_cell_pixels: tilemapCellPixels } : {}),
+      };
+    `,
+    [includeTilePixels]
+  );
+}
+
+async function readInspectionEmulatorObservation(sessionId, options = {}) {
+  const includePixels = options.includePixels === true;
+  return executeScript(
+    sessionId,
+    `
+      const observation = document.querySelector('[data-testid="inspection-emulator-observation"]');
+      const canvas = document.querySelector('[data-testid="inspection-emulator-framebuffer"]');
+      if (!observation || !(canvas instanceof HTMLCanvasElement)) return null;
+      const context = canvas.getContext("2d");
+      const pixels = context ? context.getImageData(0, 0, canvas.width, canvas.height).data : null;
+      let nonBlackPixels = 0;
+      if (pixels) {
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (pixels[index] !== 0 || pixels[index + 1] !== 0 || pixels[index + 2] !== 0) nonBlackPixels += 1;
+        }
+      }
+      return {
+        label: observation.getAttribute("data-observation-label") || "",
+        romPath: observation.getAttribute("data-rom-path") || "",
+        romSha256: observation.getAttribute("data-rom-sha256") || "",
+        romSize: Number(observation.getAttribute("data-rom-size") || "0"),
+        coreLabel: observation.getAttribute("data-core-label") || "",
+        corePath: observation.getAttribute("data-core-path") || "",
+        framesRun: Number(observation.getAttribute("data-frames-run") || "0"),
+        framesRequested: Number(observation.getAttribute("data-frames-requested") || "0"),
+        inputProfile: observation.getAttribute("data-input-profile") || "",
+        inputStartFrame: observation.getAttribute("data-input-start-frame") === "" ? null : Number(observation.getAttribute("data-input-start-frame") || "0"),
+        framebufferWidth: Number(observation.getAttribute("data-framebuffer-width") || "0"),
+        framebufferHeight: Number(observation.getAttribute("data-framebuffer-height") || "0"),
+        framebufferSha256: observation.getAttribute("data-framebuffer-sha256") || "",
+        declaredNonBlackPixels: Number(observation.getAttribute("data-non-black-pixels") || "0"),
+        canvasWidth: canvas.width,
+        canvasHeight: canvas.height,
+        canvasRgbaBytes: pixels?.length ?? 0,
+        canvasNonBlackPixels: nonBlackPixels,
+        canvasRgba: ${includePixels ? "pixels ? Array.from(pixels) : null" : "null"},
+        text: observation.textContent?.replace(/\\s+/g, " ").trim() || "",
+      };
+    `
+  );
+}
+
+async function ensureEmulatorObservationVisible(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="inspection-emulator-framebuffer"]');
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      canvas.scrollIntoView({ block: "center", inline: "nearest" });
+      const rect = canvas.getBoundingClientRect();
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const unobstructed = Boolean(top && (top === canvas || canvas.contains(top)));
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        fullyVisible,
+        unobstructed,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: top instanceof Element ? top.getAttribute('data-testid') ?? '' : '',
       };
     `
   );
@@ -2667,8 +4400,35 @@ async function clickTopBarMenuAction(sessionId, label) {
   );
 }
 
+export function isCurrentBuildFrame(frame, expectedRomSha256, previousInputSession) {
+  // The build completion log precedes emulator_load_rom. A non-black canvas
+  // can therefore belong to the previous ROM, or to the new ROM's boot screen.
+  return Boolean(frame && frame.non_black_pixels > 0 &&
+    frame.rom_sha256 === expectedRomSha256 && frame.input_session_id &&
+    frame.input_session_id !== previousInputSession && !frame.input_hold &&
+    Number.isInteger(frame.rendered_frames) && frame.rendered_frames >= 10);
+}
+
+export function createCurrentBuildFrameGate(expectedRomSha256, previousInputSession) {
+  let firstConfirmedFrame = null;
+  return (frame) => {
+    if (!isCurrentBuildFrame(frame, expectedRomSha256, previousInputSession)) {
+      firstConfirmedFrame = null;
+      return false;
+    }
+    // A no-op rebuild keeps the same ROM hash and can keep the old UI counter.
+    // Ten frames in that counter alone do not prove rendering after this load.
+    if (firstConfirmedFrame === null || frame.rendered_frames < firstConfirmedFrame) {
+      firstConfirmedFrame = frame.rendered_frames;
+      return false;
+    }
+    return frame.rendered_frames >= firstConfirmedFrame + 10;
+  };
+}
+
 async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifactPrefix) {
   const beforeState = await readAutomationState(sessionId);
+  const previousInputSession = (await callAutomationApi(sessionId, "getLastInputObservation"))?.joypadSessionId ?? null;
   const beforeBuildCount = (beforeState?.consoleEntries ?? []).filter((entry) =>
     String(entry.message ?? "").includes("Build concluido.")
   ).length;
@@ -2755,14 +4515,16 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
   }
   await assertPathExists(romPath, `ROM gerada nao encontrada para ${label}: ${romPath}`);
   const rom = await assertSegaHeader(romPath);
+  const romSha256 = createHash("sha256").update(await readFile(romPath)).digest("hex");
+  const frameReady = createCurrentBuildFrameGate(romSha256, previousInputSession);
 
   const framebuffer = await waitFor(
     async () => {
       const stats = await readFramebufferStats(sessionId);
-      return stats && stats.non_black_pixels > 0 ? stats : false;
+      return frameReady(stats) ? stats : false;
     },
     30000,
-    `Framebuffer do Libretro permaneceu vazio para ${label}.`,
+    `Framebuffer da ROM compilada nao foi confirmado na nova sessao para ${label}.`,
     1000
   );
 
@@ -2771,9 +4533,5037 @@ async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifa
     rom_path: romPath,
     sega_header: rom.header,
     rom_size_bytes: rom.sizeBytes,
+    rom_sha256: romSha256,
     framebuffer,
   };
 }
+
+// ── MUGEN import pela interface (perfil mugen.character.v1, Experimental) ────────
+// Fluxo visivel: wizard -> importador externo -> perfil MUGEN -> Importar -> painel de
+// compatibilidade -> Build & Run -> pixels do personagem no core -> editar x no Inspector ->
+// salvar -> reiniciar o app -> reabrir -> Build & Run -> pixels deslocados. Negativo: pacote
+// com caminho fora da pasta falha sem deixar projeto. So o dialogo nativo de pasta e
+// substituido (setNextExternalImportPath), como no importSgdkProject existente.
+async function finishMugenSourceReview(sessionId) {
+  await waitFor(async () => executeScript(sessionId, `const b=document.querySelector('[data-testid="mugen-source-import"]'); return b && !b.disabled;`), 120000, "Analise MUGEN nao liberou a importacao revisada.", 200);
+  await clickByTestId(sessionId, "mugen-source-import");
+}
+
+async function runMugenImportScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
+  const artifactPrefix = `mugen-import-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appPath = currentE2eRunContext?.appPath ?? null;
+  const report = {
+    generatedAt: null,
+    scenario: "mugen-import",
+    maturity: "Experimental",
+    testedApplication: {
+      path: appPath,
+      sha256: appPath ? createHash("sha256").update(await readFile(appPath)).digest("hex") : null,
+    },
+    sample: {},
+    artifacts: [],
+    steps: [],
+    runs: [],
+    dialogSubstitution:
+      "somente o dialogo nativo de escolha de pasta e substituido por setNextExternalImportPath; nome, perfil, botao Importar, painel, Inspector, Salvar, reinicio, reabertura e Build & Run sao a UI visivel",
+  };
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const state = () => readAutomationState(sessionId);
+  const shot = async (name, label) =>
+    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const fixtureDir = path.join(repoRoot, "crates", "rex-mugen", "fixtures", "probe");
+  const workDir = path.join(validationDir, `${artifactPrefix}-work`);
+  const donorDir = path.join(workDir, "probe");
+  await mkdir(donorDir, { recursive: true });
+  const sampleHashes = {};
+  for (const name of ["probe.def", "probe.air", "probe.cmd", "probe.cns", "probe.sff"]) {
+    const bytes = await readFile(path.join(fixtureDir, name));
+    await writeFile(path.join(donorDir, name), bytes);
+    sampleHashes[name] = createHash("sha256").update(bytes).digest("hex");
+  }
+  report.sample = { fixture: "crates/rex-mugen/fixtures/probe", sha256: sampleHashes };
+
+  // Pixel do canvas do core em coordenadas da tela Mega Drive (320x224).
+  const sample = async (points) =>
+    js(
+      `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      const ctx = canvas.getContext("2d");
+      const sx = canvas.width / 320, sy = canvas.height / 224;
+      return { w: canvas.width, h: canvas.height, px: arguments[0].map(([x, y]) => {
+        const d = ctx.getImageData(Math.floor((x + 0.5) * sx), Math.floor((y + 0.5) * sy), 1, 1).data;
+        return [d[0], d[1], d[2]];
+      }) };
+    `,
+      [points]
+    );
+  const colorOf = ([r, g, b]) => {
+    const hi = (v) => v > 160, lo = (v) => v < 90;
+    if (hi(r) && lo(g) && lo(b)) return "red";
+    if (lo(r) && hi(g) && lo(b)) return "green";
+    if (lo(r) && lo(g) && hi(b)) return "blue";
+    return "other";
+  };
+  // Marcadores da fixture Probe (eixo = transform + (6,24)): corpo vermelho (x+4, y+14),
+  // pe (x+14, y+22) verde no idle0 e azul no idle1.
+  const observeIdle = async (x, y, label) => {
+    const seen = { idle0: 0, idle1: 0, other: 0 };
+    let dims = null;
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      const s = await sample([[x + 4, y + 14], [x + 14, y + 22]]);
+      if (s) {
+        dims = [s.w, s.h];
+        const [body, foot] = s.px.map(colorOf);
+        if (body === "red" && foot === "green") seen.idle0 += 1;
+        else if (body === "red" && foot === "blue") seen.idle1 += 1;
+        else seen.other += 1;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    report.runs.push({ label, x, y, canvas: dims, samples: seen });
+    return seen;
+  };
+
+  // Permanencia de cada frame do idle (action_0), medida no core EM QUADROS EMULADOS (1 quadro = 1 tick
+  // de 1/60 s do jogo), nao em milissegundos de parede: o build de debug roda o core mais devagar que o
+  // tempo real (a 1a tentativa em ms deu a razao certa, 0,548 ~ 5/9, mas ~7x mais lento). Cada
+  // putImageData do viewport corresponde a exatamente um quadro emulado; classificamos o pixel de cada um.
+  // Expectativas FIXADAS antes da execucao (fixture probe.air, action 0: elemento 1 = 5 ticks, elemento 2 = 9):
+  //   original: idle0 = 5 quadros, idle1 = 9 quadros
+  //   editado (elemento 1 -> 20 ticks): idle0 = 20 quadros, idle1 = 9 quadros (nao editado)
+  const measureDwell = async (x, y, label) => {
+    await js(
+      `
+      const [x, y] = arguments;
+      const proto = CanvasRenderingContext2D.prototype;
+      if (!window.__mugenOrigPut) window.__mugenOrigPut = proto.putImageData;
+      const orig = window.__mugenOrigPut;
+      const rec = { c: [], done: false };
+      window.__mugenDwell = rec;
+      const hi = (v) => v > 160, lo = (v) => v < 90;
+      proto.putImageData = function (img, ...rest) {
+        const r = orig.call(this, img, ...rest);
+        if (this.canvas?.getAttribute("data-testid") === "viewport-game-canvas" && !rec.done) {
+          const sx = img.width / 320, sy = img.height / 224;
+          const at = (ax, ay) => { const o = (Math.floor((ay + 0.5) * sy) * img.width + Math.floor((ax + 0.5) * sx)) * 4; return [img.data[o], img.data[o + 1], img.data[o + 2]]; };
+          const b = at(x + 4, y + 14), f = at(x + 14, y + 22);
+          let cls = "other";
+          if (hi(b[0]) && lo(b[1]) && lo(b[2])) {
+            if (lo(f[0]) && hi(f[1]) && lo(f[2])) cls = "idle0";
+            else if (lo(f[0]) && lo(f[1]) && hi(f[2])) cls = "idle1";
+          }
+          rec.c.push(cls);
+          if (rec.c.length >= 320) { rec.done = true; proto.putImageData = orig; }
+        }
+        return r;
+      };
+      return true;
+    `,
+      [x, y]
+    );
+    const rec = await waitFor(
+      async () => js("return window.__mugenDwell?.done ? window.__mugenDwell : false;"),
+      180000,
+      "Gravacao de quadros do idle nao terminou.",
+      500
+    );
+    // Trechos interiores (o primeiro e o ultimo podem estar cortados): comprimento em quadros.
+    const runs = [];
+    let start = 0;
+    for (let i = 1; i <= rec.c.length; i += 1) {
+      if (i === rec.c.length || rec.c[i] !== rec.c[start]) {
+        runs.push([rec.c[start], i - start, start === 0, i === rec.c.length]);
+        start = i;
+      }
+    }
+    const interior = runs.filter(([, , first, last]) => !first && !last);
+    const lens = (cls) => interior.filter(([c]) => c === cls).map(([, n]) => n);
+    const result = { label, frames: rec.c.length, idle0Ticks: lens("idle0"), idle1Ticks: lens("idle1"), otherRuns: lens("other").length };
+    report.runs.push({ ...result, kind: "dwell" });
+    return result;
+  };
+  const allIn = (values, expected) => values.length >= 4 && values.every((v) => Math.abs(v - expected) <= 1);
+
+
+  // 1. Wizard visivel -> importador externo -> perfil MUGEN -> Importar.
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await clickByTestId(sessionId, "wizard-external-import-toggle");
+  const selected = await js(`
+    const select = document.querySelector('[data-testid="external-import-profile-select"]');
+    if (!(select instanceof HTMLSelectElement)) return null;
+    const option = Array.from(select.options).find((o) => o.value === "mugen");
+    if (!option) return Array.from(select.options).map((o) => o.value);
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(select, "mugen");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return select.value;
+  `);
+  if (selected !== "mugen") fail(`Perfil MUGEN nao disponivel no importador: ${JSON.stringify(selected)}`);
+  const projectName = `Mugen_Probe_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [donorDir]);
+  await shot("01-importer", "importador externo com perfil MUGEN");
+  await clickByTestId(sessionId, "external-import-confirm");
+  await finishMugenSourceReview(sessionId);
+
+  // 2. Painel de compatibilidade.
+  const panelState = await waitFor(
+    async () => {
+      const current = await state();
+      return current?.mugenCompatibility?.open && current.mugenCompatibility.characters.length > 0 ? current : false;
+    },
+    60000,
+    "Painel de compatibilidade MUGEN nao abriu apos a importacao.",
+    300
+  );
+  const projectDir = panelState.activeProjectDir;
+  onProjectCreated(projectDir);
+  const character = panelState.mugenCompatibility.characters.find((c) => c.id === "probe");
+  if (!character) fail("Painel nao mostrou o personagem probe.");
+  const status = Object.fromEntries(character.categories.map((c) => [c.id, c.status]));
+  const expectedStatus = {
+    sprites: "direct", animations: "direct", commands: "direct", states: "direct",
+    collisions: "manual", sound: "absent", stage: "absent",
+  };
+  if (JSON.stringify(status) !== JSON.stringify(expectedStatus)) {
+    fail(`Categorias do painel divergem: ${JSON.stringify(status)}`);
+  }
+  const panelDom = await waitFor(
+    async () =>
+      js(`
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+      const img = q("mugen-compat-character-preview");
+      if (!(img instanceof HTMLImageElement) || !img.complete || img.naturalWidth === 0) return false;
+      return {
+        summary: q("mugen-compat-summary")?.textContent ?? "",
+        collisionLoss: q("mugen-compat-loss-collision")?.textContent ?? "",
+        stage: q("mugen-compat-category-stage")?.textContent ?? "",
+        rawLength: (q("mugen-compat-raw")?.textContent ?? "").length,
+        preview: [img.naturalWidth, img.naturalHeight],
+      };
+    `),
+    20000,
+    "Painel nao exibiu o personagem convertido.",
+    250
+  );
+  if (!panelDom.collisionLoss.includes("golpes nao acertam") || !panelDom.stage.includes("Nao existe neste pacote") || panelDom.rawLength < 200) {
+    fail(`Painel nao explicou perdas: ${JSON.stringify(panelDom)}`);
+  }
+  const consoleSummary = (panelState.consoleEntries ?? []).map((e) => String(e.message)).find((m) => m.includes("[MUGEN] probe (Experimental)"));
+  if (!consoleSummary) fail("Console nao resumiu as perdas da importacao MUGEN.");
+  await shot("02-compatibility-panel", "painel de compatibilidade MUGEN");
+  addReportStep(report, "import_via_ui_and_panel", "passed", { projectDir, status, panelDom, consoleSummary, totals: character.totals });
+  // Instantaneo do painel (categorias, totais e perdas exibidos) para comparar apos reabrir.
+  const snapshotPanel = () =>
+    js(`
+      const all = (sel) => Array.from(document.querySelectorAll(sel));
+      const txt = (el) => (el?.textContent ?? "").replace(/\\s+/g, " ").trim();
+      return {
+        categories: all('[data-testid^="mugen-compat-category-"]').map((el) => [el.getAttribute("data-testid"), txt(el)]),
+        totals: all('[data-testid^="mugen-compat-total-"]').map((el) => [el.getAttribute("data-testid"), txt(el)]),
+        losses: all('[data-testid^="mugen-compat-loss-"]').map((el) => [el.getAttribute("data-testid"), txt(el)]),
+        summary: txt(document.querySelector('[data-testid="mugen-compat-summary"]')),
+      };
+    `);
+  const importSnapshot = await snapshotPanel();
+  if (importSnapshot.categories.length !== 7 || importSnapshot.losses.length === 0) {
+    fail(`Instantaneo do painel na importacao incompleto: ${JSON.stringify(importSnapshot)}`);
+  }
+  const reportOnDisk = JSON.parse(await readFile(path.join(projectDir, "assets", "mugen", "probe_import_report.json"), "utf8"));
+  await clickByTestId(sessionId, "mugen-compat-close");
+
+  // 3. Build & Run pela UI; personagem visivel na posicao do projeto (96,96).
+  const scene0 = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  const probe0 = scene0.entities.find((e) => (e.entity_id ?? e.id) === "probe");
+  if (!probe0) fail("Cena importada sem a entidade probe.");
+  const x0 = probe0.transform.x, y0 = probe0.transform.y;
+  const run1 = await runBuildRunAndCollect(sessionId, "mugen probe original", timeoutMs, report, artifactPrefix);
+  const romSha1 = createHash("sha256").update(await readFile(run1.rom_path)).digest("hex");
+  const idle1 = await observeIdle(x0, y0, "original");
+  if (idle1.idle0 === 0 || idle1.idle1 === 0) fail(`Personagem nao apareceu com os 2 frames do idle em (${x0},${y0}): ${JSON.stringify(idle1)}`);
+  const dwell1 = await measureDwell(x0, y0, "original");
+  if (!allIn(dwell1.idle0Ticks, 5) || !allIn(dwell1.idle1Ticks, 9) || dwell1.otherRuns > 0) {
+    fail(`Tempos do idle original fora do esperado (5/9 ticks): ${JSON.stringify(dwell1)}`);
+  }
+  await shot("03-core-original", "personagem convertido no core");
+  addReportStep(report, "build_run_original", "passed", { rom: run1.rom_path, rom_sha256: romSha1, x: x0, y: y0, idle: idle1, dwell: dwell1 });
+
+  // 4. Edicao no Inspector, salvar, reiniciar o app, reabrir.
+  const x1 = x0 + 44;
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-probe");
+  await waitFor(async () => (await state())?.selectedEntityId === "probe", 15000, "Entidade probe nao foi selecionada.", 200);
+  await setInputByTestIdNative(sessionId, "inspector-transform-x", String(x1));
+
+  // 4a. Tempo por quadro pelo controle do Inspector: unidade explicita, valores atuais,
+  // entradas invalidas recusadas com diagnostico e sem alterar o ultimo valor valido.
+  const f0 = "inspector-mugen-anim-action_0-frame-0";
+  const f1 = "inspector-mugen-anim-action_0-frame-1";
+  const timingUi = await waitFor(
+    async () =>
+      js(`
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+      if (!q(arguments[0]) || !q(arguments[1])) return false;
+      return {
+        help: q("inspector-mugen-timing-help")?.textContent ?? "",
+        frame0: q(arguments[0]).value,
+        frame1: q(arguments[1]).value,
+        nativeFpsInputForMugen: Boolean(q("inspector-anim-action_0-fps")),
+        labels: Array.from(document.querySelectorAll('[data-testid="inspector-mugen-anim-action_0"] label span')).map((e) => e.textContent),
+      };
+    `, [f0, f1]),
+    15000,
+    "Inspector nao mostrou o tempo por quadro da animacao MUGEN.",
+    200
+  );
+  if (timingUi.frame0 !== "5" || timingUi.frame1 !== "9" || timingUi.nativeFpsInputForMugen || !timingUi.help.includes("1/60 s") || !timingUi.labels.some((l) => l.includes("Quadro 1 (ticks)"))) {
+    fail(`Inspector exibiu tempo/unidade errados: ${JSON.stringify(timingUi)}`);
+  }
+  // Digitacao nativa com verificacao especifica e tentativas registradas (no maximo 3 por entrada).
+  const labelText = (id) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.closest('label')?.textContent ?? null;`, [id]);
+  const errorText = (id) => js(`return document.querySelector('[data-testid="' + arguments[0] + '-error"]')?.textContent ?? null;`, [id]);
+  const typingAttempts = [];
+  const { log: editLog } = await typeIntoInputAndExpect(
+    sessionId, f0, "20",
+    async () => { const t = await labelText(f0); return t && t.includes("20 ticks = 0,333 s") && !(await errorText(f0)) ? t : false; },
+    "duracao 20"
+  );
+  typingAttempts.push(...editLog);
+  const invalidResults = [];
+  for (const bad of ["0", "-2", "x"]) {
+    const { result: err, log } = await typeIntoInputAndExpect(
+      sessionId, f0, bad,
+      async () => { const e = await errorText(f0); return e && e.includes(bad) && e.includes("Mantido: 20") ? e : false; },
+      `entrada invalida '${bad}'`
+    );
+    typingAttempts.push(...log);
+    invalidResults.push({ input: bad, diagnostic: err });
+  }
+  // Sai do campo (foco em outro): o campo volta ao ultimo valor valido.
+  await js(`document.querySelector('[data-testid="' + arguments[0] + '"]').blur(); return true;`, [f0]);
+  const afterBlur = await waitFor(
+    async () => js(`const v = document.querySelector('[data-testid="' + arguments[0] + '"]')?.value; return v === "20" ? v : false;`, [f0]),
+    5000,
+    "Campo nao voltou ao ultimo valor valido apos entrada invalida.",
+    100
+  );
+  addReportStep(report, "inspector_edit_ticks", "passed", { ui: timingUi, edited: { frame: 1, from: 5, to: 20 }, invalidResults, valueAfterBlur: afterBlur, typingAttempts });
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const onDisk = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+      return onDisk.entities.find((e) => (e.entity_id ?? e.id) === "probe")?.transform?.x === x1;
+    },
+    20000,
+    "Edicao de x nao chegou ao disco.",
+    300
+  );
+  const savedScene = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  const savedAnims = savedScene.entities.find((e) => (e.entity_id ?? e.id) === "probe").components.sprite.animations;
+  const expectedSaved = { action_0: [20, 9], action_200: [3, 6, 4, 2] };
+  for (const [name, expected] of Object.entries(expectedSaved)) {
+    const anim = savedAnims[name];
+    if (JSON.stringify(anim.frame_durations) !== JSON.stringify(expected) || JSON.stringify(anim.mugen_frames.map((f) => f.duration)) !== JSON.stringify(expected)) {
+      fail(`Disco: duracoes de ${name} divergem de ${JSON.stringify(expected)}: ${JSON.stringify(anim.frame_durations)} / ${JSON.stringify(anim.mugen_frames.map((f) => f.duration))}`);
+    }
+  }
+  addReportStep(report, "edit_and_save", "passed", { from: x0, to: x1, savedDurations: { action_0: savedAnims.action_0.frame_durations, action_200: savedAnims.action_200.frame_durations } });
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto importado.", 300);
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto importado nao reabriu.", 300);
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-probe");
+  const reopenedX = await waitFor(
+    async () => js(`return document.querySelector('[data-testid="inspector-transform-x"]')?.value ?? false;`),
+    15000,
+    "Inspector nao mostrou x apos reabrir.",
+    200
+  );
+  if (Number(reopenedX) !== x1) fail(`x nao sobreviveu ao reinicio: ${reopenedX}`);
+  if (process.env.RDS_E2E_INJECT_FAILURE === "after-restart") {
+    // Falha controlada para provar a limpeza (app reiniciado + driver) no caminho de erro.
+    fail("Falha controlada (RDS_E2E_INJECT_FAILURE=after-restart) apos reiniciar o app.");
+  }
+  await shot("04-reopened", "projeto reaberto com x editado");
+  const reopenedTicks = await waitFor(
+    async () =>
+      js(`
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+      if (!q(arguments[0]) || !q(arguments[1])) return false;
+      return [q(arguments[0]).value, q(arguments[1]).value];
+    `, ["inspector-mugen-anim-action_0-frame-0", "inspector-mugen-anim-action_0-frame-1"]),
+    15000,
+    "Inspector nao mostrou o tempo por quadro apos reabrir.",
+    200
+  );
+  if (reopenedTicks[0] !== "20" || reopenedTicks[1] !== "9") fail(`Duracoes nao sobreviveram ao reinicio: ${JSON.stringify(reopenedTicks)}`);
+  addReportStep(report, "restart_reopen", "passed", { reopenedX: Number(reopenedX), reopenedTicks });
+
+  // 4b. Relatorio MUGEN reaberto pela UI numa sessao nova (sem estado da sessao que importou).
+  const beforeReopen = await state();
+  if (beforeReopen?.mugenCompatibility?.open || beforeReopen?.mugenCompatibility?.characters?.length) {
+    fail(`Sessao nova ja trazia estado do relatorio: ${JSON.stringify(beforeReopen.mugenCompatibility)}`);
+  }
+  await clickTopBarMenuAction(sessionId, "Relatorio MUGEN");
+  const reopenedPanel = await waitFor(
+    async () => {
+      const current = await state();
+      return current?.mugenCompatibility?.open && current.mugenCompatibility.characters.length > 0 ? current : false;
+    },
+    30000,
+    "Relatorio MUGEN nao reabriu pelo menu apos reabrir o projeto.",
+    300
+  );
+  await waitFor(
+    async () => js(`return Boolean(document.querySelector('[data-testid="mugen-compat-loss-collision"]'));`),
+    20000,
+    "Painel reaberto nao exibiu as perdas.",
+    250
+  );
+  const reopenedSnapshot = await snapshotPanel();
+  if (JSON.stringify(reopenedSnapshot) !== JSON.stringify(importSnapshot)) {
+    fail(`Relatorio reaberto diverge do exibido na importacao: ${JSON.stringify({ importSnapshot, reopenedSnapshot })}`);
+  }
+  const reopenedChar = reopenedPanel.mugenCompatibility.characters.find((c) => c.id === "probe");
+  const diskStatus = Object.fromEntries(reportOnDisk.summary.categories.map((c) => [c.id, c.status]));
+  const reopenedStatus = Object.fromEntries((reopenedChar?.categories ?? []).map((c) => [c.id, c.status]));
+  if (JSON.stringify(diskStatus) !== JSON.stringify(reopenedStatus) || ["direct", "approximate", "manual", "unsupported"].some((k) => reportOnDisk.summary.totals[k] !== reopenedChar?.totals?.[k])) {
+    fail(`Painel reaberto diverge do relatorio gravado: ${JSON.stringify({ diskStatus, reopenedStatus })}`);
+  }
+  await shot("04b-report-reopened", "relatorio MUGEN reaberto apos reabrir o projeto");
+  addReportStep(report, "report_reopened_after_restart", "passed", {
+    status: reopenedStatus,
+    totals: reopenedChar.totals,
+    losses: reopenedSnapshot.losses.map(([id]) => id),
+    identicalToImportPanel: true,
+  });
+  await clickByTestId(sessionId, "mugen-compat-close");
+
+  // 5. Build & Run de novo: personagem deslocado +44 e ausente da posicao antiga.
+  const run2 = await runBuildRunAndCollect(sessionId, "mugen probe editado", timeoutMs, report, artifactPrefix);
+  const romSha2 = createHash("sha256").update(await readFile(run2.rom_path)).digest("hex");
+  if (romSha2 === romSha1) fail("A ROM nao mudou apos a edicao (resposta antiga reutilizada?).");
+  const idle2 = await observeIdle(x1, y0, "editado");
+  const oldSpot = await observeIdle(x0, y0, "posicao antiga apos edicao");
+  if (idle2.idle0 === 0 || idle2.idle1 === 0) fail(`Personagem nao apareceu na posicao editada: ${JSON.stringify(idle2)}`);
+  if (oldSpot.idle0 + oldSpot.idle1 > 0) fail(`Personagem ainda aparece na posicao antiga: ${JSON.stringify(oldSpot)}`);
+  const dwell2 = await measureDwell(x1, y0, "editado");
+  if (!allIn(dwell2.idle0Ticks, 20) || !allIn(dwell2.idle1Ticks, 9) || dwell2.otherRuns > 0) {
+    fail(`Tempos do idle editado fora do esperado (20/9 ticks): ${JSON.stringify(dwell2)}`);
+  }
+  // Discriminacao: o frame editado ficou bem mais longo; o nao editado manteve o tempo.
+  // (as faixas exatas acima ja separam 5 de 20 quadros; o frame nao editado segue em 9)
+  await shot("05-core-edited", "personagem na posicao editada");
+  addReportStep(report, "build_run_edited", "passed", { rom: run2.rom_path, rom_sha256: romSha2, idle: idle2, oldSpot, dwell: dwell2 });
+
+  // 6. Negativo: pacote com sprite fora da pasta.
+  const baseDir = path.dirname(projectDir);
+  const escapeRoot = path.join(workDir, "escape");
+  const escapeDonor = path.join(escapeRoot, "probe");
+  await mkdir(escapeDonor, { recursive: true });
+  for (const name of ["probe.air", "probe.cmd", "probe.cns"]) {
+    await writeFile(path.join(escapeDonor, name), await readFile(path.join(fixtureDir, name)));
+  }
+  await writeFile(path.join(escapeRoot, "fora.sff"), await readFile(path.join(fixtureDir, "probe.sff")));
+  const def = await readFile(path.join(fixtureDir, "probe.def"), "utf8");
+  await writeFile(path.join(escapeDonor, "probe.def"), def.replace("sprite = probe.sff", "sprite = ../fora.sff"));
+  const escapeName = `Mugen_Escape_${Date.now()}`;
+  const before = (await readdir(baseDir)).filter((n) => n.startsWith("Mugen_Escape_"));
+  await clickTopBarMenuAction(sessionId, "Novo Projeto");
+  await waitForOnboardingWizard(sessionId);
+  const toggled = await js(`return Boolean(document.querySelector('[data-testid="external-import-profile-select"]'));`);
+  if (!toggled) await clickByTestId(sessionId, "wizard-external-import-toggle");
+  await js(`
+    const select = document.querySelector('[data-testid="external-import-profile-select"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(select, "mugen");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  `);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', escapeName);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [escapeDonor]);
+  await clickByTestId(sessionId, "external-import-confirm");
+  const userMessage = await waitFor(async () => js(`const panel=document.querySelector('[data-testid="mugen-source-review"]'); const b=document.querySelector('[data-testid="mugen-source-import"]'); return panel?.textContent.includes("external") && b?.disabled ? panel.textContent : false;`),30000,"Caminho externo nao foi bloqueado na revisao MUGEN.",200);
+  const failure = { diagnostic: { user_message: userMessage, technical_detail: "source.reference.external", suggested_action: "corrigir referencia; nenhum projeto criado" } };
+  const after = (await readdir(baseDir)).filter((n) => n.startsWith("Mugen_Escape_"));
+  if (after.length !== before.length) fail(`Importacao recusada deixou pasta de projeto: ${JSON.stringify(after)}`);
+  // A comparacion de conteos non discrimina cando xa existe un Mugen_Escape_* douta
+  // execucion: exige explicitamente que O NOME desta proba non chegou ao disco.
+  if (after.includes(escapeName)) fail(`Importacao recusada deixou o projeto desta execucion: ${escapeName}`);
+  const afterState = await state();
+  if (afterState?.activeProjectDir !== projectDir) fail(`Projeto ativo mudou apos importacao recusada: ${afterState?.activeProjectDir}`);
+  await shot("06-negative", "importacao recusada sem projeto parcial");
+  addReportStep(report, "negative_path_escape", "passed", {
+    escapeName,
+    userMessage,
+    suggestedAction: failure.diagnostic?.suggested_action ?? null,
+    technicalDetail: failure.diagnostic?.technical_detail ?? null,
+    baseDir,
+    leftovers: after,
+  });
+
+  report.generatedAt = new Date().toISOString();
+  await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
+  console.log(`OK: Desktop Tauri mugen-import E2E passou. Relatorio: ${reportPath}`);
+}
+
+// ── MUGEN: personagem importado, editado e controlado pelo usuario (perfil mugen.character.v1, Experimental) ──
+// Fixture autoral `walker` (crates/rex-mugen/fixtures/walker; previsao em fixture.rs). Fluxo pela UI:
+// importar -> compatibilidade -> editar duracao no Inspector -> salvar -> reiniciar -> reabrir ->
+// Build & Run -> focar o jogo -> teclado NATIVO (ArrowRight = direcao F, KeyZ = botao A do MD) ->
+// observar (a) pixels por quadro emulado e (b) o estado do runtime na RAM do core (indice da animacao).
+// Escopo: o perfil v1 NAO converte VelSet/PosAdd; nao ha movimento de posicao. "Mover" = direcao ->
+// estado/animacao de caminhada; "acao" = botao -> animacao de ataque (sem acerto, dano ou colisao).
+async function runMugenControlScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
+  const artifactPrefix = `mugen-control-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appPath = currentE2eRunContext?.appPath ?? null;
+  const sha256File = async (file) => createHash("sha256").update(await readFile(file)).digest("hex");
+  const report = {
+    generatedAt: null,
+    scenario: "mugen-control",
+    maturity: "Experimental",
+    testedApplication: { path: appPath, sha256: appPath ? await sha256File(appPath) : null },
+    frontend: { indexHtmlSha256: await sha256File(path.join(repoRoot, "dist", "index.html")).catch(() => null) },
+    sample: {},
+    artifacts: [],
+    steps: [],
+    runs: [],
+    scope:
+      "sem movimento de posicao (VelSet/PosAdd nao fazem parte do perfil v1); provado: direcao -> estado/animacao de caminhada e botao -> animacao de ataque; sem acerto, dano ou colisao",
+    dialogSubstitution:
+      "somente o dialogo nativo de escolha de pasta e substituido por setNextExternalImportPath; nome, perfil, Importar, painel, Inspector, Salvar, reinicio, reabertura, Build & Run e o teclado (eventos nativos WebDriver) sao a UI/entrada do produto",
+  };
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const state = () => readAutomationState(sessionId);
+  const shot = async (name, label) =>
+    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const fixtureDir = path.join(repoRoot, "crates", "rex-mugen", "fixtures", "walker");
+  const workDir = path.join(validationDir, `${artifactPrefix}-work`);
+  const donorDir = path.join(workDir, "walker");
+  await mkdir(donorDir, { recursive: true });
+  const sampleHashes = {};
+  for (const name of ["walker.def", "walker.air", "walker.cmd", "walker.cns", "walker.sff"]) {
+    const bytes = await readFile(path.join(fixtureDir, name));
+    await writeFile(path.join(donorDir, name), bytes);
+    sampleHashes[name] = createHash("sha256").update(bytes).digest("hex");
+  }
+  report.sample = { fixture: "crates/rex-mugen/fixtures/walker", sha256: sampleHashes };
+
+  // Expectativas FIXADAS antes da execucao (fixture walker; 1 tick = 1 quadro emulado):
+  //   compatibilidade: sprites/animations/commands/states direct; collisions/sound/stage absent
+  //   AIR: idle red -1; walk green 4 -> BLUE 6; attack yellow+fist 3 -> yellow+long fist 8
+  //   edicao pelo Inspector: walk quadro 1: 4 -> 12  => ROM: green 12, blue 6 (nao editado)
+  //   segurando ArrowRight: anim RAM = walk; verde 12 / azul 6 por ciclo; sem movimento de posicao
+  //   soltando: volta a idle (anim RAM = 0); sem input: nunca sai de idle
+  //   KeyZ: anim RAM = attack; hitA 3 / hitB 8; depois idle
+  const EDITED_WALK_TICKS = 12;
+  const expectedStatus = {
+    sprites: "direct", animations: "direct", commands: "direct", states: "direct",
+    collisions: "absent", sound: "absent", stage: "absent",
+  };
+
+  // ── utilitarios de observacao ────────────────────────────────────────────────────────────
+  // Classe do quadro emulado (1 putImageData = 1 quadro): corpo e punho em coordenadas de tela.
+  // Entidade em (96,96) -> sprite 16x32 com origem (96,96): corpo (98,112), punho curto (105,105), longo (109,105).
+  const startFrameRecorder = async (frames) =>
+    js(
+      `
+      const proto = CanvasRenderingContext2D.prototype;
+      if (!window.__mugenOrigPut) window.__mugenOrigPut = proto.putImageData;
+      const orig = window.__mugenOrigPut;
+      const rec = { c: [], bbox: [], done: false };
+      window.__mugenRec = rec;
+      const want = arguments[0];
+      proto.putImageData = function (img, ...rest) {
+        const r = orig.call(this, img, ...rest);
+        if (this.canvas?.getAttribute("data-testid") === "viewport-game-canvas" && !rec.done) {
+          const sx = img.width / 320, sy = img.height / 224;
+          const at = (ax, ay) => { const o = (Math.floor((ay + 0.5) * sy) * img.width + Math.floor((ax + 0.5) * sx)) * 4; return [img.data[o], img.data[o + 1], img.data[o + 2]]; };
+          const hi = (v) => v > 160, lo = (v) => v < 90;
+          const is = (px, r0, g0, b0) => (r0 ? hi(px[0]) : lo(px[0])) && (g0 ? hi(px[1]) : lo(px[1])) && (b0 ? hi(px[2]) : lo(px[2]));
+          const body = at(98, 112), fistA = at(105, 105), fistB = at(109, 105);
+          let cls = "other";
+          if (is(body, 1, 0, 0)) cls = "idle";
+          else if (is(body, 0, 1, 0)) cls = "walkA";
+          else if (is(body, 0, 0, 1)) cls = "walkB";
+          else if (is(body, 1, 1, 0)) cls = is(fistB, 1, 1, 1) ? "hitB" : is(fistA, 1, 1, 1) ? "hitA" : "hit?";
+          // caixa do corpo: coluna mais a esquerda nao preta na linha do corpo (deteccao de deslocamento).
+          let left = -1;
+          for (let x = 60; x < 160; x += 1) { const px = at(x, 112); if (px[0] + px[1] + px[2] > 200) { left = x; break; } }
+          rec.c.push(cls); rec.bbox.push(left);
+          if (rec.c.length >= want) { rec.done = true; proto.putImageData = orig; }
+        }
+        return r;
+      };
+      return true;
+    `,
+      [frames]
+    );
+  const recorderDone = async () => js("return Boolean(window.__mugenRec?.done);");
+  const takeRecording = async () => js("return window.__mugenRec;");
+  const runsOf = (classes) => {
+    const runs = [];
+    let start = 0;
+    for (let i = 1; i <= classes.length; i += 1) {
+      if (i === classes.length || classes[i] !== classes[start]) {
+        runs.push({ cls: classes[start], n: i - start, first: start === 0, last: i === classes.length });
+        start = i;
+      }
+    }
+    return runs;
+  };
+  // ELF32 big-endian (m68k): tabela de simbolos -> endereco.
+  const elfSymbols = (elf) => {
+    const dv = new DataView(elf.buffer, elf.byteOffset, elf.byteLength);
+    if (elf[0] !== 0x7f || elf[1] !== 0x45 || elf[4] !== 1 || elf[5] !== 2) fail("rom.out nao e ELF32 big-endian");
+    const shOff = dv.getUint32(32), shSize = dv.getUint16(46), shCount = dv.getUint16(48);
+    const out = {};
+    for (let i = 0; i < shCount; i += 1) {
+      const sec = shOff + i * shSize;
+      if (dv.getUint32(sec + 4) !== 2) continue;
+      const table = dv.getUint32(sec + 16), size = dv.getUint32(sec + 20);
+      const strtab = shOff + dv.getUint32(sec + 24) * shSize;
+      const strings = dv.getUint32(strtab + 16);
+      for (let c = table; c + 16 <= table + size; c += 16) {
+        const nameOff = dv.getUint32(c);
+        if (!nameOff) continue;
+        let end = strings + nameOff;
+        while (elf[end] !== 0) end += 1;
+        out[Buffer.from(elf.subarray(strings + nameOff, end)).toString("utf8")] = dv.getUint32(c + 4);
+      }
+    }
+    return out;
+  };
+  const readInput = async () => js("return window.__RDS_E2E__.getLastInputObservation();");
+  const waitInputAck = async (key, value, label) =>
+    waitFor(
+      async () => {
+        const o = await readInput();
+        return o?.lastJoypadAck?.joypad?.[key] === value && !o.lastJoypadSendError ? o : false;
+      },
+      15000,
+      `Ack do input '${key}=${value}' nao chegou (${label}).`,
+      100
+    );
+
+  // 1. Importar pela UI.
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await clickByTestId(sessionId, "wizard-external-import-toggle");
+  const selected = await js(`
+    const select = document.querySelector('[data-testid="external-import-profile-select"]');
+    if (!(select instanceof HTMLSelectElement)) return null;
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(select, "mugen");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return select.value;
+  `);
+  if (selected !== "mugen") fail(`Perfil MUGEN nao disponivel no importador: ${JSON.stringify(selected)}`);
+  const projectName = `Mugen_Walker_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [donorDir]);
+  await clickByTestId(sessionId, "external-import-confirm");
+  await finishMugenSourceReview(sessionId);
+
+  // 2. Compatibilidade.
+  const panelState = await waitFor(
+    async () => {
+      const current = await state();
+      return current?.mugenCompatibility?.open && current.mugenCompatibility.characters.length > 0 ? current : false;
+    },
+    60000,
+    "Painel de compatibilidade MUGEN nao abriu apos a importacao.",
+    300
+  );
+  const projectDir = panelState.activeProjectDir;
+  onProjectCreated(projectDir);
+  const character = panelState.mugenCompatibility.characters.find((c) => c.id === "walker");
+  if (!character) fail("Painel nao mostrou o personagem walker.");
+  const status = Object.fromEntries(character.categories.map((c) => [c.id, c.status]));
+  if (JSON.stringify(status) !== JSON.stringify(expectedStatus)) fail(`Categorias divergem do esperado: ${JSON.stringify({ status, expectedStatus })}`);
+  await shot("01-compatibility", "compatibilidade do personagem walker");
+  addReportStep(report, "import_and_compatibility", "passed", { projectDir, status, totals: character.totals });
+  await clickByTestId(sessionId, "mugen-compat-close");
+
+  // 3. Editar a duracao no Inspector (walk quadro 1: 4 -> 12), recusar invalido, salvar.
+  const scene0 = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  const walker0 = scene0.entities.find((e) => (e.entity_id ?? e.id) === "walker");
+  if (!walker0) fail("Cena importada sem a entidade walker.");
+  const animNames = Object.keys(walker0.components.sprite.animations).sort();
+  const animIndex = Object.fromEntries(animNames.map((n, i) => [n, i]));
+  if (JSON.stringify(walker0.components.sprite.animations.action_20.frame_durations) !== "[4,6]") fail("AIR importado com duracoes inesperadas para action_20.");
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-walker");
+  await waitFor(async () => (await state())?.selectedEntityId === "walker", 15000, "Entidade walker nao foi selecionada.", 200);
+  const walkF0 = "inspector-mugen-anim-action_20-frame-0";
+  await waitFor(async () => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value === "4";`, [walkF0]), 15000, "Inspector nao mostrou 4 ticks no quadro 1 da caminhada.", 200);
+  const walkLabel = () => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.closest('label')?.textContent ?? null;`, [walkF0]);
+  const walkError = () => js(`return document.querySelector('[data-testid="' + arguments[0] + '-error"]')?.textContent ?? null;`, [walkF0]);
+  const typingAttempts = [];
+  const { result: badDiag, log: badLog } = await typeIntoInputAndExpect(
+    sessionId, walkF0, "0",
+    async () => { const e = await walkError(); return e && e.startsWith("0 nao e aceito") && e.includes("Mantido: 4") ? e : false; },
+    "entrada invalida '0'"
+  );
+  typingAttempts.push(...badLog);
+  const { log: editLog } = await typeIntoInputAndExpect(
+    sessionId, walkF0, String(EDITED_WALK_TICKS),
+    async () => { const t = await walkLabel(); return t && t.includes(`${EDITED_WALK_TICKS} ticks = 0,200 s`) && !(await walkError()) ? t : false; },
+    `duracao ${EDITED_WALK_TICKS}`
+  );
+  typingAttempts.push(...editLog);
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const onDisk = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+      const a = onDisk.entities.find((e) => (e.entity_id ?? e.id) === "walker").components.sprite.animations;
+      return JSON.stringify(a.action_20.frame_durations) === `[${EDITED_WALK_TICKS},6]` && JSON.stringify(a.action_20.mugen_frames.map((f) => f.duration)) === `[${EDITED_WALK_TICKS},6]` && JSON.stringify(a.action_200.frame_durations) === "[3,8]";
+    },
+    20000,
+    "Edicao de duracao nao chegou ao disco (ou alterou quadros nao editados).",
+    300
+  );
+  addReportStep(report, "inspector_edit_ticks", "passed", { edited: { animation: "action_20", frame: 1, from: 4, to: EDITED_WALK_TICKS }, invalidZeroDiagnostic: badDiag, animIndex, typingAttempts });
+
+  // 4. Encerrar o app, reabrir, conferir. (a limpeza dos processos e do cenario, em main/finally)
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto importado.", 300);
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto importado nao reabriu.", 300);
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-walker");
+  const reopened = await waitFor(
+    async () =>
+      js(`
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+      if (!q(arguments[0]) || !q(arguments[1])) return false;
+      return [q(arguments[0]).value, q(arguments[1]).value];
+    `, [walkF0, "inspector-mugen-anim-action_20-frame-1"]),
+    15000,
+    "Inspector nao mostrou o tempo apos reabrir.",
+    200
+  );
+  if (reopened[0] !== String(EDITED_WALK_TICKS) || reopened[1] !== "6") fail(`Duracoes nao sobreviveram ao reinicio: ${JSON.stringify(reopened)}`);
+  await clickTopBarMenuAction(sessionId, "Relatorio MUGEN");
+  await waitFor(async () => { const cur = await state(); return cur?.mugenCompatibility?.open && cur.mugenCompatibility.characters.some((c) => c.id === "walker"); }, 30000, "Relatorio MUGEN nao reabriu.", 300);
+  await clickByTestId(sessionId, "mugen-compat-close");
+  await shot("02-reopened", "projeto reaberto com a duracao editada");
+  addReportStep(report, "restart_reopen", "passed", { reopenedTicks: reopened, reportReopened: true });
+  if (process.env.RDS_E2E_INJECT_FAILURE === "after-restart") fail("Falha controlada (RDS_E2E_INJECT_FAILURE=after-restart) apos reiniciar o app.");
+
+  // 5. Build & Run.
+  const run = await runBuildRunAndCollect(sessionId, "mugen walker editado", timeoutMs, report, artifactPrefix);
+  const romSha = await sha256File(run.rom_path);
+  const progress0 = await readCanonicalGameProgress(sessionId);
+  if (!progress0 || progress0.romSha256 !== romSha) fail(`ROM em execucao nao e a compilada: ${JSON.stringify({ running: progress0?.romSha256, built: romSha })}`);
+  const elf = await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out"));
+  const symbols = elfSymbols(elf);
+  const animAddr = symbols["rds_mugen_spr_walker_anim"];
+  if (typeof animAddr !== "number") fail(`Simbolo rds_mugen_spr_walker_anim ausente no ELF (${Object.keys(symbols).filter((k) => k.includes("mugen")).join(",")}).`);
+  const readAnim = async () => {
+    const r = await readEmulatorMemory(sessionId, 2, animAddr & 0xffff, 2);
+    return readU16le(r.data, 0); // WRAM do core vem em ordem little-endian (mesmo decode do teste Rust do produto)
+  };
+  report.runs.push({ kind: "identity", rom_path: run.rom_path, rom_sha256: romSha, elf_sha256: createHash("sha256").update(elf).digest("hex"), anim_symbol: "rds_mugen_spr_walker_anim", anim_address: `0x${animAddr.toString(16)}` });
+  await focusGameCanvasNatively(sessionId);
+
+  // Fase A: sem input. O personagem fica em idle o tempo todo (controle negativo).
+  await startFrameRecorder(90);
+  const idlePolls = [];
+  await waitFor(async () => { idlePolls.push(await readAnim()); return (await recorderDone()) ? true : false; }, 120000, "Gravacao sem input nao terminou.", 50);
+  const recA = await takeRecording();
+  // 0xFFFF = valor inicial antes do 1o tick do runtime; depois dele o indice tem de ser o do idle.
+  const idleSettled = idlePolls.filter((v) => v !== 0xffff);
+  if (recA.c.some((c) => c !== "idle") || idleSettled.length < 3 || idleSettled.some((v) => v !== animIndex.action_0)) fail(`Sem input o personagem saiu do idle: ${JSON.stringify({ classes: [...new Set(recA.c)], polls: [...new Set(idlePolls)] })}`);
+  addReportStep(report, "no_input_control", "passed", { frames: recA.c.length, animPolls: [...new Set(idlePolls)] });
+
+  // Fase B: segurar ArrowRight (evento nativo) -> caminhada.
+  await startFrameRecorder(150);
+  const reqBefore = (await readInput())?.lastJoypadRequest?.seq ?? 0;
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "direcao F do MUGEN");
+  const rightAck = await waitInputAck("right", true, "ArrowRight");
+  if (!(rightAck.lastJoypadRequest.seq > reqBefore) || rightAck.lastJoypadAck.seq !== rightAck.lastJoypadRequest.seq || rightAck.lastJoypadAck.sessionId !== rightAck.joypadSessionId) fail(`Intencao/aceitacao de input inconsistentes: ${JSON.stringify(rightAck)}`);
+  const walkPolls = [];
+  await waitFor(async () => { walkPolls.push(await readAnim()); return (await recorderDone()) ? true : false; }, 180000, "Gravacao da caminhada nao terminou.", 50);
+  const recB = await takeRecording();
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "liberacao da direcao F");
+  const rightRelease = await waitInputAck("right", false, "liberacao de ArrowRight");
+  const walkRuns = runsOf(recB.c);
+  const interior = walkRuns.filter((r) => !r.first && !r.last);
+  const near = (n, expected) => Math.abs(n - expected) <= 1;
+  const greens = interior.filter((r) => r.cls === "walkA").map((r) => r.n);
+  const blues = interior.filter((r) => r.cls === "walkB").map((r) => r.n);
+  const idles = interior.filter((r) => r.cls === "idle").map((r) => r.n);
+  const others = recB.c.filter((c) => c === "other" || c === "hitA" || c === "hitB" || c === "hit?").length;
+  if (greens.length < 3 || blues.length < 3 || !greens.every((n) => near(n, EDITED_WALK_TICKS)) || !blues.every((n) => near(n, 6)) || idles.some((n) => n > 2) || others > 0) {
+    fail(`Caminhada nao segue 12/6 ticks (editado/nao editado): ${JSON.stringify({ greens, blues, idles, others, runs: walkRuns.slice(0, 12) })}`);
+  }
+  if (!walkPolls.every((v) => v === animIndex.action_20 || v === animIndex.action_0) || walkPolls.filter((v) => v === animIndex.action_20).length < walkPolls.length * 0.6) fail(`Estado na RAM nao acompanhou a caminhada: ${JSON.stringify({ walk: animIndex.action_20, polls: walkPolls })}`);
+  const lefts = [...new Set(recB.bbox)];
+  if (lefts.length !== 1) fail(`A posicao horizontal mudou (o perfil v1 nao move o personagem): ${JSON.stringify(lefts)}`);
+  await shot("03-walking", "personagem caminhando (ultimo quadro gravado)");
+  addReportStep(report, "keyboard_walk", "passed", {
+    request: rightAck.lastJoypadRequest, ack: rightAck.lastJoypadAck, release: rightRelease.lastJoypadAck,
+    greenTicks: greens, blueTicks: blues, idleGapTicks: idles, animPolls: [...new Set(walkPolls)], expectedAnimIndex: animIndex.action_20,
+    positionLeftEdgeValues: lefts,
+  });
+
+  // Fase C: retorno ao idle apos soltar.
+  await startFrameRecorder(90);
+  const relPolls = [];
+  await waitFor(async () => { relPolls.push(await readAnim()); return (await recorderDone()) ? true : false; }, 120000, "Gravacao pos-soltar nao terminou.", 50);
+  const recC = await takeRecording();
+  const tailIdle = recC.c.slice(-60);
+  if (tailIdle.some((c) => c !== "idle") || relPolls.slice(-10).some((v) => v !== animIndex.action_0)) fail(`Nao voltou ao idle apos soltar a tecla: ${JSON.stringify({ tail: [...new Set(tailIdle)], polls: relPolls.slice(-10) })}`);
+  addReportStep(report, "release_returns_idle", "passed", { firstIdleFrame: recC.c.indexOf("idle"), tailClasses: [...new Set(tailIdle)] });
+
+  // Fase D: acao (KeyZ = botao A do Mega Drive = comando `a`).
+  await startFrameRecorder(90);
+  const reqBeforeA = (await readInput())?.lastJoypadRequest?.seq ?? 0;
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "botao a do MUGEN");
+  const actAck = await waitInputAck("y", true, "KeyZ");
+  if (!(actAck.lastJoypadRequest.seq > reqBeforeA) || actAck.lastJoypadAck.seq !== actAck.lastJoypadRequest.seq || actAck.lastJoypadAck.sessionId !== actAck.joypadSessionId) fail(`Intencao/aceitacao do botao inconsistentes: ${JSON.stringify(actAck)}`);
+  const actPolls = [];
+  let released = false;
+  const framesAtPress = (await readCanonicalGameProgress(sessionId)).renderedFrames;
+  await waitFor(
+    async () => {
+      actPolls.push(await readAnim());
+      if (!released && (await readCanonicalGameProgress(sessionId)).renderedFrames >= framesAtPress + 3) {
+        released = true;
+        await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "liberacao do botao a");
+      }
+      return (await recorderDone()) ? true : false;
+    },
+    180000,
+    "Gravacao da acao nao terminou.",
+    50
+  );
+  const actRelease = await waitInputAck("y", false, "liberacao de KeyZ");
+  const recD = await takeRecording();
+  const actRuns = runsOf(recD.c);
+  const hitA = actRuns.filter((r) => r.cls === "hitA" && !r.first && !r.last).map((r) => r.n);
+  const hitB = actRuns.filter((r) => r.cls === "hitB" && !r.first && !r.last).map((r) => r.n);
+  const order = actRuns.map((r) => r.cls).join(">");
+  if (hitA.length !== 1 || hitB.length !== 1 || !near(hitA[0], 3) || !near(hitB[0], 8) || !/^idle>hitA>hitB>idle$/.test(order) || recD.c.some((c) => c === "walkA" || c === "walkB" || c === "other" || c === "hit?")) {
+    fail(`Acao nao segue a sequencia 3/8 (hitA>hitB>idle) uma unica vez: ${JSON.stringify({ hitA, hitB, order, runs: actRuns })}`);
+  }
+  if (!actPolls.includes(animIndex.action_200) || actPolls.includes(animIndex.action_20) || actPolls[actPolls.length - 1] !== animIndex.action_0) fail(`Estado na RAM nao acompanhou a acao: ${JSON.stringify({ attack: animIndex.action_200, polls: [...new Set(actPolls)], last: actPolls[actPolls.length - 1] })}`);
+  await shot("04-after-action", "apos a acao (idle)");
+  addReportStep(report, "keyboard_action", "passed", {
+    label: "acao/animacao de ataque (sem acerto, dano ou colisao)",
+    request: actAck.lastJoypadRequest, ack: actAck.lastJoypadAck, release: actRelease.lastJoypadAck,
+    hitATicks: hitA, hitBTicks: hitB, sequence: order, animPolls: [...new Set(actPolls)], expectedAnimIndex: animIndex.action_200,
+  });
+
+  // Fase E: de novo sem input, o personagem permanece em idle (a acao nao se repete sozinha).
+  await startFrameRecorder(60);
+  const finalPolls = [];
+  await waitFor(async () => { finalPolls.push(await readAnim()); return (await recorderDone()) ? true : false; }, 120000, "Gravacao final nao terminou.", 50);
+  const recE = await takeRecording();
+  if (recE.c.some((c) => c !== "idle") || finalPolls.some((v) => v !== animIndex.action_0)) fail(`Idle nao se manteve sem input: ${JSON.stringify({ classes: [...new Set(recE.c)] })}`);
+  addReportStep(report, "final_no_input_control", "passed", { frames: recE.c.length });
+
+  report.generatedAt = new Date().toISOString();
+  await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
+  console.log(`OK: Desktop Tauri mugen-control E2E passou. Relatorio: ${reportPath}`);
+}
+
+// Digita no campo com teclado nativo e SO aceita quando (1) o campo mostra exatamente o texto digitado e
+// (2) a verificacao especifica devolve evidencia nova. Ate `attempts` tentativas, cada uma registrada;
+// valor anterior ou ausencia de diagnostico nunca contam como sucesso.
+async function typeIntoInputAndExpect(sessionId, testId, value, check, label, attempts = 3) {
+  const log = [];
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    await setInputByTestIdNative(sessionId, testId, value);
+    const observed = await executeScript(
+      sessionId,
+      `const el = document.querySelector('[data-testid="' + arguments[0] + '"]'); return el ? el.value : null;`,
+      [testId]
+    );
+    let result = false;
+    let error = null;
+    if (observed === String(value)) {
+      try {
+        result = await waitFor(async () => check(), 3000, `${label}: verificacao`, 100);
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+      }
+    }
+    log.push({ attempt, typed: String(value), observed, accepted: Boolean(result), error });
+    console.log(`[typing] ${label} tentativa ${attempt}: digitado=${JSON.stringify(String(value))} campo=${JSON.stringify(observed)} aceito=${Boolean(result)}`);
+    if (result) return { result, log };
+  }
+  throw new Error(`${label}: sem evidencia apos ${attempts} tentativas: ${JSON.stringify(log)}`);
+}
+
+// ELF32 big-endian (m68k): tabela de simbolos -> endereco. So LOCALIZA variaveis de diagnostico;
+// nunca fornece o resultado esperado ao oraculo.
+function elfSymbolTable(elf) {
+  const dv = new DataView(elf.buffer, elf.byteOffset, elf.byteLength);
+  if (elf[0] !== 0x7f || elf[1] !== 0x45 || elf[4] !== 1 || elf[5] !== 2) fail("rom.out nao e ELF32 big-endian");
+  const shOff = dv.getUint32(32), shSize = dv.getUint16(46), shCount = dv.getUint16(48);
+  const out = {};
+  for (let i = 0; i < shCount; i += 1) {
+    const sec = shOff + i * shSize;
+    if (dv.getUint32(sec + 4) !== 2) continue;
+    const table = dv.getUint32(sec + 16), size = dv.getUint32(sec + 20);
+    const strtab = shOff + dv.getUint32(sec + 24) * shSize;
+    const strings = dv.getUint32(strtab + 16);
+    for (let c = table; c + 16 <= table + size; c += 16) {
+      const nameOff = dv.getUint32(c);
+      if (!nameOff) continue;
+      let end = strings + nameOff;
+      while (elf[end] !== 0) end += 1;
+      out[Buffer.from(elf.subarray(strings + nameOff, end)).toString("utf8")] = dv.getUint32(c + 4);
+    }
+  }
+  return out;
+}
+
+// ── MUGEN: locomocao horizontal importada (perfil mugen.character.v1, Experimental) ─────────────
+// Fixture autoral `strider` (previsao em crates/rex-mugen/src/fixture.rs). Contrato de velocidade:
+// px por tick de 1/60 s, Q8.8, x positivo = direita, deslocamento = floor(soma(vx_q8)/256).
+// Fluxo pela UI: importar -> relatorio -> duplicar (2a entidade) -> editar velocidade -> salvar ->
+// reiniciar -> reabrir -> Build & Run -> teclado NATIVO -> posicao por quadro emulado no core (pixels)
+// comparada ao contrato + RAM em repouso. Sem colisao, limite de tela, dano ou combate.
+// Real BYOR art, canonical source review/import/edit/reopen/build, native input.
+// Pixel expectations are independently decoded by verify-mugen-real.py.
+async function runMugenRealScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
+  const source = process.env.RDS_MUGEN_REAL_SOURCE;
+  const output = process.env.RDS_MUGEN_REAL_UI_OUTPUT;
+  if (!source || !output) fail("RDS_MUGEN_REAL_SOURCE e RDS_MUGEN_REAL_UI_OUTPUT obrigatorios (BYOR fora do Git).");
+  await mkdir(output, { recursive: true });
+  const prefix = `mugen-real-${artifactTimestamp()}`;
+  const appPath = currentE2eRunContext.appPath;
+  const hashFile = async (p) => createHash("sha256").update(await readFile(p)).digest("hex");
+  const report = { schema: "retrodev.mugen_real_ui/v1", maturity: "Experimental", source, projectDir: null, app_sha256: await hashFile(appPath), steps: [], review_frames: [], samples: [], inputs: [], artifacts: [] };
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const shot = async (label) => {
+    const artifact = await captureScreenshot(sessionId, `${prefix}-${label}.png`);
+    addReportArtifact(report, artifact, label);
+  };
+  const select = async (id, value) => {
+    const result = await js(`
+      const e = document.querySelector('[data-testid="'+arguments[0]+'"]');
+      if (!(e instanceof HTMLSelectElement)) return null;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, String(arguments[1]));
+      e.dispatchEvent(new Event('change', {bubbles:true})); return e.value;
+    `, [id, value]);
+    if (result !== String(value)) fail(`Select ${id} nao aceitou ${value}.`);
+  };
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await clickByTestId(sessionId, "wizard-external-import-toggle");
+  await select("external-import-profile-select", "mugen");
+  const name = `Ken_Majik_Real_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', name);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [source]);
+  await clickByTestId(sessionId, "external-import-confirm");
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="mugen-source-action-200"]');`), 120000, "Triagem Ken nao abriu.", 200);
+  await select("mugen-source-palette", "ken1.act");
+  for (const n of [0, 20, 21, 200]) await clickByTestId(sessionId, `mugen-source-action-${n}`);
+  await clickByTestId(sessionId, "mugen-source-authored-demo");
+  await clickByTestId(sessionId, "mugen-source-analyze");
+  await waitFor(async () => js(`const e=document.querySelector('[data-testid="mugen-source-import"]');return e && !e.disabled;`), 120000, "Analise selecionada Ken recusada.", 200);
+  for (const [action, count] of [[0, 6], [20, 6], [21, 6], [200, 3]]) {
+    await select("mugen-review-action", action);
+    for (let element = 0; element < count; element++) {
+      await select("mugen-review-frame", element);
+      const f = await waitFor(async () => js(`
+        const o=document.querySelector('[data-testid="mugen-review-original"]');
+        const c=document.querySelector('[data-testid="mugen-review-converted"]');
+        if(!o||!c||Number(o.dataset.action)!==arguments[0]||Number(o.dataset.element)!==arguments[1])return null;
+        return {action:Number(o.dataset.action),element:Number(o.dataset.element),original_sha256:o.dataset.sha256,converted_sha256:c.dataset.sha256,
+          original_png:o.querySelector('image').getAttribute('href'),converted_png:c.querySelector('image').getAttribute('href'),
+          original_viewbox:o.getAttribute('viewBox'),converted_viewbox:c.getAttribute('viewBox')};
+      `, [action, element]), 10000, "Imagem antiga depois da troca de recurso.", 100);
+      if (f.original_viewbox !== f.converted_viewbox) fail("Fonte e convertido em escalas diferentes.");
+      report.review_frames.push(f);
+    }
+    await shot(`review-${action}`);
+  }
+  await clickByTestId(sessionId, "mugen-review-play");
+  const playing = await js(`return document.querySelector('[data-testid="mugen-review-play"]')?.textContent;`);
+  if (playing !== "Pausar") fail("Previa animada nao iniciou.");
+  await clickByTestId(sessionId, "mugen-review-play");
+  report.steps.push({step:"source_review",status:"passed",actions:[0,20,21,200],palette:"ken1.act",authored_demo:true,frames:report.review_frames.length});
+  await clickByTestId(sessionId, "mugen-source-import");
+  const state = await waitFor(async () => {
+    const s = await readAutomationState(sessionId);
+    return s?.mugenCompatibility?.open && s.mugenCompatibility.characters.some((c)=>c.id==="kenmasters") ? s : false;
+  }, 120000, "Importacao Ken nao abriu relatorio.", 200);
+  const project = state.activeProjectDir;
+  report.projectDir = project;
+  onProjectCreated(project);
+  const storedReportPath = path.join(project,"assets/mugen/kenmasters_import_report.json");
+  const persisted = JSON.parse(await readFile(storedReportPath,"utf8"));
+  const persistedReportSha = await hashFile(storedReportPath);
+  if (persisted.behavior_mode !== "authored_visual_demo" || persisted.review_options.palette_file !== "ken1.act") fail("Escolhas de revisao nao persistiram.");
+  await shot("imported");
+  await clickByTestId(sessionId,"mugen-compat-close");
+  await clickByTestId(sessionId,"workspace-rail-scene");
+  await clickByTestId(sessionId,"hierarchy-entity-kenmasters");
+  const velocity = "inspector-mugen-velocity-state-20";
+  await waitFor(async () => js(`return document.querySelector('[data-testid="'+arguments[0]+'"]')?.value === '2.5';`,[velocity]),15000,"Velocidade autoral Ken ausente.",200);
+  await typeIntoInputAndExpect(sessionId, velocity, "1.5", async () => js(`return document.querySelector('[data-testid="'+arguments[0]+'"]')?.value === '1.5';`,[velocity]), "Ken: editar velocidade para 1.5 px/tick");
+  await clickTopBarMenuAction(sessionId,"Salvar");
+  await waitFor(async () => {
+    const scene = JSON.parse(await readFile(path.join(project,"scenes/main.json"),"utf8"));
+    const e = scene.entities.find((e)=>e.entity_id==="kenmasters");
+    const graph = e.components.logic.graph ? JSON.parse(e.components.logic.graph) : JSON.parse(await readFile(path.join(project,e.components.logic.graph_ref),"utf8"));
+    const nodes = graph.nodes.filter((n)=>n.params?.state_no===20 && n.params?.vx!==undefined);
+    return nodes.length >= 2 && nodes.every((n)=>n.params.vx==="1.5");
+  },20000,"Velocidade editada nao chegou ao disco.",200);
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId,uiBootstrapTimeoutMs,"App nao reabriu.");
+  await waitFor(async () => js("return !!window.__RDS_E2E__;"),uiBootstrapTimeoutMs,"API nao voltou.",200);
+  await setSessionWindowRect(sessionId,1920,1080);
+  await fillInputBySelector(sessionId,'input[placeholder="Nome do projeto"]',name);
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="wizard-existing-project-card"]');`),30000,"Wizard nao encontrou Ken.",200);
+  await clickByTestId(sessionId,"wizard-open-existing-project");
+  await waitFor(async () => (await readAutomationState(sessionId))?.activeProjectDir===project,60000,"Ken nao reabriu.",200);
+  await clickByTestId(sessionId,"workspace-rail-scene");
+  await clickByTestId(sessionId,"hierarchy-entity-kenmasters");
+  await waitFor(async () => js(`return document.querySelector('[data-testid="'+arguments[0]+'"]')?.value==='1.5';`,[velocity]),15000,"Edicao perdeu-se no reinicio.",200);
+  await clickTopBarMenuAction(sessionId,"Relatorio MUGEN");
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="mugen-review-original"]');`),30000,"Revisao visual nao reabriu.",200);
+  if (await hashFile(storedReportPath) !== persistedReportSha) fail("Relatorio mudou durante edicao/reabertura.");
+  await select("mugen-review-action",200);
+  await select("mugen-review-frame",1);
+  const reopened = await js(`return document.querySelector('[data-testid="mugen-review-original"]')?.dataset.sha256;`);
+  if (reopened !== report.review_frames.find((f)=>f.action===200&&f.element===1).original_sha256) fail("Revisao alterou os pixels apos reinicio.");
+  await shot("reopened-review");
+  await clickByTestId(sessionId,"mugen-compat-close");
+  report.steps.push({step:"import_edit_save_exit_reopen",status:"passed",velocity:{state:20,from:2.5,to:1.5},original_cns_converted:false});
+  const run = await runBuildRunAndCollect(sessionId,"Ken Majik real editado",timeoutMs,report,prefix);
+  report.rom_sha256 = await hashFile(run.rom_path);
+  report.rom_path = run.rom_path;
+  report.elf_sha256 = await hashFile(path.join(project,"build/megadrive/out/rom.out"));
+  const progress = await readCanonicalGameProgress(sessionId);
+  if (progress?.romSha256 !== report.rom_sha256) fail("Core executa outra ROM.");
+  await closeVisibleConsoleDrawer(sessionId,"Ken teclado");
+  await focusGameCanvasNatively(sessionId);
+  await waitFor(async () => (await readCanonicalGameProgress(sessionId))?.renderedFrames >= 60,
+    180000,"Ken nao concluiu os 60 quadros de inicializacao antes da captura.",100);
+  await js(`
+    const proto=CanvasRenderingContext2D.prototype, orig=proto.putImageData;
+    const rec={phase:'idle',frames:[],orig};window.__mugenRealRec=rec;
+    proto.putImageData=function(img,...rest){
+      const result=orig.call(this,img,...rest);
+      if(this.canvas?.getAttribute('data-testid')==='viewport-game-canvas' && rec.frames.length<400){
+        const scratch=document.createElement('canvas');scratch.width=img.width;scratch.height=img.height;
+        orig.call(scratch.getContext('2d'),img,0,0);
+        rec.frames.push({phase:rec.phase,width:img.width,height:img.height,png:scratch.toDataURL('image/png')});
+      }return result;
+    };return true;
+  `);
+  const frameNow = async () => (await readCanonicalGameProgress(sessionId)).renderedFrames;
+  const waitFrames = async (n,label) => {const start=await frameNow();await waitFor(async () => (await frameNow())>=start+n,180000,`Ken nao avancou ${label}.`,100);};
+  const key = async (code,joy,down) => {
+    await sendNativeGameKey(sessionId,code,down?"keyDown":"keyUp",`Ken ${code}`);
+    const ack=await waitFor(async () => {const i=await js("return window.__RDS_E2E__.getLastInputObservation();");return i?.lastJoypadAck?.joypad?.[joy]===down&&!i.lastJoypadSendError?i:false;},15000,`Input ${code} nao confirmado.`,50);
+    if (ack.lastJoypadRequest.seq!==ack.lastJoypadAck.seq || ack.lastJoypadAck.sessionId!==ack.joypadSessionId) fail("Ack de outra intencao ou sessao.");
+    report.inputs.push({code,down,frame:await frameNow(),ack:ack.lastJoypadAck});
+  };
+  const phase = (name) => js("window.__mugenRealRec.phase=arguments[0];return true;",[name]);
+  await waitFrames(42,"sem input");await shot("idle");
+  await phase("walk");await key("ArrowRight","right",true);await waitFrames(36,"caminhada direita");await shot("walk");await key("ArrowRight","right",false);
+  await phase("stop");await waitFrames(18,"parada");
+  await phase("back");await key("ArrowLeft","left",true);await waitFrames(30,"caminhada esquerda");await shot("back");await key("ArrowLeft","left",false);
+  await phase("stop2");await waitFrames(18,"parada antes do ataque");
+  // Request a short native press. The viewport observes ten-frame batches;
+  // the independent oracle records the actual hold and any authored repeats.
+  await phase("attack");await key("KeyZ","y",true);await waitFrames(2,"toque de ataque");await key("KeyZ","y",false);await waitFrames(10,"conclusao do ataque");
+  await phase("idle2");await waitFrames(24,"apos ataque");await shot("played");
+  await clickByTestId(sessionId,"viewport-pause");
+  await waitFor(async () => (await readAutomationState(sessionId))?.emulPaused,15000,"Nao pausou.",100);
+  const core = await invokeCoreObserve(sessionId);
+  if (!core?.ok || core.rom_sha256!==report.rom_sha256) fail("Identidade core nao demonstrada.");
+  const canvas = await js(`const c=document.querySelector('[data-testid="viewport-game-canvas"]');const d=c.getContext('2d').getImageData(0,0,c.width,c.height);return {width:c.width,height:c.height,rgba:Array.from(d.data),png:c.toDataURL('image/png')};`);
+  report.core_canvas_equal=core.framebuffer_width===canvas.width&&core.framebuffer_height===canvas.height&&Buffer.from(core.framebuffer_rgba).equals(Buffer.from(canvas.rgba));
+  if (!report.core_canvas_equal) fail("Framebuffer do core difere do canvas pausado.");
+  report.core = {label:core.core_label,path:core.core_path,sha256:await hashFile(core.core_path),frames_run:core.frames_run,framebuffer_sha256:core.framebuffer_sha256};
+  await writeFile(path.join(output,"canvas-paused.png"),Buffer.from(canvas.png.split(",")[1],"base64"));
+  await writeFile(path.join(output,"core-paused.rgba"),Buffer.from(core.framebuffer_rgba));
+  const frames=await js("CanvasRenderingContext2D.prototype.putImageData=window.__mugenRealRec.orig;return window.__mugenRealRec.frames;");
+  for (let i=0;i<frames.length;i++) {
+    const f=frames[i], file=`ui-${String(i).padStart(4,"0")}.png`;
+    await writeFile(path.join(output,file),Buffer.from(f.png.split(",")[1],"base64"));
+    report.samples.push({tick:i,phase:f.phase,file,width:f.width,height:f.height});
+  }
+  report.steps.push({step:"official_build_native_keyboard_core_canvas",status:"passed",samples:frames.length,independent_pixel_verification:"required: verify-mugen-real.py"});
+  await writeFile(path.join(output,"ui-report.json"),`${JSON.stringify(report,null,2)}\n`);
+  console.log(`MUGEN real UI evidence: ${output}`);
+}
+
+
+// ELF32 big-endian (m68k): symbol table -> address.
+function parseElfSymbols(elf) {
+  const dv = new DataView(elf.buffer, elf.byteOffset, elf.byteLength);
+  if (elf[0] !== 0x7f || elf[1] !== 0x45 || elf[4] !== 1 || elf[5] !== 2) fail("rom.out nao e ELF32 big-endian");
+  const shOff = dv.getUint32(32), shSize = dv.getUint16(46), shCount = dv.getUint16(48);
+  const out = {};
+  for (let i = 0; i < shCount; i += 1) {
+    const sec = shOff + i * shSize;
+    if (dv.getUint32(sec + 4) !== 2) continue;
+    const table = dv.getUint32(sec + 16), size = dv.getUint32(sec + 20);
+    const strtab = shOff + dv.getUint32(sec + 24) * shSize;
+    const strings = dv.getUint32(strtab + 16);
+    for (let c = table; c + 16 <= table + size; c += 16) {
+      const nameOff = dv.getUint32(c);
+      if (!nameOff) continue;
+      let end = strings + nameOff;
+      while (elf[end] !== 0) end += 1;
+      out[Buffer.from(elf.subarray(strings + nameOff, end)).toString("utf8")] = dv.getUint32(c + 4);
+    }
+  }
+  return out;
+}
+
+// Native key with a driver-controlled hold: one W3C actions request (keyDown, pause, keyUp)
+// so the hold does not include two separate HTTP round trips.
+async function sendNativeGameKeyTap(sessionId, code, holdMs, label) {
+  const value = NATIVE_GAME_KEYS[code];
+  if (!value) fail(`Tecla nativa nao mapeada para ${label}: ${code}`);
+  const startedAt = Date.now();
+  const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, {
+    actions: [{ type: "key", id: `rds-tap-${code}`, actions: [{ type: "keyDown", value }, { type: "pause", duration: holdMs }, { type: "keyUp", value }] }],
+  });
+  if (!response.ok || response.payload?.value?.error) fail(`Toque nativo recusado (${label}): ${JSON.stringify(response)}`);
+  return { startedAt, endedAt: Date.now() };
+}
+
+// Original chain pilot (Stand_X of the BYOR Ken): import review -> origin review -> save ->
+// restart -> reopen -> Build & Run -> NATIVE keyboard. No direct core input. The ROM records,
+// tick by tick, the pad it sampled and the state it decided (RAM ring); the independent
+// reference (scripts/verify-mugen-chain.py) re-simulates the CMD/CNS from that pad stream.
+async function runMugenOriginalScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
+  const source = process.env.RDS_MUGEN_REAL_SOURCE;
+  const output = process.env.RDS_MUGEN_CHAIN_UI_OUTPUT;
+  if (!source || !output) fail("RDS_MUGEN_REAL_SOURCE e RDS_MUGEN_CHAIN_UI_OUTPUT obrigatorios (BYOR fora do Git).");
+  await mkdir(output, { recursive: true });
+  const prefix = `mugen-original-${artifactTimestamp()}`;
+  const appPath = currentE2eRunContext.appPath;
+  const hashFile = async (p) => createHash("sha256").update(await readFile(p)).digest("hex");
+  const report = { schema: "retrodev.mugen_chain_ui/v1", maturity: "Experimental", source, projectDir: null, app_sha256: await hashFile(appPath), steps: [], review_frames: [], inputs: [], artifacts: [], chain_review: null };
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const shot = async (label) => { addReportArtifact(report, await captureScreenshot(sessionId, `${prefix}-${label}.png`), label); };
+  const select = async (id, value) => {
+    const result = await js(`
+      const e = document.querySelector('[data-testid="'+arguments[0]+'"]');
+      if (!(e instanceof HTMLSelectElement)) return null;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, String(arguments[1]));
+      e.dispatchEvent(new Event('change', {bubbles:true})); return e.value;
+    `, [id, value]);
+    if (result !== String(value)) fail(`Select ${id} nao aceitou ${value}.`);
+  };
+  const readChainReview = (root) => js(`
+    const scope = document.querySelector(arguments[0]) ?? document;
+    const review = scope.querySelector('[data-testid="mugen-chain-review"]');
+    if (!review) return null;
+    const count = (c) => Number(review.querySelector('[data-testid="mugen-chain-count-'+c+'"]')?.dataset.count ?? -1);
+    return { status: review.dataset.status,
+      counts: { converted: count('converted'), approximate: count('approximate'), authored: count('authored'), unconverted: count('unconverted') },
+      dependency: review.querySelector('[data-testid="mugen-chain-dependency"]')?.dataset.status ?? null,
+      rows: Array.from(review.querySelectorAll('[data-testid^="mugen-chain-op-"]')).map((r) => ({ id: r.dataset.testid ?? r.getAttribute('data-testid'), cls: r.dataset.class, origin: r.children[1]?.textContent ?? '', text: r.children[2]?.textContent ?? '' })),
+      unconverted: review.querySelector('[data-testid="mugen-chain-unconverted"] summary')?.textContent ?? null };
+  `, [root]);
+
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await clickByTestId(sessionId, "wizard-external-import-toggle");
+  await select("external-import-profile-select", "mugen");
+  const name = `Ken_Majik_Chain_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', name);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [source]);
+  await clickByTestId(sessionId, "external-import-confirm");
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="mugen-source-action-200"]');`), 120000, "Triagem Ken nao abriu.", 200);
+  await select("mugen-source-palette", "ken1.act");
+  for (const n of [0, 20, 21, 200]) await clickByTestId(sessionId, `mugen-source-action-${n}`);
+  // Behavior origin: original chain instead of the authored demo.
+  await clickByTestId(sessionId, "mugen-source-original-chain");
+  await clickByTestId(sessionId, "mugen-source-analyze");
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="mugen-source-chain-200"]');`), 120000, "Cadeia 200 nao listada como convertivel.", 200);
+  const importBefore = await js(`const e=document.querySelector('[data-testid="mugen-source-import"]');return !!e && !e.disabled;`);
+  if (importBefore) fail("Importar habilitado sem escolher a cadeia.");
+  await clickByTestId(sessionId, "mugen-source-chain-200");
+  await clickByTestId(sessionId, "mugen-source-analyze");
+  await waitFor(async () => js(`const e=document.querySelector('[data-testid="mugen-source-import"]');return !!e && !e.disabled && !!document.querySelector('[data-testid="mugen-chain-review"]');`), 120000, "Revisao da cadeia original recusada.", 200);
+  const reviewed = await readChainReview('[data-testid="mugen-source-review"]');
+  if (!reviewed || reviewed.status !== "converted" || reviewed.dependency !== "missing") fail(`Revisao de origem inesperada: ${JSON.stringify(reviewed)}`);
+  for (const c of ["converted", "approximate", "authored", "unconverted"]) if (!(reviewed.counts[c] > 0)) fail(`Classe ${c} vazia na revisao de origem.`);
+  report.chain_review = reviewed;
+  await shot("origin-review");
+  for (const [action, count] of [[0, 6], [20, 6], [21, 6], [200, 3]]) {
+    await select("mugen-review-action", action);
+    for (let element = 0; element < count; element++) {
+      await select("mugen-review-frame", element);
+      const f = await waitFor(async () => js(`
+        const o=document.querySelector('[data-testid="mugen-review-original"]');
+        const c=document.querySelector('[data-testid="mugen-review-converted"]');
+        if(!o||!c||Number(o.dataset.action)!==arguments[0]||Number(o.dataset.element)!==arguments[1])return null;
+        return {action:Number(o.dataset.action),element:Number(o.dataset.element),original_sha256:o.dataset.sha256,converted_sha256:c.dataset.sha256,
+          original_png:o.querySelector('image').getAttribute('href'),converted_png:c.querySelector('image').getAttribute('href'),
+          original_viewbox:o.getAttribute('viewBox'),converted_viewbox:c.getAttribute('viewBox')};
+      `, [action, element]), 10000, "Imagem antiga depois da troca de recurso.", 100);
+      if (f.original_viewbox !== f.converted_viewbox) fail("Fonte e convertido em escalas diferentes.");
+      report.review_frames.push(f);
+    }
+  }
+  report.steps.push({ step: "source_and_origin_review", status: "passed", actions: [0, 20, 21, 200], palette: "ken1.act", chain_state: 200, frames: report.review_frames.length });
+  await clickByTestId(sessionId, "mugen-source-import");
+  const state = await waitFor(async () => {
+    const s = await readAutomationState(sessionId);
+    return s?.mugenCompatibility?.open && s.mugenCompatibility.characters.some((c) => c.id === "kenmasters") ? s : false;
+  }, 120000, "Importacao Ken nao abriu relatorio.", 200);
+  const project = state.activeProjectDir;
+  report.projectDir = project;
+  onProjectCreated(project);
+  const compat = await readChainReview('[data-testid="mugen-compat-character-kenmasters"]');
+  if (!compat || compat.status !== "converted" || JSON.stringify(compat.counts) !== JSON.stringify(reviewed.counts)) fail(`Relatorio importado difere da revisao: ${JSON.stringify({ compat, reviewed })}`);
+  const reportPath = path.join(project, "assets/mugen/kenmasters_import_report.json");
+  const persisted = JSON.parse(await readFile(reportPath, "utf8"));
+  const reportSha = await hashFile(reportPath);
+  if (persisted.behavior_mode !== "original_chain" || persisted.original_chain?.status !== "converted") fail("Modo de comportamento nao persistiu como original_chain.");
+  const graphOf = async () => {
+    const scene = JSON.parse(await readFile(path.join(project, "scenes/main.json"), "utf8"));
+    const e = scene.entities.find((x) => x.entity_id === "kenmasters");
+    const graph = e.components.logic.graph ? JSON.parse(e.components.logic.graph) : JSON.parse(await readFile(path.join(project, e.components.logic.graph_ref), "utf8"));
+    return graph.nodes.find((n) => n.type === "mugen_state_program");
+  };
+  const node = await graphOf();
+  if (!node || JSON.parse(node.params.program_json).digest !== persisted.original_chain.program_sha256) fail("Programa do grafo difere do relatorio.");
+  report.program_sha256 = JSON.parse(node.params.program_json).digest;
+  await shot("imported");
+  await clickByTestId(sessionId, "mugen-compat-close");
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu.");
+  await waitFor(async () => js("return !!window.__RDS_E2E__;"), uiBootstrapTimeoutMs, "API nao voltou.", 200);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', name);
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="wizard-existing-project-card"]');`), 30000, "Wizard nao encontrou Ken.", 200);
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  await waitFor(async () => (await readAutomationState(sessionId))?.activeProjectDir === project, 60000, "Ken nao reabriu.", 200);
+  await clickTopBarMenuAction(sessionId, "Relatorio MUGEN");
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="mugen-chain-review"]');`), 30000, "Origem do comportamento nao reabriu.", 200);
+  const reopened = await readChainReview('[data-testid="mugen-compat-character-kenmasters"]');
+  if (JSON.stringify(reopened) !== JSON.stringify(compat)) fail("Revisao de origem mudou apos reiniciar.");
+  if ((await hashFile(reportPath)) !== reportSha) fail("Relatorio mudou durante salvar/reabrir.");
+  if (JSON.parse((await graphOf()).params.program_json).digest !== report.program_sha256) fail("Programa mudou apos reabrir.");
+  await shot("reopened-origin");
+  await clickByTestId(sessionId, "mugen-compat-close");
+  // The node-graph editor must know the program node and leave it intact (it drops non string/number params).
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-kenmasters");
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(async () => js(`return !!document.querySelector('[data-testid="node-card-mugen_state_program"]');`), 30000, "Editor de grafos nao mostra o programa da cadeia.", 200);
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  if (JSON.parse((await graphOf()).params.program_json).digest !== report.program_sha256) fail("Editor de grafos alterou o programa da cadeia.");
+  await shot("graph-editor");
+  report.steps.push({ step: "import_save_restart_reopen", status: "passed", report_sha256: reportSha, program_sha256: report.program_sha256, graph_editor_intact: true });
+
+  const run = await runBuildRunAndCollect(sessionId, "Ken cadeia original", timeoutMs, report, prefix);
+  report.rom_sha256 = await hashFile(run.rom_path);
+  report.rom_path = run.rom_path;
+  const elf = await readFile(path.join(project, "build/megadrive/out/rom.out"));
+  report.elf_sha256 = createHash("sha256").update(elf).digest("hex");
+  const symbols = parseElfSymbols(elf);
+  const sym = (n) => { const a = symbols[`rds_mc_spr_kenmasters_${n}`]; if (typeof a !== "number") fail(`Simbolo rds_mc_spr_kenmasters_${n} ausente no ELF.`); return a & 0xffff; };
+  const progress = await readCanonicalGameProgress(sessionId);
+  if (progress?.romSha256 !== report.rom_sha256) fail("Core executa outra ROM.");
+  await closeVisibleConsoleDrawer(sessionId, "Ken cadeia");
+  await focusGameCanvasNatively(sessionId);
+  // The ROM is still in SGDK boot (interrupts masked, no vblank count) for its first frames:
+  // let the main loop run before recording so frames, vblanks and ticks can be joined.
+  await waitFor(async () => readU16le((await readEmulatorMemory(sessionId, 2, sym("tick"), 2)).data, 0) >= 40, 180000, "Jogo nao saiu do boot.", 200);
+  // Hold the loop while hooks are installed so no tick is lost before the recording.
+  await clickByTestId(sessionId, "viewport-pause");
+  await waitFor(async () => (await readAutomationState(sessionId))?.emulPaused, 15000, "Nao pausou.", 100);
+  await js(`
+    const log = { origin: performance.timeOrigin, t0: performance.now(), events: [], frames: [], runSeq: -1, inflight: false };
+    window.__mugenChainLog = log;
+    const watch = (cmd, args, call) => {
+      const entry = { cmd, start: performance.now() };
+      if (cmd === 'emulator_send_input') { entry.a = !!args?.joypad?.y; entry.down = !!args?.joypad?.down; }
+      if (cmd === 'emulator_run_frame') { log.runSeq += 1; log.inflight = true; entry.seq = log.runSeq; }
+      log.events.push(entry);
+      const finish = () => { entry.end = performance.now(); if (cmd === 'emulator_run_frame') log.inflight = false; };
+      return call().then((r) => { finish(); return r; }, (e) => { entry.error = String(e); finish(); throw e; });
+    };
+    const internals = window.__TAURI_INTERNALS__;
+    const descriptor = Object.getOwnPropertyDescriptor(internals, 'invoke');
+    log.hook = { descriptor: descriptor ? { writable: !!descriptor.writable, configurable: !!descriptor.configurable } : null, via: [] };
+    const orig = internals.invoke.bind(internals);
+    const wrapper = (cmd, args, opts) => (cmd === 'emulator_run_frame' || cmd === 'emulator_send_input') ? watch(cmd, args, () => orig(cmd, args, opts)) : orig(cmd, args, opts);
+    try { internals.invoke = wrapper; } catch (e) { log.hook.error = String(e); }
+    if (internals.invoke === wrapper) {
+      log.hook.via.push('invoke');
+    } else {
+      const origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        const url = typeof input === 'string' ? input : input?.url ?? String(input);
+        const m = /(emulator_run_frame|emulator_send_input)/.exec(url);
+        if (!m) return origFetch.apply(this, arguments);
+        let args = null;
+        try { if (typeof init?.body === 'string') args = JSON.parse(init.body); } catch (e) { args = null; }
+        return watch(m[1], args, () => origFetch.apply(this, arguments));
+      };
+      log.hook.via.push('fetch');
+    }
+    for (const type of ['keydown', 'keyup']) window.addEventListener(type, (e) => log.events.push({ cmd: type, code: e.code, start: performance.now(), repeat: e.repeat }), true);
+    const proto = CanvasRenderingContext2D.prototype, orig2 = proto.putImageData;
+    log.orig = orig2;
+    proto.putImageData = function (img, ...rest) {
+      const result = orig2.call(this, img, ...rest);
+      if (this.canvas?.getAttribute('data-testid') === 'viewport-game-canvas' && log.frames.length < 1400) {
+        const scratch = document.createElement('canvas'); scratch.width = img.width; scratch.height = img.height;
+        orig2.call(scratch.getContext('2d'), img, 0, 0);
+        log.frames.push({ t: performance.now(), png: scratch.toDataURL('image/png'), runSeq: log.inflight ? log.runSeq : null });
+      }
+      return result;
+    };
+    return true;
+  `);
+  const readTick = async () => readU16le((await readEmulatorMemory(sessionId, 2, sym("tick"), 2)).data, 0);
+  const entries = new Map();
+  const harvest = async () => {
+    const n = await readTick();
+    const ring = (await readEmulatorMemory(sessionId, 2, sym("trace"), 512 * 22)).data;
+    for (let i = 0; i < 512; i++) {
+      const b = i * 22, tick = readU16le(ring, b);
+      if (tick >= n || tick % 512 !== i || tick < n - 512) continue;
+      const flags = readU16le(ring, b + 6);
+      entries.set(tick, { tick, stateno: readU16le(ring, b + 2), time: readU16le(ring, b + 4), ctrl: flags & 1, statetype: String.fromCharCode(flags >> 8), action: readU16le(ring, b + 8), cmd: readU16le(ring, b + 10), pad: readU16le(ring, b + 12), animtick: readU16le(ring, b + 14), vx: readI16le(ring, b + 16), x: readI16le(ring, b + 18), vt: readU16le(ring, b + 20) });
+    }
+    return n;
+  };
+  const tickBefore = await harvest();
+  const vtimerAddr = symbols["vtimer"];
+  if (typeof vtimerAddr !== "number") fail("Simbolo vtimer ausente no ELF.");
+  const readVt = async () => readU16le((await readEmulatorMemory(sessionId, 2, (vtimerAddr + 2) & 0xffff, 2)).data, 0);
+  const vtimerStart = await readVt();
+  const coreStart = (await invokeCoreObserve(sessionId))?.frames_run;
+  const frameNow = async () => (await readCanonicalGameProgress(sessionId)).renderedFrames;
+  const waitFrames = async (n, label) => { const start = await frameNow(); await waitFor(async () => (await frameNow()) >= start + n, 240000, `Ken nao avancou ${label}.`, 100); };
+  await clickByTestId(sessionId, "viewport-resume");
+  await waitFor(async () => !(await readAutomationState(sessionId))?.emulPaused, 15000, "Nao retomou.", 100);
+  report.steps.push({ step: "recording_started", status: "passed", ticks_before: tickBefore });
+  const requests = [];
+  const tap = async (code, holdMs, label) => {
+    const info = await sendNativeGameKeyTap(sessionId, code, holdMs, label);
+    requests.push({ label, code, holdMs, ...info, frame_after: await frameNow() });
+  };
+  await waitFrames(30, "sem input");
+  await shot("idle");
+  for (const hold of [0, 20, 50, 100, 200]) { await tap("KeyZ", hold, `tap-${hold}ms`); await waitFrames(24, `apos toque ${hold} ms`); }
+  await tap("KeyZ", 1200, "hold-1200ms");
+  await waitFrames(30, "apos segurar");
+  await shot("after-hold");
+  // two quick taps inside one driver request (down 60, up 60, down 60, up) to hit the repress window
+  {
+    const value = NATIVE_GAME_KEYS.KeyZ;
+    const startedAt = Date.now();
+    const response = await webdriverRequestDetailed("POST", `/session/${sessionId}/actions`, { actions: [{ type: "key", id: "rds-double", actions: [{ type: "keyDown", value }, { type: "pause", duration: 60 }, { type: "keyUp", value }, { type: "pause", duration: 60 }, { type: "keyDown", value }, { type: "pause", duration: 60 }, { type: "keyUp", value }] }] });
+    if (!response.ok || response.payload?.value?.error) fail(`Duplo toque recusado: ${JSON.stringify(response)}`);
+    requests.push({ label: "double-60-60-60", code: "KeyZ", holdMs: 60, startedAt, endedAt: Date.now(), frame_after: await frameNow() });
+  }
+  await waitFrames(30, "apos duplo toque");
+  await harvest();
+  // Down held + native A tap: Stand_X requires command != "holddown" (no attack from stand).
+  await sendNativeGameKey(sessionId, "ArrowDown", "keyDown", "Ken baixo");
+  requests.push({ label: "down-pressed", code: "ArrowDown", startedAt: Date.now(), frame_after: await frameNow() });
+  await tap("KeyZ", 200, "down-plus-a");
+  await waitFrames(20, "baixo + A");
+  await sendNativeGameKey(sessionId, "ArrowDown", "keyUp", "Ken baixo");
+  requests.push({ label: "down-released", code: "ArrowDown", startedAt: Date.now(), frame_after: await frameNow() });
+  await waitFrames(30, "apos soltar baixo");
+  await shot("played");
+  await clickByTestId(sessionId, "viewport-pause");
+  await waitFor(async () => (await readAutomationState(sessionId))?.emulPaused, 15000, "Nao pausou ao final.", 100);
+  const tickEnd = await harvest();
+  const vtimerEnd = await readVt();
+  const coreEnd = (await invokeCoreObserve(sessionId))?.frames_run;
+  const log = await js("return {origin: window.__mugenChainLog.origin, t0: window.__mugenChainLog.t0, events: window.__mugenChainLog.events, frames: window.__mugenChainLog.frames, hook: window.__mugenChainLog.hook};");
+  await js("CanvasRenderingContext2D.prototype.putImageData = window.__mugenChainLog.orig; return true;");
+  const core = await invokeCoreObserve(sessionId);
+  if (!core?.ok || core.rom_sha256 !== report.rom_sha256) fail("Identidade core nao demonstrada.");
+  const canvas = await js(`const c=document.querySelector('[data-testid="viewport-game-canvas"]');const d=c.getContext('2d').getImageData(0,0,c.width,c.height);return {width:c.width,height:c.height,rgba:Array.from(d.data)};`);
+  report.core_canvas_equal = core.framebuffer_width === canvas.width && core.framebuffer_height === canvas.height && Buffer.from(core.framebuffer_rgba).equals(Buffer.from(canvas.rgba));
+  if (!report.core_canvas_equal) fail("Framebuffer do core difere do canvas pausado.");
+  report.core = { label: core.core_label, path: core.core_path, sha256: await hashFile(core.core_path), frames_run: core.frames_run, framebuffer_sha256: core.framebuffer_sha256 };
+  const runFrameCalls = log.events.filter((e) => e.cmd === "emulator_run_frame");
+  const completed = runFrameCalls.filter((e) => e.end !== undefined && !e.error).length;
+  const tickDelta = tickEnd - tickBefore;
+  const tied = log.frames.filter((f) => f.runSeq !== null);
+  report.frame_accounting = { presented_events: log.frames.length, tied_to_run_frame: tied.length, extra_repaints: log.frames.length - tied.length, run_frame_calls: runFrameCalls.length, run_frame_completed: completed, ticks_executed: tickDelta };
+  report.frame_accounting.hook = log.hook;
+  report.frame_accounting.vtimer = { start: vtimerStart, end: vtimerEnd, delta: (vtimerEnd - vtimerStart) & 0xffff, core_frames_start: coreStart, core_frames_end: coreEnd };
+  report.frame_accounting.ticks_per_frame = tickDelta / Math.max(1, completed);
+  report.frame_accounting.event_counts = log.events.reduce((acc, e) => ({ ...acc, [e.cmd]: (acc[e.cmd] ?? 0) + 1 }), {});
+  if (completed !== tied.length || report.frame_accounting.vtimer.delta !== completed % 65536 || coreEnd - coreStart !== completed || new Set(tied.map((f) => f.runSeq)).size !== tied.length) fail(`Contabilidade de quadros inconsistente: ${JSON.stringify(report.frame_accounting)}`);
+  const frames = [];
+  for (let i = 0; i < tied.length; i++) {
+    const file = `ui-${String(i).padStart(4, "0")}.png`;
+    await writeFile(path.join(output, file), Buffer.from(tied[i].png.split(",")[1], "base64"));
+    frames.push({ frame: i, file, run_seq: tied[i].runSeq, vtimer_after: (vtimerStart + tied[i].runSeq + 1) & 0xffff, t: tied[i].t });
+  }
+  const sorted = [...entries.values()].sort((a, b) => a.tick - b.tick);
+  if (sorted.length < tickEnd || sorted.some((e, i) => e.tick !== i)) fail(`Rastro da ROM incompleto: ${sorted.length}/${tickEnd}.`);
+  report.ticks_per_frame = { ticks: tickDelta, frames: completed, ratio: tickDelta / Math.max(1, completed) };
+  await writeFile(path.join(output, "core-paused.rgba"), Buffer.from(core.framebuffer_rgba));
+  const capture = { schema: "retrodev.mugen_chain_capture/v1", var: "spr_kenmasters", rom_sha256: report.rom_sha256, elf_sha256: report.elf_sha256, entries: sorted, frames, ticks: tickEnd, ticks_before_recording: tickBefore };
+  await writeFile(path.join(output, "chain-capture.json"), `${JSON.stringify(capture, null, 2)}\n`);
+  report.input_path = { requests, events: log.events, page_time_origin: log.origin, page_t0: log.t0 };
+  report.steps.push({ step: "official_build_native_keyboard_trace_pixels", status: "passed", ticks: tickEnd, recorded_frames: frames.length, independent_verification: "required: verify-mugen-chain.py" });
+  await writeFile(path.join(output, "ui-report.json"), `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`MUGEN original chain UI evidence: ${output}`);
+}
+
+async function runMugenLocomotionScenario(sessionId, timeoutMs, uiBootstrapTimeoutMs, onProjectCreated) {
+  const artifactPrefix = `mugen-locomotion-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appPath = currentE2eRunContext?.appPath ?? null;
+  const sha256File = async (file) => createHash("sha256").update(await readFile(file)).digest("hex");
+  const report = {
+    generatedAt: null,
+    scenario: "mugen-locomotion",
+    maturity: "Experimental",
+    testedApplication: { path: appPath, sha256: appPath ? await sha256File(appPath) : null },
+    frontend: { indexHtmlSha256: await sha256File(path.join(repoRoot, "dist", "index.html")).catch(() => null) },
+    sample: {},
+    artifacts: [],
+    steps: [],
+    runs: [],
+    scope:
+      "locomocao horizontal por VelSet (x constante, Q8.8, trigger1 = 1); facing fixo a direita; sem colisao, limite de tela, dano ou combate; PAL e tempo real nao medidos",
+    dialogSubstitution:
+      "somente o dialogo nativo de escolha de pasta e substituido por setNextExternalImportPath; o restante (importar, relatorio, Inspector, Duplicar, Salvar, reinicio, reabertura, Build & Run e teclado nativo) e a UI/entrada do produto",
+  };
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const state = () => readAutomationState(sessionId);
+  const shot = async (name, label) =>
+    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const fixtureDir = path.join(repoRoot, "crates", "rex-mugen", "fixtures", "strider");
+  const workDir = path.join(validationDir, `${artifactPrefix}-work`);
+  const donorDir = path.join(workDir, "strider");
+  await mkdir(donorDir, { recursive: true });
+  const sampleHashes = {};
+  for (const name of ["strider.def", "strider.air", "strider.cmd", "strider.cns", "strider.sff"]) {
+    const bytes = await readFile(path.join(fixtureDir, name));
+    await writeFile(path.join(donorDir, name), bytes);
+    sampleHashes[name] = createHash("sha256").update(bytes).digest("hex");
+  }
+  report.sample = { fixture: "crates/rex-mugen/fixtures/strider", sha256: sampleHashes };
+
+  // ── Expectativas FIXADAS antes da execucao ────────────────────────────────────────────────
+  const EDITED_FWD = "3.75";            // digitado no Inspector (autorado: 2.5)
+  const VQ8 = { fwd: Math.round(3.75 * 256), back: -448 /* -1.75 autorado, nao editado */, still: 0 }; // 960 / -448 / 0
+  const DUP_X = 288;                    // 2a entidade, longe do trajeto (0..~270)
+  const X0 = 96;                        // entidade original (eixo -> borda esquerda do sprite)
+  const expectedStatus = { sprites: "direct", animations: "direct", commands: "direct", states: "direct", collisions: "absent", sound: "absent", stage: "absent" };
+  const walkTicks = { green: 4, blue: 6 }; // duracao da animacao: independe da velocidade
+  // O grafo da entidade fica inline na cena ou no arquivo `graph_ref` (importado/editado): le o que existir.
+  const entityGraph = async (dir, entity) => {
+    const logic = entity.components.logic ?? {};
+    if (logic.graph) return JSON.parse(logic.graph);
+    if (logic.graph_ref) return JSON.parse(await readFile(path.join(dir, logic.graph_ref), "utf8"));
+    return { nodes: [] };
+  };
+
+  // ── 1. Importar pela UI e conferir o relatorio ───────────────────────────────────────────
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await clickByTestId(sessionId, "wizard-external-import-toggle");
+  const selected = await js(`
+    const select = document.querySelector('[data-testid="external-import-profile-select"]');
+    if (!(select instanceof HTMLSelectElement)) return null;
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(select, "mugen");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return select.value;
+  `);
+  if (selected !== "mugen") fail(`Perfil MUGEN nao disponivel no importador: ${JSON.stringify(selected)}`);
+  const projectName = `Mugen_Strider_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [donorDir]);
+  await clickByTestId(sessionId, "external-import-confirm");
+  await finishMugenSourceReview(sessionId);
+  const panelState = await waitFor(
+    async () => {
+      const current = await state();
+      return current?.mugenCompatibility?.open && current.mugenCompatibility.characters.length > 0 ? current : false;
+    },
+    60000,
+    "Painel de compatibilidade MUGEN nao abriu apos a importacao.",
+    300
+  );
+  const projectDir = panelState.activeProjectDir;
+  onProjectCreated(projectDir);
+  const character = panelState.mugenCompatibility.characters.find((c) => c.id === "strider");
+  if (!character) fail("Painel nao mostrou o personagem strider.");
+  const status = Object.fromEntries(character.categories.map((c) => [c.id, c.status]));
+  if (JSON.stringify(status) !== JSON.stringify(expectedStatus)) fail(`Categorias divergem do esperado: ${JSON.stringify({ status, expectedStatus })}`);
+  const importReport = JSON.parse(await readFile(path.join(projectDir, "assets", "mugen", "strider_import_report.json"), "utf8"));
+  const velItems = importReport.behavior.filter((b) => /^controller:(0|20|21|200)#(Stop|Walk|Still)$/.test(b.item));
+  if (velItems.length !== 4 || velItems.some((b) => b.fidelity !== "direct")) fail(`VelSet nao convertidos como direct: ${JSON.stringify(velItems)}`);
+  await shot("01-compatibility", "compatibilidade do strider (VelSet direct)");
+  addReportStep(report, "import_and_compatibility", "passed", { projectDir, status, totals: character.totals, velsetItems: velItems.map((b) => ({ item: b.item, fidelity: b.fidelity, reason: b.reason })) });
+  await clickByTestId(sessionId, "mugen-compat-close");
+
+  // ── 2. Inspector: editar a velocidade (invalidos recusados), duplicar a entidade, salvar ──
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-strider");
+  await waitFor(async () => (await state())?.selectedEntityId === "strider", 15000, "Entidade strider nao foi selecionada.", 200);
+  const vel20 = "inspector-mugen-velocity-state-20";
+  const readField = async (id) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value ?? null;`, [id]);
+  const textOf = async (id) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.textContent ?? null;`, [id]);
+  await waitFor(async () => (await readField(vel20)) === "2.5", 15000, "Inspector nao mostrou 2.5 px/tick no estado 20.", 200);
+  const help = await textOf("inspector-mugen-velocity-help");
+  if (!help?.includes("px") || !help.includes("1/60 s") || !help.includes("direita")) fail(`Ajuda da velocidade sem unidade/direcao: ${help}`);
+  const typing = [];
+  // "x" e "const(...)" nao tem prefixo valido (nada e gravado); "200" tem os prefixos validos "2" e "20",
+  // que o campo grava enquanto se digita: o valor mantido ao recusar "200" e o ultimo prefixo valido, "20".
+  for (const [bad, kept] of [["x", "2.5"], ["const(velocity.walk.fwd.x)", "2.5"], ["200", "20"]]) {
+    const { log } = await typeIntoInputAndExpect(
+      sessionId, vel20, bad,
+      async () => {
+        const err = await textOf(`${vel20}-error`);
+        return err && err.includes(`Mantido: ${kept}`) && (bad === "200" ? err.includes("limite") : err.includes(`"${bad}"`)) ? err : false;
+      },
+      `velocidade invalida '${bad}'`
+    );
+    typing.push(...log);
+  }
+  const { log: roundLog } = await typeIntoInputAndExpect(
+    sessionId, vel20, "2.4",
+    async () => ((await textOf(`${vel20}-note`)) ?? "").includes("Arredondado para 2.3984375") || false,
+    "velocidade 2.4 com aviso de arredondamento"
+  );
+  typing.push(...roundLog);
+  const { log: editLog } = await typeIntoInputAndExpect(
+    sessionId, vel20, EDITED_FWD,
+    async () => ((await textOf(`${vel20}-note`)) ?? "") === `${VQ8.fwd}/256 px/tick` || false,
+    `velocidade editada ${EDITED_FWD}`
+  );
+  typing.push(...editLog);
+  // 2a entidade pelo Duplicar do Inspector (sem a logica MUGEN: fica parada), afastada do trajeto.
+  await clickByTestId(sessionId, "inspector-duplicate-entity");
+  const needsConfirm = await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="inspector-duplicate-confirm"]')) ? "confirm" : ((window.__RDS_E2E__?.getState?.().selectedEntityId ?? "") !== "strider" ? "done" : false);`), 5000, "Duplicar nao respondeu.", 100);
+  if (needsConfirm === "confirm") await clickByTestId(sessionId, "inspector-duplicate-confirm");
+  const dupId = await waitFor(async () => { const s = (await state())?.selectedEntityId; return s && s !== "strider" ? s : false; }, 15000, "Copia da entidade nao foi selecionada.", 200);
+  const dupX = "inspector-transform-x";
+  const { log: dupLog } = await typeIntoInputAndExpect(sessionId, dupX, String(DUP_X), async () => (await readField(dupX)) === String(DUP_X), "posicao x da copia");
+  typing.push(...dupLog);
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const onDisk = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+      const orig = onDisk.entities.find((e) => (e.entity_id ?? e.id) === "strider");
+      const copy = onDisk.entities.find((e) => (e.entity_id ?? e.id) === dupId);
+      if (!orig || !copy || copy.transform?.x !== DUP_X || orig.transform?.x !== X0) return false;
+      const graph = await entityGraph(projectDir, orig);
+      const vx = graph.nodes.filter((n) => n.params?.profile === "mugen.character.v1" && n.params.state_no === 20).map((n) => n.params.vx);
+      const vx21 = graph.nodes.filter((n) => n.params?.profile === "mugen.character.v1" && n.params.state_no === 21).map((n) => n.params.vx);
+      return vx.length >= 2 && vx.every((v) => v === EDITED_FWD) && vx21.every((v) => v === "-1.75");
+    },
+    20000,
+    "Edicao de velocidade/duplicata nao chegou ao disco.",
+    300
+  );
+  addReportStep(report, "inspector_edit_velocity_and_duplicate", "passed", { edited: { state: 20, from: "2.5", to: EDITED_FWD, q8: VQ8.fwd }, unchangedBackState21: "-1.75", duplicate: { id: dupId, x: DUP_X, note: "sem logica MUGEN: permanece parada" }, typingAttempts: typing });
+
+  // ── 3. Encerrar, reabrir, conferir ─────────────────────────────────────────────────────────
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto importado.", 300);
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto importado nao reabriu.", 300);
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-strider");
+  const reopened = await waitFor(async () => { const a = await readField(vel20); const b = await readField("inspector-mugen-velocity-state-21"); return a && b ? [a, b] : false; }, 15000, "Inspector nao mostrou as velocidades apos reabrir.", 200);
+  if (reopened[0] !== EDITED_FWD || reopened[1] !== "-1.75") fail(`Velocidades nao sobreviveram ao reinicio: ${JSON.stringify(reopened)}`);
+  await clickTopBarMenuAction(sessionId, "Relatorio MUGEN");
+  await waitFor(async () => { const cur = await state(); return cur?.mugenCompatibility?.open && cur.mugenCompatibility.characters.some((c) => c.id === "strider"); }, 30000, "Relatorio MUGEN nao reabriu.", 300);
+  await clickByTestId(sessionId, "mugen-compat-close");
+  addReportStep(report, "restart_reopen", "passed", { reopened, reportReopened: true });
+  if (process.env.RDS_E2E_INJECT_FAILURE === "after-restart") fail("Falha controlada (RDS_E2E_INJECT_FAILURE=after-restart) apos reiniciar o app.");
+
+  // ── 4. Build & Run ─────────────────────────────────────────────────────────────────────────
+  const run = await runBuildRunAndCollect(sessionId, "mugen strider editado", timeoutMs, report, artifactPrefix);
+  const romSha = await sha256File(run.rom_path);
+  const progress0 = await readCanonicalGameProgress(sessionId);
+  if (!progress0 || progress0.romSha256 !== romSha) fail(`ROM em execucao nao e a compilada: ${JSON.stringify({ running: progress0?.romSha256, built: romSha })}`);
+  const elf = await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out"));
+  const symbols = elfSymbolTable(elf);
+  const posSymbols = Object.keys(symbols).filter((k) => /^spr_.*_x$/.test(k));
+  const readS16 = async (addr) => { const r = await readEmulatorMemory(sessionId, 2, addr & 0xffff, 2); const v = readU16le(r.data, 0); return v & 0x8000 ? v - 0x10000 : v; };
+  // Localiza as duas variaveis de posicao pelos valores AUTORADOS iniciais (96 e 288), sem usar RAM como oraculo.
+  await focusGameCanvasNatively(sessionId);
+  await waitFor(async () => { const p = await readCanonicalGameProgress(sessionId); return p && p.renderedFrames >= 30; }, 60000, "Jogo nao avancou 30 quadros.", 200);
+  const initial = {};
+  for (const k of posSymbols) initial[k] = await readS16(symbols[k]);
+  const stridSym = posSymbols.find((k) => initial[k] === X0);
+  const dupSym = posSymbols.find((k) => initial[k] === DUP_X);
+  if (!stridSym || !dupSym || stridSym === dupSym) fail(`Nao localizei as variaveis de posicao das duas entidades: ${JSON.stringify(initial)}`);
+  report.runs.push({ kind: "identity", rom_path: run.rom_path, rom_sha256: romSha, elf_sha256: createHash("sha256").update(elf).digest("hex"), position_symbols: { strider: stridSym, copy: dupSym }, initial });
+
+  // ── 5. Teclado nativo + gravacao por quadro emulado ───────────────────────────────────────
+  const TOTAL_FRAMES = 480;
+  await js(
+    `
+    const proto = CanvasRenderingContext2D.prototype;
+    if (!window.__mugenOrigPut) window.__mugenOrigPut = proto.putImageData;
+    const orig = window.__mugenOrigPut;
+    const rec = { cls: [], left: [], dupLeft: [], done: false };
+    window.__mugenRec = rec;
+    const want = arguments[0];
+    proto.putImageData = function (img, ...rest) {
+      const r = orig.call(this, img, ...rest);
+      if (this.canvas?.getAttribute("data-testid") === "viewport-game-canvas" && !rec.done) {
+        const sx = img.width / 320, sy = img.height / 224;
+        const at = (ax, ay) => { const o = (Math.floor((ay + 0.5) * sy) * img.width + Math.floor((ax + 0.5) * sx)) * 4; return [img.data[o], img.data[o + 1], img.data[o + 2]]; };
+        const bright = (px) => px[0] + px[1] + px[2] > 200;
+        const hi = (v) => v > 160, lo = (v) => v < 90;
+        const is = (px, a, b, c) => (a ? hi(px[0]) : lo(px[0])) && (b ? hi(px[1]) : lo(px[1])) && (c ? hi(px[2]) : lo(px[2]));
+        let left = -1, dupLeft = -1;
+        for (let x = 0; x < 270; x += 1) if (bright(at(x, 112))) { left = x; break; }
+        for (let x = 270; x < 320; x += 1) if (bright(at(x, 112))) { dupLeft = x; break; }
+        let cls = "none";
+        if (left >= 0) {
+          const body = at(left + 2, 112);
+          if (is(body, 1, 0, 0)) cls = "idle";
+          else if (is(body, 0, 1, 0)) cls = "fwdA";
+          else if (is(body, 0, 0, 1)) cls = "fwdB";
+          else if (is(body, 0, 1, 1)) cls = "backA";
+          else if (is(body, 1, 0, 1)) cls = "backB";
+          else if (is(body, 1, 1, 0)) cls = is(at(left + 13, 105), 1, 1, 1) ? "hitB" : is(at(left + 9, 105), 1, 1, 1) ? "hitA" : "hit?";
+          else cls = "other";
+        }
+        rec.cls.push(cls); rec.left.push(left); rec.dupLeft.push(dupLeft);
+        if (rec.cls.length >= want) { rec.done = true; proto.putImageData = orig; }
+      }
+      return r;
+    };
+    return true;
+  `,
+    [TOTAL_FRAMES]
+  );
+  const frameNow = async () => (await readCanonicalGameProgress(sessionId)).renderedFrames;
+  const waitFramesSince = async (start, n, label) => waitFor(async () => (await frameNow()) >= start + n, 180000, `Jogo nao avancou ${n} quadros (${label}).`, 50);
+  const inputSteps = [];
+  const waitAck = async (key, value, label) => waitFor(async () => { const o = await js("return window.__RDS_E2E__.getLastInputObservation();"); return o?.lastJoypadAck?.joypad?.[key] === value && !o.lastJoypadSendError ? o : false; }, 15000, `Ack ${key}=${value} nao chegou (${label}).`, 50);
+  const press = async (code, joyKey, label) => {
+    const before = (await js("return window.__RDS_E2E__.getLastInputObservation();"))?.lastJoypadRequest?.seq ?? 0;
+    await sendNativeGameKey(sessionId, code, "keyDown", label);
+    const ack = await waitAck(joyKey, true, label);
+    if (!(ack.lastJoypadRequest.seq > before) || ack.lastJoypadAck.seq !== ack.lastJoypadRequest.seq || ack.lastJoypadAck.sessionId !== ack.joypadSessionId) fail(`Intencao/aceitacao inconsistentes (${label}): ${JSON.stringify(ack)}`);
+    inputSteps.push({ label, action: "down", frame: await frameNow(), request: ack.lastJoypadRequest, ack: ack.lastJoypadAck });
+  };
+  const release = async (code, joyKey, label) => {
+    await sendNativeGameKey(sessionId, code, "keyUp", label);
+    const ack = await waitAck(joyKey, false, label);
+    inputSteps.push({ label, action: "up", frame: await frameNow(), ack: ack.lastJoypadAck });
+  };
+  const rec0 = await frameNow();
+  await waitFramesSince(rec0, 45, "sem input"); // P0: sem input
+  let f = await frameNow();
+  await press("ArrowRight", "right", "Right (P1)"); await waitFramesSince(f, 30, "P1 andar"); await release("ArrowRight", "right", "Right solta (P1)");
+  f = await frameNow(); await waitFramesSince(f, 30, "P1 parada");
+  f = await frameNow();
+  await press("ArrowLeft", "left", "Left (P2)"); await waitFramesSince(f, 40, "P2 andar"); await release("ArrowLeft", "left", "Left solta (P2)");
+  f = await frameNow(); await waitFramesSince(f, 30, "P2 parada");
+  f = await frameNow();
+  await press("ArrowRight", "right", "Right (P3)"); await waitFramesSince(f, 25, "P3 direita");
+  f = await frameNow();
+  await press("ArrowLeft", "left", "Left com Right segurado (P3)"); await waitFramesSince(f, 25, "P3 troca");
+  await release("ArrowLeft", "left", "Left solta (P3)"); await release("ArrowRight", "right", "Right solta (P3)");
+  f = await frameNow(); await waitFramesSince(f, 30, "P3 parada");
+  f = await frameNow();
+  await press("KeyZ", "y", "botao a (P4)"); await waitFramesSince(f, 3, "P4 segurar"); await release("KeyZ", "y", "botao a solto (P4)");
+  f = await frameNow(); await waitFramesSince(f, 40, "P4 acao e retorno");
+  await waitFor(async () => js("return Boolean(window.__mugenRec?.done);"), 180000, "Gravacao por quadro nao terminou.", 250);
+  const rec = await js("return window.__mugenRec;");
+
+  // ── 6. Oraculo: contrato (Q8.8) aplicado ao estado de cada quadro observado ────────────────
+  const stateOf = (c) => (c === "fwdA" || c === "fwdB" ? "fwd" : c === "backA" || c === "backB" ? "back" : "still");
+  if (rec.cls.some((c) => c === "none" || c === "other" || c === "hit?")) fail(`Classes nao reconhecidas: ${JSON.stringify([...new Set(rec.cls)])}`);
+  let cum = 0;
+  const mismatches = [];
+  rec.cls.forEach((c, i) => {
+    cum += VQ8[stateOf(c)];
+    const expectedLeft = X0 + Math.floor(cum / 256);
+    if (rec.left[i] !== expectedLeft) mismatches.push({ frame: i, cls: c, observed: rec.left[i], expected: expectedLeft });
+  });
+  if (mismatches.length) fail(`Posicao por quadro diverge do contrato em ${mismatches.length} quadros: ${JSON.stringify(mismatches.slice(0, 10))}`);
+  const count = (pred) => rec.cls.filter(pred).length;
+  const fwdFrames = count((c) => stateOf(c) === "fwd"), backFrames = count((c) => stateOf(c) === "back");
+  if (fwdFrames < 60 || backFrames < 60) fail(`Quadros de andar insuficientes: fwd=${fwdFrames} back=${backFrames}`);
+  // sem input: posicao estavel no inicio (P0) e no fim
+  if (new Set(rec.left.slice(0, 40)).size !== 1 || rec.left[0] !== X0 || rec.cls.slice(0, 40).some((c) => c !== "idle")) fail("Sem input o personagem nao ficou parado em x=96.");
+  const runs = [];
+  let s0 = 0;
+  for (let i = 1; i <= rec.cls.length; i += 1) if (i === rec.cls.length || rec.cls[i] !== rec.cls[s0]) { runs.push({ cls: rec.cls[s0], n: i - s0, prev: rec.cls[s0 - 1], next: rec.cls[i] }); s0 = i; }
+  const isWalk = (c) => c && stateOf(c) !== "still";
+  const interior = runs.filter((r) => isWalk(r.cls) && isWalk(r.prev) && isWalk(r.next) && stateOf(r.prev) === stateOf(r.cls) && stateOf(r.next) === stateOf(r.cls));
+  const bad = interior.filter((r) => (r.cls === "fwdA" || r.cls === "backA" ? r.n !== walkTicks.green : r.n !== walkTicks.blue));
+  if (interior.length < 8 || bad.length) fail(`Duracao da animacao dependeu da velocidade: ${JSON.stringify({ interior: interior.length, bad })}`);
+  // direcao: esquerda < direita; P3 troca: fwd seguido de back (sem passar por idle no meio)
+  const dirOrder = runs.map((r) => stateOf(r.cls)).join(">");
+  const swapIdx = rec.cls.findIndex((c, i) => i > 0 && stateOf(rec.cls[i - 1]) === "fwd" && stateOf(c) === "back");
+  if (swapIdx < 0) fail("Troca de direcao Right->Left (segurando Right) nao produziu fwd->back sem parada.");
+  // parada: cada soltura leva ao idle e a posicao fica constante ate o proximo input
+  const stopWindows = [];
+  for (let i = 1; i < rec.cls.length; i += 1) {
+    if (stateOf(rec.cls[i - 1]) !== "still" && stateOf(rec.cls[i]) === "still" && rec.cls[i] === "idle") {
+      const tail = rec.left.slice(i, i + 20);
+      stopWindows.push({ at: i, constant: new Set(tail).size === 1 });
+    }
+  }
+  if (stopWindows.length < 3 || stopWindows.some((w) => !w.constant)) fail(`Apos soltar, a posicao nao ficou constante: ${JSON.stringify(stopWindows)}`);
+  // acao: hitA 3, hitB 8 uma vez, sem deslocamento
+  const attackRuns = runs.filter((r) => r.cls === "hitA" || r.cls === "hitB");
+  if (attackRuns.length !== 2 || attackRuns[0].cls !== "hitA" || attackRuns[0].n !== 3 || attackRuns[1].cls !== "hitB" || attackRuns[1].n !== 8) fail(`Acao nao seguiu 3/8: ${JSON.stringify(attackRuns)}`);
+  // outra entidade: intacta em todos os quadros
+  if (new Set(rec.dupLeft).size !== 1 || rec.dupLeft[0] !== DUP_X) fail(`A outra entidade mudou de posicao: ${JSON.stringify([...new Set(rec.dupLeft)])}`);
+  // RAM em repouso (posicao final do core) == borda visual final; copia == autorada
+  const finalIdle = rec.cls.slice(-30).every((c) => c === "idle");
+  if (!finalIdle) fail("O jogo nao terminou em repouso.");
+  const ramX = await readS16(symbols[stridSym]);
+  const ramDup = await readS16(symbols[dupSym]);
+  const lastLeft = rec.left[rec.left.length - 1];
+  if (ramX !== lastLeft || ramDup !== DUP_X) fail(`RAM diverge do visual em repouso: ${JSON.stringify({ ramX, lastLeft, ramDup })}`);
+  await shot("02-final", "estado final do jogo");
+  const finalCum = cum;
+  addReportStep(report, "keyboard_locomotion", "passed", {
+    frames: rec.cls.length, expectedQ8: VQ8, finalCumulativeQ8: finalCum, finalX: lastLeft, expectedFinalX: X0 + Math.floor(finalCum / 256),
+    fwdFrames, backFrames, mismatches: 0, directionOrder: dirOrder, swapFrame: swapIdx, stopWindows,
+    walkAnimationRuns: { interior: interior.length, greenTicks: walkTicks.green, blueTicks: walkTicks.blue },
+    attackRuns: attackRuns.map((r) => ({ cls: r.cls, ticks: r.n })), copyEntityLeftEdge: [...new Set(rec.dupLeft)], ramFinal: { strider: ramX, copy: ramDup },
+    inputSteps, positionSamples: rec.left.filter((_, i) => i % 15 === 0),
+  });
+
+  // ── 7. Negativo: sintaxe de VelSet fora do contrato e recusada e visivel no relatorio ─────
+  const badDonor = path.join(workDir, "strider_bad", "strider");
+  await mkdir(badDonor, { recursive: true });
+  for (const name of ["strider.def", "strider.air", "strider.cmd", "strider.sff"]) await writeFile(path.join(badDonor, name), await readFile(path.join(fixtureDir, name)));
+  const cnsOriginal = await readFile(path.join(fixtureDir, "strider.cns"), "utf8");
+  await writeFile(path.join(badDonor, "strider.cns"), cnsOriginal.replace("x = 2.5", "x = const(velocity.walk.fwd.x)"));
+  const badName = `Mugen_Strider_Bad_${Date.now()}`;
+  await clickTopBarMenuAction(sessionId, "Novo Projeto");
+  await waitForOnboardingWizard(sessionId);
+  const toggled = await js(`return Boolean(document.querySelector('[data-testid="external-import-profile-select"]'));`);
+  if (!toggled) await clickByTestId(sessionId, "wizard-external-import-toggle");
+  await js(`
+    const select = document.querySelector('[data-testid="external-import-profile-select"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+    setter.call(select, "mugen");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  `);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', badName);
+  await js("return window.__RDS_E2E__.setNextExternalImportPath(arguments[0]);", [badDonor]);
+  await clickByTestId(sessionId, "external-import-confirm");
+  await finishMugenSourceReview(sessionId);
+  const badPanel = await waitFor(async () => { const cur = await state(); return cur?.mugenCompatibility?.open && cur.activeProjectDir && cur.activeProjectDir !== projectDir ? cur : false; }, 60000, "Painel do import com VelSet invalido nao abriu.", 300);
+  const badReport = JSON.parse(await readFile(path.join(badPanel.activeProjectDir, "assets", "mugen", "strider_import_report.json"), "utf8"));
+  const badItem = badReport.behavior.find((b) => b.item === "controller:20#Walk");
+  if (!badItem || badItem.fidelity !== "unsupported" || !badItem.reason.includes("literal decimal")) fail(`VelSet com expressao nao foi recusado: ${JSON.stringify(badItem)}`);
+  const badGraph = await entityGraph(badPanel.activeProjectDir, JSON.parse(await readFile(path.join(badPanel.activeProjectDir, "scenes", "main.json"), "utf8")).entities.find((e) => (e.entity_id ?? e.id) === "strider"));
+  if (badGraph.nodes.some((n) => n.params?.profile === "mugen.character.v1" && n.params.state_no === 20)) fail("O VelSet recusado foi ligado ao grafo.");
+  await shot("03-negative-panel", "import com VelSet fora do contrato: recusado e reportado");
+  addReportStep(report, "negative_unsupported_velset_syntax", "passed", { project: badPanel.activeProjectDir, item: badItem.item, fidelity: badItem.fidelity, reason: badItem.reason, wiredInGraph: false });
+
+  report.generatedAt = new Date().toISOString();
+  await writeFile(reportPath, JSON.stringify(report, null, 2), "utf8");
+  console.log(`OK: Desktop Tauri mugen-locomotion E2E passou. Relatorio: ${reportPath}`);
+}
+
+async function runReferencePlatformerScenario(sessionId, timeoutMs, onProjectCreated) {
+  const artifactPrefix = `reference-platformer-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: null,
+    scenario: "reference-platformer",
+    testedApplication: {
+      path: currentE2eRunContext?.appPath ?? null,
+      sha256: currentE2eRunContext?.appPath
+        ? createHash("sha256").update(await readFile(currentE2eRunContext.appPath)).digest("hex")
+        : null,
+    },
+    projectName: "",
+    projectDir: "",
+    templateId: "reference_platformer",
+    artifacts: [],
+    steps: [],
+    roms: [],
+    frames: [],
+    input: {},
+    goalDecision: {},
+    tilemapAuthoring: {},
+    persistence: {},
+  };
+
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-01-wizard.png`),
+    "reference template wizard"
+  );
+  await clickByTestId(sessionId, "template-card-reference_platformer");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const generatedProjectName = `Reference_Platformer_${Date.now()}`;
+  await fillInputBySelector(
+    sessionId,
+    'input[placeholder="Nome do projeto"]',
+    generatedProjectName
+  );
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+
+  const createdState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entities = Array.isArray(state?.activeScene?.entities)
+        ? state.activeScene.entities
+        : [];
+      return state?.activeProjectDir &&
+        state.activeProjectName === generatedProjectName &&
+        state.activeTarget === "megadrive" &&
+        entities.length === 6
+        ? state
+        : false;
+    },
+    45000,
+    "Template reference_platformer nao criou a cena completa pelo wizard.",
+    500
+  );
+  onProjectCreated(createdState.activeProjectDir);
+  report.projectName = generatedProjectName;
+  report.projectDir = createdState.activeProjectDir;
+  currentE2eRunContext.project = createdState.activeProjectDir;
+  currentE2eRunContext.projectName = generatedProjectName;
+  currentE2eRunContext.projectTarget = "megadrive";
+  const entityIds = (createdState.activeScene.entities ?? []).map((entity) => entity.id ?? entity.entity_id);
+  for (const requiredId of ["reference_tilemap", "player", "passage_blocker", "goal", "goal_sensor", "main_camera"]) {
+    if (!entityIds.includes(requiredId)) {
+      fail(`Template reference_platformer nao expos a entidade '${requiredId}'.`);
+    }
+  }
+  addReportStep(report, "create_reference_platformer_from_wizard", "passed", {
+    projectDir: createdState.activeProjectDir,
+    entityIds,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-02-editor.png`),
+    "reference platformer editor"
+  );
+
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.selectedEntityId === "player" ? state : false;
+    },
+    10000,
+    "Hierarchy nao selecionou o player do template de referencia.",
+    250
+  );
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const cards = await executeScript(
+        sessionId,
+        "return document.querySelectorAll('[data-testid^=\"node-card-\"]').length;"
+      );
+      return state?.activeWorkspace === "logic" && cards >= 10 ? { state, cards } : false;
+    },
+    15000,
+    "NodeGraph do template de referencia nao ficou visivel com os nodes gerados.",
+    250
+  );
+  const logicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+  if (!logicState?.resolved?.has_graph || logicState.resolved.graph_ref !== "graphs/reference_platformer_logic.json") {
+    fail(`NodeGraph do player nao persistiu como referencia canonica: ${JSON.stringify(logicState)}`);
+  }
+  addReportStep(report, "inspect_visible_reference_nodegraph", "passed", {
+    graphRef: logicState.resolved.graph_ref,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-03-nodegraph.png`),
+    "reference platformer NodeGraph"
+  );
+
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.consoleEntries?.some((entry) =>
+        String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+      )
+        ? state
+        : false;
+    },
+    15000,
+    "Salvar nao confirmou a cena do template de referencia.",
+    250
+  );
+  addReportStep(report, "save_reference_platformer", "passed");
+
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao abriu para o template de referencia.",
+    250
+  );
+  const firstBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer initial build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  report.roms.push(firstBuild);
+  report.frames.push({ label: firstBuild.label, ...firstBuild.framebuffer });
+  for (const generatedName of ["main.c", "resources.res", "resources.rs"]) {
+    const generatedPath = path.join(
+      createdState.activeProjectDir,
+      "build",
+      "megadrive",
+      generatedName === "main.c" ? "src" : "res",
+      generatedName
+    );
+    if (await pathExists(generatedPath)) {
+      const evidencePath = path.join(validationDir, `${artifactPrefix}-${generatedName}`);
+      await cp(generatedPath, evidencePath);
+      addReportArtifact(report, evidencePath, `generated ${generatedName}`);
+    }
+  }
+  for (const generatedDirectory of ["res", "src"]) {
+    const generatedDirectoryPath = path.join(
+      createdState.activeProjectDir,
+      "build",
+      "megadrive",
+      generatedDirectory
+    );
+    if (!(await pathExists(generatedDirectoryPath))) continue;
+    for (const generatedName of await readdir(generatedDirectoryPath)) {
+      if (!/resource|player|goal/i.test(generatedName)) continue;
+      const generatedPath = path.join(generatedDirectoryPath, generatedName);
+      const evidencePath = path.join(
+        validationDir,
+        `${artifactPrefix}-${generatedDirectory}-${generatedName}`
+      );
+      await cp(generatedPath, evidencePath);
+      addReportArtifact(report, evidencePath, `generated ${generatedDirectory}/${generatedName}`);
+    }
+  }
+  const initialMainPath = path.join(validationDir, `${artifactPrefix}-main.c`);
+  const initialMainSource = await readFile(initialMainPath, "utf8");
+  const logicVariableLayout = (source) => source
+    .split(/\r?\n/)
+    .filter((line) => /^static volatile s32 logic_var_/.test(line));
+  const initialLogicVariableLayout = logicVariableLayout(initialMainSource);
+  addReportStep(report, "build_real_rom_and_start_game_view", "passed", {
+    rom: firstBuild.rom_path,
+    framebuffer: firstBuild.framebuffer,
+  });
+
+  const invokeCore = async (command, args = {}) => executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponivel" }); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [command, args]
+  );
+  const elfPath = path.join(createdState.activeProjectDir, "build", "megadrive", "out", "rom.out");
+  let runtimeSymbols = parseElf32Symbols(await readFile(elfPath));
+  const readLogicInt = async (name) => {
+    const address = runtimeSymbols.get(`logic_var_${name}`);
+    const addressPrefix = Number.isInteger(address) ? address >>> 16 : 0;
+    if (!Number.isInteger(address) || ![0x00ff, 0xe0ff].includes(addressPrefix)) {
+      fail(`Símbolo runtime logic_var_${name} ausente ou fora da System RAM: ${address}`);
+    }
+    const memory = await invokeCore("emulator_read_memory", {
+      region: 2,
+      offset: address & 0xffff,
+      length: 4,
+    });
+    if (!memory?.ok || !memory.value?.data || memory.value.data.length < 4) {
+      fail(`Leitura da System RAM para ${name} falhou: ${JSON.stringify(memory)}`);
+    }
+    const data = Buffer.from(memory.value.data);
+    const readWordNative = (position) => (data[position] ?? 0) | ((data[position + 1] ?? 0) << 8);
+    const value = (((readWordNative(0) << 16) >>> 0) | readWordNative(2)) >>> 0;
+    return { value: value > 0x7fffffff ? value - 0x100000000 : value, address, offset: address & 0xffff, rawHex: data.toString("hex") };
+  };
+  const neutralGoalInput = {
+    b: false, y: false, select: false, start: false,
+    up: false, down: false, left: false, right: false,
+    a: false, x: false, l: false, r: false,
+  };
+  const framebufferStats = (observed) => {
+    const rgba = Buffer.from(observed?.framebuffer_rgba ?? []);
+    const width = Number(observed?.framebuffer_width ?? 320);
+    const height = Number(observed?.framebuffer_height ?? 224);
+    let yellowPixels = 0;
+    let barrierPixels = 0;
+    const yellowPoints = [];
+    const playerPoints = [];
+    for (let offset = 0; offset + 3 < rgba.length; offset += 4) {
+      const r = rgba[offset];
+      const g = rgba[offset + 1];
+      const b = rgba[offset + 2];
+      if (r >= 180 && g >= 120 && b <= 100 && r >= g && r - g <= 100) {
+        yellowPixels += 1;
+        yellowPoints.push({ x: (offset / 4) % width, y: Math.floor(offset / 4 / width) });
+      }
+      const pixel = offset / 4;
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      // The gate candidate uses a bright #CC0000 bar in its own 24x32 bounds.
+      // Fox scarf (#AA0000) and fur must not count as a closed barrier.
+      if (x >= 50 && x < 74 && y >= 168 && y < 200 && r >= 190 && g <= 20 && b <= 20) {
+        barrierPixels += 1;
+      }
+      // Follow the fox's own #EE6600 coat, not arbitrary blue background pixels.
+      if (x < 100 && y >= 140 && y < 210 && r >= 225 && g >= 80 && g <= 140 && b <= 40) {
+        playerPoints.push({ x, y });
+      }
+    }
+    return {
+      width,
+      height,
+      yellowPixels,
+      yellowBounds: yellowPoints.length > 0 ? {
+        x0: Math.min(...yellowPoints.map((point) => point.x)),
+        y0: Math.min(...yellowPoints.map((point) => point.y)),
+        x1: Math.max(...yellowPoints.map((point) => point.x)),
+        y1: Math.max(...yellowPoints.map((point) => point.y)),
+      } : null,
+      barrierPixels,
+      playerPixelBounds: playerPoints.length > 0 ? {
+        x0: Math.min(...playerPoints.map((point) => point.x)),
+        y0: Math.min(...playerPoints.map((point) => point.y)),
+        x1: Math.max(...playerPoints.map((point) => point.x)),
+        y1: Math.max(...playerPoints.map((point) => point.y)),
+      } : null,
+      framebufferSha256: observed?.framebuffer_sha256 ?? null,
+      romSha256: observed?.rom_sha256 ?? null,
+      framesRun: observed?.frames_run ?? null,
+    };
+  };
+  const goalVisualStats = (frame) => {
+    const rgba = frame?.rgba ?? Buffer.alloc(0);
+    const width = Number(frame?.width ?? 320);
+    const height = Number(frame?.height ?? 224);
+    const points = [];
+    for (let y = Math.floor(height * 0.62); y < height; y += 1) {
+      for (let x = Math.floor(width * 0.78); x < width; x += 1) {
+        const offset = (y * width + x) * 4;
+        const r = rgba[offset];
+        const g = rgba[offset + 1];
+        const b = rgba[offset + 2];
+        const isGoalYellow = r >= 150 && g >= 100 && b <= 120 && r >= g;
+        const isGoalWhite = r >= 180 && g >= 180 && b >= 180;
+        if (isGoalYellow || isGoalWhite) points.push({ x, y });
+      }
+    }
+    return {
+      width,
+      height,
+      markerPixels: points.length,
+      bounds: points.length > 0 ? {
+        x0: Math.min(...points.map((point) => point.x)),
+        y0: Math.min(...points.map((point) => point.y)),
+        x1: Math.max(...points.map((point) => point.x)),
+        y1: Math.max(...points.map((point) => point.y)),
+      } : null,
+      framebufferSha256: frame?.framebufferSha256 ?? null,
+      romSha256: frame?.romSha256 ?? null,
+      renderedFrames: frame?.renderedFrames ?? null,
+    };
+  };
+  const runGoalDecision = async (romPath, label, threshold, expectedOpen, screenshotLabel) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: true }]);
+    if (loaded !== true) fail(`Emulador nao confirmou carga da ROM ${label}.`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `${label} nao ficou pausada antes da sequencia controlada.`,
+      100
+    );
+    await closeVisibleConsoleDrawer(sessionId, `${label} decisao controlada`);
+    const epoch = await invokeCore("emulator_get_core_epoch");
+    if (!epoch?.ok || !Number.isInteger(epoch.value)) fail(`Epoca do core indisponivel para ${label}: ${JSON.stringify(epoch)}`);
+    const neutralAck = await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: epoch.value });
+    if (!neutralAck?.ok || !neutralAck.value?.ok) fail(`Input neutro nao confirmado para ${label}: ${JSON.stringify(neutralAck)}`);
+    const warmed = await invokeCore("emulator_run_frames", { frames: 120 });
+    const before = await invokeCore("emulator_observe");
+    if (!warmed?.ok || !warmed.value?.ok || !before?.ok || !before.value?.ok) {
+      fail(`Warmup da decisao de gameplay falhou para ${label}: ${JSON.stringify({ warmed, before })}`);
+    }
+    const renderPausedState = async (renderLabel) => {
+      await clickByTestId(sessionId, "viewport-resume");
+      const rendered = await waitFor(
+        async () => {
+          const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+          return frame && frame.nonBlackPixels > 0 && frame.romSha256 === before.value.rom_sha256 ? frame : false;
+        },
+        10000,
+        `${renderLabel} nao produziu framebuffer visivel`,
+        100
+      );
+      await clickByTestId(sessionId, "viewport-pause");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.emulPaused === true ? state : false;
+        },
+        10000,
+        `${renderLabel} nao voltou ao estado pausado`,
+        100
+      );
+      return rendered;
+    };
+    const runRightFrames = async (frames, context) => {
+      const rightAck = await invokeCore("emulator_send_input", {
+        joypad: { ...neutralGoalInput, right: true },
+        sessionEpoch: epoch.value,
+      });
+      const ran = await invokeCore("emulator_run_frames", { frames });
+      const observed = await invokeCore("emulator_observe");
+      if (!rightAck?.ok || !rightAck.value?.ok || !ran?.ok || !ran.value?.ok || !observed?.ok || !observed.value?.ok) {
+        fail(`Entrada/execucao controlada falhou (${context}, ${label}): ${JSON.stringify({ rightAck, ran, observed })}`);
+      }
+      return { rightAck: rightAck.value, observed: observed.value };
+    };
+    const readState = async (observed, context) => {
+      const score = await readLogicInt("reference_score");
+      const open = await readLogicInt("goal_open");
+      const reached = await readLogicInt("goal_reached");
+      return {
+        context,
+        score: score.value,
+        scoreSymbol: score,
+        passageOpen: open.value,
+        passageOpenSymbol: open,
+        objectiveReached: reached.value,
+        objectiveSymbol: reached,
+        framebuffer: framebufferStats(observed),
+        frame: observed.frames_run,
+      };
+    };
+
+    const baselineState = await readState(before.value, "boot");
+    const expectedStartX = baselineState.framebuffer.playerPixelBounds?.x0;
+    if (baselineState.score !== 0 || baselineState.passageOpen !== 0 || baselineState.objectiveReached !== 0 || !Number.isFinite(expectedStartX)) {
+      fail(`Estado inicial/oráculo RAM inválido para ${label}: ${JSON.stringify(baselineState)}`);
+    }
+
+    const atEight = await runRightFrames(8, "mesma sequência de referência 8f");
+    const eightState = await readState(atEight.observed, "same-input-8-frames");
+    const expectedEightOpen = 8 >= threshold;
+    if (eightState.score !== 8 || eightState.passageOpen !== Number(expectedEightOpen) ||
+        (eightState.framebuffer.barrierPixels > 0) === expectedEightOpen || !eightState.framebuffer.playerPixelBounds) {
+      fail(`Estado real score/passagem diverge após 8 frames para ${label}: ${JSON.stringify({ threshold, expectedEightOpen, eightState })}`);
+    }
+
+    // Fresh reset of this exact ROM: exercise threshold-1, threshold, threshold+1.
+    const reset = await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: true }]);
+    if (reset !== true) fail(`Nao foi possivel reiniciar a mesma ROM para as fronteiras de ${label}.`);
+    await waitFor(async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+    }, 15000, `${label} nao reiniciou pausada para fronteiras`, 100);
+    const boundaryEpoch = await invokeCore("emulator_get_core_epoch");
+    if (!boundaryEpoch?.ok || !Number.isInteger(boundaryEpoch.value)) fail(`Epoch de fronteira ausente para ${label}`);
+    const boundaryWarmup = await invokeCore("emulator_run_frames", { frames: 120 });
+    const boundaryBoot = await invokeCore("emulator_observe");
+    if (!boundaryWarmup?.ok || !boundaryWarmup.value?.ok || !boundaryBoot?.ok || !boundaryBoot.value?.ok) {
+      fail(`Warmup das fronteiras falhou em ${label}`);
+    }
+    const boundaryRun = async (frames, context) => {
+      const ack = await invokeCore("emulator_send_input", {
+        joypad: { ...neutralGoalInput, right: true },
+        sessionEpoch: boundaryEpoch.value,
+      });
+      const run = await invokeCore("emulator_run_frames", { frames });
+      const obs = await invokeCore("emulator_observe");
+      if (!ack?.ok || !ack.value?.ok || !run?.ok || !run.value?.ok || !obs?.ok || !obs.value?.ok) {
+        fail(`Execucao de fronteira ${context} falhou em ${label}`);
+      }
+      return readState(obs.value, context);
+    };
+    const captureBoundaryState = async (artifactName, description) => {
+      const released = await invokeCore("emulator_send_input", {
+        joypad: neutralGoalInput,
+        sessionEpoch: boundaryEpoch.value,
+      });
+      if (!released?.ok || !released.value?.ok) fail(`Input neutro falhou antes da captura ${description}`);
+      const frame = await renderPausedState(description);
+      const artifact = await captureScreenshot(sessionId, `${artifactPrefix}-${artifactName}.png`);
+      addReportArtifact(report, artifact, description);
+      return {
+        path: artifact.path,
+        sha256: artifact.sha256,
+        framebufferSha256: frame?.framebufferSha256 ?? null,
+        romSha256: frame?.romSha256 ?? null,
+      };
+    };
+    const below = await boundaryRun(threshold - 1, "threshold-minus-one");
+    if (below.score !== threshold - 1 || below.passageOpen !== 0 || below.framebuffer.barrierPixels === 0 ||
+        below.framebuffer.playerPixelBounds?.x0 === expectedStartX) {
+      fail(`Fronteira abaixo nao ficou bloqueada no estado real (${label}): ${JSON.stringify({ expectedStartX, below })}`);
+    }
+    const blockedScreenshot = await captureBoundaryState(`${screenshotLabel}-blocked-before-open`, `${label}: personagem bloqueado pela passagem fechada`);
+    const equal = await boundaryRun(1, "threshold-equal");
+    if (equal.score !== threshold || equal.passageOpen !== 1 ||
+        equal.framebuffer.playerPixelBounds?.x0 !== below.framebuffer.playerPixelBounds?.x0) {
+      fail(`Limiar exato nao abriu sem movimento extra no mesmo frame (${label}): ${JSON.stringify({ below, equal })}`);
+    }
+    const above = await boundaryRun(1, "threshold-plus-one");
+    if (above.score !== threshold + 1 || above.passageOpen !== 1 || above.framebuffer.barrierPixels !== 0) {
+      fail(`Fronteira acima divergiu (${label}): ${JSON.stringify({ equal, above })}`);
+    }
+    const openScreenshot = await captureBoundaryState(`${screenshotLabel}-open-at-threshold`, `${label}: passagem aberta no limiar, antes da travessia`);
+    const transit = await boundaryRun(8, "traverse-open-passage");
+    if (transit.score !== threshold + 9 || transit.passageOpen !== 1 ||
+        transit.framebuffer.playerPixelBounds?.x0 <= 50 || transit.framebuffer.barrierPixels !== 0) {
+      fail(`Passagem aberta nao foi atravessada pelo personagem (${label}): ${JSON.stringify(transit)}`);
+    }
+    const traversedScreenshot = await captureBoundaryState(`${screenshotLabel}-traversed`, `${label}: personagem atravessou a passagem`);
+    const objective = await boundaryRun(60, "reach-objective-sensor");
+    if (objective.objectiveReached !== 1) {
+      fail(`Objetivo nao registrou conclusao no estado real (${label}): ${JSON.stringify(objective)}`);
+    }
+    const generatedMainPath = path.join(createdState.activeProjectDir, "build", "megadrive", "src", "main.c");
+    const generatedMain = await readFile(generatedMainPath, "utf8");
+    const soundCallOffset = generatedMain.indexOf("XGM_startPlayPCM(SFX_GOAL_SOUND");
+    const goalSensorOffset = generatedMain.indexOf("if (retro_aabb_intersects(spr_player_x + 0, spr_player_y + 0, 14, 32, 144, 184, 16, 16))");
+    const reachedGuardOffset = generatedMain.indexOf("if ((logic_var_goal_reached == 0))", goalSensorOffset);
+    const reachedWriteOffset = generatedMain.indexOf("logic_var_goal_reached = 1;", reachedGuardOffset);
+    if (goalSensorOffset < 0 || reachedGuardOffset < goalSensorOffset || soundCallOffset < reachedGuardOffset || reachedWriteOffset < soundCallOffset) {
+      fail(`Evento do sensor deve despachar o som antes da escrita one-shot de conclusao (${label}): ${JSON.stringify({ goalSensorOffset, reachedGuardOffset, soundCallOffset, reachedWriteOffset })}.`);
+    }
+    if (!generatedMain.includes("XGM_startPlayPCM(SFX_GOAL_SOUND") ||
+        !generatedMain.includes("logic_var_goal_reached == 0") ||
+        !generatedMain.includes("logic_var_goal_reached = 1;")) {
+      fail(`ROM não contém o evento de som e a condição de vitória conectados ao sensor (${label}).`);
+    }
+    const scoreIncrementOffset = generatedMain.indexOf("logic_var_reference_score = (logic_var_reference_score + 1);");
+    const scoreCompareOffset = generatedMain.indexOf("if ((logic_var_reference_score >=", scoreIncrementOffset);
+    if (scoreIncrementOffset < 0 || scoreCompareOffset < scoreIncrementOffset) {
+      fail(`Comparacao do limiar nao usa o score gravado apos incrementar (${label}).`);
+    }
+    const testedRomSha256 = createHash("sha256").update(await readFile(romPath)).digest("hex");
+    if (objective.framebuffer.romSha256 !== testedRomSha256) {
+      fail(`O core observou outra ROM ao registrar o objetivo (${label}): ${JSON.stringify({ expected: testedRomSha256, observed: objective.framebuffer.romSha256 })}`);
+    }
+    const releaseAck = await invokeCore("emulator_send_input", {
+      joypad: neutralGoalInput,
+      sessionEpoch: boundaryEpoch.value,
+    });
+    if (!releaseAck?.ok || !releaseAck.value?.ok) fail(`Release input falhou para ${label}`);
+    const afterVisual = await renderPausedState(`${label} depois da passagem e objetivo`);
+    const beforeFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${screenshotLabel}.png`), `${label} passagem atravessada e objetivo alcançado`);
+    return {
+      label,
+      romPath,
+      testedRomSha256,
+      generatedMainSha256: createHash("sha256").update(generatedMain).digest("hex"),
+      generatedMainPath,
+      goalSoundAndWinCode: {
+        soundCall: "XGM_startPlayPCM(SFX_GOAL_SOUND, ...) emitted from goal sensor event chain",
+        persistentWinCondition: "logic_var_goal_reached transitions 0→1 after sensor overlap",
+        eventOrderObservedWithRuntimeWinFlag: true,
+      },
+      scoreComparison: {
+        incrementSource: "logic_var_reference_score = (logic_var_reference_score + 1);",
+        compareSource: "if ((logic_var_reference_score >= threshold))",
+        comparesStoredPostIncrementValue: true,
+        independentlyObservedScore: eightState.score,
+      },
+      threshold,
+      inputSequences: {
+        sameSequenceAcrossRoms: [{ right: true, frames: 8 }],
+        boundaryAndTraversal: [
+          { right: true, frames: threshold - 1, expectedScore: threshold - 1, expectedOpen: false },
+          { right: true, frames: 1, expectedScore: threshold, expectedOpen: true },
+          { right: true, frames: 1, expectedScore: threshold + 1, expectedOpen: true },
+          { right: true, frames: 8, expectedToPassBarrierX: 50 },
+          { right: true, frames: 60, expectedObjectiveReached: true },
+        ],
+      },
+      sameEightFrameObservation: eightState,
+      boundaries: { below, equal, above },
+      blockedBeforeOpen: below.framebuffer.playerPixelBounds,
+      atThresholdBeforeMove: equal.framebuffer.playerPixelBounds,
+      traversedAfterOpen: transit.framebuffer.playerPixelBounds,
+      reachedObjective: objective,
+      screenshots: { blockedScreenshot, openScreenshot, traversedScreenshot },
+      screenshotFramebuffer: {
+        sha256: afterVisual?.framebufferSha256 ?? null,
+        romSha256: afterVisual?.romSha256 ?? null,
+      },
+      domFrame: beforeFrame ? {
+        renderedFrames: beforeFrame.renderedFrames,
+        framebufferSha256: beforeFrame.framebufferSha256,
+        romSha256: beforeFrame.romSha256,
+      } : null,
+      initialState: baselineState,
+    };
+  };
+  const baselineGoalRomPath = path.join(validationDir, `${artifactPrefix}-goal-original.rom`);
+  await cp(firstBuild.rom_path, baselineGoalRomPath);
+  if (report.roms[0]) report.roms[0].rom_path = baselineGoalRomPath;
+  addReportArtifact(report, baselineGoalRomPath, "ROM baseline copied for controlled gameplay decision");
+  const goalBeforeEdit = await runGoalDecision(baselineGoalRomPath, "ROM gerada antes da edicao", 6, true, "04-goal-open-before-edit");
+  report.goalDecision.beforeEdit = goalBeforeEdit;
+  addReportStep(report, "execute_authored_goal_threshold_before_edit", "passed", goalBeforeEdit);
+
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"node-param-score_threshold-b\"]'));"),
+    15000,
+    "Editor nao expos o limiar autoral de score com source mapping.",
+    250
+  );
+  const thresholdInput = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.value ?? null;");
+  const thresholdLabel = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.parentElement?.querySelector('span')?.textContent ?? '';" );
+  const sourceMappingVisible = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-card-score_threshold\"]')?.textContent ?? '';" );
+  if (thresholdInput !== "6" || thresholdLabel !== "Pontos para abrir passagem" || !String(sourceMappingVisible).includes("Source mapped") || !String(sourceMappingVisible).includes("authored_builtin_reference_platformer")) {
+    fail(`Editor nao comprovou semantica do limiar/origem/source mapping autorais: ${JSON.stringify({ thresholdInput, thresholdLabel, sourceMappingVisible })}`);
+  }
+  await setInputByTestIdNative(sessionId, "node-param-score_threshold-b", "12");
+  const editedThreshold = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.value ?? null;");
+  if (editedThreshold !== "12") fail(`Editor nao aplicou o limiar editado: ${editedThreshold}`);
+  addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-05-authored-threshold-editor.png`), "editor com limiar autoral, semantica e source mapping");
+  await waitFor(
+    async () => {
+      const logic = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+      try {
+        const graphs = [logic?.source?.graph_json, logic?.resolved?.graph_json]
+          .filter((value) => typeof value === "string")
+          .map((value) => JSON.parse(value));
+        return graphs.some((graph) => Number(graph.nodes?.find((node) => node.id === "score_threshold")?.params?.b) === 12) ? logic : false;
+      } catch {
+        return false;
+      }
+    },
+    15000,
+    "Autosave do NodeGraph nao persistiu o limiar 12 antes do Save.",
+    250
+  );
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return (state?.consoleEntries ?? []).some((entry) => String(entry.message ?? "").includes("Cena salva no projeto ativo.")) ? state : false;
+    },
+    15000,
+    "Salvar nao confirmou o limiar de gameplay editado.",
+    250
+  );
+  await clickTopBarMenuAction(sessionId, "Fechar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const wizardVisible = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"project-wizard-body\"]'));" );
+      return !state?.activeProjectDir && wizardVisible ? true : false;
+    },
+    15000,
+    "Projeto nao reiniciou para validar salvar/reabrir do limiar.",
+    250
+  );
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', generatedProjectName);
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"wizard-existing-project-card\"]'));"),
+    30000,
+    "Wizard nao reabriu o projeto salvo com limiar editado.",
+    500
+  );
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  const reopenedGoalState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.activeProjectDir === createdState.activeProjectDir ? state : false;
+    },
+    45000,
+    "Projeto nao reabriu apos edicao do limiar.",
+    500
+  );
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.selectedEntityId === "player" ? state : false;
+    },
+    10000,
+    "Player nao foi reselecionado antes da reabertura do NodeGraph.",
+    250
+  );
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const inputValue = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-param-score_threshold-b\"]')?.value ?? null;");
+      return state?.activeWorkspace === "logic" && inputValue === "12" ? { state, inputValue } : false;
+    },
+    15000,
+    "Limiar 12 nao persistiu/reabriu pela interface.",
+    250
+  );
+  const reopenedGoalMapping = await executeScript(sessionId, "return document.querySelector('[data-testid=\"node-card-score_threshold\"]')?.textContent ?? '';" );
+  if (!String(reopenedGoalMapping).includes("Source mapped") || !String(reopenedGoalMapping).includes("authored_builtin_reference_platformer")) {
+    fail(`Source mapping/origem autoral nao persistiu na reabertura: ${reopenedGoalMapping}`);
+  }
+  const editedBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer edited goal threshold build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  const editedGoalRomPath = path.join(validationDir, `${artifactPrefix}-goal-edited.rom`);
+  await cp(editedBuild.rom_path, editedGoalRomPath);
+  addReportArtifact(report, editedGoalRomPath, "immutable ROM snapshot compiled from the saved threshold=12 graph");
+  report.roms.push({ ...editedBuild, rom_path: editedGoalRomPath });
+  const editedMainPath = path.join(createdState.activeProjectDir, "build", "megadrive", "src", "main.c");
+  const editedMain = await readFile(editedMainPath, "utf8");
+  const editedMainEvidencePath = path.join(validationDir, `${artifactPrefix}-edited-goal-main.c`);
+  await cp(editedMainPath, editedMainEvidencePath);
+  addReportArtifact(report, editedMainEvidencePath, "generated main.c with edited goal threshold");
+  const editedLogicVariableLayout = logicVariableLayout(editedMain);
+  const editedScoreComparePresent = /logic_var_reference_score\s*>=\s*12/.test(editedMain);
+  const scoreDeclaration = editedMain.includes("static volatile s32 logic_var_reference_score = 0;");
+  if (!scoreDeclaration ||
+      !editedScoreComparePresent ||
+      !editedMain.includes("logic_var_goal_reached = 1;") ||
+      JSON.stringify(editedLogicVariableLayout) !== JSON.stringify(initialLogicVariableLayout)) {
+    fail(`C gerado após salvar/reabrir não preserva os estados e o limiar 12 esperados: ${JSON.stringify({ scoreDeclaration, scoreComparePresent: editedScoreComparePresent, winWrite: editedMain.includes("logic_var_goal_reached = 1;"), initialLogicVariableLayout, editedLogicVariableLayout })}`);
+  }
+  const goalAfterEdit = await runGoalDecision(editedGoalRomPath, "ROM gerada apos edicao", 12, false, "06-goal-closed-after-edit");
+  report.goalDecision.afterEdit = goalAfterEdit;
+  report.goalDecision.sameSequence = true;
+  report.goalDecision.authorship = "score chain and threshold authored in graphs/reference_platformer_logic.json";
+  report.goalDecision.recoveryBoundary = "branch-compare remains assisted ROM recovery and is exercised separately";
+  addReportStep(report, "persist_reopen_compile_and_execute_edited_goal_threshold", "passed", {
+    reopened: {
+      projectDir: reopenedGoalState?.activeProjectDir ?? createdState.activeProjectDir,
+      threshold: 12,
+      sourceMapping: await (async () => {
+        // The graph is saved one node per line; the mapping must name the real line.
+        const graphLines = (await readFile(path.join(createdState.activeProjectDir, "graphs", "reference_platformer_logic.json"), "utf8")).split(/\r?\n/);
+        const lineIndex = graphLines.findIndex((line) => line.includes('"id":"score_threshold"'));
+        const declared = lineIndex >= 0 ? JSON.parse(graphLines[lineIndex].trim().replace(/,$/, "")).params?.source_line : null;
+        if (lineIndex < 0 || declared !== lineIndex + 1) {
+          fail(`source_line do limiar nao aponta para a linha real do grafo: ${JSON.stringify({ lineIndex, declared })}`);
+        }
+        return `graphs/reference_platformer_logic.json:${declared}`;
+      })(),
+    },
+    originalRom: { path: baselineGoalRomPath, sha256: goalBeforeEdit.testedRomSha256 },
+    editedRom: { path: editedGoalRomPath, sha256: goalAfterEdit.testedRomSha256 },
+    goalBeforeEdit,
+    goalAfterEdit,
+    generatedMainSha256: createHash("sha256").update(editedMain).digest("hex"),
+  });
+
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.activeWorkspace === "scene" &&
+        state?.activeViewportTab === "scene" &&
+        Boolean(state?.activeScene?.entities?.some((entity) => entity.id === "reference_tilemap"))
+        ? state
+        : false;
+    },
+    15000,
+    "Scene workspace nao reabriu para a autoria de tilemap da referencia.",
+    250
+  );
+  await closeVisibleConsoleDrawer(sessionId, "antes da autoria de tilemap");
+  await clickButtonByTestIdNative(
+    sessionId,
+    "hierarchy-tilemap-edit-reference_tilemap",
+    "abrir autoria do tilemap da referencia"
+  );
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-tile-paint-flow-strip\"]'));"),
+    15000,
+    "Fluxo de pintura do tilemap nao ficou visivel.",
+    250
+  );
+  const tilemapBefore = await readAutomationState(sessionId);
+  const tilemapBeforeEntity = tilemapBefore?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap");
+  const tilemapBeforeCells = tilemapBeforeEntity?.tilemap?.cells ?? [];
+  const tilemapWidth = Number(tilemapBeforeEntity?.tilemap?.mapWidth ?? 40);
+  const tilemapHeight = Number(tilemapBeforeEntity?.tilemap?.mapHeight ?? 28);
+  const tilemapTileWidth = Number(tilemapBeforeEntity?.tilemap?.tileWidth ?? 8);
+  const tilemapTileHeight = Number(tilemapBeforeEntity?.tilemap?.tileHeight ?? 8);
+  const tilemapCell = { col: 1, row: 25 };
+  const tilemapCellIndex = tilemapCell.row * tilemapWidth + tilemapCell.col;
+  const tilemapOriginalValue = Number(tilemapBeforeCells[tilemapCellIndex] ?? 0);
+  const tilemapCollisionBefore = Number(tilemapBefore?.activeScene?.collisionSolidCount ?? 0);
+  await clickByTestId(sessionId, "tile-palette-2");
+  const worldBounds = tilemapBefore?.activeScene?.worldBounds;
+  const tilemapEntity = tilemapBefore?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap");
+  const targetWorldX = Number(tilemapEntity?.x ?? 0) + tilemapCell.col * tilemapTileWidth + tilemapTileWidth / 2;
+  const targetWorldY = Number(tilemapEntity?.y ?? 0) + tilemapCell.row * tilemapTileHeight + tilemapTileHeight / 2;
+  const normalizedX = (targetWorldX - Number(worldBounds?.minX ?? 0)) /
+    Math.max(1, Number(worldBounds?.maxX ?? 320) - Number(worldBounds?.minX ?? 0));
+  const normalizedY = (targetWorldY - Number(worldBounds?.minY ?? 0)) /
+    Math.max(1, Number(worldBounds?.maxY ?? 224) - Number(worldBounds?.minY ?? 0));
+  await clickCanvasPointNatively(
+    sessionId,
+    "[data-testid='viewport-scene-overlay']",
+    normalizedX,
+    normalizedY,
+    "pintar uma celula do tilemap"
+  );
+  const paintedState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex]) === 2 ? state : false;
+    },
+    10000,
+    "Pintura do tilemap nao persistiu no draft ativo.",
+    100
+  );
+  const paintedCollision = Number(paintedState?.activeScene?.collisionSolidCount ?? 0);
+  if (paintedCollision !== tilemapCollisionBefore) {
+    fail(`Pintura visual alterou indevidamente a colisao separada: ${JSON.stringify({ tilemapCollisionBefore, paintedCollision })}`);
+  }
+  await pressKey(sessionId, "z", { code: "KeyZ", ctrlKey: true });
+  const undoneState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex] ?? 0) === tilemapOriginalValue ? state : false;
+    },
+    10000,
+    "Undo nao restaurou a celula original do tilemap.",
+    100
+  );
+  await pressKey(sessionId, "y", { code: "KeyY", ctrlKey: true });
+  const redoneState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap");
+      return Number(entity?.tilemap?.cells?.[tilemapCellIndex]) === 2 ? state : false;
+    },
+    10000,
+    "Redo nao reaplicou a celula pintada do tilemap.",
+    100
+  );
+  const savesBeforeTilemapAuthoring = (redoneState?.consoleEntries ?? []).filter((entry) =>
+    String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+  ).length;
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const savesAfterTilemapAuthoring = (state?.consoleEntries ?? []).filter((entry) =>
+        String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+      ).length;
+      return savesAfterTilemapAuthoring > savesBeforeTilemapAuthoring
+        ? state
+        : false;
+    },
+    15000,
+    "Salvar nao confirmou a autoria do tilemap.",
+    250
+  );
+  const savedSceneJson = JSON.parse(
+    await readFile(path.join(createdState.activeProjectDir, "scenes", "main.json"), "utf8")
+  );
+  const savedTilemap = savedSceneJson.entities?.find((entity) => entity.entity_id === "reference_tilemap");
+  const savedTileValue = Number(savedTilemap?.components?.tilemap?.cells?.[tilemapCellIndex] ?? 0);
+  if (savedTileValue !== 2) {
+    fail(`Arquivo de cena nao recebeu a celula pintada: ${JSON.stringify({ cellIndex: tilemapCellIndex, expected: 2, actual: savedTileValue })}`);
+  }
+  addReportStep(report, "paint_tilemap_undo_redo_and_preserve_collision", "passed", {
+    cell: tilemapCell,
+    cellIndex: tilemapCellIndex,
+    originalValue: tilemapOriginalValue,
+    paintedValue: 2,
+    undoValue: undoneState?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells?.[tilemapCellIndex] ?? tilemapOriginalValue,
+    redoValue: redoneState?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells?.[tilemapCellIndex] ?? 2,
+    collisionSolidCount: tilemapCollisionBefore,
+    normalizedPoint: { x: normalizedX, y: normalizedY },
+  });
+  report.tilemapAuthoring = {
+    cell: tilemapCell,
+    cellIndex: tilemapCellIndex,
+    originalValue: tilemapOriginalValue,
+    paintedValue: 2,
+    collisionSolidCount: tilemapCollisionBefore,
+  };
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao voltou apos a autoria do tilemap.",
+    250
+  );
+  const paintedBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer tilemap-authored build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  report.roms.push(paintedBuild);
+  report.frames.push({ label: paintedBuild.label, ...paintedBuild.framebuffer });
+  const paintedFrameDiagnostic = {
+    collected: paintedBuild.framebuffer,
+    later: await readFramebufferStats(sessionId, { includeTilePixels: true }),
+    identity: await readCanonicalGameProgress(sessionId),
+    rom_sha256: createHash("sha256").update(await readFile(paintedBuild.rom_path)).digest("hex"),
+  };
+  report.tilemapAuthoring.frameBaseline = paintedFrameDiagnostic;
+  const paintedMainEvidencePath = path.join(
+    validationDir,
+    `${artifactPrefix}-painted-main.c`
+  );
+  const paintedMainSourcePath = path.join(
+    createdState.activeProjectDir,
+    "build",
+    "megadrive",
+    "src",
+    "main.c"
+  );
+  if (await pathExists(paintedMainSourcePath)) {
+    await cp(paintedMainSourcePath, paintedMainEvidencePath);
+    addReportArtifact(report, paintedMainEvidencePath, "painted generated main.c");
+  }
+  if (paintedBuild.framebuffer.tilemap_cell_hash === firstBuild.framebuffer.tilemap_cell_hash) {
+    fail(`Build apos pintura nao alterou o framebuffer inicial: ${JSON.stringify({ initial: firstBuild.framebuffer, painted: paintedBuild.framebuffer })}`);
+  }
+  addReportStep(report, "build_tilemap_authored_rom_and_observe_change", "passed", {
+    initial: firstBuild.framebuffer,
+    painted: paintedBuild.framebuffer,
+  });
+
+  await closeVisibleConsoleDrawer(sessionId, "reference platformer movement input");
+  await focusGameCanvasNatively(sessionId);
+  const beforeControls = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  // Symbols of the ROM currently running (the tilemap-authored rebuild overwrote rom.out).
+  const jumpSymbols = parseElf32Symbols(await readFile(elfPath));
+  const readPlayerS16 = async (name) => {
+    const address = jumpSymbols.get(name);
+    if (!Number.isInteger(address) || ![0x00ff, 0xe0ff].includes(address >>> 16)) {
+      fail(`Simbolo ${name} ausente ou fora da System RAM: ${address}`);
+    }
+    const memory = await invokeCore("emulator_read_memory", { region: 2, offset: address & 0xffff, length: 2 });
+    if (!memory?.ok || !memory.value?.data || memory.value.data.length < 2) {
+      fail(`Leitura da System RAM para ${name} falhou: ${JSON.stringify(memory)}`);
+    }
+    const word = memory.value.data[0] | (memory.value.data[1] << 8);
+    return word > 0x7fff ? word - 0x10000 : word;
+  };
+  const waitNativeAck = async (button, expected, context) => {
+    let lastObservation = null;
+    try {
+      return await waitFor(
+        async () => {
+          lastObservation = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+          return lastObservation?.lastJoypadAck?.joypad?.[button] === expected ? lastObservation : false;
+        },
+        3000,
+        `${context}: ACK nativo (${button}=${expected}) nao observado`,
+        50
+      );
+    } catch (error) {
+      fail(`${context}: ACK nativo (${button}=${expected}) nao observado; falha do caminho de input, sem fallback no core. Observacao: ${JSON.stringify(lastObservation)}`);
+    }
+  };
+  const movementStartX = await readPlayerS16("spr_player_x");
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "reference movement");
+  const rightAck = await waitNativeAck("right", true, "movimento");
+  const movementFrame = await waitFor(
+    async () => {
+      const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+      return frame && frame.renderedFrames > beforeControls.renderedFrames + 30 ? frame : false;
+    },
+    20000,
+    "Movimento do template de referencia nao avancou frames.",
+    100
+  );
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "reference movement release");
+  const rightReleaseAck = await waitNativeAck("right", false, "liberacao do movimento");
+  const movementEndX = await readPlayerS16("spr_player_x");
+  const movementDiffPixels = beforeControls.rgba.reduce(
+    (count, value, index) => count + (value === movementFrame.rgba[index] ? 0 : 1),
+    0
+  );
+  if (movementEndX <= movementStartX || movementDiffPixels === 0) {
+    fail(`ArrowRight nativo nao moveu o personagem na RAM/tela: ${JSON.stringify({ movementStartX, movementEndX, movementDiffPixels })}`);
+  }
+  addReportStep(report, "movement_native_input_ram", "passed", {
+    startX: movementStartX,
+    endX: movementEndX,
+    diffPixels: movementDiffPixels,
+    ack: rightAck?.lastJoypadAck ?? null,
+    releaseAck: rightReleaseAck?.lastJoypadAck ?? null,
+  });
+
+  // Mandatory jump contract: native KeyZ through the real keyboard path (no core fallback),
+  // with the player's Y read from its ELF symbol in System RAM: rise, apex, fall, landing.
+  // Genesis Plus GX binds RetroPad Y to Mega Drive A, so the ACK must carry joypad.y.
+  // The WebView frame loop is too slow under WebDriver for real-time sampling, so the game
+  // is paused and advanced with emulator_run_frames. The key state still travels the real
+  // keyboard path (native key → frontend → ACK'd emulator_send_input → core joypad).
+  await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar para salto deterministico");
+  await waitFor(async () => (await readAutomationState(sessionId))?.emulPaused === true, 10000, "Jogo nao pausou para o salto.", 100);
+  const stepFrames = async (label, frames) => {
+    const samples = [];
+    for (let frame = 0; frame < frames; frame += 1) {
+      const ran = await invokeCore("emulator_run_frames", { frames: 1 });
+      if (!ran?.ok || !ran.value?.ok) fail(`emulator_run_frames falhou no salto: ${JSON.stringify(ran)}`);
+      samples.push({ label, frame, y: await readPlayerS16("spr_player_y") });
+    }
+    return samples;
+  };
+  const waitJoypadY = (expected, context) => waitNativeAck("y", expected, `${context} (KeyZ = RetroPad Y = Mega Drive A)`);
+  const groundSamples = await stepFrames("ground", 20);
+  const groundY = groundSamples[groundSamples.length - 1].y;
+  if (!groundSamples.every((sample) => sample.y === groundY)) {
+    fail(`Personagem nao estava parado no chao antes do salto: ${JSON.stringify(groundSamples)}`);
+  }
+  await focusGameCanvasNatively(sessionId);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump");
+  const jumpAck = await waitJoypadY(true, "salto");
+  const pressSamples = await stepFrames("pressed", 3);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump release");
+  const jumpReleaseAck = await waitJoypadY(false, "liberacao do salto");
+  const jumpSamples = [...pressSamples, ...(await stepFrames("released", 60))];
+  const apexIndex = jumpSamples.reduce((best, sample, index) => (sample.y < jumpSamples[best].y ? index : best), 0);
+  const apexY = jumpSamples[apexIndex].y;
+  const fellAfterApex = jumpSamples.slice(apexIndex).some((sample) => sample.y > apexY);
+  const landedY = jumpSamples[jumpSamples.length - 1].y;
+  const jumpTrajectory = { groundY, apexY, lift: groundY - apexY, fellAfterApex, landedY, samples: jumpSamples };
+  if (groundY - apexY < 4 || !fellAfterApex || landedY !== groundY) {
+    await writeFile(path.join(validationDir, `${artifactPrefix}-jump-trajectory.json`), JSON.stringify(jumpTrajectory, null, 2));
+    fail(`Salto por KeyZ nativo nao comprovou subida, queda e retorno ao chao: ${JSON.stringify({ groundY, apexY, fellAfterApex, landedY })}`);
+  }
+  // Negative: holding the key must not keep the player airborne (edge-triggered input_pressed).
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference jump hold");
+  await waitJoypadY(true, "salto segurado");
+  const heldSamples = await stepFrames("held", 60);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference jump hold release");
+  await waitJoypadY(false, "liberacao do salto segurado");
+  const heldLanded = heldSamples[heldSamples.length - 1].y;
+  const heldLifted = heldSamples.some((sample) => sample.y < groundY);
+  if (heldLanded !== groundY || !heldLifted) {
+    fail(`Segurar KeyZ deveria saltar uma vez e pousar ainda segurado: ${JSON.stringify({ groundY, heldLanded, heldLifted, heldSamples })}`);
+  }
+  await clickButtonByTestIdNative(sessionId, "viewport-resume", "retomar apos salto");
+  const jumpTrajectoryPath = path.join(validationDir, `${artifactPrefix}-jump-trajectory.json`);
+  await writeFile(jumpTrajectoryPath, JSON.stringify({ ...jumpTrajectory, held: { landedY: heldLanded, lifted: heldLifted, samples: heldSamples } }, null, 2));
+  addReportArtifact(report, jumpTrajectoryPath, "native KeyZ jump trajectory from RAM");
+  addReportStep(report, "jump_native_input_ram_trajectory", "passed", {
+    groundY,
+    apexY,
+    lift: groundY - apexY,
+    fellAfterApex,
+    landedY,
+    heldLandedWhileHeld: heldLanded,
+    ack: jumpAck?.lastJoypadAck ?? null,
+    releaseAck: jumpReleaseAck?.lastJoypadAck ?? null,
+    trajectory: jumpTrajectoryPath,
+  });
+  const jumpFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+
+  // The generated template VGM ends after half a second. Trigger a fresh jump SFX
+  // through the native keyboard so forwarding is observed while the source is active.
+  // Acoustic/loopback remains a separate best-effort measurement.
+  const audioBefore = await executeScript(sessionId, "return window.__RDS_E2E__?.getAudioOutputTelemetry?.() ?? null;");
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "reference audio jump");
+  const audioJumpAck = await waitJoypadY(true, "salto para audio");
+  let audioAfter;
+  try {
+    audioAfter = await waitFor(async () => {
+      const telemetry = await executeScript(sessionId, "return window.__RDS_E2E__?.getAudioOutputTelemetry?.() ?? null;");
+      return telemetry?.receivedNonZeroFrames > audioBefore?.receivedNonZeroFrames && telemetry?.renderedNonZeroFrames > audioBefore?.renderedNonZeroFrames ? telemetry : false;
+    }, 20000, "SFX de salto nao chegou ao AudioContext", 100);
+  } finally {
+    await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "reference audio jump release");
+    await waitJoypadY(false, "liberacao do salto para audio");
+  }
+  const forwarded = audioBefore && audioAfter ? {
+    receivedNonZeroFrames: audioAfter.receivedNonZeroFrames - audioBefore.receivedNonZeroFrames,
+    renderedFrames: audioAfter.renderedFrames - audioBefore.renderedFrames,
+    renderedNonZeroFrames: audioAfter.renderedNonZeroFrames - audioBefore.renderedNonZeroFrames,
+    renderedPeak: audioAfter.renderedPeak,
+    contextState: audioAfter.contextState,
+    contextSampleRate: audioAfter.contextSampleRate,
+    muted: audioAfter.muted,
+  } : null;
+  if (!forwarded || forwarded.receivedNonZeroFrames <= 0 || forwarded.renderedNonZeroFrames <= 0 || forwarded.contextState !== "running") {
+    fail(`Audio do core nao foi encaminhado ao AudioContext em execucao: ${JSON.stringify({ audioBefore, audioAfter, audioJumpAck })}`);
+  }
+  await waitFor(async () => (await readPlayerS16("spr_player_y")) === groundY, 10000, "Personagem nao pousou apos salto de audio", 100);
+  const loopback = await new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn("parec", ["-d", "@DEFAULT_MONITOR@", "--format=s16le", "--channels=1", "--rate=22050"], { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (error) {
+      resolve({ status: "unavailable", reason: String(error) });
+      return;
+    }
+    const chunks = [];
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.on("error", (error) => resolve({ status: "unavailable", reason: String(error) }));
+    setTimeout(() => {
+      child.kill("SIGTERM");
+      const pcm = Buffer.concat(chunks);
+      let peak = 0;
+      let nonZero = 0;
+      for (let offset = 0; offset + 1 < pcm.length; offset += 2) {
+        const value = Math.abs(pcm.readInt16LE(offset));
+        if (value > 0) nonZero += 1;
+        if (value > peak) peak = value;
+      }
+      resolve({ status: pcm.length === 0 ? "unavailable" : nonZero > 0 ? "observed" : "silent", samples: pcm.length / 2, nonZero, peak, source: "@DEFAULT_MONITOR@" });
+    }, 1500);
+  });
+  addReportStep(report, "audio_forwarded_to_output", "passed", {
+    forwarded,
+    loopback,
+    note: "loopback captures the whole default sink (other apps included); it is informative, not an assertion",
+  });
+
+  await closeVisibleConsoleDrawer(sessionId, "reference platformer gameplay");
+  await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar reference platformer");
+  await waitFor(
+    async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"),
+    10000,
+    "Pausa nao ficou visivel na Game View da referencia.",
+    100
+  );
+  const paused = await readCanonicalGameProgress(sessionId);
+  await clickButtonByTestIdNative(sessionId, "viewport-resume", "retomar reference platformer");
+  const resumed = await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames > paused.renderedFrames + 5 ? progress : false;
+    },
+    10000,
+    "Retomada nao avancou frames na Game View da referencia.",
+    100
+  );
+  report.input = {
+    before: { frame: beforeControls.renderedFrames, sha256: beforeControls.framebufferSha256 },
+    movement: { frame: movementFrame.renderedFrames, sha256: movementFrame.framebufferSha256, diffBytes: movementDiffPixels, startX: movementStartX, endX: movementEndX, ack: rightAck?.lastJoypadAck ?? null, releaseAck: rightReleaseAck?.lastJoypadAck ?? null },
+    jump: { frame: jumpFrame.renderedFrames, sha256: jumpFrame.framebufferSha256, ack: jumpAck?.lastJoypadAck ?? null, releaseAck: jumpReleaseAck?.lastJoypadAck ?? null, groundY, apexY, landedY },
+    pause: { paused, resumed },
+  };
+  report.frames.push({ label: "movement", width: movementFrame.width, height: movementFrame.height, non_black_pixels: movementFrame.nonBlackPixels, sha256: movementFrame.framebufferSha256 });
+  report.frames.push({ label: "jump", width: jumpFrame.width, height: jumpFrame.height, non_black_pixels: jumpFrame.nonBlackPixels, sha256: jumpFrame.framebufferSha256 });
+  addReportStep(report, "movement_pause_resume", "passed", {
+    movement: report.input.movement,
+    pause: report.input.pause,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-04-gameplay-controls.png`),
+    "reference gameplay controls"
+  );
+
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await clickTopBarMenuAction(sessionId, "Fechar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const wizardVisible = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"project-wizard-body\"]'));" );
+      return !state?.activeProjectDir && wizardVisible ? true : false;
+    },
+    15000,
+    "Projeto de referencia nao fechou com retorno ao wizard.",
+    250
+  );
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', generatedProjectName);
+  await waitFor(
+    async () => {
+      const card = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"wizard-existing-project-card\"]'));" );
+      const pathText = await executeScript(sessionId, "return document.querySelector('[data-testid=\"wizard-existing-project-path\"]')?.textContent ?? '';" );
+      return card && pathText.includes(createdState.activeProjectDir) ? true : false;
+    },
+    30000,
+    "Wizard nao detectou o projeto de referencia salvo.",
+    500
+  );
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  let reopenedSceneDiagnostics = null;
+  let reopenedState;
+  try {
+    reopenedState = await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        const entities = Array.isArray(state?.activeScene?.entities) ? state.activeScene.entities : [];
+        const entityIds = entities.map((entity) => entity.id ?? entity.entity_id ?? null);
+        reopenedSceneDiagnostics = {
+          activeProjectDir: state?.activeProjectDir ?? null,
+          entityCount: entities.length,
+          entityIds,
+        };
+        return state?.activeProjectDir === createdState.activeProjectDir &&
+          entities.length === 6 &&
+          ["passage_blocker", "goal_sensor", "goal"].every((id) => entityIds.includes(id))
+          ? state
+          : false;
+      },
+      45000,
+      "Projeto de referencia nao reabriu com blocker, sensor, visual do objetivo e demais entidades.",
+      500
+    );
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; estado recebido: ${JSON.stringify(reopenedSceneDiagnostics)}`);
+  }
+  const reopenedLogicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+  if (!reopenedLogicState?.resolved?.has_graph || reopenedLogicState.resolved.graph_ref !== "graphs/reference_platformer_logic.json") {
+    fail(`NodeGraph do template nao persistiu apos reabertura: ${JSON.stringify(reopenedLogicState)}`);
+  }
+  const reopenedTilemap = reopenedState.activeScene.entities.find((entity) => entity.id === "reference_tilemap");
+  const reopenedTileValue = Number(reopenedTilemap?.tilemap?.cells?.[tilemapCellIndex] ?? 0);
+  if (reopenedTileValue !== 2) {
+    fail(`Tilemap pintado nao persistiu apos reabertura: ${JSON.stringify({ cellIndex: tilemapCellIndex, expected: 2, actual: reopenedTileValue })}`);
+  }
+  report.persistence = {
+    projectDir: createdState.activeProjectDir,
+    entityIds: (reopenedState.activeScene.entities ?? []).map((entity) => entity.id ?? entity.entity_id),
+    graphRef: reopenedLogicState.resolved.graph_ref,
+    tilemapCell: tilemapCell,
+    tilemapCellIndex,
+    tilemapValue: reopenedTileValue,
+  };
+  addReportStep(report, "reopen_project_and_validate_persisted_graph", "passed", report.persistence);
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-05-reopened.png`),
+    "reference project reopened"
+  );
+
+  await clickByTestId(sessionId, "workspace-rail-game");
+  await waitFor(
+    async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-game-canvas\"]'));"),
+    15000,
+    "Game View nao reabriu para a referencia.",
+    250
+  );
+  const reopenedBuild = await runBuildRunAndCollect(
+    sessionId,
+    "reference platformer reopened build",
+    timeoutMs,
+    report,
+    artifactPrefix
+  );
+  let lastReopenedPaintedFrame = null;
+  const reopenedPaintedFrame = await waitFor(
+    async () => {
+      const frame = await readFramebufferStats(sessionId);
+      lastReopenedPaintedFrame = frame;
+      return frame?.tilemap_cell_hash === paintedBuild.framebuffer.tilemap_cell_hash ? frame : false;
+    },
+    15000,
+    "ROM reaberta nao refletiu o tilemap persistido no framebuffer.",
+    250
+  ).catch(async (error) => {
+    const diagnostics = {
+      error: error instanceof Error ? error.message : String(error),
+      first: firstBuild.framebuffer,
+      painted: paintedFrameDiagnostic,
+      reopened: {
+        collected: reopenedBuild.framebuffer,
+        last: lastReopenedPaintedFrame,
+        later: await readFramebufferStats(sessionId, { includeTilePixels: true }),
+        identity: await readCanonicalGameProgress(sessionId),
+        rom_sha256: createHash("sha256").update(await readFile(reopenedBuild.rom_path)).digest("hex"),
+      },
+    };
+    const diagnosticPath = path.join(validationDir, `${artifactPrefix}-tilemap-reopen-diagnostics.json`);
+    await writeFile(diagnosticPath, JSON.stringify(diagnostics, null, 2), "utf8");
+    await captureScreenshot(sessionId, `${artifactPrefix}-tilemap-reopen-failure.png`);
+    console.error(`[tilemap-reopen] ${JSON.stringify({ path: diagnosticPath, painted: diagnostics.painted.collected, reopened: diagnostics.reopened.last })}`);
+    throw error;
+  });
+  reopenedBuild.framebuffer = reopenedPaintedFrame;
+  report.roms.push(reopenedBuild);
+  report.frames.push({ label: reopenedBuild.label, ...reopenedBuild.framebuffer });
+  addReportStep(report, "rebuild_and_run_after_reopen", "passed", {
+    rom: reopenedBuild.rom_path,
+    framebuffer: reopenedBuild.framebuffer,
+  });
+  addReportArtifact(
+    report,
+    await captureScreenshot(sessionId, `${artifactPrefix}-06-reopened-build-run.png`),
+    "reference reopened build run"
+  );
+
+  // ── Second passage authored through the UI (Etapa 2) ──────────────────────────
+  // Duplicate the blocker in the Inspector, place it at x=120, add a passage in the
+  // NodeGraph "Passagens" panel with its own state and threshold 60, save, close, reopen,
+  // build and measure on the core. Threshold 60 because the player only reaches the second
+  // blocker around score ~41: a lower threshold would open before arrival and prove nothing.
+  const selectOptionByTestIdNative = async (testId, value) => {
+    const elementId = await findElement(sessionId, `[data-testid="${testId}"] option[value="${value}"]`);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+    await waitFor(
+      async () => (await executeScript(sessionId, `return document.querySelector('[data-testid="${testId}"]')?.value ?? null;`)) === value,
+      5000,
+      `Selecao ${testId}=${value} nao aplicada.`,
+      100
+    );
+  };
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-passage_blocker");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "passage_blocker", 10000, "passage_blocker nao selecionado.", 200);
+  await clickButtonByTestIdNative(sessionId, "inspector-duplicate-entity", "duplicar bloqueador");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "passage_blocker_2", 10000, "Duplicata do bloqueador nao foi criada/selecionada.", 200);
+  await setInputByTestIdNative(sessionId, "inspector-transform-x", "120");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === "passage_blocker_2");
+      return entity?.x === 120 || entity?.transform?.x === 120 ? entity : false;
+    },
+    10000,
+    "Inspector nao posicionou o segundo bloqueador em x=120.",
+    200
+  );
+  // Etapa 3 in the same authoring session: erase the floor collision of a 2x2 region
+  // (cols 10-11, rows 26-27), repaint its visual tiles as empty and set idle to 12 fps.
+  // One-cell hole: with side walls a wider/deeper pit is a trap for the template jump.
+  const pitCells = [[10, 26]];
+  const sceneStateForPit = await readAutomationState(sessionId);
+  const pitBounds = sceneStateForPit?.activeScene?.worldBounds;
+  const cellPoint = (col, row) => ({
+    x: ((col * 8 + 4) - Number(pitBounds?.minX ?? 0)) / Math.max(1, Number(pitBounds?.maxX ?? 320) - Number(pitBounds?.minX ?? 0)),
+    y: ((row * 8 + 4) - Number(pitBounds?.minY ?? 0)) / Math.max(1, Number(pitBounds?.maxY ?? 224) - Number(pitBounds?.minY ?? 0)),
+  });
+  const solidBeforePit = Number(sceneStateForPit?.activeScene?.collisionSolidCount ?? 0);
+  await clickButtonByTestIdNative(sessionId, "hierarchy-tilemap-edit-reference_tilemap", "abrir tilemap para o fosso");
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"viewport-tile-paint-flow-strip\"]'));"), 15000, "Pintura de tilemap indisponivel para o fosso.", 250);
+  // Explicitly empty cell (distinct from 0 = base map).
+  await clickByTestId(sessionId, "tile-palette-empty");
+  for (const [col, row] of pitCells) {
+    const point = cellPoint(col, row);
+    await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", point.x, point.y, `apagar visual ${col},${row}`);
+  }
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const cells = state?.activeScene?.entities?.find((candidate) => candidate.id === "reference_tilemap")?.tilemap?.cells ?? [];
+      return pitCells.every(([col, row]) => Number(cells[row * 40 + col]) === 4294967295) ? true : false;
+    },
+    10000, "Visual do fosso nao foi pintado no tilemap.", 150
+  );
+  const collisionModeClicked = await executeScript(sessionId, "const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent?.trim() === 'Modo colisao'); if (b) { b.click(); return true; } return false;");
+  if (!collisionModeClicked) {
+    await focusGameCanvasNatively(sessionId).catch(() => {});
+    await executeScript(sessionId, "document.querySelector('[data-testid=\"viewport-scene-overlay\"]')?.focus?.();");
+    await sendNativeGameKey(sessionId, "KeyC", "keyDown", "modo colisao").catch(() => {});
+  }
+  for (const [col, row] of pitCells) {
+    const point = cellPoint(col, row);
+    await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", point.x, point.y, `apagar colisao ${col},${row}`, 2);
+  }
+  const solidAfterPit = await waitFor(
+    async () => {
+      const count = Number((await readAutomationState(sessionId))?.activeScene?.collisionSolidCount ?? 0);
+      return count === solidBeforePit - pitCells.length ? count : false;
+    },
+    10000, `Colisao do fosso nao foi apagada pela UI (antes ${solidBeforePit}).`, 150
+  );
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "player", 10000, "player nao selecionado para animacao.", 200);
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"inspector-anim-idle-fps\"]'));"), 10000, "Inspector nao expos FPS das animacoes.", 200);
+  await setInputByTestIdNative(sessionId, "inspector-anim-idle-fps", "12");
+  await waitFor(
+    async () => {
+      const logic = await readAutomationState(sessionId);
+      return (await executeScript(sessionId, "return document.querySelector('[data-testid=\"inspector-anim-idle-fps\"]')?.value;")) === "12" ? logic : false;
+    },
+    10000, "FPS do idle nao aplicado.", 200
+  );
+  addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-07-pit-and-animation-edit.png`), "fosso e animacao editados");
+  report.sceneAuthoring = { pitCells, solidBeforePit, solidAfterPit, idleFps: 12 };
+
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "player", 10000, "player nao selecionado.", 200);
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"nodegraph-passages\"]'));"), 15000, "Painel de passagens ausente no NodeGraph.", 250);
+  await selectOptionByTestIdNative("passage-add-blocker", "passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "passage-add-threshold", "60");
+  await clickButtonByTestIdNative(sessionId, "passage-add", "adicionar passagem");
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"passage-passage_2\"]'));"), 10000, `Passagem nao adicionada: ${await executeScript(sessionId, "return document.querySelector('[data-testid=\"passage-add-error\"]')?.textContent ?? null;")}`, 200);
+  const passageIssues = await executeScript(sessionId, "return document.querySelector('[data-testid=\"passage-issues\"]')?.textContent ?? '';");
+  if (passageIssues) fail(`Painel de passagens reportou problemas apos adicionar: ${passageIssues}`);
+  addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-07-second-passage-panel.png`), "painel de passagens com segunda passagem");
+  await waitFor(
+    async () => {
+      const logic = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+      const graphs = [logic?.source?.graph_json, logic?.resolved?.graph_json].filter((value) => typeof value === "string");
+      return graphs.some((json) => json.includes("passage_blocker_2") && json.includes("passage_2_open")) ? true : false;
+    },
+    15000,
+    "Autosave nao persistiu a segunda passagem no grafo.",
+    250
+  );
+  const countSaves = async () => ((await readAutomationState(sessionId))?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Cena salva no projeto ativo.")).length;
+  const savesBefore = await countSaves();
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(
+    async () => (await countSaves()) > savesBefore,
+    15000,
+    `Salvar nao confirmou a segunda passagem: ${JSON.stringify(((await readAutomationState(sessionId))?.consoleEntries ?? []).filter((entry) => entry.level === "error").slice(-3))}`,
+    250
+  );
+  const savedGraphText = await waitFor(
+    async () => {
+      const text = await readFile(path.join(createdState.activeProjectDir, "graphs", "reference_platformer_logic.json"), "utf8").catch(() => "");
+      return text.includes("passage_blocker_2") ? text : false;
+    },
+    10000,
+    "Grafo gravado em disco apos Salvar nao contem a segunda passagem.",
+    250
+  ).catch(async (error) => {
+    const scene = await readFile(path.join(createdState.activeProjectDir, "scenes", "main.json"), "utf8").catch(() => "");
+    const player = JSON.parse(scene || "{}")?.entities?.find?.((entity) => entity.entity_id === "player");
+    fail(`${error.message} player(source)=${JSON.stringify(player)?.slice(0, 1500)}`);
+  });
+  report.secondPassageSavedGraphSha256 = createHash("sha256").update(savedGraphText).digest("hex");
+  await clickTopBarMenuAction(sessionId, "Fechar");
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const wizardVisible = await executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"project-wizard-body\"]'));");
+      return !state?.activeProjectDir && wizardVisible ? true : false;
+    },
+    15000, "Projeto nao fechou antes de reabrir a segunda passagem.", 250
+  );
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', generatedProjectName);
+  await waitFor(async () => executeScript(sessionId, "return Boolean(document.querySelector('[data-testid=\"wizard-existing-project-card\"]'));"), 30000, "Wizard nao listou o projeto para reabrir.", 500);
+  await clickByTestId(sessionId, "wizard-open-existing-project");
+  await waitFor(async () => (await readAutomationState(sessionId))?.activeProjectDir === createdState.activeProjectDir, 45000, "Projeto nao reabriu com a segunda passagem.", 500);
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  await waitFor(async () => (await readAutomationState(sessionId))?.selectedEntityId === "player", 10000, "player nao selecionado apos reabrir.", 200);
+  await clickByTestId(sessionId, "workspace-rail-logic");
+  const reopenedPassage = await waitFor(
+    async () => executeScript(sessionId, `
+      const q = (id) => document.querySelector('[data-testid="' + id + '"]')?.value ?? null;
+      const main = { blocker: q("passage-passage_main-blocker"), threshold: q("passage-passage_main-threshold"), openVar: q("passage-passage_main-openvar") };
+      const second = { blocker: q("passage-passage_2-blocker"), threshold: q("passage-passage_2-threshold"), openVar: q("passage-passage_2-openvar") };
+      return second.blocker ? { main, second } : false;
+    `),
+    15000, "Segunda passagem ausente apos reabrir.", 250
+  );
+  if (reopenedPassage.second.blocker !== "passage_blocker_2" || reopenedPassage.second.threshold !== "60" || reopenedPassage.second.openVar !== "passage_2_open" ||
+      reopenedPassage.main.blocker !== "passage_blocker" || reopenedPassage.main.threshold !== "12" || reopenedPassage.main.openVar !== "goal_open") {
+    fail(`Referencias das passagens nao persistiram apos reabrir: ${JSON.stringify(reopenedPassage)}`);
+  }
+  const savedScene = JSON.parse(await readFile(path.join(createdState.activeProjectDir, "scenes", "main.json"), "utf8"));
+  const savedCollision = savedScene?.collision_map?.data ?? [];
+  if (!pitCells.every(([col, row]) => Number(savedCollision[row * 40 + col]) === 0) || Number(savedCollision[26 * 40 + 20]) !== 1) {
+    fail("Colisao do fosso nao persistiu no arquivo da cena (ou apagou celulas nao editadas).");
+  }
+  await clickByTestId(sessionId, "workspace-rail-scene");
+  await clickByTestId(sessionId, "hierarchy-entity-player");
+  const reopenedIdleFps = await waitFor(async () => executeScript(sessionId, "return document.querySelector('[data-testid=\"inspector-anim-idle-fps\"]')?.value ?? false;"), 10000, "FPS do idle ausente apos reabrir.", 200);
+  if (reopenedIdleFps !== "12") fail(`FPS do idle nao persistiu: ${reopenedIdleFps}`);
+  addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-08-second-passage-reopened.png`), "passagens reabertas");
+  await clickByTestId(sessionId, "workspace-rail-game");
+  const twoPassageBuild = await runBuildRunAndCollect(sessionId, "reference platformer two passages build", timeoutMs, report, artifactPrefix);
+  const twoPassageRomPath = path.join(validationDir, `${artifactPrefix}-two-passages.rom`);
+  await cp(twoPassageBuild.rom_path, twoPassageRomPath);
+  addReportArtifact(report, twoPassageRomPath, "ROM com duas passagens autorais");
+  const twoPassageMainPath = path.join(validationDir, `${artifactPrefix}-two-passages-main.c`);
+  await cp(path.join(createdState.activeProjectDir, "build", "megadrive", "src", "main.c"), twoPassageMainPath);
+  addReportArtifact(report, twoPassageMainPath, "main.c com duas passagens");
+  runtimeSymbols = parseElf32Symbols(await readFile(elfPath));
+  const twoSymbols = runtimeSymbols;
+  const readS16 = async (name) => {
+    const address = twoSymbols.get(name);
+    if (!Number.isInteger(address)) fail(`Simbolo ${name} ausente na ROM de duas passagens.`);
+    const memory = await invokeCore("emulator_read_memory", { region: 2, offset: address & 0xffff, length: 2 });
+    const word = memory.value.data[0] | (memory.value.data[1] << 8);
+    return word > 0x7fff ? word - 0x10000 : word;
+  };
+  const loadedTwo = await callAutomationApi(sessionId, "loadRomForEmulation", [twoPassageRomPath, { startPaused: true }]);
+  if (loadedTwo !== true) fail("ROM de duas passagens nao carregou pausada.");
+  await waitFor(async () => { const st = await readAutomationState(sessionId); return st?.emulatorLoaded === true && st?.emulPaused === true; }, 15000, "ROM de duas passagens nao ficou pausada.", 100);
+  const twoEpoch = await invokeCore("emulator_get_core_epoch");
+  await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: twoEpoch.value });
+  await invokeCore("emulator_run_frames", { frames: 120 });
+  const regionHash = (observed, x0, y0, w, h) => {
+    const rgba = Buffer.from(observed?.framebuffer_rgba ?? []);
+    const width = Number(observed?.framebuffer_width ?? 320);
+    const hash = createHash("sha256");
+    for (let y = y0; y < y0 + h; y += 1) hash.update(rgba.subarray((y * width + x0) * 4, (y * width + x0 + w) * 4));
+    return hash.digest("hex");
+  };
+  const idleChanges = [];
+  let lastIdle = null;
+  let firstObserved = null;
+  for (let frame = 0; frame < 40; frame += 1) {
+    await invokeCore("emulator_run_frames", { frames: 1 });
+    const observed = (await invokeCore("emulator_observe")).value;
+    firstObserved ??= observed;
+    const idleHash = regionHash(observed, 32, 192, 16, 16);
+    if (lastIdle !== null && idleHash !== lastIdle) idleChanges.push(frame);
+    lastIdle = idleHash;
+  }
+  const idleGaps = idleChanges.slice(1).map((frame, index) => frame - idleChanges[index]);
+  if (idleChanges.length < 6 || !idleGaps.every((gap) => gap === 5)) {
+    fail(`Animacao idle editada (12 fps) nao trocou a cada 5 frames na ROM: ${JSON.stringify(idleChanges)}`);
+  }
+  const reopenedObserved = reopenedBuild.framebuffer;
+  const pitVisual = { edited: regionHash(firstObserved, 80, 208, 16, 16), control: regionHash(firstObserved, 160, 208, 16, 16) };
+  if (pitVisual.edited === pitVisual.control) {
+    fail(`Regiao do fosso nao mudou visualmente em relacao ao piso nao editado: ${JSON.stringify(pitVisual)}`);
+  }
+  report.pitVisual = { ...pitVisual, reopenedFramebuffer: reopenedObserved?.framebuffer_sha256 ?? null };
+  await invokeCore("emulator_send_input", { joypad: { ...neutralGoalInput, right: true }, sessionEpoch: twoEpoch.value });
+  const timeline = [];
+  // Native 32 px fox stands at y=176 on the y=208 floor; the erased 8 px
+  // tile exposes a real dip to y=184 before the scripted jump pulse.
+  for (let frame = 1; frame <= 130; frame += 1) {
+    // Controlled measurement: pulse jump (RetroPad Y = MD A) when the player is in the hole.
+    const inHole = timeline.length > 0 && timeline[timeline.length - 1].y >= 184;
+    await invokeCore("emulator_send_input", { joypad: { ...neutralGoalInput, right: true, y: inHole }, sessionEpoch: twoEpoch.value });
+    await invokeCore("emulator_run_frames", { frames: 1 });
+    timeline.push({
+      frame,
+      x: await readS16("spr_player_x"),
+      y: await readS16("spr_player_y"),
+      score: (await readLogicInt("reference_score")).value,
+      mainOpen: (await readLogicInt("goal_open")).value,
+      secondOpen: (await readLogicInt("passage_2_open")).value,
+    });
+  }
+  await invokeCore("emulator_send_input", { joypad: neutralGoalInput, sessionEpoch: twoEpoch.value });
+  const timelinePath = path.join(validationDir, `${artifactPrefix}-two-passages-timeline.json`);
+  await writeFile(timelinePath, JSON.stringify(timeline, null, 2));
+  addReportArtifact(report, timelinePath, "linha do tempo RAM das duas passagens");
+  const at = (predicate) => timeline.find(predicate);
+  const mainOpened = at((t) => t.mainOpen === 1);
+  const secondOpened = at((t) => t.secondOpen === 1);
+  const heldAtSecond = timeline.filter((t) => t.secondOpen === 0 && t.x === 106);
+  const crossTalk = timeline.filter((t) => t.mainOpen === 1 && t.secondOpen === 0 && t.score >= 60);
+  const maxXWhileSecondClosed = Math.max(...timeline.filter((t) => t.secondOpen === 0).map((t) => t.x));
+  if (!mainOpened || mainOpened.score !== 12 || !secondOpened || secondOpened.score !== 60 ||
+      maxXWhileSecondClosed > 106 || heldAtSecond.length < 5 || crossTalk.length > 0 || timeline.at(-1).x <= 136) {
+    fail(`Duas passagens nao se comportaram de forma independente: ${JSON.stringify({ mainOpened, secondOpened, maxXWhileSecondClosed, heldAtSecond: heldAtSecond.length, crossTalk: crossTalk.length, last: timeline.at(-1) })}`);
+  }
+  const pitDip = timeline.filter((t) => t.x >= 72 && t.x < 88 && t.y >= 184);
+  const floorHeld = timeline.filter((t) => t.x < 72).every((t) => t.y === 176);
+  if (pitDip.length === 0 || !floorHeld) {
+    fail(`Colisao apagada pela UI nao virou fosso fisico na ROM: ${JSON.stringify({ pitDip, floorHeld })}`);
+  }
+  addReportStep(report, "scene_collision_and_animation_authored_in_ui", "passed", {
+    pitCells,
+    collisionSolid: { before: solidBeforePit, after: solidAfterPit },
+    physicalPitDip: pitDip,
+    idleFps: 12,
+    idleChangeFrames: idleChanges,
+    idleGaps,
+    pitVisualRegionSha256: pitVisual,
+    limits: "sem paredes de tile horizontais: andando, o personagem sobe a borda do fosso raso",
+  });
+  addReportStep(report, "second_passage_authored_in_ui", "passed", {
+    reopened: reopenedPassage,
+    rom: { path: twoPassageRomPath, sha256: createHash("sha256").update(await readFile(twoPassageRomPath)).digest("hex") },
+    mainOpened,
+    secondOpened,
+    heldFramesAtSecondBlocker: heldAtSecond.length,
+    maxXWhileSecondClosed,
+    final: timeline.at(-1),
+    timeline: timelinePath,
+    inputDriver: "core emulator_send_input (controlled measurement; native keyboard is covered by movement/jump steps)",
+  });
+
+  const savedReport = await writeCreateGameReport(report, reportPath);
+  console.log("OK: Desktop Tauri reference-platformer E2E passou.");
+  console.log(`Projeto criado: ${generatedProjectName}`);
+  console.log(`Diretorio do projeto: ${createdState.activeProjectDir}`);
+  console.log(`ROM inicial: ${firstBuild.rom_path}`);
+  console.log(`ROM reaberta: ${reopenedBuild.rom_path}`);
+  console.log(`Relatorio: ${savedReport}`);
+}
+
+// ── Authoring acceptance (guided UI, restart, keyboard play to victory) ──────────
+// Everything is done through the normal UI with native WebDriver input. The game is
+// played with the real keyboard in the running Game View: no emulator_send_input, no
+// manual frame stepping. RAM, framebuffer and received audio are only *observed*.
+async function runAuthoringAcceptanceScenario(initialSessionId, appPath, uiBootstrapTimeoutMs, onProjectCreated) {
+  let sessionId = initialSessionId;
+  const artifactPrefix = `authoring-acceptance-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: null,
+    scenario: "authoring-acceptance",
+    testedApplication: { path: appPath, sha256: createHash("sha256").update(await readFile(appPath)).digest("hex") },
+    artifacts: [],
+    steps: [],
+    frames: [],
+    roms: [],
+  };
+  const shot = async (name, label) => addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const state = () => readAutomationState(sessionId);
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const click = (testId, label = testId) => clickButtonByTestIdNative(sessionId, testId, label);
+  const selectOption = async (testId, value) => {
+    const elementId = await findElement(sessionId, `[data-testid="${testId}"] option[value="${value}"]`);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+    await waitFor(async () => (await js(`return document.querySelector('[data-testid="${testId}"]')?.value ?? null;`)) === value, 5000, `Selecao ${testId}=${value} nao aplicada.`, 100);
+  };
+  const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
+
+  // Resources must really load: fox fur, red scarf/gate, wooden sword, grass
+  // and the Forge-converted backdrop are checked as rendered viewport pixels.
+  // are checked in the rendered viewport, not just in the asset manifest.
+  const assertResourcesVisible = async (label) => {
+    const summary = await waitFor(async () => {
+      const value = await js(`const el = document.querySelector('[data-testid="viewport-asset-health-summary"]'); return el ? { ...el.dataset } : null;`);
+      return value && Number(value.referenced) > 0 && Number(value.loading) === 0 && Number(value.ready) === Number(value.referenced) && Number(value.failed) === 0 && Number(value.missing) === 0 ? value : false;
+    }, 20000, `${label}: recursos do viewport nao carregaram (falha real de carregamento).`, 250);
+    const colors = await js(`
+      const canvas = document.querySelector('[data-testid="viewport-scene-canvas"]');
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      const data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+      const near = (i, r, g, b) => Math.abs(data[i] - r) < 16 && Math.abs(data[i + 1] - g) < 16 && Math.abs(data[i + 2] - b) < 16;
+      let foxFur = 0, redDetails = 0, woodenSword = 0, grass = 0, sky = 0, mountains = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (near(i, 238, 102, 0)) foxFur += 1;
+        if (near(i, 170, 0, 0) || near(i, 205, 48, 58)) redDetails += 1;
+        if (near(i, 204, 136, 68)) woodenSword += 1;
+        if (near(i, 183, 221, 93) || near(i, 90, 171, 70)) grass += 1;
+        if (near(i, 34, 170, 238)) sky += 1;
+        if (near(i, 0, 102, 170) || near(i, 0, 68, 102)) mountains += 1;
+      }
+      return { foxFur, redDetails, woodenSword, grass, sky, mountains, width: canvas.width, height: canvas.height };
+    `);
+    if (!colors || colors.foxFur < 20 || colors.redDetails < 20 || colors.woodenSword < 3 || colors.grass < 200 || colors.sky < 1000 || colors.mountains < 200) {
+      fail(`${label}: raposa/itens/cenario nao aparecem com seus pixels reais no viewport: ${JSON.stringify(colors)}`);
+    }
+    return { summary, colors };
+  };
+  const assertInspectorPreview = async (label) => {
+    const preview = await waitFor(async () => {
+      const value = await js(`const img = document.querySelector('[data-testid="inspector-asset-preview"]'); return img instanceof HTMLImageElement && img.complete ? { w: img.naturalWidth, h: img.naturalHeight, src: img.src.slice(0, 22) } : null;`);
+      return value && value.w > 0 ? value : false;
+    }, 15000, `${label}: preview do Inspector nao carregou.`, 200);
+    if (preview.w !== 160 || preview.h !== 32) fail(`${label}: preview do personagem com tamanho inesperado: ${JSON.stringify(preview)}`);
+    return preview;
+  };
+  // Controls must be on screen and not covered (native hit test at their center).
+  const assertReachable = async (testIds, label) => {
+    const result = await js(`
+      return arguments[0].map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        if (!el) return { id, ok: false, reason: "ausente" };
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
+        const r = el.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const inside = r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1;
+        const hit = document.elementFromPoint(cx, cy);
+        const clipped = el.scrollWidth > el.clientWidth + 2 && getComputedStyle(el).overflow === "hidden";
+        return { id, ok: inside && Boolean(hit && (hit === el || el.contains(hit))) && !clipped, inside, clipped, hit: hit?.getAttribute?.("data-testid") ?? hit?.tagName };
+      });
+    `, [testIds]);
+    const bad = result.filter((entry) => !entry.ok);
+    if (bad.length) fail(`${label}: controles inacessiveis/cortados/cobertos: ${JSON.stringify(bad)}`);
+    return result;
+  };
+
+  // 1. Create the stage from the wizard and switch to the guided mode.
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await click("template-card-reference_platformer", "modelo de fase de referencia");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const projectName = `Acceptance_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+  const created = await waitFor(async () => {
+    const value = await state();
+    return value?.activeProjectDir && value.activeProjectName === projectName ? value : false;
+  }, 60000, "Wizard nao criou o projeto.", 500);
+  const projectDir = created.activeProjectDir;
+  onProjectCreated(projectDir);
+  currentE2eRunContext.project = projectDir;
+  await click("shell-persona-guiado", "modo guiado");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`), 10000, "Barra de etapas guiadas ausente.", 200);
+  await click("guided-step-personagem", "etapa Personagem");
+  await waitSelected("player");
+  const initialResources = await assertResourcesVisible("editor inicial");
+  const initialPreview = await assertInspectorPreview("editor inicial");
+  await shot("01-guided-editor-loaded", "editor guiado com recursos carregados");
+  addReportStep(report, "create_and_see_resources", "passed", { projectDir, initialResources, initialPreview });
+
+  // Layout: 1920x1080, 1366x768 and an enlarged interface scale.
+  const layoutControls = ["guided-step-cenario", "guided-step-personagem", "guided-step-regras", "guided-step-sons", "guided-step-testar", "scene-save-status", "inspector-transform-x", "inspector-anim-idle-fps"];
+  const layout = {};
+  layout["1920x1080"] = await assertReachable(layoutControls, "1920x1080");
+  await setSessionWindowRect(sessionId, 1366, 768);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  layout["1366x768"] = await assertReachable(layoutControls, "1366x768");
+  await shot("02-layout-1366x768", "editor guiado em 1366x768");
+  await js(`document.documentElement.style.zoom = "1.25";`);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  layout["1366x768@125%"] = await assertReachable(layoutControls.filter((id) => id.startsWith("guided-step") || id === "scene-save-status"), "1366x768 com escala 125%");
+  await shot("03-layout-scaled", "editor guiado com escala 125%");
+  await js(`document.documentElement.style.zoom = "";`);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  // Keyboard reachability of the guided steps.
+  await js(`document.querySelector('[data-testid="guided-step-cenario"]').focus();`);
+  const focused = await js(`return document.activeElement?.getAttribute('data-testid');`);
+  if (focused !== "guided-step-cenario") fail(`Etapa guiada nao recebe foco pelo teclado: ${focused}`);
+  addReportStep(report, "layout_and_keyboard_reachability", "passed", { layout, focused });
+
+  // 2. Scene: paint a brick, erase one floor cell (visual) and its collision.
+  await click("guided-step-cenario", "etapa Cenario");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="tile-palette-3"]'));`), 15000, "Paleta de tiles ausente.", 200);
+  const worldBounds = (await state())?.activeScene?.worldBounds;
+  const cellPoint = (col, row) => ({
+    x: ((col * 8 + 4) - Number(worldBounds?.minX ?? 0)) / Math.max(1, Number(worldBounds?.maxX ?? 320) - Number(worldBounds?.minX ?? 0)),
+    y: ((row * 8 + 4) - Number(worldBounds?.minY ?? 0)) / Math.max(1, Number(worldBounds?.maxY ?? 224) - Number(worldBounds?.minY ?? 0)),
+  });
+  const paintCell = async (paletteTestId, col, row, label) => {
+    await click(paletteTestId, `paleta ${label}`);
+    const point = cellPoint(col, row);
+    await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", point.x, point.y, label);
+  };
+  const solidBefore = Number((await state())?.activeScene?.collisionSolidCount ?? 0);
+  await paintCell("tile-palette-3", 6, 20, "tijolo em (6,20)");
+  await paintCell("tile-palette-empty", 10, 26, "celula vazia em (10,26)");
+  const cells = await waitFor(async () => {
+    const tilemap = (await state())?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap;
+    const values = tilemap?.cells ?? [];
+    return Number(values[20 * 40 + 6]) === 3 && Number(values[26 * 40 + 10]) === 4294967295 ? values : false;
+  }, 10000, "Pintura/celula vazia nao aplicadas ao tilemap.", 150);
+  // Undo/redo with the real keyboard (Ctrl+Z / Ctrl+Y) over the erased cell.
+  const chord = async (key) => webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{ type: "key", id: "rds-chord", actions: [
+      { type: "keyDown", value: "\uE009" }, { type: "keyDown", value: key }, { type: "keyUp", value: key }, { type: "keyUp", value: "\uE009" },
+    ] }],
+  });
+  const cellValue = async (index) => Number((await state())?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells?.[index] ?? 0);
+  await js(`document.activeElement?.blur?.();`);
+  await chord("z");
+  await waitFor(async () => (await cellValue(26 * 40 + 10)) === 0, 10000, "Ctrl+Z nao desfez a celula vazia.", 150);
+  await chord("y");
+  await waitFor(async () => (await cellValue(26 * 40 + 10)) === 4294967295, 10000, "Ctrl+Y nao refez a celula vazia.", 150);
+  addReportStep(report, "undo_redo_keyboard", "passed", { cell: [10, 26] });
+  await closeVisibleConsoleDrawer(sessionId, "antes do modo colisao");
+  await click("tile-tool-collision", "ferramenta Colisao da paleta");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="tile-collision-hint"]'));`), 5000, "Modo colisao nao ativou.", 100);
+  const holePoint = cellPoint(10, 26);
+  await clickCanvasPointNatively(sessionId, "[data-testid='viewport-scene-overlay']", holePoint.x, holePoint.y, "apagar colisao (10,26)", 2);
+  await waitFor(async () => Number((await state())?.activeScene?.collisionSolidCount ?? 0) === solidBefore - 1, 10000, "Colisao da celula nao foi apagada.", 150);
+  await shot("04-scene-edited", "cenario editado: tijolo e celula vazia sem colisao");
+  addReportStep(report, "scene_edit", "passed", { brick: cells[20 * 40 + 6], empty: cells[26 * 40 + 10], collisionSolid: { before: solidBefore, after: solidBefore - 1 } });
+
+  // 3. Second blocker (duplicate + position) and character animation.
+  await click("guided-step-personagem", "etapa Personagem");
+  await webdriverRequest("POST", `/session/${sessionId}/element/${await findElement(sessionId, "[data-testid='hierarchy-entity-passage_blocker']")}/click`, {});
+  await waitSelected("passage_blocker");
+  await click("inspector-duplicate-entity", "duplicar bloqueador");
+  await waitSelected("passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "inspector-transform-x", "120");
+  await waitFor(async () => (await state())?.activeScene?.entities?.find((entity) => entity.id === "passage_blocker_2")?.x === 120, 10000, "Segundo bloqueador nao foi para x=120.", 150);
+  await click("guided-step-personagem", "etapa Personagem");
+  await waitSelected("player");
+  await setInputByTestIdNative(sessionId, "inspector-anim-idle-fps", "12");
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="inspector-anim-idle-fps"]')?.value;`)) === "12", 10000, "FPS do idle nao aplicado.", 150);
+  addReportStep(report, "blocker_and_animation", "passed", { blocker2X: 120, idleFps: 12 });
+
+  // 4. Rules: two independent passages.
+  await click("guided-step-regras", "etapa Regras");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-passages"]')) && Boolean(document.querySelector('[data-testid="nodegraph-rules"]'));`), 15000, "Regras/passagens ausentes.", 200);
+  await setInputByTestIdNative(sessionId, "passage-passage_main-threshold", "12");
+  await selectOption("passage-add-blocker", "passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "passage-add-threshold", "60");
+  await click("passage-add", "adicionar segunda passagem");
+  await waitFor(async () => js(`return document.querySelector('[data-testid="passage-passage_2-openvar"]')?.value === 'passage_2_open' && !document.querySelector('[data-testid="passage-issues"]');`), 10000, "Segunda passagem nao foi criada sem problemas.", 200);
+  const rulesText = await js(`return document.querySelector('[data-testid="nodegraph-rules"]')?.textContent ?? '';`);
+  await shot("05-rules", "regras Quando/Se/Fazer e passagens");
+  addReportStep(report, "passages", "passed", { rulesExcerpt: rulesText.slice(0, 600) });
+
+  // 5. Sounds: bind the completion event to "victory" and preview it.
+  await click("guided-step-sons", "etapa Sons");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="sound-goal_sound-select"]'));`), 10000, "Painel de sons ausente.", 200);
+  await selectOption("sound-goal_sound-select", "victory");
+  await click("sound-goal_sound-preview", "ouvir som associado");
+  const previewState = await waitFor(async () => {
+    const text = await js(`return document.querySelector('[data-testid="sound-goal_sound-preview-state"]')?.textContent ?? '';`);
+    return /Prévia: |Prévia falhou/.test(text) ? text : false;
+  }, 10000, "Previa do som nao respondeu.", 200);
+  if (!/^Prévia: 0\.4/.test(previewState)) fail(`Previa do som associado falhou: ${previewState}`);
+  const soundIssue = await js(`return document.querySelector('[data-testid="sound-goal_sound-issue"]')?.textContent ?? '';`);
+  if (soundIssue) fail(`Som associado reportou problema: ${soundIssue}`);
+  await shot("06-sounds", "som de conclusao associado a victory");
+  addReportStep(report, "sound_binding", "passed", { previewState });
+
+  // 6. Save with a truthful status, check the files, restart the app and reopen.
+  await click("guided-step-personagem", "etapa Personagem");
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  let lastSaveStatus = null;
+  await waitFor(async () => {
+    lastSaveStatus = await js(`const el = document.querySelector('[data-testid="scene-save-status"]'); return el ? { ...el.dataset, text: el.textContent } : null;`);
+    return lastSaveStatus?.status === "saved";
+  }, 20000, "Indicador nao chegou a 'Salvo'.", 200).catch(async () => fail(`Indicador de salvamento nao chegou a 'Salvo': ${JSON.stringify(lastSaveStatus)} mutacoes=${JSON.stringify((await js("return window.__RDS_E2E__.getSceneRevisionLog();")).slice(-3))}`));
+  const graphOnDisk = await readFile(path.join(projectDir, "graphs", "reference_platformer_logic.json"), "utf8");
+  const sceneOnDisk = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  if (!graphOnDisk.includes('"sfx":"victory"') || !graphOnDisk.includes("passage_blocker_2")) fail("Grafo salvo nao contem som/passagem.");
+  if (Number(sceneOnDisk.collision_map.data[26 * 40 + 10]) !== 0) fail("Colisao apagada nao foi salva.");
+  addReportStep(report, "saved", "passed", { saveStatus: "saved" });
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto salvo.", 300);
+  await click("wizard-open-existing-project", "reabrir projeto");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto nao reabriu.", 300);
+  if (!(await js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`))) await click("shell-persona-guiado", "modo guiado apos reinicio");
+  await click("guided-step-personagem", "etapa Personagem apos reinicio");
+  await waitSelected("player");
+  const reopenedResources = await assertResourcesVisible("apos reabrir");
+  const reopenedPreview = await assertInspectorPreview("apos reabrir");
+  const reopenedFps = await js(`return document.querySelector('[data-testid="inspector-anim-idle-fps"]')?.value;`);
+  const reopenedCells = (await state())?.activeScene?.entities?.find((entity) => entity.id === "reference_tilemap")?.tilemap?.cells ?? [];
+  await click("guided-step-regras", "etapa Regras apos reinicio");
+  const reopenedPassages = await waitFor(async () => js(`
+    const v = (id) => document.querySelector('[data-testid="' + id + '"]')?.value ?? null;
+    return v("passage-passage_2-blocker") ? { mainThreshold: v("passage-passage_main-threshold"), second: [v("passage-passage_2-blocker"), v("passage-passage_2-threshold"), v("passage-passage_2-openvar")], sound: v("sound-goal_sound-select") } : false;
+  `), 15000, "Passagens nao reapareceram apos reabrir.", 200);
+  if (reopenedFps !== "12" || Number(reopenedCells[20 * 40 + 6]) !== 3 || Number(reopenedCells[26 * 40 + 10]) !== 4294967295 ||
+      reopenedPassages.mainThreshold !== "12" || reopenedPassages.second.join() !== "passage_blocker_2,60,passage_2_open" || reopenedPassages.sound !== "victory") {
+    fail(`Trabalho nao preservado apos reinicio/reabertura: ${JSON.stringify({ reopenedFps, brick: reopenedCells[20 * 40 + 6], empty: reopenedCells[26 * 40 + 10], reopenedPassages })}`);
+  }
+  await shot("07-reopened", "projeto reaberto com recursos e edicoes");
+  addReportStep(report, "restart_reopen_preserved", "passed", { reopenedResources, reopenedPreview, reopenedFps, reopenedPassages });
+
+  // 7. Build and play with the keyboard until victory.
+  await click("guided-step-testar", "etapa Testar (compilar e jogar)");
+  const running = await waitFor(async () => {
+    const value = await state();
+    const frame = await readCanonicalGameFrame(sessionId);
+    return value?.emulatorLoaded && frame?.renderedFrames > 5 && frame.romSha256 ? { frame } : false;
+  }, 300000, "Build & Run nao iniciou o jogo.", 500).catch(async (error) => {
+    await shot("build-run-failure", "falha do Build & Run");
+    const entries = ((await state())?.consoleEntries ?? []).filter((entry) => entry.level !== "info").slice(-12);
+    fail(`${error.message} console=${JSON.stringify(entries).slice(0, 4000)}`);
+  });
+  const romPath = path.join(projectDir, "build", "megadrive", "out", "rom.bin");
+  const romCopy = path.join(validationDir, `${artifactPrefix}-played.rom`);
+  await cp(romPath, romCopy);
+  const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
+  if (running.frame.romSha256 !== romSha256) fail(`Game View executa outra ROM: ${JSON.stringify({ running: running.frame.romSha256, romSha256 })}`);
+  const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
+  // One in-page round trip per observation: all WRAM words read in parallel (read-only).
+  const watch = ["spr_player_x", "spr_player_y", "logic_var_reference_score", "logic_var_goal_open", "logic_var_passage_2_open", "logic_var_goal_reached"]
+    .map((name) => ({ name, address: symbols.get(name), width: name.startsWith("spr_") ? 2 : 4 }));
+  if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch)}`);
+  const observe = async () => {
+    const raw = await executeAsyncScript(sessionId, `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      Promise.all(arguments[0].map((entry) => invoke("emulator_read_memory", { region: 2, offset: entry.address & 0xffff, length: entry.width })))
+        .then((results) => done({ ok: true, data: results.map((r) => Array.from(r.data)), audioTotal: window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `, [watch]);
+    if (!raw?.ok) fail(`Leitura de WRAM falhou: ${JSON.stringify(raw)}`);
+    const decode = (d, width) => {
+      const word = (i) => d[i] | (d[i + 1] << 8);
+      if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
+      const v = ((word(0) << 16) >>> 0) | word(2);
+      return v > 0x7fffffff ? v - 0x100000000 : v;
+    };
+    const values = watch.map((entry, index) => decode(raw.data[index], entry.width));
+    return { x: values[0], y: values[1], score: values[2], mainOpen: values[3], secondOpen: values[4], goal: values[5], audioTotal: raw.audioTotal, t: Date.now() };
+  };
+  const waitAck = (button, expected, context) => waitFor(async () => {
+    const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
+  }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
+  await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
+  await focusGameCanvasNatively(sessionId);
+  const timeline = [];
+  const acks = [];
+  // The pit is one 8 px tile below the floor at y=208. Its observation
+  // threshold follows the actual visual/body height of this template frame.
+  const fullHoleY = 208 - reopenedPreview.h + 8;
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "andar para a direita");
+  acks.push(await waitAck("right", true, "segurar direita"));
+  let jumps = 0;
+  let lastJumpAt = 0;
+  const deadline = Date.now() + 240000;
+  let current = await observe();
+  while (current.goal !== 1 && Date.now() < deadline) {
+    timeline.push(current);
+    if (current.y >= fullHoleY && Date.now() - lastJumpAt > 1500) {
+      await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "pular para sair do buraco");
+      acks.push(await waitAck("y", true, "pulo"));
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "soltar pulo");
+      acks.push(await waitAck("y", false, "soltar pulo"));
+      jumps += 1;
+      lastJumpAt = Date.now();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    current = await observe();
+  }
+  timeline.push(current);
+  const victory = current;
+  // Let the completion sound play in emulated time, still holding right.
+  const rate = 44100;
+  await waitFor(async () => (await js("return window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total;")) > victory.audioTotal + rate * 2 * 0.8, 60000, "Audio pos-vitoria nao chegou.", 200);
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "soltar direita");
+  acks.push(await waitAck("right", false, "soltar direita"));
+  const timelinePath = path.join(validationDir, `${artifactPrefix}-play-timeline.json`);
+  await writeFile(timelinePath, JSON.stringify(timeline, null, 2));
+  addReportArtifact(report, timelinePath, "linha do tempo do jogo por teclado");
+  await shot("08-victory", "jogo apos vencer pelo teclado");
+  const frameAfter = await readCanonicalGameFrame(sessionId, { includePixels: true });
+  if (!frameAfter?.rgba) fail(`Framebuffer apos a vitoria indisponivel: ${JSON.stringify({ keys: Object.keys(frameAfter ?? {}) })}`);
+
+  const mainOpenedAt = timeline.find((t) => t.mainOpen === 1);
+  const secondOpenedAt = timeline.find((t) => t.secondOpen === 1);
+  const hole = timeline.filter((t) => t.y >= fullHoleY);
+  const crossedSecondClosed = timeline.filter((t) => t.secondOpen === 0 && t.x > 106);
+  if (victory.goal !== 1) fail(`Vitoria nao alcancada pelo teclado: ${JSON.stringify(victory)}`);
+  if (!mainOpenedAt || mainOpenedAt.score < 12 || !secondOpenedAt || secondOpenedAt.score < 60 || crossedSecondClosed.length) {
+    fail(`Passagens nao se comportaram durante o jogo: ${JSON.stringify({ mainOpenedAt, secondOpenedAt, crossedSecondClosed: crossedSecondClosed.length })}`);
+  }
+  if (hole.length === 0 || jumps === 0) fail(`Buraco na colisao nao foi observado/atravessado com pulo: ${JSON.stringify({ hole: hole.length, jumps })}`);
+  // Image: the fox's orange coat is visible in the real core framebuffer after
+  // victory, rather than counting arbitrary nonblack pixels or the old blue art.
+  const foxFurPixels = (() => {
+    const rgba = frameAfter.rgba;
+    let count = 0;
+    for (let i = 0; i < rgba.length; i += 4) if (Math.abs(rgba[i] - 238) < 24 && Math.abs(rgba[i + 1] - 102) < 24 && rgba[i + 2] < 24) count += 1;
+    return count;
+  })();
+  if (foxFurPixels < 20) fail(`Raposa nao aparece no framebuffer apos a vitoria: ${foxFurPixels}`);
+
+  // Sound at the right event: 1320 Hz (victory) after the win, absent before; 880 Hz
+  // (the unbound default) must not dominate.
+  const window = Math.floor(rate * 2 * 0.6);
+  const after = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [Math.max(0, victory.audioTotal - Math.floor(rate * 2 * 0.3)), window + Math.floor(rate * 2 * 0.3)]);
+  const before = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [Math.max(0, victory.audioTotal - Math.floor(rate * 2 * 1.6)), window]);
+  const power = (samples, sampleRate, frequency) => {
+    const omega = (2 * Math.PI * frequency) / sampleRate;
+    const coeff = 2 * Math.cos(omega);
+    let s1 = 0, s2 = 0, n = 0;
+    for (let i = 0; i < samples.length; i += 2) { const s0 = samples[i] + coeff * s1 - s2; s2 = s1; s1 = s0; n += 1; }
+    return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / Math.max(1, n * n);
+  };
+  if (!Array.isArray(after?.samples) || !Array.isArray(before?.samples)) fail(`Amostras de audio indisponiveis: ${JSON.stringify({ after: after && Object.keys(after), before: before && Object.keys(before) })}`);
+  const sampleRate = after.sampleRate || rate;
+  const audio = {
+    sampleRate,
+    before: { p1320: power(before.samples, sampleRate, 1320), p880: power(before.samples, sampleRate, 880), n: before.samples.length },
+    after: { p1320: power(after.samples, sampleRate, 1320), p880: power(after.samples, sampleRate, 880), n: after.samples.length },
+    telemetry: await js("return window.__RDS_E2E__.getAudioOutputTelemetry();"),
+  };
+  if (!(audio.after.p1320 > 20 * Math.max(1, audio.before.p1320) && audio.after.p1320 > 5 * Math.max(1, audio.after.p880))) {
+    fail(`Som associado (victory, 1320 Hz) nao foi produzido no evento de vitoria: ${JSON.stringify(audio)}`);
+  }
+  addReportStep(report, "keyboard_play_to_victory", "passed", {
+    rom: { path: romCopy, sha256: romSha256 },
+    acks: acks.length,
+    jumps,
+    mainOpenedAt,
+    secondOpenedAt,
+    holeSamples: hole.length,
+    victory,
+    foxFurPixels,
+    audio,
+    layers: {
+      generatedByCore: "amostras recebidas pelo app a partir do core (ring buffer), analisadas por Goertzel",
+      forwardedToWebAudio: audio.telemetry,
+      acousticLoopback: "nao medido neste cenario",
+    },
+  });
+  const saved = await writeCreateGameReport(report, reportPath);
+  console.log(`Relatorio: ${saved}`);
+  console.log("OK: Desktop Tauri authoring acceptance (UI guiada, reinicio, teclado ate a vitoria, som associado) passou.");
+}
+
+/**
+ * NodeGraph authoring proof (Experimental): everything through the normal UI with native
+ * WebDriver input — locate the jump, rebind its button, edit one passage threshold without
+ * touching the other, bind a sound from the rules view, organize/undo/redo, group, save,
+ * restart, reopen, build and play with the real keyboard. RAM, framebuffer and audio are
+ * observers only; no emulator_send_input.
+ */
+async function runNodeGraphAuthoringScenario(initialSessionId, appPath, uiBootstrapTimeoutMs, onProjectCreated) {
+  let sessionId = initialSessionId;
+  const artifactPrefix = `nodegraph-authoring-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: null,
+    scenario: "nodegraph-authoring",
+    testedApplication: { path: appPath, sha256: createHash("sha256").update(await readFile(appPath)).digest("hex") },
+    artifacts: [],
+    steps: [],
+    frames: [],
+    roms: [],
+  };
+  const shot = async (name, label) => addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const state = () => readAutomationState(sessionId);
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const click = (testId, label = testId) => clickButtonByTestIdNative(sessionId, testId, label);
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const selectOption = async (testId, value) => {
+    await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center", inline: "center" });`, [testId]);
+    const elementId = await findElement(sessionId, `[data-testid="${testId}"] option[value="${value}"]`);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+    await waitFor(async () => (await js(`return document.querySelector('[data-testid="${testId}"]')?.value ?? null;`)) === value, 5000, `Selecao ${testId}=${value} nao aplicada.`, 100);
+  };
+  const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
+  const text = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.textContent ?? null;`, [testId]);
+  const value = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value ?? null;`, [testId]);
+  const chord = async (key) => webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{ type: "key", id: "rds-chord", actions: [
+      { type: "keyDown", value: "" }, { type: "keyDown", value: key }, { type: "keyUp", value: key }, { type: "keyUp", value: "" },
+    ] }],
+  });
+  const worldPositions = () => js(`
+    const out = {};
+    for (const el of document.querySelectorAll('[data-testid^="node-card-"]')) out[el.dataset.testid.slice(10)] = [Number(el.dataset.x), Number(el.dataset.y)];
+    return out;
+  `);
+  // Geometry of what is really on screen: overlapping cards (visible ones) and the
+  // distance between every wire end and the centre of the port element it belongs to.
+  const geometry = async (label) => {
+    const result = await js(`
+      const svg = document.querySelector('[data-testid="nodegraph-edges"]');
+      // Collapsed group boxes occupy space too (their members are hidden).
+      const cards = [
+        ...[...document.querySelectorAll('[data-testid^="node-card-"]')].map((el) => ({ id: el.dataset.testid.slice(10), r: el.getBoundingClientRect() })),
+        ...[...document.querySelectorAll('[data-testid^="nodegraph-group-box-"][data-collapsed="true"]')].map((el) => ({ id: "group:" + el.dataset.testid.slice(20), r: el.getBoundingClientRect() })),
+      ];
+      const overlaps = [];
+      for (let i = 0; i < cards.length; i += 1) for (let j = i + 1; j < cards.length; j += 1) {
+        const a = cards[i].r, b = cards[j].r;
+        if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) overlaps.push([cards[i].id, cards[j].id]);
+      }
+      const svgRect = svg.getBoundingClientRect();
+      const k = svgRect.width / Math.max(1, svg.clientWidth);
+      let checked = 0, skippedOffscreen = 0, maxDeviation = 0, worst = null;
+      for (const pathEl of svg.querySelectorAll('path[data-from-node]')) {
+        if (pathEl.dataset.collapsedEnd) continue;
+        for (const end of ["from", "to"]) {
+          const node = pathEl.dataset[end + "Node"], port = pathEl.dataset[end + "Port"];
+          const portEl = document.querySelector('[data-testid="node-port-' + node + '-' + (end === "from" ? "out" : "in") + '-' + port + '"]');
+          if (!portEl) continue;
+          const r = portEl.getBoundingClientRect();
+          // Only ends the user can see: off-window points are not compared (under page zoom WebKit mixes coordinate spaces there).
+          if (r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth) { skippedOffscreen += 1; continue; }
+          // Port centre mapped back to SVG user units (layout px) using the page scale k.
+          const p = { x: (r.left + r.width / 2 - svgRect.left) / k, y: (r.top + r.height / 2 - svgRect.top) / k };
+          const deviation = Math.hypot(p.x - Number(pathEl.dataset[end + "X"]), p.y - Number(pathEl.dataset[end + "Y"]));
+          checked += 1;
+          if (deviation > maxDeviation) { const card = portEl.closest('[data-testid^="node-card-"]'); maxDeviation = deviation; worst = { edge: pathEl.dataset.testid, end, deviation, port: [p.x, p.y], wire: [Number(pathEl.dataset[end + "X"]), Number(pathEl.dataset[end + "Y"])], card: card ? { x: card.dataset.x, y: card.dataset.y, left: card.style.left, top: card.style.top, h: card.offsetHeight } : null, shellScroll: [document.querySelector('[data-testid="nodegraph-canvas-shell"]').scrollLeft, document.querySelector('[data-testid="nodegraph-canvas-shell"]').scrollTop] }; }
+        }
+      }
+      const shell = document.querySelector('[data-testid="nodegraph-canvas-shell"]');
+      return { cards: cards.length, overlaps, portEndsChecked: checked, skippedOffscreen, pageScale: k, maxDeviation, worst, zoom: Number(shell?.dataset.zoom ?? 0), window: [innerWidth, innerHeight] };
+    `);
+    if (!result || result.portEndsChecked === 0) fail(`${label}: geometria do grafo indisponivel: ${JSON.stringify(result)}`);
+    return result;
+  };
+  const assertAligned = (g, label) => {
+    if (g.maxDeviation > 2) fail(`${label}: fio fora da porta (${g.maxDeviation.toFixed(2)} px): ${JSON.stringify(g.worst)}`);
+  };
+  const assertReachable = async (testIds, label) => {
+    const result = await js(`
+      return arguments[0].map((id) => {
+        const el = document.querySelector('[data-testid="' + id + '"]');
+        if (!el) return { id, ok: false, reason: "ausente" };
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
+        const r = el.getBoundingClientRect();
+        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        const inside = r.width > 0 && r.height > 0 && r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1;
+        const hit = document.elementFromPoint(cx, cy);
+        return { id, ok: inside && Boolean(hit && (hit === el || el.contains(hit))), inside, hit: hit?.getAttribute?.("data-testid") ?? hit?.tagName };
+      });
+    `, [testIds]);
+    const bad = result.filter((entry) => !entry.ok);
+    if (bad.length) fail(`${label}: controles inacessiveis/cobertos: ${JSON.stringify(bad)}`);
+    return result;
+  };
+  const toolbar = ["nodegraph-undo", "nodegraph-redo", "nodegraph-organize-all", "nodegraph-organize-selection", "nodegraph-fit-view", "nodegraph-select-behavior", "nodegraph-pin-selection", "nodegraph-group-selection"];
+
+  // 1. Create the reference stage and a second passage blocker through the UI.
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await click("template-card-reference_platformer", "modelo de fase de referencia");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const projectName = `NodeGraph_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+  const created = await waitFor(async () => {
+    const current = await state();
+    return current?.activeProjectDir && current.activeProjectName === projectName ? current : false;
+  }, 60000, "Wizard nao criou o projeto.", 500);
+  const projectDir = created.activeProjectDir;
+  onProjectCreated(projectDir);
+  currentE2eRunContext.project = projectDir;
+  const graphPath = path.join(projectDir, "graphs", "reference_platformer_logic.json");
+  const shippedGraph = JSON.parse(await readFile(graphPath, "utf8"));
+  await click("shell-persona-guiado", "modo guiado");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`), 10000, "Barra de etapas guiadas ausente.", 200);
+  await click("guided-step-personagem", "etapa Personagem");
+  await webdriverRequest("POST", `/session/${sessionId}/element/${await findElement(sessionId, "[data-testid='hierarchy-entity-passage_blocker']")}/click`, {});
+  await waitSelected("passage_blocker");
+  await click("inspector-duplicate-entity", "duplicar bloqueador");
+  await waitSelected("passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "inspector-transform-x", "120");
+  await waitFor(async () => (await state())?.activeScene?.entities?.find((entity) => entity.id === "passage_blocker_2")?.x === 120, 10000, "Segundo bloqueador nao foi para x=120.", 150);
+  addReportStep(report, "create_project", "passed", { projectDir, shippedNodes: shippedGraph.nodes.length, shippedEdges: shippedGraph.edges.length });
+
+  // 2. Open the logic and capture the graph as shipped (fit to view).
+  await click("guided-step-regras", "etapa Regras");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="node-card-jump"]')) && Boolean(document.querySelector('[data-testid="nodegraph-rules"]'));`), 15000, "NodeGraph/Regras ausentes.", 200);
+  await closeVisibleConsoleDrawer(sessionId, "antes do NodeGraph");
+  await click("nodegraph-fit-view", "enquadrar grafo");
+  await pause(400);
+  const before = await geometry("antes de organizar");
+  assertAligned(before, "antes de organizar");
+  const positionsShipped = await worldPositions();
+  await shot("01-before-organize", "grafo como entregue pelo template (enquadrado)");
+  addReportStep(report, "graph_before_organize", "passed", { geometry: before });
+
+  // 3. Locate and understand the jump from the rules view.
+  const jumpRuleText = await text("rule-update_jump");
+  if (!jumpRuleText?.includes("A (Z)")) fail(`Regra do pulo nao descreve o botao: ${jumpRuleText}`);
+  await js(`document.querySelector('[data-testid="rule-item-jump"] button')?.scrollIntoView({ block: "center" });`);
+  const ruleButton = await findElement(sessionId, "[data-testid='rule-item-jump'] button");
+  await clickElement(sessionId, ruleButton);
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="node-card-jump"]')?.dataset.selected ?? null;`)) === "true", 5000, "Regra nao levou ao no do pulo.", 100);
+  await click("node-details-toggle-jump", "detalhes tecnicos do pulo");
+  const jumpUnderstood = {
+    action: await text("node-action-jump"),
+    button: await text("node-button-jump"),
+    velocity: await text("node-action-jump_velocity"),
+    sound: await text("node-action-jump_sound"),
+    details: await text("node-details-jump"),
+  };
+  if (jumpUnderstood.action !== "Ao apertar Botao A (tecla Z)" || !jumpUnderstood.button?.includes("Z") || !jumpUnderstood.velocity?.includes("para cima") || !jumpUnderstood.details?.includes("input_pressed")) {
+    fail(`Pulo nao compreensivel pela interface: ${JSON.stringify(jumpUnderstood)}`);
+  }
+  await shot("02-jump-located", "pulo localizado: botao A = tecla Z, impulso e som");
+  await click("node-details-toggle-jump", "fechar detalhes tecnicos");
+  addReportStep(report, "locate_jump", "passed", { jumpRuleText, jumpUnderstood });
+
+  // 4. Rebind the jump to button B (keyboard X) on the node card.
+  await selectOption("node-param-jump-button", "BUTTON_B");
+  const rebound = { action: await text("node-action-jump"), rule: await value("rule-edit-jump-button") };
+  if (rebound.action !== "Ao apertar Botao B (tecla X)" || rebound.rule !== "BUTTON_B") fail(`Troca de botao nao refletida: ${JSON.stringify(rebound)}`);
+  addReportStep(report, "rebind_jump", "passed", rebound);
+
+  // 5. Two passages; edit only the main threshold on its node card.
+  await selectOption("passage-add-blocker", "passage_blocker_2");
+  await setInputByTestIdNative(sessionId, "passage-add-threshold", "60");
+  await click("passage-add", "adicionar segunda passagem");
+  await waitFor(async () => (await value("passage-passage_2-openvar")) === "passage_2_open", 10000, "Segunda passagem nao foi criada.", 200);
+  await js(`document.querySelector('[data-testid="node-param-score_threshold-b"]')?.scrollIntoView({ block: "center", inline: "center" });`);
+  await setInputByTestIdNative(sessionId, "node-param-score_threshold-b", "12");
+  const thresholds = await waitFor(async () => {
+    const v = { main: await value("passage-passage_main-threshold"), second: await value("passage-passage_2-threshold"), card: await value("node-param-score_threshold-b") };
+    return v.main === "12" && v.card === "12" ? v : false;
+  }, 5000, "Limiar principal nao aplicado.", 150);
+  if (thresholds.second !== "60") fail(`Editar a passagem principal alterou a segunda: ${JSON.stringify(thresholds)}`);
+  addReportStep(report, "edit_one_passage", "passed", thresholds);
+
+  // 6. Bind the completion sound from the rules view.
+  await selectOption("rule-edit-goal_sound-sfx", "victory");
+  const soundBound = { rule: await value("rule-edit-goal_sound-sfx"), panel: await value("sound-goal_sound-select"), issue: await text("sound-goal_sound-issue") };
+  if (soundBound.rule !== "victory" || soundBound.panel !== "victory" || soundBound.issue) fail(`Som nao associado: ${JSON.stringify(soundBound)}`);
+  addReportStep(report, "bind_sound", "passed", soundBound);
+
+  // 7. Organize, check geometry, undo/redo with the real keyboard.
+  const edgesBefore = await js(`return document.querySelectorAll('path[data-from-node]').length;`);
+  const positionsBeforeOrganize = await worldPositions();
+  const organizeStarted = Date.now();
+  await click("nodegraph-organize-all", "organizar tudo");
+  const layoutReport = await waitFor(async () => js(`const el = document.querySelector('[data-testid="nodegraph-layout-report"]'); return el ? { ...el.dataset } : null;`), 5000, "Relatorio de organizacao ausente.", 50);
+  const organizeUiMs = Date.now() - organizeStarted;
+  await pause(500);
+  const organized = await geometry("apos organizar");
+  assertAligned(organized, "apos organizar");
+  if (organized.overlaps.length || layoutReport.overlaps !== "0" || layoutReport.conflicts !== "0") fail(`Organizar deixou sobreposicoes/conflitos: ${JSON.stringify({ organized, layoutReport })}`);
+  const positionsOrganized = await worldPositions();
+  const edgesAfter = await js(`return document.querySelectorAll('path[data-from-node]').length;`);
+  if (edgesAfter !== edgesBefore) fail(`Organizar mudou o numero de conexoes: ${edgesBefore} -> ${edgesAfter}`);
+  await shot("03-after-organize", "grafo organizado pelas conexoes (enquadrado)");
+  await js(`document.activeElement?.blur?.();`);
+  await chord("z");
+  await waitFor(async () => JSON.stringify(await worldPositions()) === JSON.stringify(positionsBeforeOrganize), 10000, "Ctrl+Z nao desfez a organizacao.", 150)
+    .catch(async (error) => {
+      const logs = ((await state())?.consoleEntries ?? []).map((entry) => entry.message).filter((m) => /NodeGraph|Atalhos/.test(m)).slice(-8);
+      const undoTitle = await js(`return document.querySelector('[data-testid="nodegraph-undo"]')?.title ?? null;`);
+      fail(`${error.message} ${JSON.stringify({ logs, undoTitle, active: await js("return document.activeElement?.tagName;") })}`);
+    });
+  await chord("y");
+  await waitFor(async () => JSON.stringify(await worldPositions()) === JSON.stringify(positionsOrganized), 10000, "Ctrl+Y nao refez a organizacao.", 150);
+  const stillBound = { button: await value("node-param-jump-button"), threshold: await value("node-param-score_threshold-b"), sound: await value("rule-edit-goal_sound-sfx") };
+  if (stillBound.button !== "BUTTON_B" || stillBound.threshold !== "12" || stillBound.sound !== "victory") fail(`Desfazer/refazer da organizacao afetou edicoes: ${JSON.stringify(stillBound)}`);
+  addReportStep(report, "organize_undo_redo", "passed", { layoutReport, organizeUiMs, before: { overlaps: before.overlaps.length }, organized, edges: edgesAfter, stillBound });
+
+  // 8. Group the jump behavior, rename and collapse it (visual only).
+  await js(`document.querySelector('[data-testid="rule-item-jump"] button')?.scrollIntoView({ block: "center" });`);
+  await clickElement(sessionId, await findElement(sessionId, "[data-testid='rule-item-jump'] button"));
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="node-card-jump"]')?.dataset.selected ?? null;`)) === "true", 5000, "No do pulo nao selecionado.", 100);
+  await click("nodegraph-select-behavior", "selecionar comportamento");
+  const selection = await text("nodegraph-selection-count");
+  if (!selection?.startsWith("4 selecionado")) fail(`Comportamento do pulo nao tem 4 nos: ${selection}`);
+  await click("nodegraph-group-selection", "agrupar");
+  const groupId = await waitFor(async () => js(`return document.querySelector('[data-testid^="nodegraph-group-name-"]')?.dataset.testid.replace("nodegraph-group-name-", "") ?? null;`), 5000, "Grupo nao criado.", 100);
+  if ((await value(`nodegraph-group-name-${groupId}`)) !== "Pulo") fail("Nome sugerido do grupo nao e 'Pulo'.");
+  await setInputByTestIdNative(sessionId, `nodegraph-group-name-${groupId}`, "Pulo (botao B)");
+  await waitFor(async () => (await value(`nodegraph-group-name-${groupId}`)) === "Pulo (botao B)", 5000, "Grupo nao renomeado.", 100);
+  await click(`nodegraph-group-collapse-${groupId}`, "recolher grupo");
+  await waitFor(async () => !(await js(`return Boolean(document.querySelector('[data-testid="node-card-jump"]'));`)), 5000, "Grupo nao recolheu.", 100);
+  await shot("04-grouped-collapsed", "comportamento Pulo agrupado e recolhido");
+  addReportStep(report, "group_behavior", "passed", { groupId, selection });
+
+  // 9. Sizes and scales: controls reachable, no overlaps, wires on ports (also zoomed in).
+  const layouts = {};
+  layouts["1920x1080"] = { reach: await assertReachable(toolbar, "1920x1080"), geometry: await geometry("1920x1080") };
+  await setSessionWindowRect(sessionId, 1366, 768);
+  await pause(700);
+  layouts["1366x768"] = { reach: await assertReachable(toolbar, "1366x768"), geometry: await geometry("1366x768") };
+  await shot("05-layout-1366x768", "NodeGraph em 1366x768");
+  await js(`document.documentElement.style.zoom = "1.25";`);
+  await pause(700);
+  layouts["1366x768@125%"] = { reach: await assertReachable(["nodegraph-undo", "nodegraph-organize-all", "nodegraph-fit-view"], "1366x768 com escala 125%"), geometry: await geometry("1366x768@125%") };
+  await shot("06-layout-scaled", "NodeGraph com escala 125%");
+  await js(`document.documentElement.style.zoom = "";`);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await pause(700);
+  await js(`
+    const shell = document.querySelector('[data-testid="nodegraph-canvas-shell"]');
+    const r = document.querySelector('[data-testid="node-card-score_threshold"]').getBoundingClientRect();
+    for (let i = 0; i < 10; i += 1) shell.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: r.left + 4, clientY: r.top + r.height / 2, deltaY: -160 }));
+  `);
+  await pause(500);
+  layouts["zoom-in"] = { geometry: await geometry("zoom ampliado") };
+  for (const [label, entry] of Object.entries(layouts)) {
+    assertAligned(entry.geometry, label);
+    if (entry.geometry.overlaps.length) fail(`${label}: cartoes sobrepostos: ${JSON.stringify(entry.geometry.overlaps)}`);
+  }
+  if (!(layouts["zoom-in"].geometry.zoom > 1)) fail(`Zoom nao ampliou: ${layouts["zoom-in"].geometry.zoom}`);
+  await click("nodegraph-fit-view", "enquadrar apos zoom");
+  addReportStep(report, "layout_sizes_scales", "passed", layouts);
+
+  // 10. Save, check the file, restart, reopen.
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  let lastSaveStatus = null;
+  await waitFor(async () => {
+    lastSaveStatus = await js(`const el = document.querySelector('[data-testid="scene-save-status"]'); return el ? { ...el.dataset, text: el.textContent } : null;`);
+    return lastSaveStatus?.status === "saved";
+  }, 20000, "Indicador nao chegou a 'Salvo'.", 200).catch(() => fail(`Salvar nao concluiu: ${JSON.stringify(lastSaveStatus)}`));
+  const saved = JSON.parse(await readFile(graphPath, "utf8"));
+  const node = (graph, id) => graph.nodes.find((candidate) => candidate.id === id);
+  const passage2Rule = saved.nodes.find((candidate) => candidate.params?.passage_id === "passage_2" && candidate.params?.passage_role === "rule");
+  const savedChecks = {
+    jumpButton: node(saved, "jump")?.params?.button,
+    mainThreshold: node(saved, "score_threshold")?.params?.b,
+    secondThreshold: passage2Rule?.params?.b,
+    goalSfx: node(saved, "goal_sound")?.params?.sfx,
+    groups: saved.groups,
+    jumpPosition: [node(saved, "jump")?.x, node(saved, "jump")?.y],
+  };
+  if (savedChecks.jumpButton !== "BUTTON_B" || savedChecks.mainThreshold !== 12 || savedChecks.secondThreshold !== 60 || savedChecks.goalSfx !== "victory" ||
+      savedChecks.groups?.[0]?.label !== "Pulo (botao B)" || savedChecks.groups?.[0]?.collapsed !== true ||
+      savedChecks.jumpPosition.join() !== positionsOrganized.jump.join()) {
+    fail(`Arquivo salvo nao reflete as edicoes: ${JSON.stringify(savedChecks)}`);
+  }
+  // Untouched behaviors keep their exact logic: every shipped node/edge not edited is identical.
+  const edited = new Set(["jump", "score_threshold", "goal_sound"]);
+  // Editor defaults materialized on save (not read by the SGDK compiler) are allowed and reported.
+  const knownDefaults = { event_update: { rate: "frame" } };
+  const materializedDefaults = [];
+  const changedUntouched = shippedGraph.nodes.filter((n) => {
+    if (edited.has(n.id)) return false;
+    const s2 = node(saved, n.id);
+    if (!s2 || s2.type !== n.type || s2.label !== n.label) return true;
+    for (const [key, v] of Object.entries(n.params)) if (JSON.stringify(s2.params[key]) !== JSON.stringify(v)) return true;
+    for (const [key, v] of Object.entries(s2.params)) {
+      if (key in n.params) continue;
+      if (knownDefaults[n.type]?.[key] !== v) return true;
+      materializedDefaults.push(`${n.id}.${key}=${v}`);
+    }
+    return false;
+  }).map((n) => n.id);
+  const missingEdges = shippedGraph.edges.filter((e) => !saved.edges.some((s) => s.fromNode === e.fromNode && s.fromPort === e.fromPort && s.toNode === e.toNode && s.toPort === e.toPort));
+  // The passage editor rewires only the movement gates to add the second passage.
+  const allowedRewire = (e) => ["move_right", "move_left"].includes(e.toNode);
+  if (changedUntouched.length || missingEdges.some((e) => !allowedRewire(e))) fail(`Comportamentos nao editados mudaram: ${JSON.stringify({ changedUntouched, missingEdges })}`);
+  addReportStep(report, "saved_file", "passed", { savedChecks, materializedDefaults, untouchedNodes: shippedGraph.nodes.length - edited.size, rewiredForSecondPassage: missingEdges });
+
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto salvo.", 300);
+  await click("wizard-open-existing-project", "reabrir projeto");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto nao reabriu.", 300);
+  if (!(await js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`))) await click("shell-persona-guiado", "modo guiado apos reinicio");
+  await click("guided-step-regras", "etapa Regras apos reinicio");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-rules"]'));`), 15000, "Regras ausentes apos reabrir.", 200);
+  await closeVisibleConsoleDrawer(sessionId, "apos reabrir");
+  const reopened = await waitFor(async () => {
+    const v = {
+      jumpRule: await value("rule-edit-jump-button"),
+      mainThreshold: await value("passage-passage_main-threshold"),
+      secondThreshold: await value("passage-passage_2-threshold"),
+      sound: await value("rule-edit-goal_sound-sfx"),
+      group: await js(`const el = document.querySelector('[data-testid^="nodegraph-group-box-"]'); return el ? { collapsed: el.dataset.collapsed, label: el.textContent } : null;`),
+      positions: await worldPositions(),
+    };
+    return v.jumpRule ? v : false;
+  }, 15000, "Edicoes nao reapareceram.", 200);
+  const visibleMatch = Object.entries(reopened.positions).every(([id, pos]) => positionsOrganized[id] && pos.join() === positionsOrganized[id].join());
+  if (reopened.jumpRule !== "BUTTON_B" || reopened.mainThreshold !== "12" || reopened.secondThreshold !== "60" || reopened.sound !== "victory" ||
+      reopened.group?.collapsed !== "true" || !reopened.group.label.includes("Pulo (botao B)") || !visibleMatch) {
+    fail(`Trabalho nao preservado apos reinicio: ${JSON.stringify(reopened)}`);
+  }
+  await click("nodegraph-fit-view", "enquadrar apos reabrir");
+  await pause(400);
+  const reopenedGeometry = await geometry("apos reabrir");
+  assertAligned(reopenedGeometry, "apos reabrir");
+  if (reopenedGeometry.overlaps.length) fail(`Sobreposicao apos reabrir: ${JSON.stringify(reopenedGeometry.overlaps)}`);
+  await shot("07-reopened", "grafo reaberto: organizado, agrupado e editado");
+  addReportStep(report, "restart_reopen", "passed", { ...reopened, positions: undefined, visibleMatch, geometry: reopenedGeometry });
+
+  // 11. Build and play with the real keyboard.
+  await click("guided-step-testar", "etapa Testar");
+  const running = await waitFor(async () => {
+    const current = await state();
+    const frame = await readCanonicalGameFrame(sessionId);
+    return current?.emulatorLoaded && frame?.renderedFrames > 5 && frame.romSha256 ? { frame } : false;
+  }, 300000, "Build & Run nao iniciou o jogo.", 500).catch(async (error) => {
+    await shot("build-run-failure", "falha do Build & Run");
+    const entries = ((await state())?.consoleEntries ?? []).filter((entry) => entry.level !== "info").slice(-12);
+    fail(`${error.message} console=${JSON.stringify(entries).slice(0, 4000)}`);
+  });
+  const romPath = path.join(projectDir, "build", "megadrive", "out", "rom.bin");
+  const romCopy = path.join(validationDir, `${artifactPrefix}-played.rom`);
+  await cp(romPath, romCopy);
+  const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
+  if (running.frame.romSha256 !== romSha256) fail(`Game View executa outra ROM: ${JSON.stringify({ running: running.frame.romSha256, romSha256 })}`);
+  const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
+  const watch = ["spr_player_x", "spr_player_y", "logic_var_reference_score", "logic_var_goal_open", "logic_var_passage_2_open", "logic_var_goal_reached", "spr_player_vel_y", "rds_joy_prev_1"]
+    .map((name) => ({ name, address: symbols.get(name), width: name.endsWith("vel_y") || name.startsWith("logic_") ? 4 : 2 }));
+  if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch)}`);
+  const observe = async () => {
+    const raw = await executeAsyncScript(sessionId, `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      Promise.all(arguments[0].map((entry) => invoke("emulator_read_memory", { region: 2, offset: entry.address & 0xffff, length: entry.width })))
+        .then((results) => done({ ok: true, data: results.map((r) => Array.from(r.data)), audioTotal: window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `, [watch]);
+    if (!raw?.ok) fail(`Leitura de WRAM falhou: ${JSON.stringify(raw)}`);
+    const decode = (d, width) => {
+      const word = (i) => d[i] | (d[i + 1] << 8);
+      if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
+      const v = ((word(0) << 16) >>> 0) | word(2);
+      return v > 0x7fffffff ? v - 0x100000000 : v;
+    };
+    const values = watch.map((entry, index) => decode(raw.data[index], entry.width));
+    return { x: values[0], y: values[1], score: values[2], mainOpen: values[3], secondOpen: values[4], goal: values[5], velY: values[6], joyPrev: values[7], frame: (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0, audioTotal: raw.audioTotal, t: Date.now() };
+  };
+  const waitAck = (button, expected, context) => waitFor(async () => {
+    const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
+  }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
+  const sampleY = async (ms) => {
+    const samples = [];
+    const end = Date.now() + ms;
+    const hardEnd = Date.now() + 20000;
+    while ((Date.now() < end || samples.length === 0 || samples[samples.length - 1].frame - samples[0].frame < 3) && Date.now() < hardEnd) {
+      samples.push(await observe());
+      await pause(20);
+    }
+    if (samples[samples.length - 1].frame - samples[0].frame < 3) fail(`ROM nao avancou quadros durante input: ${JSON.stringify(samples.slice(-4))}`);
+    return samples;
+  };
+  await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
+  await focusGameCanvasNatively(sessionId);
+  const acks = [];
+  // Standing still until the physics settles on the floor.
+  let groundY = null;
+  const settleSamples = [];
+  await waitFor(async () => {
+    const sample = await observe();
+    settleSamples.push(sample);
+    groundY = sample.y;
+    return settleSamples.length >= 4 && sample.frame > settleSamples[0].frame && settleSamples.slice(-4).every((s) => s.y === groundY);
+  }, 20000, "Personagem nao pousou.", 100).catch(async (error) => {
+    await writeFile(path.join(validationDir, `${artifactPrefix}-settle-trace.json`), JSON.stringify({ appSha256: report.testedApplication.sha256, romSha256, projectDir, watch, settleSamples }, null, 2));
+    throw error;
+  });
+  // Old binding (Z = button A) must no longer jump.
+  await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "Z (antigo pulo)");
+  acks.push(await waitAck("y", true, "Z"));
+  const zSamples = await sampleY(2500);
+  await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "soltar Z");
+  acks.push(await waitAck("y", false, "soltar Z"));
+  // New binding (X = button B) jumps.
+  await pause(300);
+  await sendNativeGameKey(sessionId, "KeyX", "keyDown", "X (novo pulo)");
+  acks.push(await waitAck("b", true, "X"));
+  const xSamples = await sampleY(2500);
+  await sendNativeGameKey(sessionId, "KeyX", "keyUp", "soltar X");
+  acks.push(await waitAck("b", false, "soltar X"));
+  const jumpProof = { groundY, zMinY: Math.min(...zSamples.map((s) => s.y)), xMinY: Math.min(...xSamples.map((s) => s.y)), zSamples: zSamples.length, xSamples: xSamples.length };
+  const jumpTracePath = path.join(validationDir, `${artifactPrefix}-jump-trace.json`);
+  await writeFile(jumpTracePath, JSON.stringify({ appSha256: report.testedApplication.sha256, romSha256, projectDir, watch, acks, zSamples, xSamples }, null, 2));
+  addReportArtifact(report, jumpTracePath, "input nativo e trajetoria RAM do salto editado");
+  if (jumpProof.zMinY < groundY - 1) fail(`Tecla Z ainda faz pular apos trocar para o botao B: ${JSON.stringify(jumpProof)}`);
+  if (!(jumpProof.xMinY <= groundY - 8)) fail(`Tecla X (botao B) nao fez pular: ${JSON.stringify(jumpProof)}`);
+  await waitFor(async () => (await observe()).y === groundY, 10000, "Personagem nao voltou ao chao.", 100);
+  // Walk right to the goal: untouched walking, score, both passages and goal logic.
+  const timeline = [];
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "andar para a direita");
+  acks.push(await waitAck("right", true, "segurar direita"));
+  const deadline = Date.now() + 240000;
+  let current = await observe();
+  while (current.goal !== 1 && Date.now() < deadline) {
+    timeline.push(current);
+    await pause(40);
+    current = await observe();
+  }
+  timeline.push(current);
+  const victory = current;
+  const rate = 44100;
+  await waitFor(async () => (await js("return window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total;")) > victory.audioTotal + rate * 2 * 0.8, 60000, "Audio pos-vitoria nao chegou.", 200);
+  await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "soltar direita");
+  acks.push(await waitAck("right", false, "soltar direita"));
+  const timelinePath = path.join(validationDir, `${artifactPrefix}-play-timeline.json`);
+  await writeFile(timelinePath, JSON.stringify({ jumpProof, timeline }, null, 2));
+  addReportArtifact(report, timelinePath, "linha do tempo do jogo por teclado");
+  await shot("08-victory", "jogo apos vencer pelo teclado");
+  const mainOpenedAt = timeline.find((t) => t.mainOpen === 1);
+  const secondOpenedAt = timeline.find((t) => t.secondOpen === 1);
+  const crossedSecondClosed = timeline.filter((t) => t.secondOpen === 0 && t.x > 106);
+  if (victory.goal !== 1) fail(`Vitoria nao alcancada pelo teclado: ${JSON.stringify(victory)}`);
+  const openedEarly = timeline.filter((t) => (t.mainOpen === 1 && t.score < 12) || (t.secondOpen === 1 && t.score < 60));
+  // Shipped threshold was 6: a closed main passage observed at score 6..11 shows the edit reached the ROM.
+  const closedAtOldThreshold = timeline.find((t) => t.mainOpen === 0 && t.score >= 6 && t.score < 12) ?? null;
+  if (!mainOpenedAt || !secondOpenedAt || openedEarly.length || crossedSecondClosed.length) {
+    fail(`Passagens nao respeitaram os limiares 12/60: ${JSON.stringify({ mainOpenedAt, secondOpenedAt, openedEarly: openedEarly.slice(0, 3), crossedSecondClosed: crossedSecondClosed.length })}`);
+  }
+  const window = Math.floor(rate * 2 * 0.6);
+  const after = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [Math.max(0, victory.audioTotal - Math.floor(rate * 2 * 0.3)), window + Math.floor(rate * 2 * 0.3)]);
+  const beforeAudio = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [Math.max(0, victory.audioTotal - Math.floor(rate * 2 * 1.6)), window]);
+  const power = (samples, sampleRate, frequency) => {
+    const omega = (2 * Math.PI * frequency) / sampleRate;
+    const coeff = 2 * Math.cos(omega);
+    let s1 = 0, s2 = 0, n = 0;
+    for (let i = 0; i < samples.length; i += 2) { const s0 = samples[i] + coeff * s1 - s2; s2 = s1; s1 = s0; n += 1; }
+    return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / Math.max(1, n * n);
+  };
+  if (!Array.isArray(after?.samples) || !Array.isArray(beforeAudio?.samples)) fail("Amostras de audio indisponiveis.");
+  const sampleRate = after.sampleRate || rate;
+  const audio = {
+    sampleRate,
+    before: { p1320: power(beforeAudio.samples, sampleRate, 1320), p880: power(beforeAudio.samples, sampleRate, 880) },
+    after: { p1320: power(after.samples, sampleRate, 1320), p880: power(after.samples, sampleRate, 880) },
+  };
+  if (!(audio.after.p1320 > 20 * Math.max(1, audio.before.p1320) && audio.after.p1320 > 5 * Math.max(1, audio.after.p880))) {
+    fail(`Som associado (victory, 1320 Hz) nao foi produzido na vitoria: ${JSON.stringify(audio)}`);
+  }
+  addReportStep(report, "keyboard_play", "passed", { rom: { path: romCopy, sha256: romSha256 }, acks: acks.length, jumpProof, mainOpenedAt, secondOpenedAt, closedAtOldThreshold, samples: timeline.length, victory, audio });
+
+  // 12. Larger graph (after the gameplay proof): append guided blocks to the same graph,
+  // organize it and record timings. The temporary project is discarded afterwards.
+  await click("guided-step-regras", "etapa Regras (grafo maior)");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid^="nodegraph-append-template-"]'));`), 15000, "Blocos guiados ausentes.", 200);
+  const perf = { baseNodes: await js(`return document.querySelectorAll('[data-testid^="node-card-"]').length + document.querySelectorAll('[data-testid^="nodegraph-group-box-"][data-collapsed="true"]').length * 4;`) };
+  for (let round = 0; round < 6; round += 1) {
+    const templates = await js(`return [...document.querySelectorAll('[data-testid^="nodegraph-append-template-"]')].map((el) => el.dataset.testid);`);
+    await click(templates[round % templates.length], `bloco guiado ${round + 1}`);
+    await pause(250);
+  }
+  perf.visibleNodes = await js(`return document.querySelectorAll('[data-testid^="node-card-"]').length;`);
+  perf.totalNodes = await js(`return Number(document.querySelector('[data-testid="nodegraph-overview"]')?.textContent.match(/(\\d+) nos/)?.[1] ?? 0);`);
+  const bigStarted = Date.now();
+  await click("nodegraph-organize-all", "organizar grafo maior");
+  perf.report = await waitFor(async () => js(`const el = document.querySelector('[data-testid="nodegraph-layout-report"]'); return el && el.dataset.moved !== undefined ? { ...el.dataset } : null;`), 10000, "Relatorio do grafo maior ausente.", 50);
+  perf.uiMs = Date.now() - bigStarted;
+  await pause(500);
+  perf.geometry = await geometry("grafo maior");
+  assertAligned(perf.geometry, "grafo maior");
+  if (perf.geometry.overlaps.length || perf.report.overlaps !== "0") fail(`Grafo maior com sobreposicao: ${JSON.stringify(perf)}`);
+  await shot("09-larger-graph", "grafo maior organizado");
+  addReportStep(report, "larger_graph_performance", "passed", perf);
+
+  const savedReport = await writeCreateGameReport(report, reportPath);
+  console.log(`Relatorio: ${savedReport}`);
+  console.log("OK: Desktop Tauri NodeGraph authoring (localizar pulo, trocar botao, limiar, som, organizar/desfazer, grupo, reinicio, teclado ate a vitoria) passou.");
+}
+
+/**
+ * Reusable behaviors proof (Experimental): through the normal UI with native WebDriver
+ * input — duplicate the player twice, give each copy its own "Movimento e salto" with
+ * different controls/speeds, a gated passage on the second, refuse an invalid parameter,
+ * edit the second (undo/redo with the real keyboard), duplicate an entity that has a
+ * behavior (remapped), remove that copy's instance, save/restart/reopen, build and play
+ * with the real keyboard. RAM is only observed.
+ */
+async function runBehaviorsIndependenceScenario(initialSessionId, appPath, uiBootstrapTimeoutMs, onProjectCreated) {
+  let sessionId = initialSessionId;
+  const artifactPrefix = `behaviors-independence-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = {
+    generatedAt: null,
+    scenario: "behaviors-independence",
+    testedApplication: { path: appPath, sha256: createHash("sha256").update(await readFile(appPath)).digest("hex") },
+    artifacts: [],
+    steps: [],
+    frames: [],
+    roms: [],
+  };
+  const shot = async (name, label) => addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const state = () => readAutomationState(sessionId);
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const click = (testId, label = testId) => clickButtonByTestIdNative(sessionId, testId, label);
+  const find = (selector) => findElement(sessionId, selector).catch(async (error) => {
+    const visible = await js(`return [...document.querySelectorAll('[data-testid]')].map((el) => el.dataset.testid).filter((id) => /hierarchy-entity|entity-switch|behavior-|inspector-dup/.test(id)).slice(0, 60);`).catch(() => null);
+    fail(`Elemento nao encontrado: ${selector} (${error.message}) presentes=${JSON.stringify(visible)}`);
+  });
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const value = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value ?? null;`, [testId]);
+  const text = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.textContent ?? null;`, [testId]);
+  const selectOption = async (testId, optionValue) => {
+    await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center", inline: "center" });`, [testId]);
+    const elementId = await find(`[data-testid="${testId}"] option[value="${optionValue}"]`);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+    await waitFor(async () => (await value(testId)) === optionValue, 5000, `Selecao ${testId}=${optionValue} nao aplicada.`, 100);
+  };
+  const setNumber = async (testId, numberValue) => {
+    await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center" });`, [testId]);
+    await setInputByTestIdNative(sessionId, testId, String(numberValue));
+    await waitFor(async () => (await value(testId)) === String(numberValue), 5000, `${testId} nao virou ${numberValue}.`, 100);
+  };
+  const chord = async (key) => webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{ type: "key", id: "rds-chord", actions: [
+      { type: "keyDown", value: "" }, { type: "keyDown", value: key }, { type: "keyUp", value: key }, { type: "keyUp", value: "" },
+    ] }],
+  });
+  const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
+  const clickHierarchy = async (entityId) => {
+    const selector = `[data-testid='hierarchy-entity-${entityId}']`;
+    await waitFor(async () => js(`return Boolean(document.querySelector(arguments[0]));`, [selector]), 15000, `Hierarquia sem ${entityId}.`, 150);
+    await js(`document.querySelector(arguments[0])?.scrollIntoView({ block: "center" });`, [selector]);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${await find(selector)}/click`, {});
+    await waitSelected(entityId);
+  };
+  const instances = () => js(`return [...document.querySelectorAll('[data-testid^="behavior-instance-"]')].map((el) => ({ id: el.dataset.testid.slice(18), text: el.textContent }));`);
+  const switchLogic = async (entityId) => {
+    // The Logic view is lazy (Suspense): wait until the switcher offers this entity.
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-entity-switch"] option[value="' + arguments[0] + '"]'));`, [entityId]), 20000, `Seletor de logica sem ${entityId}.`, 150);
+    await selectOption("nodegraph-entity-switch", entityId);
+    await waitSelected(entityId);
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-behaviors"]'));`), 10000, "Painel de comportamentos ausente.", 150);
+  };
+  const addMovement = async (config) => {
+    await click("behavior-add-platform_movement", "adicionar Movimento e salto");
+    if ((await value("behavior-param-target")) !== config.target) fail(`Alvo padrao inesperado: ${await value("behavior-param-target")}`);
+    await setNumber("behavior-param-speed", config.speed);
+    await selectOption("behavior-param-right_button", config.right);
+    await selectOption("behavior-param-left_button", config.left);
+    await selectOption("behavior-param-jump_button", config.jump);
+    await setNumber("behavior-param-jump_strength", config.strength);
+    if (config.sound !== undefined) await selectOption("behavior-param-jump_sound", config.sound);
+    const summary = await text("behavior-summary");
+    await click("behavior-apply", "aplicar comportamento");
+    return summary;
+  };
+
+  // 1. Project and two copies of the player (manual logic is NOT copied — warned first).
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await click("template-card-reference_platformer", "modelo de fase de referencia");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const projectName = `Behaviors_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+  const created = await waitFor(async () => {
+    const current = await state();
+    return current?.activeProjectDir && current.activeProjectName === projectName ? current : false;
+  }, 60000, "Wizard nao criou o projeto.", 500);
+  const projectDir = created.activeProjectDir;
+  onProjectCreated(projectDir);
+  currentE2eRunContext.project = projectDir;
+  await click("shell-persona-guiado", "modo guiado");
+  await click("guided-step-personagem", "etapa Personagem");
+  await waitSelected("player");
+  const duplicatePlayer = async (expectedId, x) => {
+    await clickHierarchy("player");
+    await click("inspector-duplicate-entity", "duplicar jogador");
+    const warning = await waitFor(async () => text("inspector-duplicate-warning"), 5000, "Aviso de logica manual nao apareceu antes de duplicar.", 100);
+    await click("inspector-duplicate-confirm", "duplicar sem logica manual");
+    await waitSelected(expectedId);
+    await setInputByTestIdNative(sessionId, "inspector-transform-x", String(x));
+    await waitFor(async () => (await state())?.activeScene?.entities?.find((entity) => entity.id === expectedId)?.x === x, 10000, `${expectedId} nao foi para x=${x}.`, 150);
+    return warning;
+  };
+  const warning2 = await duplicatePlayer("player_2", 200);
+  // Player 3 starts overlapping its own blocker (x=90..114) to exercise "starts overlapped".
+  await duplicatePlayer("player_3", 100);
+  // Blockers (24x32): A left of Player 2, B right of Player 2, C for Player 3.
+  const duplicateBlocker = async (expectedId, x) => {
+    await clickHierarchy("passage_blocker");
+    await click("inspector-duplicate-entity", "duplicar bloqueio");
+    await waitSelected(expectedId);
+    await setInputByTestIdNative(sessionId, "inspector-transform-x", String(x));
+    await waitFor(async () => (await state())?.activeScene?.entities?.find((entity) => entity.id === expectedId)?.x === x, 10000, `${expectedId} nao foi para x=${x}.`, 150);
+  };
+  await duplicateBlocker("passage_blocker_2", 150);
+  await duplicateBlocker("passage_blocker_3", 250);
+  await duplicateBlocker("passage_blocker_4", 90);
+  addReportStep(report, "duplicate_players_and_blockers", "passed", { warning: warning2, blockers: { A: 150, B: 250, C: 90 }, player2X: 200, player3X: 100 });
+
+  // 2. Behaviors through the Logic view.
+  await click("guided-step-regras", "etapa Regras");
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-entity-switch"]'));`), 15000, "Editor de logica ausente.", 200);
+  await closeVisibleConsoleDrawer(sessionId, "antes dos comportamentos");
+  await switchLogic("player_2");
+  // Maximum supported speed (8 px/frame) to catch tunneling through a blocker in one step.
+  const summaryA = await addMovement({ target: "player_2", speed: 8, right: "BUTTON_RIGHT", left: "BUTTON_LEFT", jump: "BUTTON_B", strength: 64, sound: "jump" });
+  const [instanceA] = await waitFor(async () => { const list = await instances(); return list.length === 1 ? list : false; }, 5000, "Instancia A nao apareceu.", 100);
+  const addPassage = async (movementId, blocker, threshold) => {
+    await click("behavior-add-gated_passage", "adicionar Passagem condicionada");
+    await selectOption("behavior-param-movement", movementId);
+    await selectOption("behavior-param-blocker", blocker);
+    await selectOption("behavior-param-state_variable", "reference_score");
+    await setNumber("behavior-param-threshold", threshold);
+    const summary = await text("behavior-summary");
+    const before = (await instances()).length;
+    await click("behavior-apply", `aplicar passagem ${blocker}`);
+    await waitFor(async () => (await instances()).length === before + 1, 5000, `Passagem ${blocker} nao apareceu.`, 100);
+    return { summary, id: (await instances()).map((entry) => entry.id).find((id) => id.startsWith(`bh_pass_${blocker}`)) };
+  };
+  const passageRight2 = await addPassage(instanceA.id, "passage_blocker_3", 20);
+  const passageLeft2 = await addPassage(instanceA.id, "passage_blocker_2", 20);
+  await shot("01-behavior-player2", "Movimento e salto aplicado em Player 2");
+
+  await switchLogic("player_3");
+  // Invalid parameter is refused with a message (Apply disabled).
+  await click("behavior-add-platform_movement", "adicionar Movimento (negativo)");
+  await setNumber("behavior-param-speed", 0);
+  const invalid = await waitFor(async () => text("behavior-errors"), 5000, "Erro de parametro invalido nao apareceu.", 100);
+  const applyDisabled = await js(`return document.querySelector('[data-testid="behavior-apply"]')?.disabled === true;`);
+  if (!invalid.includes("entre 1 e 8") || !applyDisabled) fail(`Parametro invalido nao foi recusado: ${JSON.stringify({ invalid, applyDisabled })}`);
+  await click("behavior-cancel", "cancelar");
+  const summaryB = await addMovement({ target: "player_3", speed: 2, right: "BUTTON_C", left: "BUTTON_A", jump: "BUTTON_START", strength: 40 });
+  const [instanceB] = await waitFor(async () => { const list = await instances(); return list.length === 1 ? list : false; }, 5000, "Instancia B nao apareceu.", 100);
+  // Player 3's own passage: a different threshold (60) on its own blocker.
+  const passage3 = await addPassage(instanceB.id, "passage_blocker_4", 60);
+  const passageId = passage3.id;
+  addReportStep(report, "apply_behaviors", "passed", { instanceA, summaryA, passageRight2, passageLeft2, instanceB, summaryB, passage3, invalid });
+
+  // 3. Edit the second instance (2 -> 3), undo/redo with the real keyboard.
+  await click(`behavior-edit-${instanceB.id}`, "editar comportamento de Player 3");
+  await setNumber("behavior-param-speed", 3);
+  await click("behavior-apply", "salvar edicao");
+  const speedIn = async () => (await instances()).find((entry) => entry.id === instanceB.id)?.text ?? "";
+  await waitFor(async () => (await speedIn()).includes("anda 3 px"), 5000, "Edicao nao aplicada.", 100);
+  await js(`document.activeElement?.blur?.();`);
+  await chord("z");
+  await waitFor(async () => (await speedIn()).includes("anda 2 px"), 10000, "Ctrl+Z nao desfez a edicao.", 150);
+  await chord("y");
+  await waitFor(async () => (await speedIn()).includes("anda 3 px"), 10000, "Ctrl+Y nao refez a edicao.", 150);
+  await switchLogic("player_2");
+  const aAfter = (await instances())[0];
+  if (!aAfter?.text.includes("anda 8 px") || aAfter.id !== instanceA.id) fail(`Editar Player 3 alterou Player 2: ${JSON.stringify(aAfter)}`);
+  await shot("02-player2-unchanged", "Player 2 inalterado apos editar Player 3");
+  addReportStep(report, "edit_undo_redo", "passed", { instanceA: aAfter });
+
+  // 4. Duplicate an entity that has a behavior: ids/target remapped, no warning (no manual logic).
+  await click("guided-step-personagem", "etapa Personagem");
+  await clickHierarchy("player_2");
+  await click("inspector-duplicate-entity", "duplicar Player 2 (com comportamento)");
+  await waitSelected("player_2_2");
+  if (await js(`return Boolean(document.querySelector('[data-testid="inspector-duplicate-warning"]'));`)) fail("Aviso de logica manual indevido ao duplicar entidade so com comportamentos.");
+  await click("guided-step-regras", "etapa Regras");
+  await switchLogic("player_2_2");
+  const copiedAll = await waitFor(async () => { const list = await instances(); return list.length === 3 ? list : false; }, 5000, "Copia sem os 3 comportamentos.", 100);
+  const copied = copiedAll.find((entry) => entry.id.startsWith("bh_move_"));
+  if (!copied || copied.id === instanceA.id || !copied.text.includes("Player 2 2")) fail(`Comportamento copiado nao foi remapeado: ${JSON.stringify(copiedAll)}`);
+  if (copiedAll.some((entry) => entry.id === passageRight2.id || entry.id === passageLeft2.id)) fail(`Passagens copiadas reutilizaram ids (estado compartilhado): ${JSON.stringify(copiedAll)}`);
+  // Save now to check the remap in the file, then remove the copy's instance.
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="scene-save-status"]')?.dataset.status;`)) === "saved", 20000, "Salvar nao concluiu.", 200);
+  const sceneFile = () => readFile(path.join(projectDir, "scenes", "main.json"), "utf8").then(JSON.parse);
+  const logicOf = (sceneJson, id) => {
+    const entity = sceneJson.entities.find((candidate) => candidate.entity_id === id);
+    return { graph: entity?.components?.logic?.graph ? JSON.parse(entity.components.logic.graph) : null, graphRef: entity?.components?.logic?.graph_ref ?? null };
+  };
+  const savedCopy = logicOf(await sceneFile(), "player_2_2");
+  const copyMoves = savedCopy.graph?.nodes.filter((node) => node.type === "sprite_move") ?? [];
+  if (savedCopy.graphRef || !copyMoves.length || copyMoves.some((node) => node.params.target !== "player_2_2" || node.id.startsWith(instanceA.id))) {
+    fail(`Remapeamento incorreto na copia: ${JSON.stringify({ graphRef: savedCopy.graphRef, copyMoves })}`);
+  }
+  for (const id of ["player_2", "player_3"]) if (logicOf(await sceneFile(), id).graphRef) fail(`${id} herdou o graph_ref do jogador (estado compartilhado).`);
+  // Removing the movement first is refused (passages depend on it), with a useful message.
+  await click(`behavior-remove-${copied.id}`, "remover movimento da copia (negativo)");
+  const refusal = await waitFor(async () => text("behavior-errors"), 5000, "Remocao com dependentes nao foi recusada.", 100);
+  if (!refusal.includes("depende")) fail(`Mensagem de dependencia ausente: ${refusal}`);
+  await click("behavior-cancel", "cancelar");
+  for (const entry of copiedAll.filter((candidate) => candidate.id !== copied.id)) {
+    await click(`behavior-remove-${entry.id}`, "remover passagem da copia");
+    await click("behavior-remove-confirm", "confirmar remocao");
+  }
+  await click(`behavior-remove-${copied.id}`, "remover movimento da copia");
+  await click("behavior-remove-confirm", "confirmar remocao");
+  await waitFor(async () => (await instances()).length === 0, 5000, "Remocao nao aplicada.", 100);
+  await switchLogic("player_2");
+  const p2Instances = await instances();
+  if (p2Instances.length !== 3 || p2Instances[0]?.id !== instanceA.id) fail(`Remover as instancias da copia afetou Player 2: ${JSON.stringify(p2Instances)}`);
+  addReportStep(report, "duplicate_remap_remove", "passed", { copiedAll, refusal, copyMoves: copyMoves.map((node) => ({ id: node.id, target: node.params.target, dx: node.params.dx })) });
+
+  // 5. Save, restart, reopen and check persistence.
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="scene-save-status"]')?.dataset.status;`)) === "saved", 20000, "Salvar nao concluiu.", 200);
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto salvo.", 300);
+  await click("wizard-open-existing-project", "reabrir projeto");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto nao reabriu.", 300);
+  if (!(await js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`))) await click("shell-persona-guiado", "modo guiado apos reinicio");
+  await click("guided-step-regras", "etapa Regras apos reinicio");
+  await closeVisibleConsoleDrawer(sessionId, "apos reabrir");
+  await switchLogic("player_2");
+  const reopenedA = await instances();
+  await switchLogic("player_3");
+  const reopenedB = await instances();
+  await switchLogic("player_2_2");
+  const reopenedCopy = await instances();
+  const issuesText = await js(`return document.querySelector('[data-testid="nodegraph-behaviors"]')?.textContent ?? "";`);
+  if (reopenedA.length !== 3 || !reopenedA[0].text.includes("anda 8 px") || reopenedA.filter((entry) => entry.text.includes("reference_score >= 20")).length !== 2 ||
+      reopenedB.length !== 2 || !reopenedB.some((entry) => entry.text.includes("anda 3 px")) ||
+      !reopenedB.some((entry) => entry.text.includes("reference_score >= 60")) || reopenedCopy.length !== 0) {
+    fail(`Comportamentos nao persistiram: ${JSON.stringify({ reopenedA, reopenedB, reopenedCopy, issuesText })}`);
+  }
+  await switchLogic("player_3");
+  await shot("03-reopened", "comportamentos apos reiniciar e reabrir");
+  addReportStep(report, "restart_reopen", "passed", { reopenedA, reopenedB, reopenedCopy });
+
+  // 6. Build and play with the real keyboard.
+  await click("guided-step-testar", "etapa Testar");
+  const running = await waitFor(async () => {
+    const current = await state();
+    const frame = await readCanonicalGameFrame(sessionId);
+    return current?.emulatorLoaded && frame?.renderedFrames > 5 && frame.romSha256 ? { frame } : false;
+  }, 300000, "Build & Run nao iniciou o jogo.", 500).catch(async (error) => {
+    await shot("build-run-failure", "falha do Build & Run");
+    const entries = ((await state())?.consoleEntries ?? []).filter((entry) => entry.level !== "info").slice(-12);
+    fail(`${error.message} console=${JSON.stringify(entries).slice(0, 4000)}`);
+  });
+  const romPath = path.join(projectDir, "build", "megadrive", "out", "rom.bin");
+  const romCopy = path.join(validationDir, `${artifactPrefix}-played.rom`);
+  await cp(romPath, romCopy);
+  const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
+  if (running.frame.romSha256 !== romSha256) fail("Game View executa outra ROM.");
+  const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
+  const spriteSymbol = (id, axis) => {
+    const exact = `spr_${id}_${axis}`;
+    if (symbols.has(exact)) return exact;
+    return [...symbols.keys()].find((name) => new RegExp(`^spr_.*__${id}_${axis}$`).test(name)) ?? exact;
+  };
+  const tracked = ["player", "player_2", "player_3", "player_2_2"];
+  const watch = [
+    ...tracked.flatMap((id) => ["x", "y"].map((axis) => ({ name: spriteSymbol(id, axis), width: 2 }))),
+    { name: "logic_var_reference_score", width: 4 },
+    { name: `logic_var_${passageRight2.id}_open`, width: 4 },
+    { name: `logic_var_${passageLeft2.id}_open`, width: 4 },
+    { name: `logic_var_${passageId}_open`, width: 4 },
+    { name: `${spriteSymbol("player_2", "y").slice(0, -2)}_vel_y`, width: 4 },
+    { name: `${spriteSymbol("player_2", "y").slice(0, -2)}_on_ground`, width: 2 },
+    { name: "rds_joy_prev_1", width: 2 },
+    { name: `${spriteSymbol("player_3", "y").slice(0, -2)}_on_ground`, width: 2 },
+  ].map((entry) => ({ ...entry, address: symbols.get(entry.name) }));
+  if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch.filter((entry) => !Number.isInteger(entry.address)).map((entry) => entry.name))}`);
+  // Collision boxes exactly as the ROM computes them (position + collision offset, size).
+  const prefab = async (file) => JSON.parse(await readFile(path.join(projectDir, "prefabs", file), "utf8"));
+  const playerCollision = (await prefab("reference_player.json")).components.collision;
+  const blockerCollision = (await prefab("reference_passage.json")).components.collision;
+  const sceneNow = JSON.parse(await readFile(path.join(projectDir, "scenes", "main.json"), "utf8"));
+  const blockerX = (id) => sceneNow.entities.find((entity) => entity.entity_id === id).transform.x + (blockerCollision.offset?.x ?? 0);
+  const box = (x) => ({ left: x + (playerCollision.offset?.x ?? 0), right: x + (playerCollision.offset?.x ?? 0) + playerCollision.width });
+  const blocker = (id) => ({ left: blockerX(id), right: blockerX(id) + blockerCollision.width });
+  const A = blocker("passage_blocker_2");
+  const B = blocker("passage_blocker_3");
+  const C = blocker("passage_blocker_4");
+  const intersects = (x, b) => box(x).left < b.right && box(x).right > b.left;
+  const observe = async () => {
+    const raw = await executeAsyncScript(sessionId, `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      Promise.all(arguments[0].map((entry) => invoke("emulator_read_memory", { region: 2, offset: entry.address & 0xffff, length: entry.width })))
+        .then((results) => done({ ok: true, data: results.map((r) => Array.from(r.data)) }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `, [watch]);
+    if (!raw?.ok) fail(`Leitura de WRAM falhou: ${JSON.stringify(raw)}`);
+    const decode = (d, width) => {
+      const word = (i) => d[i] | (d[i + 1] << 8);
+      if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
+      const v = ((word(0) << 16) >>> 0) | word(2);
+      return v > 0x7fffffff ? v - 0x100000000 : v;
+    };
+    const v = watch.map((entry, index) => decode(raw.data[index], entry.width));
+    return { p1: [v[0], v[1]], p2: [v[2], v[3]], p3: [v[4], v[5]], copy: [v[6], v[7]], score: v[8], openB: v[9], openA: v[10], openC: v[11], p2VelY: v[12], p2OnGround: v[13], joyPrev: v[14], p3OnGround: v[15], frame: (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0 };
+  };
+  const waitAck = (button, expected, context) => waitFor(async () => {
+    const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
+  }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
+  const KEY_BUTTON = { ArrowRight: "right", ArrowLeft: "left", KeyC: "a", KeyZ: "y", KeyX: "b", Enter: "start" };
+  const down = async (code, label) => { await sendNativeGameKey(sessionId, code, "keyDown", label); await waitAck(KEY_BUTTON[code], true, label); };
+  const up = async (code, label) => {
+    await sendNativeGameKey(sessionId, code, "keyUp", `soltar ${label}`);
+    await waitAck(KEY_BUTTON[code], false, `soltar ${label}`);
+    if (code === "KeyX") {
+      await waitFor(async () => ((await observe()).joyPrev & 0x10) === 0, 20000, `${label}: ROM nao consumiu a liberacao de B`, 30);
+    }
+  };
+  // Samples until `done(samples)` or the emulated-frame budget runs out.
+  const sampleUntil = async (done, maxFrames, label, pollMs = 20) => {
+    const samples = [await observe()];
+    const startFrame = samples[0].frame;
+    const cap = Date.now() + 90000;
+    while (!done(samples) && samples[samples.length - 1].frame - startFrame < maxFrames && Date.now() < cap) {
+      await pause(pollMs);
+      samples.push(await observe());
+    }
+    if (!done(samples)) {
+      const tracePath = path.join(validationDir, `${artifactPrefix}-failed-${label.replace(/[^a-z0-9]+/gi, "-")}-trace.json`);
+      await writeFile(tracePath, JSON.stringify({ appSha256: report.testedApplication.sha256, romSha256, romCopy, projectDir, watch, tapTrace, input: await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;"), samples }, null, 2));
+      fail(`${label}: condicao nao ocorreu em ${maxFrames} quadros; trajetoria preservada em ${tracePath}: ${JSON.stringify(samples.slice(-4))}`);
+    }
+    return samples;
+  };
+  const tapTrace = [];
+  // A tap must last a few emulated frames (emulation runs at a few FPS under WebDriver),
+  // otherwise press and release both happen between two frames and the game never sees it.
+  const tap = async (code, label) => {
+    const traceStart = tapTrace.length;
+    await down(code, label);
+    const pressedAt = (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0;
+    tapTrace.push({ label, phase: "down", sample: await observe(), input: await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") });
+    await waitFor(async () => {
+      const sample = await observe();
+      tapTrace.push({ label, phase: "held", sample });
+      return sample.frame - pressedAt >= 3;
+    }, 20000, `${label}: quadros nao avancaram.`, 30);
+    await up(code, label);
+    tapTrace.push({ label, phase: "up", sample: await observe(), input: await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") });
+    return tapTrace.slice(traceStart).map((entry) => entry.sample);
+  };
+  const settled = (key, ground) => (samples) => samples.length > 3 && samples.slice(-3).every((s) => s[key][1] === ground);
+  await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
+  await focusGameCanvasNatively(sessionId);
+  const initial = await sampleUntil((samples) => samples.length > 6 && samples[samples.length - 1].frame > samples[0].frame && samples.slice(-4).every((s, i, all) => s.p2[1] === all[0].p2[1] && s.p3[1] === all[0].p3[1] && s.p2OnGround !== 0 && s.p3OnGround !== 0), 600, "entidades pousarem");
+  const ground2 = initial[initial.length - 1].p2[1];
+  const ground3 = initial[initial.length - 1].p3[1];
+  const minY = (samples, key) => Math.min(...samples.map((s) => s[key][1]));
+  const problems = [];
+  const jump = {};
+
+  // J1: jump from the ground (tap X): rises, lands.
+  const j1Press = await tap("KeyX", "X (salto do chao)");
+  let run = j1Press.concat(await sampleUntil((samples) => samples.some((s) => s.p2[1] < ground2) && settled("p2", ground2)(samples), 400, "salto J1"));
+  jump.apex1 = ground2 - minY(run, "p2");
+  jump.p3DuringJ1 = run.every((s) => s.p3[1] === ground3);
+  if (!(jump.apex1 >= 8)) problems.push(`J1: sem salto a partir do chao (apex ${jump.apex1})`);
+  if (!jump.p3DuringJ1) problems.push("J1: Player 3 se moveu no salto de Player 2");
+  // J2: second press in the air must not restart the impulse.
+  run = await tap("KeyX", "X (salto J2)");
+  if (run[run.length - 1].p2[1] >= ground2) fail(`J2: toque terminou apos o pouso: ${JSON.stringify(run)}`);
+  jump.airPressAtY = run[run.length - 1].p2[1];
+  await tap("KeyX", "X (pressao no ar)");
+  run = run.concat(await sampleUntil(settled("p2", ground2), 400, "pouso J2"));
+  jump.apex2 = ground2 - minY(run, "p2");
+  if (jump.airPressAtY >= ground2) problems.push("J2: a segunda pressao nao ocorreu no ar");
+  if (jump.apex2 > jump.apex1 + 1) problems.push(`J2: pressao no ar reiniciou o impulso (apex ${jump.apex2} > ${jump.apex1})`);
+  // J3: holding the button cannot fly or re-jump after landing.
+  await down("KeyX", "X segurado");
+  run = await sampleUntil((samples) => samples.some((s) => s.p2[1] < ground2) && settled("p2", ground2)(samples), 400, "salto segurado");
+  const heldLanding = await sampleUntil((samples) => samples[samples.length - 1].frame - samples[0].frame >= 40, 80, "segurar apos pousar");
+  await up("KeyX", "X segurado");
+  jump.apexHeld = ground2 - minY(run, "p2");
+  jump.heldAfterLanding = heldLanding.every((s) => s.p2[1] === ground2);
+  if (jump.apexHeld > jump.apex1 + 1) problems.push(`J3: segurar produziu voo (apex ${jump.apexHeld})`);
+  if (!jump.heldAfterLanding) problems.push("J3: segurar apos pousar saltou de novo");
+  // J4: after landing, a new press jumps again.
+  await tap("KeyX", "X apos pousar");
+  run = await sampleUntil((samples) => samples.some((s) => s.p2[1] < ground2) && settled("p2", ground2)(samples), 400, "novo salto J4");
+  jump.apex4 = ground2 - minY(run, "p2");
+  if (!(jump.apex4 >= 8)) problems.push("J4: sem novo salto apos pousar");
+  // J5: independent support: Player 3 in the air, Player 2 on the ground can still jump.
+  const j5Press = await tap("Enter", "Enter (Player 3 salta)");
+  run = j5Press.concat(await sampleUntil((samples) => samples.some((s) => s.p3[1] < ground3), 200, "Player 3 no ar"));
+  await tap("KeyX", "X com Player 3 no ar");
+  run = run.concat(await sampleUntil((samples) => samples.some((s) => s.p2[1] < ground2) && settled("p2", ground2)(samples) && settled("p3", ground3)(samples), 400, "J5"));
+  jump.p3Apex = ground3 - minY(run, "p3");
+  jump.p2ApexWhileP3Air = ground2 - minY(run, "p2");
+  if (!(jump.p3Apex >= 4) || !(jump.p2ApexWhileP3Air >= 8)) problems.push(`J5: apoio nao independente ${JSON.stringify(jump)}`);
+
+  // Passage (before threshold). Right approach (moving right into B), at 8 px/frame.
+  const passage = { A, B, C };
+  let start = await observe();
+  if (start.score >= 20 || start.openA || start.openB || start.openC) problems.push(`Passagens abertas antes do teste: ${JSON.stringify(start)}`);
+  await down("ArrowRight", "direita ate B");
+  run = await sampleUntil((samples) => samples.length > 4 && samples.slice(-4).every((s) => s.p2[0] === samples[samples.length - 1].p2[0]) && samples[samples.length - 1].p2[0] !== start.p2[0], 200, "Player 2 parar em B");
+  await up("ArrowRight", "direita ate B");
+  passage.fromLeft = { stopX: run[run.length - 1].p2[0], maxRight: Math.max(...run.map((s) => box(s.p2[0]).right)), score: run[run.length - 1].score, overlapped: run.some((s) => intersects(s.p2[0], B)) };
+  if (passage.fromLeft.overlapped || passage.fromLeft.maxRight > B.left) problems.push(`Atravessou/invadiu B pela esquerda ${JSON.stringify(passage.fromLeft)}`);
+  if (B.left - passage.fromLeft.maxRight >= 8) problems.push(`Parou longe de B (nao alcancou o bloqueio) ${JSON.stringify(passage.fromLeft)}`);
+  if (passage.fromLeft.score >= 20) problems.push("Score passou do limiar durante a aproximacao (prova invalida)");
+  // Left approach (moving left into A from its right side).
+  start = await observe();
+  await down("ArrowLeft", "esquerda ate A");
+  run = await sampleUntil((samples) => samples.length > 4 && samples.slice(-4).every((s) => s.p2[0] === samples[samples.length - 1].p2[0]) && samples[samples.length - 1].p2[0] !== start.p2[0], 300, "Player 2 parar em A");
+  await up("ArrowLeft", "esquerda ate A");
+  passage.fromRight = { stopX: run[run.length - 1].p2[0], minLeft: Math.min(...run.map((s) => box(s.p2[0]).left)), overlapped: run.some((s) => intersects(s.p2[0], A)) };
+  if (passage.fromRight.overlapped || passage.fromRight.minLeft < A.right) problems.push(`Atravessou/invadiu A pela direita ${JSON.stringify(passage.fromRight)}`);
+  if (passage.fromRight.minLeft - A.right >= 8) problems.push(`Parou longe de A ${JSON.stringify(passage.fromRight)}`);
+  // Starts overlapped (Player 3 inside C): documented semantics = may move out freely.
+  start = await observe();
+  passage.p3StartedOverlapped = intersects(start.p3[0], C);
+  await down("KeyC", "C (sair de dentro de C)");
+  run = await sampleUntil((samples) => !intersects(samples[samples.length - 1].p3[0], C) && box(samples[samples.length - 1].p3[0]).left >= C.right + 12, 300, "Player 3 sair de C", 0);
+  await up("KeyC", "C");
+  const cDeltas = run.slice(1).map((s, i) => s.p3[0] - run[i].p3[0]).filter((d) => d !== 0);
+  passage.p3Exit = { from: start.p3[0], to: run[run.length - 1].p3[0], gcd: cDeltas.reduce((a, d) => { const g = (x, y) => (y === 0 ? Math.abs(x) : g(y, x % y)); return g(a, d); }, 0), p2Static: run.every((s) => s.p2[0] === start.p2[0]), copyStatic: run.every((s) => s.copy[0] === start.copy[0]) };
+  if (!passage.p3StartedOverlapped) problems.push("Player 3 nao comecou sobreposto a C");
+  if (passage.p3Exit.gcd !== 3) problems.push(`Passos de Player 3 nao sao 3 px (gcd ${passage.p3Exit.gcd})`);
+  if (!passage.p3Exit.p2Static || !passage.p3Exit.copyStatic) problems.push("Outra entidade andou com C (estado/alvo compartilhado)");
+  // Player 3 comes back (Z) and stops at C's right face: its own passage (60) is closed.
+  const p3Closed = async (label) => {
+    const before = await observe();
+    await down("KeyZ", label);
+    // Holding left: stable for >= 20 emulated frames (it may already be touching the face).
+    const samples = await sampleUntil((all) => all.length > 4 && all.slice(-4).every((s) => s.p3[0] === all[all.length - 1].p3[0]) && all[all.length - 1].frame - all[0].frame >= 20, 300, label);
+    void before;
+    await up("KeyZ", label);
+    return { stopX: samples[samples.length - 1].p3[0], minLeft: Math.min(...samples.map((s) => box(s.p3[0]).left)), overlapped: samples.some((s) => intersects(s.p3[0], C)), score: samples[samples.length - 1].score };
+  };
+  passage.p3BeforeThreshold = await p3Closed("Z: Player 3 volta ate C");
+  if (passage.p3BeforeThreshold.overlapped || passage.p3BeforeThreshold.minLeft < C.right) problems.push(`Player 3 invadiu C antes do limiar ${JSON.stringify(passage.p3BeforeThreshold)}`);
+  // Threshold: holding right raises the template score; Player 2 must cross B at the same place.
+  await down("ArrowRight", "direita ate atravessar B");
+  run = await sampleUntil((samples) => box(samples[samples.length - 1].p2[0]).left >= B.right, 600, "Player 2 atravessar B");
+  await up("ArrowRight", "direita ate atravessar B");
+  const firstCross = run.find((s) => box(s.p2[0]).right > B.left) ?? null;
+  passage.cross = { firstInsideB: firstCross, openedAtScore: run.find((s) => s.openB === 1)?.score ?? null, beforeOpenInside: run.filter((s) => s.openB === 0 && intersects(s.p2[0], B)).length, end: run[run.length - 1] };
+  if (!firstCross || firstCross.score < 20 || passage.cross.beforeOpenInside) problems.push(`Travessia de B antes do limiar ${JSON.stringify(passage.cross)}`);
+  // The other passage (Player 3, threshold 60) keeps its own state: still closed at the same face.
+  passage.p3AfterThreshold = await p3Closed("Z: Player 3 contra C apos o limiar de Player 2");
+  if (passage.p3AfterThreshold.score >= 60) problems.push("Score passou de 60 (prova da outra passagem invalida)");
+  if (passage.p3AfterThreshold.overlapped || passage.p3AfterThreshold.minLeft < C.right) problems.push(`Passagem de Player 3 abriu com o limiar de Player 2 ${JSON.stringify(passage.p3AfterThreshold)}`);
+  const finalState = await observe();
+  passage.openStates = { A: finalState.openA, B: finalState.openB, C: finalState.openC, score: finalState.score };
+  if (finalState.openC !== 0) problems.push("Variavel da passagem de Player 3 abriu antes de 60");
+  if (problems.length) fail(`Prova incompleta: ${problems.join("; ")} ${JSON.stringify({ jump, passage })}`);
+  await shot("04-played", "jogo apos a prova por teclado");
+  const romIdentity = { path: romCopy, sha256: romSha256 };
+  const timelinePath = path.join(validationDir, `${artifactPrefix}-play-proof.json`);
+  await writeFile(timelinePath, JSON.stringify({ romIdentity, collision: { player: playerCollision, blocker: blockerCollision }, jump, passage }, null, 2));
+  addReportArtifact(report, timelinePath, "prova de salto e passagem (RAM + colisao)");
+  addReportStep(report, "keyboard_jump_and_passage", "passed", { rom: romIdentity, jump, passage });
+
+  const saved = await writeCreateGameReport(report, reportPath);
+  console.log(`Relatorio: ${saved}`);
+  console.log("OK: Desktop Tauri behaviors independence (duas entidades, parametros distintos, edicao/undo, copia remapeada, remocao, reinicio, teclado) passou.");
+}
+
+/**
+ * Collect -> counter -> passage -> objective proof (Experimental), all through the UI with
+ * native WebDriver input: two collectibles feed a shared counter, a passage needs both,
+ * an objective needs both; save/restart/reopen, build, play with the real keyboard and
+ * restart the match. RAM, pixels and audio only observe.
+ */
+async function runCollectGoalScenario(initialSessionId, appPath, uiBootstrapTimeoutMs, onProjectCreated) {
+  let sessionId = initialSessionId;
+  const artifactPrefix = `collect-goal-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const report = { generatedAt: null, scenario: "collect-goal", testedApplication: { path: appPath, sha256: createHash("sha256").update(await readFile(appPath)).digest("hex") }, artifacts: [], steps: [], frames: [], roms: [] };
+  const shot = async (name, label) => addReportArtifact(report, await captureScreenshot(sessionId, `${artifactPrefix}-${name}.png`), label);
+  const state = () => readAutomationState(sessionId);
+  const js = (script, args = []) => executeScript(sessionId, script, args);
+  const click = (testId, label = testId) => clickButtonByTestIdNative(sessionId, testId, label);
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const value = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.value ?? null;`, [testId]);
+  const text = (testId) => js(`return document.querySelector('[data-testid="' + arguments[0] + '"]')?.textContent ?? null;`, [testId]);
+  const find = (selector) => findElement(sessionId, selector).catch((error) => fail(`Elemento nao encontrado: ${selector} (${error.message})`));
+  const selectOption = async (testId, optionValue) => {
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="' + arguments[0] + '"] option[value="' + arguments[1] + '"]'));`, [testId, optionValue]), 10000, `Opcao ${optionValue} ausente em ${testId}.`, 100);
+    await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center" });`, [testId]);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${await find(`[data-testid="${testId}"] option[value="${optionValue}"]`)}/click`, {});
+    await waitFor(async () => (await value(testId)) === optionValue, 5000, `Selecao ${testId}=${optionValue} nao aplicada.`, 100);
+  };
+  const setField = async (testId, fieldValue) => {
+    await js(`document.querySelector('[data-testid="' + arguments[0] + '"]')?.scrollIntoView({ block: "center" });`, [testId]);
+    await setInputByTestIdNative(sessionId, testId, String(fieldValue));
+    await waitFor(async () => (await value(testId)) === String(fieldValue), 5000, `${testId} nao virou ${fieldValue}.`, 100);
+  };
+  const waitSelected = (entityId) => waitFor(async () => (await state())?.selectedEntityId === entityId, 10000, `${entityId} nao selecionado.`, 150);
+  const clickHierarchy = async (entityId) => {
+    const selector = `[data-testid='hierarchy-entity-${entityId}']`;
+    await waitFor(async () => js(`return Boolean(document.querySelector(arguments[0]));`, [selector]), 15000, `Hierarquia sem ${entityId}.`, 150);
+    await js(`document.querySelector(arguments[0])?.scrollIntoView({ block: "center" });`, [selector]);
+    await webdriverRequest("POST", `/session/${sessionId}/element/${await find(selector)}/click`, {});
+    await waitSelected(entityId);
+  };
+  const instances = () => js(`return [...document.querySelectorAll('[data-testid^="behavior-instance-"]')].map((el) => ({ id: el.dataset.testid.slice(18), text: el.textContent }));`);
+  const switchLogic = async (entityId) => {
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-entity-switch"] option[value="' + arguments[0] + '"]'));`, [entityId]), 20000, `Seletor de logica sem ${entityId}.`, 150);
+    await selectOption("nodegraph-entity-switch", entityId);
+    await waitSelected(entityId);
+    await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="nodegraph-behaviors"]'));`), 10000, "Painel de comportamentos ausente.", 150);
+  };
+  const applyBehavior = async (behaviorId, fields, label) => {
+    await click(`behavior-add-${behaviorId}`, `adicionar ${label}`);
+    for (const [key, kind, fieldValue] of fields) {
+      if (kind === "select") await selectOption(`behavior-param-${key}`, fieldValue);
+      else await setField(`behavior-param-${key}`, fieldValue);
+    }
+    const summary = await text("behavior-summary");
+    const errors = await text("behavior-errors");
+    if (errors) fail(`${label}: formulario com erros: ${errors}`);
+    const before = (await instances()).length;
+    await click("behavior-apply", `aplicar ${label}`);
+    await waitFor(async () => (await instances()).length === before + 1, 5000, `${label} nao apareceu.`, 100);
+    const list = await instances();
+    return { summary, id: list[list.length - 1].id };
+  };
+  const duplicateOf = async (sourceId, expectedId, x, confirm = false) => {
+    await clickHierarchy(sourceId);
+    await click("inspector-duplicate-entity", `duplicar ${sourceId}`);
+    if (confirm) await click("inspector-duplicate-confirm", "duplicar sem logica manual");
+    await waitSelected(expectedId);
+    await setInputByTestIdNative(sessionId, "inspector-transform-x", String(x));
+    await waitFor(async () => (await state())?.activeScene?.entities?.find((entity) => entity.id === expectedId)?.x === x, 10000, `${expectedId} nao foi para x=${x}.`, 150);
+  };
+
+  // 1. Project and entities (all through the UI).
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await waitForOnboardingWizard(sessionId);
+  await click("template-card-reference_platformer", "modelo de fase de referencia");
+  await clickButtonByText(sessionId, "Mega Drive", "exact");
+  const projectName = `Collect_${Date.now()}`;
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await clickButtonByText(sessionId, "Criar Projeto", "exact");
+  const created = await waitFor(async () => { const current = await state(); return current?.activeProjectDir && current.activeProjectName === projectName ? current : false; }, 60000, "Wizard nao criou o projeto.", 500);
+  const projectDir = created.activeProjectDir;
+  onProjectCreated(projectDir);
+  currentE2eRunContext.project = projectDir;
+  await click("shell-persona-guiado", "modo guiado");
+  await click("guided-step-personagem", "etapa Personagem");
+  await waitSelected("player");
+  const layout = { player2: 150, itemA: 180, itemB: 100, sensor: 205, blocker: 240 };
+  await duplicateOf("player", "player_2", layout.player2, true);
+  await duplicateOf("goal", "goal_2", layout.itemA);
+  await duplicateOf("goal", "goal_3", layout.itemB);
+  await duplicateOf("goal_sensor", "goal_sensor_2", layout.sensor);
+  await duplicateOf("passage_blocker", "passage_blocker_2", layout.blocker);
+  addReportStep(report, "entities", "passed", { layout });
+
+  // 2. Behaviors through the Logic panels.
+  await click("guided-step-regras", "etapa Regras");
+  await closeVisibleConsoleDrawer(sessionId, "antes dos comportamentos");
+  await switchLogic("player_2");
+  const move = await applyBehavior("platform_movement", [["target", "select", "player_2"], ["speed", "input", 2], ["right_button", "select", "BUTTON_RIGHT"], ["left_button", "select", "BUTTON_LEFT"], ["jump_button", "select", "BUTTON_B"]], "Movimento de Player 2");
+  const counter = await applyBehavior("counter", [["name", "input", "Moedas"], ["scope", "select", "shared"], ["start", "input", 0]], "Contador Moedas");
+  await switchLogic("goal_2");
+  // Negative (invalid reference): the item cannot collect itself.
+  await click("behavior-add-collectible", "adicionar item (negativo)");
+  await selectOption("behavior-param-collector", "goal_2");
+  const invalidCollector = await waitFor(async () => text("behavior-errors"), 5000, "Coletor invalido nao recusado.", 100);
+  if (!invalidCollector.includes("si mesmo") || !(await js(`return document.querySelector('[data-testid="behavior-apply"]').disabled;`))) fail(`Coletor invalido nao recusado: ${invalidCollector}`);
+  await click("behavior-cancel", "cancelar");
+  const itemA = await applyBehavior("collectible", [["item", "select", "goal_2"], ["collector", "select", "player_2"], ["counter", "select", counter.id], ["amount", "input", 1], ["sound", "select", "jump"]], "Item A");
+  await switchLogic("goal_3");
+  const itemB = await applyBehavior("collectible", [["item", "select", "goal_3"], ["collector", "select", "player_2"], ["counter", "select", counter.id], ["amount", "input", 1]], "Item B");
+  await switchLogic("player_2");
+  const gate = await applyBehavior("gated_passage", [["movement", "select", move.id], ["blocker", "select", "passage_blocker_2"], ["state_variable", "select", "ctr_moedas"], ["threshold", "input", 2]], "Passagem que exige as duas moedas");
+  const goal = await applyBehavior("objective", [["actor", "select", "player_2"], ["sensor", "select", "goal_sensor_2"], ["counter", "select", counter.id], ["required", "input", 2], ["reveal", "select", "goal"], ["sound", "select", "victory"]], "Objetivo");
+  const links = await text(`behavior-links-${counter.id}`);
+  if (!links?.includes("Item coletavel — Goal Marker 2") || !links.includes("Item coletavel — Goal Marker 3") || !links.includes("Passagem condicionada") || !links.includes("Objetivo")) fail(`Ligacoes do contador incompletas: ${links}`);
+  // Negative: the counter cannot be removed while items/passage/objective use it.
+  await click(`behavior-remove-${counter.id}`, "remover contador (negativo)");
+  const removal = await waitFor(async () => text("behavior-errors"), 5000, "Remocao do contador em uso nao recusada.", 100);
+  if (!removal.includes("Goal Marker 2")) fail(`Mensagem de dependencia incompleta: ${removal}`);
+  await click("behavior-cancel", "cancelar");
+  await shot("01-behaviors", "comportamentos e ligacoes do contador");
+  addReportStep(report, "behaviors", "passed", { move, counter, itemA, itemB, gate, goal, links, invalidCollector, removal });
+
+  // 3. Save, restart the app, reopen, check.
+  await clickTopBarMenuAction(sessionId, "Salvar");
+  await waitFor(async () => (await js(`return document.querySelector('[data-testid="scene-save-status"]')?.dataset.status;`)) === "saved", 20000, "Salvar nao concluiu.", 200);
+  await deleteSession(sessionId);
+  sessionId = await createSession(appPath);
+  currentE2eRunContext.sessionId = sessionId;
+  await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App nao reabriu apos reinicio");
+  await waitFor(async () => js("return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API nao voltou apos reinicio", 150);
+  await setSessionWindowRect(sessionId, 1920, 1080);
+  await fillInputBySelector(sessionId, 'input[placeholder="Nome do projeto"]', projectName);
+  await waitFor(async () => js(`return Boolean(document.querySelector('[data-testid="wizard-existing-project-card"]'));`), 30000, "Wizard nao encontrou o projeto salvo.", 300);
+  await click("wizard-open-existing-project", "reabrir projeto");
+  await waitFor(async () => (await state())?.activeProjectDir === projectDir, 60000, "Projeto nao reabriu.", 300);
+  if (!(await js(`return Boolean(document.querySelector('[data-testid="guided-steps"]'));`))) await click("shell-persona-guiado", "modo guiado apos reinicio");
+  await click("guided-step-regras", "etapa Regras apos reinicio");
+  await closeVisibleConsoleDrawer(sessionId, "apos reabrir");
+  await switchLogic("player_2");
+  const reopenedPlayer = await instances();
+  const reopenedLinks = await text(`behavior-links-${counter.id}`);
+  await switchLogic("goal_2");
+  const reopenedA = await instances();
+  if (reopenedPlayer.length !== 4 || reopenedA.length !== 1 || reopenedLinks !== links) fail(`Comportamentos nao persistiram: ${JSON.stringify({ reopenedPlayer, reopenedA, reopenedLinks })}`);
+  await shot("02-reopened", "comportamentos apos reiniciar e reabrir");
+  addReportStep(report, "restart_reopen", "passed", { reopenedPlayer: reopenedPlayer.map((entry) => entry.id), reopenedA });
+
+  // 4. Build and play.
+  const startMatch = async (label) => {
+    const previous = (await readCanonicalGameFrame(sessionId))?.romSha256 ?? null;
+    await click("guided-step-testar", label);
+    const running = await waitFor(async () => {
+      const current = await state();
+      const frame = await readCanonicalGameFrame(sessionId);
+      return current?.emulatorLoaded && frame?.renderedFrames > 5 && frame.romSha256 ? { frame } : false;
+    }, 300000, `${label}: jogo nao iniciou.`, 300).catch(async (error) => {
+      await shot("build-run-failure", "falha do Build & Run");
+      const entries = ((await state())?.consoleEntries ?? []).filter((entry) => entry.level !== "info").slice(-12);
+      fail(`${error.message} console=${JSON.stringify(entries).slice(0, 4000)}`);
+    });
+    return { romSha256: running.frame.romSha256, previous };
+  };
+  const first = await startMatch("etapa Testar");
+  const romPath = path.join(projectDir, "build", "megadrive", "out", "rom.bin");
+  const romCopy = path.join(validationDir, `${artifactPrefix}-played.rom`);
+  await cp(romPath, romCopy);
+  const romSha256 = createHash("sha256").update(await readFile(romCopy)).digest("hex");
+  if (first.romSha256 !== romSha256) fail("Game View executa outra ROM.");
+  const symbols = parseElf32Symbols(await readFile(path.join(projectDir, "build", "megadrive", "out", "rom.out")));
+  const spriteSymbol = (id, axis) => (symbols.has(`spr_${id}_${axis}`) ? `spr_${id}_${axis}` : [...symbols.keys()].find((name) => new RegExp(`^spr_.*__${id}_${axis}$`).test(name)) ?? `spr_${id}_${axis}`);
+  const watch = [
+    { key: "p2x", name: spriteSymbol("player_2", "x"), width: 2 },
+    { key: "p1x", name: spriteSymbol("player", "x"), width: 2 },
+    { key: "counter", name: "logic_var_ctr_moedas", width: 4 },
+    { key: "takenA", name: `logic_var_${itemA.id}_taken`, width: 4 },
+    { key: "takenB", name: `logic_var_${itemB.id}_taken`, width: 4 },
+    { key: "open", name: `logic_var_${gate.id}_open`, width: 4 },
+    { key: "done", name: `logic_var_${goal.id}_done`, width: 4 },
+  ].map((entry) => ({ ...entry, address: symbols.get(entry.name) }));
+  if (watch.some((entry) => !Number.isInteger(entry.address))) fail(`Simbolos ausentes: ${JSON.stringify(watch.filter((entry) => !Number.isInteger(entry.address)).map((entry) => entry.name))}`);
+  const observe = async () => {
+    const raw = await executeAsyncScript(sessionId, `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      Promise.all(arguments[0].map((entry) => invoke("emulator_read_memory", { region: 2, offset: entry.address & 0xffff, length: entry.width })))
+        .then((results) => done({ ok: true, data: results.map((r) => Array.from(r.data)), audioTotal: window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `, [watch]);
+    if (!raw?.ok) fail(`Leitura de WRAM falhou: ${JSON.stringify(raw)}`);
+    const decode = (d, width) => {
+      const word = (i) => d[i] | (d[i + 1] << 8);
+      if (width === 2) { const w = word(0); return w > 0x7fff ? w - 0x10000 : w; }
+      const v = ((word(0) << 16) >>> 0) | word(2);
+      return v > 0x7fffffff ? v - 0x100000000 : v;
+    };
+    const out = { frame: (await readCanonicalGameFrame(sessionId))?.renderedFrames ?? 0, audioTotal: raw.audioTotal };
+    watch.forEach((entry, index) => { out[entry.key] = decode(raw.data[index], entry.width); });
+    return out;
+  };
+  const KEY_BUTTON = { ArrowRight: "right", ArrowLeft: "left" };
+  const waitAck = (button, expected, context) => waitFor(async () => {
+    const observation = await js("return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+    return observation?.lastJoypadAck?.joypad?.[button] === expected ? observation.lastJoypadAck : false;
+  }, 4000, `${context}: ACK nativo (${button}=${expected}) ausente.`, 50);
+  // Hold a direction until `done(samples)`, then release; every sample is kept.
+  const holdUntil = async (code, done, maxFrames, label) => {
+    const samples = [await observe()];
+    await sendNativeGameKey(sessionId, code, "keyDown", label);
+    await waitAck(KEY_BUTTON[code], true, label);
+    const start = samples[0].frame;
+    while (!done(samples) && samples[samples.length - 1].frame - start < maxFrames) { await pause(20); samples.push(await observe()); }
+    await sendNativeGameKey(sessionId, code, "keyUp", `soltar ${label}`);
+    await waitAck(KEY_BUTTON[code], false, `soltar ${label}`);
+    samples.push(await observe());
+    if (!done(samples)) fail(`${label}: condicao nao ocorreu em ${maxFrames} quadros: ${JSON.stringify(samples.slice(-3))}`);
+    return samples;
+  };
+  const stable = (key) => (samples) => samples.length > 5 && samples.slice(-4).every((s) => s[key] === samples[samples.length - 1][key]);
+  const prefab = async (file) => JSON.parse(await readFile(path.join(projectDir, "prefabs", file), "utf8"));
+  const playerW = (await prefab("reference_player.json")).components.collision.width;
+  const blockerW = (await prefab("reference_passage.json")).components.collision.width;
+  const itemW = (await prefab("reference_goal.json")).components.sprite.frame_width;
+  const sensorW = (await prefab("reference_goal_sensor.json")).components.collision.width;
+  const overlapsX = (x, left, width) => x < left + width && x + playerW > left;
+  // Pixels of an item's screen box (no camera scroll in this template: world = screen).
+  const itemPixels = async (left) => {
+    const frame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    const width = frame.width ?? 320;
+    let hash = 0;
+    for (let y = 176; y < 208; y += 1) for (let x = left; x < left + itemW; x += 1) {
+      const i = (y * width + x) * 4;
+      hash = (hash * 31 + frame.rgba[i] * 3 + frame.rgba[i + 1] * 5 + frame.rgba[i + 2] * 7) >>> 0;
+    }
+    return hash;
+  };
+  const tonePower = async (fromTotal, frequency) => {
+    const rate = 44100;
+    const now = await js("return window.__RDS_E2E__.readReceivedAudioSamples(0, 0).total;");
+    const audio = await js("return window.__RDS_E2E__.readReceivedAudioSamples(arguments[0], arguments[1]);", [fromTotal, Math.max(1, now - fromTotal)]);
+    const sampleRate = audio?.sampleRate || rate;
+    const omega = (2 * Math.PI * frequency) / sampleRate;
+    const coeff = 2 * Math.cos(omega);
+    let s1 = 0, s2 = 0, n = 0;
+    for (let i = 0; i < (audio?.samples?.length ?? 0); i += 2) { const s0 = audio.samples[i] + coeff * s1 - s2; s2 = s1; s1 = s0; n += 1; }
+    return (s1 * s1 + s2 * s2 - coeff * s1 * s2) / Math.max(1, n * n);
+  };
+
+  await closeVisibleConsoleDrawer(sessionId, "antes de jogar");
+  await focusGameCanvasNatively(sessionId);
+  const problems = [];
+  const initial = await observe();
+  const pixelsA0 = await itemPixels(layout.itemA);
+  const pixelsB0 = await itemPixels(layout.itemB);
+  if (initial.counter !== 0 || initial.takenA || initial.takenB || initial.open || initial.done) problems.push(`Estado inicial errado: ${JSON.stringify(initial)}`);
+  // R1: right until blocked. Collects A once, crosses the sensor without winning, stops at the blocker.
+  const r1 = await holdUntil("ArrowRight", (samples) => samples.some((s) => s.counter === 1) && stable("p2x")(samples), 600, "direita ate o bloqueio");
+  const r1End = r1[r1.length - 1];
+  const touchedSensorEarly = r1.filter((s) => overlapsX(s.p2x, layout.sensor, sensorW));
+  const proof = {
+    r1: { endX: r1End.p2x, counter: r1End.counter, maxCounter: Math.max(...r1.map((s) => s.counter)), open: r1End.open, sensorSamples: touchedSensorEarly.length, doneDuringR1: r1.some((s) => s.done), maxRight: Math.max(...r1.map((s) => s.p2x)) + playerW, blockerLeft: layout.blocker },
+  };
+  if (proof.r1.maxCounter !== 1 || r1End.takenA !== 1 || r1End.takenB !== 0) problems.push(`Item A nao creditou exatamente uma vez: ${JSON.stringify(proof.r1)}`);
+  if (proof.r1.sensorSamples === 0) problems.push("Player 2 nao passou pelo sensor antes das duas moedas (negativo de vitoria prematura nao exercitado)");
+  if (proof.r1.doneDuringR1) problems.push("Objetivo disparou antes de ter as duas moedas (vitoria prematura)");
+  if (r1End.open !== 0 || proof.r1.maxRight > layout.blocker) problems.push(`Passagem nao estava fechada fisicamente: ${JSON.stringify(proof.r1)}`);
+  // Pixels: A hidden, B untouched (only the collected item changes).
+  const pixelsA1 = await itemPixels(layout.itemA);
+  const pixelsB1 = await itemPixels(layout.itemB);
+  proof.pixels = { aChanged: pixelsA1 !== pixelsA0, bUnchangedAfterA: pixelsB1 === pixelsB0 };
+  // Wrong collector: the template player (same arrows) must not collect B.
+  proof.templatePlayerOverB = r1.some((s) => overlapsX(s.p1x, layout.itemB, itemW));
+  if (proof.templatePlayerOverB && r1.some((s) => s.takenB)) problems.push("Item B foi coletado pelo jogador errado");
+  // L1: back left over A (no second credit) to B: counter 2 exactly, passage opens.
+  const l1 = await holdUntil("ArrowLeft", (samples) => samples.some((s) => s.counter === 2), 900, "esquerda ate o item B");
+  const overAAgain = l1.filter((s) => overlapsX(s.p2x, layout.itemA, itemW)).length;
+  proof.l1 = { overAAgain, counterWhileOverA: [...new Set(l1.filter((s) => overlapsX(s.p2x, layout.itemA, itemW)).map((s) => s.counter))], maxCounter: Math.max(...l1.map((s) => s.counter)), end: l1[l1.length - 1] };
+  if (!overAAgain || proof.l1.counterWhileOverA.some((c) => c !== 1)) problems.push(`Voltar sobre A creditou de novo: ${JSON.stringify(proof.l1)}`);
+  if (proof.l1.maxCounter !== 2 || proof.l1.end.takenB !== 1) problems.push(`Item B nao creditou exatamente uma vez: ${JSON.stringify(proof.l1)}`);
+  const openAt = [...r1, ...l1].find((s) => s.open === 1);
+  if (!openAt || openAt.counter < 2) problems.push(`Passagem abriu antes da condicao: ${JSON.stringify(openAt)}`);
+  // Stay on B's spot: no further credit.
+  const stay = [];
+  const stayStart = (await observe()).frame;
+  while ((await observe()).frame - stayStart < 30) stay.push(await observe());
+  if (stay.some((s) => s.counter !== 2)) problems.push("Permanecer no local creditou de novo");
+  // R2: right through the sensor (objective once) and physically across the blocker.
+  const audioBeforeGoal = (await observe()).audioTotal;
+  const r2 = await holdUntil("ArrowRight", (samples) => samples[samples.length - 1].p2x > layout.blocker + blockerW, 900, "direita ate atravessar");
+  const fired = r2.find((s) => s.done === 1);
+  proof.r2 = { firedAtX: fired?.p2x ?? null, firedCounter: fired?.counter ?? null, endX: r2[r2.length - 1].p2x, crossed: r2[r2.length - 1].p2x > layout.blocker + blockerW };
+  if (!fired || fired.counter < 2 || !overlapsX(fired.p2x, layout.sensor, sensorW)) problems.push(`Objetivo nao disparou no sensor com a condicao: ${JSON.stringify(proof.r2)}`);
+  if (!proof.r2.crossed) problems.push("Player 2 nao atravessou fisicamente");
+  await pause(1500);
+  proof.audio = { victoryAfterGoal: await tonePower(audioBeforeGoal, 1320) };
+  // L2: back over the sensor: the objective does not fire again.
+  const l2 = await holdUntil("ArrowLeft", (samples) => samples.some((s) => overlapsX(s.p2x, layout.sensor, sensorW)) && samples[samples.length - 1].p2x < layout.sensor - playerW, 900, "esquerda de volta sobre o sensor");
+  proof.l2 = { doneValues: [...new Set(l2.map((s) => s.done))], counter: l2[l2.length - 1].counter };
+  if (proof.l2.doneValues.some((d) => d !== 1) || proof.l2.counter !== 2) problems.push(`Objetivo/contador mudaram ao voltar: ${JSON.stringify(proof.l2)}`);
+  if (problems.length) fail(`Prova incompleta: ${problems.join("; ")} ${JSON.stringify(proof)}`);
+  await shot("03-played", "apos coletar, abrir e cumprir o objetivo");
+
+  // 5. Restart the match through the UI (Testar again). Only a real restart can bring back
+  // the full initial state (Player 2 had moved and the counter was 2).
+  await click("guided-step-testar", "Testar de novo (reiniciar a partida)");
+  const isInitial = (s) => s.counter === 0 && !s.takenA && !s.takenB && !s.open && !s.done && s.p2x === layout.player2;
+  const afterRestart = await waitFor(async () => {
+    const current = await observe().catch(() => null);
+    return current && isInitial(current) ? current : false;
+  }, 300000, "Reinicio da partida nao restaurou o estado definido.", 500);
+  const restart = { romSha256: (await readCanonicalGameFrame(sessionId))?.romSha256 };
+  const pixelsA2 = await itemPixels(layout.itemA);
+  proof.restart = { state: afterRestart, itemAVisibleAgain: pixelsA2 === pixelsA0, sameRom: restart.romSha256 === romSha256 };
+  if (afterRestart.counter !== 0 || afterRestart.takenA || afterRestart.takenB || afterRestart.open || afterRestart.done || afterRestart.p2x !== layout.player2) {
+    fail(`Reinicio da partida nao restaurou o estado definido: ${JSON.stringify(proof.restart)}`);
+  }
+  await shot("04-restarted", "partida reiniciada");
+  const proofPath = path.join(validationDir, `${artifactPrefix}-play-proof.json`);
+  await writeFile(proofPath, JSON.stringify({ rom: { path: romCopy, sha256: romSha256 }, layout, proof, r1, l1, r2, l2 }, null, 2));
+  addReportArtifact(report, proofPath, "prova por teclado (RAM, pixels, audio)");
+  addReportStep(report, "keyboard_collect_goal", "passed", { rom: { path: romCopy, sha256: romSha256 }, proof });
+  const saved = await writeCreateGameReport(report, reportPath);
+  console.log(`Relatorio: ${saved}`);
+  console.log("OK: Desktop Tauri collect-goal (dois itens, contador, passagem, objetivo, reinicio da partida) passou.");
+}
+
+const SHELL_PERSONA_STORAGE_KEY = "retrodev-shell-persona";
 
 async function cleanupTemporaryProject(projectDir) {
   if (!projectDir) {
@@ -2975,6 +9765,38 @@ async function clickByTestId(sessionId, testId) {
   }
 }
 
+async function setInputByTestIdNative(sessionId, testId, value) {
+  const focused = await executeScript(
+    sessionId,
+    `
+      const input = document.querySelector('[data-testid="' + String(arguments[0]) + '"]');
+      if (!(input instanceof HTMLInputElement)) return false;
+      input.focus();
+      input.select();
+      return true;
+    `,
+    [testId]
+  );
+  if (!focused) throw new Error(`Input nao encontrado para teclado: ${testId}`);
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  const text = String(value);
+  await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/value`, {
+    text,
+    value: [...text],
+  });
+}
+
+async function activateByTestIdWithEnter(sessionId, testId) {
+  const visible = await executeScript(
+    sessionId,
+    `const element = document.querySelector('[data-testid="' + String(arguments[0]) + '"]'); if (!(element instanceof HTMLElement)) return false; element.scrollIntoView({ block: "center", inline: "center" }); element.focus(); return true;`,
+    [testId]
+  );
+  if (!visible) throw new Error(`Elemento não encontrado para teclado: ${testId}`);
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/value`, { text: "\uE007", value: ["\uE007"] });
+}
+
 async function clickButtonByText(sessionId, expectedText, mode = "contains") {
   const clicked = await executeScript(
     sessionId,
@@ -3001,6 +9823,4892 @@ async function clickButtonByText(sessionId, expectedText, mode = "contains") {
   if (!clicked) {
     fail(`Botao nao encontrado para clique: '${expectedText}'.`);
   }
+}
+
+async function clickButtonByTestIdWithPointerEvents(sessionId, testId) {
+  const result = await executeScript(
+    sessionId,
+    `const button = document.querySelector('[data-testid="' + String(arguments[0]) + '"]'); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({ block: "center", inline: "center" }); button.focus(); for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); return true;`,
+    [testId]
+  );
+  if (!result) fail(`Botao nao encontrado para eventos: '${testId}'.`);
+}
+
+async function inspectNativeButtonTarget(sessionId, testId) {
+  return executeScript(
+    sessionId,
+    `
+      const testId = String(arguments[0] ?? "");
+      const button = document.querySelector('[data-testid="' + testId + '"]');
+      if (!(button instanceof HTMLButtonElement)) {
+        return { exists: false, testId };
+      }
+      button.scrollIntoView({ block: "center", inline: "center" });
+      const rect = button.getBoundingClientRect();
+      const style = window.getComputedStyle(button);
+      const visible = rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0;
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = visible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest("[data-testid]") : null;
+      const unobstructed = Boolean(top && (top === button || button.contains(top)));
+      const wizard = document.querySelector('[data-testid="project-wizard-body"]');
+      return {
+        exists: true,
+        testId,
+        visible,
+        disabled: Boolean(button.disabled),
+        focused: document.activeElement === button,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point: { x, y },
+        topTag: top?.tagName ?? "",
+        topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
+        topClass: top instanceof Element ? String(top.className ?? "") : "",
+        unobstructed,
+        wizardVisible: Boolean(wizard),
+      };
+    `,
+    [testId]
+  );
+}
+
+async function clickButtonByTestIdNative(sessionId, testId, label = testId, options = {}) {
+  const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled) {
+    fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  if (options.expectBlocked) {
+    if (diagnostic.unobstructed) {
+      fail(`Negativo de obstrução não encontrou bloqueador para '${label}': ${JSON.stringify(diagnostic)}`);
+    }
+    return { blocked: true, diagnostic };
+  }
+  if (!diagnostic.unobstructed) {
+    fail(`Clique WebDriver bloqueado para '${label}': ${JSON.stringify(diagnostic)}`);
+  }
+  const elementId = await findElement(sessionId, `[data-testid="${testId}"]`);
+  await clickElement(sessionId, elementId);
+  return { blocked: false, diagnostic };
+}
+
+async function clickButtonByTestIdNativeWhenReady(sessionId, testId, label = testId, timeoutMs = 30000) {
+  await waitFor(
+    async () => {
+      const diagnostic = await inspectNativeButtonTarget(sessionId, testId);
+      return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+    },
+    timeoutMs,
+    `Controle nativo não ficou disponível: ${label}`,
+    100
+  );
+  return clickButtonByTestIdNative(sessionId, testId, label);
+}
+
+async function selectInspectionFrameNative(sessionId, frameId) {
+  const selector = "[data-testid='inspection-sprite-frame-select']";
+  const diagnostic = await waitFor(
+    async () => {
+      const next = await executeScript(
+        sessionId,
+        `
+      const select = document.querySelector(${JSON.stringify(selector)});
+      if (!(select instanceof HTMLSelectElement)) return { exists: false };
+      select.scrollIntoView({ block: "center", inline: "center" });
+      const rect = select.getBoundingClientRect();
+      const style = window.getComputedStyle(select);
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = document.elementFromPoint(x, y);
+      const topWithTestId = top instanceof Element ? top.closest("[data-testid]") : null;
+      return {
+        exists: true,
+        value: select.value,
+        options: Array.from(select.options, (option) => option.value),
+        visible: rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden",
+        disabled: Boolean(select.disabled),
+        focused: document.activeElement === select,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        point: { x, y },
+        topTag: top?.tagName ?? "",
+        topTestId: topWithTestId?.getAttribute("data-testid") ?? "",
+        unobstructed: Boolean(top && (top === select || select.contains(top))),
+      };
+        `
+      );
+      return next?.exists && next.visible ? next : false;
+    },
+    60000,
+    `Controle de seleção de frame não apareceu: ${frameId}`,
+    100
+  );
+  if (!diagnostic?.exists || !diagnostic.visible || diagnostic.disabled || !diagnostic.unobstructed) {
+    fail(`Seleção nativa de frame bloqueada: ${JSON.stringify({ frameId, diagnostic })}`);
+  }
+  if (diagnostic.value !== frameId) {
+    const elementId = await findElement(sessionId, selector);
+    await clickElement(sessionId, elementId);
+    const frameIndex = Array.isArray(diagnostic.options) ? diagnostic.options.indexOf(frameId) : -1;
+    if (frameIndex < 0) fail(`Frame não está exposto no controle nativo: ${JSON.stringify({ frameId, options: diagnostic.options })}`);
+    await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "key", id: "inspection-frame-selector-home", actions: [
+        { type: "keyDown", value: "\uE011" },
+        { type: "keyUp", value: "\uE011" },
+      ] }],
+    });
+    if (frameIndex > 0) {
+      await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+        actions: [{ type: "key", id: "inspection-frame-selector-down", actions: Array.from({ length: frameIndex }, () => [
+          { type: "keyDown", value: "\uE015" },
+          { type: "keyUp", value: "\uE015" },
+        ]).flat() }],
+      });
+    }
+    await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+      actions: [{ type: "key", id: "inspection-frame-selector-enter", actions: [
+        { type: "keyDown", value: "\uE007" },
+        { type: "keyUp", value: "\uE007" },
+      ] }],
+    });
+  }
+  const selected = await waitFor(
+    async () => executeScript(sessionId, `return document.querySelector(${JSON.stringify(selector)})?.value === ${JSON.stringify(frameId)};`),
+    5000,
+    `Seleção nativa não confirmou ${frameId}`,
+    50
+  );
+  if (!selected) fail(`Seleção de frame não foi confirmada: ${frameId}`);
+  return { frameId, diagnostic };
+}
+
+async function setSonicNumberInputNative(sessionId, testId, value) {
+  const selector = `[data-testid="${testId}"]`;
+  const element = await findElement(sessionId, selector);
+  await clickElementWithDiagnostics(sessionId, element, selector);
+  await webdriverRequest("POST", `/session/${sessionId}/actions`, {actions: [{type:"key",id:"sonic-field-keyboard",actions:[
+    {type:"keyDown",value:"\uE009"},{type:"keyDown",value:"a"},
+    {type:"keyUp",value:"a"},{type:"keyUp",value:"\uE009"},
+    {type:"keyDown",value:"\uE003"},{type:"keyUp",value:"\uE003"}]}]});
+  const text = String(value);
+  await webdriverRequest("POST", `/session/${sessionId}/element/${element}/value`, {text,value:[...text]});
+  await waitFor(async () => executeScript(sessionId,
+    `return document.querySelector(arguments[0])?.valueAsNumber === arguments[1];`, [selector,Number(value)]),
+    5000, `Campo ${testId} não recebeu o valor numérico ${value} pelo teclado nativo`, 50);
+  const observed = await executeScript(sessionId,
+    `const input=document.querySelector(arguments[0]); return {field:arguments[0],value:input?.value,number:input?.valueAsNumber,focused:document.activeElement===input,windowFocused:document.hasFocus()};`, [selector]);
+  console.log("[sonic-field-typed] " + JSON.stringify(observed));
+  return observed;
+}
+
+async function runSonicMultiframeScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
+  const hash = (b) => createHash("sha256").update(b).digest("hex");
+  const frames = [["stand",1],["wait-1",2],["look-up",5],["walk-1",6],["walk-2",7],
+    ["walk-3",8],["walk-4",9],["walk-5",10],["walk-6",11],["run-1",30]];
+  const report = { scenario: "sonic-multiframe", binary_sha256: hash(await readFile(app)),
+    base_sha256: hash(base), steps: [], runtime_effect: "not measured in this scenario" };
+  const inspectFrame = async (name, index, bytes) => {
+    const frameId = `sonic1_sonic/${name}`;
+    await selectInspectionFrameNative(sessionId, frameId);
+    await closeVisibleConsoleDrawer(sessionId, `compor ${name}`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite");
+    const actual = await waitFor(async () => {
+      const v = await readRenderedSpriteFramePixels(sessionId);
+      return v?.frameId === frameId && v.romSha256 === hash(bytes) ? v : false;
+    }, 30000, `Frame ${name} não corresponde à ROM executada`, 100);
+    const expected = renderSonicFrameReference(bytes, index);
+    const pixels = assertExactPreviewPixels({ width: actual.naturalWidth, height: actual.naturalHeight, pixels: actual.pixels }, expected, frameId);
+    const layout = await waitFor(async () => {
+      const l = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+      return l?.fullyVisible && l.unobstructed && l.exactContentDimensions && l.metadataBelow ? l : false;
+    }, 15000, `Frame ${name} está obstruído ou mal dimensionado`, 100);
+    report.steps.push({ step: "independent_preview", frameId, pixels, layout });
+  };
+  for (const [name,index] of frames) await inspectFrame(name,index,base);
+  await inspectFrame("walk-1",6,base);
+  const beforeScreenshot = await captureScreenshot(sessionId, `${prefix}-multiframe-before.png`);
+  const expectedBytes = Buffer.from(base);
+  const reference = renderSonicFrameReference(base,6);
+  const at = reference.locations[0];
+  if (!at) fail("Pixel de controle não pertence ao mapping independente");
+  const oldIndex = at.high ? base[at.offset] >> 4 : base[at.offset] & 15;
+  const paintIndex = oldIndex === 15 ? 14 : 15;
+  await clickButtonByTestIdNativeWhenReady(sessionId, `sonic-color-${paintIndex}`);
+  const point = await executeScript(sessionId, `
+    const img=document.querySelector('[data-testid="sonic-paint-image"]');
+    img?.scrollIntoView({block:'center',inline:'center'});
+    const r=img?.getBoundingClientRect(); if(!r) return null;
+    const x=r.left+r.width/(Number(arguments[0])*2),y=r.top+r.height/(Number(arguments[1])*2);
+    return {x,y,unobstructed:document.elementFromPoint(x,y)===img};
+  `,[reference.width,reference.height]);
+  if (!point?.unobstructed) fail(`Pintura obstruída: ${JSON.stringify(point)}`);
+  await webdriverRequest("POST",`/session/${sessionId}/actions`,{actions:[{type:"pointer",id:"sonic-paint-pointer",parameters:{pointerType:"mouse"},
+    actions:[{type:"pointerMove",duration:0,x:Math.round(point.x),y:Math.round(point.y),origin:"viewport"},{type:"pointerDown",button:0},{type:"pointerUp",button:0}]}]});
+  const disabled = await executeScript(sessionId, `return document.querySelector('[data-testid="sonic-paint-apply"]')?.disabled;`);
+  if (!disabled) fail("Pintura compartilhada ficou disponível sem confirmação");
+  const sharedSelector='[data-testid="sonic-paint-confirm-shared"]';
+  await clickElementWithDiagnostics(sessionId,await findElement(sessionId,sharedSelector),sharedSelector);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"sonic-paint-apply");
+  expectedBytes[at.offset] = at.high ? (expectedBytes[at.offset]&15)|(paintIndex<<4) : (expectedBytes[at.offset]&0xf0)|paintIndex;
+  await waitFor(async () => (await readRenderedSpriteFramePixels(sessionId))?.romSha256===hash(expectedBytes),30000,"Pintura não confirmou os bytes independentes",100);
+  report.steps.push({step:"native_paint",offset:at.offset,index:paintIndex,shared_confirmation_required:true});
+  for (const [field,value] of [["index",1],["red",7],["green",0],["blue",7]]) {
+    await setSonicNumberInputNative(sessionId, `inspection-sonic-palette-${field}`, value);
+  }
+  console.log("[sonic-palette-fields] " + JSON.stringify(await executeScript(sessionId,
+    `return ['index','red','green','blue'].map((field) => ({field,value:document.querySelector('[data-testid="inspection-sonic-palette-'+field+'"]')?.value}));`)));
+  await closeVisibleConsoleDrawer(sessionId,"paleta acumulada");
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-sonic-edit");
+  expectedBytes.writeUInt16BE(0x0e0e,0x238a);
+  await waitFor(async () => (await readRenderedSpriteFramePixels(sessionId))?.romSha256===hash(expectedBytes),30000,"Paleta apagou pintura ou não foi confirmada",100)
+    .catch(async (error) => {
+      const diagnostics = await executeScript(sessionId,
+        `return {body:document.body.innerText.slice(-8000),logs:window.__RDS_E2E__?.getConsoleLogs?.().slice(-8)};`).catch(() => ({unavailable:true}));
+      console.log("[sonic-palette-failure] " + JSON.stringify(diagnostics));
+      throw error;
+    });
+  await inspectFrame("walk-1",6,expectedBytes);
+  const status = await invokeCoreObserveCommand(sessionId,"rex_inspection_status",{sessionId:savedId});
+  if (!status?.session?.edit || status.session.edit.modified_rom_sha256!==hash(expectedBytes)) fail("Snapshot não confirmou a cópia acumulada");
+  if (!(await readFile(status.session.edit.modified_rom_path)).equals(expectedBytes)) fail("ROM editada difere da mutação independente");
+  const pilotDir=path.join(validationDir,`${prefix}-multiframe`); await mkdir(pilotDir,{recursive:true});
+  const patchPath=path.join(pilotDir,"multiframe.bps"), appliedPath=path.join(pilotDir,"applied.bin");
+  const nativePath = async (testId,value) => {
+    const selector=`[data-testid="${testId}"] input`;
+    const element=await findElement(sessionId,selector);
+    await clickElementWithDiagnostics(sessionId,element,selector);
+    await webdriverRequest("POST",`/session/${sessionId}/element/${element}/clear`,{});
+    await webdriverRequest("POST",`/session/${sessionId}/element/${element}/value`,{text:value,value:[...value]});
+  };
+  await nativePath("sonic-patch-path",patchPath);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-sonic-export-patch");
+  await waitFor(()=>pathExists(patchPath),15000,"BPS não foi exportado",100);
+  await nativePath("sonic-applied-path",appliedPath);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-sonic-apply-patch");
+  await waitFor(()=>pathExists(appliedPath),15000,"BPS não foi aplicado",100);
+  if (!(await readFile(appliedPath)).equals(expectedBytes)) fail("Aplicação BPS divergiu da ROM calculada independentemente");
+  report.steps.push({step:"bps_export_apply",rom_sha256:hash(expectedBytes),patch_sha256:hash(await readFile(patchPath))});
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-save");
+  await waitFor(async()=>executeScript(sessionId,`return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),15000,"Snapshot não foi salvo",100);
+  await deleteSession(sessionId);
+  sessionId=await createSession(app); currentE2eRunContext.sessionId=sessionId;
+  await waitForAppWindowReady(sessionId,uiBootstrapTimeoutMs,"App não reiniciou");
+  await handleProjectWizardVisibly(sessionId,"multiframe-restart");
+  await setSessionWindowRect(sessionId,1920,1080);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"workspace-rail-debug");
+  await callAutomationApi(sessionId,"openToolsWorkspace",["reverse","debug",true]);
+  await waitForBodyText(sessionId,"Analisar ROM",15000,"Reverse não voltou");
+  await clickButtonByTestIdNativeWhenReady(sessionId,"reverse-tab-inspection");
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-refresh-sessions");
+  await waitFor(async()=>executeScript(sessionId,`return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),30000,"Sessão não reapareceu",100);
+  await clickButtonByTestIdNativeWhenReady(sessionId,`select-saved-session-${savedId}`);
+  await clickButtonByTestIdNativeWhenReady(sessionId,"inspection-reopen");
+  await waitFor(async()=>executeScript(sessionId,`return document.querySelector('[data-testid="inspection-sprite-frame-select"]')?.value==='sonic1_sonic/walk-1';`),30000,"Frame salvo não foi restaurado",100);
+  await inspectFrame("walk-1",6,expectedBytes);
+  const afterScreenshot=await captureScreenshot(sessionId,`${prefix}-multiframe-after-restart.png`);
+  if (!(await readFile(romPath)).equals(base)) fail("Base BYOR mudou");
+  report.steps.push({step:"restart_reopen",frame_id:"sonic1_sonic/walk-1",base_unchanged:true});
+  report.screenshots=[beforeScreenshot,afterScreenshot];
+  await writeFile(path.join(pilotDir,"report.json"),JSON.stringify(report,null,2));
+  console.log(`OK: Sonic multi-frame E2E; report=${path.join(pilotDir,"report.json")}`);
+  return sessionId;
+}
+
+const CADENCE_JOURNEY_WAIT_ADDR = 0x13bae;
+const CADENCE_JOURNEY_WAIT_FRAMES = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 2, 2, 2, 3, 4];
+// Addendum-A: a rota exata da Etapa 4 (load → 900 frames → START nos frames
+// 900-901 → neutro → 2901 no total), com a janela 1500..2900 gravada frame a
+// frame DENTRO do core por `emulator_run_frames_sampled`. O contador usado
+// para gaps é o índice absoluto que o próprio core atribui a cada frame.
+const CADENCE_JOURNEY_OBSERVATION = {
+  totalFrames: 2901,
+  warmupFrames: 900,
+  startFrames: 2,
+  tailFrames: 1999,
+  recordFrom: 1500,
+  recordTo: 2900,
+  region: 2,
+  offset: 0xd000,
+  length: 0x40,
+};
+
+function analyzeCadenceRunSamples(samples, expectedByte) {
+  let adjacentIdlePairs = 0;
+  let timerDecrementOne = 0;
+  let adjacentFrameTransitions = 0;
+  const reloadFrames = [];
+  let idleSamples = 0;
+  for (const sample of samples) if (sample[2] === 5) idleSamples += 1;
+  for (let i = 1; i < samples.length; i += 1) {
+    const [rfA, frameA, animA, timeA] = samples[i - 1];
+    const [rfB, frameB, animB, timeB] = samples[i];
+    if (animA !== 5 || animB !== 5) continue;
+    if (rfB - rfA === 1) {
+      adjacentIdlePairs += 1;
+      if (timeA >= 1 && timeB === timeA - 1) timerDecrementOne += 1;
+      if (frameA !== frameB) adjacentFrameTransitions += 1;
+      if (timeA === 0 && timeB === expectedByte) reloadFrames.push(rfB);
+    }
+  }
+  const gaps = [];
+  for (let i = 1; i < reloadFrames.length; i += 1) {
+    const gap = reloadFrames[i] - reloadFrames[i - 1];
+    if (gap > 0 && gap <= 600) gaps.push(gap);
+  }
+  const histogram = {};
+  for (const gap of gaps) histogram[gap] = (histogram[gap] ?? 0) + 1;
+  let gapMode = null;
+  let gapModeCount = 0;
+  for (const [gap, count] of Object.entries(histogram)) {
+    if (count > gapModeCount) { gapMode = Number(gap); gapModeCount = count; }
+  }
+  const firstIdle = samples.find((sample) => sample[2] === 5)?.[0] ?? null;
+  const lastFrame = samples.at(-1)?.[0] ?? null;
+  return {
+    expected_interval_byte: expectedByte,
+    samples: samples.length,
+    idle_coverage_ratio: samples.length ? Number((idleSamples / samples.length).toFixed(4)) : null,
+    adjacent_idle_pairs: adjacentIdlePairs,
+    timer_decrement_one_ratio: adjacentIdlePairs ? Number((timerDecrementOne / adjacentIdlePairs).toFixed(4)) : null,
+    adjacent_frame_transitions: adjacentFrameTransitions,
+    clean_reloads_zero_to_byte: reloadFrames.length,
+    reload_frames: reloadFrames,
+    gaps,
+    gap_histogram: histogram,
+    gap_mode: gapMode,
+    gap_mode_ratio: gaps.length ? Number((gapModeCount / gaps.length).toFixed(4)) : null,
+    frames_after_first_idle: firstIdle !== null && lastFrame !== null ? lastFrame - firstIdle : null,
+  };
+}
+
+async function readCadencePanelState(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const q = (selector) => document.querySelector(selector);
+      const frames = Array.from(document.querySelectorAll("[data-testid^='inspection-cadence-frame-']"));
+      return {
+        panel: Boolean(q("[data-testid='inspection-sonic-cadence-panel']")),
+        frameCount: frames.length,
+        thumbnailDataUrls: frames.map((el) => (el.querySelector("img")?.getAttribute("src") ?? "").startsWith("data:image") ? 1 : 0),
+        original: q("[data-testid='inspection-cadence-original']")?.textContent ?? "",
+        current: q("[data-testid='inspection-cadence-current']")?.textContent ?? "",
+        prediction: q("[data-testid='inspection-cadence-prediction']")?.textContent ?? "",
+        error: q("[data-testid='inspection-cadence-error']")?.textContent ?? "",
+      };
+    `
+  );
+}
+
+// Perna AO VIVO da jornada (Game View real): gates de identidade, reancoragem,
+// START nativo com ACK, frames avancando ao vivo apos o ACK, framebuffer novo e
+// negativo de tecla. A medicao por frame foi movida para observeCadenceRunOnCore
+// (Addendum-A): o contador `data-rendered-frames` e quantizado em x10 e cada
+// leitura IPC pela pagina afama o pump de 1 frame por tick — amostrar ao vivo e
+// estruturalmente impossivel. Os numeros congelados sao conferidos na perna de
+// observacao, no proprio core, frame a frame.
+async function playCadenceRunLiveGates(sessionId, runOptions) {
+  const { buttonTestId, label, expectedBytes, oldGameFrame, report } = runOptions;
+  const expectedSha256 = createHash("sha256").update(expectedBytes).digest("hex");
+  await clickButtonByTestIdNativeWhenReady(sessionId, buttonTestId, `jogar ${label} na jornada de cadencia`);
+  const identity = await waitFor(
+    async () => {
+      const frame = await readCanonicalGameFrame(sessionId);
+      return frame && frame.romSha256 === expectedSha256 && frame.romSize === expectedBytes.length && frame.coreLabel && frame.corePath ? frame : false;
+    },
+    20000,
+    `Game View nao confirmou a identidade da ROM ${label} na jornada de cadencia`,
+    100
+  );
+  const reanchored = await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.romSha256 === expectedSha256 && progress.renderedFrames >= 1 && progress.renderedFrames <= 1200 ? progress : false;
+    },
+    15000,
+    `O contador de frames nao reancorou na carga da ROM ${label} (jogo ao vivo seria ambiguo)`,
+    100
+  );
+  await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= 10 ? progress : false;
+    },
+    10000,
+    `A Game View nao avancou 10 frames na corrida ${label}`,
+    100
+  );
+  const bootFrame = await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= 890 ? progress : false;
+    },
+    120000,
+    `A ROM ${label} nao atravessou o boot ate o ponto de entrada na jornada`,
+    100
+  );
+  await focusGameCanvasNatively(sessionId);
+  const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  await sendNativeGameKey(sessionId, "Enter", "keyDown", `START de entrada da fase ${label} (jornada cadencia)`);
+  await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= bootFrame.renderedFrames + 30 ? progress : false;
+    },
+    15000,
+    `START nao segurou por 30 frames na corrida ${label}`,
+    100
+  );
+  await sendNativeGameKey(sessionId, "Enter", "keyUp", `liberacao de START da corrida ${label}`);
+  const startInput = await waitFor(
+    async () => {
+      const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+      return current?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0) ? current : false;
+    },
+    10000,
+    `START nativo nao foi confirmado pelo produto na corrida ${label}`,
+    100
+  );
+  const atAck = await readCanonicalGameProgress(sessionId);
+  const afterAck = await waitFor(
+    async () => {
+      const progress = await readCanonicalGameProgress(sessionId);
+      return progress && progress.renderedFrames >= atAck.renderedFrames + 10 ? progress : false;
+    },
+    15000,
+    `O jogo nao avancou 10 frames apos a confirmacao de START na corrida ${label}`,
+    100
+  );
+  const gameplayFrame = await readCanonicalGameFrame(sessionId);
+  const staleImageRejected = Boolean(oldGameFrame) ? oldGameFrame.framebufferSha256 !== gameplayFrame.framebufferSha256 : true;
+  if (!staleImageRejected) fail(`A Game View reutilizou o framebuffer da corrida anterior em ${label}: ${gameplayFrame.framebufferSha256}`);
+  const negativeBefore = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  await sendNativeGameKey(sessionId, "KeyQ", "keyDown", `negativo de tecla nao mapeada na corrida ${label}`);
+  await sendNativeGameKey(sessionId, "KeyQ", "keyUp", `liberacao do negativo na corrida ${label}`);
+  const negativeAfter = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+  const unmappedInputRejected = negativeAfter?.lastJoypadAck?.seq === negativeBefore?.lastJoypadAck?.seq;
+  if (!unmappedInputRejected) fail(`Entrada nao mapeada foi aceita como input do jogo na corrida ${label}`);
+  const checks = [
+    { name: `${label}.identidade_rom`, pass: identity.romSha256 === expectedSha256 && identity.romSize === 531577, observed: { sha: identity.romSha256, size: identity.romSize }, required: expectedSha256 },
+    { name: `${label}.reancoragem_do_contador`, pass: reanchored.renderedFrames <= 1200, observed: reanchored.renderedFrames, required: "<=1200 apos carga" },
+    { name: `${label}.ack_de_start`, pass: startInput?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0), observed: startInput?.lastJoypadAck, required: "sequencia ACK avancou" },
+    { name: `${label}.frames_avancados_tras_primeira_observacao`, pass: afterAck.renderedFrames - atAck.renderedFrames >= 10, observed: afterAck.renderedFrames - atAck.renderedFrames, required: ">=10 frames de tela ao vivo apos o ACK" },
+    { name: `${label}.negativo_tecla_nao_mapeada`, pass: unmappedInputRejected, observed: negativeAfter?.lastJoypadAck, required: "ACK inalterado por KeyQ" },
+    { name: `${label}.framebuffer_nao_reutilizado`, pass: staleImageRejected, observed: gameplayFrame.framebufferSha256, required: "diversos do frame anterior" },
+  ];
+  for (const entry of checks) report.checks.push(entry);
+  console.log(`[cadence-journey-live] ${JSON.stringify({ label, core: identity.coreLabel, rf_at_ack: atAck.renderedFrames, rf_after: afterAck.renderedFrames })}`);
+  return { identity, checks };
+}
+
+// Perna DE OBSERVACAO (Addendum-A): replicar exatamente a rota do painel
+// (InspectionPanel runRomAndObserve / Etapa 4): carregar a ROM no core,
+// esquentar 900 frames, pressionar START pelo comando de input do produto
+// (com epoch), soltar apos 2 frames e rodar o resto — tudo com
+// `emulator_run_frames_sampled`, que mantem o mutex do core e amostra a janela
+// de WRAM (regiao 2, 0xd000, 0x40) a cada frame executado 1:1. Os indices de
+// frame sao absolutos pos-execucao (o contador zera na carga), entao a janela
+// congelada 1500..2900 e exatamente 1401 linhas consecutivas.
+async function observeCadenceRunOnCore(sessionId, runOptions) {
+  const { romPath, expectedSha256, label, intervalByte, report } = runOptions;
+  const obs = CADENCE_JOURNEY_OBSERVATION;
+  await webdriverRequest("POST", `/session/${sessionId}/timeouts`, { script: 300000, pageLoad: 300000, implicit: 0 });
+  const wrapped = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponivel na pagina" }); return; }
+      const romPath = arguments[0];
+      const cfg = arguments[1];
+      const neutral = { b: false, y: false, select: false, start: false, up: false, down: false, left: false, right: false, a: false, x: false, l: false, r: false };
+      const pressed = { ...neutral, start: true };
+      const sampled = (frames, recordFrom) => invoke("emulator_run_frames_sampled", { frames, region: cfg.region, offset: cfg.offset, length: cfg.length, recordFrom });
+      (async () => {
+        const load = await invoke("emulator_load_rom", { romPath });
+        const epoch = await invoke("emulator_get_core_epoch");
+        const warmup = await invoke("emulator_run_frames", { frames: cfg.warmupFrames });
+        const press = await invoke("emulator_send_input", { joypad: pressed, sessionEpoch: epoch });
+        const startBatch = await sampled(cfg.startFrames, cfg.recordFrom);
+        const release = await invoke("emulator_send_input", { joypad: neutral, sessionEpoch: epoch });
+        const tailBatch = await sampled(cfg.tailFrames, cfg.recordFrom);
+        return { load, epoch, warmup, press, startBatch, release, tailBatch };
+      })().then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error && error.message ? error.message : error) }));
+    `,
+    [romPath, obs]
+  );
+  const failCheck = (name, observed, required) => {
+    report.checks.push({ name: `${label}.${name}`, pass: false, observed, required });
+    fail(`Observacao ${label} abortada (${name}): ${JSON.stringify({ observed, required })}`);
+  };
+  if (!wrapped?.ok) failCheck("observacao_rota_ok", wrapped?.error ?? wrapped, "todos os comandos da rota retornaram ok");
+  const route = wrapped.value;
+  if (typeof route.epoch !== "number" || route.load?.ok === false || route.warmup?.ok === false || route.press?.ok === false || route.startBatch?.ok === false || route.release?.ok === false || route.tailBatch?.ok === false) {
+    failCheck("observacao_rota_ok", { load: route.load?.ok, warmup: route.warmup?.ok, press: route.press?.ok, start: route.startBatch?.ok, release: route.release?.ok, tail: route.tailBatch?.ok, epoch: route.epoch }, "cada comando da rota confirmou ok e o epoch e numerico");
+  }
+  const tail = route.tailBatch;
+  const start = route.startBatch;
+  if (start.frames_before !== obs.warmupFrames || start.frames_after !== obs.warmupFrames + obs.startFrames || start.rows.length !== 0 || tail.frames_after !== obs.totalFrames) {
+    failCheck("observacao_orcamento_e_ancoragem", { start_before: start.frames_before, start_after: start.frames_after, tail_after: tail.frames_after, start_rows: start.rows.length }, `warmup=${obs.warmupFrames}, START em ${obs.warmupFrames + 1}..${obs.warmupFrames + obs.startFrames}, total=${obs.totalFrames}, 0 linhas antes de ${obs.recordFrom}`);
+  }
+  const rows = tail.rows ?? [];
+  // Retificacao A do Addendum: record_from e inclusivo ate o ultimo frame
+  // executado (2901), entao o bruto correto e a sequencia continua
+  // 1500..2901 (1402 linhas) — prova de orcamento integral e nao-intercalacao.
+  // A janela CONGELADA de analise continua 1500..2900 (1401 amostras); a linha
+  // de 2901, fora da janela, e descartada antes das metricas e o descarte e
+  // registrado na serie persistida.
+  const expectedRawCount = obs.totalFrames - obs.recordFrom + 1;
+  if (rows.length !== expectedRawCount || rows[0]?.frame !== obs.recordFrom || rows[rows.length - 1]?.frame !== obs.totalFrames) {
+    failCheck("observacao_janela_completa", { rows: rows.length, first: rows[0]?.frame ?? null, last: rows[rows.length - 1]?.frame ?? null }, `${expectedRawCount} linhas continuas de ${obs.recordFrom} a ${obs.totalFrames}`);
+  }
+  for (let i = 1; i < rows.length; i += 1) {
+    if (rows[i].frame !== rows[i - 1].frame + 1) failCheck("observacao_janela_completa", { gap_entre: rows[i - 1].frame, e: rows[i].frame }, "indices de frame consecutivos, sem buracos");
+  }
+  const windowRows = rows.filter((row) => row.frame <= obs.recordTo);
+  if (windowRows.length !== obs.recordTo - obs.recordFrom + 1 || windowRows[0].frame !== obs.recordFrom || windowRows.at(-1).frame !== obs.recordTo) {
+    failCheck("observacao_janela_completa", { janela: windowRows.length, first: windowRows[0]?.frame ?? null, last: windowRows.at(-1)?.frame ?? null }, `janela congelada ${obs.recordFrom}..${obs.recordTo}`);
+  }
+  if (tail.rom_sha256 !== expectedSha256 || tail.rom_path !== romPath) {
+    failCheck("observacao_identidade_rom", { sha: tail.rom_sha256, path: tail.rom_path }, `${expectedSha256} @ ${romPath}`);
+  }
+  const samples = windowRows.map((row) => {
+    const bytes = Buffer.from(row.bytes_hex, "hex");
+    return [row.frame, bytes[0x1b], bytes[0x1d], bytes[0x1f]];
+  });
+  const metrics = analyzeCadenceRunSamples(samples, intervalByte);
+  const checks = [
+    { name: `${label}.observacao_rota_ok`, pass: true, observed: { epoch: route.epoch, core: tail.core_label } },
+    { name: `${label}.observacao_orcamento_e_ancoragem`, pass: true, observed: { frames_before: start.frames_before, frames_after: tail.frames_after } },
+    { name: `${label}.observacao_janela_completa`, pass: true, observed: { bruto: rows.length, janela: windowRows.length, descartada_fora_da_janela: rows.length - windowRows.length, first: rows[0].frame, last: rows.at(-1).frame } },
+    { name: `${label}.observacao_identidade_rom`, pass: true, observed: { sha: tail.rom_sha256, path: tail.rom_path } },
+    { name: `${label}.cobertura_idle`, pass: metrics.idle_coverage_ratio !== null && metrics.idle_coverage_ratio >= 0.4, observed: metrics.idle_coverage_ratio, required: ">=0.40" },
+    { name: `${label}.candidato_timer_decrementa_1`, pass: metrics.timer_decrement_one_ratio !== null && metrics.timer_decrement_one_ratio >= 0.8, observed: metrics.timer_decrement_one_ratio, required: ">=0.80 em pares adjacentes idle" },
+    { name: `${label}.recargas_0_para_byte`, pass: metrics.clean_reloads_zero_to_byte >= 3, observed: metrics.clean_reloads_zero_to_byte, required: ">=3" },
+    { name: `${label}.transicoes_de_frame`, pass: metrics.adjacent_frame_transitions >= 5, observed: metrics.adjacent_frame_transitions, required: ">=5" },
+    { name: `${label}.modo_dos_gaps`, pass: metrics.gap_mode === intervalByte + 1, observed: metrics.gap_mode, required: `==${intervalByte + 1}` },
+    { name: `${label}.razao_do_modo`, pass: metrics.gap_mode_ratio !== null && metrics.gap_mode_ratio >= 0.8, observed: metrics.gap_mode_ratio, required: ">=0.80" },
+  ];
+  for (const entry of checks) report.checks.push(entry);
+  console.log(`[cadence-journey-observe] ${JSON.stringify({ label, rom_sha256: tail.rom_sha256, core: tail.core_label, metrics })}`);
+  const seriesPath = path.join(validationDir, `${report.artifact_prefix}-cadence-journey-series-${label}.json`);
+  await writeFile(seriesPath, JSON.stringify({
+    schema: "rex-sonic-cadence-journey-series/v1",
+    label,
+    rom_path: romPath,
+    rom_sha256: tail.rom_sha256,
+    interval_byte: intervalByte,
+    core_label: tail.core_label,
+    route: { ...obs, epoch: route.epoch, frames_before_start: start.frames_before, frames_after_tail: tail.frames_after, start_batch_rows: start.rows },
+    dropped_outside_window: rows.filter((row) => row.frame > obs.recordTo).map((row) => row.frame),
+    checks,
+    metrics,
+    raw_rows: rows,
+  }, null, 2));
+  return { metrics, checks, seriesPath, rom_sha256: tail.rom_sha256 };
+}
+
+async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
+  const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const baseSha256 = hash(base);
+  if (base.length !== 531577) fail(`A jornada exige a ROM BYOR pinada de 531577 bytes: ${base.length}`);
+  if (base[CADENCE_JOURNEY_WAIT_ADDR] !== 23) fail(`O byte de intervalo da base nao e $17: ${base[CADENCE_JOURNEY_WAIT_ADDR]}`);
+  if (!CADENCE_JOURNEY_WAIT_FRAMES.every((frame, index) => base[CADENCE_JOURNEY_WAIT_ADDR + 1 + index] === frame)) {
+    fail("A sequencia de frames do script id_Wait na base difere do contrato lido independentemente");
+  }
+  if (base[CADENCE_JOURNEY_WAIT_ADDR + 19] !== 0xfe || base[CADENCE_JOURNEY_WAIT_ADDR + 20] !== 0x02) {
+    fail("O terminador afBack 2 do script id_Wait nao esta na base");
+  }
+  const expectedBytes = Buffer.from(base);
+  expectedBytes[CADENCE_JOURNEY_WAIT_ADDR] = 40;
+  const modifiedSha256 = hash(expectedBytes);
+  await ensureValidationDir();
+  const pilotDir = path.join(validationDir, `${prefix}-cadence-journey`);
+  await mkdir(pilotDir, { recursive: true });
+  const report = {
+    schema: "rex-sonic-cadence-journey/v1",
+    artifact_prefix: prefix,
+    expectations: "docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA5.md",
+    binary_sha256: hash(await readFile(app)),
+    base_rom_sha256: baseSha256,
+    expected_modified_sha256: modifiedSha256,
+    pilot_dir: pilotDir,
+    steps: [],
+    checks: [],
+  };
+  const persistReport = async (extra = {}) => {
+    await writeFile(path.join(pilotDir, "report.json"), JSON.stringify({ ...report, ...extra }, null, 2));
+  };
+  let sessionIdRef = sessionId;
+  try {
+    const panelBefore = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.panel && state.frameCount === 18 && state.thumbnailDataUrls.every((ok) => ok === 1) ? state : false;
+      },
+      60000,
+      "O painel de cadencia nao mostrou os 18 quadros com miniaturas reais",
+      250
+    );
+    report.checks.push({ name: "painel.ordem_e_miniaturas", pass: true, observed: { frame_count: panelBefore.frameCount, thumbnails: panelBefore.thumbnailDataUrls.length } });
+    report.checks.push({ name: "painel.original_23", pass: panelBefore.original.includes("23 ticks"), observed: panelBefore.original });
+    report.checks.push({ name: "painel.current_23", pass: panelBefore.current.includes("23 ticks"), observed: panelBefore.current });
+    report.checks.push({ name: "painel.previsao_24", pass: panelBefore.prediction.includes("byte 23") && panelBefore.prediction.includes("24 frames de tela"), observed: panelBefore.prediction });
+    report.checks.push({ name: "painel.sem_erro", pass: !panelBefore.error.trim(), observed: panelBefore.error });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`Painel de cadencia inicial nao bate com o congelado: ${JSON.stringify(panelBefore)}`);
+    await captureScreenshot(sessionIdRef, `${prefix}-cadence-journey-panel-23.png`);
+
+    await setSonicNumberInputNative(sessionIdRef, "inspection-cadence-value", 40);
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da aplicacao de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-cadence-apply", "aplicar duracao 40 pela interface");
+    const appliedMessage = await waitFor(
+      async () => {
+        const entries = ((await readAutomationState(sessionIdRef))?.consoleEntries ?? []).map((entry) => String(entry?.message ?? ""));
+        return entries.find((message) => message.includes("Cadência id_Wait aplicada") && message.includes("agora 40 ticks")) ?? false;
+      },
+      30000,
+      "A aplicacao de cadencia nao publicou a mensagem de sucesso no console",
+      100
+    );
+    report.checks.push({ name: "editar.mensagem_com_sha_independente", pass: appliedMessage.includes(modifiedSha256), observed: appliedMessage, required: modifiedSha256 });
+    report.checks.push({ name: "editar.mensagem_aponta_0x13BAE", pass: appliedMessage.includes("0x13BAE"), observed: appliedMessage });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`Edicao de cadencia nao bate com a mutacao independente: ${appliedMessage}`);
+    const panelAfter = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.current.includes("40 ticks") && state?.prediction.includes("byte 40") && state?.prediction.includes("41 frames de tela") ? state : false;
+      },
+      30000,
+      "O painel nao passou a mostrar 40 ticks com previsao de 41 frames",
+      100
+    );
+    report.checks.push({ name: "painel.original_permanece_23", pass: panelAfter.original.includes("23 ticks"), observed: panelAfter.original });
+    const status = await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId });
+    const edit = status?.session?.edit;
+    report.checks.push({ name: "pipeline.edit_formato_offset_unico", pass: edit?.format === "sonic1_wait_interval_byte" && edit?.bytes_changed === 1 && Array.isArray(edit?.changed_offsets) && edit.changed_offsets.length === 1 && edit.changed_offsets[0] === CADENCE_JOURNEY_WAIT_ADDR, observed: { format: edit?.format, bytes_changed: edit?.bytes_changed, changed_offsets: edit?.changed_offsets } });
+    if (!edit?.modified_rom_path) fail(`A sessao nao expoe a copia editada: ${JSON.stringify(status?.session?.status)}`);
+    const copyBytes = await readFile(edit.modified_rom_path);
+    report.checks.push({ name: "pipeline.copia_bytes_exatos", pass: copyBytes.equals(expectedBytes) && edit.modified_rom_sha256 === modifiedSha256, observed: { copy_sha: hash(copyBytes), edit_sha: edit.modified_rom_sha256 }, required: modifiedSha256 });
+    if (report.checks.some((entry) => !entry.pass)) throw new Error(`Etapa de edicao 40 divergiu do congelado: ${JSON.stringify(report.checks.slice(-4))}`);
+    report.steps.push({ step: "cadence_edit_40", console_message: appliedMessage, edit });
+    await captureScreenshot(sessionIdRef, `${prefix}-cadence-journey-panel-40.png`);
+
+    const patchPath = path.join(pilotDir, "cadence-40.bps");
+    const appliedPath = path.join(pilotDir, "cadence-40-applied.bin");
+    const nativePath = async (testId, value) => {
+      const selector = `[data-testid="${testId}"] input`;
+      const element = await findElement(sessionIdRef, selector);
+      await clickElementWithDiagnostics(sessionIdRef, element, selector);
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/clear`, {});
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/value`, { text: value, value: [...value] });
+    };
+    await nativePath("sonic-patch-path", patchPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-export-patch", "exportar BPS da cadencia");
+    await waitFor(() => pathExists(patchPath), 15000, "O BPS de cadencia nao foi exportado pela UI", 100);
+    await nativePath("sonic-applied-path", appliedPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-apply-patch", "aplicar BPS da cadencia a base");
+    await waitFor(() => pathExists(appliedPath), 15000, "A ROM aplicada de cadencia nao foi criada pela UI", 100);
+    const appliedBytes = await readFile(appliedPath);
+    report.checks.push({ name: "bps.aplicado_igual_mutacao_independente", pass: appliedBytes.equals(expectedBytes), observed: { applied_sha: hash(appliedBytes), patch_sha: hash(await readFile(patchPath)) }, required: modifiedSha256 });
+    if (!report.checks.at(-1).pass) throw new Error("A aplicacao BPS divergiu da ROM calculada independentemente");
+    report.steps.push({ step: "bps_export_apply", patch_path: patchPath, applied_path: appliedPath, patch_sha256: hash(await readFile(patchPath)) });
+
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-save", "salvar sessao de cadencia");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),
+      15000,
+      "A sessao de cadencia salva nao apareceu na lista",
+      100
+    );
+    await deleteSession(sessionIdRef);
+    sessionIdRef = await createSession(app);
+    currentE2eRunContext.sessionId = sessionIdRef;
+    await waitForAppWindowReady(sessionIdRef, uiBootstrapTimeoutMs, "O app da jornada de cadencia nao reabriu");
+    await handleProjectWizardVisibly(sessionIdRef, "cadence-journey-restart");
+    await setSessionWindowRect(sessionIdRef, 1920, 1080);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "workspace-rail-debug", "reabrir Debug Workspace na jornada de cadencia");
+    await callAutomationApi(sessionIdRef, "openToolsWorkspace", ["reverse", "debug", true]);
+    await waitForBodyText(sessionIdRef, "Analisar ROM", 20000, "O Reverse Workspace nao voltou na jornada de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "reverse-tab-inspection", "reabrir inspecao na jornada de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-refresh-sessions", "listar sessoes salvas na jornada de cadencia");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),
+      30000,
+      "A sessao salva de cadencia nao reapareceu apos destruir a janela",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `select-saved-session-${savedId}`, "selecionar sessao salva de cadencia");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-reopen", "reabrir sessao de cadencia");
+    const reopened = await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
+      30000,
+      "A sessao de cadencia nao foi reaberta com estado completo",
+      100
+    );
+    const reopenedPanel = await waitFor(
+      async () => {
+        const state = await readCadencePanelState(sessionIdRef);
+        return state?.panel && state.frameCount === 18 && state.current.includes("40 ticks") && state.prediction.includes("41 frames de tela") && state.original.includes("23 ticks") ? state : false;
+      },
+      60000,
+      "O painel reaberto nao restaurou 40 ticks, original 23 e previsao 41",
+      250
+    );
+    const reopenedProvenience = await waitFor(
+      async () => {
+        const text = await executeScript(sessionIdRef, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? "";`);
+        return text.includes(modifiedSha256) ? text : false;
+      },
+      20000,
+      "A proveniencia da edicao (SHA da copia) nao foi restaurada na reabertura",
+      100
+    );
+    report.checks.push({ name: "reabrir.restaura_40_previsao_41_proveniencia", pass: true, observed: { current: reopenedPanel.current, prediction: reopenedPanel.prediction, session: reopened.session?.id } });
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/stand");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da recomposicao pos-reabertura");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "recompor stand apos reabrir a jornada de cadencia");
+    const reopenedProof = await verifyRenderedSpriteFrame(sessionIdRef, expectedBytes, "sonic1_sonic/stand", "Sonic stand reaberto (jornada de cadencia)");
+    report.steps.push({ step: "restart_reopen", reopened_proof: reopenedProof, provenvenience_text: reopenedProvenience.slice(0, 200) });
+    await captureScreenshot(sessionIdRef, `${prefix}-cadence-journey-reopened.png`);
+    report.checks.push({ name: "pipeline.base_preservada_ate_jogo", pass: (await readFile(romPath)).equals(base), observed: { rom_path: romPath } });
+    if (!report.checks.at(-1).pass) throw new Error("A base BYOR foi alterada antes mesmo do jogo");
+
+    const oldGameFrame = await readCanonicalGameFrame(sessionIdRef);
+    const baseLive = await playCadenceRunLiveGates(sessionIdRef, {
+      buttonTestId: "inspection-sonic-play-base",
+      label: "base",
+      expectedBytes: base,
+      oldGameFrame,
+      report,
+    });
+    const modifiedLive = await playCadenceRunLiveGates(sessionIdRef, {
+      buttonTestId: "inspection-sonic-play-modified",
+      label: "modificada",
+      expectedBytes,
+      oldGameFrame: await readCanonicalGameFrame(sessionIdRef),
+      report,
+    });
+    // Congelar o pump da Game View antes da medicao: a observacao roda no mesmo
+    // core e cada frame do pump interleavado invalidaria a janela por frame.
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "viewport-pause", "pausar o pump da Game View antes da observacao amostrada");
+    const rfBeforeHold = await readCanonicalGameProgress(sessionIdRef);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const rfAfterHold = await readCanonicalGameProgress(sessionIdRef);
+    report.checks.push({ name: "observacao.pump_pausado", pass: rfBeforeHold.renderedFrames === rfAfterHold.renderedFrames, observed: { antes: rfBeforeHold.renderedFrames, depois: rfAfterHold.renderedFrames }, required: "contador estavel com a Game View pausada" });
+    if (!report.checks.at(-1).pass) fail(`O pump da Game View nao parou com viewport-pause: ${JSON.stringify({ antes: rfBeforeHold.renderedFrames, depois: rfAfterHold.renderedFrames })}`);
+    const baseObs = await observeCadenceRunOnCore(sessionIdRef, {
+      romPath,
+      expectedSha256: baseSha256,
+      label: "base",
+      intervalByte: 23,
+      report,
+    });
+    const modifiedObs = await observeCadenceRunOnCore(sessionIdRef, {
+      romPath: appliedPath,
+      expectedSha256: modifiedSha256,
+      label: "modificada",
+      intervalByte: 40,
+      report,
+    });
+    report.checks.push({
+      name: "discriminante.modos_diferentes",
+      pass: baseObs.metrics.gap_mode !== modifiedObs.metrics.gap_mode,
+      observed: { base: baseObs.metrics.gap_mode, modificada: modifiedObs.metrics.gap_mode },
+      required: "modos distintos entre as duas corridas",
+    });
+    report.steps.push({
+      step: "cadence_play_observe",
+      live: { base_core: baseLive.identity.coreLabel, modificada_core: modifiedLive.identity.coreLabel },
+      base_series: baseObs.seriesPath,
+      modificada_series: modifiedObs.seriesPath,
+    });
+    if ((await readFile(romPath)).equals(base) === false) fail("A base BYOR mudou durante a jornada");
+    report.checks.push({ name: "jogo.base_preservada_no_final", pass: true, observed: baseSha256 });
+    const allPass = report.checks.every((entry) => entry.pass !== false);
+    report.runtime_effect = {
+      base: { interval_byte: 23, measured_gap_mode: baseObs.metrics.gap_mode, verdict_expected: "H_N+1 => 24" },
+      modificada: { interval_byte: 40, measured_gap_mode: modifiedObs.metrics.gap_mode, verdict_expected: "H_N+1 => 41" },
+    };
+    await persistReport({ allPass, finished_at: new Date().toISOString() });
+    if (!allPass) {
+      const failed = report.checks.filter((entry) => entry.pass === false);
+      fail(`Jornada de cadencia INCONCLUSIVA/FAIL frente ao congelado (sem promover nada): ${JSON.stringify({ failed, report_path: path.join(pilotDir, "report.json") })}`);
+    }
+    console.log(`OK: Sonic cadence journey E2E; allPass=true; report=${path.join(pilotDir, "report.json")}`);
+    return sessionIdRef;
+  } catch (error) {
+    await persistReport({ allPass: false, aborted: true, error: String(error?.message ?? error), finished_at: new Date().toISOString() }).catch(() => null);
+    throw error;
+  }
+}
+
+async function closeVisibleConsoleDrawer(sessionId, label = "console inicial") {
+  const visible = await executeScript(
+    sessionId,
+    `return document.querySelector('[data-testid="console-drawer"][data-visible="true"]') ? true : false;`
+  );
+  if (!visible) {
+    return { closed: false, reason: "not-visible" };
+  }
+  const selector = '[data-testid="console-drawer"] > div:first-child > button';
+  const before = await inspectElementInteraction(sessionId, selector);
+  if (!before?.found || !before.visible || before.disabled || before.elementAtCenter?.includes('console-details')) {
+    fail(`Console visível não ficou fechável por controle nativo (${label}): ${JSON.stringify(before)}`);
+  }
+  const elementId = await findElement(sessionId, selector);
+  await clickElement(sessionId, elementId);
+  await waitFor(
+    async () => !(await executeScript(sessionId, `return document.querySelector('[data-testid="console-drawer"][data-visible="true"]') ? true : false;`)),
+    5000,
+    `Console não fechou pelo controle visível (${label})`,
+    100
+  );
+  const after = await inspectElementInteraction(sessionId, selector);
+  console.log(`[inspection-console] ${JSON.stringify({ label, before, after, closed: true })}`);
+  return { closed: true, before, after };
+}
+
+async function readSavedSessionSelection(sessionId, persistedSessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const card = document.querySelector('[data-testid="inspection-saved-session"][data-session-id="' + String(arguments[0]) + '"]');
+      if (!(card instanceof HTMLElement)) return null;
+      const button = card.querySelector('[data-testid="select-saved-session-' + String(arguments[0]) + '"]');
+      const className = String(card.className || '');
+      return {
+        sessionId: card.getAttribute('data-session-id') || '',
+        status: card.getAttribute('data-session-status') || '',
+        selected: className.includes('border-[#cba6f7]'),
+        cardClass: className,
+        buttonDisabled: button instanceof HTMLButtonElement ? button.disabled : null,
+      };
+    `,
+    [persistedSessionId]
+  );
+}
+
+async function ensurePreviewVisibleAndUnobstructed(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const image = document.querySelector('[data-testid="inspection-preview-image"]');
+      if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+      let scrollParent = image.parentElement;
+      while (scrollParent && scrollParent !== document.body) {
+        const style = window.getComputedStyle(scrollParent);
+        if (scrollParent.scrollHeight > scrollParent.clientHeight && /(auto|scroll|overlay)/.test(style.overflowY)) break;
+        scrollParent = scrollParent.parentElement;
+      }
+      image.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const rect = image.getBoundingClientRect();
+      const fullyVisible = rect.left >= 0 && rect.top >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight;
+      const renderedSizeSufficient = rect.width >= Math.min(image.naturalWidth, 32) && rect.height >= Math.min(image.naturalHeight, 8);
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const top = fullyVisible ? document.elementFromPoint(x, y) : null;
+      const topWithTestId = top instanceof Element ? top.closest('[data-testid]') : null;
+      const unobstructed = Boolean(top && (top === image || image.contains(top)));
+      return {
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height, right: rect.right, bottom: rect.bottom },
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        fullyVisible,
+        naturalSize: { width: image.naturalWidth, height: image.naturalHeight },
+        renderedSizeSufficient,
+        unobstructed,
+        point: { x, y },
+        topTag: top?.tagName ?? '',
+        topTestId: topWithTestId?.getAttribute('data-testid') ?? '',
+        topClass: top instanceof Element ? String(top.className ?? '') : '',
+        scrollParentTestId: scrollParent?.getAttribute('data-testid') ?? '',
+        scrollParentTag: scrollParent?.tagName ?? '',
+        scrollTop: scrollParent ? scrollParent.scrollTop : null,
+      };
+    `
+  );
+}
+
+async function handleProjectWizardVisibly(sessionId, label) {
+  const wizardVisible = await executeScript(
+    sessionId,
+    `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`
+  );
+  if (!wizardVisible) {
+    return { label, action: "not-visible" };
+  }
+
+  const wizardAction = await waitFor(
+    async () => executeScript(
+      sessionId,
+      `return document.querySelector('[data-testid="wizard-open-existing-project"]') ? "existing" : document.querySelector('[data-testid="template-card-empty"]') ? "empty" : false;`
+    ),
+    15000,
+    `Controles do wizard não apareceram (${label})`,
+    100
+  );
+  if (wizardAction === "existing") {
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-open-existing-project", `${label}: abrir projeto existente`);
+  } else {
+    await clickButtonByTestIdNativeWhenReady(sessionId, "template-card-empty", `${label}: selecionar Projeto Vazio`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-target-megadrive", `${label}: selecionar Mega Drive`);
+    await clickButtonByTestIdNativeWhenReady(sessionId, "wizard-create-project", `${label}: concluir wizard`);
+  }
+
+  const state = await waitFor(
+    async () => {
+      const wizard = await executeScript(
+        sessionId,
+        `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`
+      );
+      const automation = await readAutomationState(sessionId);
+      return !wizard && automation?.activeProjectDir ? automation : false;
+    },
+    30000,
+    `Wizard não foi concluído por controles visíveis (${label})`,
+    100
+  );
+  console.log(`[inspection-wizard] ${JSON.stringify({ label, action: wizardAction === "existing" ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir })}`);
+  return { label, action: wizardAction === "existing" ? "open-existing" : "create-empty", activeProjectDir: state.activeProjectDir };
+}
+
+async function runLogicRecoveryScenario(sessionId, projectDir) {
+  const nodeRomPath = process.env.RDS_LOGIC_RECOVERY_NODE_ROM ?? "";
+  const routineRomPath = process.env.RDS_LOGIC_RECOVERY_ROUTINE_ROM ?? process.env.RDS_LOGIC_RECOVERY_ROM ?? "";
+  const offsetRaw = process.env.RDS_LOGIC_RECOVERY_OFFSET ?? "";
+  const offset = Number.parseInt(offsetRaw, 0);
+  if (
+    !nodeRomPath ||
+    !routineRomPath ||
+    !Number.isInteger(offset) ||
+    offset < 0 ||
+    !(await pathExists(nodeRomPath)) ||
+    !(await pathExists(routineRomPath))
+  ) {
+    fail("logic-recovery exige RDS_LOGIC_RECOVERY_NODE_ROM, RDS_LOGIC_RECOVERY_ROUTINE_ROM e RDS_LOGIC_RECOVERY_OFFSET.");
+  }
+  const nodeBytes = await readFile(nodeRomPath);
+  const routineBytes = await readFile(routineRomPath);
+  const expectedRoutineBytes = Buffer.from([0x52, 0x40, 0x4e, 0x75]);
+  if (!routineBytes.subarray(offset, offset + expectedRoutineBytes.length).equals(expectedRoutineBytes)) {
+    fail(`fixture routine não contém 52 40 4E 75 no offset 0x${offset.toString(16)}.`);
+  }
+  const nodeSourcePath = path.join(path.dirname(path.dirname(nodeRomPath)), "src", "main.c");
+  const routineSourcePath = path.join(path.dirname(path.dirname(routineRomPath)), "src", "main.c");
+  const nodeSource = await readFile(nodeSourcePath, "utf8");
+  const routineSource = await readFile(routineSourcePath, "utf8");
+  if (!nodeSource.includes("node_generated_rom_addq_word") || !nodeSource.includes("rds_rom_word_result")) {
+    fail(`source do caminho node não contém a semântica C esperada: ${nodeSourcePath}`);
+  }
+  if (!routineSource.includes("recovered_addq_word")) {
+    fail(`source do caminho routine não contém a chamada da rotina vinculada: ${routineSourcePath}`);
+  }
+
+  const artifactPrefix = `logic-recovery-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appBytes = await readFile(currentE2eRunContext?.appPath ?? "").catch(() => null);
+  const report = {
+    generatedAt: new Date().toISOString(),
+    scenario: "logic-recovery",
+    application: {
+      path: currentE2eRunContext?.appPath ?? null,
+      sha256: appBytes ? createHash("sha256").update(appBytes).digest("hex") : null,
+    },
+    fixture: {
+      nodeRomPath,
+      routineRomPath,
+      nodeRomSha256: createHash("sha256").update(nodeBytes).digest("hex"),
+      routineRomSha256: createHash("sha256").update(routineBytes).digest("hex"),
+      nodeSourcePath,
+      nodeSourceSha256: createHash("sha256").update(nodeSource).digest("hex"),
+      routineSourcePath,
+      routineSourceSha256: createHash("sha256").update(routineSource).digest("hex"),
+    },
+    offset,
+    steps: [],
+  };
+
+  await setSessionWindowRect(sessionId, 1280, 800);
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.activeProjectDir === projectDir ? state : false;
+    },
+    30000,
+    "Fixture do logic-recovery não abriu explicitamente",
+    250
+  );
+  await closeVisibleConsoleDrawer(sessionId);
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace não abriu para logic-recovery");
+
+  await fillInputBySelector(sessionId, 'input[placeholder="/roms/game.md"]', routineRomPath);
+  await clickButtonByTextWithPointerEvents(sessionId, "Analisar ROM");
+  await waitFor(
+    async () => executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Analisar ROM") && document.body?.textContent?.includes("ROM Map") ? true : false;`),
+    30000,
+    "Análise da fixture de lógica não concluiu",
+    250
+  );
+  const openedCode = await executeScript(sessionId, `
+    const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+      const text = candidate.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+      return text === "Code" || text === "Voltar para Code";
+    });
+    if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+    button.scrollIntoView({ block: "center", inline: "center" });
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+      button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
+    return true;
+  `);
+  if (!openedCode) {
+    const buttons = await executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).map((button) => button.textContent?.replace(/\\s+/g, " ").trim()).filter(Boolean).slice(-40);`);
+    console.error(`[logic-recovery] code-tab buttons=${JSON.stringify(buttons)}`);
+    fail("A aba Code não encontrou um controle visível no Reverse Workspace.");
+  }
+  await waitForBodyText(sessionId, "Lógica ROM → Nodes", 15000, "A aba Code não abriu a superfície de recuperação");
+  await fillInputByLabel(sessionId, "Offset", `0x${offset.toString(16)}`);
+  try {
+    await waitFor(
+      async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-recover-logic"]:not([disabled])'));`),
+      30000,
+      "Controle de recuperação exata não ficou habilitado após a análise",
+      250
+    );
+  } catch (error) {
+    const diagnostics = await executeScript(sessionId, `return {
+      button: (() => { const node = document.querySelector('[data-testid="reverse-recover-logic"]'); return node ? { disabled: node.disabled, text: node.textContent, outer: node.outerHTML } : null; })(),
+      inputs: Array.from(document.querySelectorAll('input')).map((node) => ({ value: node.value, placeholder: node.placeholder, aria: node.getAttribute('aria-label') })),
+      state: window.__RDS_E2E__?.getState?.() ?? null,
+      reverseText: document.body?.textContent?.replace(/\\s+/g, ' ').slice(-2400) ?? '',
+    };`);
+    console.error(`[logic-recovery] habilitação diagnostics=${JSON.stringify(diagnostics)}`);
+    throw error;
+  }
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-recover-logic");
+  let recovered;
+  try {
+    recovered = await waitFor(
+      async () => executeScript(sessionId, `
+        const card = document.querySelector('[data-testid="reverse-logic-recovery-card"]');
+        const button = document.querySelector('[data-testid="reverse-recover-logic"]');
+        const text = card?.textContent ?? "";
+        return card && button?.textContent?.includes("Recuperar rotina exata") && text.toLowerCase().includes("52 40 4e 75") ? text : false;
+      `),
+      30000,
+      "Recuperação exata não produziu o card da UI",
+      250
+    );
+  } catch (error) {
+    const diagnostics = await executeScript(sessionId, `return {
+      card: document.querySelector('[data-testid="reverse-logic-recovery-card"]')?.textContent ?? null,
+      button: document.querySelector('[data-testid="reverse-recover-logic"]')?.textContent ?? null,
+      console: window.__RDS_E2E__?.getState?.()?.consoleEntries?.slice(-12) ?? [],
+    };`);
+    console.error(`[logic-recovery] recovery diagnostics=${JSON.stringify(diagnostics)}`);
+    throw error;
+  }
+  const recoveredText = String(recovered);
+  if (!recoveredText.toLowerCase().includes("52 40 4e 75") || !recoveredText.includes("ADDQ")) {
+    fail(`Recuperação da fixture não confirmou bytes/semântica: ${recovered}`);
+  }
+  report.steps.push({ step: "recover_exact_profile", status: "passed", offset, bytes: [0x52, 0x40, 0x4e, 0x75] });
+
+  const invoke = async (command, args = {}) => executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponível" }); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [command, args]
+  );
+  const recoveryProbe = await invoke("rom_recover_logic", { romPath: routineRomPath, offset });
+  if (!recoveryProbe?.ok || !recoveryProbe.value?.ok) {
+    fail(`probe independente da recuperação falhou: ${JSON.stringify(recoveryProbe)}`);
+  }
+  const independentStates = recoveryProbe.value.independent_test_states ?? [];
+  const stateFor = (input) => independentStates.find((state) => state.input_d0 === input);
+  const upperWrap = stateFor(0x1234ffff);
+  const signedOverflow = stateFor(0x00007fff);
+  if (
+    !upperWrap ||
+    upperWrap.output_d0 !== 0x12340000 ||
+    !upperWrap.output_z ||
+    !upperWrap.output_c ||
+    !upperWrap.output_x ||
+    (upperWrap.output_d0 >>> 16) !== (upperWrap.input_d0 >>> 16) ||
+    !signedOverflow ||
+    signedOverflow.output_d0 !== 0x00008000 ||
+    !signedOverflow.output_n ||
+    !signedOverflow.output_v
+  ) {
+    fail(`cobertura independente de upper D0/wrap/flags incompleta: ${JSON.stringify(independentStates)}`);
+  }
+  report.steps.push({
+    step: "independent_semantic_coverage",
+    status: "passed",
+    profileId: recoveryProbe.value.profile_id,
+    operations: recoveryProbe.value.operations,
+    sourceMappings: recoveryProbe.value.source_mappings,
+    coverage: {
+      upperD0PreservedAndWrap: true,
+      zero: true,
+      negative: true,
+      signedOverflow: true,
+      carryAndExtend: true,
+    },
+    states: independentStates,
+  });
+
+  const noOpPath = `${routineRomPath}.addq1.patched.bin`;
+  const patchedPath = `${routineRomPath}.addq2.patched.bin`;
+  await rm(noOpPath, { force: true });
+  await rm(patchedPath, { force: true });
+  const noOpPatch = await invoke("rom_patch_recovered_logic", {
+    romPath: routineRomPath,
+    outputPath: noOpPath,
+    expectedSha256: report.fixture.routineRomSha256,
+    offset,
+    immediate: 1,
+  });
+  if (!noOpPatch?.ok || !noOpPatch.value?.output_path) {
+    fail(`patch no-op #1 via IPC falhou: ${JSON.stringify(noOpPatch)}`);
+  }
+  await waitFor(
+    async () => pathExists(noOpPath),
+    15000,
+    "cópia no-op da fixture não foi criada",
+    100
+  );
+  const noOpBytes = await readFile(noOpPath);
+  if (!noOpBytes.equals(routineBytes)) {
+    fail("controle negativo no-op (#1) alterou bytes ou tamanho da ROM.");
+  }
+  report.steps.push({
+    step: "negative_noop_patch",
+    status: "passed",
+    inputSha256: createHash("sha256").update(routineBytes).digest("hex"),
+    outputSha256: createHash("sha256").update(noOpBytes).digest("hex"),
+    outputPath: noOpPath,
+    bytesEqual: true,
+  });
+
+  await callAutomationApi(sessionId, "setSelectedEntityId", ["camera_root"]);
+  await clickButtonByTextWithPointerEvents(sessionId, "Aplicar ao NodeGraph selecionado");
+  await waitFor(
+    async () => executeScript(sessionId, `return document.body?.textContent?.includes("aplicado e persistido") ? true : false;`),
+    15000,
+    "Grafo recuperado não foi persistido pela UI",
+    250
+  );
+  report.steps.push({ step: "apply_recovered_graph", status: "passed", entityId: "camera_root" });
+
+  await callAutomationApi(sessionId, "closeProject");
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  const reopenedLogic = await waitFor(
+    async () => {
+      const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]);
+      return state?.source?.graph_origin === "rom_recovered" ? state : false;
+    },
+    30000,
+    "Grafo recuperado não foi relido após fechar/reabrir o projeto",
+    250
+  );
+  let reopenedGraph;
+  try {
+    reopenedGraph = JSON.parse(reopenedLogic.source?.graph_json ?? "");
+  } catch {
+    fail("grafo recuperado reaberto não é JSON válido.");
+  }
+  const reopenedOperation = (reopenedGraph.nodes ?? []).find((node) => node.type === "rom_addq_word");
+  const expectedInstructionOffsets = `0x${offset.toString(16).toUpperCase().padStart(6, "0")},0x${(offset + 2).toString(16).toUpperCase().padStart(6, "0")}`;
+  if (
+    reopenedLogic.source.graph_origin !== "rom_recovered" ||
+    !reopenedOperation ||
+    reopenedOperation.params?.register !== "D0" ||
+    reopenedOperation.params?.immediate !== 1 ||
+    reopenedOperation.params?.width_bits !== 16 ||
+    reopenedOperation.params?.rom_start !== offset ||
+    reopenedOperation.params?.rom_end !== offset + 4 ||
+    reopenedOperation.params?.rom_sha256 !== report.fixture.routineRomSha256 ||
+    reopenedOperation.params?.instruction_offsets !== expectedInstructionOffsets ||
+    reopenedGraph.edges?.length !== 1 ||
+    reopenedGraph.edges[0]?.fromNode !== `${reopenedOperation.id}_entry`
+  ) {
+    fail(`grafo recuperado reaberto não preservou operação, conexão e source mapping: ${JSON.stringify(reopenedLogic)}`);
+  }
+  report.steps.push({
+    step: "reopen_recovered_graph",
+    status: "passed",
+    graphOrigin: reopenedLogic.source.graph_origin,
+    operation: {
+      id: reopenedOperation.id,
+      type: reopenedOperation.type,
+      register: reopenedOperation.params.register,
+      immediate: reopenedOperation.params.immediate,
+      width_bits: reopenedOperation.params.width_bits,
+      rom_start: reopenedOperation.params.rom_start,
+      rom_end: reopenedOperation.params.rom_end,
+      rom_sha256: reopenedOperation.params.rom_sha256,
+      instruction_offsets: reopenedOperation.params.instruction_offsets,
+    },
+    edge: reopenedGraph.edges[0],
+    sourceMappingCount: recoveryProbe.value.source_mappings?.length ?? 0,
+  });
+
+  const beforeBuild = await readAutomationState(sessionId);
+  const beforeBuildCount = (beforeBuild?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
+  await clickButtonByTestIdWithPointerEvents(sessionId, "toolbar-build-run");
+  const builtState = await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      const count = (state?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
+      return count > beforeBuildCount ? state : false;
+    },
+    120000,
+    "Projeto com grafo recuperado não concluiu Build & Run",
+    500
+  );
+  const builtRomPath = extractLatestRomPath(builtState);
+  if (!builtRomPath) fail("Build & Run não reportou ROM gerada para o grafo reaberto.");
+  const generatedMainPath = path.join(path.dirname(path.dirname(builtRomPath)), "src", "main.c");
+  const generatedMain = await readFile(generatedMainPath, "utf8").catch(() => "");
+  if (!generatedMain.includes("rds_rom_word_result") || !generatedMain.includes("logic_var_rom_d0")) {
+    fail(`C gerado pelo NodeGraph não contém a operação recuperada: ${generatedMainPath}`);
+  }
+  report.steps.push({
+    step: "build_reopened_project",
+    status: "passed",
+    romPath: builtRomPath,
+    romOrigin: "generated_from_reopened_nodegraph",
+    generatedMainPath,
+    generatedMainSha256: createHash("sha256").update(generatedMain).digest("hex"),
+    generatedSemantics: "rds_rom_word_result + logic_var_rom_d0",
+  });
+
+  const neutralInput = {
+    b: false, y: false, select: false, start: false,
+    up: false, down: false, left: false, right: false,
+    a: false, x: false, l: false, r: false,
+  };
+  const controlledFrames = 1;
+  const readOracle = async (label) => {
+    const memory = await invoke("emulator_read_memory", { region: 2, offset: 0xff00, length: 6 });
+    const stateProbe = await invoke("emulator_read_memory", { region: 2, offset: 0, length: 8 });
+    if (!memory?.ok || !memory.value?.ok || (memory.value.data ?? []).length < 6) {
+      fail(`oracle de WRAM indisponível após ${label}: ${JSON.stringify(memory)}`);
+    }
+    const bytes = Buffer.from(memory.value.data);
+    const readWordNative = (offset) => (bytes[offset] ?? 0) | ((bytes[offset + 1] ?? 0) << 8);
+    return {
+      // Genesis Plus GX exposes 68000 WRAM as native 16-bit words in host
+      // order; decode each word explicitly, preserving the independent RAM
+      // oracle instead of comparing an opaque byte diff.
+      value: (((readWordNative(0) << 16) >>> 0) | readWordNative(2)) >>> 0,
+      flags: readWordNative(4),
+      region: 2,
+      valueOffset: 0xff00,
+      flagsOffset: 0xff04,
+      rawHex: bytes.toString("hex"),
+      stateProbe: stateProbe?.value?.data ?? null,
+    };
+  };
+  const applyAddQWordOracle = (value, immediate) => {
+    const before = value & 0xffff;
+    const result = (before + immediate) & 0xffff;
+    const flags =
+      (result & 0x8000 ? 1 : 0) |
+      (result === 0 ? 2 : 0) |
+      (before < 0x8000 && result >= 0x8000 ? 4 : 0) |
+      (before + immediate > 0xffff ? 8 | 16 : 0);
+    return { value: (((value & 0xffff0000) >>> 0) | result) >>> 0, flags };
+  };
+  const observeRom = async (pathToRun, label, expectedOracle) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [pathToRun, { startPaused: true }]);
+    if (loaded !== true) fail(`Emulador não confirmou carga de ${label}.`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.activeViewportTab === "game" && state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `${label} não ficou pausada antes da execução controlada`,
+      100
+    );
+    const preWarmup = await invoke("emulator_observe");
+    if (!preWarmup?.ok || !preWarmup.value?.ok) fail(`observação inicial de ${label} falhou: ${JSON.stringify(preWarmup)}`);
+    const epoch = await invoke("emulator_get_core_epoch");
+    if (!epoch?.ok || !Number.isInteger(epoch.value)) fail(`época do core indisponível para ${label}: ${JSON.stringify(epoch)}`);
+    const inputAck = await invoke("emulator_send_input", { joypad: neutralInput, sessionEpoch: epoch.value });
+    if (!inputAck?.ok || !inputAck.value?.ok) fail(`input neutro não confirmado para ${label}: ${JSON.stringify(inputAck)}`);
+    const startupFrames = 120;
+    const warmed = await invoke("emulator_run_frames", { frames: startupFrames });
+    const before = await invoke("emulator_observe");
+    const beforeOracle = await readOracle(`${label} após warmup`);
+    const warmupDelta = before?.value?.frames_run - preWarmup.value.frames_run;
+    if (
+      !warmed?.ok ||
+      !warmed.value?.ok ||
+      !before?.ok ||
+      !before.value?.ok ||
+      warmupDelta !== startupFrames ||
+      (expectedOracle.before && beforeOracle.value !== expectedOracle.before.value) ||
+      (expectedOracle.before && beforeOracle.flags !== expectedOracle.before.flags) ||
+      (beforeOracle.value >>> 16) !== 0x1234 ||
+      beforeOracle.flags !== 0
+    ) {
+      fail(`warmup/oracle inicial de ${label} não foi determinístico: ${JSON.stringify({ warmupDelta, startupFrames, before: { frames_run: before?.value?.frames_run, rom_sha256: before?.value?.rom_sha256, framebuffer_sha256: before?.value?.framebuffer_sha256 }, beforeOracle })}`);
+    }
+    const ran = await invoke("emulator_run_frames", { frames: controlledFrames });
+    if (!ran?.ok || !ran.value?.ok) fail(`Execução da ${label} falhou: ${JSON.stringify(ran)}`);
+    const observed = await invoke("emulator_observe");
+    const frameDelta = observed?.value?.frames_run - before.value.frames_run;
+    const oracle = await readOracle(label);
+    const expectedAfter = applyAddQWordOracle(beforeOracle.value, expectedOracle.immediate);
+    if (
+      !observed?.ok ||
+      !observed.value?.ok ||
+      frameDelta !== controlledFrames ||
+      (observed.value.framebuffer_rgba ?? []).length === 0 ||
+      oracle.value !== expectedAfter.value ||
+      oracle.flags !== expectedAfter.flags
+    ) {
+      fail(`Observação da ${label} não comprovou core/framebuffer/oracle: ${JSON.stringify({ observed: observed?.value ? { ok: observed.ok, rom_sha256: observed.value.rom_sha256, core_label: observed.value.core_label, frames_run: observed.value.frames_run, framebuffer_sha256: observed.value.framebuffer_sha256, framebuffer_rgba_bytes: (observed.value.framebuffer_rgba ?? []).length } : observed, oracle, beforeOracle, frameDelta })}`);
+    }
+    const stateAfter = await readAutomationState(sessionId);
+    if (stateAfter?.emulPaused !== true) fail(`${label} saiu do estado pausado após lote controlado.`);
+    return {
+      rom_sha256: observed.value.rom_sha256,
+      framebuffer_sha256: observed.value.framebuffer_sha256,
+      frames_before: before.value.frames_run,
+      frames_after: observed.value.frames_run,
+      frame_delta: frameDelta,
+      frames_requested: controlledFrames,
+      startup_frames: startupFrames,
+      warmup_delta: warmupDelta,
+      input: neutralInput,
+      input_ack: inputAck.value,
+      oracle_before: beforeOracle,
+      expected_oracle_after: expectedAfter,
+      oracle,
+    };
+  };
+  const expectedOriginalOracle = { immediate: 1, before: { value: 0x12340058, flags: 0 } };
+  const expectedPatchedOracle = { immediate: 2, before: { value: 0x12340058, flags: 0 } };
+  const nodeFixtureObservation = await observeRom(nodeRomPath, "ROM node fixture/code-generation", expectedOriginalOracle);
+  const generatedGraphObservation = await observeRom(
+    builtRomPath,
+    "ROM gerada pelo grafo NodeGraph",
+    expectedOriginalOracle
+  );
+  const originalObservationA = await observeRom(routineRomPath, "ROM original A", expectedOriginalOracle);
+  const originalObservationB = await observeRom(routineRomPath, "ROM original B", expectedOriginalOracle);
+  if (
+    nodeFixtureObservation.oracle_before.value !== expectedOriginalOracle.before.value ||
+    generatedGraphObservation.oracle_before.value !== expectedOriginalOracle.before.value ||
+    generatedGraphObservation.oracle.value !== originalObservationA.oracle.value ||
+    generatedGraphObservation.oracle.flags !== originalObservationA.oracle.flags ||
+    nodeFixtureObservation.oracle.value !== originalObservationA.oracle.value ||
+    nodeFixtureObservation.oracle.flags !== originalObservationA.oracle.flags ||
+    JSON.stringify(generatedGraphObservation.input) !== JSON.stringify(originalObservationA.input) ||
+    JSON.stringify(nodeFixtureObservation.input) !== JSON.stringify(originalObservationA.input) ||
+    originalObservationA.rom_sha256 !== originalObservationB.rom_sha256 ||
+    originalObservationA.framebuffer_sha256 !== originalObservationB.framebuffer_sha256 ||
+    JSON.stringify(originalObservationA.oracle) !== JSON.stringify(originalObservationB.oracle) ||
+    originalObservationA.frame_delta !== controlledFrames ||
+    originalObservationB.frame_delta !== controlledFrames
+  ) {
+    fail(`controle comum entre ROM gerada/original não foi determinístico: ${JSON.stringify({ nodeFixtureObservation, generatedGraphObservation, originalObservationA, originalObservationB })}`);
+  }
+  report.steps.push({
+    step: "generated_graph_rom_observation",
+    status: "passed",
+    romOrigin: "generated_from_reopened_nodegraph",
+    romPath: builtRomPath,
+    romSha256: generatedGraphObservation.rom_sha256,
+    generatedMainPath,
+    generatedMainSha256: createHash("sha256").update(generatedMain).digest("hex"),
+    observation: generatedGraphObservation,
+    expected: {
+      before: expectedOriginalOracle.before,
+      after: generatedGraphObservation.expected_oracle_after,
+    },
+  });
+  const noOpObservation = await observeRom(noOpPath, "patch no-op #1", expectedOriginalOracle);
+  const patchResult = await invoke("rom_patch_recovered_logic", {
+    romPath: routineRomPath,
+    outputPath: patchedPath,
+    expectedSha256: report.fixture.routineRomSha256,
+    offset,
+    immediate: 2,
+  });
+  if (!patchResult?.ok || !patchResult.value?.output_path) {
+    fail(`patch #2 via IPC falhou: ${JSON.stringify(patchResult)}`);
+  }
+  await waitFor(async () => pathExists(patchedPath), 15000, "Cópia patchada da fixture não foi criada", 100);
+  const finalPatchBytes = await readFile(patchedPath);
+  if (
+    finalPatchBytes.length !== routineBytes.length ||
+    !finalPatchBytes.subarray(0, offset).equals(routineBytes.subarray(0, offset)) ||
+    !finalPatchBytes.subarray(offset + 4).equals(routineBytes.subarray(offset + 4)) ||
+    !finalPatchBytes.subarray(offset, offset + 4).equals(Buffer.from([0x54, 0x40, 0x4e, 0x75]))
+  ) {
+    fail(`patch #2 não alterou somente o imediato esperado em 0x${offset.toString(16)}.`);
+  }
+  const patchedObservation = await observeRom(patchedPath, "ROM patchada #2", expectedPatchedOracle);
+  for (const [label, observation] of [
+    ["patch no-op #1", noOpObservation],
+    ["ROM patchada #2", patchedObservation],
+  ]) {
+    if (
+      observation.oracle_before.value !== expectedOriginalOracle.before.value ||
+      observation.oracle_before.flags !== expectedOriginalOracle.before.flags ||
+      JSON.stringify(observation.input) !== JSON.stringify(originalObservationA.input) ||
+      observation.frame_delta !== controlledFrames
+    ) {
+      fail(`estado inicial/input comum não foi preservado em ${label}: ${JSON.stringify({ observation, originalObservationA })}`);
+    }
+  }
+  if (
+    originalObservationA.rom_sha256 === patchedObservation.rom_sha256 ||
+    originalObservationA.oracle.value === patchedObservation.oracle.value
+  ) {
+    fail(`patch controlado não produziu diferença observável/oracular: ${JSON.stringify({ originalObservationA, patchedObservation })}`);
+  }
+  report.steps.push({
+    step: "deterministic_original_node_and_patch_runs",
+    status: "passed",
+    controlledFrames,
+    inputScript: [neutralInput],
+    expectedOriginalOracle,
+    expectedPatchedOracle,
+    nodeFixtureObservation,
+    generatedGraphObservation,
+    originalObservationA,
+    originalObservationB,
+    noOpObservation,
+    patchedObservation,
+    fullHashes: {
+      original: report.fixture.routineRomSha256,
+      noOp: createHash("sha256").update(noOpBytes).digest("hex"),
+      patched: createHash("sha256").update(finalPatchBytes).digest("hex"),
+      node: report.fixture.nodeRomSha256,
+      generatedGraph: generatedGraphObservation.rom_sha256,
+    },
+  });
+  report.finishedAt = new Date().toISOString();
+  await ensureValidationDir();
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  console.log(`[logic-recovery] relatório=${reportPath}`);
+  console.log("OK: Desktop Tauri logic-recovery E2E passou com recuperação, grafo, patch e efeito observado.");
+}
+
+// Cadeia REX LZ4W pela interface: prévia, no-op, edição via transação,
+// patch re-aplicado à base com hash exato e efeito observado no core.
+// Comando genérico do core via IPC (época, run_frames, read_memory...).
+async function invokeCoreObserveCommand(sessionId, command, args = {}) {
+  return executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done(null); return; }
+      invoke(arguments[0], arguments[1] ?? {}).then((value) => done(value)).catch(() => done(null));
+    `,
+    [command, args]
+  );
+}
+
+async function invokeCoreObserveEpoch(sessionId) {
+  const result = await invokeCoreObserveCommand(sessionId, "emulator_get_core_epoch", {});
+  const value = result?.value ?? result;
+  return Number.isInteger(value) ? value : null;
+}
+
+// Observa o framebuffer direto do core via IPC (capacidade separada do
+// canvas do app; usada pelas timelines determinísticas REX).
+async function invokeCoreObserve(sessionId) {
+  return executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done(null); return; }
+      invoke('emulator_observe', {}).then((value) => done(value)).catch(() => done(null));
+    `,
+    []
+  );
+}
+
+async function runRexLz4wEffectScenario(sessionId) {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const expectedSha = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+  const targetOffsetHex = "c8cc8";
+  const romPath = process.env.RDS_REX_RESOURCE_ROM ?? process.env.RDS_INSPECTION_ROM ?? "";
+  if (!romPath || !(await pathExists(romPath))) {
+    fail("RDS_REX_RESOURCE_ROM deve apontar para a ROM BYOR congelada existente.");
+  }
+  const romBytes = await readFile(romPath);
+  const romSha = createHash("sha256").update(romBytes).digest("hex");
+  if (romSha !== expectedSha) fail(`ROM inesperada: ${romSha}`);
+
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  await waitFor(
+    async () => executeScript(
+      sessionId,
+      `return Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`
+    ),
+    30000,
+    `aba de recursos não apareceu; DOM: ${(await executeScript(
+      sessionId,
+      `return Array.from(document.querySelectorAll('[data-testid]')).map((e) => e.getAttribute('data-testid')).filter((t) => (t || '').startsWith('reverse-') || (t || '').startsWith('rex-')).slice(0, 30).join(',');`
+    )) || "sem testids reverse/rex"}`,
+    250
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+  const panel = '[data-testid="rex-resource-panel"]';
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`),
+    15000,
+    "painel de recursos comprimidos não abriu.",
+    250
+  );
+  await executeScript(sessionId, `
+    const input = document.querySelector('${panel} input[type="text"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, ${JSON.stringify(romPath)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;`);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-select"] option[value="${targetOffsetHex}"]'));`),
+    30000,
+    "recursos verificados não apareceram (verificação estrutural falhou).",
+    250
+  );
+  await executeScript(sessionId, `
+    const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+    setter.call(select, '${targetOffsetHex}');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;`);
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-canvas"]'));`),
+    30000,
+    "prévia chunky não apareceu.",
+    250
+  );
+  const previewPixelsSha = await executeScript(
+    sessionId,
+    `return document.querySelector('${panel} [data-testid="rex-resource-pixels-sha"]').textContent;`
+  );
+  if (typeof previewPixelsSha !== "string" || previewPixelsSha.length < 8) fail("prévia sem hash de pixels.");
+
+  // NO-OP: aplicar com zero edições pela mesma transação.
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  await waitFor(
+    async () => ((await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-result"]')?.textContent ?? ''`)) || "").includes("noop"),
+    30000,
+    "transação não reportou no-op com zero edições.",
+    250
+  );
+
+  // EDIÇÃO determinística: índice 9 no pixel (7,7) do ÚLTIMO tile (67) —
+  // altera só o último byte do dado (espaço comprovado pela enumeração).
+  const setNumberInput = async (testId, value) => {
+    await executeScript(sessionId, `
+      const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, '${value}');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;`);
+  };
+  await setNumberInput("rex-resource-paint-index", 15);
+  await setNumberInput("rex-resource-edit-tile", 0);
+  await setNumberInput("rex-resource-edit-row", 7);
+  await setNumberInput("rex-resource-edit-col", 4);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await waitFor(
+    async () => ((await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "").includes("1 edição(ões) pendente(s)"),
+    15000,
+    `clique na prévia não registrou edição pendente; painel: ${((await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "").slice(-800)}`,
+    250
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const resultText = await waitFor(
+    async () => {
+      const text = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-result"]')?.textContent ?? ''`)) || "";
+      if (text.includes("applied")) return text;
+      const errorText = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-error"]')?.textContent ?? ''`)) || "";
+      if (errorText) fail(`transação recusou a edição: ${errorText}`);
+      return false;
+    },
+    30000,
+    "transação não aplicou a edição.",
+    250
+  );
+  const modifiedMatch = resultText.match(/cópia: (\S+)/);
+  const patchMatch = resultText.match(/patch: (\S+)/);
+  if (!modifiedMatch || !patchMatch) fail(`proveniência ausente no resultado: ${resultText.slice(0, 200)}`);
+  const modifiedPath = modifiedMatch[1];
+  const patchPath = patchMatch[1];
+  const modifiedSha = createHash("sha256").update(await readFile(modifiedPath)).digest("hex");
+  const patchSha = createHash("sha256").update(await readFile(patchPath)).digest("hex");
+  const preservedMatch = resultText.match(/preservados (\d+)/);
+  if (!preservedMatch || Number(preservedMatch[1]) < 1) fail("contagem de recursos preservados ausente.");
+
+  // Patch re-aplicado à cópia da base: hash exato da cópia modificada.
+  const baseCopy = path.join(validationDir, "rex-lz4w-base-copy.bin");
+  const patchApplied = path.join(validationDir, "rex-lz4w-patch-applied.bin");
+  await writeFile(baseCopy, romBytes);
+  const applyResult = await executeScript(sessionId, `
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    return await invoke('patch_apply_bps', { romPath: ${JSON.stringify(baseCopy)}, patchPath: ${JSON.stringify(patchPath)}, outputPath: ${JSON.stringify(patchApplied)} });`);
+  if (!applyResult || applyResult.ok !== true) fail(`patch_apply_bps falhou: ${JSON.stringify(applyResult)}`);
+  const appliedSha = createHash("sha256").update(await readFile(patchApplied)).digest("hex");
+  if (appliedSha !== modifiedSha) fail(`patch re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
+
+  // SALVAR/REABRIR: a cópia modificada reabre no MESMO pipeline da UI —
+  // identidade própria e prévia com pixels DIFERENTES do original (a edição
+  // persistiu no artefato e o painel re-deriva tudo de disco).
+  await executeScript(sessionId, `
+    const input = document.querySelector('${panel} input[type="text"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, ${JSON.stringify(modifiedPath)});
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;`);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  const reopenedSha = await waitFor(
+    async () => {
+      const text = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-rom-sha"]')?.textContent ?? ''`)) || "";
+      return text.includes(modifiedSha.slice(0, 16)) ? modifiedSha : false;
+    },
+    30000,
+    "ROM modificada não reabriu com a própria identidade no painel.",
+    250
+  );
+  await executeScript(sessionId, `
+    const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+    setter.call(select, '${targetOffsetHex}');
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;`);
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-canvas"]'));`),
+    30000,
+    "prévia da ROM modificada não apareceu.",
+    250
+  );
+  // Estabiliza: a prévia da ROM modificada pode demorar (decode do stream).
+  await pause(2000);
+  const modifiedPreviewSha = await executeScript(
+    sessionId,
+    `return document.querySelector('${panel} [data-testid="rex-resource-pixels-sha"]').textContent;`
+  );
+  if (modifiedPreviewSha === previewPixelsSha) {
+    const panelShaNow = (await executeScript(sessionId, `return document.querySelector('${panel} [data-testid="rex-resource-rom-sha"]')?.textContent ?? ''`)) || "";
+    const panelText = (await executeScript(sessionId, `return document.querySelector('${panel}')?.textContent ?? ''`)) || "";
+    fail(`prévia da ROM modificada é idêntica à original: a edição não persistiu no artefato (original=${previewPixelsSha}, modificada=${modifiedPreviewSha}, modifiedPath=${modifiedPath}, painel_sha_agora=${panelShaNow}, painel=${panelText.slice(-600)})`);
+  }
+
+  // ORIGINAL vs MODIFICADO no core, mesma linha de input; efeito específico.
+  // Timeline determinística: load pausado -> inputs e lotes de frames via
+  // IPC do core -> framebuffer lido por `emulator_observe` (independe do
+  // loop vivo do app, que não redesenha o canvas com o core pausado).
+  const captureTimeline = async (timelineRomPath, label) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [timelineRomPath, { startPaused: true }]);
+    if (loaded !== true) fail(`Emulador não confirmou carga da ROM (${label}).`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `${label}: ROM não ficou pausada pronta.`,
+      100
+    );
+    await closeVisibleConsoleDrawer(sessionId, label);
+    // Timeline PURAMENTE pausada: nenhum resume aqui — o loop vivo avança o
+    // jogo por tempo real e destruiria o alinhamento de frames entre runs.
+    // A apresentação pelo canvas é verificada em passo separado (após as
+    // timelines), com o mesmo frame congelado em ambos os lados.
+    const invokeCore = async (command, args = {}) => executeAsyncScript(
+      sessionId,
+      `
+        const done = arguments[arguments.length - 1];
+        const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+        if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponivel" }); return; }
+        invoke(arguments[0], arguments[1] ?? {}).then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error) }));
+      `,
+      [command, args]
+    );
+    const epoch = await invokeCore("emulator_get_core_epoch");
+    if (!epoch?.ok || !Number.isInteger(epoch.value)) fail(`Época do core indisponível (${label}).`);
+    const neutralInput = {
+      b: false, y: false, select: false, start: false,
+      up: false, down: false, left: false, right: false,
+      a: false, x: false, l: false, r: false,
+    };
+    const sendInput = async (joypad) => {
+      const ack = await invokeCore("emulator_send_input", { joypad, sessionEpoch: epoch.value });
+      if (!ack?.ok || !ack.value?.ok) fail(`Input não confirmado (${label}): ${JSON.stringify(ack)}`);
+    };
+    const runFrames = async (frames) => {
+      const run = await invokeCore("emulator_run_frames", { frames });
+      if (!run?.ok) fail(`emulator_run_frames falhou (${label}): ${JSON.stringify(run)}`);
+    };
+    const snapshot = async (dumpName) => {
+      const observation = await invokeCore("emulator_observe", {});
+      if (!observation?.ok || !observation.value?.framebuffer_rgba) {
+        fail(`framebuffer do core indisponível (${label}): ${JSON.stringify(observation?.error ?? observation)}`);
+      }
+      if (dumpName) {
+        const rgba = Buffer.from(observation.value.framebuffer_rgba);
+        const width = observation.value.framebuffer_width;
+        const height = observation.value.framebuffer_height;
+        const ppm = Buffer.alloc(width * height * 3);
+        for (let p = 0; p < width * height; p++) {
+          ppm[p * 3] = rgba[p * 4];
+          ppm[p * 3 + 1] = rgba[p * 4 + 1];
+          ppm[p * 3 + 2] = rgba[p * 4 + 2];
+        }
+        const ppmPath = path.join(validationDir, `rex-frame-${label}-${dumpName}.ppm`);
+        await writeFile(ppmPath, Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`), ppm]));
+        await new Promise((resolve) => execFile("convert", [ppmPath, ppmPath.replace(".ppm", ".png")], () => resolve()));
+      }
+      return Buffer.from(observation.value.framebuffer_rgba);
+    };
+    const samples = [];
+    await runFrames(180);
+    samples.push(await snapshot("boot"));
+    await runFrames(420);
+    samples.push(await snapshot("pos-start"));
+    await sendInput({ ...neutralInput, start: true });
+    await runFrames(3);
+    await sendInput(neutralInput);
+    await runFrames(240);
+    samples.push(await snapshot());
+    // Aproxima até contato e ataca repetidamente (faíscas de golpe são
+    // candidatas ao recurso de 9 tiles).
+    await sendInput({ ...neutralInput, right: true });
+    await runFrames(300);
+    samples.push(await snapshot());
+    for (let round = 0; round < 3; round++) {
+      await sendInput({ ...neutralInput, right: true, a: true });
+      for (let step = 0; step < 4; step++) {
+        await runFrames(15);
+        samples.push(await snapshot(round === 0 && step === 2 ? "ataque-a" : undefined));
+      }
+      await sendInput({ ...neutralInput, right: true, b: true });
+      for (let step = 0; step < 4; step++) {
+        await runFrames(15);
+        samples.push(await snapshot());
+      }
+    }
+    await sendInput(neutralInput);
+    await runFrames(60);
+    samples.push(await snapshot());
+    return samples;
+  };
+  // PROVA CAUSAL: stream -> descompactador 68000 -> WRAM -> (VRAM/CRAM).
+  // Com ROM, core, estado inicial e inputs idênticos (run_frames), o diff
+  // de WRAM/VRAM entre original e modificado é o bloco descompactado e o
+  // que dele deriva — sem depender de interpretação visual.
+  const readMemoryRegions = async (label) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [label.romPath, { startPaused: true }]);
+    if (loaded !== true) fail(`causal: carga falhou (${label.tag}).`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      15000,
+      `causal: ROM não pronta (${label.tag}).`,
+      100
+    );
+    await closeVisibleConsoleDrawer(sessionId, `causal ${label.tag}`);
+    const epoch = await invokeCoreObserveEpoch(sessionId);
+    if (!epoch) fail(`causal: época indisponível (${label.tag}).`);
+    const runFrames = async (frames) => {
+      const run = await invokeCoreObserveCommand(sessionId, "emulator_run_frames", { frames });
+      if (!run?.ok) fail(`causal: run_frames falhou (${label.tag}): ${JSON.stringify(run)?.slice(0, 200)}`);
+    };
+    await runFrames(label.frames);
+    const readRegion = async (region, size) => {
+      const result = await invokeCoreObserveCommand(sessionId, "emulator_read_memory", { region, offset: 0, length: size });
+      // emulator_read_memory devolve EmulatorMemoryResult direto ({ok, data, total_size}).
+      if (!result?.ok || !Array.isArray(result.data)) {
+        fail(`causal: leitura da região ${region} falhou (${label.tag}): ${JSON.stringify(result)?.slice(0, 200)}`);
+      }
+      const total = Number(result.total_size ?? -1);
+      if (total < 0) fail(`causal: região ${region} sem total_size (${label.tag}).`);
+      // total_size == 0 => o core não expõe a região; data vazia NÃO é "região
+      // igual entre runs", é ausência de observação.
+      return { totalSize: total, available: total > 0 && result.data.length > 0, bytes: Buffer.from(result.data) };
+    };
+    const wram = await readRegion(2, 0x10000);
+    const vram = await readRegion(3, 0x10000);
+    if (!wram.available) fail(`causal: core não expõe WRAM (região 2, total_size=0) (${label.tag}).`);
+    return { wram, vram };
+  };
+  const causal = {
+    original: await readMemoryRegions({ romPath: romPath, tag: "original", frames: 900 }),
+    modified: await readMemoryRegions({ romPath: modifiedPath, tag: "modificado", frames: 900 }),
+  };
+  const regionDiff = (a, b) => {
+    const regions = [];
+    let start = -1;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) {
+        if (start < 0) start = i;
+      } else if (start >= 0) {
+        if (i - start >= 4) regions.push([start, i]);
+        start = -1;
+      }
+    }
+    if (start >= 0) regions.push([start, a.length]);
+    return regions;
+  };
+  const wramRegions = regionDiff(causal.original.wram.bytes, causal.modified.wram.bytes);
+  const vramRegions = causal.original.vram.available
+    ? regionDiff(causal.original.vram.bytes, causal.modified.vram.bytes)
+    : null;
+  console.log(`[rex-causal] WRAM dif em ${wramRegions.length} região(ões): ${JSON.stringify(wramRegions.slice(0, 8).map(([a, b]) => [a.toString(16), b.toString(16), b - a]))}`);
+  console.log(vramRegions === null
+    ? `[rex-causal] VRAM NÃO OBSERVÁVEL: o core não expõe a região VIDEO_RAM (total_size=0); nenhuma afirmação é feita sobre VRAM`
+    : `[rex-causal] VRAM dif em ${vramRegions.length} região(ões): ${JSON.stringify(vramRegions.slice(0, 8).map(([a, b]) => [a.toString(16), b.toString(16), b - a]))}`);
+  await writeFile(path.join(validationDir, "rex-causal-wram-original.bin"), causal.original.wram.bytes);
+  await writeFile(path.join(validationDir, "rex-causal-wram-modificado.bin"), causal.modified.wram.bytes);
+  await writeFile(path.join(validationDir, "rex-causal-vram-original.bin"), causal.original.vram.bytes);
+  await writeFile(path.join(validationDir, "rex-causal-vram-modificado.bin"), causal.modified.vram.bytes);
+  // Controle de determinismo: ORIGINAL vs ORIGINAL deve ser idêntico.
+  const causalAgain = await readMemoryRegions({ romPath: romPath, tag: "original-2", frames: 900 });
+  const wramSelf = regionDiff(causal.original.wram.bytes, causalAgain.wram.bytes).length;
+  const vramSelf = causal.original.vram.available
+    ? regionDiff(causal.original.vram.bytes, causalAgain.vram.bytes).length
+    : null;
+  console.log(`[rex-causal] controle original/original: WRAM dif=${wramSelf}, VRAM dif=${vramSelf ?? "não observável"}`);
+  if (wramSelf > 0 || (vramSelf ?? 0) > 0) fail(`determinismo quebrado no controle original/original (WRAM ${wramSelf}, VRAM ${vramSelf})`);
+  let semanticBlocked = wramRegions.length === 0 && (vramRegions === null || vramRegions.length === 0);
+  if (semanticBlocked) {
+    console.log(`[rex-causal] RECURSO NÃO CARREGADO na janela de 900 frames: nenhuma diferença em ${vramRegions === null ? "WRAM (VRAM não observável no core)" : "WRAM/VRAM"} — consumidor não provado; edição semântica permanece BLOQUEADA (item 6)`);
+  }
+
+  // CAPACIDADE SEPARADA — apresentação normal do app (passo próprio, após
+  // as medições determinísticas; o loop vivo avança o jogo em tempo real,
+  // então resume -> pausa -> compara canvas vs core no MESMO frame).
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
+  await pause(600);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-pause");
+  await pause(200);
+  {
+    const canvasFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    const observation = await invokeCoreObserve(sessionId);
+    if (!canvasFrame?.rgba || !observation?.framebuffer_rgba) {
+      fail(`apresentação indisponível: canvas=${Boolean(canvasFrame?.rgba)} core=${Boolean(observation?.framebuffer_rgba)}`);
+    }
+    const canvasBytes = Buffer.from(canvasFrame.rgba);
+    const coreBytes = Buffer.from(observation.framebuffer_rgba);
+    const canvasW = Number(canvasFrame.width);
+    const canvasH = Number(canvasFrame.height);
+    const coreW = Number(observation.framebuffer_width);
+    const coreH = Number(observation.framebuffer_height);
+    const dims = { canvas: `${canvasW}x${canvasH}`, core: `${coreW}x${coreH}` };
+    let identical = canvasBytes.equals(coreBytes);
+    if (!identical && canvasW >= coreW && canvasH >= coreH) {
+      const coreRow0 = coreBytes.subarray(0, coreW * 4);
+      let offsetX = -1;
+      let offsetY = -1;
+      outer: for (let oy = 0; oy <= canvasH - coreH; oy++) {
+        for (let ox = 0; ox <= canvasW - coreW; ox++) {
+          const start = (oy * canvasW + ox) * 4;
+          if (canvasBytes.subarray(start, start + coreW * 4).equals(coreRow0)) {
+            offsetX = ox;
+            offsetY = oy;
+            break outer;
+          }
+        }
+      }
+      if (offsetX >= 0) {
+        let allRows = true;
+        for (let y = 0; y < coreH && allRows; y++) {
+          const cStart = ((offsetY + y) * canvasW + offsetX) * 4;
+          const kStart = y * coreW * 4;
+          if (!canvasBytes.subarray(cStart, cStart + coreW * 4).equals(coreBytes.subarray(kStart, kStart + coreW * 4))) {
+            allRows = false;
+          }
+        }
+        identical = allRows;
+        console.log(`[rex-lz4w-canvas] subimagem do core em (${offsetX},${offsetY}) do canvas: identical=${identical}`);
+      }
+    }
+    console.log(`[rex-lz4w-canvas] ${JSON.stringify({ ...dims, identical })}`);
+    if (!identical) {
+      fail(`canvas do app não exibe o framebuffer do core: dims=${JSON.stringify(dims)}`);
+    }
+  }
+
+  const originalFrames = await captureTimeline(romPath, "original");
+  const modifiedFrames = await captureTimeline(patchApplied, "modificado");
+  if (originalFrames.length !== modifiedFrames.length || originalFrames.length < 2) {
+    fail(`timelines desiguais: ${originalFrames.length} vs ${modifiedFrames.length}`);
+  }
+  // Diagnóstico: o que muda entre snapshots consecutivos do ORIGINAL?
+  for (let i = 1; i < originalFrames.length; i++) {
+    const a = originalFrames[i - 1];
+    const b = originalFrames[i];
+    let count = 0;
+    let minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
+    for (let p = 0; p < a.length; p += 4) {
+      if (a[p] !== b[p] || a[p + 1] !== b[p + 1] || a[p + 2] !== b[p + 2]) {
+        count++;
+        const pixelIndex = p / 4;
+        const x = pixelIndex % 320;
+        const y = Math.floor(pixelIndex / 320);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+    console.log(`[rex-diag] par ${i - 1}->${i}: ${count} px mudaram, caixa ${maxX >= 0 ? `${minX},${minY} ${maxX - minX + 1}x${maxY - minY + 1}` : "nenhuma"}`);
+  }
+  let diffFrame = -1;
+  let diffPixels = 0;
+  let minDiffX = 1e9, minDiffY = 1e9, maxDiffX = -1, maxDiffY = -1;
+  for (let i = 0; i < originalFrames.length; i++) {
+    const a = originalFrames[i];
+    const b = modifiedFrames[i];
+    if (a.length !== b.length) fail("framebuffers de tamanhos diferentes");
+    if (a.equals(b)) continue;
+    let count = 0;
+    let minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
+    for (let p = 0; p < a.length; p += 4) {
+      if (!a.equals(b) && (a[p] !== b[p] || a[p + 1] !== b[p + 1] || a[p + 2] !== b[p + 2])) {
+        count++;
+        const pixelIndex = p / 4;
+        const x = pixelIndex % 320;
+        const y = Math.floor(pixelIndex / 320);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
+    if (count > 0) {
+      diffFrame = i; diffPixels = count;
+      minDiffX = minX; minDiffY = minY; maxDiffX = maxX; maxDiffY = maxY;
+      // Dump do par que difere para inspeção visual.
+      const dumpFrame = async (buffer, tag) => {
+        const width = 320;
+        const height = buffer.length / 4 / width;
+        const ppm = Buffer.alloc(width * height * 3);
+        for (let p = 0; p < width * height; p++) {
+          ppm[p * 3] = buffer[p * 4];
+          ppm[p * 3 + 1] = buffer[p * 4 + 1];
+          ppm[p * 3 + 2] = buffer[p * 4 + 2];
+        }
+        const ppmPath = path.join(validationDir, `rex-diff-${tag}-${i}.ppm`);
+        await writeFile(ppmPath, Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`), ppm]));
+        await new Promise((resolve) => execFile("convert", [ppmPath, ppmPath.replace(".ppm", ".png")], () => resolve()));
+      };
+      await dumpFrame(originalFrames[i], "original");
+      await dumpFrame(modifiedFrames[i], "modificado");
+      const overlay = Buffer.from(originalFrames[i]);
+      for (let p = 0; p < overlay.length; p += 4) {
+        if (originalFrames[i][p] !== modifiedFrames[i][p] || originalFrames[i][p + 1] !== modifiedFrames[i][p + 1] || originalFrames[i][p + 2] !== modifiedFrames[i][p + 2]) {
+          overlay[p] = 255; overlay[p + 1] = 0; overlay[p + 2] = 255;
+        }
+      }
+      await dumpFrame(overlay, "overlay");
+      break;
+    }
+  }
+  // Estado SEMÂNTICO do alvo 0xc8cc8: DESCONHECIDO. A sonda causal mediu que
+  // WRAM permaneceu byte a byte idêntica entre original e modificado (900
+  // frames; controle original/original idêntico, o que valida o determinismo e
+  // a metodologia). ISSO NÃO PROVA que o recurso não seja descompactado: a
+  // região VRAM nem sequer é exposta pelo core carregado (retro_get_memory_size
+  // == 0, leitura devolve buffer vazio com ok:true — ver os .bin de 0 bytes em
+  // validationDir), então "VRAM dif=0" nessa janela era ausência de observação,
+  // não evidência. CRAM e outras regiões também ficam missing, e o
+  // desempacotamento pode ocorrer em região/janela não observados. O "efeito"
+  // visto antes era ruído do resume do loop vivo entre runs separados. Efeito
+  // esperado só pode ser definido após a prova do consumidor; até lá a edição
+  // semântica deste recurso permanece BLOQUEADA e a comparação de frames deve
+  // ser IDÊNTICA (qualquer diff = ruído de não-determinismo).
+  if (diffFrame >= 0) {
+    fail(`diferença de framebuffer entre original e modificado (${diffPixels} px @ ${diffFrame}) SEM consumidor provado: ruído de não-determinismo ou efeito não explicado — aceito semanticamente só após prova da cadeia (item 3/4).`);
+  }
+  console.log(`[rex-lz4w-effect] ${JSON.stringify({
+    romSha, targetOffset: `0x${targetOffsetHex}`, previewPixelsSha, modifiedSha, patchSha,
+    preserved: Number(preservedMatch[1]),
+    observed: "nenhuma diferença em WRAM/VRAM nas regiões amostradas (900 frames, run_frames determinístico; controle original/original idêntico)",
+    coverage: { sampled: ["WRAM (região 2)", "VRAM (região 3)"], missing: ["CRAM", "outras regiões não expostas pelo core", "chamada/destino do desempacotador (sem tracer no core)"] },
+    semanticState: "BLOQUEADO — consumidor do recurso não provado; ausência de diferença observada NÃO é prova de ausência de descompactação",
+  })}`);
+}
+
+// PASSO 5, PERNA 2 — o recurso real (BYOR) aPLib editado pela BARRA.
+//
+// Espelha `runRexLz4wEffectScenario` no recurso aPLib do stream 0x2e12a (header
+// TileSet 0x21b20, 100 tiles, plain 3 200 B, slot 938 B) da mesma ROM
+// congelada. As pernas 1 e 3 já provaram do lado do backend: a transação
+// canônica escreve 937 B nesse slot (5880a22) e o desempacotador do próprio
+// jogo executa esses bytes, mudando exatamente 2 pixels nos 119 frames em que o
+// tile aparece, nas duas colocações previstas (d43fdde). O que falta e esta
+// perna prova é o caminho do usuário: os mesmos três comandos chamados pela
+// superfície que um humano usa, com o resultado conferido em bytes no disco.
+//
+// A edição das pernas 1/3 (índice 0) É aplicável pela barra desde 2026-09-27, e
+// aqui ela é medida: o campo de índice guardava o número coercido
+// (`setPaintIndex(Number(v) || 1)`), que reescrevia 0 para 1 em silêncio antes de
+// `editRejectReason` — 0 é índice legítimo do 4bpp (o que o VDP lê como
+// transparente), não sentinela. A sonda 5b agora exige que a barra expresse o 0 e
+// reproduza a cópia que o núcleo executou nas pernas 1 e 3, e a sonda 6a mantém o
+// lado diferencial: os outros índices do mesmo pixel estouram o slot. As recusas
+// de entrada inválida (5a) e o alvo que a varredura mediu como cabível (6b)
+// completam a perna.
+async function runRexAplibByorEffectScenario(sessionId) {
+  const ROM_SHA = "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+  const STREAM = 0x2e12a;
+  const STREAM_HEX = "2e12a";
+  const SLOT = 938;
+  // Pixel das pernas 1 e 3 (5→0, 937 B no slot de 938): a única edição que cabe
+  // ali é com índice 0 — o valor que o campo de índice reescrevia para 1 e que a
+  // sonda 5b agora cobra da barra.
+  const PIXEL_DO_PIN = { tile: 53, row: 0, col: 4 };
+  const INDICE_ORIGINAL = 5;
+  // Alvo medido, não escolhido: a varredura de capacidade do encoder
+  // (`byor_aplib_varre_edicoes_de_um_pixel_que_a_barra_sabe_expressar`, na mesma
+  // ROM) deixa exatamente duas edições de um pixel com índice 1..15 caberem no
+  // tile observado 53, ambas a 938 B — o teto do slot. A paleta pinada (0x2cbc8)
+  // distingue as duas cores: 5 = 0x0468, 4 = 0x0446.
+  const ALVO_DA_BARRA = { tile: 53, row: 7, col: 5, indice: 4 };
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // O cenário inteiro fala por asserts; sem marcadores, um ERRO no fim da log não
+  // diria em qual sonda a barra parou — e 5a, 5b e 6a sondam a mesma superfície
+  // em ordens diferentes.
+  const passo = (rotulo) => console.log(`[rex-aplib-byor-effect] passo ${rotulo}`);
+
+  const romPath = process.env.RDS_REX_RESOURCE_ROM ?? process.env.RDS_INSPECTION_ROM ?? "";
+  if (!romPath || !(await pathExists(romPath))) {
+    fail(
+      "RDS_REX_RESOURCE_ROM deve apontar para a ROM BYOR congelada de sha256 558bea6c…: o recurso editado nesta perna é o aPLib do stream 0x2e12a dela, que o fixture autoral não contém. BYOR não é dependência provisionável, então este cenário só roda com a ROM local explícita."
+    );
+  }
+  const romBytes = await readFile(romPath);
+  const romSha = createHash("sha256").update(romBytes).digest("hex");
+  if (romSha !== ROM_SHA) fail(`ROM inesperada: ${romSha}`);
+
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  const panel = '[data-testid="rex-resource-panel"]';
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'))
+      || Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`),
+    30000,
+    "a barra não montou nenhuma superfície de recursos.",
+    250
+  );
+  if (!(await executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`))) {
+    await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+  }
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`),
+    15000,
+    "o painel de recursos comprimidos não abriu.",
+    250
+  );
+
+  const textOf = async (testId) =>
+    ((await executeScript(
+      sessionId,
+      `return document.querySelector('${panel} [data-testid="${testId}"]')?.textContent ?? ''`
+    )) || "");
+  const setPanelInput = async (testId, value) => {
+    // Um campo ausente não é detalhe: é a superfície que mudou, e o erro do
+    // driver sozinho não diria quais testids a barra tem montados agora.
+    const r = await executeScript(sessionId, `
+      const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      if (!input) {
+        return 'AUSENTE::' + Array.from(document.querySelectorAll('[data-testid]'))
+          .map((e) => e.getAttribute('data-testid')).join(',');
+      }
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(String(value))});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;`);
+    if (typeof r === "string" && r.startsWith("AUSENTE::")) {
+      fail(
+        `campo ${testId} não está montado (valor ${JSON.stringify(String(value))}); `
+        + `testids presentes na página: ${r.slice("AUSENTE::".length)}`
+      );
+    }
+    return r;
+  };
+  const selectResource = async (offsetHex) => {
+    await executeScript(sessionId, `
+      const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, '${offsetHex}');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;`);
+    // Esperar o `<img>` da prévia NÃO fecha a janela: React desmonta o bloco
+    // inteiro (prévia + campo de índice) ao iniciar a re-decodagem, então a
+    // sondagem pode ver ainda o canvas do estado anterior e passar cedo. Foi o
+    // que derrubou a corrida de 2026-09-27 às 10:34Z (07:34 local) com "campo
+    // paint-index ausente". A condição assentada é a que o usuário vê: o campo
+    // montado e botão aplicar habilitado (`disabled={busy || selected == null}`),
+    // ou seja `busy === false` com a prévia presente.
+    await waitFor(
+      async () => executeScript(sessionId, `
+        const inp = document.querySelector('${panel} [data-testid="rex-resource-paint-index"]');
+        const btn = document.querySelector('${panel} [data-testid="rex-resource-apply"]');
+        return Boolean(inp) && Boolean(btn) && btn.disabled === false;`),
+      30000,
+      `prévia chunky do recurso ${offsetHex} não assentou (campo de índice ausente ou botão aplicar travado).`,
+      250
+    );
+    await pause(1500);
+    return textOf("rex-resource-pixels-sha");
+  };
+  const optionLabels = () => executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  // Dump do estado da fila: as sondas abaixo medem exatamente estes campos, então
+  // um timeout sem eles não diria se a culpa é do painel ou da cena.
+  const dumpFila = () => executeScript(sessionId, `
+    const q = (id) => document.querySelector('${panel} [data-testid="' + id + '"]');
+    return JSON.stringify({
+      notice: q('rex-resource-notice')?.textContent ?? null,
+      error: q('rex-resource-error')?.textContent ?? null,
+      resultado: q('rex-resource-result')?.textContent ?? null,
+      fila: q('rex-resource-edit-count')?.textContent ?? null,
+      indice: q('rex-resource-paint-index')?.value ?? null,
+      tile: q('rex-resource-edit-tile')?.value ?? null,
+      linha: q('rex-resource-edit-row')?.value ?? null,
+      coluna: q('rex-resource-edit-col')?.value ?? null,
+    });`);
+
+  // ---- 1/2/3: abrir, verificar e selecionar o recurso aPLib real.
+  passo("1-3: abrir ROM, verificar, selecionar 0x2e12a");
+  await setPanelInput("rex-resource-rom-input", romPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-select"] option[value="${STREAM_HEX}"]'));`),
+    60000,
+    "o recurso aPLib 0x2e12a não apareceu na lista verificada pela barra.",
+    250
+  );
+  const labels = await optionLabels();
+  const alvo = labels.filter((l) => l.startsWith(`${STREAM_HEX}|`));
+  if (alvo.length !== 1) fail(`o stream 0x2e12a aparece ${alvo.length}x na lista da barra: ${JSON.stringify(alvo)}`);
+  if (!/aplib/i.test(alvo[0])) fail(`a barra não declarou o codec do recurso: "${alvo[0]}"`);
+  if (!new RegExp(`100 tiles \\(stream ${SLOT} B\\)`).test(alvo[0])) {
+    fail(`tamanho/anúncio do slot divergem do pinado no passo 4: "${alvo[0]}"`);
+  }
+  const aplibListados = labels.filter((l) => /aplib/i.test(l)).length;
+  const totalListado = labels.filter((l) => !l.startsWith("|")).length; // descarta "selecione…"
+  const previewShaOriginal = await selectResource(STREAM_HEX);
+  if (typeof previewShaOriginal !== "string" || previewShaOriginal.length < 8) fail("prévia sem hash de pixels.");
+
+  // ---- 4: no-op pela mesma transação, pela barra.
+  passo("4: no-op com fila vazia");
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  await waitFor(
+    async () => (await textOf("rex-resource-result")).includes("noop"),
+    30000,
+    "a barra não reportou no-op com zero edições.",
+    250
+  );
+
+  // ---- 5a: a guarda anti-descarte-silencioso é alcançável pela barra em cada
+  // forma de entrada que não pertence ao domínio: linha 8 num tile de 8 linhas e
+  // os índices que o 4bpp não tem (16, -1, não inteiro, campo vazio). Cada sonda
+  // tem que avisar E deixar a fila vazia — entrar na fila no lugar de outra cor é
+  // exatamente o descarte silencioso que a guarda existe para impedir.
+  const recusasDoPainel = {};
+  for (const sonda of [
+    { campo: "rex-resource-edit-row", valor: 8, motivo: "linha 8 fora do tile" },
+    { campo: "rex-resource-paint-index", valor: 16, motivo: "fora da paleta" },
+    { campo: "rex-resource-paint-index", valor: -1, motivo: "fora da paleta" },
+    { campo: "rex-resource-paint-index", valor: 1.5, motivo: "não é um inteiro" },
+    { campo: "rex-resource-paint-index", valor: "", motivo: "campo de índice vazio" },
+  ]) {
+    await selectResource(STREAM_HEX); // limpa fila, resultado, erro e aviso
+    passo(`5a: sonda de recusa ${sonda.campo.replace("rex-resource-", "")}=${JSON.stringify(sonda.valor)}`);
+    await setPanelInput("rex-resource-paint-index", sonda.campo === "rex-resource-paint-index" ? sonda.valor : 1);
+    await setPanelInput("rex-resource-edit-tile", PIXEL_DO_PIN.tile);
+    await setPanelInput("rex-resource-edit-row", sonda.campo === "rex-resource-edit-row" ? sonda.valor : PIXEL_DO_PIN.row);
+    await setPanelInput("rex-resource-edit-col", PIXEL_DO_PIN.col);
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+    const aviso = await waitFor(
+      async () => {
+        const notice = await textOf("rex-resource-notice");
+        return notice.includes(sonda.motivo) ? notice : false;
+      },
+      8000,
+      `a guarda do painel não avisou a recusa de ${sonda.campo}=${JSON.stringify(sonda.valor)} (superfície mudou?). DOM: ${await dumpFila()}`,
+      200
+    );
+    const filaVazia = (await textOf("rex-resource-edit-count")).includes("nenhuma edição");
+    if (!filaVazia) {
+      fail(`a guarda avisou mas a entrada inválida entrou na fila (descarte silencioso voltou?): ${await dumpFila()}`);
+    }
+    recusasDoPainel[`${sonda.campo}=${sonda.valor === "" ? "(vazio)" : sonda.valor}`] = {
+      aviso,
+      fila_ficou_vazia: filaVazia,
+    };
+  }
+  const avisoGuardaLinha = recusasDoPainel[`rex-resource-edit-row=${8}`].aviso;
+
+  // Desfecho de uma aplicação pela barra: `aplicado` com o hash anunciado ou
+  // `recusado` com o texto do erro estruturado do núcleo. Interpretação fora do
+  // predicado: `waitFor` engole exceções e as transformaria em timeout.
+  //
+  // O orçamento é medido, não chutado: cada desfecho registra os ms decorridos,
+  // porque um timeout estourado sem número não distingue "a barra quebrou" de
+  // "a transação é lenta neste host". Ela re-verifica os 205 candidatos da ROM,
+  // re-codifica o recurso, escreve a cópia de 917 504 B e o BPS: na primeira
+  // corrida com binário recém-compilado (2026-09-27, 10:52Z) isso estourou os
+  // 60 s antigos no §6b, com a edição já na fila e sem erro no painel.
+  const duracoesAplicacao = [];
+  const desfechoAplicacao = async (rotulo) => {
+    const inicio = Date.now();
+    let bruto;
+    try {
+      bruto = await waitFor(
+        async () => {
+          const texto = await textOf("rex-resource-result");
+          if (texto.includes("applied")) return { aplicado: texto };
+          const erro = await textOf("rex-resource-error");
+          if (erro) return { recusado: erro };
+          return false;
+        },
+        180000,
+        `a transação não devolveu desfecho para ${rotulo}. DOM: ${await dumpFila()}`,
+        250
+      );
+    } finally {
+      duracoesAplicacao.push({ rotulo, ms: Date.now() - inicio });
+    }
+    return bruto;
+  };
+  const aplicarEdicao = async (pixel, indice, rotulo) => {
+    await selectResource(STREAM_HEX);
+    await setPanelInput("rex-resource-edit-tile", pixel.tile);
+    await setPanelInput("rex-resource-edit-row", pixel.row);
+    await setPanelInput("rex-resource-edit-col", pixel.col);
+    await setPanelInput("rex-resource-paint-index", indice);
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+    await waitFor(
+      async () => (await textOf("rex-resource-edit-count")).includes("1 edição"),
+      8000,
+      `edição (${pixel.tile},${pixel.row},${pixel.col}) → ${indice} ${rotulo} não entrou na fila. DOM: ${await dumpFila()}`,
+      200
+    );
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+    const bruto = await desfechoAplicacao(rotulo);
+    if (bruto.aplicado) {
+      const sha = bruto.aplicado.match(/ROM modificada ([0-9a-f]{16})/)?.[1] ?? null;
+      if (!sha) fail(`${rotulo}: desfecho aplicado sem anunciar hash: ${bruto.aplicado.slice(0, 240)}`);
+      return { kind: "aplicado", sha, texto: bruto.aplicado.slice(0, 240), completo: bruto.aplicado };
+    }
+    return { kind: "recusado", sha: null, texto: bruto.recusado.slice(0, 200), completo: bruto.recusado };
+  };
+
+  // ---- 5b: regressão do índice 0. O índice 0 é um valor do domínio 4bpp — é o
+  // que o VDP lê como transparente no plano de tiles — e o pin das pernas 1 e 3 é
+  // exatamente (53,0,4) → 0: 937 B escritos no slot de 938 B na cópia
+  // 69389ec2…, e foi ESSA cópia que a perna 3 executou no desempacotador do próprio
+  // jogo (candidate_sha256 do run rex05-hamoopig-aplib-edit). Custo e hash foram
+  // re-medidos em 2026-09-27 com o encoder atual por
+  // `cargo test --lib byor_aplib -- --ignored --nocapture`, não copiados do
+  // registro. Antes do conserto o campo reescrevia 0 para 1 (`Number(v) || 1`) e
+  // esta sonda media o achado; agora ela mede o contrário: a barra expressa o 0 e
+  // reproduz byte a byte o artefato que o núcleo já rodou.
+  const SHA_COPIA_INDICE_0 = "69389ec2b400220c7a069e4c36326ca3c26d81e85ff0ab81bf798dc9ae4038ac";
+  passo("5b: regressão do índice 0 digitado na barra");
+  await selectResource(STREAM_HEX);
+  await setPanelInput("rex-resource-edit-tile", PIXEL_DO_PIN.tile);
+  await setPanelInput("rex-resource-edit-row", PIXEL_DO_PIN.row);
+  await setPanelInput("rex-resource-edit-col", PIXEL_DO_PIN.col);
+  await setPanelInput("rex-resource-paint-index", 0);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  const sondaIndiceZero = await waitFor(
+    async () => {
+      const notice = await textOf("rex-resource-notice");
+      if (notice) return { recusada: notice };
+      if ((await textOf("rex-resource-edit-count")).includes("1 edição")) return { enfileirada: true };
+      return false;
+    },
+    8000,
+    `a sonda do índice 0 não produziu nem recusa nem edição (superfície mudou?). DOM: ${await dumpFila()}`,
+    200
+  );
+  const indiceNoCampoAposDigitar0 = await executeScript(sessionId, `
+    return document.querySelector('${panel} [data-testid="rex-resource-paint-index"]')?.value ?? '';`);
+  // O campo guarda o texto digitado de propósito: 0 no teclado tem que ser 0 no
+  // DOM. Qualquer outro valor aqui é a coerção silenciosa voltando.
+  if (indiceNoCampoAposDigitar0 !== "0") {
+    fail(
+      `digitar índice 0 deixou "${indiceNoCampoAposDigitar0}" no campo, não "0": a coerção do `
+      + `campo de índice voltou (Number(v) || 1?) e a barra voltou a não expressar o 0`
+    );
+  }
+  if (sondaIndiceZero.recusada) {
+    fail(`a barra recusou o índice 0 antes da transação (0 voltou a estar fora do domínio): ${sondaIndiceZero.recusada}`);
+  }
+  const desfechoSonda = await aplicarEdicao(PIXEL_DO_PIN, 0, "índice 0 digitado na barra");
+  if (desfechoSonda.kind !== "aplicado") {
+    fail(
+      `a edição pinada das pernas 1 e 3, digitada na barra, não completou: ${desfechoSonda.texto}
+       ` + `Se o encoder ou a ROM mudou, o custo do índice 0 deixou de ser 937 B de 938 — re-meça a varredura.`
+    );
+  }
+  if (desfechoSonda.sha !== SHA_COPIA_INDICE_0.slice(0, 16)) {
+    fail(
+      `a barra escreveu uma cópia diferente da que o núcleo executou na perna 3: `
+      + `${desfechoSonda.sha}… != ${SHA_COPIA_INDICE_0.slice(0, 16)}… (índice 0 reescrito por outro valor?)`
+    );
+  }
+  // Conferência em bytes do artefato DA BARRA para o índice 0: o hash já amarra
+  // cada byte, mas "sem expansão" e "nada fora do slot" são guardas da transação
+  // e aqui são medidas, não alegadas.
+  const copiaIndiceZeroPath = desfechoSonda.completo.match(/cópia: (\S+)/)?.[1];
+  if (!copiaIndiceZeroPath) fail(`proveniência ausente no desfecho do índice 0: ${desfechoSonda.completo.slice(0, 240)}`);
+  const bytesIndiceZero = await readFile(copiaIndiceZeroPath);
+  if (createHash("sha256").update(bytesIndiceZero).digest("hex") !== SHA_COPIA_INDICE_0) {
+    fail(`a cópia do índice 0 não é o artefato da perna 3 em disco: ${copiaIndiceZeroPath}`);
+  }
+  if (bytesIndiceZero.length !== romBytes.length) {
+    fail(`a cópia do índice 0 expandiu a ROM: ${bytesIndiceZero.length} != ${romBytes.length}`);
+  }
+  const deslocadosIndiceZero = [];
+  for (let i = 0; i < bytesIndiceZero.length; i += 1) {
+    if (bytesIndiceZero[i] !== romBytes[i]) deslocadosIndiceZero.push(i);
+  }
+  if (deslocadosIndiceZero.length === 0) fail("a cópia do índice 0 é idêntica à ROM: nada foi escrito.");
+  const foraDoSlotIndiceZero = deslocadosIndiceZero.filter((i) => i < STREAM || i >= STREAM + SLOT);
+  if (foraDoSlotIndiceZero.length > 0) {
+    fail(
+      `a barra escreveu ${foraDoSlotIndiceZero.length} byte(s) fora do slot no índice 0: `
+      + `${JSON.stringify(foraDoSlotIndiceZero.slice(0, 8))}`
+    );
+  }
+
+  // ---- 6a: os índices 1..15 do mesmo pixel das pernas 1 e 3. A varredura de
+  // capacidade do encoder no lib prevê recusa total (939..942 B contra 938), e o
+  // índice 0 — agora o único do domínio que cabe — é tratado na sonda 5b: se um
+  // destes aplicar, foi o encoder ou a ROM que mudou, e a mensagem abaixo diz isso
+  // em vez de esconder. A recusa daqui é também o lado diferencial de 5b: 0 e 1
+  // não são o mesmo byte enviado, porque um completa e os outros estouram o slot.
+  const recusas = {};
+  for (let indice = 1; indice <= 15; indice += 1) {
+    if (indice === INDICE_ORIGINAL) continue; // é o valor original: não-editar
+    passo(`6a: índice ${indice} no pixel do pin`);
+    const desfecho = await aplicarEdicao(PIXEL_DO_PIN, indice, `índice ${indice} no pixel do pin`);
+    if (desfecho.kind === "aplicado") {
+      fail(
+        `o índice ${indice} coube no pixel do pin (${desfecho.sha}); a varredura do encoder previa recusa total em 1..15`
+      );
+    }
+    recusas[String(indice)] = desfecho.texto;
+    if (!desfecho.texto.includes("excessive_output")) {
+      fail(`recusa inesperada no índice ${indice} (esperava excessive_output): ${desfecho.texto}`);
+    }
+  }
+
+  // ---- 6b: o alvo que a varredura mediu como cabível E a barra sabe digitar, no
+  // mesmo tile observado 53. Aqui a transação tem que completar.
+  const desfechoAlvo = await aplicarEdicao(
+    ALVO_DA_BARRA,
+    ALVO_DA_BARRA.indice,
+    `alvo medido (${ALVO_DA_BARRA.tile},${ALVO_DA_BARRA.row},${ALVO_DA_BARRA.col}) → ${ALVO_DA_BARRA.indice}`
+  );
+  if (desfechoAlvo.kind !== "aplicado") {
+    fail(`o alvo medido pela varredura não completou pela barra: ${desfechoAlvo.texto}`);
+  }
+  const resultText = desfechoAlvo.completo;
+
+  // ---- 7: o que a barra escreveu, conferido em bytes no disco.
+  passo("7: bytes da cópia no disco");
+  const modifiedPath = resultText.match(/cópia: (\S+)/)?.[1];
+  const patchPath = resultText.match(/patch: (\S+)/)?.[1];
+  if (!modifiedPath || !patchPath) fail(`proveniência ausente no resultado da barra: ${resultText.slice(0, 240)}`);
+  const copyBytes = await readFile(modifiedPath);
+  const modifiedSha = createHash("sha256").update(copyBytes).digest("hex");
+  const patchSha = createHash("sha256").update(await readFile(patchPath)).digest("hex");
+  if (!resultText.includes(`ROM modificada ${modifiedSha.slice(0, 16)}`)) {
+    fail(`a barra anunciou outro hash: "${resultText.slice(0, 200)}" != ${modifiedSha}`);
+  }
+  if (!resultText.includes("codec aplib")) fail(`o desfecho não declara o codec: ${resultText.slice(0, 200)}`);
+  const preserved = Number(resultText.match(/preservados (\d+)/)?.[1] ?? -1);
+  if (preserved < Math.max(0, totalListado - 1)) {
+    fail(`preservados ${preserved} < recursos verificados ${totalListado} - 1: ${resultText.slice(0, 240)}`);
+  }
+  if (copyBytes.length !== romBytes.length) {
+    fail(`a cópia mudou de tamanho: ${copyBytes.length} != ${romBytes.length} (sem expansão de ROM é guarda da transação)`);
+  }
+  const deslocados = [];
+  for (let i = 0; i < copyBytes.length; i += 1) {
+    if (copyBytes[i] !== romBytes[i]) deslocados.push(i);
+  }
+  if (deslocados.length === 0) fail("a cópia da barra é idêntica à ROM original.");
+  const foraDoSlot = deslocados.filter((i) => i < STREAM || i >= STREAM + SLOT);
+  if (foraDoSlot.length > 0) {
+    fail(`a barra escreveu ${foraDoSlot.length} byte(s) fora do slot [0x${STREAM_HEX}, +${SLOT}): ${JSON.stringify(foraDoSlot.slice(0, 8))}`);
+  }
+
+  // ---- 8: BPS exportado pela barra re-aplicado a uma cópia íntegra.
+  const baseCopy = path.join(validationDir, "rex-aplib-byor-base-copy.bin");
+  const patchApplied = path.join(validationDir, "rex-aplib-byor-patch-applied.bin");
+  await writeFile(baseCopy, romBytes);
+  const reapplied = await executeScript(sessionId, `
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    return await invoke('patch_apply_bps', { romPath: ${JSON.stringify(baseCopy)}, patchPath: ${JSON.stringify(patchPath)}, outputPath: ${JSON.stringify(patchApplied)} });`);
+  if (!reapplied || reapplied.ok !== true) fail(`patch_apply_bps falhou: ${JSON.stringify(reapplied)}`);
+  const appliedSha = createHash("sha256").update(await readFile(patchApplied)).digest("hex");
+  if (appliedSha !== modifiedSha) fail(`BPS da barra re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
+
+  // ---- 9: reabrir a cópia no mesmo pipeline da UI — identidade e prévia novas.
+  await setPanelInput("rex-resource-rom-input", modifiedPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => (await textOf("rex-resource-rom-sha")).includes(modifiedSha.slice(0, 16)),
+    60000,
+    "a cópia da barra não reabriu com a própria identidade no painel.",
+    250
+  );
+  const labelsReaberto = await optionLabels();
+  const totalReaberto = labelsReaberto.filter((l) => !l.startsWith("|")).length;
+  if (totalReaberto !== totalListado) {
+    fail(`reabrir a cópia mudou o conjunto verificado: ${totalReaberto} != ${totalListado}`);
+  }
+  const previewShaModificada = await selectResource(STREAM_HEX);
+  if (previewShaModificada === previewShaOriginal) {
+    fail(`prévia da cópia idêntica à original: a edição não persistiu no artefato (${previewShaOriginal}).`);
+  }
+
+  const reportPath = path.join(validationDir, `rex-aplib-byor-effect-${artifactTimestamp()}-report.json`);
+  await writeFile(
+    reportPath,
+    JSON.stringify(
+      {
+        schema: "rex-aplib-byor-effect/v2",
+        etapa: "passo 5 perna 2 — recurso real aPLib editado pela interface",
+        rom: { path: romPath, sha256: romSha },
+        recurso: {
+          stream_offset: `0x${STREAM_HEX}`,
+          codec_anunciado_pela_barra: alvo[0],
+          slot_bytes: SLOT,
+          plain_bytes: 3200,
+          tiles_recurso: 100,
+          aplib_na_lista: aplibListados,
+          verificados_na_lista: totalListado,
+          verificados_reaberto: totalReaberto,
+        },
+        edicoes: {
+          pixel_das_pernas_1_e_3: { ...PIXEL_DO_PIN, indice_original: INDICE_ORIGINAL },
+          indices_digitados_no_pixel_do_pin: Object.keys(recusas).length,
+          alvo_aplicado_pela_barra: ALVO_DA_BARRA,
+        },
+        recusas_excessive_output: recusas,
+        guarda_anti_descarte_silencioso: recusasDoPainel,
+        duracoes_aplicacao: duracoesAplicacao,
+        regressao_indice_0_expressavel_pela_barra: {
+          dominio: "índice de paleta de pixel no 4bpp: 0..15, sendo 0 o que o VDP lê como transparente no plano de tiles (não é edição de cor RGB da paleta)",
+          conserto: "CompressedResourcePanel.tsx guarda o TEXTO do campo (useState(\"1\")) e valida por paintIndexRejectReason: vazio, não número, não inteiro e fora de 0..15 têm queixa própria e nada entra na fila no lugar de outra cor; o min=1 e o Number(value) || 1 que reescreviam 0 para 1 saíram",
+          edicao_sondada: { ...PIXEL_DO_PIN, indice: 0 },
+          valor_no_campo_apos_digitar_0: indiceNoCampoAposDigitar0,
+          sonda: sondaIndiceZero,
+          desfecho_da_aplicacao: desfechoSonda,
+          copia_da_barra_indice_0: {
+            path: copiaIndiceZeroPath,
+            sha256: SHA_COPIA_INDICE_0,
+            bytes_diferentes_na_copia: deslocadosIndiceZero.length,
+            bytes_fora_do_slot: foraDoSlotIndiceZero.length,
+          },
+          hash_da_copia_pinada_pernas_1_e_3: SHA_COPIA_INDICE_0,
+          re_medido_em: "2026-09-27 por `cargo test --lib byor_aplib -- --ignored --nocapture` (custo 937 B no slot de 938 B e a mesma cópia 69389ec2… com o encoder atual)",
+          prova_diferencial: "a barra aplicou o índice 0 e reproduziu em bytes a cópia que o núcleo executou na perna 3; os índices 1..15 do mesmo pixel, medidos na sonda 6a desta mesma rodada, foram todos recusados com excessive_output — 0 não é outro valor disfarçado",
+          status: "corrigido e regredido: o índice 0 é expressável pela interface de ponta a ponta",
+        },
+        saida: {
+          copia_path: modifiedPath,
+          copia_sha256: modifiedSha,
+          patch_bps_path: patchPath,
+          patch_bps_sha256: patchSha,
+          preservados: preserved,
+          bytes_diferentes_na_copia: deslocados.length,
+          bytes_fora_do_slot: foraDoSlot.length,
+          patch_reaplicado_sha256: appliedSha,
+          preview_sha_original: previewShaOriginal,
+          preview_sha_copia: previewShaModificada,
+        },
+        limites: [
+          "prova o caminho da barra neste recurso, nesta ROM e nesta edição: não prova o resto dos 4 recursos aPLib nem o jogo inteiro",
+          "orçamento de desfecho por aplicação é 180 s medidos em duracoes_aplicacao: a transação re-verifica os 205 candidatos da ROM, re-codifica o recurso, escreve a cópia de 917 504 B e o BPS. A corrida de 2026-09-27 10:52Z, com binário recém-compilado, passou por 5a, 5b e os 14 índices de 6a e estourou os 60 s antigos no §6b sem erro no painel e com a edição na fila; a barra não foi alterada por isso e a corrida seguinte mede as durações",
+          "a barra agora aplica o índice 0 das pernas 1 e 3 e produz byte a byte a cópia 69389ec2… que a perna 3 executou no core: o efeito em tela desta edição está provado por identidade de artefato, não por uma corrida nova desta cópia pela barra",
+          "o bit a bit da edição (nibble do pixel, demais pixels intactos) é conferido no lib contra o plain re-decodificado, não aqui: a barra não expõe o desempacotamento",
+          "BYOR não é dependência provisionável: este cenário não roda no CI",
+        ],
+      },
+      null,
+      1
+    )
+  );
+  console.log(`[rex-aplib-byor-effect] relatório=${reportPath}`);
+  console.log(`[rex-aplib-byor-effect] ${JSON.stringify({
+    romSha,
+    recurso: `0x${STREAM_HEX}`,
+    alvo_aplicado: `${ALVO_DA_BARRA.tile},${ALVO_DA_BARRA.row},${ALVO_DA_BARRA.col}->${ALVO_DA_BARRA.indice}`,
+    recusas: Object.keys(recusas).length,
+    bytes_diferentes: deslocados.length,
+    copia: modifiedSha,
+    patch: patchSha,
+    preservados: preserved,
+    guarda_aviso: avisoGuardaLinha.slice(0, 60),
+    recusas_painel: Object.keys(recusasDoPainel).length,
+    indice_0_no_campo: indiceNoCampoAposDigitar0,
+    indice_0_sonda: desfechoSonda.kind,
+    indice_0_copia: desfechoSonda.sha ?? desfechoSonda.texto.slice(0, 60),
+    indice_1_a_15_todos_recusados: Object.keys(recusas).length === 14,
+    aplicacoes_ms: duracoesAplicacao.map((d) => d.ms),
+  })}`);
+}
+
+// PASSO 7 — o contexto da imagem provado PELA INTERFACE, na fixture autoral.
+//
+// De onde vem cada expectativa: três arquivos autorais — `ground_truth.json`
+// (schema rex-context-aplib-fixture-ground-truth/v1: constantes de autoria +
+// semântica do rescomp 2.11 lida em tools/rescomp/src,
+// `derived_from_compiled_rom: false`), `fixture-build-report.json` (schema
+// rex-context-aplib-fixture-build/v1: offsets conferidos contra symbol.txt) e
+// `external-verify.json` (schema rex-context-aplib-external-verify/v1: decode e
+// round-trip feitos por apj.jar do SGDK 2.11, com o SHA da ferramenta pino, sem
+// passar pelo produto). Nada aqui lê o produto para descobrir o esperado; o
+// produto é comparado contra o que o autor registrou. O SHA da ROM é pino deste
+// cenário, e a auto-consistência das receitas (flip → posição de tela, decode
+// externo → plain autoral, consumo do oráculo → array linkado) é conferida antes
+// de qualquer clique, de modo que uma receita editada à mão sem recalcular as
+// posições derrube a corrida em vez de convencê-la.
+//
+// Pernas, na ordem que o briefing pinou: localizar a imagem pelo produto →
+// clicar as quatro ocorrências com flip → confirmar o mesmo pixel de fonte →
+// editar uma vez → prever e observar exatamente as quatro posições →
+// salvar/reabrir → BPS re-aplicado com hash exato. Os negativos obrigatórios
+// (ghost sem vínculo, referência inválida recusada, tile fora do conjunto,
+// identidade trocada no leitura E na escrita, resposta obsoleta, troca de ROM)
+// são medidos aqui, não delegados aos testes de unidade.
+async function runRexContextFixtureEffectScenario(sessionId) {
+  const FIXTURE_ROM_SHA256 =
+    "705b72eb848fadf11cdefd4302ef8c6751d005bd1c762918aea3b0860b20da86";
+  const BYOR_ROM_SHA256 =
+    "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9";
+  const BYOR_STREAM_HEX = "2e12a";
+  const BYOR_SLOT_BYTES = 938;
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const hex = (n) => `0x${n.toString(16)}`;
+  const passo = (rotulo) => console.log(`[rex-context-e2e] passo ${rotulo}`);
+  const steps = [];
+  const record = (step, claim, observed) => {
+    steps.push({ step, claim, observed });
+    console.log(`[rex-context-e2e] ${step}: ${claim} -> ${JSON.stringify(observed)}`);
+  };
+  const t0 = Date.now();
+  const duracoes = [];
+  const cronometrar = async (rotulo, fn) => {
+    const inicio = Date.now();
+    const saida = await fn();
+    duracoes.push({ etapa: rotulo, ms: Date.now() - inicio });
+    return saida;
+  };
+
+  // ---- 0: receitas autorais lidas do disco, com a identidade conferida.
+  const fixtureRomPath = process.env.RDS_REX_CTX_FIXTURE_ROM ?? "";
+  if (!fixtureRomPath || !(await pathExists(fixtureRomPath))) {
+    fail(
+      "RDS_REX_CTX_FIXTURE_ROM deve apontar para a ROM da fixture autoral de contexto "
+      + "(reconstruível com scripts/rex_profiles/integrator/context_fixture/build-fixture.sh); "
+      + "nenhuma ROM é criada pelo E2E."
+    );
+  }
+  const romBytes = await readFile(fixtureRomPath);
+  const romSha = sha256(romBytes);
+  if (romSha !== FIXTURE_ROM_SHA256) fail(`fixture inesperada: ${romSha} != ${FIXTURE_ROM_SHA256}`);
+
+  const outDir = path.dirname(path.resolve(fixtureRomPath));
+  const truthPath = process.env.RDS_REX_CTX_FIXTURE_TRUTH
+    ?? path.join(outDir, "..", "ground_truth.json");
+  const reportPath = process.env.RDS_REX_CTX_FIXTURE_REPORT
+    ?? path.join(outDir, "..", "..", "fixture-build-report.json");
+  const extPath = process.env.RDS_REX_CTX_FIXTURE_EXTERNAL
+    ?? path.join(outDir, "..", "..", "external-verify.json");
+  if (
+    !(await pathExists(truthPath)) || !(await pathExists(reportPath))
+    || !(await pathExists(extPath))
+  ) {
+    fail(
+      `faltam as receitas autorais (truth=${truthPath}, report=${reportPath}, externo=${extPath}): `
+      + "o esperado deste cenário nasce delas, não do produto."
+    );
+  }
+  const manifesto = JSON.parse(await readFile(truthPath, "utf8"));
+  const receita = JSON.parse(await readFile(reportPath, "utf8"));
+  const externo = JSON.parse(await readFile(extPath, "utf8"));
+  if (manifesto.schema !== "rex-context-aplib-fixture-ground-truth/v1") {
+    fail(`manifesto de outra receita: ${manifesto.schema}`);
+  }
+  if (receita.schema !== "rex-context-aplib-fixture-build/v1") {
+    fail(`relatório de build de outra receita: ${receita.schema}`);
+  }
+  if (manifesto.derived_from_compiled_rom !== false || !manifesto.authored_fixture) {
+    fail("o manifesto deixou de ser autoral/anterior à compilação; a expectativa perderia o vínculo.");
+  }
+  if (receita.rom_sha256 !== romSha) {
+    fail(`o relatório de build não descreve esta ROM: ${receita.rom_sha256} != ${romSha}`);
+  }
+  if (Number(receita.rom_len) !== romBytes.length) fail("rom_len do relatório diverge do arquivo.");
+
+  // Offsets do artefato, lidos da receita conferida contra symbol.txt.
+  const TS_HDR = Number(receita.resources.tileset_aplib.header_offset);
+  const TS_STREAM = Number(receita.resources.tileset_aplib.stream_offset);
+  const TM_HDR = Number(receita.resources.tilemap_ctx_map_aplib.header_offset);
+  const TM_STREAM = Number(receita.resources.tilemap_ctx_map_aplib.stream_offset);
+  const GHOST_HDR = Number(receita.resources.tilemap_ctx_ghost_aplib.header_offset);
+  const GHOST_STREAM = Number(receita.resources.tilemap_ctx_ghost_aplib.stream_offset);
+  const PAL_HDR = Number(receita.resources.palette.header_offset);
+  const PAL_STREAM = Number(receita.resources.palette.stream_offset);
+  const IMG_STRUCT = Number(receita.associacoes.verificada_por_ponteiro.endereco);
+  // `data_size` de symbol.txt é a extensão do ARRAY linkado; o stream aPLib pode
+  // terminar antes e o rescomp completar o array com zeros. O que a barra anuncia
+  // como slot é o consumo medido no decode, então a expectativa dele vem do
+  // oráculo externo (apj.jar, SHA pino abaixo) e não da tabela de símbolos.
+  const TS_ARRAY = Number(receita.symbol_crosscheck.tileset.data_size);
+  const TS_SLOT = Number(externo.stream_sizes?.tileset?.aplib);
+  if (
+    TS_HDR !== Number(receita.associacoes.verificada_por_ponteiro.campos.tileset)
+    || TM_HDR !== Number(receita.associacoes.verificada_por_ponteiro.campos.tilemap)
+    || PAL_HDR !== Number(receita.associacoes.verificada_por_ponteiro.campos.palette)
+  ) {
+    fail("a trinca do struct não bate com os headers dos recursos: receita inconsistente.");
+  }
+
+  // Terceira receita autoral: a decodificação feita por apj.jar (ferramenta do
+  // SGDK 2.11), portanto independente do produto. Ela amarra o esperado
+  // pré-compilação ao artefato compilado e fornece o comprimento real do stream,
+  // que é o que a barra anuncia como slot.
+  if (externo.schema !== "rex-context-aplib-external-verify/v1") {
+    fail(`validação externa de outra receita: ${externo.schema}`);
+  }
+  if (externo.rom_sha256 !== romSha) {
+    fail(`a validação externa descreve outra ROM: ${externo.rom_sha256} != ${romSha}`);
+  }
+  if (externo.independente_do_produto !== true) {
+    fail("a validação externa não se declara independente do produto.");
+  }
+  if (!/apj\.jar/.test(externo.oracle?.tool ?? "") || !/^[0-9a-f]{64}$/.test(externo.oracle?.sha256 ?? "")) {
+    fail(`oráculo externo sem ferramenta/SHA imutável: ${JSON.stringify(externo.oracle)}`);
+  }
+  if (externo.render_pixels_sha256 !== manifesto.composed_layer.pixels_sha256) {
+    fail(
+      `oráculo externo e manifesto divergem sobre a camada autoral: `
+      + `${externo.render_pixels_sha256} != ${manifesto.composed_layer.pixels_sha256}`
+    );
+  }
+  for (const [nome, chave] of [["tileset", "tileset"], ["map", "map"], ["ghost", "ghost"]]) {
+    const esperado = manifesto[nome].plain_sha256;
+    if (externo.decoded_sha256?.[nome] !== esperado) {
+      fail(`decode externo de ${nome} não bate com o plain autoral: ${externo.decoded_sha256?.[nome]} != ${esperado}`);
+    }
+  }
+  const posicoesExternas = (externo.edicao?.posicoes_mudadas ?? [])
+    .map((p) => `${p[0]},${p[1]}`);
+  const posicoesManifesto = manifesto.edicao_canonica.posicoes_de_tela_previstas
+    .map((p) => `${p.x},${p.y}`);
+  if (posicoesExternas.join(" ") !== posicoesManifesto.join(" ")) {
+    fail(
+      `as posições do oráculo externo ${JSON.stringify(posicoesExternas)} não são as do `
+      + `manifesto ${JSON.stringify(posicoesManifesto)}.`
+    );
+  }
+  // Comprimento do stream medido pelo oráculo: cabe no array linkado e o
+  // excedente é zero de preenchimento. Se algum byte do excedente fosse vivo, o
+  // slot anunciado pela barra estaria invadindo o vizinho e o cenário parava.
+  const conferidos = [
+    {
+      nome: "tileset", stream: TS_STREAM, array: TS_ARRAY, medido: TS_SLOT,
+    },
+    {
+      nome: "map", stream: TM_STREAM, array: Number(receita.symbol_crosscheck.ctx_map.data_size),
+      medido: Number(externo.stream_sizes?.map?.aplib),
+    },
+    {
+      nome: "ghost", stream: GHOST_STREAM, array: Number(receita.symbol_crosscheck.ctx_ghost.data_size),
+      medido: Number(externo.stream_sizes?.ghost?.aplib),
+    },
+  ];
+  const fendasDeSlot = [];
+  for (const r of conferidos) {
+    if (!Number.isInteger(r.medido) || r.medido <= 0) fail(`medida externa do stream ${r.nome} ausente: ${r.medido}`);
+    if (r.medido > r.array) {
+      fail(`o stream ${r.nome} medido (${r.medido} B) é maior que o array linkado (${r.array} B).`);
+    }
+    const vivo = romBytes
+      .subarray(r.stream + r.medido, r.stream + r.array)
+      .findIndex((b) => b !== 0);
+    if (vivo !== -1) {
+      fail(`o stream ${r.nome} tem byte vivo fora do consumo medido, em +${r.medido + vivo}.`);
+    }
+    if (r.array !== r.medido) fendasDeSlot.push({ recurso: r.nome, array: r.array, medido: r.medido });
+  }
+
+  const cols = Number(manifesto.map.cols);
+  const rows = Number(manifesto.map.rows);
+  const LARGURA = cols * 8;
+  const ALTURA = rows * 8;
+  const NUM_TILES = Number(manifesto.tileset.num_tile);
+  const FONTE = manifesto.edicao_canonica.pixel_fonte; // {tile,row,col,de,para}
+  const EDITE = {
+    tile: Number(FONTE.tile),
+    row: Number(FONTE.row),
+    col: Number(FONTE.col),
+    de: Number(FONTE.de),
+    para: Number(FONTE.para),
+  };
+  if (EDITE.de === EDITE.para) fail("a edição canônica não mudaria índice nenhum.");
+
+  // ---- 0b: auto-consistência do manifesto (flip → posição de tela).
+  const plain = Buffer.from(manifesto.tileset.plain_hex, "hex");
+  if (plain.length !== Number(manifesto.tileset.plain_bytes)) fail("tileset plain_hex com tamanho trocado.");
+  const indiceDoPixel = (tile, row, col) => {
+    const byte = plain[tile * 32 + row * 4 + Math.floor(col / 2)];
+    return col % 2 === 0 ? byte >> 4 : byte & 0x0f;
+  };
+  if (indiceDoPixel(EDITE.tile, EDITE.row, EDITE.col) !== EDITE.de) {
+    fail(
+      `o manifesto diz que a fonte (${EDITE.tile},${EDITE.row},${EDITE.col}) vale ${EDITE.de}, `
+      + `mas o plain autoral vale ${indiceDoPixel(EDITE.tile, EDITE.row, EDITE.col)}.`
+    );
+  }
+  const rgb8 = manifesto.palette.rgb8;
+  const celulas = manifesto.map.cells_table;
+  const ocorrenciasDoTile = celulas.filter((c) => Number(c.tile) === EDITE.tile);
+  const posicoesCalculadas = ocorrenciasDoTile.map((c) => {
+    const v = c.flip === "V" || c.flip === "B";
+    const h = c.flip === "H" || c.flip === "B";
+    const r = v ? 8 - 1 - EDITE.row : EDITE.row;
+    const k = h ? 8 - 1 - EDITE.col : EDITE.col;
+    return { x: Number(c.col) * 8 + k, y: Number(c.row) * 8 + r, flip: c.flip, indice: Number(c.row) * cols + Number(c.col) };
+  });
+  const posicoesDoManifesto = manifesto.edicao_canonica.posicoes_de_tela_previstas
+    .map((p) => `${p.x},${p.y}`);
+  const calculadas = posicoesCalculadas.map((p) => `${p.x},${p.y}`);
+  if (posicoesDoManifesto.join(" ") !== calculadas.join(" ")) {
+    fail(
+      `o manifesto está internamente inconsistente: posições previstas ${JSON.stringify(posicoesDoManifesto)} `
+      + `!= recalculadas dos flips ${JSON.stringify(calculadas)}`
+    );
+  }
+  if (Number(manifesto.edicao_canonica.ocorrencias_no_mapa_verificado) !== posicoesCalculadas.length) {
+    fail("contagem de ocorrências do manifesto não bate com a cells_table.");
+  }
+  record(
+    "0",
+    "receitas autorais lidas e auto-consistentes (symbol.txt + oráculo externo apj.jar + flips recalculados)",
+    {
+      rom_sha: romSha.slice(0, 16),
+      oraculo_sha: externo.oracle.sha256.slice(0, 16),
+      struct: hex(IMG_STRUCT),
+      tileset_stream: hex(TS_STREAM),
+      tileset_slot_oraculo: TS_SLOT,
+      tileset_array_simbolo: TS_ARRAY,
+      preenchimento_nonzero: fendasDeSlot,
+      tilemap_stream: hex(TM_STREAM),
+      ghost_stream: hex(GHOST_STREAM),
+      ocorrencias: posicoesCalculadas.length,
+      posicoes: calculadas,
+    }
+  );
+
+  const camadaEsperada = (edite) => {
+    const out = Buffer.alloc(LARGURA * ALTURA * 4);
+    for (const c of celulas) {
+      const v = c.flip === "V" || c.flip === "B";
+      const h = c.flip === "H" || c.flip === "B";
+      const banco = Number(c.bank);
+      for (let r = 0; r < 8; r += 1) {
+        for (let k = 0; k < 8; k += 1) {
+          const rs = v ? 7 - r : r;
+          const ks = h ? 7 - k : k;
+          let idx = indiceDoPixel(Number(c.tile), rs, ks);
+          if (edite && Number(c.tile) === edite.tile && rs === edite.row && ks === edite.col) {
+            idx = edite.para;
+          }
+          const o = ((Number(c.row) * 8 + r) * LARGURA + Number(c.col) * 8 + k) * 4;
+          if (idx === 0) {
+            out[o] = 0; out[o + 1] = 0; out[o + 2] = 0; out[o + 3] = 0;
+          } else {
+            const cor = rgb8[banco][idx];
+            out[o] = cor[0]; out[o + 1] = cor[1]; out[o + 2] = cor[2]; out[o + 3] = 255;
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const camadaIntacta = camadaEsperada(null);
+  const camadaEditada = camadaEsperada(EDITE);
+  // O SHA esperado do manifesto tem que bater com o que ESTAS funções recompoem:
+  // é o que prova que a recomposição do cenário é a mesma camada autoral, e não
+  // uma segunda opinião sobre ela.
+  //
+  // Canal: o oráculo externo (`verify-external.py`, que lê o PNG autoral) e o
+  // aceite do núcleo (`camada_esperada`, rex_context.rs) hashizam o packed **RGB**
+  // de 3 bytes por pixel. Aqui a comparação com o canvas da interface é RGBA
+  // pixel a pixel, então o alpha continua conferido — o sha só amarra o cores.
+  const pixelsShaDoManifesto = manifesto.composed_layer.pixels_sha256;
+  const pixelsShaEmRgb = (rgba) => {
+    const rgb = Buffer.alloc((rgba.length / 4) * 3);
+    for (let p = 0, o = 0; p < rgba.length; p += 4, o += 3) {
+      rgb[o] = rgba[p];
+      rgb[o + 1] = rgba[p + 1];
+      rgb[o + 2] = rgba[p + 2];
+    }
+    return sha256(rgb);
+  };
+  if (pixelsShaEmRgb(camadaIntacta) !== pixelsShaDoManifesto) {
+    fail(
+      `a recomposição do cenário não reproduz o esperado autoral: `
+      + `${pixelsShaEmRgb(camadaIntacta)} != ${pixelsShaDoManifesto}`
+    );
+  }
+
+  // ---- 1: abrir a barra e verificar a fixture.
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  const panel = '[data-testid="rex-resource-panel"]';
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'))
+      || Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`),
+    30000,
+    "a barra não montou nenhuma superfície de recursos.",
+    250
+  );
+  if (!(await executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`))) {
+    await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+  }
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`),
+    15000,
+    "o painel de recursos comprimidos não abriu.",
+    250
+  );
+
+  const contextoDom = () => executeScript(sessionId, `
+    const q = (id) => document.querySelector('${panel} [data-testid="' + id + '"]');
+    return JSON.stringify({
+      erro: q('rex-context-error')?.textContent ?? null,
+      aviso: q('rex-context-notice')?.textContent ?? null,
+      vazio: q('rex-context-empty')?.textContent ?? null,
+      camada: q('rex-context-layer') ? {
+        natural: [q('rex-context-layer').naturalWidth, q('rex-context-layer').naturalHeight],
+        style: [q('rex-context-layer').style.width, q('rex-context-layer').style.height, q('rex-context-layer').style.imageRendering],
+      } : null,
+      imagens: Array.from(document.querySelectorAll('${panel} [data-testid="rex-context-image-select"] option'))
+        .map((o) => o.getAttribute('value') + '|' + o.textContent.trim()),
+      semVinculo: q('rex-context-unlinked')?.innerText ?? null,
+      recusados: q('rex-context-refused-links')?.innerText ?? null,
+      painelDeRecursos: {
+        sha: q('rex-resource-rom-sha')?.textContent ?? null,
+        fila: q('rex-resource-edit-count')?.textContent ?? null,
+        resultado: q('rex-resource-result')?.textContent ?? null,
+        erro: q('rex-resource-error')?.textContent ?? null,
+        aviso: q('rex-resource-notice')?.textContent ?? null,
+      },
+    });`);
+  const dumpContexto = async () => {
+    try {
+      return await contextoDom();
+    } catch (cause) {
+      return `dump indisponível: ${String(cause).slice(0, 160)}`;
+    }
+  };
+  const normaliza = (s) => String(s).replace(/\s+/g, " ").trim();
+  const textoDe = async (testId) => normaliza(
+    (await executeScript(sessionId, `
+      const el = document.querySelector('${panel} [data-testid="${testId}"]');
+      return el ? (el.innerText || el.textContent || '') : 'AUSENTE';`)) || ""
+  );
+  const setPanelInput = async (testId, value) => {
+    const r = await executeScript(sessionId, `
+      const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      if (!input) {
+        return 'AUSENTE::' + Array.from(document.querySelectorAll('[data-testid]'))
+          .map((e) => e.getAttribute('data-testid')).join(',');
+      }
+      const proto = input.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, ${JSON.stringify(String(value))});
+      input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+      return true;`);
+    if (typeof r === "string" && r.startsWith("AUSENTE::")) {
+      fail(`campo ${testId} não está montado (valor ${JSON.stringify(String(value))}); testids: ${r.slice(9)}`);
+    }
+    return r;
+  };
+  const selecionarRecurso = async (offsetHex) => {
+    await setPanelInput("rex-resource-select", offsetHex);
+    await waitFor(
+      async () => executeScript(sessionId, `
+        const inp = document.querySelector('${panel} [data-testid="rex-resource-paint-index"]');
+        const btn = document.querySelector('${panel} [data-testid="rex-resource-apply"]');
+        return Boolean(inp) && Boolean(btn) && btn.disabled === false;`),
+      30000,
+      `prévia do recurso ${offsetHex} não assentou (campo de índice ausente ou botão travado).`,
+      250
+    );
+    await pause(800);
+    return textoDe("rex-resource-pixels-sha");
+  };
+  const verificarRom = async (caminho, shaEsperado) => {
+    await setPanelInput("rex-resource-rom-input", caminho);
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+    await waitFor(
+      async () => (await textoDe("rex-resource-rom-sha")).includes(shaEsperado.slice(0, 16)),
+      60000,
+      `a ROM ${caminho} não reabriu com a identidade ${shaEsperado.slice(0, 16)}… no painel. DOM: ${await dumpContexto()}`,
+      250
+    );
+    return textoDe("rex-resource-rom-sha");
+  };
+
+  passo("1: verificar a fixture e localizar o TileSet aPLib na lista");
+  await verificarRom(fixtureRomPath, romSha);
+  const etiquetas = await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  const alvoLista = etiquetas.filter((l) => l.startsWith(`${TS_STREAM.toString(16)}|`));
+  if (alvoLista.length !== 1) {
+    fail(`o TileSet autoral ${hex(TS_STREAM)} aparece ${alvoLista.length}x na lista verificada: ${JSON.stringify(alvoLista)}`);
+  }
+  if (!/aplib/i.test(alvoLista[0])) fail(`a barra não declarou o codec aPLib do recurso: "${alvoLista[0]}"`);
+  if (!alvoLista[0].includes(`stream ${TS_SLOT} B`)) {
+    fail(
+      `o consumo medido pelo oráculo externo (${TS_SLOT} B, array linkado ${TS_ARRAY} B) `
+      + `não é o que a barra anunciou: "${alvoLista[0]}"`
+    );
+  }
+  if (!alvoLista[0].includes(`${NUM_TILES} tiles`)) {
+    fail(`contagem de tiles diverge do manifesto (${NUM_TILES}): "${alvoLista[0]}"`);
+  }
+  const aplibListados = etiquetas.filter((l) => /aplib/i.test(l)).length;
+  const totalListado = etiquetas.filter((l) => !l.startsWith("|")).length;
+  record("1", "recurso da imagem localizado na lista verificada pela barra", {
+    etiqueta: alvoLista[0], aplib: aplibListados, total: totalListado,
+  });
+  const previewShaIntacta = await selecionarRecurso(TS_STREAM.toString(16));
+  if (!/^pixels [0-9a-f]{16}/.test(previewShaIntacta)) fail(`prévia do tileset sem sha: "${previewShaIntacta}"`);
+
+  // ---- 2: contexto carregado PELO CLIQUE NA BARRA.
+  passo("2: carregar o contexto pela interface");
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  await waitFor(
+    async () => (await textoDe("rex-context-geometry")).startsWith("camada"),
+    60000,
+    `o contexto não montou pela interface. DOM: ${await dumpContexto()}`,
+    250
+  );
+  const geometria = await textoDe("rex-context-geometry");
+  const tilesSemUso = [];
+  {
+    const usados = new Set(celulas.map((c) => Number(c.tile)));
+    for (let t = 0; t < NUM_TILES; t += 1) if (!usados.has(t)) tilesSemUso.push(hex(t));
+  }
+  const geometriaEsperada = normaliza(
+    `camada ${LARGURA}x${ALTURA} px · ${cols}x${rows} células · tiles sem uso neste mapa: ${tilesSemUso.join(", ")}`
+  );
+  if (geometria !== geometriaEsperada) {
+    fail(`geometria publicada diverge do manifesto:\n  UI:      "${geometria}"\n  esperado: "${geometriaEsperada}"`);
+  }
+  const proveniencia = await textoDe("rex-context-provenance");
+  const obrigamNaProveniencia = [
+    `vínculo verificada · paleta ${hex(PAL_STREAM)} · TileSet ${hex(TS_STREAM)} · TileMap ${hex(TM_STREAM)}`,
+    `Struct \`Image\` em ${hex(IMG_STRUCT)}`,
+    `paleta ${hex(PAL_HDR)}, tileset ${hex(TS_HDR)}, tilemap ${hex(TM_HDR)}, nesta ordem`,
+    `TileSet em ${hex(TS_HDR)} decodifica com o codec lido do header (aplib) para exatamente ${plain.length} bytes = ${NUM_TILES} tiles de 32 bytes`,
+    `TileMap em ${hex(TM_HDR)} decodifica (aplib) para exatamente ${celulas.length * 2} bytes = ${cols}x${rows} células (${LARGURA}x${ALTURA} pixels)`,
+    `Palette em ${hex(PAL_HDR)} tem ${Number(manifesto.palette.plain_bytes)} bytes literais na ROM = ${Number(manifesto.palette.num_color)} cores (${Number(manifesto.palette.banks)} banco(s))`,
+    "Não prova:",
+    "Não prova que o jogo carregue ou exiba este recurso",
+    "Nada aqui foi observado no VDP",
+    "A prévia é a camada reconstruída, não o framebuffer completo: oclusão por sprites, janela e o bit de prioridade",
+  ];
+  for (const trecho of obrigamNaProveniencia) {
+    if (!proveniencia.includes(normaliza(trecho))) {
+      fail(`a procedência exibida não diz \`${trecho}\`:\n${proveniencia}`);
+    }
+  }
+  const rotuloDeImagens = await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-context-image-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  if (rotuloDeImagens.length !== 1) {
+    fail(
+      `a fixture autoral tem uma cadeia verificada por ponteiro; a interface mostrou ${rotuloDeImagens.length}: `
+      + `${JSON.stringify(rotuloDeImagens)}`
+    );
+  }
+  if (!rotuloDeImagens[0].startsWith(`${hex(IMG_STRUCT)}|`) || !/verificada/.test(rotuloDeImagens[0])
+    || !rotuloDeImagens[0].includes(`${LARGURA}x${ALTURA} px`)
+    || !rotuloDeImagens[0].includes(`${cols}x${rows} células`)) {
+    fail(`rótulo da imagem diverge da receita: "${rotuloDeImagens[0]}"`);
+  }
+  const semVinculoTexto = await textoDe("rex-context-unlinked");
+  if (!semVinculoTexto.includes(`tilemap ${hex(GHOST_STREAM)}`)) {
+    fail(`o ghost ${hex(GHOST_STREAM)} não aparece como recurso verificado sem vínculo: "${semVinculoTexto}"`);
+  }
+  if (!semVinculoTexto.includes("nenhum ponteiro de struct `Image` alcança este header")) {
+    fail(`a lista sem vínculo não explica o porquê: "${semVinculoTexto}"`);
+  }
+  if (!semVinculoTexto.includes(`tilemap ${hex(GHOST_STREAM)} (aplib, ${Number(manifesto.ghost.plain_bytes)} B)`)) {
+    fail(
+      `a linha do ghost não publica codec e tamanho decodificados (${Number(manifesto.ghost.plain_bytes)} B): `
+      + `"${semVinculoTexto}"`
+    );
+  }
+  for (const vinculado of [PAL_STREAM, TS_STREAM, TM_STREAM]) {
+    if (semVinculoTexto.includes(hex(vinculado))) {
+      fail(`recurso vinculado apareceu em sem_vinculo: ${hex(vinculado)}`);
+    }
+  }
+  const recusadosTexto = await textoDe("rex-context-refused-links");
+  const domContexto = JSON.parse(await contextoDom());
+  if (domContexto.erro) fail(`o contexto carregou com erro: ${domContexto.erro}`);
+  if (domContexto.vazio) fail(`havendo imagem verificada, a interface mostrou o estado vazio: ${domContexto.vazio}`);
+  if (recusadosTexto !== "AUSENTE") {
+    for (const rotulo of rotuloDeImagens) {
+      if (recusadosTexto.includes(rotulo.split("|")[0])) {
+        fail(`um vínculo recusado também aparece como imagem: ${rotulo}`);
+      }
+    }
+  }
+  record("2", "contexto montado pela interface com identidade, vínculos e limites", {
+    imagem: rotuloDeImagens[0],
+    geometria,
+    recusados: recusadosTexto === "AUSENTE" ? 0 : recusadosTexto.slice(0, 120),
+    semVinculo: semVinculoTexto.slice(0, 160),
+  });
+
+  // ---- 3: a camada que a interface mostra É a camada autoral, pixel a pixel.
+  passo("3: ler os pixels da camada pelo WebView e comparar com o esperado autoral");
+  const leCamada = async () => {
+    const r = await executeScript(sessionId, `
+      const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+      if (!img) return 'SEM_CAMADA';
+      if (!img.complete || !img.naturalWidth) return 'NAO_CARREGOU';
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0);
+      const d = ctx.getImageData(0, 0, c.width, c.height).data;
+      let bin = '';
+      for (let i = 0; i < d.length; i += 1) bin += String.fromCharCode(d[i]);
+      return JSON.stringify({ w: c.width, h: c.height, b64: btoa(bin) });`);
+    if (typeof r !== "string" || r === "SEM_CAMADA" || r === "NAO_CARREGOU") {
+      fail(`não foi possível ler a camada composta (${r}); DOM: ${await dumpContexto()}`);
+    }
+    const parsed = JSON.parse(r);
+    if (parsed.w !== LARGURA || parsed.h !== ALTURA) {
+      fail(`a camada exibida tem ${parsed.w}x${parsed.h}, o manifesto diz ${LARGURA}x${ALTURA}`);
+    }
+    return Buffer.from(parsed.b64, "base64");
+  };
+  const camadaDaUI = await cronometrar("leitura da camada intacta (canvas)", leCamada);
+  if (camadaDaUI.length !== LARGURA * ALTURA * 4) fail(`bytes lidos do canvas: ${camadaDaUI.length}`);
+  // Dois níveis, cada um pegando uma classe de engano diferente: o sha RGB é o
+  // vínculo com o oráculo autoral; a comparação RGBA byte a byte é o que prova o
+  // alpha (índice 0 transparente), que o sha em RGB não enxerga.
+  const divergentesRGBA = [];
+  for (let p = 0; p < camadaIntacta.length; p += 4) {
+    if (camadaIntacta[p] !== camadaDaUI[p] || camadaIntacta[p + 1] !== camadaDaUI[p + 1]
+      || camadaIntacta[p + 2] !== camadaDaUI[p + 2] || camadaIntacta[p + 3] !== camadaDaUI[p + 3]) {
+      divergentesRGBA.push(p / 4);
+    }
+  }
+  if (divergentesRGBA.length > 0) {
+    fail(
+      `a prévia composta pela interface não é a camada autoral pixel a pixel (RGBA): `
+      + `${divergentesRGBA.length} divergente(s), primeiros ${JSON.stringify(divergentesRGBA.slice(0, 8))}`
+    );
+  }
+  const shaCamadaUI = pixelsShaEmRgb(camadaDaUI);
+  if (shaCamadaUI !== pixelsShaDoManifesto) {
+    fail(
+      `a camada lida da interface bate com a recomposição local mas não com o oráculo: `
+      + `${shaCamadaUI} != ${pixelsShaDoManifesto}`
+    );
+  }
+  record("3", "RGBA lido do <img> == camada autoral pixel a pixel, e sha RGB == oráculo", {
+    pixels_sha_rgb: shaCamadaUI.slice(0, 16), bytes: camadaDaUI.length,
+  });
+
+  // ---- 4: zoom inteiro, pixels nítidos e a escala da página não mudam a resolução.
+  passo("4: zoom 4x e verificação de nitidez");
+  await setPanelInput("rex-context-zoom", "4");
+  const estiloDaCamada = await executeScript(sessionId, `
+    const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+    return JSON.stringify({
+      style: [img.style.width, img.style.height, img.style.imageRendering],
+      rect: (function () { const r = img.getBoundingClientRect(); return [r.width, r.height]; })(),
+    });`);
+  const estilo = JSON.parse(estiloDaCamada);
+  if (estilo.style[0] !== `${LARGURA * 4}px` || estilo.style[1] !== `${ALTURA * 4}px`) {
+    fail(`zoom 4 não produziu ${LARGURA * 4}px de largura: ${JSON.stringify(estilo.style)}`);
+  }
+  if (estilo.style[2] !== "pixelated") {
+    fail(`a camada não está nitida em zoom inteiro (image-rendering=${estilo.style[2]}).`);
+  }
+  if (Math.abs(estilo.rect[0] - LARGURA * 4) > 1) {
+    fail(`layout divergiu do zoom pedido: rect ${JSON.stringify(estilo.rect)}`);
+  }
+
+  // ---- 5: os quatro cliques previstos, com o núcleo resolvendo a geometria.
+  const rotuloDeFlip = { B: "H e V", H: "H", V: "V", "": "nenhum" };
+  const cliqueNaCamada = async (x, y) => {
+    const r = await executeScript(sessionId, `
+      const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+      if (!img) return 'SEM_CAMADA';
+      img.scrollIntoView({ block: 'center', inline: 'center' });
+      const rect = img.getBoundingClientRect();
+      if (!(rect.width > 0) || !(rect.height > 0)) return 'SEM_LAYOUT';
+      const clientX = rect.left + (${x} + 0.5) * (rect.width / ${LARGURA});
+      const clientY = rect.top + (${y} + 0.5) * (rect.height / ${ALTURA});
+      img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX, clientY, view: window }));
+      return JSON.stringify({ rect: [rect.left, rect.top, rect.width, rect.height], alvo: [clientX, clientY] });`);
+    if (typeof r !== "string" || r === "SEM_CAMADA" || r === "SEM_LAYOUT") {
+      fail(`clique em (${x},${y}) não alcançou a camada: ${r}`);
+    }
+    return JSON.parse(r);
+  };
+  const hitEsperado = (oc, pos) => normaliza(
+    `célula (${oc.col}, ${oc.row}) · índice ${oc.row * cols + oc.col} · tile ${oc.tile} · `
+    + `flips ${rotuloDeFlip[oc.flip]} · banco ${oc.bank} · prioridade ${Number(oc.prio) ? "sim" : "não"} · `
+    + `local na célula (${pos.x - oc.col * 8}, ${pos.y - oc.row * 8}) · `
+    + `tile de origem ${EDITE.tile}, linha ${EDITE.row}, coluna ${EDITE.col} · índice atual ${EDITE.de}`
+  );
+  const evidenciasDeClique = [];
+  for (let i = 0; i < posicoesCalculadas.length; i += 1) {
+    const pos = posicoesCalculadas[i];
+    const oc = celulas.find((c) => Number(c.row) * cols + Number(c.col) === pos.indice);
+    passo(`5.${i + 1}: clique em (${pos.x},${pos.y}) — célula (${oc.col},${oc.row}) flip ${JSON.stringify(oc.flip)}`);
+    await cliqueNaCamada(pos.x, pos.y);
+    const hit = await waitFor(
+      async () => {
+        const t = await textoDe("rex-context-hit");
+        return t === hitEsperado(oc, pos) ? t : false;
+      },
+      20000,
+      `o clique ${i + 1} em (${pos.x},${pos.y}) não resolveu como o manifesto prevê. `
+      + `Último texto: ${await textoDe("rex-context-hit")}\nEsperado: ${hitEsperado(oc, pos)}\nDOM: ${await dumpContexto()}`,
+      200
+    );
+    const occ = await textoDe("rex-context-occurrences");
+    if (!occ.startsWith(`${posicoesCalculadas.length} ocorrências neste mapa verificado`)) {
+      fail(`a contagem não anunciou o escopo do mapa verificado: "${occ}"`);
+    }
+    if (!occ.includes(`TileMap em ${hex(TM_HDR)}`) || !occ.includes("outros mapas da ROM não entram nesta contagem")) {
+      fail(`o escopo da contagem está incompleto: "${occ}"`);
+    }
+    const impacto = await textoDe("rex-context-impact");
+    if (!impacto.includes(`muda as ${posicoesCalculadas.length} ocorrências deste mapa`)
+      || !impacto.includes("nenhuma ocorrência isolada é editável")
+      || !impacto.includes("duplicar e realocar o tile")) {
+      fail(`a previsão de impacto não diz que a ocorrência isolada não é editável: "${impacto}"`);
+    }
+    const geometriaDosDelimitadores = JSON.parse(await executeScript(sessionId, `
+      const q = (sel) => Array.from(document.querySelectorAll('${panel} [data-testid="' + sel + '"]'))
+        .map((e) => [parseInt(e.style.left, 10), parseInt(e.style.top, 10), parseInt(e.style.width, 10)].join(','));
+      return JSON.stringify({
+        ocorrencias: q('rex-context-occurrence'),
+        celula: q('rex-context-cell-highlight'),
+        tile: q('rex-context-tile-highlight'),
+      });`));
+    const passoZoom = 8 * 4;
+    const esperadoOcorrencias = posicoesCalculadas
+      .map((p) => celulas.find((c) => Number(c.row) * cols + Number(c.col) === p.indice))
+      .map((c) => `${Number(c.col) * passoZoom},${Number(c.row) * passoZoom},${passoZoom}`)
+      .sort();
+    if (geometriaDosDelimitadores.ocorrencias.slice().sort().join(" ") !== esperadoOcorrencias.join(" ")) {
+      fail(
+        `os delimitadores de ocorrência não são as ${posicoesCalculadas.length} células do manifesto: `
+        + `${JSON.stringify(geometriaDosDelimitadores.ocorrencias)} != ${JSON.stringify(esperadoOcorrencias)}`
+      );
+    }
+    if (geometriaDosDelimitadores.celula.length !== 1
+      || geometriaDosDelimitadores.celula[0]
+        !== `${Number(oc.col) * passoZoom},${Number(oc.row) * passoZoom},${passoZoom}`) {
+      fail(`a célula clicada não foi destacada: ${JSON.stringify(geometriaDosDelimitadores.celula)}`);
+    }
+    const tileX = (EDITE.tile % 16) * passoZoom;
+    const tileY = Math.floor(EDITE.tile / 16) * passoZoom;
+    if (geometriaDosDelimitadores.tile.length !== 1
+      || geometriaDosDelimitadores.tile[0] !== `${tileX},${tileY},${passoZoom}`) {
+      fail(
+        `o tile de origem não foi destacado na folha do TileSet (${EDITE.tile} → ${tileX},${tileY}): `
+        + `${JSON.stringify(geometriaDosDelimitadores.tile)}`
+      );
+    }
+    evidenciasDeClique.push({
+      posicao: [pos.x, pos.y],
+      celula: [Number(oc.col), Number(oc.row)],
+      flip: rotuloDeFlip[oc.flip],
+      hit,
+      ocorrencias: geometriaDosDelimitadores.ocorrencias.length,
+    });
+  }
+  record("5", "os quatro cliques resolvem o MESMO pixel de fonte, com flips e delimitadores conferidos", {
+    fonte: `tile ${EDITE.tile}, linha ${EDITE.row}, coluna ${EDITE.col}, índice atual ${EDITE.de}`,
+    hits: evidenciasDeClique.map((e) => `${e.posicao} ← ${e.flip}`),
+    todos_mesmo_fonte: new Set(evidenciasDeClique.map((e) => e.hit.split(" · tile de origem ")[1])).size === 1,
+  });
+
+  // ---- 6: borda, escala de página e clique fora — o núcleo resolve, a UI não decide.
+  passo("6: escala da página (zoom 0.75) e clique fora da camada");
+  await executeScript(sessionId, `document.body.style.zoom = '0.75'; return true;`);
+  const posZero = posicoesCalculadas[0];
+  const ocZero = celulas.find((c) => Number(c.row) * cols + Number(c.col) === posZero.indice);
+  await cliqueNaCamada(posZero.x, posZero.y);
+  await waitFor(
+    async () => (await textoDe("rex-context-hit")) === hitEsperado(ocZero, posZero),
+    20000,
+    `com a página em 0.75, o clique em (${posZero.x},${posZero.y}) não resolveu a mesma célula. `
+    + `UI: ${await textoDe("rex-context-hit")}`,
+    200
+  );
+  record("6a", "clique com escala de página 0.75 resolve igual", { escala: 0.75, posicao: [posZero.x, posZero.y] });
+  await executeScript(sessionId, `document.body.style.zoom = ''; return true;`);
+  await pause(150);
+
+  await cliqueNaCamada(LARGURA - 1, ALTURA - 1);
+  const ultimoHit = await textoDe("rex-context-hit");
+  await cliqueNaCamada(999, 999);
+  const avisoFora = await waitFor(
+    async () => {
+      const t = await textoDe("rex-context-notice");
+      return t.startsWith("clique fora da camada") ? t : false;
+    },
+    10000,
+    `um clique fora da camada não foi recusado em voz alta. DOM: ${await dumpContexto()}`,
+    200
+  );
+  if (!avisoFora.includes(`${LARGURA}x${ALTURA} px`) || !avisoFora.includes("seleção anterior foi mantida")) {
+    fail(`a recusa de clique fora não diz o que aconteceu: "${avisoFora}"`);
+  }
+  if ((await textoDe("rex-context-hit")) !== ultimoHit) {
+    fail("o clique inválido trocou a seleção exibida, apesar de dizer o contrário.");
+  }
+  record("6b", "clique fora da camada: recusado com motivo e seleção preservada", { aviso: avisoFora.slice(0, 90) });
+
+  // ---- 6c: dois cliques no mesmo tick — a última resposta vence, nada se mistura.
+  const ultimoGanha = posicoesCalculadas[posicoesCalculadas.length - 1];
+  const ocUltimo = celulas.find((c) => Number(c.row) * cols + Number(c.col) === ultimoGanha.indice);
+  await executeScript(sessionId, `
+    const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+    img.scrollIntoView({ block: 'center', inline: 'center' });
+    const rect = img.getBoundingClientRect();
+    const at = (x, y) => img.dispatchEvent(new MouseEvent('click', {
+      bubbles: true, cancelable: true, view: window,
+      clientX: rect.left + (x + 0.5) * (rect.width / ${LARGURA}),
+      clientY: rect.top + (y + 0.5) * (rect.height / ${ALTURA}),
+    }));
+    at(${posicoesCalculadas[0].x}, ${posicoesCalculadas[0].y});
+    at(${ultimoGanha.x}, ${ultimoGanha.y});
+    return true;`);
+  await waitFor(
+    async () => (await textoDe("rex-context-hit")) === hitEsperado(ocUltimo, ultimoGanha),
+    20000,
+    `dois cliques em sequência não terminaram na segunda seleção. UI: ${await textoDe("rex-context-hit")}`,
+    200
+  );
+  record("6c", "dois pedidos no mesmo tick: a resposta exibida é a última, sem mistura", {
+    exibida: hitEsperado(ocUltimo, ultimoGanha).slice(0, 40),
+  });
+
+  // ---- 7: editar UMA vez, pelo pixel de fonte que o núcleo apontou.
+  passo("7: enfileirar a edição no pixel de origem e aplicar pela transação canônica");
+  await setPanelInput("rex-resource-paint-index", String(EDITE.para));
+  // Campos do formulário em valores DECOY: se a barra enfileirasse o formulário em
+  // vez do pixel que o núcleo apontou, a perna 9 (diff de exatamente quatro
+  // posições previstas) pegaria — aqui a fila só pode nascer do clique.
+  await setPanelInput("rex-resource-edit-tile", String((EDITE.tile + 1) % NUM_TILES));
+  await setPanelInput("rex-resource-edit-row", String((EDITE.row + 1) % 8));
+  await setPanelInput("rex-resource-edit-col", String((EDITE.col + 1) % 8));
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-queue-edit");
+  await waitFor(
+    async () => /^1 edição/.test(await textoDe("rex-resource-edit-count")),
+    10000,
+    `a edição do pixel de origem não entrou na fila. DOM: ${await dumpContexto()}`,
+    200
+  );
+  const avisoFila = await textoDe("rex-resource-notice");
+  if (avisoFila !== "AUSENTE") {
+    fail(`enfileirar pelo contexto produziu aviso de recusa: "${avisoFila}"`);
+  }
+  const inicioAplicacao = Date.now();
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const resultado = await waitFor(
+    async () => {
+      const t = await textoDe("rex-resource-result");
+      return t.includes("desfecho:") && t !== "AUSENTE" ? t : false;
+    },
+    180000,
+    "a transação não publicou desfecho no painel.",
+    250
+  );
+  duracoes.push({ etapa: "apply pela barra (contexto → transação)", ms: Date.now() - inicioAplicacao });
+  if (!resultado.includes("applied")) {
+    fail(`desfecho diferente de applied: "${resultado.slice(0, 300)}"; erro: ${await textoDe("rex-resource-error")}`);
+  }
+  if (!resultado.includes("codec aplib")) fail(`o desfecho não declara o codec: "${resultado.slice(0, 200)}"`);
+  const modifiedPath = resultado.match(/cópia: (\S+)/)?.[1];
+  const patchPath = resultado.match(/patch: (\S+)/)?.[1];
+  if (!modifiedPath || !patchPath) fail(`proveniência ausente no desfecho: ${resultado.slice(0, 300)}`);
+  const copyBytes = await readFile(modifiedPath);
+  const modifiedSha = sha256(copyBytes);
+  const patchSha = sha256(await readFile(patchPath));
+  if (!resultado.includes(`ROM modificada ${modifiedSha.slice(0, 16)}`)) {
+    fail(`a barra anunciou outro hash para a cópia em disco: "${resultado.slice(0, 200)}" != ${modifiedSha}`);
+  }
+  record("7", "edição única enfileirada pelo pixel de fonte e aplicada pela transação", {
+    copia: modifiedSha.slice(0, 16), patch: patchSha.slice(0, 16),
+    apply_ms: Date.now() - inicioAplicacao,
+  });
+
+  // ---- 8: o que foi escrito em disco, conferido byte a byte.
+  passo("8: bytes da cópia no disco");
+  if (copyBytes.length !== romBytes.length) {
+    fail(`a cópia expandiu a ROM: ${copyBytes.length} != ${romBytes.length}`);
+  }
+  const deslocados = [];
+  for (let i = 0; i < copyBytes.length; i += 1) {
+    if (copyBytes[i] !== romBytes[i]) deslocados.push(i);
+  }
+  if (deslocados.length === 0) fail("a cópia é idêntica à fixture: nada foi escrito.");
+  const foraDoSlot = deslocados.filter((i) => i < TS_STREAM || i >= TS_STREAM + TS_SLOT);
+  if (foraDoSlot.length > 0) {
+    fail(`fora do slot do tileset [${hex(TS_STREAM)}, +${TS_SLOT}): ${JSON.stringify(foraDoSlot.slice(0, 8))}`);
+  }
+  // Quantos bytes o encoder moveu é propriedade do encoder, não da transação: a
+  // guarda aqui é a contenção (acima) e o efeito semântico, que a perna 9 mede
+  // pixel a pixel na camada reaberta. O contador vai para o relatório para que a
+  // divergência entre dois runs seja visível sem reexecutar o cenário.
+  record("8", "escrita confina ao slot do tileset; a ROM não expandiu", {
+    deslocados: deslocados.length,
+    primeiro: hex(deslocados[0]),
+    ultimo: hex(deslocados[deslocados.length - 1]),
+    dentro_do_slot: true,
+  });
+
+  // ---- 9: reabrir a cópia pelo MESMO pipeline e verificar o impacto previsto.
+  passo("9: reabrir a cópia, recarregar o contexto e comparar as camadas");
+  await verificarRom(modifiedPath, modifiedSha);
+  const etiquetasReaberto = await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  if (etiquetasReaberto.filter((l) => !l.startsWith("|")).length !== totalListado) {
+    fail(`reabrir a cópia mudou o conjunto verificado: ${JSON.stringify(etiquetasReaberto.length)}`);
+  }
+  const previewShaModificada = await selecionarRecurso(TS_STREAM.toString(16));
+  if (previewShaModificada === previewShaIntacta) {
+    fail(`a prévia do tileset não mudou na cópia (${previewShaModificada}): a edição não persistiu no artefato.`);
+  }
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  await waitFor(
+    async () => (await textoDe("rex-context-geometry")) === geometriaEsperada,
+    60000,
+    `o contexto da cópia não refez a mesma geometria: ${await textoDe("rex-context-geometry")}`,
+    250
+  );
+  const reaberto = await cronometrar("leitura da camada editada (canvas)", leCamada);
+  for (let i = 0; i < posicoesCalculadas.length; i += 1) {
+    const pos = posicoesCalculadas[i];
+    const oc = celulas.find((c) => Number(c.row) * cols + Number(c.col) === pos.indice);
+    await cliqueNaCamada(pos.x, pos.y);
+    await waitFor(
+      async () => (await textoDe("rex-context-hit")) === hitEsperado(oc, pos).replace(`índice atual ${EDITE.de}`, `índice atual ${EDITE.para}`),
+      20000,
+      `reaberta a cópia, o clique ${i + 1} em (${pos.x},${pos.y}) não mostra o índice editado ${EDITE.para}: `
+      + `${await textoDe("rex-context-hit")}`,
+      200
+    );
+  }
+  const diffPixels = [];
+  for (let p = 0; p < camadaIntacta.length; p += 4) {
+    if (camadaIntacta[p] !== reaberto[p] || camadaIntacta[p + 1] !== reaberto[p + 1]
+      || camadaIntacta[p + 2] !== reaberto[p + 2] || camadaIntacta[p + 3] !== reaberto[p + 3]) {
+      diffPixels.push([p / 4 % LARGURA, Math.floor(p / 4 / LARGURA)]);
+    }
+  }
+  const previstas = posicoesCalculadas.map((p) => `${p.x},${p.y}`).sort().join(" ");
+  const observadas = diffPixels.map(([x, y]) => `${x},${y}`).sort().join(" ");
+  if (observadas !== previstas) {
+    fail(
+      `a edição mudou a camada em ${diffPixels.length} posição(s); o manifesto prevê exatamente `
+      + `${posicoesCalculadas.length} [${previstas}] e observou [${observadas}]`
+    );
+  }
+  if (sha256(reaberto) !== sha256(camadaEditada)) {
+    fail(
+      `a camada após a edição não é a recomposição autoral editada: `
+      + `${sha256(reaberto)} != ${sha256(camadaEditada)}`
+    );
+  }
+  record("9", "impacto observado == impacto previsto: exatamente as quatro posições, e só elas", {
+    posicoes: observadas, bytes_da_copia: modifiedSha.slice(0, 16),
+    previa_tileset: [previewShaIntacta, previewShaModificada],
+  });
+
+  // ---- 10: identidade trocada na LEITURA (o contexto vem de outra ROM que a verificada).
+  passo("10: contexto de outra ROM com recursos verificados em uma — recusa em voz alta");
+  await setPanelInput("rex-resource-rom-input", fixtureRomPath); // sem re-verificar
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  const erroIdentidade = await waitFor(
+    async () => {
+      const t = await textoDe("rex-context-error");
+      return t.includes("identidade divergente") ? t : false;
+    },
+    30000,
+    `a troca silenciosa de ROM no contexto não foi recusada. DOM: ${await dumpContexto()}`,
+    250
+  );
+  if (!erroIdentidade.includes(romSha.slice(0, 16)) || !erroIdentidade.includes(modifiedSha.slice(0, 16))) {
+    fail(`a recusa de identidade não nomeia as duas ROMs: "${erroIdentidade}"`);
+  }
+  if (!erroIdentidade.includes("Nenhum contexto é exibido")) {
+    fail(`a recusa não diz que nada é exibido: "${erroIdentidade}"`);
+  }
+  const domTrocado = JSON.parse(await contextoDom());
+  if (domTrocado.imagens.length !== 0 || domTrocado.camada !== null) {
+    fail(`com identidade divergente a interface ainda exibiu contexto: ${JSON.stringify(domTrocado).slice(0, 200)}`);
+  }
+  record("10", "identidade trocada na leitura: recusada, com as duas ROMs nomeadas e nada exibido", {
+    erro: erroIdentidade.slice(0, 120),
+  });
+
+  // ---- 11: identidade trocada na ESCRITA (a transação é a guarda final).
+  passo("11: edição em fila com a ROM trocada — a transação recusa");
+  await verificarRom(fixtureRomPath, romSha);
+  await selecionarRecurso(TS_STREAM.toString(16));
+  await setPanelInput("rex-resource-paint-index", String(EDITE.para));
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  await waitFor(
+    async () => (await textoDe("rex-context-geometry")) === geometriaEsperada,
+    60000,
+    "o contexto da fixture íntegra não recarregou para a perna de escrita.",
+    250
+  );
+  await cliqueNaCamada(posicoesCalculadas[2].x, posicoesCalculadas[2].y);
+  await waitFor(
+    async () => (await textoDe("rex-context-hit")).includes(`índice atual ${EDITE.de}`),
+    20000,
+    "o clique não resolveu antes da perna de escrita.",
+    200
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-queue-edit");
+  await waitFor(
+    async () => /^1 edição/.test(await textoDe("rex-resource-edit-count")),
+    10000,
+    "a edição não entrou na fila para a perna de escrita.",
+    200
+  );
+  // A ROM do campo passa a ser a BYOR sem re-verificar: a fila é da fixture.
+  const byorPath = process.env.RDS_REX_RESOURCE_ROM
+    ?? path.join(repoRoot, "data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin");
+  if (!(await pathExists(byorPath))) {
+    fail(`ROM BYOR ausente em ${byorPath}: a perna de identidade na escrita precisa dela.`);
+  }
+  const byorBytes = await readFile(byorPath);
+  const byorSha = sha256(byorBytes);
+  if (byorSha !== BYOR_ROM_SHA256) fail(`ROM BYOR inesperada: ${byorSha}`);
+  await setPanelInput("rex-resource-rom-input", byorPath);
+  // Estado do botão e das três superfícies de retorno ANTES e DEPOIS do clique:
+  // sem isto, um timeout na recusa não diz se o clique não chegou, se a chamada
+  // está em voo ou se a recusa apareceu em outra superfície.
+  const estadoDaEscrita = async (rotulo) => {
+    const botao = await executeScript(sessionId, `
+      const b = document.querySelector('${panel} [data-testid="rex-resource-apply"]');
+      if (!b) return 'BOTAO_AUSENTE';
+      const r = b.getBoundingClientRect();
+      return JSON.stringify({
+        desabilitado: b.disabled,
+        rect: [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)],
+        visivel: r.width > 0 && r.height > 0,
+      });`);
+    const superficies = {
+      erro: await textoDe("rex-resource-error"),
+      aviso: await textoDe("rex-resource-notice"),
+      resultado: await textoDe("rex-resource-result"),
+      fila: await textoDe("rex-resource-edit-count"),
+      sha: await textoDe("rex-resource-rom-sha"),
+    };
+    console.log(`[rex-context-e2e] 11/${rotulo}: botão=${botao} superfícies=${JSON.stringify(superficies)}`);
+    return superficies;
+  };
+  await estadoDaEscrita("antes-do-clique");
+  const inicioRecusa = Date.now();
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  await pause(1500);
+  const depoisDoClique = await estadoDaEscrita("1,5s-apos-o-clique");
+  const erroEscrita = await waitFor(
+    async () => {
+      const t = await textoDe("rex-resource-error");
+      if (t.includes("rom_identity_mismatch")) return t;
+      if (t !== "AUSENTE" && t.length > 0) fail(`a recusa veio com outro código: "${t}"`);
+      return false;
+    },
+    90000,
+    `a transação não recusou a edição com a ROM trocada. DOM: ${await dumpContexto()}`,
+    250
+  );
+  const msRecusa = Date.now() - inicioRecusa;
+  // A guarda de identidade corre antes de qualquer varredura, então a recusa é
+  // imediata mesmo numa ROM grande: se ela voltar a depender do scan completo,
+  // esta asserção cai e o custo volta a ser visível.
+  if (!depoisDoClique.erro.includes("rom_identity_mismatch")) {
+    fail(
+      `a recusa de identidade não chegou em 1,5 s numa ROM de ${byorBytes.length} B `
+      + `(custo ${msRecusa} ms) — a varredura voltou a preceder a guarda.`
+    );
+  }
+  if ((await textoDe("rex-resource-result")) !== "AUSENTE") {
+    fail("mesmo recusada, a barra publicou um desfecho de escrita.");
+  }
+  const byorDepois = await readFile(byorPath);
+  if (sha256(byorDepois) !== byorSha) fail("a recusa escreveu na ROM BYOR.");
+  record("11", "identidade trocada na escrita: rom_identity_mismatch, zero artefato, corpus intacto", {
+    erro: erroEscrita.slice(0, 120),
+  });
+
+  // ---- 12: tile fora do conjunto — a guarda do painel explica e preserva a fila.
+  passo("12: tile fora do conjunto não entra na fila no lugar de outro");
+  await setPanelInput("rex-resource-rom-input", fixtureRomPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => (await textoDe("rex-resource-rom-sha")).includes(romSha.slice(0, 16)),
+    60000, "a fixture não voltou a verificar-se depois da perna de escrita.", 250
+  );
+  await selecionarRecurso(TS_STREAM.toString(16));
+  const filaAntes = await textoDe("rex-resource-edit-count");
+  if (!/^nenhuma edição/.test(filaAntes)) {
+    fail(`re-verificar a ROM deveria esvaziar a fila, e ela está em "${filaAntes}".`);
+  }
+  await setPanelInput("rex-resource-paint-index", String(EDITE.para));
+  await setPanelInput("rex-resource-edit-tile", String(NUM_TILES));
+  await setPanelInput("rex-resource-edit-row", String(EDITE.row));
+  await setPanelInput("rex-resource-edit-col", String(EDITE.col));
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  const avisoTileFora = await waitFor(
+    async () => {
+      const t = await textoDe("rex-resource-notice");
+      return t.includes(`tile ${NUM_TILES}`) ? t : false;
+    },
+    10000,
+    `a barra aceitou tile ${NUM_TILES} fora do conjunto verificado. DOM: ${await dumpContexto()}`,
+    200
+  );
+  if (!avisoTileFora.includes(`são ${NUM_TILES} tile(s), numerados de 0 a ${NUM_TILES - 1}`)) {
+    fail(`a recusa não disse o domínio do recurso: "${avisoTileFora}"`);
+  }
+  if (!/^nenhuma edição/.test(await textoDe("rex-resource-edit-count"))) {
+    fail(`a entrada inválida entrou na fila: ${await textoDe("rex-resource-edit-count")}`);
+  }
+  record("12", "tile fora do conjunto: recusa explicada, fila intacta", { aviso: avisoTileFora.slice(0, 90) });
+
+  // ---- 13: BPS exportado pela barra re-aplicado a uma cópia íntegra.
+  passo("13: BPS re-aplicado com hash exato");
+  const baseCopy = path.join(validationDir, "rex-context-base-copy.bin");
+  const patchApplied = path.join(validationDir, "rex-context-patch-applied.bin");
+  await writeFile(baseCopy, romBytes);
+  const reapplied = await executeScript(sessionId, `
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    return await invoke('patch_apply_bps', { romPath: ${JSON.stringify(baseCopy)}, patchPath: ${JSON.stringify(patchPath)}, outputPath: ${JSON.stringify(patchApplied)} });`);
+  if (!reapplied || reapplied.ok !== true) fail(`patch_apply_bps falhou: ${JSON.stringify(reapplied)}`);
+  const appliedSha = sha256(await readFile(patchApplied));
+  if (appliedSha !== modifiedSha) {
+    fail(`BPS da barra re-aplicado diverge: ${appliedSha} != ${modifiedSha}`);
+  }
+  record("13", "BPS materializado pela barra reproduz a cópia exata", {
+    patch: patchSha.slice(0, 16), aplicado: appliedSha.slice(0, 16),
+  });
+
+  // ---- 14: o caso BYOR — contexto pela interface, com a camada declarada
+  // camada reconstruída (nunca framebuffer) e contagem sempre por mapa.
+  passo("14: BYOR — contexto pela interface e honestidade da prévia");
+  await setPanelInput("rex-resource-rom-input", byorPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => (await textoDe("rex-resource-rom-sha")).includes(byorSha.slice(0, 16)),
+    90000, "a ROM BYOR não verificou no painel.", 250
+  );
+  const etiquetasByor = await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => o.getAttribute('value') + '|' + o.textContent.trim());`);
+  const alvoByor = etiquetasByor.filter((l) => l.startsWith(`${BYOR_STREAM_HEX}|`));
+  if (alvoByor.length !== 1 || !/aplib/i.test(alvoByor[0])
+    || !alvoByor[0].includes(`stream ${BYOR_SLOT_BYTES} B`)) {
+    fail(`o recurso aPLib BYOR já comprovado mudou de forma na lista: ${JSON.stringify(alvoByor)}`);
+  }
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-context-load");
+  await waitFor(
+    async () => {
+      const d = JSON.parse(await contextoDom());
+      return d.erro === null && (d.imagens.length > 0 || d.vazio !== null || d.camada !== null);
+    },
+    120000,
+    `o contexto BYOR não assentou. DOM: ${await dumpContexto()}`,
+    500
+  );
+  const domByor = JSON.parse(await contextoDom());
+  if (domByor.erro) fail(`contexto BYOR com erro: ${domByor.erro}`);
+  let byorHonestidade = "sem imagem verificada: estado vazio exibido";
+  if (domByor.camada) {
+    const provByor = await textoDe("rex-context-provenance");
+    if (!provByor.includes("framebuffer completo") || !provByor.includes("oclusão")) {
+      fail(`no BYOR a prévia composta foi exibida sem dizer que não é o framebuffer:\n${provByor}`);
+    }
+    byorHonestidade = "camada reconstruída exibida com a oclusão declarada como não modelada";
+    const geomByor = await textoDe("rex-context-geometry");
+    if (!geomByor.startsWith("camada ")) fail(`geometria BYOR ausente: "${geomByor}"`);
+    const d0 = JSON.parse(await executeScript(sessionId, `
+      const img = document.querySelector('${panel} [data-testid="rex-context-layer"]');
+      const rect = img.getBoundingClientRect();
+      img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window,
+        clientX: rect.left + 0.5 * (rect.width / img.naturalWidth),
+        clientY: rect.top + 0.5 * (rect.height / img.naturalHeight) }));
+      return JSON.stringify([img.naturalWidth, img.naturalHeight]);`));
+    const contagem = await waitFor(
+      async () => {
+        const t = await textoDe("rex-context-occurrences");
+        return t.includes("ocorrências neste mapa verificado") ? t : false;
+      },
+      20000,
+      `clique no BYOR sem contagem escopada por mapa. hit=${await textoDe("rex-context-hit")}`,
+      250
+    );
+    record("14b", "clique no BYOR resolve e conta por mapa verificado", {
+      natural: d0, contagem: contagem.slice(0, 120),
+    });
+  } else {
+    if (!domByor.vazio) fail("contexto BYOR sem camada e sem estado vazio: tela em branco.");
+    if (domByor.imagens.length !== 0) {
+      fail(`o BYOR anunciou ${domByor.imagens.length} imagem(ns) sem camada composta: estado incoerente.`);
+    }
+  }
+  record("14", "caso BYOR aberto pelo produto, com a prévia declarada como camada reconstruída", {
+    recurso: alvoByor[0],
+    imagens: domByor.imagens.length,
+    sem_vinculo: domByor.semVinculo ? domByor.semVinculo.slice(0, 80) : null,
+    recusados: domByor.recusados ? domByor.recusados.slice(0, 80) : null,
+    honestidade: byorHonestidade,
+  });
+
+  // ---- fechamento: relatório independente do log falado.
+  const reportPathOut = path.join(
+    validationDir,
+    `rex-context-fixture-effect-${artifactTimestamp()}-report.json`
+  );
+  await writeFile(
+    reportPathOut,
+    JSON.stringify(
+      {
+        schema: "rex-context-fixture-effect/v1",
+        etapa: "passo 7 — contexto da imagem provado pela interface",
+        fixture: {
+          rom: { path: fixtureRomPath, sha256: romSha },
+          manifesto: { path: truthPath, schema: manifesto.schema },
+          receita: { path: reportPath, schema: receita.schema },
+          externo: {
+            path: extPath, schema: externo.schema, ferramenta: externo.oracle.tool,
+            sha256: externo.oracle.sha256,
+          },
+          offsets: {
+            struct: hex(IMG_STRUCT),
+            palette: { header: hex(PAL_HDR), stream: hex(PAL_STREAM) },
+            tileset: { header: hex(TS_HDR), stream: hex(TS_STREAM), slot: TS_SLOT, array_simbolico: TS_ARRAY },
+            tilemap: { header: hex(TM_HDR), stream: hex(TM_STREAM) },
+            ghost: { header: hex(GHOST_HDR), stream: hex(GHOST_STREAM) },
+          },
+          camada_esperada_sha256_rgb: pixelsShaDoManifesto,
+          camada_lida_do_webview_sha256_rgb: shaCamadaUI,
+          camada_divergencias_rgba: divergentesRGBA.length,
+        },
+        edicao: {
+          fonte: EDITE,
+          ocorrencias_previstas: posicoesCalculadas.length,
+          posicoes_previstas: posicoesCalculadas.map((p) => [p.x, p.y]),
+          posicoes_observadas: diffPixels,
+          bytes_fora_do_slot: foraDoSlot.length,
+          bytes_alterados: deslocados.length,
+          byte_alterado_em: hex(deslocados[0]),
+          copia_sha256: modifiedSha,
+          patch_sha256: patchSha,
+          bps_reaplicado_sha256: appliedSha,
+          previa_tileset: { intacta: previewShaIntacta, editada: previewShaModificada },
+        },
+        cliques: evidenciasDeClique,
+        negativos: {
+          ghost_sem_vinculo: semVinculoTexto.slice(0, 200),
+          recusados: recusadosTexto === "AUSENTE" ? "nenhum" : recusadosTexto.slice(0, 200),
+          clique_fora_da_camada: avisoFora,
+          resposta_obsoleta: "dois pedidos no mesmo tick: a última resposta é a exibida",
+          identidade_trocada_leitura: erroIdentidade.slice(0, 200),
+          identidade_trocada_escrita: erroEscrita.slice(0, 200),
+          tile_fora_do_conjunto: avisoTileFora.slice(0, 200),
+          troca_de_rom: "contexto descartado ao trocar o caminho (pernas 10/11)",
+        },
+        byor: {
+          rom_sha256: byorSha,
+          recurso: alvoByor[0],
+          honestidade_da_previa: byorHonestidade,
+        },
+        duracoes: {
+          total_ms: Date.now() - t0,
+          etapas: duracoes,
+        },
+        passos: steps,
+      },
+      null,
+      2
+    )
+  );
+  console.log(`[rex-context-e2e] relatório=${reportPathOut}`);
+  console.log(`[rex-context-e2e] ${JSON.stringify({
+    camada_ui_igual_esperada: shaCamadaUI === pixelsShaDoManifesto,
+    cliques: evidenciasDeClique.length,
+    ocorrencias: posicoesCalculadas.length,
+    posicoes_alteradas: diffPixels.length,
+    bytes_alterados: deslocados.length,
+    copia: modifiedSha.slice(0, 16),
+    patch: patchSha.slice(0, 16),
+    bps_reaplicado: appliedSha === modifiedSha,
+    total_ms: Date.now() - t0,
+  })}`);
+}
+
+function ppmFromRgba(frame) {
+  const { bytes, width } = frame;
+  const height = Math.floor(bytes.length / 4 / width);
+  const ppm = Buffer.alloc(width * height * 3);
+  for (let p = 0; p < width * height; p++) {
+    ppm[p * 3] = bytes[p * 4];
+    ppm[p * 3 + 1] = bytes[p * 4 + 1];
+    ppm[p * 3 + 2] = bytes[p * 4 + 2];
+  }
+  return Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`), ppm]);
+}
+
+// ETAPA E — prova causal pelo produto no fixture autoral.
+//
+// Diferença em relação ao cenário BYOR: aqui a cadeia de consumo é conhecida
+// POR CONSTRUÇÃO (fonte C do fixture: unpackTileSet -> VDP_loadTileSet ->
+// VDP_fillTileMapRectInc, tile t em uma única célula (t % map_w, t / map_w)).
+// A expectativa de tela nasce do fonte gerador, não da observação, e a edição
+// de UM pixel do recurso deve aparecer como UM único pixel diferente no
+// framebuffer. O que a emulação alcança: o WRAM (1 byte no plain chunky
+// descompactado) e a tela. VRAM não é provável aqui — o core carregado não expõe
+// a região (seria +4 bytes planar no tile da VRAM, afirmado como consequência do
+// formato, não medido). A identidade do pixel é estabelecida pela POSIÇÃO
+// prevista pelo fonte: o DAC funde as 16 palavras de paleta em 11 cores, então
+// índice->cor é função mas não é injetiva e a cor só confirma a classe.
+async function runRexLz4wFixtureEffectScenario(sessionId) {
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sha = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const FIXTURE_ROM_SHA256 = "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5";
+  // Offsets/tamanhos do receituário do fixture (build report + driver 68k).
+  const FIXTURE_HEADER_OFFSET = 95464;
+  const FIXTURE_SLOT_BYTES = 444;
+  const FIXTURE_STREAM_OFFSET_HEX = "5f988";
+  // Segundo recurso real do fixture, medido direto no arquivo (não no produto):
+  // o TileSet aPLib do `font_08x08` que o SGDK 2.11 embute e comprime com aPLib.
+  // Não é ruído do scan — os 609 B do stream são byte a byte os mesmos do
+  // recurso 0x2cd94 da ROM BYOR HAMOOPIG (sha256 do stream
+  // e9b88ab5…), e o plain de 3 072 B (96 glifos 8x8, nibbles só em
+  // {0x0,0xF,0xF0,0xFF}) tem sha256 20ee7dcc…. Verificável por
+  // `python3 scripts/rex_profiles/integrator/aplib/audit_aplib_candidates.py`.
+  const FIXTURE_FONT_HEADER = 0x59d14;
+  const FIXTURE_FONT_STREAM_HEX = "5f2ec";
+  const FIXTURE_FONT_STREAM_OFFSET = 0x5f2ec;
+  const FIXTURE_FONT_TILES = 96;
+  const FIXTURE_FONT_STREAM_BYTES = 609;
+  const FIXTURE_FONT_STREAM_SHA256 =
+    "e9b88ab50ad575f340a6c31cb12cdf3d666577a8fc1eeeb88b083be3c36b1256";
+  const SETTLE_FRAMES = 60;
+  const steps = [];
+  const record = (step, claim, observed) => {
+    steps.push({ step, claim, observed });
+    console.log(`[rex-fixture-e2e] ${step}: ${claim} -> ${JSON.stringify(observed)}`);
+  };
+
+  const fixtureRomPath = process.env.RDS_REX_LZ4W_FIXTURE_ROM ?? "";
+  if (!fixtureRomPath || !(await pathExists(fixtureRomPath))) {
+    fail("RDS_REX_LZ4W_FIXTURE_ROM deve apontar para a ROM do fixture autoral existente (BYOR não é dependência provisionável).");
+  }
+  const romBytes = await readFile(fixtureRomPath);
+  const romSha = sha(romBytes);
+  if (romSha !== FIXTURE_ROM_SHA256) fail(`ROM do fixture inesperada: ${romSha} != ${FIXTURE_ROM_SHA256}`);
+  const truthPath = process.env.RDS_REX_LZ4W_FIXTURE_TRUTH
+    ?? path.join(path.dirname(path.dirname(fixtureRomPath)), "ground_truth.json");
+  if (!(await pathExists(truthPath))) {
+    fail(`terra firme do fixture ausente em ${truthPath}: a expectativa causal precisa nascer do fonte, não da observação.`);
+  }
+  const truth = JSON.parse(await readFile(truthPath, "utf8"));
+  if (truth.schema !== "rex-lz4w-fixture-ground-truth/v1") fail(`schema de terra firme inesperado: ${truth.schema}`);
+  if (!Array.isArray(truth.tile_pixels) || typeof truth.tile_pixels[0] !== "string") {
+    fail("ground_truth.json é de uma receita antiga (tile_pixels aninhado); reconstrua o fixture com build-fixture.sh.");
+  }
+  const TILE_PX = Number(truth.tile_px);
+  const TILE_COUNT = Number(truth.tile_count);
+  const MAP_W = Number(truth.map_w);
+  const MAP_H = Number(truth.map_h);
+  const NOISE_ROWS = Number(truth.noise_rows);
+  const NEAR_MISS_ROW = Number(truth.near_miss_row);
+  const PLANT_COL = Number(truth.planted_edit.col);
+  if (TILE_PX !== 8 || TILE_COUNT !== 16 || MAP_W !== 4 || MAP_H !== 4) {
+    fail(`layout do fixture mudou: ${JSON.stringify({ TILE_PX, TILE_COUNT, MAP_W, MAP_H })}`);
+  }
+  if (NEAR_MISS_ROW !== NOISE_ROWS + 1 || PLANT_COL !== TILE_PX - 1) {
+    fail(`regra de plantio mudou: near_miss_row=${NEAR_MISS_ROW} noise_rows=${NOISE_ROWS} col=${PLANT_COL}`);
+  }
+  const indexAt = (tile, row, col) => Number.parseInt(truth.tile_pixels[tile][row * TILE_PX + col], 16);
+  const valueOf = (tile, row) => (tile * 7 + row * 3) & 15;
+  // O plantio é conferido em TODOS os tiles: a linha near_miss é sólida em v
+  // e o último pixel vale (v+1)&15 — é isso que torna a edição de 1 pixel
+  // encurtante, porque o LZ4W casa words de 16 bits, não pixels.
+  for (let tile = 0; tile < TILE_COUNT; tile++) {
+    const v = valueOf(tile, NEAR_MISS_ROW);
+    for (let col = 0; col < PLANT_COL; col++) {
+      if (indexAt(tile, NEAR_MISS_ROW, col) !== v) {
+        fail(`tile ${tile}: linha plantada deixou de ser sólida em v=${v} na coluna ${col}`);
+      }
+    }
+    if (indexAt(tile, NEAR_MISS_ROW, PLANT_COL) !== ((v + 1) & 15)) {
+      fail(`tile ${tile}: último pixel da linha plantada não vale (v+1)&15`);
+    }
+  }
+  const EDIT_TILE = 0;
+  const editLinear = EDIT_TILE * TILE_PX * TILE_PX + NEAR_MISS_ROW * TILE_PX + PLANT_COL;
+  const fromIndex = indexAt(EDIT_TILE, NEAR_MISS_ROW, PLANT_COL);
+  const toIndex = valueOf(EDIT_TILE, NEAR_MISS_ROW);
+  if (fromIndex === toIndex) fail("edição plantada não mudaria nenhum índice");
+  const originalIdx = [];
+  for (let tile = 0; tile < TILE_COUNT; tile++) {
+    for (let row = 0; row < TILE_PX; row++) for (let col = 0; col < TILE_PX; col++) originalIdx.push(indexAt(tile, row, col));
+  }
+  const editedIdx = originalIdx.slice();
+  editedIdx[editLinear] = toIndex;
+  const chunkyFromIndices = (indices) => {
+    const bytes = Buffer.alloc(indices.length / 2);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (indices[i * 2] << 4) | indices[i * 2 + 1];
+    return bytes;
+  };
+  const originalChunky = chunkyFromIndices(originalIdx);
+  const editedChunky = chunkyFromIndices(editedIdx);
+  // Pino compartilhado com o driver 68k (i31): byte 23, nibble baixo.
+  if (fromIndex !== 0 || (originalChunky[23] & 0x0f) !== 0 || (editedChunky[23] & 0x0f) !== 15) {
+    fail(`edição prevista não cai no byte 23/nibble baixo: original=${originalChunky[23].toString(16)} editado=${editedChunky[23].toString(16)}`);
+  }
+  // Prévia esperada replicando o layout do produto (grade de 16 tiles,
+  // cinza index*16): valida o DECODE pela interface sem usar o decodificador.
+  const previewRgba = (indices) => {
+    const perRow = 16;
+    const width = perRow * TILE_PX;
+    const height = Math.ceil(TILE_COUNT / perRow) * TILE_PX;
+    const rgba = Buffer.alloc(width * height * 4);
+    for (let tile = 0; tile < TILE_COUNT; tile++) {
+      for (let row = 0; row < TILE_PX; row++) {
+        for (let col = 0; col < TILE_PX; col++) {
+          const index = indices[tile * TILE_PX * TILE_PX + row * TILE_PX + col];
+          const dst = ((Math.floor(tile / perRow) * TILE_PX + row) * width + (tile % perRow) * TILE_PX + col) * 4;
+          rgba[dst] = index * 16;
+          rgba[dst + 1] = index * 16;
+          rgba[dst + 2] = index * 16;
+          rgba[dst + 3] = 255;
+        }
+      }
+    }
+    return { rgba, width, height };
+  };
+  const expectedOriginalPixelsSha = sha(previewRgba(originalIdx).rgba);
+  const expectedEditedPixelsSha = sha(previewRgba(editedIdx).rgba);
+  if (expectedOriginalPixelsSha === expectedEditedPixelsSha) fail("prévias original e editada colapsaram");
+  record(1, "terra firme do fonte conferida (plantio em 16/16 tiles, byte 23 pinado)", {
+    romSha, truthPath, edit: { tile: EDIT_TILE, row: NEAR_MISS_ROW, col: PLANT_COL, fromIndex, toIndex },
+    expectedOriginalPixelsSha, expectedEditedPixelsSha,
+  });
+
+  // ---- expectativa de TELA derivada do fonte do fixture ----
+  const BLOCK_W = MAP_W * TILE_PX;
+  const BLOCK_H = MAP_H * TILE_PX;
+  const blockFrom = (indices) => {
+    const map = new Int16Array(BLOCK_W * BLOCK_H);
+    for (let y = 0; y < BLOCK_H; y++) {
+      for (let x = 0; x < BLOCK_W; x++) {
+        const tile = Math.floor(y / TILE_PX) * MAP_W + Math.floor(x / TILE_PX);
+        map[y * BLOCK_W + x] = indices[tile * TILE_PX * TILE_PX + (y % TILE_PX) * TILE_PX + (x % TILE_PX)];
+      }
+    }
+    return map;
+  };
+  const originalBlock = blockFrom(originalIdx);
+  const editedBlock = blockFrom(editedIdx);
+  const blockX = (EDIT_TILE % MAP_W) * TILE_PX + PLANT_COL;
+  const blockY = Math.floor(EDIT_TILE / MAP_W) * TILE_PX + NEAR_MISS_ROW;
+
+  // ---- painel de recursos pela interface real ----
+  const panel = '[data-testid="rex-resource-panel"]';
+  const textOf = async (testId) => (await executeScript(
+    sessionId,
+    `return (document.querySelector('${panel} [data-testid="${testId}"]')?.textContent ?? '')`
+  )) || "";
+  const hasResourcePanel = () => executeScript(sessionId, `
+    return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'));`);
+  // A vista ativa é estado React do ReverseWorkspace. Quando ela já está em
+  // "resources", o botão reverse-tab-resources NÃO existe (a lista de abas o
+  // exclui em ReverseWorkspace.tsx:418-427), e o painel guarda romPath, romSha,
+  // recursos e edições da fase anterior. `fresh` dá a volta por Inspeção, o que
+  // desmonta CompressedResourcePanel e zera o estado; assim a lista de recursos
+  // observada a seguir só pode vir do verify desta configuração.
+  const openResourcePanel = async (label, { fresh = false } = {}) => {
+    // As medições rodam o viewport, que troca o workspace ativo para uma concha
+    // SEM painel direito (game/logic/artstudio têm showRight:false em
+    // src/core/workspaceLayout.ts). Nela o ReverseWorkspace não é montado, e
+    // openToolsWorkspace sozinho só mexe no painel direito já existente.
+    await callAutomationApi(sessionId, "selectWorkspace", ["debug"]);
+    await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+    try {
+      await waitFor(
+        async () => executeScript(sessionId, `
+          return Boolean(document.querySelector('${panel} [data-testid="rex-resource-rom-input"]'))
+            || Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`),
+        30000, `reverse workspace não montou nenhuma superfície de recursos (${label}).`, 250
+      );
+    } catch (error) {
+      const body = await executeScript(sessionId, `
+        return (document.body?.textContent ?? '').replace(/\s+/g, ' ').slice(0, 200);`);
+      const tabs = await executeScript(sessionId, `
+        return [...document.querySelectorAll('[data-testid^="reverse-tab-"]')]
+          .map((el) => el.getAttribute('data-testid')).join(',');`);
+      fail(`superfície de recursos ausente (${label}): ${error?.message ?? error} | abas=[${tabs}] | corpo="${body}"`);
+    }
+    if (fresh && await hasResourcePanel()) {
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-tab-resources"]'));`),
+        15000, `a vista Inspeção não montou para reset do painel (${label}).`, 250
+      );
+    }
+    if (!(await hasResourcePanel())) {
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-resources");
+      try {
+        await waitFor(hasResourcePanel, 15000, `painel de recursos comprimidos não abriu (${label}).`, 250);
+      } catch (error) {
+        const tabs = await executeScript(sessionId, `
+          return [...document.querySelectorAll('[data-testid^="reverse-tab-"]')]
+            .map((el) => el.getAttribute('data-testid')).join(',');`);
+        const panelText = (await executeScript(sessionId, `return (document.querySelector('${panel}')?.textContent ?? '').slice(0, 400)`)) || "";
+        fail(`painel de recursos não abriu (${label}): ${error?.message ?? error} | abas=[${tabs}] | painel="${panelText}"`);
+      }
+    }
+  };
+  await openResourcePanel("abertura inicial");
+  const setPanelInput = async (testId, value) => {
+    await executeScript(sessionId, `
+      const input = document.querySelector('${panel} [data-testid="${testId}"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(String(value))});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;`);
+  };
+  const selectOffset = async (offsetHex) => {
+    await executeScript(sessionId, `
+      const select = document.querySelector('${panel} [data-testid="rex-resource-select"]');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(select, '${offsetHex}');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;`);
+  };
+  const waitPreview = async (label) => {
+    await waitFor(
+      async () => {
+        const errorText = await textOf("rex-resource-error");
+        if (errorText) fail(`prévia recusou (${label}): ${errorText}`);
+        return executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-canvas"]'));`);
+      },
+      30000, `prévia não apareceu (${label}); painel: ${(await executeScript(sessionId, `return (document.querySelector('${panel}')?.textContent ?? '')`))?.slice(-400) || "vazio"}`, 250
+    );
+    await pause(400);
+    return textOf("rex-resource-pixels-sha");
+  };
+
+  await setPanelInput("rex-resource-rom-input", fixtureRomPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-select"]'));`),
+    30000, "nenhum recurso verificado no fixture.", 250
+  );
+  const options = (await executeScript(sessionId, `
+    return Array.from(document.querySelectorAll('${panel} [data-testid="rex-resource-select"] option'))
+      .map((o) => ({ value: o.value, label: o.textContent }));`)) || [];
+  const resourceOptions = options.filter((o) => o.value);
+  // O offset do stream é conferido contra o HEADER TileSet do próprio fixture
+  // (compression==2, numTile==16), lido direto do arquivo — não do produto.
+  const header = romBytes.readUInt32BE(FIXTURE_HEADER_OFFSET + 4);
+  if (romBytes.readUInt16BE(FIXTURE_HEADER_OFFSET) !== 2) fail("fixture perdeu a marca LZ4W (compression=2)");
+  if (romBytes.readUInt16BE(FIXTURE_HEADER_OFFSET + 2) !== TILE_COUNT) fail("fixture perdeu numTile=16");
+  if (header.toString(16) !== FIXTURE_STREAM_OFFSET_HEX) {
+    fail(`ponteiro do header (${header.toString(16)}) não bate com o offset esperado (${FIXTURE_STREAM_OFFSET_HEX})`);
+  }
+  const target = resourceOptions.find((o) => o.value === FIXTURE_STREAM_OFFSET_HEX);
+  if (!target) fail(`produto não listou o recurso do fixture (${FIXTURE_STREAM_OFFSET_HEX}); opções: ${JSON.stringify(resourceOptions)}`);
+  // O contrato da lista é por codec, porque a verificação deixou de ser
+  // exclusiva de LZ4W: exatamente 1 TileSet LZ4W (o plantado pelo fonte) e
+  // exatamente 1 TileSet aPLib (o font_08x08 do SGDK, real e conferido no
+  // arquivo abaixo). "1 opção no total" não era uma propriedade do fixture —
+  // era uma consequência do pipeline só ter um codec.
+  const porCodec = (codec) => resourceOptions.filter((o) => (o.label ?? "").includes(`— ${codec} ·`));
+  const lz4wOptions = porCodec("lz4w");
+  const aplibOptions = porCodec("aplib");
+  if (lz4wOptions.length !== 1 || aplibOptions.length !== 1 || resourceOptions.length !== 2) {
+    fail(
+      `fixture deveria ter 1 recurso LZ4W + 1 aPLib; produto listou ` +
+        `LZ4W=${lz4wOptions.length}, aPLib=${aplibOptions.length}, total=${resourceOptions.length}: ` +
+        JSON.stringify(resourceOptions)
+    );
+  }
+  if (romBytes.readUInt16BE(FIXTURE_FONT_HEADER) !== 1) fail("fixture perdeu o header aPLib do font (compression=1)");
+  if (romBytes.readUInt16BE(FIXTURE_FONT_HEADER + 2) !== FIXTURE_FONT_TILES) fail("font_08x08 perdeu numTile=96");
+  if (romBytes.readUInt32BE(FIXTURE_FONT_HEADER + 4) !== FIXTURE_FONT_STREAM_OFFSET) {
+    fail(`ponteiro do font (${romBytes.readUInt32BE(FIXTURE_FONT_HEADER + 4).toString(16)}) não bate com 0x${FIXTURE_FONT_STREAM_HEX}`);
+  }
+  const fonteStream = romBytes.subarray(FIXTURE_FONT_STREAM_OFFSET, FIXTURE_FONT_STREAM_OFFSET + FIXTURE_FONT_STREAM_BYTES);
+  if (sha(fonteStream) !== FIXTURE_FONT_STREAM_SHA256) {
+    fail(`stream aPLib do font não é o byte do SGDK medido: ${sha(fonteStream)}`);
+  }
+  const fonte = aplibOptions[0];
+  if (fonte.value !== FIXTURE_FONT_STREAM_HEX) fail(`recurso aPLib listado não é o font do SGDK: ${JSON.stringify(fonte)}`);
+  if (!(fonte.label ?? "").includes(`${FIXTURE_FONT_TILES} tiles`) || !(fonte.label ?? "").includes(`stream ${FIXTURE_FONT_STREAM_BYTES} B`)) {
+    fail(`rótulo do font não declara os números medidos (96 tiles, stream 609 B): ${fonte.label}`);
+  }
+  const streamLenMatch = (target.label ?? "").match(/stream (\d+) B/);
+  if (!streamLenMatch || Number(streamLenMatch[1]) !== FIXTURE_SLOT_BYTES) {
+    fail(`slot do stream divergiu do receituário (${FIXTURE_SLOT_BYTES} B): ${target.label}`);
+  }
+  await selectOffset(FIXTURE_STREAM_OFFSET_HEX);
+  const pixelsLine = await waitPreview("original");
+  const pixelsSha = (pixelsLine.match(/pixels ([0-9a-f]{16})/) ?? [])[1] ?? "";
+  if (pixelsSha !== expectedOriginalPixelsSha.slice(0, 16)) {
+    fail(`prévia do produto não é o fonte autoral recomputado: ui=${pixelsSha} esperado=${expectedOriginalPixelsSha.slice(0, 16)}`);
+  }
+  record(2, "descoberta + decode pela UI: um recurso por codec, slot conferido pelo header, prévia == fonte recomposto", {
+    resourceOptions, headerOffset: FIXTURE_HEADER_OFFSET, streamOffset: FIXTURE_STREAM_OFFSET_HEX,
+    slotBytes: Number(streamLenMatch[1]), pixelsSha,
+    font: { headerOffset: FIXTURE_FONT_HEADER, streamOffset: FIXTURE_FONT_STREAM_HEX,
+            streamBytes: FIXTURE_FONT_STREAM_BYTES, streamSha256: sha(fonteStream),
+            tiles: FIXTURE_FONT_TILES, label: fonte.label },
+  });
+
+  // NO-OP honesto pela mesma transação (zero edições não é sucesso fabricado).
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  await waitFor(
+    async () => (await textOf("rex-resource-result")).includes("noop"),
+    30000, "transação não reportou no-op com zero edições.", 250
+  );
+  record(3, "no-op com zero edições reportado pela transação canônica", { result: (await textOf("rex-resource-result")).slice(0, 120) });
+
+  // Edição prevista plantada: tile 0, linha near_miss, última coluna -> v.
+  await setPanelInput("rex-resource-paint-index", toIndex);
+  await setPanelInput("rex-resource-edit-tile", EDIT_TILE);
+  await setPanelInput("rex-resource-edit-row", NEAR_MISS_ROW);
+  await setPanelInput("rex-resource-edit-col", PLANT_COL);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await waitFor(
+    async () => (await executeScript(sessionId, `return (document.querySelector('${panel}')?.textContent ?? '')`)).includes("1 edição(ões) pendente(s)"),
+    15000, "edição não registrada no painel.", 250
+  );
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const resultText = await waitFor(
+    async () => {
+      const text = await textOf("rex-resource-result");
+      if (text.includes("applied")) return text;
+      const errorText = await textOf("rex-resource-error");
+      if (errorText) fail(`transação recusou a edição prevista: ${errorText}`);
+      return false;
+    },
+    60000, "transação não aplicou a edição prevista.", 250
+  );
+  const modifiedPath = (resultText.match(/cópia: (\S+)/) ?? [])[1] ?? "";
+  const patchPath = (resultText.match(/patch: (\S+)/) ?? [])[1] ?? "";
+  if (!modifiedPath || !patchPath) fail(`proveniência ausente no resultado: ${resultText.slice(0, 240)}`);
+  const modifiedBytes = await readFile(modifiedPath);
+  const patchBytes = await readFile(patchPath);
+  const modifiedSha = sha(modifiedBytes);
+  const patchSha = sha(patchBytes);
+  if (modifiedBytes.length !== romBytes.length) fail(`ROM modificada expandiu: ${modifiedBytes.length} != ${romBytes.length}`);
+  // Fora do slot nada mudou: a escrita é local ao stream.
+  const romCopyDiffs = [];
+  for (let i = 0; i < romBytes.length; i++) if (romBytes[i] !== modifiedBytes[i]) romCopyDiffs.push(i);
+  const streamStart = Number.parseInt(FIXTURE_STREAM_OFFSET_HEX, 16);
+  const outsideSlot = romCopyDiffs.filter((i) => i < streamStart || i >= streamStart + FIXTURE_SLOT_BYTES);
+  if (outsideSlot.length > 0) {
+    fail(`transação escreveu fora do slot do stream em ${outsideSlot.length} byte(s): ${outsideSlot.slice(0, 8).map((v) => v.toString(16))}`);
+  }
+  if (romCopyDiffs.length === 0) fail("cópia idêntica à base: edição não foi escrita");
+  record(4, "edição aplicada pela transação; escrita confinada ao slot; bytes comerciais intocados fora dele", {
+    modifiedPath, modifiedSha, patchSha,
+    patchBytes: patchBytes.length,
+    streamSlot: { start: streamStart, size: FIXTURE_SLOT_BYTES },
+    bytesDiferentes: romCopyDiffs.length,
+    faixaAlterada: [romCopyDiffs[0].toString(16), romCopyDiffs[romCopyDiffs.length - 1].toString(16)],
+    diferenteForaDoSlot: outsideSlot.length,
+  });
+
+  // BPS re-aplicado à base reproduz a cópia com hash exato.
+  const baseCopy = path.join(validationDir, "rex-fixture-base-copy.bin");
+  const patchApplied = path.join(validationDir, "rex-fixture-patch-applied.bin");
+  await writeFile(baseCopy, romBytes);
+  const bps = await executeScript(sessionId, `
+    const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+    return await invoke('patch_apply_bps', { romPath: ${JSON.stringify(baseCopy)}, patchPath: ${JSON.stringify(patchPath)}, outputPath: ${JSON.stringify(patchApplied)} });`);
+  if (!bps || bps.ok !== true) fail(`patch_apply_bps falhou: ${JSON.stringify(bps)}`);
+  const appliedSha = sha(await readFile(patchApplied));
+  if (appliedSha !== modifiedSha) fail(`patch re-aplicado diverge da cópia: ${appliedSha} != ${modifiedSha}`);
+  record(5, "patch BPS re-aplicado à base reproduz a cópia modificada (hash exato)", { appliedSha, patchSha });
+
+  // Reabrir a cópia pelo MESMO pipeline da UI: decode vem do disco.
+  await setPanelInput("rex-resource-rom-input", modifiedPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(
+    async () => (await textOf("rex-resource-rom-sha")).includes(modifiedSha.slice(0, 16)),
+    30000, "cópia modificada não reabriu com a própria identidade no painel.", 250
+  );
+  await selectOffset(FIXTURE_STREAM_OFFSET_HEX);
+  const editedPixelsLine = await waitPreview("modificada");
+  const editedPixelsSha = (editedPixelsLine.match(/pixels ([0-9a-f]{16})/) ?? [])[1] ?? "";
+  if (editedPixelsSha !== expectedEditedPixelsSha.slice(0, 16)) {
+    fail(`prévia da cópia não é o plain editado previsto: ui=${editedPixelsSha} esperado=${expectedEditedPixelsSha.slice(0, 16)}`);
+  }
+  record(6, "cópia reaberta no produto decodifica exatamente no plain editado (prévia conferida por hash)", {
+    editedPixelsSha, esperado: expectedEditedPixelsSha.slice(0, 16),
+  });
+
+  // ---- medições no core: memória e tela, mesma janela de frames ----
+  const loadPaused = async (romPathForCore, label) => {
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [romPathForCore, { startPaused: true }]);
+    if (loaded !== true) fail(`carga da ROM falhou (${label}).`);
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionId);
+        return state?.emulatorLoaded === true && state?.emulPaused === true ? state : false;
+      },
+      20000, `ROM não ficou pausada pronta (${label}).`, 100
+    );
+    await closeVisibleConsoleDrawer(sessionId, label);
+  };
+  const observe = async (label) => {
+    // emulator_observe devolve EmulatorObservationResult DIRETO (sem envelope).
+    const observation = await invokeCoreObserveCommand(sessionId, "emulator_observe", {});
+    if (!observation?.ok || !Array.isArray(observation.framebuffer_rgba)) {
+      fail(`framebuffer do core indisponível (${label}): ${JSON.stringify(observation?.message ?? observation)?.slice(0, 200)}`);
+    }
+    return {
+      bytes: Buffer.from(observation.framebuffer_rgba),
+      width: Number(observation.framebuffer_width),
+      height: Number(observation.framebuffer_height),
+      romSha256: observation.rom_sha256 ?? "",
+      coreLabel: observation.core_label ?? "",
+      corePath: observation.core_path ?? "",
+      framesRun: Number(observation.frames_run ?? -1),
+      nonBlackPixels: Number(observation.non_black_pixels ?? -1),
+    };
+  };
+  const runFrames = async (frames, label) => {
+    const run = await invokeCoreObserveCommand(sessionId, "emulator_run_frames", { frames });
+    if (!run?.ok) fail(`emulator_run_frames falhou (${label}): ${JSON.stringify(run)?.slice(0, 200)}`);
+  };
+  // `emulator_read_memory` responde ok:true inclusive quando o core nao expoe a
+  // regiao (retro_get_memory_size == 0 -> data vazia). Sem checar tamanho, uma
+  // regiao ausente vira um "0 divergencias" vacuamente Aprovado.
+  const readRegion = async (region, size, label) => {
+    const result = await invokeCoreObserveCommand(sessionId, "emulator_read_memory", { region, offset: 0, length: size });
+    if (!result?.ok || !Array.isArray(result.data)) {
+      fail(`leitura da região ${region} falhou (${label}): ${JSON.stringify(result)?.slice(0, 200)}`);
+    }
+    const total = Number(result.total_size ?? -1);
+    if (total < 0) fail(`região ${region} sem total_size (${label}): ${JSON.stringify(result).slice(0, 200)}`);
+    return { available: total > 0 && result.data.length > 0, totalSize: total, bytesRead: result.data.length, bytes: Buffer.from(result.data) };
+  };
+  const capture = async (romPathForCore, label, expectedRomSha) => {
+    await loadPaused(romPathForCore, label);
+    const epoch = await invokeCoreObserveEpoch(sessionId);
+    if (!epoch) fail(`época do core indisponível (${label}).`);
+    await runFrames(SETTLE_FRAMES, label);
+    const memory = { wram: await readRegion(2, 0x10000, label), vram: await readRegion(3, 0x10000, label) };
+    if (!memory.wram.available) fail(`o core não expõe WRAM (região 2, total_size=${memory.wram.totalSize}) — a prova de memória não pode ser feita (${label}).`);
+    const first = await observe(label);
+    await runFrames(SETTLE_FRAMES, label);
+    const second = await observe(label);
+    // O core precisa confirmar que roda MESMO a ROM pedida; sem isso a
+    // comparação entre runs não significa nada.
+    for (const frame of [first, second]) {
+      if (frame.romSha256 !== expectedRomSha) {
+        fail(`core reporta ROM ${frame.romSha256} em vez de ${expectedRomSha} (${label})`);
+      }
+      if (frame.nonBlackPixels < 1000) fail(`tela quase preta (${label}): ${frame.nonBlackPixels} px não pretos`);
+    }
+    return { ...memory, frames: [first, second] };
+  };
+  const byteDiffs = (a, b) => {
+    const out = [];
+    for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] !== b[i]) out.push(i);
+    return out;
+  };
+
+  const baseline = await capture(fixtureRomPath, "original", romSha);
+  const control = await capture(fixtureRomPath, "original-controle", romSha);
+  const edited = await capture(modifiedPath, "modificado", modifiedSha);
+  if (baseline.frames[0].width !== edited.frames[0].width || baseline.frames[0].height !== edited.frames[0].height) {
+    fail(`dimensões de framebuffer divergem entre runs: ${baseline.frames[0].width}x${baseline.frames[0].height} vs ${edited.frames[0].width}x${edited.frames[0].height}`);
+  }
+  // A tela do fixture é estática após o desempacotamento; qualquer mudança
+  // entre amostras seria não-determinismo, não efeito da edição.
+  const staticCheck = (which) => {
+    const frames = which.frames;
+    const moved = byteDiffs(frames[0].bytes, frames[1].bytes).length;
+    if (moved > 0) fail(`tela do fixture não é estática (${which.label}): ${moved} byte(s) mudaram entre frames`);
+  };
+  const vramComparable = baseline.vram.available && control.vram.available;
+  const controlDiffs = {
+    wram: byteDiffs(baseline.wram.bytes, control.wram.bytes).length,
+    vram: vramComparable ? byteDiffs(baseline.vram.bytes, control.vram.bytes).length : null,
+    framebuffer: byteDiffs(baseline.frames[0].bytes, control.frames[0].bytes).length,
+  };
+  if (controlDiffs.wram || controlDiffs.vram || controlDiffs.framebuffer) {
+    fail(`determinismo quebrado no controle original/original: ${JSON.stringify(controlDiffs)}`);
+  }
+  staticCheck({ ...baseline, label: "original" });
+  staticCheck({ ...edited, label: "modificado" });
+
+  const wramDiffs = byteDiffs(baseline.wram.bytes, edited.wram.bytes);
+  if (wramDiffs.length !== 1) {
+    fail(`WRAM deveria divergir em exatamente 1 byte (o plain chunky descompactado); divergiu em ${wramDiffs.length}: ${wramDiffs.slice(0, 8).map((v) => v.toString(16))}`);
+  }
+  const wramAt = wramDiffs[0];
+  if ((baseline.wram.bytes[wramAt] & 0x0f) !== fromIndex || (edited.wram.bytes[wramAt] & 0x0f) !== toIndex) {
+    fail(`byte divergente no WRAM não é o plain esperado em ${wramAt.toString(16)}: ${baseline.wram.bytes[wramAt].toString(16)} -> ${edited.wram.bytes[wramAt].toString(16)}`);
+  }
+  // O core Libretro carregado decide quais regiões são legíveis. O Genesis Plus
+  // GX expõe SYSTEM_RAM mas retro_get_memory_size(VIDEO_RAM) == 0: nesse caso a
+  // perna de VRAM NÃO é observável e não pode ser contada como Aprovado.
+  if (baseline.vram.available !== control.vram.available || baseline.vram.available !== edited.vram.available
+    || baseline.vram.totalSize !== control.vram.totalSize || baseline.vram.totalSize !== edited.vram.totalSize) {
+    fail(`disponibilidade de VRAM oscilou entre runs: ${JSON.stringify({ baseline: baseline.vram.totalSize, controle: control.vram.totalSize, editado: edited.vram.totalSize })}`);
+  }
+  if (baseline.wram.bytesRead !== edited.wram.bytesRead) {
+    fail(`WRAM lida em tamanhos diferentes entre original e modificado: ${baseline.wram.bytesRead} vs ${edited.wram.bytesRead}`);
+  }
+  const vramObserved = baseline.vram.available && edited.vram.available;
+  let vramProof = {
+    observed: false,
+    reason: `o core ${baseline.frames[0].coreLabel || "?"} não expõe a região VIDEO_RAM (total_size=${baseline.vram.totalSize}/${edited.vram.totalSize}); a cadeia causal fica provada por WRAM + framebuffer`,
+  };
+  if (vramObserved) {
+    const vramDiffs = byteDiffs(baseline.vram.bytes, edited.vram.bytes);
+    if (vramDiffs.length !== 4) {
+      fail(`VRAM deveria divergir em exatamente 4 bytes (1 pixel 4bpp planar); divergiu em ${vramDiffs.length}: ${vramDiffs.slice(0, 12).map((v) => v.toString(16))}`);
+    }
+    const vramBlocks = new Set(vramDiffs.map((i) => Math.floor(i / 32)));
+    if (vramBlocks.size !== 1) fail(`divergência de VRAM espalhada por ${vramBlocks.size} tiles: ${vramDiffs.map((v) => v.toString(16))}`);
+    const vramTileBase = [...vramBlocks][0] * 32;
+    const vramRows = vramDiffs.map((i) => i - vramTileBase).sort((a, b) => a - b);
+    const expectedRows = [0, 1, 2, 3].map((k) => k * 8 + NEAR_MISS_ROW);
+    if (JSON.stringify(vramRows) !== JSON.stringify(expectedRows)) {
+      fail(`bytes divergentes em VRAM não formam a linha ${NEAR_MISS_ROW} de um tile 4bpp: ${JSON.stringify(vramRows)} vs ${JSON.stringify(expectedRows)}`);
+    }
+    const planeBits = vramDiffs.map((i) => baseline.vram.bytes[i] ^ edited.vram.bytes[i]);
+    if (new Set(planeBits).size !== 1 || (planeBits[0] & (planeBits[0] - 1)) !== 0) {
+      fail(`VRAM: mudança não é um único bit por plano: ${planeBits.map((v) => v.toString(16))}`);
+    }
+    const bit = Math.log2(planeBits[0]);
+    if (bit !== TILE_PX - 1 - PLANT_COL) {
+      fail(`VRAM: bit do plano ${bit} não corresponde à coluna ${PLANT_COL} (esperado ${TILE_PX - 1 - PLANT_COL})`);
+    }
+    if (vramDiffs.some((i) => (baseline.vram.bytes[i] & planeBits[0]) !== 0 || (edited.vram.bytes[i] & planeBits[0]) !== planeBits[0])) {
+      fail("VRAM: plano não passou de 0 para 1 no pixel previsto");
+    }
+    vramProof = {
+      observed: true,
+      tileBase: `0x${vramTileBase.toString(16)}`,
+      offsets: vramDiffs.map((i) => `0x${i.toString(16)}`),
+      bit,
+    };
+  }
+  record(7, vramObserved
+    ? "prova de memória: 1 byte no WRAM (plain descompactado) e 1 pixel (4 planos) no VRAM, exatamente onde o fonte do fixture diz"
+    : "prova de memória: 1 byte no WRAM (plain descompactado) exatamente onde o fonte do fixture diz; VRAM não legível no core, então a perna de VRAM fica NÃO PROVADA (registrada como limitação, não como sucesso)", {
+    frames: SETTLE_FRAMES * 2,
+    core: { label: baseline.frames[0].coreLabel, path: baseline.frames[0].corePath },
+    wram: { available: true, offset: `0x${wramAt.toString(16)}`, before: baseline.wram.bytes[wramAt].toString(16), after: edited.wram.bytes[wramAt].toString(16) },
+    vram: vramObserved ? vramProof : { ...vramProof, available: false },
+    regiões: { wram: { total: baseline.wram.totalSize, lidos: baseline.wram.bytesRead }, vram: { total: baseline.vram.totalSize, lidos: baseline.vram.bytesRead } },
+    controle: controlDiffs,
+  });
+
+  // ---- origem da tela resolvida pela ESTRUTURA de cores, sem fórmula ----
+  // Não se assume nenhuma conversão paleta->RGB: exige-se apenas que o mesmo
+  // índice tenha sempre a mesma cor dentro do bloco (função índice->cor). Não se
+  // exige injetividade porque o DAC do Mega Drive funde níveis (0x3 e 0x7 têm a
+  // mesma tensão): no fixture, 0x333 e 0x777 colidem, então a bijetor falharia
+  // em qualquer origem. O desempate é o número de classes de cor observadas —
+  // o bloco real tem de ser a janela com MAIS classes, o que elimina as janelas
+  // puramente preto (uma só classe) que também seriam "consistentes".
+  const partitionMatch = (frame, ox, oy, expected) => {
+    const indexToColor = new Map();
+    const colors = new Set();
+    for (let y = 0; y < BLOCK_H; y++) {
+      let p = ((oy + y) * frame.width + ox) * 4;
+      for (let x = 0; x < BLOCK_W; x++, p += 4) {
+        const color = (frame.bytes[p] << 16) | (frame.bytes[p + 1] << 8) | frame.bytes[p + 2];
+        const index = expected[y * BLOCK_W + x];
+        const knownColor = indexToColor.get(index);
+        if (knownColor !== undefined) { if (knownColor !== color) return null; } else indexToColor.set(index, color);
+        colors.add(color);
+      }
+    }
+    if (indexToColor.size !== new Set(expected).size) return null;
+    return { indexToColor, classes: colors.size };
+  };
+  const findOrigins = (frame, expected) => {
+    const hits = [];
+    for (let oy = 0; oy + BLOCK_H <= frame.height; oy++) {
+      for (let ox = 0; ox + BLOCK_W <= frame.width; ox++) {
+        const found = partitionMatch(frame, ox, oy, expected);
+        if (found) hits.push({ ox, oy, ...found });
+      }
+    }
+    if (hits.length === 0) return { best: hits, maxClasses: 0 };
+    const maxClasses = Math.max(...hits.map((hit) => hit.classes));
+    return { best: hits.filter((hit) => hit.classes === maxClasses), maxClasses };
+  };
+  const frameDiffPixels = (a, b) => {
+    const out = [];
+    for (let p = 0; p < Math.min(a.bytes.length, b.bytes.length); p += 4) {
+      if (a.bytes[p] !== b.bytes[p] || a.bytes[p + 1] !== b.bytes[p + 1] || a.bytes[p + 2] !== b.bytes[p + 2]) {
+        out.push([(p / 4) % a.width, Math.floor(p / 4 / a.width),
+          (a.bytes[p] << 16) | (a.bytes[p + 1] << 8) | a.bytes[p + 2],
+          (b.bytes[p] << 16) | (b.bytes[p + 1] << 8) | b.bytes[p + 2]]);
+      }
+    }
+    return out;
+  };
+  const frameDiffs = [0, 1].map((i) => frameDiffPixels(baseline.frames[i], edited.frames[i]));
+  await writeFile(path.join(validationDir, "rex-fixture-frame-original.ppm"), ppmFromRgba(baseline.frames[0]));
+  await writeFile(path.join(validationDir, "rex-fixture-frame-modificado.ppm"), ppmFromRgba(edited.frames[0]));
+  console.log(`[rex-fixture-e2e] framebuffer ${baseline.frames[0].width}x${baseline.frames[0].height}; pixels de tela diferentes: ${JSON.stringify(frameDiffs.map((d) => d.length))} → ${JSON.stringify(frameDiffs[0].slice(0, 6))}; dumps em ${validationDir}/rex-fixture-frame-*.ppm`);
+  const originalOrigins = findOrigins(baseline.frames[0], originalBlock);
+  const editedOrigins = findOrigins(edited.frames[0], editedBlock);
+  if (originalOrigins.best.length !== 1 || editedOrigins.best.length !== 1) {
+    const histogram = (frame) => {
+      const counts = new Map();
+      for (let p = 0; p < frame.bytes.length; p += 4) {
+        const color = (frame.bytes[p] << 16) | (frame.bytes[p + 1] << 8) | frame.bytes[p + 2];
+        counts.set(color, (counts.get(color) ?? 0) + 1);
+      }
+      return [...counts.entries()].sort((a, b) => b[1] - a[1])
+        .slice(0, 10).map(([color, n]) => `${color.toString(16)}x${n}`).join(" ");
+    };
+    fail(`origem do bloco não é única: original=${originalOrigins.best.length} modificado=${editedOrigins.best.length}; ` +
+      `classes de cor no melhor acerto: ${JSON.stringify({ original: originalOrigins.maxClasses, modificado: editedOrigins.maxClasses })}; ` +
+      `cores do frame original: ${histogram(baseline.frames[0])}`);
+  }
+  if (originalOrigins.best[0].ox !== editedOrigins.best[0].ox || originalOrigins.best[0].oy !== editedOrigins.best[0].oy) {
+    fail(`origem do bloco mudou entre runs: ${JSON.stringify(originalOrigins.best[0])} vs ${JSON.stringify(editedOrigins.best[0])}`);
+  }
+  if (originalOrigins.maxClasses !== editedOrigins.maxClasses) {
+    fail(`número de classes de cor do bloco mudou entre runs: ${originalOrigins.maxClasses} vs ${editedOrigins.maxClasses}`);
+  }
+  const { ox: originX, oy: originY } = originalOrigins.best[0];
+  const mapBefore = originalOrigins.best[0].indexToColor;
+  const mapAfter = editedOrigins.best[0].indexToColor;
+  // O DAC do Mega Drive funde níveis de brilho: as 16 palavras de paleta
+  // autoradas do fixture renderizam 11 cores. Por isso o índice NÃO é
+  // identificável pela cor; a identificação é por POSIÇÃO (o fonte do fixture
+  // diz onde cada tile vai) e a cor só confirma a classe do pixel.
+  const mergedIndices = [...mapBefore.keys()].filter((index) => {
+    const color = mapBefore.get(index);
+    return [...mapBefore.entries()].some(([other, otherColor]) => other !== index && otherColor === color);
+  }).sort((a, b) => a - b);
+  for (let index = 0; index < 16; index++) {
+    if (mapBefore.get(index) !== mapAfter.get(index)) {
+      fail(`cor do índice ${index} divergiu entre original e modificado — a edição não deveria tocar a paleta`);
+    }
+  }
+  if (mapBefore.get(fromIndex) === mapBefore.get(toIndex)) {
+    fail(`classes de índice ${fromIndex} e ${toIndex} são a MESMA cor no core: a edição não teria efeito visual observável`);
+  }
+  const predictedX = originX + blockX;
+  const predictedY = originY + blockY;
+  for (const diffs of frameDiffs) {
+    if (diffs.length !== 1) {
+      fail(`framebuffer divergiu em ${diffs.length} pixel(s); exatamente 1 era previsto: ${JSON.stringify(diffs.slice(0, 6))}`);
+    }
+    const [x, y, before, after] = diffs[0];
+    if (x !== predictedX || y !== predictedY) {
+      fail(`pixel divergente em (${x},${y}), previsto em (${predictedX},${predictedY}) (tile ${EDIT_TILE}, linha ${NEAR_MISS_ROW}, col ${PLANT_COL})`);
+    }
+    if (before !== mapBefore.get(fromIndex)) fail(`cor antes (${before.toString(16)}) não é a cor da classe de índice ${fromIndex}`);
+    if (after !== mapAfter.get(toIndex)) fail(`cor depois (${after.toString(16)}) não é a cor da classe de índice ${toIndex}`);
+  }
+  record(8, "EFEITO VISUAL CAUSAL PELA INTERFACE: exatamente 1 pixel de tela muda, no coordenada prevista pelo fonte, com a cor da classe de índice certa", {
+    framebuffer: `${baseline.frames[0].width}x${baseline.frames[0].height}`,
+    origemDoBloco: [originX, originY],
+    pixelPrevisto: [predictedX, predictedY],
+    diferencaPorFrame: frameDiffs.map((d) => d.length),
+    antes: `0x${frameDiffs[0][0][2].toString(16)}`,
+    depois: `0x${frameDiffs[0][0][3].toString(16)}`,
+    classesDeCor: originalOrigins.maxClasses,
+    indicesComMesmaCor: mergedIndices,
+    indiceAntes: fromIndex, indiceDepois: toIndex,
+  });
+
+  // Apresentação: o canvas do app exibe o framebuffer do core no mesmo frame.
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-resume");
+  await pause(800);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "viewport-pause");
+  await pause(250);
+  {
+    const canvasFrame = await readCanonicalGameFrame(sessionId, { includePixels: true });
+    const core = await observe("apresentacao");
+    if (!canvasFrame?.rgba) fail("canvas do app indisponível.");
+    const canvasBytes = Buffer.from(canvasFrame.rgba);
+    const canvasW = Number(canvasFrame.width);
+    const canvasH = Number(canvasFrame.height);
+    let presented = canvasBytes.equals(core.bytes);
+    if (!presented && canvasW >= core.width && canvasH >= core.height) {
+      const coreRow0 = core.bytes.subarray(0, core.width * 4);
+      for (let oy = 0; oy <= canvasH - core.height && !presented; oy++) {
+        for (let ox = 0; ox <= canvasW - core.width && !presented; ox++) {
+          const start = (oy * canvasW + ox) * 4;
+          if (!canvasBytes.subarray(start, start + core.width * 4).equals(coreRow0)) continue;
+          presented = true;
+          for (let y = 0; y < core.height && presented; y++) {
+            const c = ((oy + y) * canvasW + ox) * 4;
+            if (!canvasBytes.subarray(c, c + core.width * 4).equals(core.bytes.subarray(y * core.width * 4, (y + 1) * core.width * 4))) {
+              presented = false;
+            }
+          }
+        }
+      }
+    }
+    if (!presented) fail(`canvas do app não apresenta o framebuffer do core: canvas=${canvasW}x${canvasH} core=${core.width}x${core.height}`);
+    record(9, "canvas do app == framebuffer do core (mesmo frame congelado) na ROM modificada", {
+      canvas: `${canvasW}x${canvasH}`, core: `${core.width}x${core.height}`, presented: true,
+    });
+  }
+
+  // As medições carregaram ROMs no viewport e a vista ativa do workspace é
+  // estado React; os negativos exigem painel recém-montado, senão o seletor e o
+  // sha observados podem ser resíduo da fase positiva.
+  await openResourcePanel("após as medições", { fresh: true });
+  // ---- negativos alcançáveis pela interface ----
+  // Cada negativo começa por "Verificar recursos": verify limpa resultado,
+  // prévia e edições pendentes, então a recusa observada é do PRIMEIRO apply
+  // daquela configuração (sem resto de estado do apply positivo).
+  const scratchRom = path.join(validationDir, "rex-fixture-scratch.bin");
+  await writeFile(scratchRom, romBytes);
+  const clearPanel = async (expectedSha, label) => {
+    // Barreira real: o painel tem de reler o arquivo AGORA e reportar o sha que
+    // ele tinha no disco antes do clique. Sem isso, um seletor residual da
+    // verificação anterior satisfaz a espera vazia e, no negativo de
+    // identidade, a mutação aconteceria enquanto o verify ainda lia.
+    await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+    await waitFor(
+      async () => (await textOf("rex-resource-rom-sha")).includes(expectedSha.slice(0, 16)),
+      30000, `verificação (${label}) não reportou o sha esperado ${expectedSha.slice(0, 16)}.`, 250
+    );
+    await waitFor(
+      async () => executeScript(sessionId, `return Boolean(document.querySelector('${panel} [data-testid="rex-resource-select"]'));`),
+      30000, `cópia de trabalho do fixture não verificou recursos (${label}).`, 250
+    );
+    await selectOffset(FIXTURE_STREAM_OFFSET_HEX);
+    await waitPreview(label);
+  };
+  await setPanelInput("rex-resource-rom-input", scratchRom);
+  await clearPanel(romSha, "intervalo");
+  await setPanelInput("rex-resource-paint-index", toIndex);
+  // Negativo de intervalo, pelo que a interface REAL permite observar: o painel
+  // descarta edição com tile >= num_tiles (CompressedResourcePanel.tsx:242),
+  // então a recusa observável é "nada entra na fila e nada é escrito". A recusa
+  // do núcleo (rex_resources.rs:634, "tile N fora do recurso") é provada no
+  // teste unitário do produto, não aqui.
+  await setPanelInput("rex-resource-edit-tile", TILE_COUNT);
+  await setPanelInput("rex-resource-edit-row", 0);
+  await setPanelInput("rex-resource-edit-col", 0);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await pause(400);
+  // O que este negativo pode observar pela interface: (1) nada entra na fila e
+  // (2) o painel EXPLICA o descarte em vez de calar (6351f15 passou a renderizar
+  // "nenhuma edição pendente" quando a fila está vazia — a asserção antiga exigia
+  // o literal "0 …" e apodreceu sem que o E2E fosse reexecutado). A recusa do
+  // núcleo (rex_resources.rs, "tile N fora do recurso") é provada no teste
+  // unitário do produto, não aqui.
+  const guardedCount = await textOf("rex-resource-edit-count");
+  if (!/^\s*(0\b|nenhuma edição)/.test(guardedCount)) {
+    fail(`edição com tile ${TILE_COUNT} (fora do recurso de ${TILE_COUNT} tiles) entrou na fila da UI: ${guardedCount}`);
+  }
+  const guardNotice = await waitFor(
+    async () => {
+      const notice = await textOf("rex-resource-notice");
+      return notice.includes(`tile ${TILE_COUNT} fora do recurso`) &&
+        notice.includes("fila atual foi preservada")
+        ? notice
+        : false;
+    },
+    10000,
+    `o painel não explicou o descarte da edição fora do intervalo (fila: ${guardedCount}).`,
+    250
+  );
+  record(10, "negativo de intervalo pela interface: fila vazia E aviso explicando o descarte", {
+    editCount: guardedCount.trim(),
+    notice: guardNotice,
+  });
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const boundsOutcome = await waitFor(
+    async () => {
+      const resultText = await textOf("rex-resource-result");
+      return resultText ? resultText : false;
+    },
+    30000, "aplicação sem edição válida não foi reportada pelo painel.", 250
+  );
+  const boundsError = await textOf("rex-resource-error");
+  if (boundsOutcome.includes("applied")) fail(`transação aplicou edição fora do recurso: ${boundsOutcome}`);
+  if ((await sha(await readFile(scratchRom))) !== romSha) fail("a recusa de intervalo escreveu na cópia de trabalho");
+  // Controle positivo da guarda: os mesmos cliques com tile VÁLIDO enfileiram a
+  // edição. Sem este passo, o 0 acima poderia ser um botão morto.
+  await setPanelInput("rex-resource-edit-tile", EDIT_TILE);
+  await setPanelInput("rex-resource-edit-row", NEAR_MISS_ROW);
+  await setPanelInput("rex-resource-edit-col", PLANT_COL);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await waitFor(
+    async () => /^\s*1\b/.test(await textOf("rex-resource-edit-count")),
+    15000, "a UI não enfileirou a edição válida (controle positivo da guarda de intervalo).", 250
+  );
+  const boundsProof = {
+    guardedCount, boundsOutcome, boundsError,
+    controlePositivo: "tile válido enfileira 1 edição; tile fora do recurso enfileira 0",
+    recusaDoNucleo: "rex_resources.rs:634 ('tile N fora do recurso') — teste unitário do produto",
+  };
+  // TOCTOU: a ROM muda no disco depois da verificação, sob o mesmo painel.
+  await openResourcePanel("antes do negativo de identidade", { fresh: true });
+  await setPanelInput("rex-resource-rom-input", scratchRom);
+  await clearPanel(romSha, "identidade");
+  const mutated = Buffer.from(romBytes);
+  mutated[mutated.length - 1] ^= 0xff;
+  await writeFile(scratchRom, mutated);
+  await setPanelInput("rex-resource-edit-tile", EDIT_TILE);
+  await setPanelInput("rex-resource-edit-row", NEAR_MISS_ROW);
+  await setPanelInput("rex-resource-edit-col", PLANT_COL);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-add-edit");
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-apply");
+  const identityError = await waitFor(
+    async () => {
+      const errorText = await textOf("rex-resource-error");
+      return errorText.startsWith("rom_identity_mismatch") ? errorText : false;
+    },
+    30000, `ROM alterada sob o painel não foi recusada por identidade; último erro: ${await textOf("rex-resource-error")}`, 250
+  );
+  if ((await textOf("rex-resource-result")).includes("applied")) fail("transação aplicou edição com ROM alterada no disco");
+  const scratchAfter = sha(await readFile(scratchRom));
+  if (scratchAfter === romSha) fail("negativo de identidade não alterou o arquivo de teste (prova vazia)");
+  await openResourcePanel("reabertura do fixture após os negativos", { fresh: true });
+  await setPanelInput("rex-resource-rom-input", fixtureRomPath);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "rex-resource-verify");
+  await waitFor(async () => (await textOf("rex-resource-rom-sha")).includes(romSha.slice(0, 16)), 30000, "fixture original não reabriu após os negativos.", 250);
+  const fixtureAfterNegatives = sha(await readFile(fixtureRomPath));
+  if (fixtureAfterNegatives !== romSha) fail(`fixture autoral foi alterada durante o teste: ${fixtureAfterNegatives}`);
+  record(11, "negativos pela UI: fila de intervalo guardada (0 entradas, 0 escritas; controle positivo enfileira 1) e identidade de ROM recusada (arquivo alterado sob o painel)", {
+    bounds: boundsProof, identityError, fixtureRomIntact: true,
+    excessiveOutput: "coberto no teste de aceite do produto com varredura exaustiva de 15.360 candidatos de 1 pixel (README do fixture)",
+    dependentModified: "não alcançável aqui: o fixture tem 1 recurso LZ4W; coberto no BYOR (0x91a00 dependente de 0x8ff8e)",
+  });
+
+  const appBytes = await readFile(currentE2eRunContext?.appPath ?? "").catch(() => null);
+  const reportPath = path.join(validationDir, `rex-lz4w-fixture-effect-${artifactTimestamp()}-report.json`);
+  await writeFile(reportPath, `${JSON.stringify({
+    generatedAt: new Date().toISOString(),
+    scenario: "rex-lz4w-fixture-effect",
+    application: {
+      path: currentE2eRunContext?.appPath ?? null,
+      sha256: appBytes ? sha(appBytes) : null,
+    },
+    fixture: {
+      romPath: fixtureRomPath, romSha256: romSha, truthPath,
+      truthSha256: sha(await readFile(truthPath)),
+      headerOffset: FIXTURE_HEADER_OFFSET, streamOffset: streamStart, slotBytes: FIXTURE_SLOT_BYTES,
+    },
+    edit: { tile: EDIT_TILE, row: NEAR_MISS_ROW, col: PLANT_COL, fromIndex, toIndex },
+    artifacts: { modifiedRomPath: modifiedPath, modifiedRomSha256: modifiedSha, patchPath, patchBpsSha256: patchSha },
+    prediction: {
+      origemDoBloco: [originX, originY], tela: [predictedX, predictedY],
+      preview: [blockX, blockY], memory: { wramByte: wramAt, vram: vramProof },
+    },
+    steps,
+    limitacoes: vramObserved ? [] : [vramProof.reason],
+    semanticState: "VERIFIED — fixture autoral com consumidor provado por construção",
+    escopo: "esta prova vale para o fixture autoral; o alvo comercial 0xc8cc8 continua com semanticState BLOQUEADO (consumidor não provado)",
+  }, null, 2)}\n`, "utf8");
+  console.log(`[rex-lz4w-fixture-effect] relatório=${reportPath}`);
+  console.log(`[rex-lz4w-fixture-effect] ${JSON.stringify({
+    romSha, modifiedSha, patchSha,
+    pixelDeTela: [predictedX, predictedY],
+    pixelsDiferentes: frameDiffs[0].length,
+    wramDiffs: wramDiffs.length, vramProva: vramProof,
+    semanticState: "VERIFIED (fixture autoral; consumidor por construção)",
+  })}`);
+  console.log(vramObserved
+    ? "OK: Desktop Tauri rex-lz4w-fixture-effect passou — efeito causal de 1 pixel provado pela interface e pelo core (WRAM + VRAM + tela)."
+    : `OK: Desktop Tauri rex-lz4w-fixture-effect passou — efeito causal de 1 pixel provado pela interface e pelo core (WRAM + tela). ${vramProof.reason}`);
+}
+
+async function runBranchLogicRecoveryScenario(sessionId, projectDir) {  const nodeRomPath = process.env.RDS_LOGIC_BRANCH_NODE_ROM ?? "";
+  const routineRomPath = process.env.RDS_LOGIC_BRANCH_ROUTINE_ROM ?? "";
+  const offset = Number.parseInt(process.env.RDS_LOGIC_BRANCH_OFFSET ?? "", 0);
+  const routineSignature = Buffer.from("064000010C4000056C0A33FC0000E0FFFF004E7533FC0001E0FFFF004E75", "hex");
+  if (!nodeRomPath || !routineRomPath || !Number.isInteger(offset) || !(await pathExists(nodeRomPath)) || !(await pathExists(routineRomPath))) {
+    fail("logic-recovery-branch exige RDS_LOGIC_BRANCH_NODE_ROM, RDS_LOGIC_BRANCH_ROUTINE_ROM e RDS_LOGIC_BRANCH_OFFSET.");
+  }
+  const nodeBytes = await readFile(nodeRomPath);
+  const routineBytes = await readFile(routineRomPath);
+  if (!routineBytes.subarray(offset, offset + routineSignature.length).equals(routineSignature)) {
+    fail(`fixture branch não contém a rotina exata no offset 0x${offset.toString(16)}.`);
+  }
+  const nodeSourcePath = path.join(path.dirname(path.dirname(nodeRomPath)), "src", "main.c");
+  const routineSourcePath = path.join(path.dirname(path.dirname(routineRomPath)), "src", "main.c");
+  const nodeSource = await readFile(nodeSourcePath, "utf8");
+  const routineSource = await readFile(routineSourcePath, "utf8");
+  if (!nodeSource.includes("node_generated_branch_compare_word") || !nodeSource.includes("rds_branch_result")) fail("caminho Node não contém read/add/compare/branch/write da fixture.");
+  if (!routineSource.includes("recovered_branch_logic_bridge")) fail("caminho original não contém a chamada da rotina M68K vinculada.");
+
+  const artifactPrefix = `logic-recovery-branch-${artifactTimestamp()}`;
+  const reportPath = path.join(validationDir, `${artifactPrefix}-report.json`);
+  const appBytes = await readFile(currentE2eRunContext?.appPath ?? "").catch(() => null);
+  const report = {
+    generatedAt: new Date().toISOString(),
+    scenario: "logic-recovery-branch",
+    application: { path: currentE2eRunContext?.appPath ?? null, sha256: appBytes ? createHash("sha256").update(appBytes).digest("hex") : null },
+    fixture: {
+      nodeRomPath, routineRomPath,
+      nodeRomSha256: createHash("sha256").update(nodeBytes).digest("hex"),
+      routineRomSha256: createHash("sha256").update(routineBytes).digest("hex"),
+      nodeSourcePath, routineSourcePath,
+      nodeSourceSha256: createHash("sha256").update(nodeSource).digest("hex"),
+      routineSourceSha256: createHash("sha256").update(routineSource).digest("hex"),
+    },
+    profileId: "m68k.add_compare_branch_word_d0_wram.v1",
+    offset,
+    steps: [],
+  };
+
+  await setSessionWindowRect(sessionId, 1280, 800);
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  await waitFor(async () => (await readAutomationState(sessionId))?.activeProjectDir === projectDir, 30000, "Fixture branch não abriu", 250);
+  await closeVisibleConsoleDrawer(sessionId);
+  await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+  await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace não abriu para branch");
+  await fillInputBySelector(sessionId, 'input[placeholder="/roms/game.md"]', routineRomPath);
+  await clickButtonByTextWithPointerEvents(sessionId, "Analisar ROM");
+  await waitFor(async () => executeScript(sessionId, `return document.body?.textContent?.includes("ROM Map") ? true : false;`), 30000, "Análise branch não concluiu", 250);
+  const openedCode = await executeScript(sessionId, `const button = Array.from(document.querySelectorAll("button")).find((candidate) => ["Code", "Voltar para Code"].includes(candidate.textContent?.replace(/\\s+/g, " ").trim())); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({block:"center"}); button.click(); return true;`);
+  if (!openedCode) fail("A aba Code não abriu a superfície branch.");
+  await waitForBodyText(sessionId, "Lógica ROM → Nodes", 15000, "Code branch não abriu");
+  await fillInputByLabel(sessionId, "Offset", `0x${offset.toString(16)}`);
+  await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="reverse-recover-logic"]:not([disabled])'));`), 30000, "Recuperação branch não habilitou", 250);
+  await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-recover-logic");
+  await waitFor(async () => executeScript(sessionId, `const card=document.querySelector('[data-testid="reverse-logic-recovery-card"]'); return card?.textContent?.includes("m68k.add_compare_branch_word_d0_wram.v1") ? true : false;`), 30000, "Perfil branch não apareceu na UI", 250);
+
+  const invoke = async (command, args = {}) => executeAsyncScript(sessionId, `const done=arguments[arguments.length-1]; const invoke=window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke; if(typeof invoke!=="function"){done({ok:false,error:"Tauri invoke indisponível"});return;} invoke(arguments[0],arguments[1]??{}).then((value)=>done({ok:true,value})).catch((error)=>done({ok:false,error:String(error)}));`, [command, args]);
+  const recoveryProbe = await invoke("rom_recover_logic", { romPath: routineRomPath, offset });
+  if (!recoveryProbe?.ok || !recoveryProbe.value?.ok || recoveryProbe.value.profile_id !== report.profileId) fail(`probe independente branch falhou: ${JSON.stringify(recoveryProbe)}`);
+  const states = recoveryProbe.value.independent_test_states ?? [];
+  const stateMap = new Map(states.map((state) => [state.input_d0, state]));
+  const expectedStates = [[3, 0, false], [4, 1, true], [5, 1, true], [0xffff, 0, false], [0x1234, 1, true]];
+  for (const [input, result, branchTaken] of expectedStates) {
+    const state = stateMap.get(input);
+    if (!state || state.output_result !== result || state.branch_taken !== branchTaken) fail(`oráculo independente branch incompleto em ${input}: ${JSON.stringify(state)}`);
+  }
+  if ((recoveryProbe.value.source_mappings ?? []).length !== 4 || !String(recoveryProbe.value.graph_json).includes("rom_branch_compare_word")) fail("source mapping/grafo branch não comprovaram as quatro faixas da rotina.");
+  report.steps.push({ step: "recover_exact_branch_profile", status: "passed", profileId: recoveryProbe.value.profile_id, bytes: [...routineSignature], operations: recoveryProbe.value.operations, sourceMappings: recoveryProbe.value.source_mappings, independentStates: states, coverage: { falseBranch: true, trueBranch: true, thresholdMinusOne: true, threshold: true, wordWrap: true } });
+
+  const noOpPath = `${routineRomPath}.branch5.patched.bin`;
+  const patchedPath = `${routineRomPath}.branch6.patched.bin`;
+  await rm(noOpPath, { force: true });
+  await rm(patchedPath, { force: true });
+  const patchNoOp = await invoke("rom_patch_recovered_logic", { romPath: routineRomPath, outputPath: noOpPath, expectedSha256: report.fixture.routineRomSha256, offset, immediate: 5 });
+  if (!patchNoOp?.ok || !patchNoOp.value?.output_path) fail(`patch branch no-op falhou: ${JSON.stringify(patchNoOp)}`);
+  await waitFor(async () => pathExists(noOpPath), 15000, "cópia branch no-op não foi criada", 100);
+  const noOpBytes = await readFile(noOpPath);
+  if (!noOpBytes.equals(routineBytes)) fail("patch branch no-op alterou a ROM.");
+
+  await callAutomationApi(sessionId, "setSelectedEntityId", ["camera_root"]);
+  await clickButtonByTextWithPointerEvents(sessionId, "Aplicar ao NodeGraph selecionado");
+  await waitFor(async () => executeScript(sessionId, `return document.body?.textContent?.includes("aplicado e persistido") ? true : false;`), 15000, "Grafo branch não persistiu", 250);
+  await callAutomationApi(sessionId, "closeProject");
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  const reopenedLogic = await waitFor(async () => { const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]); return state?.source?.graph_origin === "rom_recovered" ? state : false; }, 30000, "Grafo branch não reabriu", 250);
+  const reopenedGraph = JSON.parse(reopenedLogic.source?.graph_json ?? "{}");
+  const reopenedNode = (reopenedGraph.nodes ?? []).find((node) => node.type === "rom_branch_compare_word");
+  if (!reopenedNode || reopenedNode.params?.threshold !== 5 || reopenedNode.params?.rom_start !== offset || reopenedNode.params?.rom_end !== offset + routineSignature.length || reopenedGraph.edges?.length !== 1) fail(`save/reopen branch perdeu mapping/parâmetro: ${JSON.stringify(reopenedLogic)}`);
+  report.steps.push({ step: "save_reopen_branch_graph", status: "passed", graphOrigin: reopenedLogic.source.graph_origin, node: reopenedNode, edge: reopenedGraph.edges[0] });
+
+  const buildProject = async (label) => {
+    const before = await readAutomationState(sessionId);
+    const count = (before?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length;
+    await clickButtonByTestIdWithPointerEvents(sessionId, "toolbar-build-run");
+    const built = await waitFor(async () => { const state = await readAutomationState(sessionId); const next = (state?.consoleEntries ?? []).filter((entry) => String(entry.message ?? "").includes("Build concluido.")).length; return next > count ? state : false; }, 120000, `${label} não concluiu Build & Run`, 500);
+    const romPath = extractLatestRomPath(built);
+    if (!romPath) fail(`${label} não reportou ROM gerada.`);
+    const generatedMainPath = path.join(path.dirname(path.dirname(romPath)), "src", "main.c");
+    const generatedMain = await readFile(generatedMainPath, "utf8");
+    if (!generatedMain.includes("rds_branch_arithmetic") || !generatedMain.includes("rds_branch_recovery_result")) fail(`${label} não contém a rotina gerada pelo grafo: ${generatedMainPath}`);
+    return { romPath, generatedMainPath, generatedMain, romSha256: createHash("sha256").update(await readFile(romPath)).digest("hex") };
+  };
+  const originalBuild = await buildProject("Build branch original");
+  report.steps.push({ step: "build_graph_rom_original_parameter", status: "passed", romOrigin: "generated_from_reopened_nodegraph", ...originalBuild, generatedMainSha256: createHash("sha256").update(originalBuild.generatedMain).digest("hex"), expectedThreshold: 5 });
+
+  const neutralInput = { b:false,y:false,select:false,start:false,up:false,down:false,left:false,right:false,a:false,x:false,l:false,r:false };
+  const readBranchOracle = async (label) => {
+    const memory = await invoke("emulator_read_memory", { region: 2, offset: 0xff00, length: 4 });
+    if (!memory?.ok || !memory.value?.ok || (memory.value.data ?? []).length < 4) fail(`oracle branch indisponível após ${label}: ${JSON.stringify(memory)}`);
+    const bytes = Buffer.from(memory.value.data);
+    const word = (offsetValue) => (bytes[offsetValue] ?? 0) | ((bytes[offsetValue + 1] ?? 0) << 8);
+    return { result: word(0), input: word(2), rawHex: bytes.toString("hex"), region: 2, resultOffset: 0xff00, inputOffset: 0xff02 };
+  };
+  const inputCases = [3, 4, 5, 0, 0xffff, 0x1234];
+  const oracleResult = (input, threshold) => { const word = (input + 1) & 0xffff; const signedWord = word >= 0x8000 ? word - 0x10000 : word; return signedWord >= threshold ? 1 : 0; };
+  const observeBranchRom = async (romPath, label, threshold) => {
+    if (await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, { startPaused: true }]) !== true) fail(`Emulador não carregou ${label}.`);
+    await waitFor(async () => { const state = await readAutomationState(sessionId); return state?.activeViewportTab === "game" && state?.emulatorLoaded === true && state?.emulPaused === true ? state : false; }, 15000, `${label} não ficou pausada`, 100);
+    const epoch = await invoke("emulator_get_core_epoch");
+    const ack = await invoke("emulator_send_input", { joypad: neutralInput, sessionEpoch: epoch.value });
+    if (!ack?.ok || !ack.value?.ok) fail(`input neutro não confirmado para ${label}.`);
+    const warmed = await invoke("emulator_run_frames", { frames: 120 });
+    if (!warmed?.ok || !warmed.value?.ok) fail(`warmup falhou para ${label}.`);
+    const warmupOracle = await readBranchOracle(`${label} warmup`);
+    const samples = [];
+    const beforeFrames = warmed.value.frames_run;
+    let syncFrames = 0;
+    let synchronized = warmupOracle;
+    while (synchronized.input !== inputCases[0] && syncFrames < inputCases.length * 2) {
+      const ran = await invoke("emulator_run_frames", { frames: 1 });
+      if (!ran?.ok || !ran.value?.ok) fail(`sincronização do frame controlado falhou em ${label}.`);
+      syncFrames += 1;
+      synchronized = await readBranchOracle(`${label} sync ${syncFrames}`);
+    }
+    if (synchronized.input !== inputCases[0]) fail(`script de entrada não sincronizou em ${label}: ${JSON.stringify(synchronized)}`);
+    let current = synchronized;
+    for (let index = 0; index < 6; index += 1) {
+      if (index > 0) {
+        let attempts = 0;
+        while (current.input !== inputCases[index] && attempts < inputCases.length * 2) {
+          const ran = await invoke("emulator_run_frames", { frames: 1 });
+          if (!ran?.ok || !ran.value?.ok) fail(`frame controlado ${index} falhou em ${label}.`);
+          attempts += 1;
+          current = await readBranchOracle(`${label} frame ${index} sync ${attempts}`);
+        }
+      }
+      const observed = await invoke("emulator_observe");
+      const expectedInput = inputCases[index];
+      const oracle = current;
+      const expectedResult = oracleResult(oracle.input, threshold);
+      if (!observed?.ok || !observed.value?.ok || oracle.input !== expectedInput || oracle.result !== expectedResult) fail(`oracle independente branch divergiu em ${label}/${index}: ${JSON.stringify({ oracle, expectedInput, expectedResult, observed: observed?.value })}`);
+      samples.push({ frame: index + 1, input: oracle.input, expectedResult, oracle, romSha256: observed.value.rom_sha256, framebufferSha256: observed.value.framebuffer_sha256, framesRun: observed.value.frames_run });
+    }
+    const state = await readAutomationState(sessionId);
+    if (state?.emulPaused !== true || samples.length !== 6 || samples[5].framesRun < beforeFrames) fail(`${label} não preservou execução pausada/lote de 6 estados.`);
+    return { label, threshold, inputScript: samples.map((sample) => sample.input), warmupOracle, syncFrames, samples, romSha256: samples[0].romSha256, framebufferSha256: samples[0].framebufferSha256, inputAck: ack.value, controlledFrames: 6 };
+  };
+
+  const generatedOriginalObservation = await observeBranchRom(originalBuild.romPath, "ROM gerada pelo grafo (threshold 5)", 5);
+  const nodeObservation = await observeBranchRom(nodeRomPath, "ROM Node fixture (threshold 5)", 5);
+  const originalObservationA = await observeBranchRom(routineRomPath, "ROM original A (threshold 5)", 5);
+  const originalObservationB = await observeBranchRom(routineRomPath, "ROM original B (threshold 5)", 5);
+  const noOpObservation = await observeBranchRom(noOpPath, "ROM no-op threshold 5", 5);
+  const commonInputScript = JSON.stringify(originalObservationA.inputScript);
+  for (const observation of [generatedOriginalObservation, nodeObservation, originalObservationB, noOpObservation]) {
+    if (JSON.stringify(observation.inputScript) !== commonInputScript || JSON.stringify(observation.samples.map((sample) => sample.oracle.result)) !== JSON.stringify(originalObservationA.samples.map((sample) => sample.oracle.result))) fail("equivalência original/node/no-op/original não foi comprovada com entrada e estado controlados.");
+  }
+  if (JSON.stringify(originalObservationA.samples.map((sample) => sample.oracle)) !== JSON.stringify(originalObservationB.samples.map((sample) => sample.oracle)) || JSON.stringify(noOpObservation.samples.map((sample) => sample.oracle)) !== JSON.stringify(originalObservationA.samples.map((sample) => sample.oracle))) fail("execuções repetidas da ROM original/no-op não foram determinísticas.");
+  report.steps.push({ step: "common_input_controlled_execution_original_and_graph", status: "passed", expected: [0,1,1,0,0,1], nodeObservation, generatedOriginalObservation, originalObservationA, originalObservationB, noOpObservation, proof: "cada ROM executou o mesmo script [3,4,5,0,0xFFFF,0x1234] após 120 frames de warmup e o oráculo independente leu resultado/input da WRAM" });
+
+  await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
+  await callAutomationApi(sessionId, "setSelectedEntityId", ["camera_root"]);
+  await clickButtonByTextWithPointerEvents(sessionId, "Logic");
+  await waitFor(async () => { const state = await readAutomationState(sessionId); return state?.activeViewportTab === "logic" ? state : false; }, 15000, "NodeGraph branch não abriu após reabrir o projeto", 250);
+  await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid^="node-param-"][data-testid$="-threshold"]'));`), 15000, "editor branch não exibiu o parâmetro threshold", 250);
+  const edited = await executeScript(sessionId, `const input=document.querySelector('[data-testid$="-threshold"]'); if(!(input instanceof HTMLInputElement)) return false; const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set; setter?.call(input,"6"); input.dispatchEvent(new Event("input",{bubbles:true})); input.dispatchEvent(new Event("change",{bubbles:true})); return input.value;`);
+  if (edited !== "6") fail(`editor não alterou threshold: ${edited}`);
+  await waitFor(async () => { const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]); try { const graph = JSON.parse(state?.source?.graph_json ?? "{}"); return graph.nodes?.some((node) => node.type === "rom_branch_compare_word" && node.params?.threshold === 6) ? state : false; } catch { return false; } }, 15000, "alteração do parâmetro não foi autosalva", 250);
+  await callAutomationApi(sessionId, "closeProject");
+  await callAutomationApi(sessionId, "openProject", [projectDir]);
+  const editedReopened = await waitFor(async () => { const state = await callAutomationApi(sessionId, "getEntityLogicState", ["camera_root"]); try { const graph = JSON.parse(state?.source?.graph_json ?? "{}"); return graph.nodes?.some((node) => node.type === "rom_branch_compare_word" && node.params?.threshold === 6) ? state : false; } catch { return false; } }, 30000, "threshold editado não foi relido", 250);
+  const editedBuild = await buildProject("Build branch threshold 6");
+  if (!editedBuild.generatedMain.includes("(s16)6") && !editedBuild.generatedMain.includes(">= (s16)6")) fail("C gerado após edição não comprova threshold 6.");
+  report.steps.push({ step: "editor_parameter_edit_and_reopen", status: "passed", parameter: "threshold", before: 5, after: 6, reopenedGraphOrigin: editedReopened.source.graph_origin, generatedMainPath: editedBuild.generatedMainPath, generatedMainSha256: createHash("sha256").update(editedBuild.generatedMain).digest("hex") });
+
+  const patchResult = await invoke("rom_patch_recovered_logic", { romPath: routineRomPath, outputPath: patchedPath, expectedSha256: report.fixture.routineRomSha256, offset, immediate: 6 });
+  if (!patchResult?.ok || !patchResult.value?.output_path) fail(`patch branch #6 falhou: ${JSON.stringify(patchResult)}`);
+  await waitFor(async () => pathExists(patchedPath), 15000, "cópia branch patchada não foi criada", 100);
+  const patchedBytes = await readFile(patchedPath);
+  if (patchedBytes.length !== routineBytes.length || !patchedBytes.subarray(0, offset).equals(routineBytes.subarray(0, offset)) || !patchedBytes.subarray(offset + routineSignature.length).equals(routineBytes.subarray(offset + routineSignature.length)) || patchedBytes[offset + 7] !== 6) fail("patch branch #6 alterou bytes fora do parâmetro threshold.");
+  const generatedEditedObservation = await observeBranchRom(editedBuild.romPath, "ROM gerada pelo grafo (threshold 6)", 6);
+  const patchedObservation = await observeBranchRom(patchedPath, "ROM cópia patchada (threshold 6)", 6);
+  if (JSON.stringify(generatedEditedObservation.samples.map((sample) => sample.oracle)) !== JSON.stringify(patchedObservation.samples.map((sample) => sample.oracle)) || generatedEditedObservation.samples[1].oracle.result !== 0 || patchedObservation.samples[1].oracle.result !== 0 || originalObservationA.samples[1].oracle.result !== 1) fail("efeito do parâmetro 5→6 não foi comprovado nas ROMs gerada e patchada.");
+  report.steps.push({ step: "edited_generated_and_patched_rom_observation", status: "passed", parameter: { original: 5, edited: 6 }, expectedOriginalResults: [0,1,1,0,0,1], expectedEditedResults: [0,0,1,0,0,1], generatedEditedObservation, patchedObservation, roms: { generatedEdited: { path: editedBuild.romPath, origin: "generated_from_edited_reopened_nodegraph", sha256: generatedEditedObservation.romSha256 }, patched: { path: patchedPath, origin: "copy_of_original_with_threshold_byte_edited", sha256: patchedObservation.romSha256 } }, observation: "WRAM result/input pairs for the same six-frame script; threshold boundary input 4 changes 1→0" });
+  report.finishedAt = new Date().toISOString();
+  await ensureValidationDir();
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  console.log(`[logic-recovery-branch] relatório=${reportPath}`);
+  console.log("OK: Desktop Tauri branch logic-recovery E2E passou com mapping, dois ramos, fronteiras, edição, patch e oráculo.");
+}
+
+async function clickButtonByTextWithPointerEvents(sessionId, expectedText) {
+  const result = await executeScript(
+    sessionId,
+    `const expected = String(arguments[0]); const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.replace(/\\s+/g, " ").trim().includes(expected)); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.scrollIntoView({ block: "center", inline: "center" }); button.focus(); for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) button.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window })); return true;`,
+    [expectedText]
+  );
+  if (!result) fail(`Botao nao encontrado para eventos: '${expectedText}'.`);
+}
+
+async function clickButtonByTextAtCoordinates(sessionId, expectedText) {
+  const rect = await executeScript(
+    sessionId,
+    `const expected = String(arguments[0]); const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent?.replace(/\\s+/g, " ").trim().includes(expected)); if (!(button instanceof HTMLButtonElement) || button.disabled) return null; button.scrollIntoView({ block: "center", inline: "center" }); const rect = button.getBoundingClientRect(); return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };`,
+    [expectedText]
+  );
+  if (!rect) fail(`Botao nao encontrado para clique coordenado: '${expectedText}'.`);
+  await webdriverRequest("POST", `/session/${sessionId}/actions`, {
+    actions: [{
+      type: "pointer",
+      id: "rds-inspection-mouse",
+      parameters: { pointerType: "mouse" },
+      actions: [
+        { type: "pointerMove", origin: "viewport", x: rect.x, y: rect.y },
+        { type: "pointerDown", button: 0 },
+        { type: "pointerUp", button: 0 },
+      ],
+    }],
+  });
 }
 
 async function clickButtonByTestId(sessionId, testId) {
@@ -3432,7 +15140,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" || options.scenario === "reference-platformer" || options.scenario === "authoring-acceptance" || options.scenario === "nodegraph-authoring" || options.scenario === "behaviors-independence" || options.scenario === "collect-goal" || options.scenario === "mugen-import" || options.scenario === "mugen-control" || options.scenario === "mugen-locomotion" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -3443,8 +15151,19 @@ async function main() {
   const requiresExistingProject =
     options.scenario !== "onboarding-shell" &&
     options.scenario !== "qa-rc" &&
-    options.scenario !== "create-game-from-zero";
+    options.scenario !== "create-game-from-zero" &&
+    options.scenario !== "reference-platformer" &&
+    options.scenario !== "authoring-acceptance" &&
+    options.scenario !== "nodegraph-authoring" &&
+    options.scenario !== "behaviors-independence" &&
+    options.scenario !== "collect-goal" &&
+    options.scenario !== "mugen-import" &&
+    options.scenario !== "mugen-control" &&
+    options.scenario !== "mugen-locomotion" &&
+    options.scenario !== "mugen-real" &&
+    options.scenario !== "mugen-original";
   let temporaryProjectDir = "";
+  let temporaryInspectionFixtureDir = "";
   if (requiresExistingProject) {
     await assertPathExists(
       options.project,
@@ -3473,6 +15192,7 @@ async function main() {
     projectName: projectMetadata.name || null,
     projectTarget: projectMetadata.target || null,
     app: options.app,
+    appPath: options.app,
     externalDriver: options.externalDriver,
     sessionId: null,
   };
@@ -3593,6 +15313,7 @@ async function main() {
       driverExited = true;
       driverExitCode = code;
     });
+    ownedDriverPid = driverProcess.pid ?? null;
   }
 
   let sessionId = "";
@@ -3624,6 +15345,16 @@ async function main() {
     }
 
     await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "Janela do app nao abriu corretamente");
+    // Scenarios expect the default shell; a persona left in localStorage (e.g. by the
+    // guided acceptance run) would hide workspaces. Reset it and reload once.
+    if (options.scenario !== "authoring-acceptance" && options.scenario !== "nodegraph-authoring" && options.scenario !== "behaviors-independence" && options.scenario !== "collect-goal") {
+      const persisted = await executeScript(sessionId, "return localStorage.getItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      if (persisted) {
+        await executeScript(sessionId, "localStorage.removeItem(arguments[0]); location.reload();", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "Janela do app nao voltou apos resetar o modo do shell");
+      }
+    }
 
     await waitFor(
       async () =>
@@ -3641,6 +15372,1249 @@ async function main() {
       options.project = path.join(temporaryProjectDir, path.basename(sourceProject));
       await cp(sourceProject, options.project, { recursive: true });
       currentE2eRunContext.project = options.project;
+    }
+
+    if (options.scenario === "logic-recovery") {
+      currentE2eRunContext.appPath = options.app;
+      await runLogicRecoveryScenario(sessionId, options.project);
+      return;
+    }
+    if (options.scenario === "logic-recovery-branch") {
+      currentE2eRunContext.appPath = options.app;
+      await runBranchLogicRecoveryScenario(sessionId, options.project);
+      return;
+    }
+
+    if (options.scenario === "rex-lz4w-effect") {
+      currentE2eRunContext.appPath = options.app;
+      await runRexLz4wEffectScenario(sessionId);
+      return;
+    }
+
+    if (options.scenario === "rex-lz4w-fixture-effect") {
+      currentE2eRunContext.appPath = options.app;
+      await runRexLz4wFixtureEffectScenario(sessionId);
+      return;
+    }
+
+    if (options.scenario === "rex-aplib-byor-effect") {
+      currentE2eRunContext.appPath = options.app;
+      await runRexAplibByorEffectScenario(sessionId);
+      return;
+    }
+
+    if (options.scenario === "rex-context-fixture-effect") {
+      currentE2eRunContext.appPath = options.app;
+      await runRexContextFixtureEffectScenario(sessionId);
+      return;
+    }
+
+    const sonicMultiframeMode = options.scenario === "sonic-multiframe";
+    const sonicCadenceMode = options.scenario === "sonic-cadence-journey";
+    const sonicTilesMode = options.scenario === "inspection-sonic-tiles";
+    if (sonicMultiframeMode) options.scenario = "inspection-sonic";
+    if (sonicCadenceMode) options.scenario = "inspection-sonic";
+    if (sonicTilesMode) options.scenario = "inspection-sonic";
+    if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
+      let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
+      let inspectionFixture = null;
+      if (options.scenario === "inspection-preview-unavailable" && !process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM) {
+        inspectionFixture = await createUnavailablePreviewFixture();
+        temporaryInspectionFixtureDir = inspectionFixture.fixtureDir;
+        inspectionRom = inspectionFixture.romPath;
+      } else if (options.scenario === "inspection-preview-unavailable") {
+        inspectionRom = process.env.RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM;
+      }
+      if (!inspectionRom || !(await pathExists(inspectionRom))) {
+        fail(
+          options.scenario === "inspection-preview-unavailable"
+            ? "RDS_INSPECTION_PREVIEW_UNAVAILABLE_ROM deve apontar para um fixture BYOR controlado existente."
+            : "RDS_INSPECTION_ROM deve apontar para uma ROM BYOR real existente; nenhuma ROM e criada pelo E2E."
+        );
+      }
+      const inspectionRomBytes = await readFile(inspectionRom);
+      console.log(`[inspection-rom] ${JSON.stringify({ path: inspectionRom, size: inspectionRomBytes.length, sha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), fixture: inspectionFixture })}`);
+      const spriteResourceId = process.env.RDS_INSPECTION_SPRITE_RESOURCE_ID ?? (options.scenario === "inspection-sonic" ? "sonic1_sonic" : "spr_ryo_100");
+      const spriteSourcePng = process.env.RDS_INSPECTION_SPRITE_SOURCE_PNG ?? (spriteResourceId === "spr_spark0"
+        ? "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/TAIKETSU ULTRA HERO GENESIS [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/spr_spark0.png"
+        : "/mnt/sdcard/Projects/Sgdk Forge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/res/sprite/ryo/100.png");
+      const requiresSpriteOracle = (options.scenario === "inspection" || options.scenario === "inspection-complete" || options.scenario === "inspection-sprite-secondary") && options.scenario !== "inspection-sonic";
+      if (requiresSpriteOracle && !(await pathExists(spriteSourcePng))) {
+        fail(`RDS_INSPECTION_SPRITE_SOURCE_PNG deve apontar para o PNG doador independente: ${spriteSourcePng}`);
+      }
+      const spriteSourcePngSha256 = !requiresSpriteOracle
+        ? null
+        : createHash("sha256").update(await readFile(spriteSourcePng)).digest("hex");
+      const expectedSourceSha256 = process.env.RDS_INSPECTION_SPRITE_RESOURCE_ID === "spr_spark0"
+        ? "cafaf180ba006903242aa822fb3c0dceb42424a9e0bd07a5a19b75f33a4bf196"
+        : "1ff180a0737f5b3c8c156effc481de037d2daba1bce4993dda54598bbd7aa63b";
+      if (requiresSpriteOracle && spriteSourcePngSha256 !== expectedSourceSha256) {
+        fail(`PNG doador independente divergente: ${JSON.stringify({ path: spriteSourcePng, sha256: spriteSourcePngSha256 })}`);
+      }
+      console.log(`[inspection-sprite-source] ${JSON.stringify({ path: spriteSourcePng, resource: spriteResourceId, sha256: spriteSourcePngSha256, frame: `${spriteResourceId}/frame-0` })}`);
+      const artifactPrefix = `inspection-${artifactTimestamp()}`;
+      const inspectionPanel = "[data-testid='reverse-inspection-panel']";
+      const inspectionInput = `${inspectionPanel} input[type='text']`;
+      const gitEvidence = await readGitEvidence();
+      const binarySha256 = createHash("sha256").update(await readFile(options.app)).digest("hex");
+      const frontendEvidence = await executeScript(sessionId, `return { buildCommit: window.__RDS_BUILD_COMMIT__ ?? null, scripts: Array.from(document.scripts).map((script) => script.src || script.textContent?.slice(0, 80) || "") };`);
+      console.log(`[inspection-build] binary=${JSON.stringify({ path: options.app, sha256: binarySha256 })}`);
+      console.log(`[inspection-build] frontend=${JSON.stringify(frontendEvidence)} git=${JSON.stringify(gitEvidence)}`);
+      if (!gitEvidence.commit || frontendEvidence?.buildCommit !== gitEvidence.commit) {
+        fail(`Binário/frontend não correspondem ao commit corrente: ${JSON.stringify({ binary: options.app, frontend: frontendEvidence, git: gitEvidence })}`);
+      }
+      try {
+        await setSessionWindowRect(sessionId, 1280, 800);
+      } catch (error) {
+        console.warn(`[inspection] janela não aceitou 1280x800; seguindo somente se o hit-test validar o controle: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await handleProjectWizardVisibly(sessionId, "initial");
+      await closeVisibleConsoleDrawer(sessionId);
+      await clickByTestId(sessionId, "workspace-rail-debug");
+      await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace nao abriu");
+      await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+      try {
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace nao terminou de montar");
+      } catch (error) {
+        console.log(`[inspection] estado apos abrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
+        console.log(`[inspection] botoes apos abrir reverse: ${JSON.stringify(await executeScript(sessionId, `return Array.from(document.querySelectorAll("button")).map((button) => button.textContent?.replace(/\\s+/g, " ").trim()).filter(Boolean).slice(-20);`))}`);
+        throw error;
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
+        15000,
+        "Painel de inspeção visual nao abriu",
+        250
+      );
+      await fillInputBySelector(sessionId, inspectionInput, inspectionRom);
+      const inputState = await readInspectionUiState(sessionId);
+      console.log(`[inspection-identify] input=${JSON.stringify(inputState)}`);
+      const identifySelector = "[data-testid='inspection-identify']";
+      const identifyElement = await findElement(sessionId, identifySelector);
+      await clickElementWithDiagnostics(sessionId, identifyElement, identifySelector);
+      let identifiedState;
+      try {
+        identifiedState = await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.identify?.state === "succeeded" && state.session?.id ? state : false;
+          },
+          30000,
+          "handler React/IPC de identificação não produziu estado de sessão",
+          100
+        );
+      } catch (error) {
+        const state = await readInspectionUiState(sessionId);
+        const automation = await readAutomationState(sessionId);
+        console.log(`[inspection-identify] final-ui=${JSON.stringify(state)}`);
+        console.log(`[inspection-identify] console=${JSON.stringify(automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [])}`);
+        throw error;
+      }
+      const identifyAutomation = await readAutomationState(sessionId);
+      console.log(`[inspection-identify] success=${JSON.stringify(identifiedState)}`);
+      console.log(`[inspection-identify] ipc-log=${JSON.stringify(identifyAutomation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [])}`);
+
+      const startAvailable = await executeScript(
+        sessionId,
+        `return Boolean(document.querySelector("[data-testid='inspection-start']"));`
+      );
+      if (!startAvailable) {
+        fail(`Identificação terminou sem o controle de análise: ${JSON.stringify(await readInspectionUiState(sessionId))}`);
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-start");
+
+      if (options.scenario === "inspection-cancel") {
+        await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.run?.status === "running" ? state : false;
+          },
+          10000,
+          "Cancelamento não foi testado: a UI não exibiu um run em andamento",
+          100
+        );
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-cancel");
+        const cancelledState = await waitFor(
+          async () => {
+            const state = await readInspectionUiState(sessionId);
+            return state?.run?.status === "cancelled" && state.session?.status === "cancelled" ? state : false;
+          },
+          30000,
+          "Cancelamento não chegou ao estado terminal cancelled",
+          100
+        );
+        console.log(`[inspection-cancel] OK: estado terminal ${JSON.stringify(cancelledState)}`);
+        console.log("OK: Desktop Tauri inspection/cancel E2E passou com cancelamento comprovado.");
+        return;
+      }
+
+      const completedState = await waitFor(
+        async () => {
+          const state = await readInspectionUiState(sessionId);
+          return state?.run?.status === "completed" && state.session?.status === "completed" ? state : false;
+        },
+        120000,
+        "Descoberta visual não chegou ao estado terminal completed",
+        250
+      );
+      console.log(`[inspection-complete] terminal=${JSON.stringify(completedState)}`);
+      const beforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-before-restart.png`);
+      if (options.scenario === "inspection-sonic") {
+        const baseSha256 = createHash("sha256").update(inspectionRomBytes).digest("hex");
+        const expectedBaseSha256 = "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb";
+        if (baseSha256 !== expectedBaseSha256 || spriteResourceId !== "sonic1_sonic") {
+          fail(`Cenário Sonic exige a ROM BYOR e o recurso verificados: ${JSON.stringify({ baseSha256, spriteResourceId })}`);
+        }
+        const frameId = "sonic1_sonic/stand";
+        await selectInspectionFrameNative(sessionId, frameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do Sonic stand antes da edição");
+        const baseProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frameId, "Sonic stand antes da edição");
+        const baseScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-base.png`);
+
+        if (sonicMultiframeMode) {
+          sessionId = await runSonicMultiframeScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
+          currentE2eRunContext.sessionId = sessionId;
+          return;
+        }
+        if (sonicCadenceMode) {
+          sessionId = await runSonicCadenceJourneyScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
+          currentE2eRunContext.sessionId = sessionId;
+          return;
+        }
+        const modifiedRomBytes = Buffer.from(inspectionRomBytes);
+        // Tile mode: independent oracle of the reinsertion, decoded here from the ROM's
+        // stand mapping (0x21293) and raw art (0x21AFE), not from product code.
+        const tileRect = { x: 10, y: 14, w: 12, h: 8, index: 14 };
+        const editWord = (7 << 1) | (0 << 5) | (7 << 9);
+        const sonicStandByteFor = (x, y) => {
+          const mapping = inspectionRomBytes.subarray(0x21293, 0x21293 + 21);
+          for (let piece = 0; piece < mapping[0]; piece += 1) {
+            const d = mapping.subarray(1 + piece * 5, 6 + piece * 5);
+            const w = ((d[1] >> 2) & 3) + 1;
+            const h = (d[1] & 3) + 1;
+            const left = 16 + ((d[4] << 24) >> 24);
+            const top = 20 + ((d[0] << 24) >> 24);
+            const lx = x - left;
+            const ly = y - top;
+            if (lx < 0 || ly < 0 || lx >= w * 8 || ly >= h * 8) continue;
+            const tile = d[2] * 256 + d[3] + Math.floor(lx / 8) * h + Math.floor(ly / 8);
+            return { tile, offset: 0x21afe + tile * 32 + (ly % 8) * 4 + Math.floor((lx % 8) / 2), high: (lx % 8) % 2 === 0 };
+          }
+          return null;
+        };
+        if (sonicTilesMode) {
+          for (let y = tileRect.y; y < tileRect.y + tileRect.h; y += 1) {
+            for (let x = tileRect.x; x < tileRect.x + tileRect.w; x += 1) {
+              const at = sonicStandByteFor(x, y);
+              if (!at) fail(`Retangulo de teste fora do mapping: ${x},${y}`);
+              const byte = modifiedRomBytes[at.offset];
+              modifiedRomBytes[at.offset] = at.high ? (byte & 0x0f) | (tileRect.index << 4) : (byte & 0xf0) | tileRect.index;
+            }
+          }
+        } else {
+          modifiedRomBytes.writeUInt16BE(editWord, 0x2388 + 2);
+        }
+        const modifiedSha256 = createHash("sha256").update(modifiedRomBytes).digest("hex");
+        await closeVisibleConsoleDrawer(sessionId, "antes da edição Sonic");
+        const tileEditErrors = async () => ((await readAutomationState(sessionId))?.consoleEntries ?? [])
+          .map((entry) => String(entry?.message ?? ""))
+          .filter((message) => message.includes("Reinserção recusada"));
+        const setTileRect = async (rect) => {
+          for (const key of ["x", "y", "w", "h"]) await setSonicNumberInputNative(sessionId, `inspection-sonic-tile-${key}`, rect[key]);
+          await setSonicNumberInputNative(sessionId, "inspection-sonic-tile-index", rect.index);
+        };
+        const tileNegatives = [];
+        let sonicTileEvidence = null;
+        if (sonicTilesMode) {
+          for (const negative of [
+            { label: "pixel fora do mapping", rect: { x: 28, y: 2, w: 2, h: 2, index: 14 }, expect: "não pertence ao mapping deste frame" },
+            { label: "tiles compartilhados sem confirmacao", rect: { x: 10, y: 25, w: 4, h: 2, index: 14 }, expect: "frames DPLC [5]" },
+          ]) {
+            const before = (await tileEditErrors()).length;
+            await closeVisibleConsoleDrawer(sessionId, `antes do negativo ${negative.label}`);
+            await setTileRect(negative.rect);
+            await clickButtonByTestIdNative(sessionId, "inspection-sonic-tile-edit-apply", `negativo: ${negative.label}`);
+            const errors = await waitFor(async () => { const list = await tileEditErrors(); return list.length > before ? list : false; }, 10000, `Negativo nao foi recusado: ${negative.label}`, 100).catch(async (error) => {
+              const ui = await executeScript(sessionId, `
+                const q = (id) => document.querySelector('[data-testid="' + id + '"]');
+                const button = q("inspection-sonic-tile-edit-apply");
+                return { panel: Boolean(q("inspection-sonic-tile-edit")), disabled: button?.disabled ?? null, text: button?.textContent ?? null,
+                  values: ["x","y","w","h","index"].map((k) => q("inspection-sonic-tile-" + k)?.value ?? null) };
+              `);
+              const last = ((await readAutomationState(sessionId))?.consoleEntries ?? []).slice(-5);
+              await captureScreenshot(sessionId, `${artifactPrefix}-sonic-tile-negative-failure.png`).catch(() => null);
+              fail(`${error.message} ui=${JSON.stringify(ui)} console=${JSON.stringify(last)}`);
+            });
+            const message = errors.at(-1);
+            const resultText = await executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`);
+            if (!message.includes(negative.expect) || resultText) fail(`Negativo ${negative.label} nao produziu recusa esperada sem edicao: ${JSON.stringify({ message, resultText })}`);
+            tileNegatives.push({ label: negative.label, message });
+          }
+          await closeVisibleConsoleDrawer(sessionId, "antes da reinsercao");
+          await setTileRect(tileRect);
+          await clickButtonByTestIdNative(sessionId, "inspection-sonic-tile-edit-apply", "reinserir tiles do Sonic pela interface");
+        } else {
+          await fillInputByLabel(sessionId, "Índice", "1");
+          await fillInputByLabel(sessionId, "R", "7");
+          await fillInputByLabel(sessionId, "G", "0");
+          await fillInputByLabel(sessionId, "B", "7");
+          await clickElementWithNativePointer(sessionId, "[data-testid='inspection-sonic-edit']", "editar a paleta Sonic pela interface");
+        }
+        let editEvidence;
+        try {
+          editEvidence = await waitFor(
+            async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`),
+            15000,
+            "Edição Sonic não produziu o resultado persistido pela UI",
+            100
+          );
+        } catch (error) {
+          const editButton = await inspectNativeButtonTarget(sessionId, "inspection-sonic-edit");
+          const automation = await readAutomationState(sessionId);
+          console.log(`[inspection-sonic-edit-failure] ${JSON.stringify({ editButton, ui: await readInspectionUiState(sessionId), console: automation?.consoleEntries?.filter((entry) => String(entry?.message ?? "").includes("[Inspeção]")) ?? [] })}`);
+          throw error;
+        }
+        const tileEvidence = sonicTilesMode ? await executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-tile-edit-result"]')?.textContent ?? '';`) : "";
+        if (sonicTilesMode && (!String(editEvidence).includes(modifiedSha256) || !String(tileEvidence).includes("compartilhados com frames DPLC: nenhum") || !String(tileEvidence).includes(baseSha256))) {
+          fail(`Reinsercao de tiles nao corresponde a mutacao independente: ${JSON.stringify({ editEvidence, tileEvidence, modifiedSha256 })}`);
+        }
+        if (!sonicTilesMode && (!String(editEvidence).includes(modifiedSha256) || !String(editEvidence).includes("0x00238A"))) {
+          fail(`Resultado da edição Sonic não corresponde à mutação independente: ${JSON.stringify({ editEvidence, modifiedSha256 })}`);
+        }
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do Sonic stand após edição");
+        const editedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após edição");
+        const editedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-edited.png`);
+
+        await ensureValidationDir();
+        const pilotDir = path.join(validationDir, `sonic1-pilot-${artifactTimestamp()}`);
+        await mkdir(pilotDir, { recursive: true });
+        const patchPath = path.join(pilotDir, sonicTilesMode ? "sonic1-stand-tiles.bps" : "sonic1-stand-palette.bps");
+        const patchedRomPath = path.join(pilotDir, sonicTilesMode ? "sonic1-stand-tiles-applied.bin" : "sonic1-stand-palette-applied.bin");
+        await fillInputByLabel(sessionId, "Exportar patch BPS", patchPath);
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-export-patch", "exportar patch Sonic pela interface");
+        await waitFor(async () => pathExists(patchPath), 15000, "Patch BPS Sonic não foi criado pela UI", 100);
+        const patchBytes = await readFile(patchPath);
+        const patchSha256 = createHash("sha256").update(patchBytes).digest("hex");
+        await fillInputByLabel(sessionId, "Salvar ROM modificada aplicada", patchedRomPath);
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-apply-patch", "aplicar patch Sonic pela interface");
+        await waitFor(async () => pathExists(patchedRomPath), 15000, "ROM aplicada não foi criada pela UI", 100);
+        const patchedRomBytes = await readFile(patchedRomPath);
+        const patchedSha256 = createHash("sha256").update(patchedRomBytes).digest("hex");
+        if (patchedSha256 !== modifiedSha256 || baseSha256 !== createHash("sha256").update(inspectionRomBytes).digest("hex") || !patchedRomBytes.equals(modifiedRomBytes)) {
+          fail(`Aplicação BPS não reproduziu exatamente a ROM editada: ${JSON.stringify({ baseSha256, modifiedSha256, patchedSha256 })}`);
+        }
+        const expectedGameplayFrames = 1200;
+        const assertEmulatorObservation = async (label, expectedRomSha256) => {
+          let lastObservation = null;
+          let observation;
+          try {
+            observation = await waitFor(
+              async () => {
+                const current = await readInspectionEmulatorObservation(sessionId);
+                lastObservation = current;
+                return current &&
+                  current.label === label &&
+                  current.romSha256 === expectedRomSha256 &&
+                  current.framesRun >= expectedGameplayFrames &&
+                  current.framesRequested >= expectedGameplayFrames &&
+                  current.inputProfile === "sonic-boot-start" &&
+                  current.inputStartFrame === 900 &&
+                  current.coreLabel &&
+                  current.corePath &&
+                  current.framebufferWidth > 0 &&
+                  current.framebufferHeight > 0 &&
+                  current.framebufferSha256.length === 64 &&
+                  current.canvasWidth === current.framebufferWidth &&
+                  current.canvasHeight === current.framebufferHeight &&
+                  current.canvasRgbaBytes === current.framebufferWidth * current.framebufferHeight * 4
+                  ? current
+                  : false;
+              },
+              30000,
+              "A observação real da " + label + " não comprovou ROM, core, frames e framebuffer",
+              100
+            );
+          } catch (error) {
+            console.error(`[inspection-emulator-observation] timeout ${label} ` + JSON.stringify({ expectedRomSha256, lastObservation, error: String(error) }));
+            throw error;
+          }
+          const withPixels = await readInspectionEmulatorObservation(sessionId, { includePixels: true });
+          if (!withPixels?.canvasRgba || withPixels.canvasRgba.length !== withPixels.canvasWidth * withPixels.canvasHeight * 4) {
+            fail(`Framebuffer do canvas não pôde ser relido integralmente para ${label}: ${JSON.stringify(withPixels)}`);
+          }
+          const pixels = Buffer.from(withPixels.canvasRgba);
+          const width = withPixels.canvasWidth;
+          const height = withPixels.canvasHeight;
+          const gameplayRoi = { x0: 0, y0: Math.floor(height * 0.55), x1: Math.min(width, 128), y1: height };
+          let roiNonBlackPixels = 0;
+          let roiMagentaPixels = 0;
+          let magentaPixels = 0;
+          let roiMagentaLikePixels = 0;
+          let magentaLikePixels = 0;
+          const colorCounts = new Map();
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width; x += 1) {
+              const offset = (y * width + x) * 4;
+              const r = pixels[offset];
+              const g = pixels[offset + 1];
+              const b = pixels[offset + 2];
+              const nonBlack = r !== 0 || g !== 0 || b !== 0;
+              const magenta = r === 255 && g === 0 && b === 255;
+              const magentaLike = r >= 224 && g <= 32 && b >= 224;
+              const colorKey = `${r},${g},${b}`;
+              colorCounts.set(colorKey, (colorCounts.get(colorKey) ?? 0) + 1);
+              if (nonBlack && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiNonBlackPixels += 1;
+              if (magenta) magentaPixels += 1;
+              if (magenta && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiMagentaPixels += 1;
+              if (magentaLike) magentaLikePixels += 1;
+              if (magentaLike && x >= gameplayRoi.x0 && x < gameplayRoi.x1 && y >= gameplayRoi.y0 && y < gameplayRoi.y1) roiMagentaLikePixels += 1;
+            }
+          }
+          if (withPixels.canvasNonBlackPixels < 1000 || roiNonBlackPixels < 1000) {
+            fail(`A cena Sonic não ficou reconhecível no framebuffer de ${label}: ${JSON.stringify({ width, height, canvasNonBlackPixels: withPixels.canvasNonBlackPixels, roiNonBlackPixels, gameplayRoi })}`);
+          }
+          const topColors = Array.from(colorCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12);
+          console.log(`[inspection-emulator-observation] ` + JSON.stringify({ ...withPixels, canvasRgba: undefined, gameplayRoi, roiNonBlackPixels, magentaPixels, roiMagentaPixels, magentaLikePixels, roiMagentaLikePixels, topColors }));
+          return { ...withPixels, gameplayRoi, roiNonBlackPixels, magentaPixels, roiMagentaPixels, magentaLikePixels, roiMagentaLikePixels, topColors };
+        };
+
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-base", "observar ROM Sonic base pela interface");
+        const baseEmulatorObservation = await assertEmulatorObservation("ROM base", baseSha256);
+        const baseEmulatorCanvas = await ensureEmulatorObservationVisible(sessionId);
+        if (!baseEmulatorCanvas?.fullyVisible || !baseEmulatorCanvas.unobstructed) {
+          fail(`Framebuffer da ROM base não ficou visível/desobstruído para captura: ${JSON.stringify(baseEmulatorCanvas)}`);
+        }
+        const baseEmulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator-base.png`);
+
+        await clickButtonByTestIdNative(sessionId, "inspection-sonic-run-patched", "observar ROM Sonic aplicada pela interface");
+        const appliedEmulatorObservation = await assertEmulatorObservation("ROM aplicada", patchedSha256);
+        const appliedEmulatorCanvas = await ensureEmulatorObservationVisible(sessionId);
+        if (!appliedEmulatorCanvas?.fullyVisible || !appliedEmulatorCanvas.unobstructed) {
+          fail(`Framebuffer da ROM aplicada não ficou visível/desobstruído para captura: ${JSON.stringify(appliedEmulatorCanvas)}`);
+        }
+        const emulatorScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-emulator-applied.png`);
+        if (sonicTilesMode) {
+          const basePixels = Buffer.from(baseEmulatorObservation.canvasRgba);
+          const appliedPixels = Buffer.from(appliedEmulatorObservation.canvasRgba);
+          const width = baseEmulatorObservation.canvasWidth;
+          const diffs = [];
+          for (let offset = 0; offset < basePixels.length; offset += 4) {
+            if (basePixels[offset] !== appliedPixels[offset] || basePixels[offset + 1] !== appliedPixels[offset + 1] || basePixels[offset + 2] !== appliedPixels[offset + 2]) {
+              diffs.push({ x: (offset / 4) % width, y: Math.floor(offset / 4 / width) });
+            }
+          }
+          const box = diffs.length ? { x0: Math.min(...diffs.map((d) => d.x)), x1: Math.max(...diffs.map((d) => d.x)), y0: Math.min(...diffs.map((d) => d.y)), y1: Math.max(...diffs.map((d) => d.y)) } : null;
+          if (diffs.length < 20 || !box || box.x1 - box.x0 >= 32 || box.y1 - box.y0 >= 40) {
+            fail(`Tiles reinseridos nao apareceram no jogo restritos ao sprite: ${JSON.stringify({ count: diffs.length, box })}`);
+          }
+          sonicTileEvidence = { negatives: tileNegatives, inGameDiffPixels: diffs.length, box, baseFramebuffer: baseEmulatorObservation.framebufferSha256, appliedFramebuffer: appliedEmulatorObservation.framebufferSha256, patchSha256, patchedSha256, baseSha256 };
+          console.log(`[inspection-tile-effect] ${JSON.stringify(sonicTileEvidence)}`);
+        }
+        if (!sonicTilesMode && (baseEmulatorObservation.magentaLikePixels !== 0 || baseEmulatorObservation.roiMagentaLikePixels !== 0)) {
+          fail(`A ROM base já contém a cor de paleta editada na cena Sonic: ${JSON.stringify({ magentaPixels: baseEmulatorObservation.magentaPixels, magentaLikePixels: baseEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: baseEmulatorObservation.roiMagentaLikePixels, topColors: baseEmulatorObservation.topColors })}`);
+        }
+        if (!sonicTilesMode && (appliedEmulatorObservation.magentaLikePixels < 100 || appliedEmulatorObservation.roiMagentaLikePixels < 50)) {
+          fail(`A ROM aplicada não mostrou a alteração de paleta no ROI do Sonic: ${JSON.stringify({ magentaPixels: appliedEmulatorObservation.magentaPixels, magentaLikePixels: appliedEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: appliedEmulatorObservation.roiMagentaLikePixels, topColors: appliedEmulatorObservation.topColors })}`);
+        }
+        const framebufferDiverged = baseEmulatorObservation.framebufferSha256 !== appliedEmulatorObservation.framebufferSha256;
+        const sameConditions = baseEmulatorObservation.framesRun === appliedEmulatorObservation.framesRun &&
+          baseEmulatorObservation.framebufferWidth === appliedEmulatorObservation.framebufferWidth &&
+          baseEmulatorObservation.framebufferHeight === appliedEmulatorObservation.framebufferHeight &&
+          baseEmulatorObservation.coreLabel === appliedEmulatorObservation.coreLabel;
+        if (!sameConditions || !framebufferDiverged) {
+          fail(`A comparação base/aplicada não ocorreu sob condições equivalentes ou não divergiu: ${JSON.stringify({ sameConditions, framebufferDiverged, base: { framesRun: baseEmulatorObservation.framesRun, framebufferWidth: baseEmulatorObservation.framebufferWidth, framebufferHeight: baseEmulatorObservation.framebufferHeight, coreLabel: baseEmulatorObservation.coreLabel }, applied: { framesRun: appliedEmulatorObservation.framesRun, framebufferWidth: appliedEmulatorObservation.framebufferWidth, framebufferHeight: appliedEmulatorObservation.framebufferHeight, coreLabel: appliedEmulatorObservation.coreLabel } })}`);
+        }
+        console.log(`[inspection-palette-effect] ` + JSON.stringify({ status: "passed", oracle: "independent framebuffer ROI + expected RGB333 palette mutation", framebufferDiverged, sameConditions, base: { romSha256: baseEmulatorObservation.romSha256, framebufferSha256: baseEmulatorObservation.framebufferSha256, roiNonBlackPixels: baseEmulatorObservation.roiNonBlackPixels, magentaPixels: baseEmulatorObservation.magentaPixels, magentaLikePixels: baseEmulatorObservation.magentaLikePixels }, applied: { romSha256: appliedEmulatorObservation.romSha256, framebufferSha256: appliedEmulatorObservation.framebufferSha256, roiNonBlackPixels: appliedEmulatorObservation.roiNonBlackPixels, magentaPixels: appliedEmulatorObservation.magentaPixels, magentaLikePixels: appliedEmulatorObservation.magentaLikePixels, roiMagentaLikePixels: appliedEmulatorObservation.roiMagentaLikePixels }, baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas }));
+
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+        const persistedSessionId = completedState.session.id;
+        if (!persistedSessionId) fail(`Sessão Sonic concluída não tem identidade: ${JSON.stringify(completedState)}`);
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Salvar sessão Sonic não publicou a sessão", 100);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+        await deleteSession(sessionId);
+        sessionId = await createSession(options.app);
+        currentE2eRunContext.sessionId = sessionId;
+        await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App Sonic não reabriu após reinício");
+        await waitFor(async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API Sonic não voltou após reinício", 100);
+        await handleProjectWizardVisibly(sessionId, "sonic-after-restart");
+        await setSessionWindowRect(sessionId, 1920, 1080);
+        await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace Sonic após reinício");
+        await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace Sonic não voltou");
+        await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace Sonic não voltou");
+        await clickButtonByTestIdNative(sessionId, "reverse-tab-inspection", "abrir inspeção Sonic após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`), 15000, "Painel Sonic não voltou", 100);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-refresh-sessions", "atualizar sessões Sonic após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 30000, "Sessão Sonic não foi descoberta após reinício", 100);
+        const reopenedSessionSelector = `[data-testid='select-saved-session-${persistedSessionId}']`;
+        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, reopenedSessionSelector), reopenedSessionSelector);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-reopen", "reabrir sessão Sonic após reinício");
+        const reopenedState = await waitFor(async () => { const state = await readInspectionUiState(sessionId); return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false; }, 30000, "Sessão Sonic não foi reaberta", 100);
+        const reopenedFrame = await waitFor(async () => executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sprite-frame-select"]')?.value ?? '';`), 15000, "Frame Sonic salvo não foi restaurado", 100);
+        if (reopenedFrame !== frameId) fail(`Frame Sonic restaurado diverge: ${JSON.stringify({ expected: frameId, actual: reopenedFrame })}`);
+        const reopenedEdit = await executeScript(sessionId, `return document.querySelector('[data-testid="inspection-sonic-edit-result"]')?.textContent ?? '';`);
+        if (!String(reopenedEdit).includes(modifiedSha256)) fail(`Proveniência da edição Sonic não foi restaurada: ${reopenedEdit}`);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recompor Sonic após reinício");
+        const reopenedProof = await verifyRenderedSpriteFrame(sessionId, modifiedRomBytes, frameId, "Sonic stand após salvar/reiniciar/reabrir");
+        const reopenedScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-stand-reopened.png`);
+        if (sonicTilesMode) {
+          const summaryPath = path.join(pilotDir, "sonic1-stand-tiles-summary.json");
+          await writeFile(summaryPath, JSON.stringify({ ...sonicTileEvidence, reopened: { frameId, editRestored: true, composedPixels: reopenedProof }, screenshots: [baseScreenshot, editedScreenshot, baseEmulatorScreenshot, emulatorScreenshot, reopenedScreenshot] }, null, 2));
+          console.log(`Resumo: ${summaryPath}`);
+          console.log("OK: Desktop Tauri Sonic tile reinsertion identify/compose/edit/negatives/patch/apply/observe/restart/reopen E2E passou.");
+          return;
+        }
+        const oldGameFrame = await readCanonicalGameFrame(sessionId);
+        const baseCanonicalPlayEvidence = await runCanonicalSonicTrajectory(sessionId, {
+          buttonTestId: "inspection-sonic-play-base",
+          label: "base",
+          expectedSha256: baseSha256,
+          romBytes: inspectionRomBytes,
+          artifactPrefix,
+        });
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-sonic-play-modified", "jogar versão modificada na Game View após reinício");
+        const canonicalIdentity = await waitFor(
+          async () => {
+            const frame = await readCanonicalGameFrame(sessionId);
+            return frame && frame.romSha256 === patchedSha256 && frame.romSha256 !== baseSha256 && frame.romSize === patchedRomBytes.length && frame.coreLabel && frame.corePath ? frame : false;
+          },
+          15000,
+          "Game View não confirmou a identidade da ROM modificada",
+          100
+        );
+        let firstCanonicalFrame;
+        let lastCanonicalFrame = null;
+        try {
+          firstCanonicalFrame = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastCanonicalFrame = progress;
+              return progress && progress.renderedFrames >= 10 ? readCanonicalGameFrame(sessionId) : false;
+            },
+            10000,
+            "Game View não produziu frames renderizados após Jogar versão modificada",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-first-failure] ${JSON.stringify({ lastCanonicalFrame, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        let lastBootProgress = null;
+        let bootFrame;
+        try {
+          bootFrame = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastBootProgress = progress;
+              return progress && progress.renderedFrames >= 890 ? progress : false;
+            },
+            120000,
+            "Game View não atravessou o boot da ROM modificada até o ponto de entrada",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-boot-failure] ${JSON.stringify({ lastBootProgress, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        await focusGameCanvasNatively(sessionId);
+        const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        await sendNativeGameKey(sessionId, "Enter", "keyDown", "START de entrada da fase");
+        const startHoldProgress = await waitFor(
+          async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= (bootFrame?.renderedFrames ?? 890) + 30 ? progress : false;
+          },
+          15000,
+          "Game View não avançou frames enquanto START estava pressionado",
+          100
+        );
+        await sendNativeGameKey(sessionId, "Enter", "keyUp", "liberação de START de entrada da fase");
+        const startInput = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0) ? current : false;
+          },
+          10000,
+          "START nativo não foi confirmado pelo handler/IPC do produto",
+          100
+        );
+        let lastGameplayProgress = null;
+        let gameplayProgress;
+        try {
+          gameplayProgress = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              lastGameplayProgress = progress;
+              return progress && progress.renderedFrames >= 1800 ? progress : false;
+            },
+            120000,
+            "A ROM modificada não alcançou a cena de gameplay com Sonic localizado no ROI independente",
+            100
+          );
+        } catch (error) {
+          console.error(`[inspection-canonical-gameplay-failure] ${JSON.stringify({ lastGameplayProgress, state: await readAutomationState(sessionId), input: await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;") })}`);
+          throw error;
+        }
+        const gameplayFrameWithPixels = await readCanonicalGameFrame(sessionId, { includePixels: true });
+        const gameplaySonic = locateSonicVisual(gameplayFrameWithPixels, modifiedRomBytes);
+        if (gameplayFrameWithPixels.nonBlackPixels <= 1000 || !gameplaySonic) {
+          fail(`A ROM modificada atravessou o boot, mas o localizador visual independente não encontrou Sonic: ${JSON.stringify({ gameplayProgress, frame: { ...gameplayFrameWithPixels, rgba: undefined }, gameplaySonic })}`);
+        }
+        const gameplayFrame = { ...gameplayFrameWithPixels, rgba: undefined, sonic: gameplaySonic };
+        const canonicalGameBeforeControlsScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-modified-before-controls.png`);
+        const oldImageReused = Boolean(oldGameFrame && oldGameFrame.nonBlackPixels > 0 && oldGameFrame.framebufferSha256 === gameplayFrame.framebufferSha256);
+        if (oldImageReused) {
+          fail(`A Game View reutilizou a imagem anterior após carregar a ROM modificada: ${JSON.stringify({ old: oldGameFrame.framebufferSha256, gameplay: gameplayFrame.framebufferSha256 })}`);
+        }
+        const negativeInputBefore = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        await sendNativeGameKey(sessionId, "KeyQ", "keyDown", "negativo de tecla não mapeada");
+        await sendNativeGameKey(sessionId, "KeyQ", "keyUp", "liberação da tecla não mapeada");
+        const negativeInputAfter = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+        const negativeInputRejected = negativeInputAfter?.lastJoypadAck?.seq === negativeInputBefore?.lastJoypadAck?.seq;
+        if (!negativeInputRejected) {
+          fail(`Entrada não mapeada foi aceita como input do jogo: ${JSON.stringify({ before: negativeInputBefore, after: negativeInputAfter })}`);
+        }
+        console.log(`[inspection-canonical-negatives] ${JSON.stringify({ wrongRomRejected: canonicalIdentity.romSha256 !== baseSha256 && canonicalIdentity.romSha256 === patchedSha256, staleImageRejected: !oldImageReused, unmappedInputRejected: negativeInputRejected, input: { before: negativeInputBefore?.lastJoypadAck, after: negativeInputAfter?.lastJoypadAck } })}`);
+        const trajectory = [];
+        const recordTrajectoryFrame = async (label, input, previous, minFrameExclusive = -1) => {
+          const raw = await waitFor(async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames > minFrameExclusive ? readCanonicalGameFrame(sessionId, { includePixels: true }) : false;
+          }, 10000, `${label} não avançou para um novo frame`, 100);
+          const sonic = locateSonicVisual(raw, modifiedRomBytes, { previous });
+          if (!sonic) fail(`Localizador independente não encontrou Sonic na trajetória: ${label}`);
+          const memory = await readSonic1PlayerMemory(sessionId);
+          const entry = { label, frame: raw.renderedFrames, input, framebufferSha256: raw.framebufferSha256, sonic, memory };
+          trajectory.push(entry);
+          return { raw, sonic, entry };
+        };
+        const detectGroundTop = (raw, sonic) => {
+          if (!raw?.rgba) return null;
+          for (let y = sonic.bounds.y1 + 1; y < raw.height; y += 1) {
+            let greenPixels = 0;
+            for (let x = Math.max(0, sonic.bounds.x0 - 12); x <= Math.min(raw.width - 1, sonic.bounds.x1 + 12); x += 1) {
+              const offset = (y * raw.width + x) * 4;
+              const red = raw.rgba[offset];
+              const green = raw.rgba[offset + 1];
+              const blue = raw.rgba[offset + 2];
+              if (green > red + 20 && green > blue + 10 && green >= 90) greenPixels += 1;
+            }
+            if (greenPixels >= 8) return y;
+          }
+          return null;
+        };
+        const initialVisual = { raw: gameplayFrameWithPixels, sonic: gameplaySonic };
+        const gameplayMemory = await readSonic1PlayerMemory(sessionId);
+        trajectory.push({ label: "before-controls", frame: gameplayFrameWithPixels.renderedFrames, input: "neutral", framebufferSha256: gameplayFrameWithPixels.framebufferSha256, sonic: gameplaySonic, memory: gameplayMemory });
+        console.log(`[inspection-trajectory] ${JSON.stringify({ label: "modified", step: "located", frame: gameplayFrameWithPixels.renderedFrames, sonic: gameplaySonic, memory: gameplayMemory })}`);
+        const initialGroundTop = detectGroundTop(gameplayFrameWithPixels, gameplaySonic);
+        const initialOnGround = initialGroundTop !== null && initialGroundTop - gameplaySonic.bounds.y1 <= 4;
+        if (!initialOnGround) {
+          fail(`Situação inicial não comprovou Sonic no chão: ${JSON.stringify({ sonic: gameplaySonic, initialGroundTop })}`);
+        }
+
+        const movementBefore = initialVisual;
+        await sendNativeGameKey(sessionId, "ArrowRight", "keyDown", "movimento para direita");
+        const rightInput = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.right === true ? current : false;
+          },
+          10000,
+          "ArrowRight nativa não chegou ao core pelo handler do produto",
+          100
+        );
+        const movementSamples = [];
+        let movementHoldProgress = null;
+        for (const frames of [45, 90, 135]) {
+          movementHoldProgress = await waitFor(
+            async () => {
+              const progress = await readCanonicalGameProgress(sessionId);
+              return progress && progress.renderedFrames >= movementBefore.raw.renderedFrames + frames ? progress : false;
+            },
+            20000,
+            `Game View não avançou ${frames} frames durante o movimento para direita`,
+            100
+          );
+          movementSamples.push(await recordTrajectoryFrame(`movement-held-${frames}`, { right: true }, movementSamples.at(-1)?.sonic ?? movementBefore.sonic, movementSamples.at(-1)?.raw.renderedFrames ?? movementBefore.raw.renderedFrames));
+          console.log(`[inspection-trajectory] ${JSON.stringify({ label: "modified", step: `movement-held-${frames}`, frame: movementSamples.at(-1).raw.renderedFrames, sonic: movementSamples.at(-1).sonic })}`);
+        }
+        const movementDuring = movementSamples.at(-1);
+        await sendNativeGameKey(sessionId, "ArrowRight", "keyUp", "parada do movimento para direita");
+        await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.right === false ? current : false;
+          },
+          10000,
+          "liberação de ArrowRight não chegou ao core",
+          100
+        );
+        const movementAfter = await recordTrajectoryFrame("movement-released", { right: false }, movementDuring.sonic, movementDuring.raw.renderedFrames);
+        const movementDeltaX = Math.max(...[...movementSamples.map((sample) => sample.entry), movementAfter.entry].map((entry) => Math.abs(entry.memory.x - gameplayMemory.x)));
+        if (movementAfter.raw.framebufferSha256 === movementBefore.raw.framebufferSha256 || movementDeltaX < 2) {
+          const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+          await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput }, frames: trajectory, failure: "movement-not-observed", movementDeltaX }, null, 2));
+          fail(`Movimento de Sonic não produziu deslocamento independente: ${JSON.stringify({ before: movementBefore.sonic, after: movementAfter.sonic, input: rightInput })}`);
+        }
+
+        const jumpBefore = await recordTrajectoryFrame("jump-before", { right: false, a: false }, movementAfter.sonic, movementAfter.raw.renderedFrames);
+        await sendNativeGameKey(sessionId, "KeyZ", "keyDown", "salto pelo botão A");
+        const jumpInputA = await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.y === true ? current : false;
+          },
+          10000,
+          "KeyZ/A nativa não chegou ao core pelo handler do produto",
+          100
+        );
+        const jumpDownProgress = await waitFor(
+          async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= jumpBefore.raw.renderedFrames + 2 ? progress : false;
+          },
+          20000,
+          "Game View não avançou frames durante o salto",
+          100
+        );
+        const jumpDuring = await recordTrajectoryFrame("jump-held", { a: true }, jumpBefore.sonic, jumpBefore.raw.renderedFrames);
+        await sendNativeGameKey(sessionId, "KeyZ", "keyUp", "liberação do salto");
+        await waitFor(
+          async () => {
+            const current = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
+            return current?.lastJoypadAck?.joypad?.y === false ? current : false;
+          },
+          10000,
+          "liberação de KeyZ/A não chegou ao core",
+          100
+        );
+        const jumpReleased = await recordTrajectoryFrame("jump-released", { a: false }, jumpDuring.sonic, jumpDuring.raw.renderedFrames);
+        let lastJumpSample = jumpReleased;
+        const captureAfterFrames = async (label, frames) => {
+          const target = jumpReleased.raw.renderedFrames + frames;
+          await waitFor(async () => {
+            const progress = await readCanonicalGameProgress(sessionId);
+            return progress && progress.renderedFrames >= target ? progress : false;
+          }, 30000, `Game View não avançou ${frames} frames após o salto`, 100);
+          lastJumpSample = await recordTrajectoryFrame(label, { a: false }, lastJumpSample.sonic, lastJumpSample.raw.renderedFrames);
+          return lastJumpSample;
+        };
+        const jumpLater = await captureAfterFrames("jump-after-15", 15);
+        const jumpMid = await captureAfterFrames("jump-after-45", 45);
+        const jumpReturn90 = await captureAfterFrames("jump-after-90", 90);
+        const jumpReturn150 = await captureAfterFrames("jump-after-150", 150);
+        const jumpReturn240 = await captureAfterFrames("jump-after-240", 240);
+        const jumpReturn = [jumpMid, jumpReturn90, jumpReturn150, jumpReturn240].find((sample) => sample.entry.memory.yVel === 0) ?? jumpReturn240;
+        const trajectoryY = trajectory.filter((entry) => entry.label.startsWith("jump-")).map((entry) => entry.memory.y);
+        const lowestY = Math.min(...trajectoryY);
+        const jumpLift = jumpBefore.entry.memory.y - lowestY;
+        const returnedToGround = jumpReturn.entry.memory.yVel === 0 && jumpReturn.entry.memory.y >= jumpBefore.entry.memory.y - jumpLift;
+        if (jumpLift < 3 || !returnedToGround) {
+          const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+          await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput, jump: jumpInputA }, frames: trajectory, failure: "jump-trajectory-not-observed", jumpLift, returnedToGround }, null, 2));
+          fail(`Trajetória de salto não comprovou subida e retorno: ${JSON.stringify({ jumpLift, returnedToGround, trajectory })}`);
+        }
+
+        await clickButtonByTestIdNative(sessionId, "viewport-pause", "pausar gameplay Sonic");
+        await waitFor(async () => executeScript(sessionId, "return /paus/i.test(document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent ?? '')"), 10000, "Pausa não ficou visível", 100);
+        const pausedProgress = await readCanonicalGameProgress(sessionId);
+        await clickButtonByTestIdNative(sessionId, "viewport-resume", "retomar gameplay Sonic");
+        const resumedProgress = await waitFor(async () => {
+          const progress = await readCanonicalGameProgress(sessionId);
+          return progress && progress.renderedFrames > pausedProgress.renderedFrames + 5 ? progress : false;
+        }, 10000, "Retomada não avançou frames", 100);
+        const trajectoryPath = path.join(validationDir, `${artifactPrefix}-sonic-trajectory.json`);
+        await writeFile(trajectoryPath, JSON.stringify({ romSha256: patchedSha256, core: canonicalIdentity.coreLabel, initial: { onGround: initialOnGround, groundTop: initialGroundTop }, input: { movement: rightInput, jump: jumpInputA }, frames: trajectory, pause: { paused: pausedProgress, resumed: resumedProgress } }, null, 2));
+        const jumpAfter = jumpReturn;
+        const jumpInput = jumpInputA;
+        const jumpControl = "KeyZ/A";
+        const canonicalGameScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sonic-game-modified-after-restart.png`);
+        const canonicalPlayEvidence = {
+          identity: canonicalIdentity,
+          firstFrame: firstCanonicalFrame,
+          bootFrame,
+          startHoldProgress,
+          gameplayFrame,
+          movement: { before: trajectory.find((entry) => entry.label === "before-controls"), samples: movementSamples.map((sample) => sample.entry), after: movementAfter.entry, input: rightInput, holdProgress: movementHoldProgress, deltaX: movementDeltaX },
+          jump: { before: jumpBefore.entry, during: jumpDuring.entry, released: jumpReleased.entry, later: jumpLater.entry, mid: jumpMid.entry, after: jumpAfter.entry, input: jumpInput, holdProgress: jumpDownProgress },
+          jumpControl,
+          oldImageReused,
+          screenshot: canonicalGameScreenshot,
+          beforeControlsScreenshot: canonicalGameBeforeControlsScreenshot,
+          controls: "WebDriver W3C native key actions routed through ViewportPanel key handlers and emulator_send_input",
+        };
+        console.log(`[inspection-canonical-gameplay] ${JSON.stringify(canonicalPlayEvidence)}`);
+        const baseAfterFlowBytes = await readFile(inspectionRom);
+        const baseAfterFlowSha256 = createHash("sha256").update(baseAfterFlowBytes).digest("hex");
+        if (baseAfterFlowBytes.length !== inspectionRomBytes.length || baseAfterFlowSha256 !== baseSha256) {
+          fail("ROM BYOR original foi alterada durante o fluxo: " + JSON.stringify({ initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 } }));
+        }
+        console.log(`[inspection-base-integrity] ` + JSON.stringify({ path: inspectionRom, initial: { size: inspectionRomBytes.length, sha256: baseSha256 }, final: { size: baseAfterFlowBytes.length, sha256: baseAfterFlowSha256 }, unchanged: true }));
+        console.log(`[inspection-sonic] ` + JSON.stringify({ baseRom: { path: inspectionRom, size: inspectionRomBytes.length, sha256: baseSha256, finalSize: baseAfterFlowBytes.length, finalSha256: baseAfterFlowSha256 }, modifiedRom: { sha256: modifiedSha256, paletteOffset: 0x238a, word: editWord }, patch: { path: patchPath, size: patchBytes.length, sha256: patchSha256 }, appliedRom: { path: patchedRomPath, sha256: patchedSha256 }, resource: { id: "sonic1_sonic", frame: frameId, tileData: [0x21afe, 0xa120], palette: [0x2388, 0x20], mapping: [0x21293, 21] }, pixels: { base: baseProof.independentEvidence.pixelsSha256, edited: editedProof.independentEvidence.pixelsSha256, reopened: reopenedProof.independentEvidence.pixelsSha256 }, emulator: { base: baseEmulatorObservation, applied: appliedEmulatorObservation, framebufferDiverged, sameConditions, paletteEffectStatus: "passed", paletteOracle: "independent framebuffer comparison; character identity uses the verified shape/palette template, not a magenta ROI", baseCanvas: baseEmulatorCanvas, appliedCanvas: appliedEmulatorCanvas, baseCanonicalPlayEvidence, canonicalPlayEvidence }, screenshots: { base: baseScreenshot, edited: editedScreenshot, emulatorBase: baseEmulatorScreenshot, emulatorApplied: emulatorScreenshot, reopened: reopenedScreenshot, canonicalGameScreenshot }, sessionId: reopenedState.session.id }));
+        console.log("OK: Desktop Tauri Sonic identify/compose/edit/save/patch/apply/canonical-play/restart/reopen E2E passou.");
+        return;
+      }
+      if (options.scenario === "inspection-sprite-secondary") {
+        if (spriteResourceId !== "spr_spark0" || createHash("sha256").update(inspectionRomBytes).digest("hex") !== "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c") {
+          fail(`Cenário secundário exige spr_spark0 e ROM Taiketsu verificada: ${JSON.stringify({ resource: spriteResourceId, rom: createHash("sha256").update(inspectionRomBytes).digest("hex") })}`);
+        }
+        const secondaryFrameId = "spr_spark0/frame-0";
+        await selectInspectionFrameNative(sessionId, secondaryFrameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do spr_spark0/frame-0");
+        const secondaryBefore = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, secondaryFrameId, "recurso secundário antes de salvar");
+        const secondaryBeforeScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-spark0-before-restart.png`);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+        const persistedSessionId = completedState.session.id;
+        if (!persistedSessionId) fail(`Sessão secundária concluída não tem identidade: ${JSON.stringify(completedState)}`);
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Salvar sessão secundária não publicou a sessão", 100);
+        await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+        await deleteSession(sessionId);
+        sessionId = await createSession(options.app);
+        currentE2eRunContext.sessionId = sessionId;
+        await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App secundário não reabriu após reinício");
+        await waitFor(async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"), uiBootstrapTimeoutMs, "API de automação secundária não voltou", 100);
+        await handleProjectWizardVisibly(sessionId, "secondary-after-restart");
+        await setSessionWindowRect(sessionId, 1280, 800);
+        await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace secundário após reinício");
+        await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace secundário não voltou");
+        await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace secundário não voltou");
+        await clickButtonByTestIdWithPointerEvents(sessionId, "reverse-tab-inspection");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`), 15000, "Painel secundário não voltou", 100);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-refresh-sessions", "atualizar sessões secundárias após reinício");
+        await waitFor(async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`), 15000, "Sessão secundária persistida não apareceu após reinício", 100);
+        const secondarySessionSelector = `[data-testid='select-saved-session-${persistedSessionId}']`;
+        await clickElementWithDiagnostics(sessionId, await findElement(sessionId, secondarySessionSelector), secondarySessionSelector);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-reopen", "reabrir sessão secundária");
+        await waitFor(async () => { const state = await readInspectionUiState(sessionId); return state?.session?.id === persistedSessionId && state.session.status === "completed" ? state : false; }, 30000, "Sessão secundária não foi restaurada após reinício", 100);
+        await selectInspectionFrameNative(sessionId, secondaryFrameId);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do spr_spark0/frame-0 após reinício");
+        const secondaryAfter = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, secondaryFrameId, "recurso secundário após reabrir");
+        const secondaryAfterScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-spark0-after-restart.png`);
+        console.log(`[inspection-sprite-secondary] ${JSON.stringify({ resource: spriteResourceId, frame: secondaryFrameId, romSha256: secondaryAfter.visualEvidence.romSha256, sourcePngSha256: spriteSourcePngSha256, beforePixelsSha256: secondaryBefore.independentEvidence.pixelsSha256, afterPixelsSha256: secondaryAfter.independentEvidence.pixelsSha256, beforeScreenshot: secondaryBeforeScreenshot, afterScreenshot: secondaryAfterScreenshot, restoredSessionId: persistedSessionId, nativeSize: [secondaryAfter.visualEvidence.naturalWidth, secondaryAfter.visualEvidence.naturalHeight], offsets: { tileData: [0x80060, 0x120], palette: [0x2e134, 0x20], descriptor: 0x22f94 } })}`);
+        console.log("OK: Desktop Tauri inspection secondary sprite save/restart/reopen E2E passou.");
+        return;
+      }
+      const candidateAvailable = await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid^='inspection-candidate-']"));`),
+        30000,
+        "Catálogo concluído não exibiu candidato visual",
+        250
+      );
+      if (!candidateAvailable) fail("Catálogo concluído não exibiu candidato visual.");
+      const expectedCandidateId = options.scenario === "inspection-preview-unavailable"
+        ? process.env.RDS_INSPECTION_UNAVAILABLE_CANDIDATE_ID ?? ""
+        : process.env.RDS_INSPECTION_EXPECTED_CANDIDATE_ID ?? "";
+      const expectedOffset = options.scenario === "inspection-preview-unavailable"
+        ? null
+        : Number(process.env.RDS_INSPECTION_EXPECTED_OFFSET ?? "");
+      const expectedSize = options.scenario === "inspection-preview-unavailable"
+        ? null
+        : Number(process.env.RDS_INSPECTION_EXPECTED_SIZE ?? "");
+      const expectedKind = options.scenario === "inspection-preview-unavailable"
+        ? ""
+        : process.env.RDS_INSPECTION_EXPECTED_KIND ?? "tile4bpp_block";
+      if (options.scenario !== "inspection-preview-unavailable" && (!Number.isSafeInteger(expectedOffset) || !Number.isSafeInteger(expectedSize) || expectedOffset < 0 || expectedSize <= 0)) {
+        fail("A prova positiva exige RDS_INSPECTION_EXPECTED_OFFSET e RDS_INSPECTION_EXPECTED_SIZE independentes da UI.");
+      }
+      const candidateLookup = async () => executeScript(
+        sessionId,
+        `
+          const expected = String(arguments[0] || "");
+          const offset = arguments[2];
+          const size = arguments[3];
+          const kind = String(arguments[4] || "");
+          const unavailable = String(arguments[1]) === "unavailable";
+          const selector = expected ? "[data-testid='inspection-candidate-" + expected + "']" : (unavailable ? "[data-preview-expected='false']" : "[data-preview-expected='true']");
+          const candidates = Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']"));
+          const match = expected ? document.querySelector(selector) : candidates.find((candidate) =>
+            (unavailable || (
+              Number(candidate.getAttribute("data-candidate-offset")) === offset &&
+              Number(candidate.getAttribute("data-candidate-size")) === size &&
+              (!kind || candidate.getAttribute("data-candidate-kind") === kind)
+            )) &&
+            (unavailable ? candidate.getAttribute("data-preview-expected") === "false" : candidate.getAttribute("data-preview-expected") === "true")
+          );
+          return match?.getAttribute("data-testid") ?? "";
+        `,
+        [expectedCandidateId, options.scenario === "inspection-preview-unavailable" ? "unavailable" : "available", expectedOffset, expectedSize, expectedKind]
+      );
+      let candidateTestId = await candidateLookup();
+      // The controlled negative deliberately places the first unavailable
+      // candidate after the 16-preview export cap. If pagination hides it,
+      // reach it through the visible paginator so the scenario still
+      // exercises the UI path instead of selecting it through IPC.
+      if (!candidateTestId && options.scenario === "inspection-preview-unavailable") {
+        for (let pageTurn = 0; pageTurn < 32 && !candidateTestId; pageTurn += 1) {
+          const nextPage = await executeScript(
+            sessionId,
+            `return Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.replace(/\\s+/g, " ").trim() === "Próxima" && !button.disabled) ? true : false;`
+          );
+          if (!nextPage) break;
+          const beforeCount = await executeScript(sessionId, `return document.querySelectorAll("[data-testid^='inspection-candidate-']").length;`);
+          await clickButtonByTextWithPointerEvents(sessionId, "Próxima");
+          await waitFor(
+            async () => executeScript(sessionId, `return document.querySelectorAll("[data-testid^='inspection-candidate-']").length !== ${Number(beforeCount)};`),
+            5000,
+            "Paginação do catálogo não atualizou a página",
+            100
+          );
+          candidateTestId = await candidateLookup();
+        }
+      }
+      if (!candidateTestId) {
+        const catalogSummary = await executeScript(
+          sessionId,
+          `return Array.from(document.querySelectorAll("[data-testid^='inspection-candidate-']")).map((candidate) => ({ id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") }));`
+        );
+        console.log(`[inspection-candidate-negative] catalog=${JSON.stringify(catalogSummary)}`);
+        fail(expectedCandidateId ? `Candidato esperado não foi localizado: ${expectedCandidateId}` : options.scenario === "inspection-preview-unavailable" ? "Catálogo concluído não expôs candidato explicitamente sem prévia." : "Catálogo concluído não expôs candidato com prévia esperada.");
+      }
+      const selectedCandidateEvidence = await executeScript(
+        sessionId,
+        `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${candidateTestId}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
+      );
+      console.log(`[inspection-candidate] ${JSON.stringify(selectedCandidateEvidence)}`);
+      if (options.scenario !== "inspection-preview-unavailable" && (selectedCandidateEvidence?.offset !== expectedOffset || selectedCandidateEvidence?.size !== expectedSize || selectedCandidateEvidence?.kind !== expectedKind || selectedCandidateEvidence?.previewExpected !== "true")) {
+        fail(`Candidato conhecido divergente da especificação independente: ${JSON.stringify({ selected: selectedCandidateEvidence, expected: { offset: expectedOffset, size: expectedSize, kind: expectedKind } })}`);
+      }
+      await clickButtonByTestIdWithPointerEvents(sessionId, candidateTestId);
+      if (options.scenario === "inspection-preview-unavailable") {
+        const unavailable = await waitFor(
+          async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-preview-unavailable']")) && !document.querySelector("[data-testid='inspection-preview-image']");`),
+          15000,
+          "O cenário de prévia indisponível não expôs o estado negativo explícito",
+          100
+        );
+        if (!unavailable) fail("Prévia indisponível não foi representada como estado negativo separado.");
+        if (inspectionFixture && selectedCandidateEvidence?.previewExpected !== "false") fail(`Fixture controlado não produziu candidato sem prévia: ${JSON.stringify({ fixture: inspectionFixture, selected: selectedCandidateEvidence })}`);
+        console.log("OK: Desktop Tauri inspection/preview-unavailable E2E passou como cenário negativo separado.");
+        return;
+      }
+      const visualEvidence = await waitFor(
+        async () => executeScript(sessionId, `
+          const image = document.querySelector("[data-testid='inspection-preview-image']");
+          if (!(image instanceof HTMLImageElement) || !image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) return false;
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          if (!context) return false;
+          context.drawImage(image, 0, 0);
+          const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          return {
+            image: true,
+            naturalWidth: image.naturalWidth,
+            naturalHeight: image.naturalHeight,
+            declaredWidth: Number(image.getAttribute("data-preview-width") || 0),
+            declaredHeight: Number(image.getAttribute("data-preview-height") || 0),
+            pngSha256: image.getAttribute("data-png-sha256") || "",
+            pixelsSha256: image.getAttribute("data-pixels-sha256") || "",
+            artifactSha256: image.getAttribute("data-artifact-sha256") || "",
+            src: image.currentSrc || image.src,
+            pixels: Array.from(pixels),
+          };
+        `),
+        15000,
+        "Prévia real não carregou imagem, dimensões ou pixels",
+        100
+      );
+      if (!visualEvidence.image || !Array.isArray(visualEvidence.pixels) || !visualEvidence.src) {
+        fail(`Prévia real inválida: ${JSON.stringify({ ...visualEvidence, pixels: undefined })}`);
+      }
+      assertChunkyGoldenOracle();
+      const expectedPreview = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      console.log(`[inspection-preview-oracle] ${JSON.stringify({ offset: expectedOffset, size: expectedSize, dimensions: [expectedPreview.width, expectedPreview.height], pixelsSha256: createHash("sha256").update(expectedPreview.pixels).digest("hex"), firstBytes: Array.from(inspectionRomBytes.subarray(expectedOffset, expectedOffset + 16)) })}`);
+      const independentPixelEvidence = assertExactPreviewPixels(
+        { width: visualEvidence.naturalWidth, height: visualEvidence.naturalHeight, pixels: visualEvidence.pixels },
+        expectedPreview,
+        "ROM/offset/tamanho conhecidos"
+      );
+      const pngPayload = String(visualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!pngPayload) fail(`A prévia carregada não expôs uma fonte PNG data: válida: ${String(visualEvidence.src).slice(0, 80)}`);
+      const actualPngSha256 = createHash("sha256").update(Buffer.from(pngPayload, "base64")).digest("hex");
+      if (actualPngSha256 !== visualEvidence.pngSha256 || actualPngSha256 !== visualEvidence.artifactSha256) {
+        fail(`Hash do PNG carregado diverge do contrato de artefato: ${JSON.stringify({ actualPngSha256, pngSha256: visualEvidence.pngSha256, artifactSha256: visualEvidence.artifactSha256 })}`);
+      }
+      if (visualEvidence.pixelsSha256 !== independentPixelEvidence.pixelsSha256 || actualPngSha256 === independentPixelEvidence.pixelsSha256) {
+        fail(`Hashes PNG/RGBA não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidence.pixelsSha256 })}`);
+      }
+      const mutatedPixels = Buffer.from(expectedPreview.pixels);
+      mutatedPixels[0] ^= 1;
+      let mutationRejected = false;
+      try {
+        assertExactPreviewPixels(
+          { width: expectedPreview.width, height: expectedPreview.height, pixels: mutatedPixels },
+          expectedPreview,
+          "mutação de um pixel com atributos HTML inalterados"
+        );
+      } catch (error) {
+        mutationRejected = true;
+        console.log(`[inspection-preview-negative] mutation-rejected=${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (!mutationRejected) fail("O oracle independente aceitou uma imagem com um pixel alterado; a asserção visual está permissiva.");
+      console.log(`[inspection-preview] ${JSON.stringify({ candidate: selectedCandidateEvidence, dimensions: [independentPixelEvidence.width, independentPixelEvidence.height], pngSha256: actualPngSha256, pixelsSha256: independentPixelEvidence.pixelsSha256, displayedPixelsSha256: visualEvidence.pixelsSha256, mutationRejected })}`);
+      const frame0Id = "spr_ryo_100/frame-0";
+      const frame1Id = "spr_ryo_100/frame-1";
+      await selectInspectionFrameNative(sessionId, frame0Id);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-0 HAMOOPIG");
+      const frame0Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "seleção inicial");
+      const spriteFrame0Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-0.png`);
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame0Proof.visualEvidence.romSha256, resource: frame0Proof.visualEvidence.resourceId, frame: frame0Proof.visualEvidence.frameId, nativeSize: [frame0Proof.visualEvidence.naturalWidth, frame0Proof.visualEvidence.naturalHeight], pngSha256: frame0Proof.actualPngSha256, pixelsSha256: frame0Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame0Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame0Proof.independentEvidence.expectedRgbaSha256, layout: frame0Proof.layout, screenshot: spriteFrame0Screenshot })}`);
+
+      await selectInspectionFrameNative(sessionId, frame1Id);
+      const afterFrame1Selection = await readRenderedSpriteFramePixels(sessionId);
+      if (afterFrame1Selection?.frameId === frame0Id) {
+        fail(`A seleção de frame-1 manteve a imagem/metadados do frame-0 durante a troca: ${JSON.stringify(afterFrame1Selection)}`);
+      }
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frame0Id, to: frame1Id, pending: afterFrame1Selection ? { frame: afterFrame1Selection.frameId, resource: afterFrame1Selection.resourceId } : null, previousPreviewRemovedOnChange: !afterFrame1Selection || afterFrame1Selection.frameId !== frame0Id })}`);
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição do frame-1 HAMOOPIG");
+      const frame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "troca frame-0 para frame-1");
+      const spriteFrame1Screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-1.png`);
+      console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: frame1Proof.visualEvidence.romSha256, resource: frame1Proof.visualEvidence.resourceId, frame: frame1Proof.visualEvidence.frameId, nativeSize: [frame1Proof.visualEvidence.naturalWidth, frame1Proof.visualEvidence.naturalHeight], pngSha256: frame1Proof.actualPngSha256, pixelsSha256: frame1Proof.independentEvidence.pixelsSha256, expectedIndexSha256: frame1Proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: frame1Proof.independentEvidence.expectedRgbaSha256, layout: frame1Proof.layout, screenshot: spriteFrame1Screenshot })}`);
+
+      for (const frameNumber of [2, 3, 4]) {
+        const frameId = `spr_ryo_100/frame-${frameNumber}`;
+        await selectInspectionFrameNative(sessionId, frameId);
+        const staleFrame = await readRenderedSpriteFramePixels(sessionId);
+        if (staleFrame?.frameId === frame1Id || staleFrame?.frameId === `spr_ryo_100/frame-${frameNumber - 1}`) {
+          fail(`A troca para ${frameId} reutilizou a prévia anterior: ${JSON.stringify(staleFrame)}`);
+        }
+        console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frameNumber === 2 ? frame1Id : `spr_ryo_100/frame-${frameNumber - 1}`, to: frameId, pending: staleFrame ? { frame: staleFrame.frameId, resource: staleFrame.resourceId } : null, previousPreviewRemovedOnChange: !staleFrame || staleFrame.frameId !== frameId })}`);
+        await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", `composição do ${frameId}`);
+        const proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frameId, `troca para ${frameId}`);
+        const screenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-frame-${frameNumber}.png`);
+        console.log(`[inspection-sprite-frame] ${JSON.stringify({ sourcePng: spriteSourcePng, sourcePngSha256: spriteSourcePngSha256, romSha256: proof.visualEvidence.romSha256, resource: proof.visualEvidence.resourceId, frame: proof.visualEvidence.frameId, nativeSize: [proof.visualEvidence.naturalWidth, proof.visualEvidence.naturalHeight], pngSha256: proof.actualPngSha256, pixelsSha256: proof.independentEvidence.pixelsSha256, expectedIndexSha256: proof.independentEvidence.expectedIndexSha256, expectedRgbaSha256: proof.independentEvidence.expectedRgbaSha256, layout: proof.layout, screenshot })}`);
+      }
+
+      await selectInspectionFrameNative(sessionId, frame0Id);
+      const afterFrame0Return = await readRenderedSpriteFramePixels(sessionId);
+      if (afterFrame0Return?.frameId === frame1Id) {
+        fail(`A seleção de frame-0 manteve a imagem/metadados do frame-1 durante a troca: ${JSON.stringify(afterFrame0Return)}`);
+      }
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "recomposição do frame-0 HAMOOPIG");
+      const frame0ReturnProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame0Id, "retorno frame-1 para frame-0");
+      console.log(`[inspection-sprite-transition] ${JSON.stringify({ label: "prévia anterior removida na troca", from: frame1Id, to: frame0Id, pending: afterFrame0Return ? { frame: afterFrame0Return.frameId, resource: afterFrame0Return.resourceId } : null, previousPreviewRemovedOnChange: !afterFrame0Return || afterFrame0Return.frameId !== frame1Id, returnedPixelsSha256: frame0ReturnProof.independentEvidence.pixelsSha256 })}`);
+
+      await selectInspectionFrameNative(sessionId, frame1Id);
+      const beforePersistFrame1 = await readRenderedSpriteFramePixels(sessionId);
+      if (beforePersistFrame1?.frameId === frame0Id) {
+        fail(`A seleção final de frame-1 manteve a prévia anterior antes de salvar: ${JSON.stringify(beforePersistFrame1)}`);
+      }
+      await clickButtonByTestIdNativeWhenReady(sessionId, "inspection-compose-sprite", "composição final do frame-1 HAMOOPIG");
+      const persistedFrame1Proof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, frame1Id, "frame-1 antes de salvar");
+      const spriteBeforeRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-before-restart.png`);
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-save");
+      const persistedSessionId = completedState.session.id;
+      if (!persistedSessionId) fail(`Sessão concluída não tem identidade para validar persistência: ${JSON.stringify(completedState)}`);
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`),
+        15000,
+        "Salvar sessão não publicou a sessão corrente na lista persistida",
+        100
+      );
+      await clickButtonByTestIdWithPointerEvents(sessionId, "inspection-close");
+      await deleteSession(sessionId);
+      sessionId = await createSession(options.app);
+      currentE2eRunContext.sessionId = sessionId;
+      await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "App não reabriu após reinício real");
+      await waitFor(
+        async () => executeScript(sessionId, "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"),
+        uiBootstrapTimeoutMs,
+        "API de automação não voltou após reinício real"
+      );
+      await handleProjectWizardVisibly(sessionId, "after-restart");
+      await setSessionWindowRect(sessionId, 1920, 1080);
+      console.log(`[inspection-reopen-window] ${JSON.stringify(await executeScript(sessionId, `return { width: window.innerWidth, height: window.innerHeight, outerWidth: window.outerWidth, outerHeight: window.outerHeight };`))}`);
+      await clickButtonByTestIdNative(sessionId, "workspace-rail-debug", "abrir Debug Workspace após reinício");
+      await waitForBodyText(sessionId, "Debug Workspace", 15000, "Debug Workspace não voltou após reinício");
+      await callAutomationApi(sessionId, "openToolsWorkspace", ["reverse", "debug", true]);
+      try {
+        await waitForBodyText(sessionId, "Analisar ROM", 15000, "Reverse Workspace nao terminou de remontar");
+      } catch (error) {
+        console.log(`[inspection] estado apos reabrir reverse: ${JSON.stringify(await readAutomationState(sessionId))}`);
+        throw error;
+      }
+      await clickButtonByTestIdNative(sessionId, "reverse-tab-inspection", "abrir aba Inspeção após reinício");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector(${JSON.stringify(inspectionPanel)}));`),
+        15000,
+        "Painel de inspeção não voltou após reinício",
+        250
+      );
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector("[data-testid='inspection-saved-session'][data-session-id='${persistedSessionId}']"));`),
+        30000,
+        "Sessão persistida não foi descoberta após reinício",
+        100
+      );
+
+      // Negative control: deliberately reopen the real wizard through its
+      // visible menu control. A native WebDriver click must be rejected by
+      // hit-test and must not activate the saved-session control underneath it.
+      await clickButtonByTestIdNative(sessionId, "unified-topbar-menu-trigger", "abrir menu superior para o negativo");
+      await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, "menu-action-project-new");
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        10000,
+        "Menu superior não expôs o controle Novo Projeto",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, "menu-action-project-new", "abrir wizard deliberadamente para o negativo");
+      await waitFor(
+        async () => executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="project-wizard-body"]'));`),
+        15000,
+        "Wizard não ficou visível para o negativo deliberado de obstrução",
+        100
+      );
+      const selectionBeforeBlockedClick = await readSavedSessionSelection(sessionId, persistedSessionId);
+      if (!selectionBeforeBlockedClick) {
+        fail(`Sessão salva não estava disponível para o negativo de obstrução: ${persistedSessionId}`);
+      }
+      const blockedSelectionClick = await clickButtonByTestIdNative(
+        sessionId,
+        `select-saved-session-${persistedSessionId}`,
+        "seleção da sessão salva atrás do wizard",
+        { expectBlocked: true }
+      );
+      const selectionAfterBlockedClick = await readSavedSessionSelection(sessionId, persistedSessionId);
+      if (!selectionAfterBlockedClick || JSON.stringify(selectionAfterBlockedClick) !== JSON.stringify(selectionBeforeBlockedClick)) {
+        fail(`Clique obstruído alterou a seleção da sessão: ${JSON.stringify({ before: selectionBeforeBlockedClick, after: selectionAfterBlockedClick })}`);
+      }
+      console.log(`[inspection-reopen-negative] click-rejected=${JSON.stringify({ ...blockedSelectionClick.diagnostic, selectionUnchanged: true, syntheticEvents: false })}`);
+      await clickButtonByTestIdNative(sessionId, "wizard-cancel", "fechar wizard pelo controle visível");
+      await waitFor(
+        async () => executeScript(sessionId, `return !document.querySelector('[data-testid="project-wizard-body"]');`),
+        15000,
+        "Wizard permaneceu como bloqueador após tratamento visual",
+        100
+      );
+      await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, `select-saved-session-${persistedSessionId}`);
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        30000,
+        "Controle nativo de seleção da sessão permaneceu obstruído após fechar o wizard",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, `select-saved-session-${persistedSessionId}`, "seleção da sessão salva após reinício");
+      const reopenDiagnostic = await waitFor(
+        async () => {
+          const diagnostic = await inspectNativeButtonTarget(sessionId, "inspection-reopen");
+          return diagnostic?.exists && diagnostic.visible && !diagnostic.disabled && diagnostic.unobstructed ? diagnostic : false;
+        },
+        15000,
+        "Controle nativo de reabertura não ficou disponível após selecionar a sessão",
+        100
+      );
+      await clickButtonByTestIdNative(sessionId, "inspection-reopen", "reabertura da sessão após reinício");
+      const reopenedState = await waitFor(
+        async () => {
+          const state = await readInspectionUiState(sessionId);
+          return state?.session?.id === persistedSessionId &&
+            state.session.status === "completed" &&
+            state.session.identitySha256 === completedState.session.identitySha256
+            ? state
+            : false;
+        },
+        30000,
+        "Sessão persistida não foi reaberta com a mesma identidade após reinício",
+        100
+      );
+      console.log(`[inspection-reopen] state=${JSON.stringify(reopenedState)}`);
+      const reopenedFrameSelection = await waitFor(
+        async () => executeScript(sessionId, `return document.querySelector("[data-testid='inspection-sprite-frame-select']")?.value ?? "";`),
+        15000,
+        "Seleção persistida de frame-1 não foi restaurada após reinício",
+        100
+      );
+      if (reopenedFrameSelection !== "spr_ryo_100/frame-1") {
+        fail(`Seleção de frame restaurada diverge do frame salvo: ${JSON.stringify({ expected: "spr_ryo_100/frame-1", actual: reopenedFrameSelection })}`);
+      }
+      console.log(`[inspection-reopen-frame-selection] ${JSON.stringify({ sessionId: reopenedState.session.id, frameId: reopenedFrameSelection, restored: true })}`);
+      const reopenedCandidate = await waitFor(
+        async () => executeScript(sessionId, `return document.querySelector("[data-testid='${candidateTestId}']")?.getAttribute("data-testid") ?? "";`),
+        30000,
+        "Catálogo da sessão reaberta não expôs o candidato esperado",
+        100
+      );
+      const reopenedCandidateEvidence = await executeScript(
+        sessionId,
+        `const candidate = document.querySelector(${JSON.stringify(`[data-testid='${reopenedCandidate}']`)}); return candidate ? { id: candidate.getAttribute("data-testid"), offset: Number(candidate.getAttribute("data-candidate-offset")), size: Number(candidate.getAttribute("data-candidate-size")), kind: candidate.getAttribute("data-candidate-kind"), previewExpected: candidate.getAttribute("data-preview-expected") } : null;`
+      );
+      if (!reopenedCandidateEvidence ||
+        reopenedCandidateEvidence.offset !== expectedOffset ||
+        reopenedCandidateEvidence.size !== expectedSize ||
+        reopenedCandidateEvidence.kind !== expectedKind ||
+        reopenedCandidateEvidence.previewExpected !== "true") {
+        fail(`Candidato reaberto diverge da especificação independente: ${JSON.stringify({ selected: reopenedCandidateEvidence, expected: { offset: expectedOffset, size: expectedSize, kind: expectedKind } })}`);
+      }
+      await clickButtonByTestIdNative(sessionId, reopenedCandidate, "seleção do candidato após reinício");
+      const reopenedVisualEvidence = await waitFor(
+        async () => {
+          const evidence = await readRenderedPreviewPixels(sessionId);
+          return evidence?.image && evidence.pixels?.length > 0 ? evidence : false;
+        },
+        15000,
+        "Prévia real não voltou após reabrir a sessão",
+        100
+      );
+      let reopenedPreviewLayout;
+      try {
+        reopenedPreviewLayout = await waitFor(
+          async () => {
+            const layout = await ensurePreviewVisibleAndUnobstructed(sessionId);
+            return layout?.fullyVisible && layout.unobstructed && layout.renderedSizeSufficient ? layout : false;
+          },
+          15000,
+          "Prévia reaberta não ficou integralmente visível e sem obstrução após o scroll do painel",
+          100
+        );
+      } catch (error) {
+        const lastLayout = await ensurePreviewVisibleAndUnobstructed(sessionId);
+        fail(`${error instanceof Error ? error.message : String(error)}; último layout=${JSON.stringify(lastLayout)}`);
+      }
+      assertChunkyGoldenOracle();
+      const expectedPreviewAfterRestart = renderExpectedTilePreview(inspectionRomBytes, expectedOffset, expectedSize);
+      const independentPixelEvidenceAfterRestart = assertExactPreviewPixels(
+        { width: reopenedVisualEvidence.naturalWidth, height: reopenedVisualEvidence.naturalHeight, pixels: reopenedVisualEvidence.pixels },
+        expectedPreviewAfterRestart,
+        "ROM/offset/tamanho conhecidos após reinício"
+      );
+      const pngPayloadAfterRestart = String(reopenedVisualEvidence.src).match(/^data:image\/png;base64,(.+)$/)?.[1];
+      if (!pngPayloadAfterRestart) fail(`A prévia reaberta não expôs uma fonte PNG data: válida: ${String(reopenedVisualEvidence.src).slice(0, 80)}`);
+      const actualPngSha256AfterRestart = createHash("sha256").update(Buffer.from(pngPayloadAfterRestart, "base64")).digest("hex");
+      if (actualPngSha256AfterRestart !== reopenedVisualEvidence.pngSha256 || actualPngSha256AfterRestart !== reopenedVisualEvidence.artifactSha256) {
+        fail(`Hash do PNG reaberto diverge do contrato de artefato: ${JSON.stringify({ actualPngSha256: actualPngSha256AfterRestart, pngSha256: reopenedVisualEvidence.pngSha256, artifactSha256: reopenedVisualEvidence.artifactSha256 })}`);
+      }
+      if (reopenedVisualEvidence.pixelsSha256 !== independentPixelEvidenceAfterRestart.pixelsSha256 || actualPngSha256AfterRestart === independentPixelEvidenceAfterRestart.pixelsSha256) {
+        fail(`Hashes PNG/RGBA reabertos não estão semanticamente separados: ${JSON.stringify({ pngSha256: actualPngSha256AfterRestart, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, actualPixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256 })}`);
+      }
+      console.log(`[inspection-reopen-visual] ${JSON.stringify({ romSha256: createHash("sha256").update(inspectionRomBytes).digest("hex"), sessionId: reopenedState.session.id, identitySha256: reopenedState.session.identitySha256, candidate: reopenedCandidateEvidence, dimensions: [independentPixelEvidenceAfterRestart.width, independentPixelEvidenceAfterRestart.height], pngSha256: actualPngSha256AfterRestart, pixelsSha256: independentPixelEvidenceAfterRestart.pixelsSha256, displayedPixelsSha256: reopenedVisualEvidence.pixelsSha256, previewLayout: reopenedPreviewLayout, reopenDiagnostic })}`);
+      await clickButtonByTestIdNative(sessionId, "inspection-compose-sprite", "composição do frame-1 após reinício");
+      const reopenedSpriteProof = await verifyRenderedSpriteFrame(sessionId, inspectionRomBytes, "spr_ryo_100/frame-1", "ROM/manifesto HAMOOPIG após reinício");
+      if (reopenedSpriteProof.visualEvidence.romSha256 !== reopenedState.session.identitySha256 || reopenedSpriteProof.visualEvidence.resourceId !== "spr_ryo_100" || reopenedSpriteProof.visualEvidence.frameId !== "spr_ryo_100/frame-1") {
+        fail(`Frame composto reaberto diverge da identidade persistida: ${JSON.stringify({ sprite: reopenedSpriteProof.visualEvidence, session: reopenedState })}`);
+      }
+      console.log(`[inspection-reopen-sprite-frame] ${JSON.stringify({ romSha256: reopenedSpriteProof.visualEvidence.romSha256, resource: reopenedSpriteProof.visualEvidence.resourceId, frame: reopenedSpriteProof.visualEvidence.frameId, dimensions: [reopenedSpriteProof.visualEvidence.naturalWidth, reopenedSpriteProof.visualEvidence.naturalHeight], pngSha256: reopenedSpriteProof.actualPngSha256, pixelsSha256: reopenedSpriteProof.independentEvidence.pixelsSha256, expectedRgbaSha256: reopenedSpriteProof.independentEvidence.expectedRgbaSha256, layout: reopenedSpriteProof.layout, frameSelection: reopenedFrameSelection })}`);
+      const spriteAfterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-sprite-after-restart.png`);
+      const afterRestartScreenshot = await captureScreenshot(sessionId, `${artifactPrefix}-after-restart.png`);
+      console.log("OK: Desktop Tauri inspection/complete/save/restart/reopen E2E passou.");
+      console.log(`ROM BYOR: ${inspectionRom}`);
+      console.log(`Sessão reaberta: ${persistedSessionId}`);
+      console.log(`Prévia após reinício: pixels PNG recalculados (${reopenedVisualEvidence.naturalWidth}x${reopenedVisualEvidence.naturalHeight})`);
+      console.log(`Evidências: ${beforeRestartScreenshot}`);
+      console.log(`Evidências: ${afterRestartScreenshot}`);
+      console.log(`Evidências do frame-0: ${spriteFrame0Screenshot}`);
+      console.log(`Evidências do frame-1: ${spriteFrame1Screenshot}`);
+      console.log(`Evidências do frame composto: ${spriteBeforeRestartScreenshot}`);
+      console.log(`Evidências do frame composto após reinício: ${spriteAfterRestartScreenshot}`);
+      return;
     }
 
     if (options.scenario === "onboarding-shell") {
@@ -3751,6 +16725,107 @@ async function main() {
       console.log(`Evidencias: ${wizardScreenshot}`);
       console.log(`Evidencias: ${editorScreenshot}`);
       console.log(`Evidencias: ${layerScreenshot}`);
+      return;
+    }
+
+    if (options.scenario === "authoring-acceptance") {
+      try {
+        await runAuthoringAcceptanceScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
+          temporaryProjectDir = projectDir;
+        });
+      } finally {
+        // The guided persona persists in the app's localStorage; restore the default so the
+        // next scenarios see the standard shell.
+        await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      }
+      return;
+    }
+
+    if (options.scenario === "collect-goal") {
+      try {
+        await runCollectGoalScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
+          temporaryProjectDir = projectDir;
+        });
+      } finally {
+        await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      }
+      return;
+    }
+
+    if (options.scenario === "behaviors-independence") {
+      try {
+        await runBehaviorsIndependenceScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
+          temporaryProjectDir = projectDir;
+        });
+      } finally {
+        await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      }
+      return;
+    }
+
+    if (options.scenario === "nodegraph-authoring") {
+      try {
+        await runNodeGraphAuthoringScenario(sessionId, options.app, uiBootstrapTimeoutMs, (projectDir) => {
+          temporaryProjectDir = projectDir;
+        });
+      } finally {
+        await executeScript(currentE2eRunContext.sessionId ?? sessionId, "localStorage.removeItem(arguments[0]);", [SHELL_PERSONA_STORAGE_KEY]).catch(() => null);
+      }
+      return;
+    }
+
+    if (options.scenario === "mugen-original") {
+      await runMugenOriginalScenario(sessionId,emulatorActivationTimeoutMs,uiBootstrapTimeoutMs,(created)=>{temporaryProjectDir=created;});
+      return;
+    }
+    if (options.scenario === "mugen-real") {
+      await runMugenRealScenario(sessionId,emulatorActivationTimeoutMs,uiBootstrapTimeoutMs,(created)=>{temporaryProjectDir=created;});
+      return;
+    }
+    if (options.scenario === "mugen-locomotion") {
+      await runMugenLocomotionScenario(
+        sessionId,
+        emulatorActivationTimeoutMs,
+        uiBootstrapTimeoutMs,
+        (projectDir) => {
+          temporaryProjectDir = projectDir;
+        }
+      );
+      return;
+    }
+
+    if (options.scenario === "mugen-control") {
+      await runMugenControlScenario(
+        sessionId,
+        emulatorActivationTimeoutMs,
+        uiBootstrapTimeoutMs,
+        (projectDir) => {
+          temporaryProjectDir = projectDir;
+        }
+      );
+      return;
+    }
+
+    if (options.scenario === "mugen-import") {
+      await runMugenImportScenario(
+        sessionId,
+        emulatorActivationTimeoutMs,
+        uiBootstrapTimeoutMs,
+        (projectDir) => {
+          temporaryProjectDir = projectDir;
+        }
+      );
+      return;
+    }
+
+    if (options.scenario === "reference-platformer") {
+      await runReferencePlatformerScenario(
+        sessionId,
+        emulatorActivationTimeoutMs,
+        (projectDir) => {
+          temporaryProjectDir = projectDir;
+        }
+      );
       return;
     }
 
@@ -6362,9 +19437,11 @@ async function main() {
         : details
     );
   } finally {
-    if (sessionId) {
-      await deleteSession(sessionId);
+    // Todas as sessoes abertas pelo cenario (inclusive a criada apos reiniciar o app), nao so a inicial.
+    for (const owned of new Set([sessionId, currentE2eRunContext?.sessionId, ...ownedSessions].filter(Boolean))) {
+      await deleteSession(owned);
     }
+    trackOwnedProcesses();
     if (driverProcess) {
       if (!driverExited) {
         driverProcess.kill();
@@ -6382,13 +19459,19 @@ async function main() {
         console.warn(`[cleanup] tauri-driver ainda responde em ${driverServerUrl} apos cleanup.`);
       }
     }
-    if (temporaryProjectDir) {
+    await cleanupOwnedProcesses();
+    if (temporaryProjectDir && process.env.RDS_E2E_KEEP_PROJECT === "1") {
+      console.warn(`[cleanup] RDS_E2E_KEEP_PROJECT=1: projeto temporario preservado para diagnostico: ${temporaryProjectDir}`);
+    } else if (temporaryProjectDir) {
       const cleaned = await cleanupTemporaryProject(temporaryProjectDir);
       if (!cleaned) {
         console.warn(
           `[cleanup] Nao foi possivel remover o projeto temporario criado pelo onboarding: ${temporaryProjectDir}`
         );
       }
+    }
+    if (temporaryInspectionFixtureDir) {
+      await rm(temporaryInspectionFixtureDir, { recursive: true, force: true });
     }
   }
 }

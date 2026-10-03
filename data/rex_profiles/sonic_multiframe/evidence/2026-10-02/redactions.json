@@ -1,0 +1,7 @@
+{
+  "reason": "Commercial PNG and RGBA arrays remain local BYOR QA; versioned reports contain hashes, dimensions and observations only.",
+  "removed_fields": [
+    "root.reopened.composedPixels.visualEvidence.pixels",
+    "root.reopened.composedPixels.visualEvidence.src"
+  ]
+}

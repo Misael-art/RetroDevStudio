@@ -1,0 +1,415 @@
+{
+  "generatedAt": "2026-09-23T22:13:53.457Z",
+  "scenario": "authoring-acceptance",
+  "testedApplication": {
+    "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "9224bdd04343d14402e83b61d842a4ee0fe485c62805bb6715b1fbcfc629cb37"
+  },
+  "artifacts": [
+    {
+      "label": "editor guiado com recursos carregados",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-01-guided-editor-loaded.png"
+    },
+    {
+      "label": "editor guiado em 1366x768",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-02-layout-1366x768.png"
+    },
+    {
+      "label": "editor guiado com escala 125%",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-03-layout-scaled.png"
+    },
+    {
+      "label": "cenario editado: tijolo e celula vazia sem colisao",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-04-scene-edited.png"
+    },
+    {
+      "label": "regras Quando/Se/Fazer e passagens",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-05-rules.png"
+    },
+    {
+      "label": "som de conclusao associado a victory",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-06-sounds.png"
+    },
+    {
+      "label": "projeto reaberto com recursos e edicoes",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-07-reopened.png"
+    },
+    {
+      "label": "linha do tempo do jogo por teclado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-play-timeline.json"
+    },
+    {
+      "label": "jogo apos vencer pelo teclado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-08-victory.png"
+    }
+  ],
+  "steps": [
+    {
+      "id": "create_and_see_resources",
+      "status": "passed",
+      "at": "2026-09-23T22:13:10.669Z",
+      "projectDir": "/home/misael/Documents/RetroDevProjects/Acceptance_1790201589550",
+      "initialResources": {
+        "summary": {
+          "failed": "0",
+          "ready": "4",
+          "missing": "0",
+          "testid": "viewport-asset-health-summary",
+          "referenced": "4",
+          "loading": "0"
+        },
+        "colors": {
+          "grass": 3149,
+          "width": 432,
+          "sky": 36161,
+          "foxFur": 49,
+          "height": 304,
+          "mountains": 5852,
+          "redDetails": 32,
+          "woodenSword": 14
+        }
+      },
+      "initialPreview": {
+        "w": 160,
+        "src": "asset://localhost/%2Fh",
+        "h": 32
+      }
+    },
+    {
+      "id": "layout_and_keyboard_reachability",
+      "status": "passed",
+      "at": "2026-09-23T22:13:15.173Z",
+      "layout": {
+        "1920x1080": [
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-cenario",
+            "hit": "guided-step-cenario"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-personagem",
+            "hit": "guided-step-personagem"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-regras",
+            "hit": "guided-step-regras"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-sons",
+            "hit": "guided-step-sons"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-testar",
+            "hit": "guided-step-testar"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "scene-save-status",
+            "hit": "scene-save-status"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "inspector-transform-x",
+            "hit": "inspector-transform-x"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "inspector-anim-idle-fps",
+            "hit": "inspector-anim-idle-fps"
+          }
+        ],
+        "1366x768": [
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-cenario",
+            "hit": "guided-step-cenario"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-personagem",
+            "hit": "guided-step-personagem"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-regras",
+            "hit": "guided-step-regras"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-sons",
+            "hit": "guided-step-sons"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-testar",
+            "hit": "guided-step-testar"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "scene-save-status",
+            "hit": "scene-save-status"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "inspector-transform-x",
+            "hit": "inspector-transform-x"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "inspector-anim-idle-fps",
+            "hit": "inspector-anim-idle-fps"
+          }
+        ],
+        "1366x768@125%": [
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-cenario",
+            "hit": "guided-step-cenario"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-personagem",
+            "hit": "guided-step-personagem"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-regras",
+            "hit": "guided-step-regras"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-sons",
+            "hit": "guided-step-sons"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "guided-step-testar",
+            "hit": "guided-step-testar"
+          },
+          {
+            "clipped": false,
+            "ok": true,
+            "inside": true,
+            "id": "scene-save-status",
+            "hit": "scene-save-status"
+          }
+        ]
+      },
+      "focused": "guided-step-cenario"
+    },
+    {
+      "id": "undo_redo_keyboard",
+      "status": "passed",
+      "at": "2026-09-23T22:13:17.099Z",
+      "cell": [
+        10,
+        26
+      ]
+    },
+    {
+      "id": "scene_edit",
+      "status": "passed",
+      "at": "2026-09-23T22:13:17.695Z",
+      "brick": 3,
+      "empty": 4294967295,
+      "collisionSolid": {
+        "before": 88,
+        "after": 87
+      }
+    },
+    {
+      "id": "blocker_and_animation",
+      "status": "passed",
+      "at": "2026-09-23T22:13:18.753Z",
+      "blocker2X": 120,
+      "idleFps": 12
+    },
+    {
+      "id": "passages",
+      "status": "passed",
+      "at": "2026-09-23T22:13:19.991Z",
+      "rulesExcerpt": "Regras (Quando → Se → Fazer)Quando Ao iniciar · Fazer tocar música reference_themeQuando A cada frame · Se tecla → segurada e player iria entrar em passage_blocker e goal_open == 1 e player iria entrar em passage_blocker_2 e passage_2_open == 1 · Fazer mover player (2, 0)Regra avançada: a condição \"player iria entrar em passage_blocker\" também tem um caminho \"senão\". O texto mostra só o caminho principal; a lógica completa está no grafo.Quando A cada frame · Se tecla ← segurada e player iria entrar em passage_blocker e goal_open == 1 e player iria entrar em passage_blocker_2 e passage_2_open ="
+    },
+    {
+      "id": "sound_binding",
+      "status": "passed",
+      "at": "2026-09-23T22:13:20.829Z",
+      "previewState": "Prévia: 0.40 s"
+    },
+    {
+      "id": "saved",
+      "status": "passed",
+      "at": "2026-09-23T22:13:21.297Z",
+      "saveStatus": "saved"
+    },
+    {
+      "id": "restart_reopen_preserved",
+      "status": "passed",
+      "at": "2026-09-23T22:13:25.282Z",
+      "reopenedResources": {
+        "summary": {
+          "failed": "0",
+          "ready": "4",
+          "missing": "0",
+          "testid": "viewport-asset-health-summary",
+          "referenced": "4",
+          "loading": "0"
+        },
+        "colors": {
+          "grass": 3092,
+          "width": 432,
+          "sky": 36161,
+          "foxFur": 49,
+          "height": 304,
+          "mountains": 5703,
+          "redDetails": 53,
+          "woodenSword": 14
+        }
+      },
+      "reopenedPreview": {
+        "w": 160,
+        "src": "asset://localhost/%2Fh",
+        "h": 32
+      },
+      "reopenedFps": "12",
+      "reopenedPassages": {
+        "mainThreshold": "12",
+        "second": [
+          "passage_blocker_2",
+          "60",
+          "passage_2_open"
+        ],
+        "sound": "victory"
+      }
+    },
+    {
+      "id": "keyboard_play_to_victory",
+      "status": "passed",
+      "at": "2026-09-23T22:13:53.457Z",
+      "rom": {
+        "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/authoring-acceptance-2026-09-23T22-13-07-834Z-played.rom",
+        "sha256": "01ebd95e508c8b821b0746d8453706d7e282d515cc16ad6233a68c5524c463b8"
+      },
+      "acks": 4,
+      "jumps": 1,
+      "mainOpenedAt": {
+        "x": 36,
+        "y": 176,
+        "score": 12,
+        "mainOpen": 1,
+        "secondOpen": 0,
+        "goal": 0,
+        "audioTotal": 91256,
+        "t": 1790201616082
+      },
+      "secondOpenedAt": {
+        "x": 106,
+        "y": 176,
+        "score": 60,
+        "mainOpen": 1,
+        "secondOpen": 1,
+        "goal": 0,
+        "audioTotal": 161908,
+        "t": 1790201623195
+      },
+      "holeSamples": 1,
+      "victory": {
+        "x": 132,
+        "y": 176,
+        "score": 73,
+        "mainOpen": 1,
+        "secondOpen": 1,
+        "goal": 1,
+        "audioTotal": 181042,
+        "t": 1790201625080
+      },
+      "foxFurPixels": 68,
+      "audio": {
+        "sampleRate": 44100,
+        "before": {
+          "p1320": 0.39784846951777414,
+          "p880": 0.03213112575088371,
+          "n": 52920
+        },
+        "after": {
+          "p1320": 1125.9999623922413,
+          "p880": 3.0051924486545674,
+          "n": 79380
+        },
+        "telemetry": {
+          "renderedNonZeroFrames": 96901,
+          "receivedNonZeroFrames": 97637,
+          "contextState": "running",
+          "receivedFrames": 129526,
+          "contextSampleRate": 44100,
+          "renderedPeak": 0.116607666015625,
+          "renderedFrames": 1060864,
+          "muted": false
+        }
+      },
+      "layers": {
+        "generatedByCore": "amostras recebidas pelo app a partir do core (ring buffer), analisadas por Goertzel",
+        "forwardedToWebAudio": {
+          "renderedNonZeroFrames": 96901,
+          "receivedNonZeroFrames": 97637,
+          "contextState": "running",
+          "receivedFrames": 129526,
+          "contextSampleRate": 44100,
+          "renderedPeak": 0.116607666015625,
+          "renderedFrames": 1060864,
+          "muted": false
+        },
+        "acousticLoopback": "nao medido neste cenario"
+      }
+    }
+  ],
+  "frames": [],
+  "roms": [],
+  "non_black_pixels": 0
+}

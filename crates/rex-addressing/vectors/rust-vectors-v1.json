@@ -1,0 +1,7551 @@
+{
+  "contract_version": 1,
+  "generated_by": "scripts/rex_profiles/addressing/differential/export-vectors.mjs",
+  "date": "2026-09-25",
+  "usage": "testes diferenciais da implementación Rust: para cada vector, a implementación debe producir \"expect\"; os campos engine_agree=son a concordancia do segundo motor independente (scripts/rex_profiles/addressing/crosscheck/). Para bytes, reproduza o fixture co PRNG_SPEC (non hai ROMs comerciais neste ficheiro).",
+  "fixture_prng_spec": {
+    "algorithm": "xorshift32",
+    "seed_per_block": "seed = (seedBase ^ imul(blockIndex+1, 0x9e3779b9)) >>> 0; 0 => 0x9e3779b9",
+    "step": "s ^= s<<13 (u32); s ^= s>>17; s ^= s<<5; byte = s>>>24",
+    "block_size_bytes": 65536,
+    "seed_bases": {
+      "md-linear": "0x4d444d44",
+      "md-ssf2": "0x5546322d",
+      "snes-lorom": "0x4c4f524d (blocks of 32KB)",
+      "snes-hirom": "0x4849524d",
+      "snes-exhirom": "0x45584849"
+    },
+    "note": "fixtures autorais: o Rust debe recrexar o MESMO stream para comparar bytes; fonte en scripts/rex_profiles/addressing/build-fixtures.mjs"
+  },
+  "real_case_pointers": {
+    "md-linear": "data/rex_profiles/addressing/md-linear/evidence/real-case.json",
+    "md-ssf2": "data/rex_profiles/addressing/md-ssf2/evidence/real-case.json",
+    "snes-lorom": "data/rex_profiles/addressing/snes-lorom/evidence/real-case.json",
+    "snes-hirom": "data/rex_profiles/addressing/snes-hirom/evidence/real-case.json",
+    "snes-exhirom": "data/rex_profiles/addressing/snes-exhirom/evidence/real-case.json"
+  },
+  "profiles": {
+    "md-linear": {
+      "fixture": {
+        "sha256": "13b08feab9b43c2ef781468b83192bb0a8c37fa303734219b4f033a040afe24b",
+        "rom_size": 524288
+      },
+      "translate": [
+        {
+          "name": "primeira posicao da ROM",
+          "cpu_address": "0x000000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "ultima posicao da ROM",
+          "cpu_address": "0x07FFFF",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x07FFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho k=1 retorna ao inicio",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "ultima posicao da janela do cartucho",
+          "cpu_address": "0x3FFFFF",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x07FFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "offset direto no meio",
+          "cpu_address": "0x023456",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x023456"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho com ROM de 256KB",
+          "cpu_address": "0x100000",
+          "mapper_state": {
+            "rom_size": 262144
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "ROM minima de 64KB espelha 64x",
+          "cpu_address": "0x3FFFFF",
+          "mapper_state": {
+            "rom_size": 65536
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x00FFFF"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "work-ram inicio da janela",
+          "cpu_address": "0xE00000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "work-ram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "work-ram espelho classico FF0000",
+          "cpu_address": "0xFF0000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "work-ram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "work-ram meio",
+          "cpu_address": "0xE12345",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "work-ram",
+            "offset": "0x2345"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "work-ram ultima posicao",
+          "cpu_address": "0xFFFFFF",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "work-ram",
+            "offset": "0xFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "z80-ram inicio",
+          "cpu_address": "0xA00000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "z80-ram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "z80-ram fim do primeiro espelho",
+          "cpu_address": "0xA01FFF",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "z80-ram",
+            "offset": "0x1FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "z80-ram segundo espelho",
+          "cpu_address": "0xA02000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "z80-ram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "z80-ram espelho alto",
+          "cpu_address": "0xA08000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "z80-ram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "z80-ram espelho alto meio",
+          "cpu_address": "0xA0A123",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "z80-ram",
+            "offset": "0x0123"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io inicio",
+          "cpu_address": "0xA10000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io registro especifico",
+          "cpu_address": "0xA10003",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x0003"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io fim da sub-janela baixa",
+          "cpu_address": "0xA12FFF",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x2FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io acima do TIME",
+          "cpu_address": "0xA14000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x4000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "cart-io inicio (TIME)",
+          "cpu_address": "0xA13000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "cart-io",
+            "offset": "0x00"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "cart-io registrador 0xF1",
+          "cpu_address": "0xA130F1",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "cart-io",
+            "offset": "0xF1"
+          },
+          "engine_agree": true
+        }
+      ],
+      "translate_negatives": [
+        {
+          "name": "open bus 0x400000",
+          "cpu_address": "0x400000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "open bus fim 0x7FFFFF",
+          "cpu_address": "0x7FFFFF",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "VDP fora do escopo",
+          "cpu_address": "0xC00000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "sound bus YM2612",
+          "cpu_address": "0xA04000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "sound bus YM2612 espelhado",
+          "cpu_address": "0xA0C000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "sound bus misc (VDP via bus do Z80)",
+          "cpu_address": "0xA0E000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "acima do barramento 24 bits",
+          "cpu_address": "0x1000000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "mapper_state ausente",
+          "cpu_address": "0x000000",
+          "mapper_state": null,
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size sem potencia de 2 (caso corpus 531577)",
+          "cpu_address": "0x000000",
+          "mapper_state": {
+            "rom_size": 531577
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size acima de 4MB exige mapper",
+          "cpu_address": "0x000000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size abaixo do minimo 64KB",
+          "cpu_address": "0x000000",
+          "mapper_state": {
+            "rom_size": 32768
+          },
+          "expect_error": "unsupported"
+        }
+      ],
+      "invert_cases": [
+        {
+          "name": "offset 0 em ROM 512KB tem 8 aliases",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "aliases": [
+              "0x000000",
+              "0x080000",
+              "0x100000",
+              "0x180000",
+              "0x200000",
+              "0x280000",
+              "0x300000",
+              "0x380000"
+            ]
+          }
+        },
+        {
+          "name": "ultimo offset em ROM 512KB",
+          "rom_offset": "0x07FFFF",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "aliases": [
+              "0x07ffff",
+              "0x0fffff",
+              "0x17ffff",
+              "0x1fffff",
+              "0x27ffff",
+              "0x2fffff",
+              "0x37ffff",
+              "0x3fffff"
+            ]
+          }
+        },
+        {
+          "name": "offset em ROM 256KB tem 16 aliases",
+          "rom_offset": "0x000123",
+          "mapper_state": {
+            "rom_size": 262144
+          },
+          "expect": {
+            "aliases": [
+              "0x000123",
+              "0x040123",
+              "0x080123",
+              "0x0c0123",
+              "0x100123",
+              "0x140123",
+              "0x180123",
+              "0x1c0123",
+              "0x200123",
+              "0x240123",
+              "0x280123",
+              "0x2c0123",
+              "0x300123",
+              "0x340123",
+              "0x380123",
+              "0x3c0123"
+            ]
+          }
+        },
+        {
+          "name": "offset alem do fim da ROM nao tem alias",
+          "rom_offset": "0x080000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "aliases": []
+          }
+        },
+        {
+          "name": "invert exige mapper_state",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "aliases": [
+              "0x000000",
+              "0x080000",
+              "0x100000",
+              "0x180000",
+              "0x200000",
+              "0x280000",
+              "0x300000",
+              "0x380000"
+            ]
+          }
+        }
+      ],
+      "invert_samples_exhaustive_verified": [
+        {
+          "rom_offset": "0x058000",
+          "aliases": [
+            "0x058000",
+            "0x0d8000",
+            "0x158000",
+            "0x1d8000",
+            "0x258000",
+            "0x2d8000",
+            "0x358000",
+            "0x3d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x000000",
+            "0x080000",
+            "0x100000",
+            "0x180000",
+            "0x200000",
+            "0x280000",
+            "0x300000",
+            "0x380000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x0a8000",
+            "0x128000",
+            "0x1a8000",
+            "0x228000",
+            "0x2a8000",
+            "0x328000",
+            "0x3a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x0c8000",
+            "0x148000",
+            "0x1c8000",
+            "0x248000",
+            "0x2c8000",
+            "0x348000",
+            "0x3c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x0e8000",
+            "0x168000",
+            "0x1e8000",
+            "0x268000",
+            "0x2e8000",
+            "0x368000",
+            "0x3e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x070000",
+          "aliases": [
+            "0x070000",
+            "0x0f0000",
+            "0x170000",
+            "0x1f0000",
+            "0x270000",
+            "0x2f0000",
+            "0x370000",
+            "0x3f0000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x0e8000",
+            "0x168000",
+            "0x1e8000",
+            "0x268000",
+            "0x2e8000",
+            "0x368000",
+            "0x3e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x058000",
+          "aliases": [
+            "0x058000",
+            "0x0d8000",
+            "0x158000",
+            "0x1d8000",
+            "0x258000",
+            "0x2d8000",
+            "0x358000",
+            "0x3d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x020000",
+          "aliases": [
+            "0x020000",
+            "0x0a0000",
+            "0x120000",
+            "0x1a0000",
+            "0x220000",
+            "0x2a0000",
+            "0x320000",
+            "0x3a0000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x088000",
+            "0x108000",
+            "0x188000",
+            "0x208000",
+            "0x288000",
+            "0x308000",
+            "0x388000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x088000",
+            "0x108000",
+            "0x188000",
+            "0x208000",
+            "0x288000",
+            "0x308000",
+            "0x388000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x088000",
+            "0x108000",
+            "0x188000",
+            "0x208000",
+            "0x288000",
+            "0x308000",
+            "0x388000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x060000",
+            "0x0e0000",
+            "0x160000",
+            "0x1e0000",
+            "0x260000",
+            "0x2e0000",
+            "0x360000",
+            "0x3e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x0a8000",
+            "0x128000",
+            "0x1a8000",
+            "0x228000",
+            "0x2a8000",
+            "0x328000",
+            "0x3a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x010000",
+          "aliases": [
+            "0x010000",
+            "0x090000",
+            "0x110000",
+            "0x190000",
+            "0x210000",
+            "0x290000",
+            "0x310000",
+            "0x390000"
+          ]
+        },
+        {
+          "rom_offset": "0x030000",
+          "aliases": [
+            "0x030000",
+            "0x0b0000",
+            "0x130000",
+            "0x1b0000",
+            "0x230000",
+            "0x2b0000",
+            "0x330000",
+            "0x3b0000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x088000",
+            "0x108000",
+            "0x188000",
+            "0x208000",
+            "0x288000",
+            "0x308000",
+            "0x388000"
+          ]
+        },
+        {
+          "rom_offset": "0x010000",
+          "aliases": [
+            "0x010000",
+            "0x090000",
+            "0x110000",
+            "0x190000",
+            "0x210000",
+            "0x290000",
+            "0x310000",
+            "0x390000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000",
+            "0x0f8000",
+            "0x178000",
+            "0x1f8000",
+            "0x278000",
+            "0x2f8000",
+            "0x378000",
+            "0x3f8000"
+          ]
+        },
+        {
+          "rom_offset": "0x058000",
+          "aliases": [
+            "0x058000",
+            "0x0d8000",
+            "0x158000",
+            "0x1d8000",
+            "0x258000",
+            "0x2d8000",
+            "0x358000",
+            "0x3d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x0c8000",
+            "0x148000",
+            "0x1c8000",
+            "0x248000",
+            "0x2c8000",
+            "0x348000",
+            "0x3c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x0a8000",
+            "0x128000",
+            "0x1a8000",
+            "0x228000",
+            "0x2a8000",
+            "0x328000",
+            "0x3a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x040000",
+          "aliases": [
+            "0x040000",
+            "0x0c0000",
+            "0x140000",
+            "0x1c0000",
+            "0x240000",
+            "0x2c0000",
+            "0x340000",
+            "0x3c0000"
+          ]
+        },
+        {
+          "rom_offset": "0x058000",
+          "aliases": [
+            "0x058000",
+            "0x0d8000",
+            "0x158000",
+            "0x1d8000",
+            "0x258000",
+            "0x2d8000",
+            "0x358000",
+            "0x3d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x0c8000",
+            "0x148000",
+            "0x1c8000",
+            "0x248000",
+            "0x2c8000",
+            "0x348000",
+            "0x3c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x0a8000",
+            "0x128000",
+            "0x1a8000",
+            "0x228000",
+            "0x2a8000",
+            "0x328000",
+            "0x3a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000",
+            "0x0f8000",
+            "0x178000",
+            "0x1f8000",
+            "0x278000",
+            "0x2f8000",
+            "0x378000",
+            "0x3f8000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x0a8000",
+            "0x128000",
+            "0x1a8000",
+            "0x228000",
+            "0x2a8000",
+            "0x328000",
+            "0x3a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x0a8000",
+            "0x128000",
+            "0x1a8000",
+            "0x228000",
+            "0x2a8000",
+            "0x328000",
+            "0x3a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x060000",
+            "0x0e0000",
+            "0x160000",
+            "0x1e0000",
+            "0x260000",
+            "0x2e0000",
+            "0x360000",
+            "0x3e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x088000",
+            "0x108000",
+            "0x188000",
+            "0x208000",
+            "0x288000",
+            "0x308000",
+            "0x388000"
+          ]
+        },
+        {
+          "rom_offset": "0x038000",
+          "aliases": [
+            "0x038000",
+            "0x0b8000",
+            "0x138000",
+            "0x1b8000",
+            "0x238000",
+            "0x2b8000",
+            "0x338000",
+            "0x3b8000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x060000",
+            "0x0e0000",
+            "0x160000",
+            "0x1e0000",
+            "0x260000",
+            "0x2e0000",
+            "0x360000",
+            "0x3e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x030000",
+          "aliases": [
+            "0x030000",
+            "0x0b0000",
+            "0x130000",
+            "0x1b0000",
+            "0x230000",
+            "0x2b0000",
+            "0x330000",
+            "0x3b0000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x060000",
+            "0x0e0000",
+            "0x160000",
+            "0x1e0000",
+            "0x260000",
+            "0x2e0000",
+            "0x360000",
+            "0x3e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x0e8000",
+            "0x168000",
+            "0x1e8000",
+            "0x268000",
+            "0x2e8000",
+            "0x368000",
+            "0x3e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x0c8000",
+            "0x148000",
+            "0x1c8000",
+            "0x248000",
+            "0x2c8000",
+            "0x348000",
+            "0x3c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x050000",
+          "aliases": [
+            "0x050000",
+            "0x0d0000",
+            "0x150000",
+            "0x1d0000",
+            "0x250000",
+            "0x2d0000",
+            "0x350000",
+            "0x3d0000"
+          ]
+        },
+        {
+          "rom_offset": "0x038000",
+          "aliases": [
+            "0x038000",
+            "0x0b8000",
+            "0x138000",
+            "0x1b8000",
+            "0x238000",
+            "0x2b8000",
+            "0x338000",
+            "0x3b8000"
+          ]
+        },
+        {
+          "rom_offset": "0x038000",
+          "aliases": [
+            "0x038000",
+            "0x0b8000",
+            "0x138000",
+            "0x1b8000",
+            "0x238000",
+            "0x2b8000",
+            "0x338000",
+            "0x3b8000"
+          ]
+        },
+        {
+          "rom_offset": "0x050000",
+          "aliases": [
+            "0x050000",
+            "0x0d0000",
+            "0x150000",
+            "0x1d0000",
+            "0x250000",
+            "0x2d0000",
+            "0x350000",
+            "0x3d0000"
+          ]
+        },
+        {
+          "rom_offset": "0x010000",
+          "aliases": [
+            "0x010000",
+            "0x090000",
+            "0x110000",
+            "0x190000",
+            "0x210000",
+            "0x290000",
+            "0x310000",
+            "0x390000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x0c8000",
+            "0x148000",
+            "0x1c8000",
+            "0x248000",
+            "0x2c8000",
+            "0x348000",
+            "0x3c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x000000",
+            "0x080000",
+            "0x100000",
+            "0x180000",
+            "0x200000",
+            "0x280000",
+            "0x300000",
+            "0x380000"
+          ]
+        },
+        {
+          "rom_offset": "0x030000",
+          "aliases": [
+            "0x030000",
+            "0x0b0000",
+            "0x130000",
+            "0x1b0000",
+            "0x230000",
+            "0x2b0000",
+            "0x330000",
+            "0x3b0000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x0e8000",
+            "0x168000",
+            "0x1e8000",
+            "0x268000",
+            "0x2e8000",
+            "0x368000",
+            "0x3e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x0c8000",
+            "0x148000",
+            "0x1c8000",
+            "0x248000",
+            "0x2c8000",
+            "0x348000",
+            "0x3c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x0c8000",
+            "0x148000",
+            "0x1c8000",
+            "0x248000",
+            "0x2c8000",
+            "0x348000",
+            "0x3c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x000000",
+            "0x080000",
+            "0x100000",
+            "0x180000",
+            "0x200000",
+            "0x280000",
+            "0x300000",
+            "0x380000"
+          ]
+        },
+        {
+          "rom_offset": "0x058000",
+          "aliases": [
+            "0x058000",
+            "0x0d8000",
+            "0x158000",
+            "0x1d8000",
+            "0x258000",
+            "0x2d8000",
+            "0x358000",
+            "0x3d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x088000",
+            "0x108000",
+            "0x188000",
+            "0x208000",
+            "0x288000",
+            "0x308000",
+            "0x388000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000",
+            "0x0f8000",
+            "0x178000",
+            "0x1f8000",
+            "0x278000",
+            "0x2f8000",
+            "0x378000",
+            "0x3f8000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x0e8000",
+            "0x168000",
+            "0x1e8000",
+            "0x268000",
+            "0x2e8000",
+            "0x368000",
+            "0x3e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000",
+            "0x0f8000",
+            "0x178000",
+            "0x1f8000",
+            "0x278000",
+            "0x2f8000",
+            "0x378000",
+            "0x3f8000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x0a8000",
+            "0x128000",
+            "0x1a8000",
+            "0x228000",
+            "0x2a8000",
+            "0x328000",
+            "0x3a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x060000",
+            "0x0e0000",
+            "0x160000",
+            "0x1e0000",
+            "0x260000",
+            "0x2e0000",
+            "0x360000",
+            "0x3e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x050000",
+          "aliases": [
+            "0x050000",
+            "0x0d0000",
+            "0x150000",
+            "0x1d0000",
+            "0x250000",
+            "0x2d0000",
+            "0x350000",
+            "0x3d0000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x0e8000",
+            "0x168000",
+            "0x1e8000",
+            "0x268000",
+            "0x2e8000",
+            "0x368000",
+            "0x3e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x000000",
+            "0x080000",
+            "0x100000",
+            "0x180000",
+            "0x200000",
+            "0x280000",
+            "0x300000",
+            "0x380000"
+          ]
+        },
+        {
+          "rom_offset": "0x020000",
+          "aliases": [
+            "0x020000",
+            "0x0a0000",
+            "0x120000",
+            "0x1a0000",
+            "0x220000",
+            "0x2a0000",
+            "0x320000",
+            "0x3a0000"
+          ]
+        }
+      ],
+      "read_cases": [
+        {
+          "name": "leitura simples no inicio",
+          "cpu_address": "0x000000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x000000",
+              "bytes_hex": "089a1d21d82bdb1d"
+            }
+          ]
+        },
+        {
+          "name": "cruzamento de espelho gera dois segmentos com offsets distintos",
+          "cpu_address": "0x07FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x07fff8",
+              "bytes_hex": "541dbf4125d1484a"
+            },
+            {
+              "region": "rom",
+              "offset": "0x000000",
+              "bytes_hex": "089a1d21d82bdb1d"
+            }
+          ]
+        },
+        {
+          "name": "leitura na ultima posicao valida cruza para area nao suportada",
+          "cpu_address": "0x3FFFFF",
+          "length": 2,
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x07ffff",
+              "bytes_hex": "4a"
+            },
+            {
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "regiao nao-ROM classifica offset sem backing ROM",
+          "cpu_address": "0xFFFFFE",
+          "length": 2,
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "work-ram",
+              "offset": "0x00fffe",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "leitura alem do barramento 24 bits e rejeitada antes de alocar",
+          "cpu_address": "0x1000000",
+          "length": 1,
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "length zero e rejeitado",
+          "cpu_address": "0x000000",
+          "length": 0,
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "rom menor que rom_size declarado: trecho faltante e out-of-range, sem clamp",
+          "cpu_address": "0x000000",
+          "length": 524288,
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "rom_short_by": 8,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x000000",
+              "bytes_hex": "089a1d21d82bdb1d495667cd0d98b05a9e8d77417468c3dd88584f891a658fc8"
+            },
+            {
+              "error": "out-of-range",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        }
+      ]
+    },
+    "md-ssf2": {
+      "fixture": {
+        "sha256": "4e18dee7efa2de03d8e7f78a06267a8cd27001463e3226b90d29956c6ca7945e",
+        "rom_size": 4194304
+      },
+      "translate": [
+        {
+          "name": "janela 0 fixa, primeira posicao",
+          "cpu_address": "0x000000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "janela 0 ultima posicao",
+          "cpu_address": "0x07FFFF",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x07FFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "estado inicial identidade: janela 1 inicio",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x080000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "estado inicial identidade: janela 1 fim",
+          "cpu_address": "0x0FFFFF",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0FFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "janela 5 identidade com deslocamento",
+          "cpu_address": "0x281234",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x281234"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "janela 7 identidade, ultima posicao da janela do cartucho",
+          "cpu_address": "0x3FFFFF",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x3FFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banks {1:5}: janela 1 aponta pagina 5 (5<<19 = 0x280000)",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5
+            }
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x280000"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "banks {1:5}: fim da janela 1",
+          "cpu_address": "0x0FFFFF",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5
+            }
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x2FFFFF"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "banks {1:11}: pagina 11 = base 0x180000 (nada a ver com janela 3)",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 11
+            }
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x180000"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "valor de banco alem da ROM espelha por mascara, nao e erro (66<<19 & mask = 0x100000)",
+          "cpu_address": "0x380000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "7": 66
+            }
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x100000"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "duas janelas no mesmo banco: CPU 0x080000",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5,
+              "2": 5
+            }
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x280000"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "duas janelas no mesmo banco: CPU 0x100000 traduz ao MESMO offset",
+          "cpu_address": "0x100000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5,
+              "2": 5
+            }
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x280000"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "janela 0 imune a banks escritos",
+          "cpu_address": "0x000123",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5,
+              "7": 2
+            }
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000123"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "ROM minima 512KB: base identidade mascarada a zero em toda janela (w3)",
+          "cpu_address": "0x180000",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "ROM minima 512KB com banks {3:1}: (1<<19)&0x7FFFF = 0 (mascara, nao erro)",
+          "cpu_address": "0x180123",
+          "mapper_state": {
+            "rom_size": 524288,
+            "banks": {
+              "3": 1
+            }
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000123"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "regiao cart-io (pagina TIME) mantida",
+          "cpu_address": "0xA130F3",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "cart-io",
+            "offset": "0x0F3"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "regiao io acima do TIME",
+          "cpu_address": "0xA11000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x1000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "work-ram espelho classico",
+          "cpu_address": "0xFF0000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "work-ram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        }
+      ],
+      "translate_negatives": [
+        {
+          "name": "open bus 0x400000",
+          "cpu_address": "0x400000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "fim da area aberta 0x7FFFFF",
+          "cpu_address": "0x7FFFFF",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "VDP ports fora do escopo",
+          "cpu_address": "0xC00000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "acima do barramento 24 bits",
+          "cpu_address": "0x1000000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "estado ausente",
+          "cpu_address": "0x080000",
+          "mapper_state": null,
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size abaixo de uma janela de 512KB",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 65536
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size acima de 8MB",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 16777216
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size nao potencia de 2 (5MB cru)",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 5242880
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "banco com valor string ('5' nao e 5)",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": "5"
+            }
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "banco com valor negativo",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": -1
+            }
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "banco com valor fracionario",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "2": 1.5
+            }
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "janela 0 nao e remapeavel no estado",
+          "cpu_address": "0x000000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "0": 3
+            }
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "janela de banco desconhecida (8)",
+          "cpu_address": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "8": 1
+            }
+          },
+          "expect_error": "unsupported"
+        }
+      ],
+      "invert_cases": [
+        {
+          "name": "identidade 4MB e bijetiva: offset 0x123 so na janela 0",
+          "rom_offset": "0x000123",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "aliases": [
+              "0x000123"
+            ]
+          }
+        },
+        {
+          "name": "banks {1:5,2:5}: offset 0x281234 tem tres aliases: janelas 1 e 2 reescritas e a identidade da janela 5",
+          "rom_offset": "0x281234",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5,
+              "2": 5
+            }
+          },
+          "expect": {
+            "aliases": [
+              "0x081234",
+              "0x101234",
+              "0x281234"
+            ]
+          }
+        },
+        {
+          "name": "banks {1:11}: base 0x180000 colide com a identidade da janela 3 -> dois aliases",
+          "rom_offset": "0x1A0F00",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 11
+            }
+          },
+          "expect": {
+            "aliases": [
+              "0x0a0f00",
+              "0x1a0f00"
+            ]
+          }
+        },
+        {
+          "name": "banks {1:0}: janela 0 e janela 1 espelhando o inicio da ROM",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 0
+            }
+          },
+          "expect": {
+            "aliases": [
+              "0x000000",
+              "0x080000"
+            ]
+          }
+        },
+        {
+          "name": "offset alem do fim da ROM declarada: lista vazia, resposta valida",
+          "rom_offset": "0x400000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "aliases": []
+          }
+        },
+        {
+          "name": "ROM 512KB identidade: todas as 8 janelas mascararam a base 0 -> 8 aliases",
+          "rom_offset": "0x000123",
+          "mapper_state": {
+            "rom_size": 524288
+          },
+          "expect": {
+            "aliases": [
+              "0x000123",
+              "0x080123",
+              "0x100123",
+              "0x180123",
+              "0x200123",
+              "0x280123",
+              "0x300123",
+              "0x380123"
+            ]
+          }
+        },
+        {
+          "name": "janela 0 so ve offsets ate 0x7FFFF",
+          "rom_offset": "0x080000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "aliases": [
+              "0x080000"
+            ]
+          }
+        },
+        {
+          "name": "offset nao inteiro e erro",
+          "rom_offset": "291.5",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "error": "out-of-range"
+          }
+        },
+        {
+          "name": "invert exige mapper_state valido",
+          "rom_offset": "0x000123",
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "3": "x"
+            }
+          },
+          "expect": {
+            "error": "unsupported"
+          }
+        }
+      ],
+      "invert_samples_exhaustive_verified": [
+        {
+          "rom_offset": "0x3d8000",
+          "aliases": [
+            "0x3d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x300000",
+          "aliases": [
+            "0x300000"
+          ]
+        },
+        {
+          "rom_offset": "0x1a8000",
+          "aliases": [
+            "0x1a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x1c8000",
+          "aliases": [
+            "0x1c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000"
+          ]
+        },
+        {
+          "rom_offset": "0x370000",
+          "aliases": [
+            "0x370000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e8000",
+          "aliases": [
+            "0x0e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x058000",
+          "aliases": [
+            "0x058000"
+          ]
+        },
+        {
+          "rom_offset": "0x020000",
+          "aliases": [
+            "0x020000"
+          ]
+        },
+        {
+          "rom_offset": "0x088000",
+          "aliases": [
+            "0x088000"
+          ]
+        },
+        {
+          "rom_offset": "0x108000",
+          "aliases": [
+            "0x108000"
+          ]
+        },
+        {
+          "rom_offset": "0x308000",
+          "aliases": [
+            "0x308000"
+          ]
+        },
+        {
+          "rom_offset": "0x1e0000",
+          "aliases": [
+            "0x1e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x228000",
+          "aliases": [
+            "0x228000"
+          ]
+        },
+        {
+          "rom_offset": "0x290000",
+          "aliases": [
+            "0x290000"
+          ]
+        },
+        {
+          "rom_offset": "0x2b0000",
+          "aliases": [
+            "0x2b0000"
+          ]
+        },
+        {
+          "rom_offset": "0x208000",
+          "aliases": [
+            "0x208000"
+          ]
+        },
+        {
+          "rom_offset": "0x010000",
+          "aliases": [
+            "0x010000"
+          ]
+        },
+        {
+          "rom_offset": "0x3f8000",
+          "aliases": [
+            "0x3f8000"
+          ]
+        },
+        {
+          "rom_offset": "0x3d8000",
+          "aliases": [
+            "0x3d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x2c8000",
+          "aliases": [
+            "0x2c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x1a8000",
+          "aliases": [
+            "0x1a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x140000",
+          "aliases": [
+            "0x140000"
+          ]
+        },
+        {
+          "rom_offset": "0x2d8000",
+          "aliases": [
+            "0x2d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000"
+          ]
+        },
+        {
+          "rom_offset": "0x228000",
+          "aliases": [
+            "0x228000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000"
+          ]
+        },
+        {
+          "rom_offset": "0x3a8000",
+          "aliases": [
+            "0x3a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x060000"
+          ]
+        },
+        {
+          "rom_offset": "0x108000",
+          "aliases": [
+            "0x108000"
+          ]
+        },
+        {
+          "rom_offset": "0x238000",
+          "aliases": [
+            "0x238000"
+          ]
+        },
+        {
+          "rom_offset": "0x1e0000",
+          "aliases": [
+            "0x1e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x330000",
+          "aliases": [
+            "0x330000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x060000"
+          ]
+        },
+        {
+          "rom_offset": "0x1e8000",
+          "aliases": [
+            "0x1e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x2c8000",
+          "aliases": [
+            "0x2c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d0000",
+          "aliases": [
+            "0x0d0000"
+          ]
+        },
+        {
+          "rom_offset": "0x1b8000",
+          "aliases": [
+            "0x1b8000"
+          ]
+        },
+        {
+          "rom_offset": "0x238000",
+          "aliases": [
+            "0x238000"
+          ]
+        },
+        {
+          "rom_offset": "0x1d0000",
+          "aliases": [
+            "0x1d0000"
+          ]
+        },
+        {
+          "rom_offset": "0x390000",
+          "aliases": [
+            "0x390000"
+          ]
+        },
+        {
+          "rom_offset": "0x1c8000",
+          "aliases": [
+            "0x1c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x200000",
+          "aliases": [
+            "0x200000"
+          ]
+        },
+        {
+          "rom_offset": "0x3b0000",
+          "aliases": [
+            "0x3b0000"
+          ]
+        },
+        {
+          "rom_offset": "0x168000",
+          "aliases": [
+            "0x168000"
+          ]
+        },
+        {
+          "rom_offset": "0x348000",
+          "aliases": [
+            "0x348000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000"
+          ]
+        },
+        {
+          "rom_offset": "0x300000",
+          "aliases": [
+            "0x300000"
+          ]
+        },
+        {
+          "rom_offset": "0x3d8000",
+          "aliases": [
+            "0x3d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x288000",
+          "aliases": [
+            "0x288000"
+          ]
+        },
+        {
+          "rom_offset": "0x378000",
+          "aliases": [
+            "0x378000"
+          ]
+        },
+        {
+          "rom_offset": "0x3e8000",
+          "aliases": [
+            "0x3e8000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000"
+          ]
+        },
+        {
+          "rom_offset": "0x1a8000",
+          "aliases": [
+            "0x1a8000"
+          ]
+        },
+        {
+          "rom_offset": "0x1e0000",
+          "aliases": [
+            "0x1e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x050000",
+          "aliases": [
+            "0x050000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000"
+          ]
+        },
+        {
+          "rom_offset": "0x080000",
+          "aliases": [
+            "0x080000"
+          ]
+        },
+        {
+          "rom_offset": "0x1a0000",
+          "aliases": [
+            "0x1a0000"
+          ]
+        }
+      ],
+      "read_cases": [
+        {
+          "name": "leitura simples na janela 0",
+          "cpu_address": "0x000000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x000000",
+              "bytes_hex": "a2d17a709a127888"
+            }
+          ]
+        },
+        {
+          "name": "identidade: fronteira janela 0 -> 1 contigua na ROM",
+          "cpu_address": "0x07FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x07fff8",
+              "bytes_hex": "ceeca0374a500695"
+            },
+            {
+              "region": "rom",
+              "offset": "0x080000",
+              "bytes_hex": "f4b8fb8371b6131a"
+            }
+          ]
+        },
+        {
+          "name": "banks {1:5}: fronteira 0->1 produz offsets nao contiguos (0x07FFF8 | 0x280000)",
+          "cpu_address": "0x07FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5
+            }
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x07fff8",
+              "bytes_hex": "ceeca0374a500695"
+            },
+            {
+              "region": "rom",
+              "offset": "0x280000",
+              "bytes_hex": "cc267827f7cf2c10"
+            }
+          ]
+        },
+        {
+          "name": "banks {1:5}: fronteira 1->2 (janela 2 identidade 0x100000)",
+          "cpu_address": "0x0FFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5
+            }
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x2ffff8",
+              "bytes_hex": "7299455d74e45ad6"
+            },
+            {
+              "region": "rom",
+              "offset": "0x100000",
+              "bytes_hex": "f0ef215db5091049"
+            }
+          ]
+        },
+        {
+          "name": "banks {1:5,2:5}: mesma pagina em duas janelas -> dois segmentos, offsets saltam",
+          "cpu_address": "0x0FFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5,
+              "2": 5
+            }
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x2ffff8",
+              "bytes_hex": "7299455d74e45ad6"
+            },
+            {
+              "region": "rom",
+              "offset": "0x280000",
+              "bytes_hex": "cc267827f7cf2c10"
+            }
+          ]
+        },
+        {
+          "name": "ultima posicao da janela do cartucho cruza para area sem suporte",
+          "cpu_address": "0x3FFFFF",
+          "length": 2,
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x3fffff",
+              "bytes_hex": "ae"
+            },
+            {
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "work-ram sem backing ROM: segmento classificatorio",
+          "cpu_address": "0xFFF000",
+          "length": 4,
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "work-ram",
+              "offset": "0x00f000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "rom menor que rom_size declarado: out-of-range no trecho faltante",
+          "cpu_address": "0x3FFFF0",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "rom_short_by": 8,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x3ffff0",
+              "bytes_hex": "1dc816880b77a7b6"
+            },
+            {
+              "error": "out-of-range",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "leitura alem do barramento 24 bits rejeitada antes de alocar",
+          "cpu_address": "0x1000000",
+          "length": 1,
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "length zero rejeitado",
+          "cpu_address": "0x000000",
+          "length": 0,
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "estado com banco invalido rejeitado antes de alocar",
+          "cpu_address": "0x080000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": "5"
+            }
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "unsupported"
+        }
+      ],
+      "ssf2_write_sequences": [
+        {
+          "seq": 0,
+          "writes": [
+            {
+              "cpu_address": "0xa1306e",
+              "data": 15
+            },
+            {
+              "cpu_address": "0xa1309c",
+              "data": 165
+            },
+            {
+              "cpu_address": "0xa1307a",
+              "data": 43
+            },
+            {
+              "cpu_address": "0xa13088",
+              "data": 33
+            },
+            {
+              "cpu_address": "0xa13046",
+              "data": 7
+            },
+            {
+              "cpu_address": "0xa13034",
+              "data": 93
+            }
+          ],
+          "expect_banks": {
+            "2": 93,
+            "3": 7,
+            "4": 33,
+            "5": 43,
+            "6": 165,
+            "7": 15
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x692345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x392345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x592345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x792345"
+            }
+          ]
+        },
+        {
+          "seq": 1,
+          "writes": [
+            {
+              "cpu_address": "0xa130a2",
+              "data": 160
+            }
+          ],
+          "expect_banks": {
+            "1": 160
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x192345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x212345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x312345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x392345"
+            }
+          ]
+        },
+        {
+          "seq": 2,
+          "writes": [
+            {
+              "cpu_address": "0xa1301e",
+              "data": 255
+            },
+            {
+              "cpu_address": "0xa130cc",
+              "data": 21
+            },
+            {
+              "cpu_address": "0xa1302a",
+              "data": 27
+            },
+            {
+              "cpu_address": "0xa130b8",
+              "data": 145
+            }
+          ],
+          "expect_banks": {
+            "4": 145,
+            "5": 27,
+            "6": 21,
+            "7": 255
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x192345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x592345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x792345"
+            }
+          ]
+        },
+        {
+          "seq": 3,
+          "writes": [
+            {
+              "cpu_address": "0xa130f6",
+              "data": 100
+            }
+          ],
+          "expect_banks": {
+            "3": 100
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x212345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x212345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x312345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x392345"
+            }
+          ]
+        },
+        {
+          "seq": 4,
+          "writes": [
+            {
+              "cpu_address": "0xa13082",
+              "data": 147
+            },
+            {
+              "cpu_address": "0xa130d0",
+              "data": 201
+            },
+            {
+              "cpu_address": "0xa130ce",
+              "data": 239
+            },
+            {
+              "cpu_address": "0xa130fc",
+              "data": 133
+            },
+            {
+              "cpu_address": "0xa130da",
+              "data": 11
+            },
+            {
+              "cpu_address": "0xa130e8",
+              "data": 1
+            }
+          ],
+          "expect_banks": {
+            "1": 147,
+            "4": 1,
+            "5": 11,
+            "6": 133,
+            "7": 239
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x192345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x192345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x592345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x792345"
+            }
+          ]
+        },
+        {
+          "seq": 5,
+          "writes": [
+            {
+              "cpu_address": "0xa130e6",
+              "data": 148
+            },
+            {
+              "cpu_address": "0xa1303c",
+              "data": 50
+            },
+            {
+              "cpu_address": "0xa13082",
+              "data": 0
+            }
+          ],
+          "expect_banks": {
+            "1": 0,
+            "3": 148,
+            "6": 50
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x212345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x212345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x392345"
+            }
+          ]
+        },
+        {
+          "seq": 6,
+          "writes": [
+            {
+              "cpu_address": "0xa1307e",
+              "data": 223
+            },
+            {
+              "cpu_address": "0xa1302c",
+              "data": 245
+            },
+            {
+              "cpu_address": "0xa1308a",
+              "data": 251
+            },
+            {
+              "cpu_address": "0xa13018",
+              "data": 113
+            },
+            {
+              "cpu_address": "0xa13056",
+              "data": 215
+            },
+            {
+              "cpu_address": "0xa130c4",
+              "data": 173
+            }
+          ],
+          "expect_banks": {
+            "2": 173,
+            "3": 215,
+            "4": 113,
+            "5": 251,
+            "6": 245,
+            "7": 223
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x692345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x392345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x592345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x792345"
+            }
+          ]
+        },
+        {
+          "seq": 7,
+          "writes": [
+            {
+              "cpu_address": "0xa13072",
+              "data": 48
+            },
+            {
+              "cpu_address": "0xa130a8",
+              "data": 46
+            },
+            {
+              "cpu_address": "0xa130ce",
+              "data": 92
+            }
+          ],
+          "expect_banks": {
+            "1": 48,
+            "4": 46,
+            "7": 92
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x192345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x712345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x312345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x612345"
+            }
+          ]
+        },
+        {
+          "seq": 8,
+          "writes": [
+            {
+              "cpu_address": "0xa1303a",
+              "data": 235
+            },
+            {
+              "cpu_address": "0xa13048",
+              "data": 225
+            },
+            {
+              "cpu_address": "0xa13006",
+              "data": 199
+            },
+            {
+              "cpu_address": "0xa130f4",
+              "data": 29
+            },
+            {
+              "cpu_address": "0xa13092",
+              "data": 99
+            },
+            {
+              "cpu_address": "0xa13060",
+              "data": 25
+            }
+          ],
+          "expect_banks": {
+            "1": 99,
+            "2": 29,
+            "3": 199,
+            "4": 225,
+            "5": 235
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x192345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x692345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x392345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x592345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x312345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x392345"
+            }
+          ]
+        },
+        {
+          "seq": 9,
+          "writes": [
+            {
+              "cpu_address": "0xa130be",
+              "data": 140
+            }
+          ],
+          "expect_banks": {
+            "7": 140
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x192345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x212345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x312345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x612345"
+            }
+          ]
+        },
+        {
+          "seq": 10,
+          "writes": [
+            {
+              "cpu_address": "0xa130ea",
+              "data": 219
+            },
+            {
+              "cpu_address": "0xa13078",
+              "data": 81
+            },
+            {
+              "cpu_address": "0xa130b6",
+              "data": 183
+            },
+            {
+              "cpu_address": "0xa13024",
+              "data": 141
+            }
+          ],
+          "expect_banks": {
+            "2": 141,
+            "3": 183,
+            "4": 81,
+            "5": 219
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x692345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x392345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x092345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x592345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x312345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x392345"
+            }
+          ]
+        },
+        {
+          "seq": 11,
+          "writes": [
+            {
+              "cpu_address": "0xa13052",
+              "data": 144
+            },
+            {
+              "cpu_address": "0xa13088",
+              "data": 142
+            },
+            {
+              "cpu_address": "0xa130ae",
+              "data": 188
+            }
+          ],
+          "expect_banks": {
+            "1": 144,
+            "4": 142,
+            "7": 188
+          },
+          "probes": [
+            {
+              "cpu_address": "0x12345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x92345",
+              "offset": "0x012345"
+            },
+            {
+              "cpu_address": "0x112345",
+              "offset": "0x112345"
+            },
+            {
+              "cpu_address": "0x192345",
+              "offset": "0x192345"
+            },
+            {
+              "cpu_address": "0x212345",
+              "offset": "0x712345"
+            },
+            {
+              "cpu_address": "0x292345",
+              "offset": "0x292345"
+            },
+            {
+              "cpu_address": "0x312345",
+              "offset": "0x312345"
+            },
+            {
+              "cpu_address": "0x392345",
+              "offset": "0x612345"
+            }
+          ]
+        }
+      ],
+      "ssf2_pinned_write_register_cases": [
+        {
+          "name": "escrever $A130F3=5 remapeia janela 1; traducao seguinte muda",
+          "writes": [
+            {
+              "cpu_address": "0xA130F3",
+              "data": 5
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {
+            "1": 5
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x080000",
+              "offset": "0x280000"
+            }
+          ]
+        },
+        {
+          "name": "$A130F5=6 remapeia janela 2 (pagina 6 = base 0x300000)",
+          "writes": [
+            {
+              "cpu_address": "0xA130F5",
+              "data": 6
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {
+            "2": 6
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x100000",
+              "offset": "0x300000"
+            }
+          ]
+        },
+        {
+          "name": "$A130FF=3 remapeia janela 7 para pagina 3 (base 0x180000)",
+          "writes": [
+            {
+              "cpu_address": "0xA130FF",
+              "data": 3
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {
+            "7": 3
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x380000",
+              "offset": "0x180000"
+            }
+          ]
+        },
+        {
+          "name": "escritas em janelas distintas se acumulam",
+          "writes": [
+            {
+              "cpu_address": "0xA130F3",
+              "data": 5
+            },
+            {
+              "cpu_address": "0xA130F5",
+              "data": 6
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {
+            "1": 5,
+            "2": 6
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x080000",
+              "offset": "0x280000"
+            },
+            {
+              "cpu_address": "0x100000",
+              "offset": "0x300000"
+            }
+          ]
+        },
+        {
+          "name": "reescrita substitui o valor anterior (nao faz AND/OR)",
+          "writes": [
+            {
+              "cpu_address": "0xA130F3",
+              "data": 5
+            },
+            {
+              "cpu_address": "0xA130F3",
+              "data": 2
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {
+            "1": 2
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x080000",
+              "offset": "0x100000"
+            }
+          ]
+        },
+        {
+          "name": "$A130F1 (janela 0) escrita sem efeito; traducoes inalteradas",
+          "writes": [
+            {
+              "cpu_address": "0xA130F1",
+              "data": 9
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {},
+          "expect_translate": [
+            {
+              "cpu_address": "0x080000",
+              "offset": "0x080000"
+            }
+          ]
+        },
+        {
+          "name": "decodificacao espelhada: endereco par $A130F2 tambem seleciona a janela 1",
+          "writes": [
+            {
+              "cpu_address": "0xA130F2",
+              "data": 4
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {
+            "1": 4
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x080000",
+              "offset": "0x200000"
+            }
+          ]
+        },
+        {
+          "name": "decodificacao espelhada em toda a pagina: $A13022 seleciona janela 1",
+          "writes": [
+            {
+              "cpu_address": "0xA13022",
+              "data": 10
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {
+            "1": 10
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x080000",
+              "offset": "0x100000"
+            }
+          ]
+        },
+        {
+          "name": "valor 0xFF mascarado so na traducao (255<<19 & mask = 0x380000)",
+          "writes": [
+            {
+              "cpu_address": "0xA130F3",
+              "data": 255
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_banks": {
+            "1": 255
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x080000",
+              "offset": "0x380000"
+            }
+          ]
+        },
+        {
+          "name": "escrita sobre estado com banks preserva as demais janelas",
+          "writes": [
+            {
+              "cpu_address": "0xA130F5",
+              "data": 3
+            }
+          ],
+          "mapper_state": {
+            "rom_size": 4194304,
+            "banks": {
+              "1": 5
+            }
+          },
+          "expect_banks": {
+            "1": 5,
+            "2": 3
+          },
+          "expect_translate": [
+            {
+              "cpu_address": "0x080000",
+              "offset": "0x280000"
+            },
+            {
+              "cpu_address": "0x100000",
+              "offset": "0x180000"
+            }
+          ]
+        }
+      ]
+    },
+    "snes-lorom": {
+      "fixture": {
+        "sha256": "145c7b9848d51573bee2ec60c999f89b7acec95ecdda62a41939409cf306a217",
+        "rom_size": 1048576
+      },
+      "translate": [
+        {
+          "name": "inicio da pagina 0 (banco 00, metade alta)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "fim da pagina 0",
+          "cpu_address": "0x00FFFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x007FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco 80 alias do banco 00 (A15 mask)",
+          "cpu_address": "0x808000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco 3F ultima pagina atingivel sem espelho",
+          "cpu_address": "0x3F8000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0F8000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco BF alias de 3F",
+          "cpu_address": "0xBF8000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0F8000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho por mascara: pagina 32 (0x100000) volta ao offset 0",
+          "cpu_address": "0x208000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho: pagina 0x7D mascarada",
+          "cpu_address": "0x7DFFFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0EFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco 7D pagina alta",
+          "cpu_address": "0x7D8000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0E8000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "wram banco 7E inicio",
+          "cpu_address": "0x7E0000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "wram banco 7F fim",
+          "cpu_address": "0x7FFFFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram",
+            "offset": "0xFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "wram meio",
+          "cpu_address": "0x7F1234",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram",
+            "offset": "0x1234"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho WRAM em banco 00 metade baixa",
+          "cpu_address": "0x001FFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram-mirror",
+            "offset": "0x1FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho WRAM em banco 80",
+          "cpu_address": "0x800123",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram-mirror",
+            "offset": "0x0123"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "sram banco 70 metade baixa",
+          "cpu_address": "0x701234",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "sram",
+            "offset": "0x1234"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "sram banco F0 (espelho declarado em bsnes LOROM-RAM)",
+          "cpu_address": "0xF01FFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "sram",
+            "offset": "0x1FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io PPU em banco 00",
+          "cpu_address": "0x002100",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x2100"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io SMP em banco BD (limite superior da tabela io)",
+          "cpu_address": "0xBD7FFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x7FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "vetores de reset caem na janela ROM do banco 00",
+          "cpu_address": "0x00FFD8",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x07FD8"
+          },
+          "engine_agree": true
+        }
+      ],
+      "translate_negatives": [
+        {
+          "name": "A15 desconectado: banco 40 metade baixa (snes9x ROM vs bsnes open bus)",
+          "cpu_address": "0x401234",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect_error": "ambiguous"
+        },
+        {
+          "name": "A15 desconectado: banco C0 metade baixa",
+          "cpu_address": "0xC01234",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect_error": "ambiguous"
+        },
+        {
+          "name": "A15 desconectado em janela io: banco 40, a=$2100",
+          "cpu_address": "0x402100",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect_error": "ambiguous"
+        },
+        {
+          "name": "reservado: banco 3E, a=$4800 (fora das janelas io listadas)",
+          "cpu_address": "0x3E4800",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "acima do barramento 24 bits",
+          "cpu_address": "0x1000000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "estado ausente",
+          "cpu_address": "0x008000",
+          "mapper_state": null,
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size acima do alcance LoROM (8MB)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size abaixo de uma pagina de 32KB",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 16384
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size nao potencia de 2",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 786432
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "estado com chave desconhecida rejeitada (sem estado de mapper em LoROM)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 1048576,
+            "banks": {
+              "1": 2
+            }
+          },
+          "expect_error": "unsupported"
+        }
+      ],
+      "invert_cases": [
+        {
+          "name": "offset 0: todas as paginas mascaradas (p=0,32,64,96 x bancos b e b|0x80), ordem crescente",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "aliases": [
+              "0x008000",
+              "0x208000",
+              "0x408000",
+              "0x608000",
+              "0x808000",
+              "0xa08000",
+              "0xc08000",
+              "0xe08000"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x12345: pagina 2 e suas equivalentes mascaradas",
+          "rom_offset": "0x12345",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "aliases": [
+              "0x02a345",
+              "0x22a345",
+              "0x42a345",
+              "0x62a345",
+              "0x82a345",
+              "0xa2a345",
+              "0xc2a345",
+              "0xe2a345"
+            ]
+          }
+        },
+        {
+          "name": "ROM de 4MB (maxima): offset 0 so tem dois aliases (bancos 00 e 80)",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "aliases": [
+              "0x008000",
+              "0x808000"
+            ]
+          }
+        },
+        {
+          "name": "ultimo offset valido em 4MB: pagina 0x7F so e alcancavel pelo banco FF (7E/7F sao WRAM)",
+          "rom_offset": "0x3FFFFF",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "aliases": [
+              "0xffffff"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x12345 em 4MB (sem mascara dupla): pagina 2 so pelos bancos 02 e 82",
+          "rom_offset": "0x12345",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "aliases": [
+              "0x02a345",
+              "0x82a345"
+            ]
+          }
+        },
+        {
+          "name": "offset alem do fim da ROM: lista vazia, resposta valida",
+          "rom_offset": "0x100000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "aliases": []
+          }
+        },
+        {
+          "name": "offset nao inteiro e erro",
+          "rom_offset": "4096.5",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "error": "out-of-range"
+          }
+        },
+        {
+          "name": "invert exige mapper_state valido",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "aliases": [
+              "0x008000",
+              "0x208000",
+              "0x408000",
+              "0x608000",
+              "0x808000",
+              "0xa08000",
+              "0xc08000",
+              "0xe08000"
+            ]
+          }
+        }
+      ],
+      "invert_samples_exhaustive_verified": [
+        {
+          "rom_offset": "0x0d8000",
+          "aliases": [
+            "0x1b8000",
+            "0x3b8000",
+            "0x5b8000",
+            "0x7b8000",
+            "0x9b8000",
+            "0xbb8000",
+            "0xdb8000",
+            "0xfb8000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x008000",
+            "0x208000",
+            "0x408000",
+            "0x608000",
+            "0x808000",
+            "0xa08000",
+            "0xc08000",
+            "0xe08000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a8000",
+          "aliases": [
+            "0x158000",
+            "0x358000",
+            "0x558000",
+            "0x758000",
+            "0x958000",
+            "0xb58000",
+            "0xd58000",
+            "0xf58000"
+          ]
+        },
+        {
+          "rom_offset": "0x0c8000",
+          "aliases": [
+            "0x198000",
+            "0x398000",
+            "0x598000",
+            "0x798000",
+            "0x998000",
+            "0xb98000",
+            "0xd98000",
+            "0xf98000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x0d8000",
+            "0x2d8000",
+            "0x4d8000",
+            "0x6d8000",
+            "0x8d8000",
+            "0xad8000",
+            "0xcd8000",
+            "0xed8000"
+          ]
+        },
+        {
+          "rom_offset": "0x070000",
+          "aliases": [
+            "0x0e8000",
+            "0x2e8000",
+            "0x4e8000",
+            "0x6e8000",
+            "0x8e8000",
+            "0xae8000",
+            "0xce8000",
+            "0xee8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e8000",
+          "aliases": [
+            "0x1d8000",
+            "0x3d8000",
+            "0x5d8000",
+            "0x7d8000",
+            "0x9d8000",
+            "0xbd8000",
+            "0xdd8000",
+            "0xfd8000"
+          ]
+        },
+        {
+          "rom_offset": "0x058000",
+          "aliases": [
+            "0x0b8000",
+            "0x2b8000",
+            "0x4b8000",
+            "0x6b8000",
+            "0x8b8000",
+            "0xab8000",
+            "0xcb8000",
+            "0xeb8000"
+          ]
+        },
+        {
+          "rom_offset": "0x020000",
+          "aliases": [
+            "0x048000",
+            "0x248000",
+            "0x448000",
+            "0x648000",
+            "0x848000",
+            "0xa48000",
+            "0xc48000",
+            "0xe48000"
+          ]
+        },
+        {
+          "rom_offset": "0x088000",
+          "aliases": [
+            "0x118000",
+            "0x318000",
+            "0x518000",
+            "0x718000",
+            "0x918000",
+            "0xb18000",
+            "0xd18000",
+            "0xf18000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x018000",
+            "0x218000",
+            "0x418000",
+            "0x618000",
+            "0x818000",
+            "0xa18000",
+            "0xc18000",
+            "0xe18000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x018000",
+            "0x218000",
+            "0x418000",
+            "0x618000",
+            "0x818000",
+            "0xa18000",
+            "0xc18000",
+            "0xe18000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e0000",
+          "aliases": [
+            "0x1c8000",
+            "0x3c8000",
+            "0x5c8000",
+            "0x7c8000",
+            "0x9c8000",
+            "0xbc8000",
+            "0xdc8000",
+            "0xfc8000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x058000",
+            "0x258000",
+            "0x458000",
+            "0x658000",
+            "0x858000",
+            "0xa58000",
+            "0xc58000",
+            "0xe58000"
+          ]
+        },
+        {
+          "rom_offset": "0x090000",
+          "aliases": [
+            "0x128000",
+            "0x328000",
+            "0x528000",
+            "0x728000",
+            "0x928000",
+            "0xb28000",
+            "0xd28000",
+            "0xf28000"
+          ]
+        },
+        {
+          "rom_offset": "0x0b0000",
+          "aliases": [
+            "0x168000",
+            "0x368000",
+            "0x568000",
+            "0x768000",
+            "0x968000",
+            "0xb68000",
+            "0xd68000",
+            "0xf68000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x018000",
+            "0x218000",
+            "0x418000",
+            "0x618000",
+            "0x818000",
+            "0xa18000",
+            "0xc18000",
+            "0xe18000"
+          ]
+        },
+        {
+          "rom_offset": "0x010000",
+          "aliases": [
+            "0x028000",
+            "0x228000",
+            "0x428000",
+            "0x628000",
+            "0x828000",
+            "0xa28000",
+            "0xc28000",
+            "0xe28000"
+          ]
+        },
+        {
+          "rom_offset": "0x0f8000",
+          "aliases": [
+            "0x1f8000",
+            "0x3f8000",
+            "0x5f8000",
+            "0x9f8000",
+            "0xbf8000",
+            "0xdf8000",
+            "0xff8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d8000",
+          "aliases": [
+            "0x1b8000",
+            "0x3b8000",
+            "0x5b8000",
+            "0x7b8000",
+            "0x9b8000",
+            "0xbb8000",
+            "0xdb8000",
+            "0xfb8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0c8000",
+          "aliases": [
+            "0x198000",
+            "0x398000",
+            "0x598000",
+            "0x798000",
+            "0x998000",
+            "0xb98000",
+            "0xd98000",
+            "0xf98000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a8000",
+          "aliases": [
+            "0x158000",
+            "0x358000",
+            "0x558000",
+            "0x758000",
+            "0x958000",
+            "0xb58000",
+            "0xd58000",
+            "0xf58000"
+          ]
+        },
+        {
+          "rom_offset": "0x040000",
+          "aliases": [
+            "0x088000",
+            "0x288000",
+            "0x488000",
+            "0x688000",
+            "0x888000",
+            "0xa88000",
+            "0xc88000",
+            "0xe88000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d8000",
+          "aliases": [
+            "0x1b8000",
+            "0x3b8000",
+            "0x5b8000",
+            "0x7b8000",
+            "0x9b8000",
+            "0xbb8000",
+            "0xdb8000",
+            "0xfb8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x098000",
+            "0x298000",
+            "0x498000",
+            "0x698000",
+            "0x898000",
+            "0xa98000",
+            "0xc98000",
+            "0xe98000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x058000",
+            "0x258000",
+            "0x458000",
+            "0x658000",
+            "0x858000",
+            "0xa58000",
+            "0xc58000",
+            "0xe58000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x0f8000",
+            "0x2f8000",
+            "0x4f8000",
+            "0x6f8000",
+            "0x8f8000",
+            "0xaf8000",
+            "0xcf8000",
+            "0xef8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a8000",
+          "aliases": [
+            "0x158000",
+            "0x358000",
+            "0x558000",
+            "0x758000",
+            "0x958000",
+            "0xb58000",
+            "0xd58000",
+            "0xf58000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x058000",
+            "0x258000",
+            "0x458000",
+            "0x658000",
+            "0x858000",
+            "0xa58000",
+            "0xc58000",
+            "0xe58000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x0c8000",
+            "0x2c8000",
+            "0x4c8000",
+            "0x6c8000",
+            "0x8c8000",
+            "0xac8000",
+            "0xcc8000",
+            "0xec8000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x018000",
+            "0x218000",
+            "0x418000",
+            "0x618000",
+            "0x818000",
+            "0xa18000",
+            "0xc18000",
+            "0xe18000"
+          ]
+        },
+        {
+          "rom_offset": "0x038000",
+          "aliases": [
+            "0x078000",
+            "0x278000",
+            "0x478000",
+            "0x678000",
+            "0x878000",
+            "0xa78000",
+            "0xc78000",
+            "0xe78000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e0000",
+          "aliases": [
+            "0x1c8000",
+            "0x3c8000",
+            "0x5c8000",
+            "0x7c8000",
+            "0x9c8000",
+            "0xbc8000",
+            "0xdc8000",
+            "0xfc8000"
+          ]
+        },
+        {
+          "rom_offset": "0x030000",
+          "aliases": [
+            "0x068000",
+            "0x268000",
+            "0x468000",
+            "0x668000",
+            "0x868000",
+            "0xa68000",
+            "0xc68000",
+            "0xe68000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x0c8000",
+            "0x2c8000",
+            "0x4c8000",
+            "0x6c8000",
+            "0x8c8000",
+            "0xac8000",
+            "0xcc8000",
+            "0xec8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e8000",
+          "aliases": [
+            "0x1d8000",
+            "0x3d8000",
+            "0x5d8000",
+            "0x7d8000",
+            "0x9d8000",
+            "0xbd8000",
+            "0xdd8000",
+            "0xfd8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0c8000",
+          "aliases": [
+            "0x198000",
+            "0x398000",
+            "0x598000",
+            "0x798000",
+            "0x998000",
+            "0xb98000",
+            "0xd98000",
+            "0xf98000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d0000",
+          "aliases": [
+            "0x1a8000",
+            "0x3a8000",
+            "0x5a8000",
+            "0x7a8000",
+            "0x9a8000",
+            "0xba8000",
+            "0xda8000",
+            "0xfa8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0b8000",
+          "aliases": [
+            "0x178000",
+            "0x378000",
+            "0x578000",
+            "0x778000",
+            "0x978000",
+            "0xb78000",
+            "0xd78000",
+            "0xf78000"
+          ]
+        },
+        {
+          "rom_offset": "0x038000",
+          "aliases": [
+            "0x078000",
+            "0x278000",
+            "0x478000",
+            "0x678000",
+            "0x878000",
+            "0xa78000",
+            "0xc78000",
+            "0xe78000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d0000",
+          "aliases": [
+            "0x1a8000",
+            "0x3a8000",
+            "0x5a8000",
+            "0x7a8000",
+            "0x9a8000",
+            "0xba8000",
+            "0xda8000",
+            "0xfa8000"
+          ]
+        },
+        {
+          "rom_offset": "0x090000",
+          "aliases": [
+            "0x128000",
+            "0x328000",
+            "0x528000",
+            "0x728000",
+            "0x928000",
+            "0xb28000",
+            "0xd28000",
+            "0xf28000"
+          ]
+        },
+        {
+          "rom_offset": "0x0c8000",
+          "aliases": [
+            "0x198000",
+            "0x398000",
+            "0x598000",
+            "0x798000",
+            "0x998000",
+            "0xb98000",
+            "0xd98000",
+            "0xf98000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x008000",
+            "0x208000",
+            "0x408000",
+            "0x608000",
+            "0x808000",
+            "0xa08000",
+            "0xc08000",
+            "0xe08000"
+          ]
+        },
+        {
+          "rom_offset": "0x0b0000",
+          "aliases": [
+            "0x168000",
+            "0x368000",
+            "0x568000",
+            "0x768000",
+            "0x968000",
+            "0xb68000",
+            "0xd68000",
+            "0xf68000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x0d8000",
+            "0x2d8000",
+            "0x4d8000",
+            "0x6d8000",
+            "0x8d8000",
+            "0xad8000",
+            "0xcd8000",
+            "0xed8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x098000",
+            "0x298000",
+            "0x498000",
+            "0x698000",
+            "0x898000",
+            "0xa98000",
+            "0xc98000",
+            "0xe98000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x098000",
+            "0x298000",
+            "0x498000",
+            "0x698000",
+            "0x898000",
+            "0xa98000",
+            "0xc98000",
+            "0xe98000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x008000",
+            "0x208000",
+            "0x408000",
+            "0x608000",
+            "0x808000",
+            "0xa08000",
+            "0xc08000",
+            "0xe08000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d8000",
+          "aliases": [
+            "0x1b8000",
+            "0x3b8000",
+            "0x5b8000",
+            "0x7b8000",
+            "0x9b8000",
+            "0xbb8000",
+            "0xdb8000",
+            "0xfb8000"
+          ]
+        },
+        {
+          "rom_offset": "0x088000",
+          "aliases": [
+            "0x118000",
+            "0x318000",
+            "0x518000",
+            "0x718000",
+            "0x918000",
+            "0xb18000",
+            "0xd18000",
+            "0xf18000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x0f8000",
+            "0x2f8000",
+            "0x4f8000",
+            "0x6f8000",
+            "0x8f8000",
+            "0xaf8000",
+            "0xcf8000",
+            "0xef8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e8000",
+          "aliases": [
+            "0x1d8000",
+            "0x3d8000",
+            "0x5d8000",
+            "0x7d8000",
+            "0x9d8000",
+            "0xbd8000",
+            "0xdd8000",
+            "0xfd8000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x0f8000",
+            "0x2f8000",
+            "0x4f8000",
+            "0x6f8000",
+            "0x8f8000",
+            "0xaf8000",
+            "0xcf8000",
+            "0xef8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a8000",
+          "aliases": [
+            "0x158000",
+            "0x358000",
+            "0x558000",
+            "0x758000",
+            "0x958000",
+            "0xb58000",
+            "0xd58000",
+            "0xf58000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e0000",
+          "aliases": [
+            "0x1c8000",
+            "0x3c8000",
+            "0x5c8000",
+            "0x7c8000",
+            "0x9c8000",
+            "0xbc8000",
+            "0xdc8000",
+            "0xfc8000"
+          ]
+        },
+        {
+          "rom_offset": "0x050000",
+          "aliases": [
+            "0x0a8000",
+            "0x2a8000",
+            "0x4a8000",
+            "0x6a8000",
+            "0x8a8000",
+            "0xaa8000",
+            "0xca8000",
+            "0xea8000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x0d8000",
+            "0x2d8000",
+            "0x4d8000",
+            "0x6d8000",
+            "0x8d8000",
+            "0xad8000",
+            "0xcd8000",
+            "0xed8000"
+          ]
+        },
+        {
+          "rom_offset": "0x080000",
+          "aliases": [
+            "0x108000",
+            "0x308000",
+            "0x508000",
+            "0x708000",
+            "0x908000",
+            "0xb08000",
+            "0xd08000",
+            "0xf08000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a0000",
+          "aliases": [
+            "0x148000",
+            "0x348000",
+            "0x548000",
+            "0x748000",
+            "0x948000",
+            "0xb48000",
+            "0xd48000",
+            "0xf48000"
+          ]
+        }
+      ],
+      "read_cases": [
+        {
+          "name": "leitura no inicio da pagina 0",
+          "cpu_address": "0x008000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x000000",
+              "bytes_hex": "372f9c47c2b3dbde"
+            }
+          ]
+        },
+        {
+          "name": "cruzamento do fim do banco 00 cai no espelho WRAM (nao-ROM), classificado sem clamp",
+          "cpu_address": "0x00FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x007ff8",
+              "bytes_hex": "fd1af8adbc1d24c0"
+            },
+            {
+              "region": "wram-mirror",
+              "offset": "0x000000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "fim da pagina 32 (banco 20 mascarado para offset 0x07FF8): o proximo byte e 0x210000, metade baixa do banco 21 = espelho WRAM. Em LoROM leitura ROM nunca emenda em outra pagina ROM.",
+          "cpu_address": "0x20FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x007ff8",
+              "bytes_hex": "fd1af8adbc1d24c0"
+            },
+            {
+              "region": "wram-mirror",
+              "offset": "0x000000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "alias 80: mesma pagina vista do banco espelho",
+          "cpu_address": "0x808000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x000000",
+              "bytes_hex": "372f9c47c2b3dbde"
+            }
+          ]
+        },
+        {
+          "name": "ultima pagina atingivel (BF) com offset mascarado",
+          "cpu_address": "0xBF8000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x0f8000",
+              "bytes_hex": "473526a06325769f"
+            }
+          ]
+        },
+        {
+          "name": "regiao sram: segmento classificatorio sem backing ROM",
+          "cpu_address": "0x701000",
+          "length": 4,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "sram",
+              "offset": "0x001000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "rom menor que rom_size declarado: out-of-range no trecho faltante (offset mascarado no fim da pagina)",
+          "cpu_address": "0x3FFFF0",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 8,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x0ffff0",
+              "bytes_hex": "768193aacfe56858"
+            },
+            {
+              "error": "out-of-range",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "leitura alem do barramento rejeitada antes de alocar",
+          "cpu_address": "0xFFFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "length zero rejeitado",
+          "cpu_address": "0x008000",
+          "length": 0,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "estado invalido rejeitado antes de alocar",
+          "cpu_address": "0x008000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 786432
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "unsupported"
+        }
+      ]
+    },
+    "snes-hirom": {
+      "fixture": {
+        "sha256": "52dc17e6abc570a5368c38fedff9381d3351ed9f6f252c521e7a42a60acc7baa",
+        "rom_size": 1048576
+      },
+      "translate": [
+        {
+          "name": "mitade alta do banco 00 comeca no offset 0x8000 (HiROM, nao 0 como LoROM)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x008000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "fim do banco 00",
+          "cpu_address": "0x00FFFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x00FFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "alias A15: banco 80 mascarado ao banco 00",
+          "cpu_address": "0x808000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x008000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco 40 completo comeca no offset 0",
+          "cpu_address": "0x400000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "sobreposicao intencional: 0x408000 == mesmo offset que 0x008000",
+          "cpu_address": "0x408000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x008000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco 7D mascarado por 1MB",
+          "cpu_address": "0x7DFFFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0DFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco 3F mitad alta mascarada",
+          "cpu_address": "0x3F8000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0F8000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco FE (c0-ff de bsnes) e ROM completa",
+          "cpu_address": "0xFE0000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0E0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "4MB: banco C0 mascarado a 40 (sem espelho duplo dentro do alcance)",
+          "cpu_address": "0xC0FFFF",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x00FFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "wram banco 7E inicio",
+          "cpu_address": "0x7E0000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "wram banco 7F fim (128KB contiguos)",
+          "cpu_address": "0x7FFFFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram",
+            "offset": "0xFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "sram banco 20 em 6000: ventana de 2KB mascarada",
+          "cpu_address": "0x206000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "sram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "sram banco A0 em 7FFF",
+          "cpu_address": "0xA07FFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "sram",
+            "offset": "0x1FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho WRAM banco 00 mitad baixa",
+          "cpu_address": "0x001FFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram-mirror",
+            "offset": "0x1FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho WRAM banco 80",
+          "cpu_address": "0x800123",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "wram-mirror",
+            "offset": "0x0123"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io PPU banco 00",
+          "cpu_address": "0x002100",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x2100"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io CPU banco BD (limite 5FFF da janela snes9x)",
+          "cpu_address": "0xBD5FFF",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x5FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "vetores em 00FFD8 caem no offset 0x0FFD8 (pagina do banco 40 alias)",
+          "cpu_address": "0x00FFD8",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x0FFD8"
+          },
+          "engine_agree": true
+        }
+      ],
+      "translate_negatives": [
+        {
+          "name": "reservado: banco 3E mitad baixa (bsnes limita janelas a 00-3D/80-BD)",
+          "cpu_address": "0x3E4800",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "reservado: banco BE mitad baixa (BSAT)",
+          "cpu_address": "0xBE4800",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "acima do barramento 24 bits",
+          "cpu_address": "0x1000000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "estado ausente",
+          "cpu_address": "0x008000",
+          "mapper_state": null,
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size acima de 4MB (exige ExHiROM, perfil propio)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size abaixo de um banco completo de 64KB",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 32768
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size nao potencia de 2",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 1572864
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "estado com chave desconhecida rejeitada (sem registradores em HiROM)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 1048576,
+            "banks": {
+              "1": 2
+            }
+          },
+          "expect_error": "unsupported"
+        }
+      ],
+      "invert_cases": [
+        {
+          "name": "offset 0x000000 em 1MB: apenas 8 bancos completos (b&0xF=0 em 40-7D/C0-FF); metade alta nunca ve offset < start+0x8000",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "aliases": [
+              "0x400000",
+              "0x500000",
+              "0x600000",
+              "0x700000",
+              "0xc00000",
+              "0xd00000",
+              "0xe00000",
+              "0xf00000"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x008000 em 1MB: 8 aliases de metade alta (bancos =0 mod 16, a=0x8000) + 8 de banco completo, ordem crescente",
+          "rom_offset": "0x008000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "aliases": [
+              "0x008000",
+              "0x108000",
+              "0x208000",
+              "0x308000",
+              "0x408000",
+              "0x508000",
+              "0x608000",
+              "0x708000",
+              "0x808000",
+              "0x908000",
+              "0xa08000",
+              "0xb08000",
+              "0xc08000",
+              "0xd08000",
+              "0xe08000",
+              "0xf08000"
+            ]
+          }
+        },
+        {
+          "name": "4MB offset 0: unicos 2 aliases de banco completo (40, C0); bancos 00/80 de metade alta comecam em $8000, logo nao veem offset 0",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "aliases": [
+              "0x400000",
+              "0xc00000"
+            ]
+          }
+        },
+        {
+          "name": "4MB ultimo offset: metade alta de 3F/BF cobre 0x3F8000-0x3FFFFFF (a=0xFFFF) e banco completo FF cobre 0x3FFFFF; 7E/7F sao WRAM",
+          "rom_offset": "0x3FFFFF",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect": {
+            "aliases": [
+              "0x3fffff",
+              "0xbfffff",
+              "0xffffff"
+            ]
+          }
+        },
+        {
+          "name": "offset alem do fim da ROM: lista vazia, resposta valida",
+          "rom_offset": "0x100000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "aliases": []
+          }
+        },
+        {
+          "name": "offset nao inteiro e erro",
+          "rom_offset": "4096.5",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "error": "out-of-range"
+          }
+        },
+        {
+          "name": "invert exige mapper_state valido",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "expect": {
+            "aliases": [
+              "0x400000",
+              "0x500000",
+              "0x600000",
+              "0x700000",
+              "0xc00000",
+              "0xd00000",
+              "0xe00000",
+              "0xf00000"
+            ]
+          }
+        }
+      ],
+      "invert_samples_exhaustive_verified": [
+        {
+          "rom_offset": "0x0d8000",
+          "aliases": [
+            "0x0d8000",
+            "0x1d8000",
+            "0x2d8000",
+            "0x3d8000",
+            "0x4d8000",
+            "0x5d8000",
+            "0x6d8000",
+            "0x7d8000",
+            "0x8d8000",
+            "0x9d8000",
+            "0xad8000",
+            "0xbd8000",
+            "0xcd8000",
+            "0xdd8000",
+            "0xed8000",
+            "0xfd8000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x400000",
+            "0x500000",
+            "0x600000",
+            "0x700000",
+            "0xc00000",
+            "0xd00000",
+            "0xe00000",
+            "0xf00000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a8000",
+          "aliases": [
+            "0x0a8000",
+            "0x1a8000",
+            "0x2a8000",
+            "0x3a8000",
+            "0x4a8000",
+            "0x5a8000",
+            "0x6a8000",
+            "0x7a8000",
+            "0x8a8000",
+            "0x9a8000",
+            "0xaa8000",
+            "0xba8000",
+            "0xca8000",
+            "0xda8000",
+            "0xea8000",
+            "0xfa8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0c8000",
+          "aliases": [
+            "0x0c8000",
+            "0x1c8000",
+            "0x2c8000",
+            "0x3c8000",
+            "0x4c8000",
+            "0x5c8000",
+            "0x6c8000",
+            "0x7c8000",
+            "0x8c8000",
+            "0x9c8000",
+            "0xac8000",
+            "0xbc8000",
+            "0xcc8000",
+            "0xdc8000",
+            "0xec8000",
+            "0xfc8000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x168000",
+            "0x268000",
+            "0x368000",
+            "0x468000",
+            "0x568000",
+            "0x668000",
+            "0x768000",
+            "0x868000",
+            "0x968000",
+            "0xa68000",
+            "0xb68000",
+            "0xc68000",
+            "0xd68000",
+            "0xe68000",
+            "0xf68000"
+          ]
+        },
+        {
+          "rom_offset": "0x070000",
+          "aliases": [
+            "0x470000",
+            "0x570000",
+            "0x670000",
+            "0x770000",
+            "0xc70000",
+            "0xd70000",
+            "0xe70000",
+            "0xf70000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e8000",
+          "aliases": [
+            "0x0e8000",
+            "0x1e8000",
+            "0x2e8000",
+            "0x3e8000",
+            "0x4e8000",
+            "0x5e8000",
+            "0x6e8000",
+            "0x8e8000",
+            "0x9e8000",
+            "0xae8000",
+            "0xbe8000",
+            "0xce8000",
+            "0xde8000",
+            "0xee8000",
+            "0xfe8000"
+          ]
+        },
+        {
+          "rom_offset": "0x058000",
+          "aliases": [
+            "0x058000",
+            "0x158000",
+            "0x258000",
+            "0x358000",
+            "0x458000",
+            "0x558000",
+            "0x658000",
+            "0x758000",
+            "0x858000",
+            "0x958000",
+            "0xa58000",
+            "0xb58000",
+            "0xc58000",
+            "0xd58000",
+            "0xe58000",
+            "0xf58000"
+          ]
+        },
+        {
+          "rom_offset": "0x020000",
+          "aliases": [
+            "0x420000",
+            "0x520000",
+            "0x620000",
+            "0x720000",
+            "0xc20000",
+            "0xd20000",
+            "0xe20000",
+            "0xf20000"
+          ]
+        },
+        {
+          "rom_offset": "0x088000",
+          "aliases": [
+            "0x088000",
+            "0x188000",
+            "0x288000",
+            "0x388000",
+            "0x488000",
+            "0x588000",
+            "0x688000",
+            "0x788000",
+            "0x888000",
+            "0x988000",
+            "0xa88000",
+            "0xb88000",
+            "0xc88000",
+            "0xd88000",
+            "0xe88000",
+            "0xf88000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x108000",
+            "0x208000",
+            "0x308000",
+            "0x408000",
+            "0x508000",
+            "0x608000",
+            "0x708000",
+            "0x808000",
+            "0x908000",
+            "0xa08000",
+            "0xb08000",
+            "0xc08000",
+            "0xd08000",
+            "0xe08000",
+            "0xf08000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x108000",
+            "0x208000",
+            "0x308000",
+            "0x408000",
+            "0x508000",
+            "0x608000",
+            "0x708000",
+            "0x808000",
+            "0x908000",
+            "0xa08000",
+            "0xb08000",
+            "0xc08000",
+            "0xd08000",
+            "0xe08000",
+            "0xf08000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e0000",
+          "aliases": [
+            "0x4e0000",
+            "0x5e0000",
+            "0x6e0000",
+            "0xce0000",
+            "0xde0000",
+            "0xee0000",
+            "0xfe0000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x128000",
+            "0x228000",
+            "0x328000",
+            "0x428000",
+            "0x528000",
+            "0x628000",
+            "0x728000",
+            "0x828000",
+            "0x928000",
+            "0xa28000",
+            "0xb28000",
+            "0xc28000",
+            "0xd28000",
+            "0xe28000",
+            "0xf28000"
+          ]
+        },
+        {
+          "rom_offset": "0x090000",
+          "aliases": [
+            "0x490000",
+            "0x590000",
+            "0x690000",
+            "0x790000",
+            "0xc90000",
+            "0xd90000",
+            "0xe90000",
+            "0xf90000"
+          ]
+        },
+        {
+          "rom_offset": "0x0b0000",
+          "aliases": [
+            "0x4b0000",
+            "0x5b0000",
+            "0x6b0000",
+            "0x7b0000",
+            "0xcb0000",
+            "0xdb0000",
+            "0xeb0000",
+            "0xfb0000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x108000",
+            "0x208000",
+            "0x308000",
+            "0x408000",
+            "0x508000",
+            "0x608000",
+            "0x708000",
+            "0x808000",
+            "0x908000",
+            "0xa08000",
+            "0xb08000",
+            "0xc08000",
+            "0xd08000",
+            "0xe08000",
+            "0xf08000"
+          ]
+        },
+        {
+          "rom_offset": "0x010000",
+          "aliases": [
+            "0x410000",
+            "0x510000",
+            "0x610000",
+            "0x710000",
+            "0xc10000",
+            "0xd10000",
+            "0xe10000",
+            "0xf10000"
+          ]
+        },
+        {
+          "rom_offset": "0x0f8000",
+          "aliases": [
+            "0x0f8000",
+            "0x1f8000",
+            "0x2f8000",
+            "0x3f8000",
+            "0x4f8000",
+            "0x5f8000",
+            "0x6f8000",
+            "0x8f8000",
+            "0x9f8000",
+            "0xaf8000",
+            "0xbf8000",
+            "0xcf8000",
+            "0xdf8000",
+            "0xef8000",
+            "0xff8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d8000",
+          "aliases": [
+            "0x0d8000",
+            "0x1d8000",
+            "0x2d8000",
+            "0x3d8000",
+            "0x4d8000",
+            "0x5d8000",
+            "0x6d8000",
+            "0x7d8000",
+            "0x8d8000",
+            "0x9d8000",
+            "0xad8000",
+            "0xbd8000",
+            "0xcd8000",
+            "0xdd8000",
+            "0xed8000",
+            "0xfd8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0c8000",
+          "aliases": [
+            "0x0c8000",
+            "0x1c8000",
+            "0x2c8000",
+            "0x3c8000",
+            "0x4c8000",
+            "0x5c8000",
+            "0x6c8000",
+            "0x7c8000",
+            "0x8c8000",
+            "0x9c8000",
+            "0xac8000",
+            "0xbc8000",
+            "0xcc8000",
+            "0xdc8000",
+            "0xec8000",
+            "0xfc8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a8000",
+          "aliases": [
+            "0x0a8000",
+            "0x1a8000",
+            "0x2a8000",
+            "0x3a8000",
+            "0x4a8000",
+            "0x5a8000",
+            "0x6a8000",
+            "0x7a8000",
+            "0x8a8000",
+            "0x9a8000",
+            "0xaa8000",
+            "0xba8000",
+            "0xca8000",
+            "0xda8000",
+            "0xea8000",
+            "0xfa8000"
+          ]
+        },
+        {
+          "rom_offset": "0x040000",
+          "aliases": [
+            "0x440000",
+            "0x540000",
+            "0x640000",
+            "0x740000",
+            "0xc40000",
+            "0xd40000",
+            "0xe40000",
+            "0xf40000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d8000",
+          "aliases": [
+            "0x0d8000",
+            "0x1d8000",
+            "0x2d8000",
+            "0x3d8000",
+            "0x4d8000",
+            "0x5d8000",
+            "0x6d8000",
+            "0x7d8000",
+            "0x8d8000",
+            "0x9d8000",
+            "0xad8000",
+            "0xbd8000",
+            "0xcd8000",
+            "0xdd8000",
+            "0xed8000",
+            "0xfd8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x148000",
+            "0x248000",
+            "0x348000",
+            "0x448000",
+            "0x548000",
+            "0x648000",
+            "0x748000",
+            "0x848000",
+            "0x948000",
+            "0xa48000",
+            "0xb48000",
+            "0xc48000",
+            "0xd48000",
+            "0xe48000",
+            "0xf48000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x128000",
+            "0x228000",
+            "0x328000",
+            "0x428000",
+            "0x528000",
+            "0x628000",
+            "0x728000",
+            "0x828000",
+            "0x928000",
+            "0xa28000",
+            "0xb28000",
+            "0xc28000",
+            "0xd28000",
+            "0xe28000",
+            "0xf28000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000",
+            "0x178000",
+            "0x278000",
+            "0x378000",
+            "0x478000",
+            "0x578000",
+            "0x678000",
+            "0x778000",
+            "0x878000",
+            "0x978000",
+            "0xa78000",
+            "0xb78000",
+            "0xc78000",
+            "0xd78000",
+            "0xe78000",
+            "0xf78000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a8000",
+          "aliases": [
+            "0x0a8000",
+            "0x1a8000",
+            "0x2a8000",
+            "0x3a8000",
+            "0x4a8000",
+            "0x5a8000",
+            "0x6a8000",
+            "0x7a8000",
+            "0x8a8000",
+            "0x9a8000",
+            "0xaa8000",
+            "0xba8000",
+            "0xca8000",
+            "0xda8000",
+            "0xea8000",
+            "0xfa8000"
+          ]
+        },
+        {
+          "rom_offset": "0x028000",
+          "aliases": [
+            "0x028000",
+            "0x128000",
+            "0x228000",
+            "0x328000",
+            "0x428000",
+            "0x528000",
+            "0x628000",
+            "0x728000",
+            "0x828000",
+            "0x928000",
+            "0xa28000",
+            "0xb28000",
+            "0xc28000",
+            "0xd28000",
+            "0xe28000",
+            "0xf28000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x460000",
+            "0x560000",
+            "0x660000",
+            "0x760000",
+            "0xc60000",
+            "0xd60000",
+            "0xe60000",
+            "0xf60000"
+          ]
+        },
+        {
+          "rom_offset": "0x008000",
+          "aliases": [
+            "0x008000",
+            "0x108000",
+            "0x208000",
+            "0x308000",
+            "0x408000",
+            "0x508000",
+            "0x608000",
+            "0x708000",
+            "0x808000",
+            "0x908000",
+            "0xa08000",
+            "0xb08000",
+            "0xc08000",
+            "0xd08000",
+            "0xe08000",
+            "0xf08000"
+          ]
+        },
+        {
+          "rom_offset": "0x038000",
+          "aliases": [
+            "0x038000",
+            "0x138000",
+            "0x238000",
+            "0x338000",
+            "0x438000",
+            "0x538000",
+            "0x638000",
+            "0x738000",
+            "0x838000",
+            "0x938000",
+            "0xa38000",
+            "0xb38000",
+            "0xc38000",
+            "0xd38000",
+            "0xe38000",
+            "0xf38000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e0000",
+          "aliases": [
+            "0x4e0000",
+            "0x5e0000",
+            "0x6e0000",
+            "0xce0000",
+            "0xde0000",
+            "0xee0000",
+            "0xfe0000"
+          ]
+        },
+        {
+          "rom_offset": "0x030000",
+          "aliases": [
+            "0x430000",
+            "0x530000",
+            "0x630000",
+            "0x730000",
+            "0xc30000",
+            "0xd30000",
+            "0xe30000",
+            "0xf30000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0x460000",
+            "0x560000",
+            "0x660000",
+            "0x760000",
+            "0xc60000",
+            "0xd60000",
+            "0xe60000",
+            "0xf60000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e8000",
+          "aliases": [
+            "0x0e8000",
+            "0x1e8000",
+            "0x2e8000",
+            "0x3e8000",
+            "0x4e8000",
+            "0x5e8000",
+            "0x6e8000",
+            "0x8e8000",
+            "0x9e8000",
+            "0xae8000",
+            "0xbe8000",
+            "0xce8000",
+            "0xde8000",
+            "0xee8000",
+            "0xfe8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0c8000",
+          "aliases": [
+            "0x0c8000",
+            "0x1c8000",
+            "0x2c8000",
+            "0x3c8000",
+            "0x4c8000",
+            "0x5c8000",
+            "0x6c8000",
+            "0x7c8000",
+            "0x8c8000",
+            "0x9c8000",
+            "0xac8000",
+            "0xbc8000",
+            "0xcc8000",
+            "0xdc8000",
+            "0xec8000",
+            "0xfc8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d0000",
+          "aliases": [
+            "0x4d0000",
+            "0x5d0000",
+            "0x6d0000",
+            "0x7d0000",
+            "0xcd0000",
+            "0xdd0000",
+            "0xed0000",
+            "0xfd0000"
+          ]
+        },
+        {
+          "rom_offset": "0x0b8000",
+          "aliases": [
+            "0x0b8000",
+            "0x1b8000",
+            "0x2b8000",
+            "0x3b8000",
+            "0x4b8000",
+            "0x5b8000",
+            "0x6b8000",
+            "0x7b8000",
+            "0x8b8000",
+            "0x9b8000",
+            "0xab8000",
+            "0xbb8000",
+            "0xcb8000",
+            "0xdb8000",
+            "0xeb8000",
+            "0xfb8000"
+          ]
+        },
+        {
+          "rom_offset": "0x038000",
+          "aliases": [
+            "0x038000",
+            "0x138000",
+            "0x238000",
+            "0x338000",
+            "0x438000",
+            "0x538000",
+            "0x638000",
+            "0x738000",
+            "0x838000",
+            "0x938000",
+            "0xa38000",
+            "0xb38000",
+            "0xc38000",
+            "0xd38000",
+            "0xe38000",
+            "0xf38000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d0000",
+          "aliases": [
+            "0x4d0000",
+            "0x5d0000",
+            "0x6d0000",
+            "0x7d0000",
+            "0xcd0000",
+            "0xdd0000",
+            "0xed0000",
+            "0xfd0000"
+          ]
+        },
+        {
+          "rom_offset": "0x090000",
+          "aliases": [
+            "0x490000",
+            "0x590000",
+            "0x690000",
+            "0x790000",
+            "0xc90000",
+            "0xd90000",
+            "0xe90000",
+            "0xf90000"
+          ]
+        },
+        {
+          "rom_offset": "0x0c8000",
+          "aliases": [
+            "0x0c8000",
+            "0x1c8000",
+            "0x2c8000",
+            "0x3c8000",
+            "0x4c8000",
+            "0x5c8000",
+            "0x6c8000",
+            "0x7c8000",
+            "0x8c8000",
+            "0x9c8000",
+            "0xac8000",
+            "0xbc8000",
+            "0xcc8000",
+            "0xdc8000",
+            "0xec8000",
+            "0xfc8000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x400000",
+            "0x500000",
+            "0x600000",
+            "0x700000",
+            "0xc00000",
+            "0xd00000",
+            "0xe00000",
+            "0xf00000"
+          ]
+        },
+        {
+          "rom_offset": "0x0b0000",
+          "aliases": [
+            "0x4b0000",
+            "0x5b0000",
+            "0x6b0000",
+            "0x7b0000",
+            "0xcb0000",
+            "0xdb0000",
+            "0xeb0000",
+            "0xfb0000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x168000",
+            "0x268000",
+            "0x368000",
+            "0x468000",
+            "0x568000",
+            "0x668000",
+            "0x768000",
+            "0x868000",
+            "0x968000",
+            "0xa68000",
+            "0xb68000",
+            "0xc68000",
+            "0xd68000",
+            "0xe68000",
+            "0xf68000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x148000",
+            "0x248000",
+            "0x348000",
+            "0x448000",
+            "0x548000",
+            "0x648000",
+            "0x748000",
+            "0x848000",
+            "0x948000",
+            "0xa48000",
+            "0xb48000",
+            "0xc48000",
+            "0xd48000",
+            "0xe48000",
+            "0xf48000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x048000",
+            "0x148000",
+            "0x248000",
+            "0x348000",
+            "0x448000",
+            "0x548000",
+            "0x648000",
+            "0x748000",
+            "0x848000",
+            "0x948000",
+            "0xa48000",
+            "0xb48000",
+            "0xc48000",
+            "0xd48000",
+            "0xe48000",
+            "0xf48000"
+          ]
+        },
+        {
+          "rom_offset": "0x000000",
+          "aliases": [
+            "0x400000",
+            "0x500000",
+            "0x600000",
+            "0x700000",
+            "0xc00000",
+            "0xd00000",
+            "0xe00000",
+            "0xf00000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d8000",
+          "aliases": [
+            "0x0d8000",
+            "0x1d8000",
+            "0x2d8000",
+            "0x3d8000",
+            "0x4d8000",
+            "0x5d8000",
+            "0x6d8000",
+            "0x7d8000",
+            "0x8d8000",
+            "0x9d8000",
+            "0xad8000",
+            "0xbd8000",
+            "0xcd8000",
+            "0xdd8000",
+            "0xed8000",
+            "0xfd8000"
+          ]
+        },
+        {
+          "rom_offset": "0x088000",
+          "aliases": [
+            "0x088000",
+            "0x188000",
+            "0x288000",
+            "0x388000",
+            "0x488000",
+            "0x588000",
+            "0x688000",
+            "0x788000",
+            "0x888000",
+            "0x988000",
+            "0xa88000",
+            "0xb88000",
+            "0xc88000",
+            "0xd88000",
+            "0xe88000",
+            "0xf88000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000",
+            "0x178000",
+            "0x278000",
+            "0x378000",
+            "0x478000",
+            "0x578000",
+            "0x678000",
+            "0x778000",
+            "0x878000",
+            "0x978000",
+            "0xa78000",
+            "0xb78000",
+            "0xc78000",
+            "0xd78000",
+            "0xe78000",
+            "0xf78000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e8000",
+          "aliases": [
+            "0x0e8000",
+            "0x1e8000",
+            "0x2e8000",
+            "0x3e8000",
+            "0x4e8000",
+            "0x5e8000",
+            "0x6e8000",
+            "0x8e8000",
+            "0x9e8000",
+            "0xae8000",
+            "0xbe8000",
+            "0xce8000",
+            "0xde8000",
+            "0xee8000",
+            "0xfe8000"
+          ]
+        },
+        {
+          "rom_offset": "0x078000",
+          "aliases": [
+            "0x078000",
+            "0x178000",
+            "0x278000",
+            "0x378000",
+            "0x478000",
+            "0x578000",
+            "0x678000",
+            "0x778000",
+            "0x878000",
+            "0x978000",
+            "0xa78000",
+            "0xb78000",
+            "0xc78000",
+            "0xd78000",
+            "0xe78000",
+            "0xf78000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a8000",
+          "aliases": [
+            "0x0a8000",
+            "0x1a8000",
+            "0x2a8000",
+            "0x3a8000",
+            "0x4a8000",
+            "0x5a8000",
+            "0x6a8000",
+            "0x7a8000",
+            "0x8a8000",
+            "0x9a8000",
+            "0xaa8000",
+            "0xba8000",
+            "0xca8000",
+            "0xda8000",
+            "0xea8000",
+            "0xfa8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e0000",
+          "aliases": [
+            "0x4e0000",
+            "0x5e0000",
+            "0x6e0000",
+            "0xce0000",
+            "0xde0000",
+            "0xee0000",
+            "0xfe0000"
+          ]
+        },
+        {
+          "rom_offset": "0x050000",
+          "aliases": [
+            "0x450000",
+            "0x550000",
+            "0x650000",
+            "0x750000",
+            "0xc50000",
+            "0xd50000",
+            "0xe50000",
+            "0xf50000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x068000",
+            "0x168000",
+            "0x268000",
+            "0x368000",
+            "0x468000",
+            "0x568000",
+            "0x668000",
+            "0x768000",
+            "0x868000",
+            "0x968000",
+            "0xa68000",
+            "0xb68000",
+            "0xc68000",
+            "0xd68000",
+            "0xe68000",
+            "0xf68000"
+          ]
+        },
+        {
+          "rom_offset": "0x080000",
+          "aliases": [
+            "0x480000",
+            "0x580000",
+            "0x680000",
+            "0x780000",
+            "0xc80000",
+            "0xd80000",
+            "0xe80000",
+            "0xf80000"
+          ]
+        },
+        {
+          "rom_offset": "0x0a0000",
+          "aliases": [
+            "0x4a0000",
+            "0x5a0000",
+            "0x6a0000",
+            "0x7a0000",
+            "0xca0000",
+            "0xda0000",
+            "0xea0000",
+            "0xfa0000"
+          ]
+        }
+      ],
+      "read_cases": [
+        {
+          "name": "leitura na mitad alta do banco 00",
+          "cpu_address": "0x008000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x008000",
+              "bytes_hex": "8ddad4cd41e7edee"
+            }
+          ]
+        },
+        {
+          "name": "HiROM permite corrida CONTIGUA atraves de bancos completos (40->41): UM segmento, offset 0xFFF8..0x10007",
+          "cpu_address": "0x40FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x00fff8",
+              "bytes_hex": "ea9eacc470848953801fc30132e0c577"
+            }
+          ]
+        },
+        {
+          "name": "fim da mitad alta corta: 0x00FFF8+16 emenda no espelho WRAM do banco 01",
+          "cpu_address": "0x00FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x00fff8",
+              "bytes_hex": "ea9eacc470848953"
+            },
+            {
+              "region": "wram-mirror",
+              "offset": "0x000000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "virada de espelho sem clamp: 0x5FFFF8 termina em 0xFFFFF e 0x600000 volta ao offset 0 (dois segmentos ROM nao contiguos)",
+          "cpu_address": "0x5FFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x0ffff8",
+              "bytes_hex": "692ef59689c5f74c"
+            },
+            {
+              "region": "rom",
+              "offset": "0x000000",
+              "bytes_hex": "733f5dc16db8caf2"
+            }
+          ]
+        },
+        {
+          "name": "corte no fim do grupo de bancos completos (7D->7E WRAM) mesmo com offsets contiguos posibles",
+          "cpu_address": "0x7DFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x0dfff8",
+              "bytes_hex": "2aeaecec78681359"
+            },
+            {
+              "region": "wram",
+              "offset": "0x000000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "regiao sram: segmento classificador sem backing ROM",
+          "cpu_address": "0x206000",
+          "length": 4,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "sram",
+              "offset": "0x000000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "rom menor que rom_size declarado: out-of-range no trecho faltante (sem clamp)",
+          "cpu_address": "0x3FFFF0",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 8,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x0ffff0",
+              "bytes_hex": "82d354088e9f3383"
+            },
+            {
+              "error": "out-of-range",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "leitura alem do barramento rejeitada antes de alocar",
+          "cpu_address": "0xFFFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "length zero rejeitado",
+          "cpu_address": "0x008000",
+          "length": 0,
+          "mapper_state": {
+            "rom_size": 1048576
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "estado invalido rejeitado antes de alocar",
+          "cpu_address": "0x008000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 1572864
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "unsupported"
+        }
+      ]
+    },
+    "snes-exhirom": {
+      "fixture": {
+        "sha256": "aba2db79e63369ffaa00af73324f7cefe36dba4a638fa78d9eb2d465bd087989",
+        "rom_size": 8388608
+      },
+      "translate": [
+        {
+          "name": "banco 00 metade alta: area 2 com base 0x400000",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x408000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "vetores de reset em 0x00FFD8 caem no meio do arquivo de 8MB",
+          "cpu_address": "0x00FFD8",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x40FFD8"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "fim da janela de metade alta do banco 3F",
+          "cpu_address": "0x3F8000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x7F8000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "ultimo offset da area 2 em 8MB (banco 3F, $FFFF)",
+          "cpu_address": "0x3FFFFF",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x7FFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "inicio do banco cheio 40: area 2 identidade em 8MB",
+          "cpu_address": "0x400000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x400000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco cheio 40, $8000",
+          "cpu_address": "0x408000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x408000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "fim do grupo de bancos cheios 40-7D",
+          "cpu_address": "0x7DFFFF",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x7DFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco 80 metade alta: area 1 involutiva com banco 00",
+          "cpu_address": "0x808000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x008000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco BF alto: A22/A23 desconectados mascaram para 0x3F8000",
+          "cpu_address": "0xBF8000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x3F8000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "inicio do banco cheio C0: area 1 offset 0",
+          "cpu_address": "0xC00000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x000000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "ultima direcao do barramento: area 1 offset 0x3FFFFF",
+          "cpu_address": "0xFFFFFF",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x3FFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco FE cheio alias de area 1 (FE≡3E mod 0x400000)",
+          "cpu_address": "0xFE0000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x3E0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "wram banco 7E inicio",
+          "cpu_address": "0x7E0000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "wram",
+            "offset": "0x0000"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "wram banco 7F fim",
+          "cpu_address": "0x7FFFFF",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "wram",
+            "offset": "0xFFFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "wram meio",
+          "cpu_address": "0x7F1234",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "wram",
+            "offset": "0x1234"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "sram banco 20 $6000-$7FFF",
+          "cpu_address": "0x206123",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "sram",
+            "offset": "0x0123"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "sram banco A1 topo da janela (ganha do io em bancos A0-BF)",
+          "cpu_address": "0xA17FFF",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "sram",
+            "offset": "0x1FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho WRAM em banco 00 metade baixa",
+          "cpu_address": "0x001234",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "wram-mirror",
+            "offset": "0x1234"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "espelho WRAM em banco 80",
+          "cpu_address": "0x800123",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "wram-mirror",
+            "offset": "0x0123"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io PPU em banco 00",
+          "cpu_address": "0x002100",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x2100"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "io topo da janela do banco 00 (em bancos 20-3F/A0-BF o mesmo a seria sram)",
+          "cpu_address": "0x007FFF",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "io",
+            "offset": "0x7FFF"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "banco cheio 7D meio: identidade linear em 8MB",
+          "cpu_address": "0x7D5555",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x7D5555"
+          },
+          "engine_agree": true
+        },
+        {
+          "name": "ROM de 6MB: banco 20 alto mod half2=0x200000 => 0x408000",
+          "cpu_address": "0x208000",
+          "mapper_state": {
+            "rom_size": 6291456
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x408000"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "ROM de 6MB: banco 60 cheio cruza a borda do espelho da area 2",
+          "cpu_address": "0x600000",
+          "mapper_state": {
+            "rom_size": 6291456
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x400000"
+          },
+          "engine_agree": false
+        },
+        {
+          "name": "ROM de 5MB: banco 10 alto mod half2=0x100000 => 0x408000",
+          "cpu_address": "0x108000",
+          "mapper_state": {
+            "rom_size": 5242880
+          },
+          "expect": {
+            "region": "rom",
+            "offset": "0x408000"
+          },
+          "engine_agree": false
+        }
+      ],
+      "translate_negatives": [
+        {
+          "name": "reservado: banco 3E, a=$4800 (mitade baixa; nao e io nem ROM)",
+          "cpu_address": "0x3E4800",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "reservado: banco BE, a=$4800",
+          "cpu_address": "0xBE4800",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "acima do barramento 24 bits",
+          "cpu_address": "0x1000000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "estado ausente",
+          "cpu_address": "0x008000",
+          "mapper_state": null,
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size 4MB nao e ExHiROM (perfil snes-hirom)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 4194304
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size 7MB: half2=3MB nao e potencia de 2 (pad 0xFF a 8MB registrado)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 7340032
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "rom_size acima das duas areas (9MB)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 9437184
+          },
+          "expect_error": "unsupported"
+        },
+        {
+          "name": "estado com chave desconhecida rejeitada (sem registradores em ExHiROM)",
+          "cpu_address": "0x008000",
+          "mapper_state": {
+            "rom_size": 8388608,
+            "banks": {
+              "1": 2
+            }
+          },
+          "expect_error": "unsupported"
+        }
+      ],
+      "invert_cases": [
+        {
+          "name": "offset 0 em 8MB: so o inicio do banco cheio C0 (area 2 nao cobre <0x400000; 80-BF altos comecam em 0x8000)",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0xc00000"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x400000 em 8MB: inicio do banco cheio 40 (banco 00 alto comeca em 0x408000)",
+          "rom_offset": "0x400000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0x400000"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x408000 em 8MB: par involutivo banco 00 alto e banco 40",
+          "rom_offset": "0x408000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0x008000",
+              "0x408000"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x40FFD8 (vetores) em 8MB: 0x00FFD8 e 0x40FFD8",
+          "rom_offset": "0x40FFD8",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0x00ffd8",
+              "0x40ffd8"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x3FFFFF em 8MB: topo da area 1 pelos bancos BF alto e FF cheio",
+          "rom_offset": "0x3FFFFF",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0xbfffff",
+              "0xffffff"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x7FFFFF em 8MB: topo da area 2 so pelo fim do banco 3F",
+          "rom_offset": "0x7FFFFF",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0x3fffff"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x12345 em 8MB: area 1 so pelo banco cheio C1 (bancos altos 80-BF cobrem apenas offsets >= 0x??8000)",
+          "rom_offset": "0x12345",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0xc12345"
+            ]
+          }
+        },
+        {
+          "name": "offset 0x412345 em 8MB: area 2 so pelo banco cheio 41 (banco 01 baixo nao e ROM)",
+          "rom_offset": "0x412345",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0x412345"
+            ]
+          }
+        },
+        {
+          "name": "ROM de 6MB: offset 0x400000 tem dois aliases (bancos 40 e 60, mod half2=0x200000)",
+          "rom_offset": "0x400000",
+          "mapper_state": {
+            "rom_size": 6291456
+          },
+          "expect": {
+            "aliases": [
+              "0x400000",
+              "0x600000"
+            ]
+          }
+        },
+        {
+          "name": "ROM de 6MB: offset 0x5FFFFF tem tres aliases (1F, 3F altos e 5F cheio)",
+          "rom_offset": "0x5FFFFF",
+          "mapper_state": {
+            "rom_size": 6291456
+          },
+          "expect": {
+            "aliases": [
+              "0x1fffff",
+              "0x3fffff",
+              "0x5fffff"
+            ]
+          }
+        },
+        {
+          "name": "offset alem do fim da ROM: lista vazia, resposta valida",
+          "rom_offset": "0x800000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": []
+          }
+        },
+        {
+          "name": "offset nao inteiro e erro",
+          "rom_offset": "4096.5",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "error": "out-of-range"
+          }
+        },
+        {
+          "name": "invert exige mapper_state valido",
+          "rom_offset": "0x000000",
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "expect": {
+            "aliases": [
+              "0xc00000"
+            ]
+          }
+        }
+      ],
+      "invert_samples_exhaustive_verified": [
+        {
+          "rom_offset": "0x7d8000",
+          "aliases": [
+            "0x3d8000",
+            "0x7d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x700000",
+          "aliases": [
+            "0x700000"
+          ]
+        },
+        {
+          "rom_offset": "0x1a8000",
+          "aliases": [
+            "0x9a8000",
+            "0xda8000"
+          ]
+        },
+        {
+          "rom_offset": "0x5c8000",
+          "aliases": [
+            "0x1c8000",
+            "0x5c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x068000",
+          "aliases": [
+            "0x868000",
+            "0xc68000"
+          ]
+        },
+        {
+          "rom_offset": "0x370000",
+          "aliases": [
+            "0xf70000"
+          ]
+        },
+        {
+          "rom_offset": "0x0e8000",
+          "aliases": [
+            "0x8e8000",
+            "0xce8000"
+          ]
+        },
+        {
+          "rom_offset": "0x458000",
+          "aliases": [
+            "0x058000",
+            "0x458000"
+          ]
+        },
+        {
+          "rom_offset": "0x020000",
+          "aliases": [
+            "0xc20000"
+          ]
+        },
+        {
+          "rom_offset": "0x088000",
+          "aliases": [
+            "0x888000",
+            "0xc88000"
+          ]
+        },
+        {
+          "rom_offset": "0x108000",
+          "aliases": [
+            "0x908000",
+            "0xd08000"
+          ]
+        },
+        {
+          "rom_offset": "0x708000",
+          "aliases": [
+            "0x308000",
+            "0x708000"
+          ]
+        },
+        {
+          "rom_offset": "0x5e0000",
+          "aliases": [
+            "0x5e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x628000",
+          "aliases": [
+            "0x228000",
+            "0x628000"
+          ]
+        },
+        {
+          "rom_offset": "0x690000",
+          "aliases": [
+            "0x690000"
+          ]
+        },
+        {
+          "rom_offset": "0x6b0000",
+          "aliases": [
+            "0x6b0000"
+          ]
+        },
+        {
+          "rom_offset": "0x208000",
+          "aliases": [
+            "0xa08000",
+            "0xe08000"
+          ]
+        },
+        {
+          "rom_offset": "0x410000",
+          "aliases": [
+            "0x410000"
+          ]
+        },
+        {
+          "rom_offset": "0x3f8000",
+          "aliases": [
+            "0xbf8000",
+            "0xff8000"
+          ]
+        },
+        {
+          "rom_offset": "0x7d8000",
+          "aliases": [
+            "0x3d8000",
+            "0x7d8000"
+          ]
+        },
+        {
+          "rom_offset": "0x6c8000",
+          "aliases": [
+            "0x2c8000",
+            "0x6c8000"
+          ]
+        },
+        {
+          "rom_offset": "0x1a8000",
+          "aliases": [
+            "0x9a8000",
+            "0xda8000"
+          ]
+        },
+        {
+          "rom_offset": "0x140000",
+          "aliases": [
+            "0xd40000"
+          ]
+        },
+        {
+          "rom_offset": "0x2d8000",
+          "aliases": [
+            "0xad8000",
+            "0xed8000"
+          ]
+        },
+        {
+          "rom_offset": "0x048000",
+          "aliases": [
+            "0x848000",
+            "0xc48000"
+          ]
+        },
+        {
+          "rom_offset": "0x628000",
+          "aliases": [
+            "0x228000",
+            "0x628000"
+          ]
+        },
+        {
+          "rom_offset": "0x478000",
+          "aliases": [
+            "0x078000",
+            "0x478000"
+          ]
+        },
+        {
+          "rom_offset": "0x3a8000",
+          "aliases": [
+            "0xba8000",
+            "0xfa8000"
+          ]
+        },
+        {
+          "rom_offset": "0x428000",
+          "aliases": [
+            "0x028000",
+            "0x428000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0xc60000"
+          ]
+        },
+        {
+          "rom_offset": "0x108000",
+          "aliases": [
+            "0x908000",
+            "0xd08000"
+          ]
+        },
+        {
+          "rom_offset": "0x238000",
+          "aliases": [
+            "0xa38000",
+            "0xe38000"
+          ]
+        },
+        {
+          "rom_offset": "0x1e0000",
+          "aliases": [
+            "0xde0000"
+          ]
+        },
+        {
+          "rom_offset": "0x730000",
+          "aliases": [
+            "0x730000"
+          ]
+        },
+        {
+          "rom_offset": "0x060000",
+          "aliases": [
+            "0xc60000"
+          ]
+        },
+        {
+          "rom_offset": "0x1e8000",
+          "aliases": [
+            "0x9e8000",
+            "0xde8000"
+          ]
+        },
+        {
+          "rom_offset": "0x2c8000",
+          "aliases": [
+            "0xac8000",
+            "0xec8000"
+          ]
+        },
+        {
+          "rom_offset": "0x0d0000",
+          "aliases": [
+            "0xcd0000"
+          ]
+        },
+        {
+          "rom_offset": "0x1b8000",
+          "aliases": [
+            "0x9b8000",
+            "0xdb8000"
+          ]
+        },
+        {
+          "rom_offset": "0x238000",
+          "aliases": [
+            "0xa38000",
+            "0xe38000"
+          ]
+        },
+        {
+          "rom_offset": "0x1d0000",
+          "aliases": [
+            "0xdd0000"
+          ]
+        },
+        {
+          "rom_offset": "0x390000",
+          "aliases": [
+            "0xf90000"
+          ]
+        },
+        {
+          "rom_offset": "0x1c8000",
+          "aliases": [
+            "0x9c8000",
+            "0xdc8000"
+          ]
+        },
+        {
+          "rom_offset": "0x600000",
+          "aliases": [
+            "0x600000"
+          ]
+        },
+        {
+          "rom_offset": "0x3b0000",
+          "aliases": [
+            "0xfb0000"
+          ]
+        },
+        {
+          "rom_offset": "0x568000",
+          "aliases": [
+            "0x168000",
+            "0x568000"
+          ]
+        },
+        {
+          "rom_offset": "0x348000",
+          "aliases": [
+            "0xb48000",
+            "0xf48000"
+          ]
+        },
+        {
+          "rom_offset": "0x448000",
+          "aliases": [
+            "0x048000",
+            "0x448000"
+          ]
+        },
+        {
+          "rom_offset": "0x700000",
+          "aliases": [
+            "0x700000"
+          ]
+        },
+        {
+          "rom_offset": "0x3d8000",
+          "aliases": [
+            "0xbd8000",
+            "0xfd8000"
+          ]
+        },
+        {
+          "rom_offset": "0x688000",
+          "aliases": [
+            "0x288000",
+            "0x688000"
+          ]
+        },
+        {
+          "rom_offset": "0x778000",
+          "aliases": [
+            "0x378000",
+            "0x778000"
+          ]
+        },
+        {
+          "rom_offset": "0x3e8000",
+          "aliases": [
+            "0xbe8000",
+            "0xfe8000"
+          ]
+        },
+        {
+          "rom_offset": "0x478000",
+          "aliases": [
+            "0x078000",
+            "0x478000"
+          ]
+        },
+        {
+          "rom_offset": "0x1a8000",
+          "aliases": [
+            "0x9a8000",
+            "0xda8000"
+          ]
+        },
+        {
+          "rom_offset": "0x5e0000",
+          "aliases": [
+            "0x5e0000"
+          ]
+        },
+        {
+          "rom_offset": "0x450000",
+          "aliases": [
+            "0x450000"
+          ]
+        },
+        {
+          "rom_offset": "0x468000",
+          "aliases": [
+            "0x068000",
+            "0x468000"
+          ]
+        },
+        {
+          "rom_offset": "0x080000",
+          "aliases": [
+            "0xc80000"
+          ]
+        },
+        {
+          "rom_offset": "0x1a0000",
+          "aliases": [
+            "0xda0000"
+          ]
+        }
+      ],
+      "read_cases": [
+        {
+          "name": "banco 00 alto le do meio do arquivo (area 2)",
+          "cpu_address": "0x008000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x408000",
+              "bytes_hex": "be2640bc8f61261f"
+            }
+          ]
+        },
+        {
+          "name": "contiguidade area 2: 0x40FFF8+16 emenda no banco 41 em UM segmento",
+          "cpu_address": "0x40FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x40fff8",
+              "bytes_hex": "599f3c8d801e62246fbf84aac1b2140e"
+            }
+          ]
+        },
+        {
+          "name": "mitade alta para no fim do banco: 0x00FFF8+16 corta e o resto e espelho WRAM classificado",
+          "cpu_address": "0x00FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x40fff8",
+              "bytes_hex": "599f3c8d801e6224"
+            },
+            {
+              "region": "wram-mirror",
+              "offset": "0x000000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "alias involutivo area 1: 0x808000 le do comeco do arquivo",
+          "cpu_address": "0x808000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x008000",
+              "bytes_hex": "339077eee619684b"
+            }
+          ]
+        },
+        {
+          "name": "contiguidade area 1: 0xC0FFF8+16 emenda no banco C1 em UM segmento",
+          "cpu_address": "0xC0FFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x00fff8",
+              "bytes_hex": "d46412f6d5a76b0e64d0458905ebdc78"
+            }
+          ]
+        },
+        {
+          "name": "fim do grupo 40-7D: 0x7DFFF8+16 corta em WRAM classificado",
+          "cpu_address": "0x7DFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x7dfff8",
+              "bytes_hex": "15d479420be444bb"
+            },
+            {
+              "region": "wram",
+              "offset": "0x000000",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "regiao sram: segmento classificatorio sem backing ROM",
+          "cpu_address": "0x206123",
+          "length": 4,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [
+            {
+              "region": "sram",
+              "offset": "0x000123",
+              "error": "unsupported",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "rom 8 bytes menor que rom_size: ultimo trecho da area 2 (0x3FFFF0) e out-of-range sem clamp",
+          "cpu_address": "0x3FFFF0",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 8,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x7ffff0",
+              "bytes_hex": "bae34828320c3d00"
+            },
+            {
+              "error": "out-of-range",
+              "detail_contains": "ver detalle"
+            }
+          ]
+        },
+        {
+          "name": "ROM de 6MB: wrap do espelho da area 2 corta em dois segmentos (0x5FFFFF -> 0x400000)",
+          "cpu_address": "0x5FFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 6291456
+          },
+          "rom_short_by": 2097152,
+          "expect_segments": [
+            {
+              "region": "rom",
+              "offset": "0x5ffff8",
+              "bytes_hex": "1e0058098c40a676"
+            },
+            {
+              "region": "rom",
+              "offset": "0x400000",
+              "bytes_hex": "4bbd61030b4bdf33"
+            }
+          ]
+        },
+        {
+          "name": "leitura alem do barramento rejeitada antes de alocar",
+          "cpu_address": "0xFFFFF8",
+          "length": 16,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "length zero rejeitado",
+          "cpu_address": "0x008000",
+          "length": 0,
+          "mapper_state": {
+            "rom_size": 8388608
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "out-of-range"
+        },
+        {
+          "name": "estado invalido rejeitado antes de alocar",
+          "cpu_address": "0x008000",
+          "length": 8,
+          "mapper_state": {
+            "rom_size": 7340032
+          },
+          "rom_short_by": 0,
+          "expect_segments": [],
+          "expect_error": "unsupported"
+        }
+      ]
+    }
+  }
+}

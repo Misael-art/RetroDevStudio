@@ -21,6 +21,14 @@ import type {
 
 const UNDO_STACK_LIMIT = 50;
 
+export type SceneSaveState = {
+  status: "idle" | "saving" | "saved" | "failed";
+  message: string | null;
+  at: number | null;
+  /** sceneRevision that the last successful save persisted. */
+  revision: number | null;
+};
+
 export interface HwStatus {
   vram_used: number;
   vram_limit: number;
@@ -101,12 +109,73 @@ export interface ActiveBrush {
   tileIndex?: number;
 }
 
+/** Observação de joypad correlacionada por sessão de emulação + sequência
+ * monotônica, para que uma confirmação atrasada — da mesma carga ou de uma
+ * carga anterior — não seja confundida com a da transição corrente.
+ *
+ * A sessão é gerada no frontend, não pelo backend, e isso é suficiente: o par
+ * (sessão, seq) é capturado no fechamento do envio e reconferido na resolução,
+ * de modo que um ack que atravesse um stop/recarga carrega a sessão antiga e é
+ * descartado. Um eco do backend não acrescentaria garantia — quem define a
+ * época da carga é o próprio frontend. */
+export interface JoypadObservation {
+  sessionId: string;
+  seq: number;
+  joypad: Record<string, boolean>;
+}
+
+export interface EmulatorRomIdentity {
+  path: string;
+  size: number;
+  sha256: string;
+  coreLabel: string;
+  corePath: string;
+  sourceLabel: string;
+}
+
+export interface EmulatorLaunchRequest {
+  requestId: number;
+  romPath: string;
+  sourceLabel: string;
+}
+
+let joypadSessionCounter = 0;
+let emulatorLaunchRequestCounter = 0;
+
 export interface StoreState {
   activeProjectDir: string;
   activeProjectName: string;
   activeTarget: "megadrive" | "snes";
   activeScenePath: string;
   emulatorLoaded: boolean;
+  /** Identidade observada da ROM realmente carregada no core canônico. */
+  emulatorRomIdentity: EmulatorRomIdentity | null;
+  /** Solicitação de carga originada por outra superfície do produto. O App
+   * consome-a usando o mesmo loadRomIntoEmulator do fluxo existente. */
+  emulatorLaunchRequest: EmulatorLaunchRequest | null;
+  /** Última INTENÇÃO de joypad formada pelo caminho de teclado do produto,
+   * registrada antes do IPC. Prova que o handler rodou — NÃO prova entrega.
+   * null = nada solicitado desde a abertura. */
+  lastJoypadRequest: JoypadObservation | null;
+  /** true durante carga/stop do emulador: a época está invalidada e envios de
+   * input são bloqueados (contados) até a nova sessão existir. */
+  joypadSessionHold: boolean;
+  joypadBlockedCount: number;
+  /** Época do core no backend: inputs são enviados com este valor e o
+   * backend recusa época obsoleta (recarga aconteceu no meio do voo). */
+  coreEpoch: number | null;
+  /** Truthful save status of the active scene: set by persistActiveScene only. */
+  sceneSaveState: SceneSaveState;
+  /** Última intenção CONFIRMADA pelo backend (`ok: true`). Este é o único
+   * campo que demonstra entrega aceita pelo emulador. Acks cuja sequência não
+   * corresponde à solicitação corrente são descartados (ack atrasado). */
+  lastJoypadAck: JoypadObservation | null;
+  /** Falha da última solicitação: `ok: false` (resolve normal da IPC) ou
+   * exceção. Correlacionado por sequência. */
+  lastJoypadSendError: { sessionId: string; seq: number; message: string } | null;
+  /** Época da carga corrente do emulador. Muda a cada carga e vira null ao
+   * parar; solicitações e confirmações de sessões anteriores são descartadas. */
+  joypadSessionId: string | null;
   selectedEntityId: string | null;
   /** ID da camada ativa no LayerPanel. null = sem camada selecionada. */
   activeLayerId: string | null;
@@ -154,6 +223,9 @@ export interface StoreActions {
   setActiveTarget: (target: "megadrive" | "snes") => void;
   setActiveScenePath: (path: string) => void;
   setEmulatorLoaded: (loaded: boolean) => void;
+  setEmulatorRomIdentity: (identity: EmulatorRomIdentity | null) => void;
+  requestEmulatorLaunch: (romPath: string, sourceLabel: string) => void;
+  clearEmulatorLaunchRequest: () => void;
   setSelectedEntityId: (id: string | null) => void;
   setActiveLayerId: (id: string | null) => void;
   setActiveWorkspace: (workspace: EditorWorkspace) => void;
@@ -208,6 +280,16 @@ export interface StoreActions {
   undo: () => void;
   redo: () => void;
   setEmulPaused: (paused: boolean) => void;
+  recordJoypadRequest: (sessionId: string, seq: number, joypad: Record<string, boolean>) => void;
+  recordJoypadAck: (sessionId: string, seq: number, joypad: Record<string, boolean>) => void;
+  recordJoypadSendError: (sessionId: string, seq: number, message: string) => void;
+  /** Invalida a época ANTES de qualquer await da carga/stop: durante o hold,
+   * envios são bloqueados e contados — nada antigo é aceito na janela. */
+  beginJoypadSessionHold: () => void;
+  releaseJoypadSessionHold: () => void;
+  recordJoypadBlocked: () => void;
+  setCoreEpoch: (epoch: number | null) => void;
+  setSceneSaveState: (state: SceneSaveState) => void;
   setViewportZoom: (zoom: number) => void;
   resetViewportZoom: () => void;
   setProjectSourceKind: (kind: string) => void;
@@ -300,6 +382,34 @@ function prunePatchAgainstBase(patch: unknown, base: unknown): unknown | undefin
   }
 
   return Object.keys(pruned).length > 0 ? pruned : undefined;
+}
+
+/**
+ * On a prefab instance, a component present in the source replaces the prefab's whole
+ * component (the backend requires complete components, e.g. SpriteComponent.asset).
+ * A pruned partial patch of an inherited component would therefore be invalid, so the
+ * touched component becomes a complete local override (resolved value + patch). Only
+ * touched components are materialized; every other component stays inherited.
+ */
+function completeInheritedComponentOverrides(
+  sourcePatch: unknown,
+  sourceEntity: Entity,
+  resolvedEntity: Entity
+): unknown | undefined {
+  if (!isRecord(sourcePatch) || !isRecord(sourcePatch.components) || !sourceEntity.prefab) {
+    return sourcePatch;
+  }
+  const sourceComponents = (sourceEntity.components ?? {}) as Record<string, unknown>;
+  const resolvedComponents = (resolvedEntity.components ?? {}) as Record<string, unknown>;
+  const components: Record<string, unknown> = { ...sourcePatch.components };
+  for (const [key, value] of Object.entries(components)) {
+    const inherited = sourceComponents[key] === undefined || sourceComponents[key] === null;
+    const resolved = resolvedComponents[key];
+    if (inherited && isRecord(resolved) && isRecord(value) && key !== "logic") {
+      components[key] = mergePatchedValue(structuredClone(resolved), value);
+    }
+  }
+  return { ...sourcePatch, components };
 }
 
 function preserveInheritedGraphRef(
@@ -414,7 +524,31 @@ export const useEditorStore = create<EditorState>((set) => ({
   activeScenePath: "",
   setActiveScenePath: (path) => set({ activeScenePath: path }),
   emulatorLoaded: false,
-  setEmulatorLoaded: (loaded) => set({ emulatorLoaded: loaded }),
+  emulatorRomIdentity: null,
+  emulatorLaunchRequest: null,
+  setEmulatorLoaded: (loaded) =>
+    set(() => ({
+      emulatorLoaded: loaded,
+      emulatorRomIdentity: null,
+      // Toda transição de carga abre uma época nova (ou nenhuma, ao parar):
+      // solicitações e confirmações da carga anterior deixam de ser aceitáveis.
+      // Ancorar aqui — e não em cada call site — torna a invalidação por
+      // stop/recarga impossível de esquecer.
+      joypadSessionId: loaded ? `joypad-session-${(joypadSessionCounter += 1)}` : null,
+      lastJoypadRequest: null,
+      lastJoypadAck: null,
+      lastJoypadSendError: null,
+    })),
+  setEmulatorRomIdentity: (identity) => set({ emulatorRomIdentity: identity }),
+  requestEmulatorLaunch: (romPath, sourceLabel) =>
+    set({
+      emulatorLaunchRequest: {
+        requestId: (emulatorLaunchRequestCounter += 1),
+        romPath,
+        sourceLabel,
+      },
+    }),
+  clearEmulatorLaunchRequest: () => set({ emulatorLaunchRequest: null }),
 
   selectedEntityId: null,
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
@@ -544,6 +678,10 @@ export const useEditorStore = create<EditorState>((set) => ({
         activeSceneSource: sourceScene,
         selectedEntityId: resolveSceneSelection(scene, state.selectedEntityId),
         sceneRevision: nextRevision,
+        // A scene set from outside (disk load/hydration) is the saved baseline.
+        sceneSaveState: scene
+          ? { status: "saved" as const, message: null, at: Date.now(), revision: nextRevision }
+          : { status: "idle" as const, message: null, at: null, revision: null },
         undoStack: [],
         redoStack: [],
         pendingHistorySnapshot: null,
@@ -588,9 +726,13 @@ export const useEditorStore = create<EditorState>((set) => ({
       const sourceEntity =
         sourceScene.entities.find((entity) => entity.entity_id === entityId) ?? resolvedEntity;
 
-      const sourcePatch = preserveInheritedGraphRef(
-        prunePatchAgainstBase(patch, resolvedEntity),
-        patch,
+      const sourcePatch = completeInheritedComponentOverrides(
+        preserveInheritedGraphRef(
+          prunePatchAgainstBase(patch, resolvedEntity),
+          patch,
+          sourceEntity,
+          resolvedEntity
+        ),
         sourceEntity,
         resolvedEntity
       );
@@ -771,7 +913,55 @@ export const useEditorStore = create<EditorState>((set) => ({
     }),
 
   emulPaused: false,
+  lastJoypadRequest: null,
+  lastJoypadAck: null,
+  lastJoypadSendError: null,
+  joypadSessionId: null,
+  joypadSessionHold: false,
+  joypadBlockedCount: 0,
+  coreEpoch: null,
+  sceneSaveState: { status: "idle", message: null, at: null, revision: null },
   setEmulPaused: (paused) => set({ emulPaused: paused }),
+  beginJoypadSessionHold: () =>
+    set({
+      joypadSessionHold: true,
+      // Invalidação ANTES de qualquer await da operação: a época corrente
+      // deixa de existir aqui, não quando a resposta chegar.
+      joypadSessionId: null,
+      lastJoypadRequest: null,
+      lastJoypadAck: null,
+      lastJoypadSendError: null,
+    }),
+  releaseJoypadSessionHold: () => set({ joypadSessionHold: false }),
+  recordJoypadBlocked: () =>
+    set((state) => ({ joypadBlockedCount: state.joypadBlockedCount + 1 })),
+  setCoreEpoch: (epoch) => set({ coreEpoch: epoch }),
+  setSceneSaveState: (sceneSaveState) => set({ sceneSaveState }),
+  recordJoypadRequest: (sessionId, seq, joypad) =>
+    set((state) =>
+      !state.joypadSessionHold && state.joypadSessionId === sessionId
+        ? { lastJoypadRequest: { sessionId, seq, joypad }, lastJoypadSendError: null }
+        : {},
+    ),
+  recordJoypadAck: (sessionId, seq, joypad) =>
+    set((state) =>
+      // Só confirma o ack da solicitação corrente, na sessão corrente. Um ack
+      // que chega depois de uma transição mais nova, ou que atravessa um
+      // stop/recarga, refere-se a estado obsoleto e é descartado.
+      state.joypadSessionId === sessionId &&
+      state.lastJoypadRequest?.sessionId === sessionId &&
+      state.lastJoypadRequest?.seq === seq
+        ? { lastJoypadAck: { sessionId, seq, joypad } }
+        : {},
+    ),
+  recordJoypadSendError: (sessionId, seq, message) =>
+    set((state) =>
+      state.joypadSessionId === sessionId &&
+      state.lastJoypadRequest?.sessionId === sessionId &&
+      state.lastJoypadRequest?.seq === seq
+        ? { lastJoypadSendError: { sessionId, seq, message } }
+        : {},
+    ),
 
   viewportZoom: 1.75,
   setViewportZoom: (zoom) =>

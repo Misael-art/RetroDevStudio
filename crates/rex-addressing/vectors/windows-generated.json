@@ -1,0 +1,211 @@
+{
+ "contract_version": 1,
+ "generated_by": "scripts/rex_profiles/addressing/crosscheck/gen-windows.mjs",
+ "generated_on": "2026-09-25",
+ "source": {
+  "project": "bsnes",
+  "repo": "byuu/bsnes",
+  "commit": "7d5aa1e656b9171524d01b1b22917197d8121cb4",
+  "path": "bsnes/target-bsnes/resource/system/boards.bml",
+  "license": "GPL-3.0 (usado SO como especificacion; extraese a taboa de ventas, non se transcribe codigo)",
+  "fetch_command": "gh api \"repos/byuu/bsnes/contents/bsnes/target-bsnes/resource/system/boards.bml?ref=7d5aa1e656b9171524d01b1b22917197d8121cb4\" --jq .content | base64 -d",
+  "sha256": "b8006d805bef610bb527a486e8b576d48531e6afd94fce7083d3ca9eb553b378",
+  "input_sha256_verified": "b8006d805bef610bb527a486e8b576d48531e6afd94fce7083d3ca9eb553b378"
+ },
+ "primitives": {
+  "reference": "bsnes@7d5aa1e sfc/memory/memory.cpp:63-65 (Bus::map) + memory-inline.hpp (reduce/mirror)",
+  "model": "offset=reduce(A,mask); base=mirror(base,size); offset=base+mirror(offset,size-base)",
+  "note": "as primitivas implementan-se EN JS en engine.mjs a partir desta descricion formal, non do codigo orixinal"
+ },
+ "derivation": "ventanas ROM/Save extraidas mecanicamente do BML crudo; os valores numericos (banks/mask/base) son datos do arquivo orixinal, non a aritmetica fechada dun perfil",
+ "boards": {
+  "LOROM": {
+   "board": "LOROM",
+   "rom_windows": [
+    {
+     "banks": [
+      [
+       0,
+       125
+      ],
+      [
+       128,
+       255
+      ]
+     ],
+     "a": [
+      32768,
+      65535
+     ],
+     "base": 0,
+     "mask": 32768
+    }
+   ],
+   "save_board": "LOROM-RAM",
+   "save_windows": [
+    {
+     "banks": [
+      [
+       112,
+       125
+      ],
+      [
+       240,
+       255
+      ]
+     ],
+     "a": [
+      0,
+      32767
+     ],
+     "base": 0,
+     "mask": 32768
+    }
+   ]
+  },
+  "HIROM": {
+   "board": "HIROM",
+   "rom_windows": [
+    {
+     "banks": [
+      [
+       0,
+       63
+      ],
+      [
+       128,
+       191
+      ]
+     ],
+     "a": [
+      32768,
+      65535
+     ],
+     "base": 0,
+     "mask": 0
+    },
+    {
+     "banks": [
+      [
+       64,
+       125
+      ],
+      [
+       192,
+       255
+      ]
+     ],
+     "a": [
+      0,
+      65535
+     ],
+     "base": 0,
+     "mask": 0
+    }
+   ],
+   "save_board": "HIROM-RAM",
+   "save_windows": [
+    {
+     "banks": [
+      [
+       32,
+       63
+      ],
+      [
+       160,
+       191
+      ]
+     ],
+     "a": [
+      24576,
+      32767
+     ],
+     "base": 0,
+     "mask": 57344
+    }
+   ]
+  },
+  "EXHIROM": {
+   "board": "EXHIROM",
+   "rom_windows": [
+    {
+     "banks": [
+      [
+       0,
+       63
+      ]
+     ],
+     "a": [
+      32768,
+      65535
+     ],
+     "base": 4194304,
+     "mask": 0
+    },
+    {
+     "banks": [
+      [
+       64,
+       125
+      ]
+     ],
+     "a": [
+      0,
+      65535
+     ],
+     "base": 4194304,
+     "mask": 0
+    },
+    {
+     "banks": [
+      [
+       128,
+       191
+      ]
+     ],
+     "a": [
+      32768,
+      65535
+     ],
+     "base": 0,
+     "mask": 12582912
+    },
+    {
+     "banks": [
+      [
+       192,
+       255
+      ]
+     ],
+     "a": [
+      0,
+      65535
+     ],
+     "base": 0,
+     "mask": 12582912
+    }
+   ],
+   "save_board": "EXHIROM-RAM",
+   "save_windows": [
+    {
+     "banks": [
+      [
+       32,
+       63
+      ],
+      [
+       160,
+       191
+      ]
+     ],
+     "a": [
+      24576,
+      32767
+     ],
+     "base": 0,
+     "mask": 57344
+    }
+   ]
+  }
+ }
+}

@@ -1,0 +1,2 @@
+OK       i18_corpus_edit_c8cc8        ret68k=  288 esperado=  288 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)

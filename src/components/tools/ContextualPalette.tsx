@@ -1,7 +1,13 @@
+import { decodePpm } from "../../core/ppmImage";
+import { TILEMAP_CELL_EMPTY } from "../../core/tilemapCells";
 import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEditorStore } from "../../core/store/editorStore";
-import { listProjectAssets, type ProjectAssetEntry } from "../../core/ipc/toolsService";
+import {
+  listProjectAssets,
+  readProjectAssetBytes,
+  type ProjectAssetEntry,
+} from "../../core/ipc/toolsService";
 import { resolveProjectAssetPath } from "../../core/pathUtils";
 import type { ActiveBrush, EditorMode, TilePaintTool } from "../../core/store/editorStore";
 
@@ -111,7 +117,7 @@ function PaletteItem({
 
 const TILE_TOOL_META: Record<TilePaintTool, { label: string; icon: string; hint: string }> = {
   pencil: { label: "Lápis", icon: "\u270f", hint: "Pintar célula (P)" },
-  eraser: { label: "Borracha", icon: "\u232b", hint: "Apagar célula (X)" },
+  eraser: { label: "Restaurar base", icon: "\u232b", hint: "Desfaz a edição da célula e mostra o mapa-base (X)" },
   picker: { label: "Conta-gotas", icon: "\ud83d\udd0d", hint: "Capturar tile (I)" },
   rect: { label: "Retângulo", icon: "\u25a2", hint: "Preencher retângulo (R)" },
   fill: { label: "Balde", icon: "\u25b2", hint: "Flood fill (G)" },
@@ -121,11 +127,13 @@ const TILE_TOOL_META: Record<TilePaintTool, { label: string; icon: string; hint:
 const TILE_TOOL_ORDER: TilePaintTool[] = ["pencil", "eraser", "picker", "rect", "fill"];
 
 export function TilePalette({
+  projectDir,
   tilesetAbsolutePath,
   tilesetRelativePath,
   tileSize,
   tilemapEntityId,
 }: {
+  projectDir: string;
   tilesetAbsolutePath: string;
   /** Caminho relativo ao projeto (gravado no tilemap) — repassado ao brush para tracabilidade. */
   tilesetRelativePath: string;
@@ -135,6 +143,7 @@ export function TilePalette({
   const activeBrush = useEditorStore((s) => s.activeBrush);
   const setActiveBrush = useEditorStore((s) => s.setActiveBrush);
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const editorMode = useEditorStore((s) => s.editorMode);
   const tilePaintTool = useEditorStore((s) => s.tilePaintTool);
   const setTilePaintTool = useEditorStore((s) => s.setTilePaintTool);
   const setActiveTilemapId = useEditorStore((s) => s.setActiveTilemapId);
@@ -142,14 +151,110 @@ export function TilePalette({
 
   const url = useMemo(() => convertFileSrc(tilesetAbsolutePath), [tilesetAbsolutePath]);
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+  const [tileImageUrl, setTileImageUrl] = useState("");
 
   useEffect(() => {
-    if (!url) return;
-    const img = new Image();
-    img.onload = () => setDims({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => setDims(null);
-    img.src = url;
-  }, [url]);
+    if (!url) {
+      setDims(null);
+      setTileImageUrl("");
+      return;
+    }
+
+    let cancelled = false;
+    setDims(null);
+    setTileImageUrl("");
+
+    if (tilesetAbsolutePath.toLowerCase().endsWith(".ppm")) {
+      void readProjectAssetBytes(projectDir, tilesetRelativePath)
+        .then((bytes) => Uint8Array.from(bytes).buffer)
+        .then((content) => {
+          const imageData = decodePpm(content);
+          if (!imageData) throw new Error("PPM P3 invalido");
+
+          const canvas = document.createElement("canvas");
+          canvas.width = imageData.width;
+          canvas.height = imageData.height;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Canvas indisponivel");
+          context.putImageData(imageData, 0, 0);
+
+          if (!cancelled) {
+            setDims({ w: imageData.width, h: imageData.height });
+            setTileImageUrl(canvas.toDataURL("image/png"));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setDims(null);
+            setTileImageUrl("");
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void readProjectAssetBytes(projectDir, tilesetRelativePath)
+      .then((bytes) => new Blob([Uint8Array.from(bytes)]))
+      .then(async (blob) => {
+        if (typeof createImageBitmap === "function") {
+          const bitmap = await createImageBitmap(blob);
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Canvas indisponivel");
+          context.drawImage(bitmap, 0, 0);
+          bitmap.close?.();
+          return {
+            width: canvas.width,
+            height: canvas.height,
+            dataUrl: canvas.toDataURL("image/png"),
+          };
+        }
+
+        if (typeof URL.createObjectURL !== "function") throw new Error("URL indisponivel");
+        const objectUrl = URL.createObjectURL(blob);
+        try {
+          const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const element = new Image();
+            element.onload = () => resolve(element);
+            element.onerror = () => reject(new Error("Decode de imagem falhou"));
+            element.src = objectUrl;
+          });
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Canvas indisponivel");
+          context.drawImage(image, 0, 0);
+          return {
+            width: canvas.width,
+            height: canvas.height,
+            dataUrl: canvas.toDataURL("image/png"),
+          };
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      })
+      .then((image) => {
+        if (!cancelled) {
+          setDims({ w: image.width, h: image.height });
+          setTileImageUrl(image.dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDims(null);
+          setTileImageUrl("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectDir, tilesetAbsolutePath, tilesetRelativePath, url]);
 
   const grid = useMemo(() => {
     if (!dims || tileSize <= 0) return null;
@@ -189,8 +294,8 @@ export function TilePalette({
         )}
       </div>
 
-      {/* Tool toolbar */}
-      <div className="mt-2 flex gap-1">
+      {/* Tool toolbar (full labels) */}
+      <div className="mt-2 flex flex-wrap gap-1">
         {TILE_TOOL_ORDER.map((tool) => {
           const meta = TILE_TOOL_META[tool];
           const isActive = tilePaintTool === tool;
@@ -198,23 +303,47 @@ export function TilePalette({
             <button
               key={tool}
               type="button"
+              data-testid={`tile-tool-${tool}`}
+              aria-pressed={isActive && editorMode === "paint"}
               title={meta.hint}
               onClick={() => {
                 setTilePaintTool(tool);
                 setEditorMode("paint");
                 setActiveTilemapId(tilemapEntityId);
               }}
-              className={`flex-1 rounded border px-1 py-1 text-[10px] transition-colors ${
-                isActive
+              className={`flex-1 whitespace-nowrap rounded border px-1.5 py-1 text-[10px] transition-colors ${
+                isActive && editorMode === "paint"
                   ? "bg-[#89b4fa]/20 border-[#89b4fa] text-[#89b4fa]"
                   : "border-[#313244] bg-[#181825] text-[#a6adc8] hover:border-[#45475a]"
               }`}
             >
-              {meta.icon}
+              {meta.icon} {meta.label}
             </button>
           );
         })}
+        <button
+          type="button"
+          data-testid="tile-tool-collision"
+          aria-pressed={editorMode === "collision"}
+          title="Colisão: clique esquerdo marca a célula como sólida, clique direito libera. Tecla C."
+          onClick={() => {
+            setActiveTilemapId(tilemapEntityId);
+            setEditorMode("collision");
+          }}
+          className={`flex-1 whitespace-nowrap rounded border px-1.5 py-1 text-[10px] transition-colors ${
+            editorMode === "collision"
+              ? "bg-[#f38ba8]/20 border-[#f38ba8] text-[#f38ba8]"
+              : "border-[#313244] bg-[#181825] text-[#a6adc8] hover:border-[#45475a]"
+          }`}
+        >
+          ▦ Colisão
+        </button>
       </div>
+      {editorMode === "collision" && (
+        <p data-testid="tile-collision-hint" className="mt-1 text-[10px] text-[#f38ba8]">
+          Colisão: esquerdo = sólido · direito = livre (o personagem para nas laterais e pousa em cima).
+        </p>
+      )}
 
       {/* Status readout */}
       <div className="mt-2 flex items-center justify-between text-[9px] text-[#7f849c]">
@@ -238,18 +367,20 @@ export function TilePalette({
           className="mt-2 grid gap-[1px] overflow-hidden rounded border border-[#313244] bg-[#11111b]"
           style={{ gridTemplateColumns: `repeat(${grid.cols}, 1fr)` }}
         >
-          {/* Index 0 = vazio */}
+          {/* Célula explicitamente vazia (diferente de "Restaurar base") */}
           <button
             type="button"
-            title="Tile vazio (0) — use com borracha"
-            onClick={() => handlePickTile(0)}
+            data-testid="tile-palette-empty"
+            aria-label="Célula vazia"
+            title="Célula vazia: apaga o tile nesta posição (na ROM vira tile em branco). Para voltar ao mapa-base use Restaurar base."
+            onClick={() => handlePickTile(TILEMAP_CELL_EMPTY)}
             className={`aspect-square bg-[#313244]/40 hover:bg-[#f38ba8]/20 transition-colors ${
-              activeTileIndex === 0 ? "ring-2 ring-inset ring-[#f38ba8]" : ""
+              activeTileIndex === TILEMAP_CELL_EMPTY ? "ring-2 ring-inset ring-[#f38ba8]" : ""
             }`}
           >
             <span className="text-[7px] text-[#45475a]">×</span>
           </button>
-          {Array.from({ length: grid.cols * grid.rows - 1 }, (_, i) => {
+          {Array.from({ length: grid.cols * grid.rows }, (_, i) => {
             const tileIndex = i + 1;
             const atlasIdx = tileIndex - 1;
             const col = atlasIdx % grid.cols;
@@ -258,6 +389,7 @@ export function TilePalette({
               <button
                 key={tileIndex}
                 type="button"
+                data-testid={`tile-palette-${tileIndex}`}
                 title={`Tile #${tileIndex} (col ${col}, row ${row})`}
                 onClick={() => handlePickTile(tileIndex)}
                 className={`aspect-square transition-transform hover:scale-105 ${
@@ -266,7 +398,7 @@ export function TilePalette({
                     : ""
                 }`}
                 style={{
-                  backgroundImage: `url(${url})`,
+                  backgroundImage: `url(${tileImageUrl})`,
                   backgroundSize: `${grid.cols * 100}% ${grid.rows * 100}%`,
                   backgroundPosition: `${(col * 100) / Math.max(1, grid.cols - 1)}% ${
                     (row * 100) / Math.max(1, grid.rows - 1)
@@ -446,6 +578,7 @@ export default function ContextualPalette() {
       {/* ── Tile palette (tilemap selecionado) ─────────────────────── */}
       {selectedTilemap && resolvedTilesetAbsolutePath.length > 0 && (
         <TilePalette
+          projectDir={activeProjectDir}
           tilesetAbsolutePath={resolvedTilesetAbsolutePath}
           tilesetRelativePath={selectedTilemap.tileset}
           tileSize={tilePaintSize > 0 ? tilePaintSize : 8}

@@ -1,0 +1,80 @@
+alvo_sha=a556e867a1cef9676c7ea1a740bfe7f9459b0abd  segmento_inicio=2026-09-28T03:19:12Z
+consulta_1 2026-09-28T03:19:12Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_2 2026-09-28T03:20:43Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_3 2026-09-28T03:22:13Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_4 2026-09-28T03:23:44Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+alvo_sha=a556e867a1cef9676c7ea1a740bfe7f9459b0abd  segmento_inicio=2026-09-28T03:23:53Z
+consulta_1 2026-09-28T03:23:53Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_2 2026-09-28T03:25:24Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_3 2026-09-28T03:26:54Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_4 2026-09-28T03:28:25Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+alvo_sha=a556e867a1cef9676c7ea1a740bfe7f9459b0abd  segmento_inicio=2026-09-28T03:28:25Z
+consulta_1 2026-09-28T03:28:25Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_2 2026-09-28T03:29:56Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_3 2026-09-28T03:31:26Z
+  linux-validate   in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[linux-validate,desktop-smoke,validate]
+consulta_4 2026-09-28T03:32:57Z
+  linux-validate   completed    success    https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[desktop-smoke,validate]
+alvo_sha=a556e867a1cef9676c7ea1a740bfe7f9459b0abd  segmento_inicio=2026-09-28T03:34:21Z
+consulta_1 2026-09-28T03:34:21Z
+  linux-validate   completed    success    https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[desktop-smoke,validate]
+consulta_2 2026-09-28T03:35:52Z
+  linux-validate   completed    success    https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    in_progress  -          https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         completed    failure    https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[desktop-smoke]
+consulta_3 2026-09-28T03:37:22Z
+  linux-validate   completed    success    https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662757
+  desktop-smoke    completed    success    https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219717/job/108773662698
+  validate         completed    failure    https://github.com/Misael-art/RetroDevStudio/actions/runs/36373219732/job/108773662536
+  em_andamento=[]
+ROLLUP_TERMINAL 2026-09-28T03:37:22Z

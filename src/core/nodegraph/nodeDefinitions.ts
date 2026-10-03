@@ -10,6 +10,8 @@ import {
   EMPTY_GRAPH,
   cloneGraph,
   isNodeEdge,
+  isBehaviorInstance,
+  isNodeGraphGroup,
   isNodePort,
   isNodeType,
   isRecord,
@@ -118,6 +120,16 @@ export const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { target: "player", state: "idle" },
+  },
+  condition_on_ground: {
+    type: "condition_on_ground",
+    label: "On Ground",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [
+      { id: "true", label: "True ▶", kind: "exec" },
+      { id: "false", label: "False ▶", kind: "exec" },
+    ],
+    params: { target: "player" },
   },
   condition_overlap: {
     type: "condition_overlap",
@@ -337,11 +349,139 @@ export const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     ],
     params: { vram_kb: 64, sprites: 80, scanline_sprites: 20 },
   },
+  rom_addq_word: {
+    type: "rom_addq_word", label: "Recovered ADDQ.W",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: {
+      register: "D0",
+      immediate: 1,
+      width_bits: 16,
+      signedness: "bit-preserving-word",
+      rom_sha256: "",
+      rom_start: 0,
+      rom_end: 4,
+      instruction_offsets: "",
+      flags: "N,Z,V,C,X",
+      memory_effects: "none",
+      profile_id: "m68k.addq_word_d0_rts.v1",
+    },
+  },
+  rom_branch_compare_word: {
+    type: "rom_branch_compare_word", label: "Recovered branch word",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: {
+      input_var: "branch_input",
+      bias: 1,
+      threshold: 5,
+      result_var: "branch_result",
+      output_address: "0xE0FFFF00",
+      rom_sha256: "",
+      rom_start: 0,
+      rom_end: 30,
+      instruction_offsets: "",
+      semantic_stages: "read_variable;add_word;compare_signed;branch_conditional;write_result",
+      profile_id: "m68k.add_compare_branch_word_d0_wram.v1",
+    },
+  },
+  mugen_state_program: {
+    type: "mugen_state_program", label: "Programa de estados MUGEN",
+    inputs: [],
+    outputs: [],
+    params: { target: "", profile: "mugen.original_chain.v1", program_sha256: "", program_json: "" },
+  },
   bridge_unconverted_source: {
     type: "bridge_unconverted_source", label: "Source Bridge",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { gap: "semantic_gap", source: "" },
+  },
+  rom_region_entry: {
+    type: "rom_region_entry", label: "Entrada da rexion recuperada",
+    inputs: [],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: { semantic_origin: "recovered_from_rom", address: "", source_mappings: "" },
+  },
+  rom_input_bit_guard: {
+    type: "rom_input_bit_guard", label: "Garda de bit de input",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [
+      { id: "true", label: "Sim", kind: "exec" },
+      { id: "false", label: "Nao", kind: "exec" },
+    ],
+    params: {
+      semantic_origin: "recovered_from_rom",
+      register: "",
+      bit: 0,
+      skip_exit: "",
+      source_mappings: "",
+    },
+  },
+  rom_counter_add: {
+    type: "rom_counter_add", label: "Contador += paso",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: {
+      semantic_origin: "recovered_from_rom",
+      address: "",
+      step: 1,
+      width_bits: 32,
+      signedness: "",
+      source_mappings: "",
+    },
+  },
+  rom_counter_compare: {
+    type: "rom_counter_compare", label: "Limiar do contador",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [
+      { id: "true", label: "Sim", kind: "exec" },
+      { id: "false", label: "Nao", kind: "exec" },
+    ],
+    params: {
+      semantic_origin: "recovered_from_rom",
+      address: "",
+      operator: ">=",
+      threshold: 0,
+      recovered_threshold: 0,
+      threshold_min: 0,
+      threshold_max: 0,
+      width_bits: 32,
+      lowering: "",
+      source_mappings: "",
+    },
+  },
+  rom_state_write: {
+    type: "rom_state_write", label: "Escrita de estado",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: {
+      semantic_origin: "recovered_from_rom",
+      address: "",
+      value: 0,
+      width_bits: 32,
+      source_mappings: "",
+    },
+  },
+  rom_external_call: {
+    type: "rom_external_call", label: "Chamada externa (non recuperada)",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: {
+      semantic_origin: "recovered_from_rom",
+      target: "",
+      understood: "false",
+      clobbers: "",
+      source_mappings: "",
+      readonly: "true",
+      opaco: "true",
+    },
+  },
+  rom_region_exit: {
+    type: "rom_region_exit", label: "Saida da rexion",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [],
+    params: { semantic_origin: "recovered_from_rom", address: "", source_mappings: "" },
   },
   event_vblank: {
     type: "event_vblank", label: "On VBlank",
@@ -421,6 +561,7 @@ function hydrateGraphNode(value: unknown, index: number): GraphNode | null {
     inputs,
     outputs,
     params: coerceNodeParams(value.type, value.params),
+    ...(value.pinned === true ? { pinned: true } : {}),
   };
 }
 
@@ -467,8 +608,19 @@ export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
 
     const nodeById = new Map(hydratedNodes.map((node) => [node.id, node]));
     const validEdges = rawEdges.filter((edge) => edgeConnectsValidPorts(edge, nodeById));
+    const groups = (Array.isArray(parsed.groups) ? parsed.groups : [])
+      .filter(isNodeGraphGroup)
+      .map((group) => ({ ...group, nodeIds: group.nodeIds.filter((id) => nodeById.has(id)) }))
+      .filter((group) => group.nodeIds.length > 0);
 
-    return cloneGraph({ nodes: hydratedNodes, edges: validEdges });
+    const behaviors = (Array.isArray(parsed.behaviors) ? parsed.behaviors : []).filter(isBehaviorInstance);
+
+    return cloneGraph({
+      nodes: hydratedNodes,
+      edges: validEdges,
+      ...(groups.length > 0 ? { groups } : {}),
+      ...(behaviors.length > 0 ? { behaviors } : {}),
+    });
   } catch {
     return cloneGraph(EMPTY_GRAPH);
   }

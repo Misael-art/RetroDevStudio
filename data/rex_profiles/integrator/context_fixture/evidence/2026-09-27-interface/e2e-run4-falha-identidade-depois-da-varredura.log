@@ -1,0 +1,102 @@
+[RDS preflight host]
+  SGDK real: OK (/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/sgdk via SGDK_ROOT)
+  tauri-driver: OK (/home/misael/.cargo/bin/tauri-driver)
+  WebDriver nativo: OK (/usr/sbin/WebKitWebDriver)
+  Ready: SIM
+== Building debug Tauri app ==
+
+> retrodev-studio@0.1.0 build:debug
+> node scripts/build.mjs debug
+
+RetroDev Studio - Script Unificado de Compilacao
+Modo: debug
+Target dir canonico: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test
+Target dir dev bruto: /home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/cargo-target
+Target dir validation: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation
+
+[Prep] Mantendo artefatos anteriores e validando atualizacao por timestamp.
+
+
+[Build] Compilando Tauri (modo: debug)...
+
+[Build] Cargo target efetivo: /home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/cargo-target
+
+> retrodev-studio@0.1.0 tauri
+> tauri build --debug --no-bundle
+
+        Info Looking up installed tauri packages to check mismatched versions...
+     Running beforeBuildCommand `npm run build`
+
+> retrodev-studio@0.1.0 build
+> tsc -b && vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 129 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                0.40 kB │ gzip:   0.27 kB
+dist/assets/index-CsDEyHM5.css               128.97 kB │ gzip:  18.31 kB
+dist/assets/projectCapability-Bg1a-pW9.js      0.99 kB │ gzip:   0.47 kB │ map:    12.17 kB
+dist/assets/ppmImage-BDeP-CYg.js               5.66 kB │ gzip:   1.58 kB │ map:    10.99 kB
+dist/assets/AssetPreview-Sf7E47ST.js           6.65 kB │ gzip:   1.73 kB │ map:    11.60 kB
+dist/assets/nodeDefinitions-ipRGuZeJ.js       19.56 kB │ gzip:   3.83 kB │ map:    42.72 kB
+dist/assets/ContextualPalette-DoKtB8dz.js     26.40 kB │ gzip:   6.44 kB │ map:    42.67 kB
+dist/assets/ExplorerWorkspace-CaAsogbb.js     31.49 kB │ gzip:   5.97 kB │ map:    46.65 kB
+dist/assets/RetroFXDesigner-BcMYzAFn.js       49.47 kB │ gzip:   9.06 kB │ map:    68.56 kB
+dist/assets/behaviorLibrary-DgNnfnmx.js       66.16 kB │ gzip:  15.96 kB │ map:   133.26 kB
+dist/assets/InspectorPanel-DVPAIjSs.js       118.89 kB │ gzip:  21.66 kB │ map:   174.74 kB
+dist/assets/ReverseWorkspace-g6pzZq95.js     171.24 kB │ gzip:  29.71 kB │ map:   239.39 kB
+dist/assets/ArtStudioPanel-BSkyhYqy.js       182.37 kB │ gzip:  33.88 kB │ map:   271.52 kB
+dist/assets/ToolsPanel-ZCxc1hxt.js           194.92 kB │ gzip:  34.14 kB │ map:   274.03 kB
+dist/assets/ViewportPanel-BWF6PSfK.js        226.33 kB │ gzip:  42.29 kB │ map:   343.81 kB
+dist/assets/NodeGraphEditor-CKP2Ug1_.js      312.59 kB │ gzip:  66.94 kB │ map:   483.70 kB
+dist/assets/index-gq1MfN16.js              1,073.06 kB │ gzip: 204.74 kB │ map: 1,777.79 kB
+✓ built in 5.61s
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 20.37s
+       Built application at: /home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/cargo-target/debug/retro-dev-studio
+
+============================================================
+  Artefatos gerados:
+============================================================
+  EXE Debug: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio [OK]
+  Dev work target: /home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/cargo-target
+  Validation dir: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation
+  Build report: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/build-report.json
+============================================================
+
+[Hint] Use --open-dir para abrir a pasta do binario ao final do build.
+== Starting tauri-driver ==
+Error serving connection: hyper::Error(User(Service), client error (Connect)
+
+Caused by:
+    0: tcp connect error
+    1: Connection refused (os error 111))
+[rex-context-e2e] 0: receitas autorais lidas e auto-consistentes (symbol.txt + oráculo externo apj.jar + flips recalculados) -> {"rom_sha":"705b72eb848fadf1","oraculo_sha":"2d8cdc63cc800e4b","struct":"0x1750a","tileset_stream":"0x5fa38","tileset_slot_oraculo":169,"tileset_array_simbolo":170,"preenchimento_nonzero":[{"recurso":"tileset","array":170,"medido":169}],"tilemap_stream":"0x5f9f0","ghost_stream":"0x5fa26","ocorrencias":4,"posicoes":["0,3","56,4","23,12","47,27"]}
+[rex-context-e2e] passo 1: verificar a fixture e localizar o TileSet aPLib na lista
+[rex-context-e2e] 1: recurso da imagem localizado na lista verificada pela barra -> {"etiqueta":"5fa38|0x5fa38 — aplib · 16 tiles (stream 169 B)","aplib":2,"total":2}
+[rex-context-e2e] passo 2: carregar o contexto pela interface
+[rex-context-e2e] 2: contexto montado pela interface com identidade, vínculos e limites -> {"imagem":"0x1750a|0x1750a — verificada · 120x72 px · 15x9 células","geometria":"camada 120x72 px · 15x9 células · tiles sem uso neste mapa: 0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf","recusados":0,"semVinculo":"Recursos verificados sem vínculo com nenhuma imagem desta ROM:tileset 0x5f354 (aplib, 3072 B) — verificado por decode, mas nenhum ponteiro de struct `Image` alc"}
+[rex-context-e2e] passo 3: ler os pixels da camada pelo WebView e comparar com o esperado autoral
+[rex-context-e2e] 3: RGBA lido do <img> == camada autoral pixel a pixel, e sha RGB == oráculo -> {"pixels_sha_rgb":"7dc94b0254acda91","bytes":34560}
+[rex-context-e2e] passo 4: zoom 4x e verificação de nitidez
+[rex-context-e2e] passo 5.1: clique em (0,3) — célula (0,0) flip "B"
+[rex-context-e2e] passo 5.2: clique em (56,4) — célula (7,0) flip "H"
+[rex-context-e2e] passo 5.3: clique em (23,12) — célula (2,1) flip ""
+[rex-context-e2e] passo 5.4: clique em (47,27) — célula (5,3) flip "V"
+[rex-context-e2e] 5: os quatro cliques resolvem o MESMO pixel de fonte, com flips e delimitadores conferidos -> {"fonte":"tile 2, linha 4, coluna 7, índice atual 11","hits":["0,3 ← H e V","56,4 ← H","23,12 ← nenhum","47,27 ← V"],"todos_mesmo_fonte":true}
+[rex-context-e2e] passo 6: escala da página (zoom 0.75) e clique fora da camada
+[rex-context-e2e] 6a: clique com escala de página 0.75 resolve igual -> {"escala":0.75,"posicao":[0,3]}
+[rex-context-e2e] 6b: clique fora da camada: recusado com motivo e seleção preservada -> {"aviso":"clique fora da camada (120x72 px): nada foi enviado ao núcleo e a seleção anterior foi man"}
+[rex-context-e2e] 6c: dois pedidos no mesmo tick: a resposta exibida é a última, sem mistura -> {"exibida":"célula (5, 3) · índice 50 · tile 2 · fli"}
+[rex-context-e2e] passo 7: enfileirar a edição no pixel de origem e aplicar pela transação canônica
+[rex-context-e2e] 7: edição única enfileirada pelo pixel de fonte e aplicada pela transação -> {"copia":"1d6da6d961b216e9","patch":"2fafda419411ae9c","apply_ms":1045}
+[rex-context-e2e] passo 8: bytes da cópia no disco
+[rex-context-e2e] 8: escrita confina ao slot do tileset; a ROM não expandiu -> {"deslocados":129,"primeiro":"0x5fa57","ultimo":"0x5fad8","dentro_do_slot":true}
+[rex-context-e2e] passo 9: reabrir a cópia, recarregar o contexto e comparar as camadas
+[rex-context-e2e] 9: impacto observado == impacto previsto: exatamente as quatro posições, e só elas -> {"posicoes":"0,3 23,12 47,27 56,4","bytes_da_copia":"1d6da6d961b216e9","previa_tileset":["pixels 4d1d0637e6850b23…","pixels f1971660c076c6b2…"]}
+[rex-context-e2e] passo 10: contexto de outra ROM com recursos verificados em uma — recusa em voz alta
+[rex-context-e2e] 10: identidade trocada na leitura: recusada, com as duas ROMs nomeadas e nada exibido -> {"erro":"identidade divergente: o contexto veio com ROM 705b72eb848fadf1… e os recursos verificados são da 1d6da6d961b216e9…. Nen"}
+[rex-context-e2e] passo 11: edição em fila com a ROM trocada — a transação recusa
+ERRO: a transação não recusou a edição com a ROM trocada. DOM: {"erro":null,"aviso":null,"vazio":null,"camada":null,"imagens":[],"semVinculo":null,"recusados":null,"painelDeRecursos":{"sha":"sha256 705b72eb848fadf1…","fila":"1 edição(ões) pendente(s)","resultado":null,"erro":null,"aviso":null}} [timeout: condicao nao foi satisfeita em 60135ms (orcamento 60000ms); isto e esgotamento de tempo, nao um defeito confirmado]

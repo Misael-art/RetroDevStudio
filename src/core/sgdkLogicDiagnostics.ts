@@ -290,11 +290,17 @@ export function getGraphNodeSourceMapping(node: GraphNodeLike | null | undefined
   const file =
     normalizeText(params.source_file) ||
     normalizeText(params.source_path) ||
-    normalizeText(params.source);
+    normalizeText(params.source) ||
+    (normalizeText(params.rom_sha256)
+      ? `ROM sha256:${normalizeText(params.rom_sha256)}`
+      : "");
   if (!file) {
     return null;
   }
-  const line = readNumber(params.source_line) || readNumber(params.line);
+  const line =
+    readNumber(params.source_line) ||
+    readNumber(params.line) ||
+    readNumber(params.rom_start);
   return line > 0 ? { file, line } : { file };
 }
 

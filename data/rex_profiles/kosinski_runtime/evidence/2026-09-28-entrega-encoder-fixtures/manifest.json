@@ -1,0 +1,32 @@
+{
+  "schema": "rex-crate-integration/v1",
+  "descricao": "Integracion da entrega mais recente da fronte B (crates/rex-kosinski): contrato do encoder, codificador v1, paridade bidireccional koscmp, contenedor de edicion autoral, docs da entrega, 52 fixtures vendorizadas e correccion do package list.",
+  "quando_utc": "2026-09-28T14:36Z-14:38Z (UTC)",
+  "quem": "integrador (célula Qoder, sesión 99209e15)",
+  "branch": "codex/rex-integrator-crates-registry",
+  "ferramenta": "git cherry-pick -x; npm run crates:gates; git diff/ls-tree/ls-remote para paridade e pinos",
+  "objeto_da_integracao": {
+    "pin_conferido": "git ls-remote origin refs/heads/codex/rex-kosinski-decoder -> 6a2218ece0928b764f7cff79fa0237534998e5fc, o 2026-09-28T14:38:34Z, antes de medir",
+    "commits": "0b752b7, 2b50cab, 36741a5, f3c51f2, a386da0, dafcf1d, 9223e7a, 6a2218e — 8, todos por `cherry-pick -x` sen conflitos (a ruta crates/rex-kosinski xa coincidía coa dela; non fixo falta reescrita ningunha)",
+    "paridade": "`git diff 6a2218e:crates/rex-kosinski HEAD:crates/rex-kosinski` = 0 bytes; 66 ficheiros no paquete neste tronco"
+  },
+  "medicion": {
+    "gates": "rc=0: rex-kosinski fmt OK, clippy --all-targets -D warnings OK, test --locked OK con 51 executados / 0 fallos / 0 ignorados (22 contract + 8 edit + 16 encode + 2 fixtures + 3 mutations); rex-addressing re-medido no mesmo gate: 138 / 0 / 10 sen cambios",
+    "check_tree": "rc=0 despois dos 8 cherry-picks",
+    "non_vacuidade": "tests/fixtures.rs pinna o SHA-256 dos 52 ficheiros vendorizados e re-verifica a cada run; a carreira de gates executou sen `data/rex_profiles/codec/` — se alguén move ou edita unha fixture, o gate rompe antes de calquera resultado"
+  },
+  "nao_alega": "O paquete segue en `gates-proprios-aprovados`. Non hai dependencia por path en src-tauri, non hai adaptador, non hai chamada real polo backend e non hai fluxo pola interface. O contenedor `edit` é prova de contrato («NON transacción canónica de producción» di o propio módulo) e non se expón como reinserción. A licencia segue sendo decisión do operador: nada aquí escolle unha. Non se alega descuberta de recursos nin lectura sobre xogos reais: as fixtures son autorais/sintéticas, cero corpus BYOR no gate.",
+  "artefatos_promovidos": {
+    "gates-do-pacote-pos-integracion.log": {
+      "sha256": "ccf8030b20df34e652ba5634ad97da9f4d07af4376a5ed429f8fb61901f13840",
+      "linhas": 371,
+      "nota": "a primeira captura gardaba só os códigos de saída (npm escribe os contadores en stderr); re-executouse coa saída completa e appendouse á mesma evidencia, etiquetada como re-execución. O RC da carreira autorizada é o último GATES_RC=0."
+    },
+    "paridade-e-pinos.log": {
+      "sha256": "31ca6f74ab4ac4de32d5d4714db36278e31c0c337dc25ce3407f82ea30d22b87",
+      "linhas": 22,
+      "nota": "cada comando escrito antes da súa saída: ls-remote (6a2218e), os 8 commits en orde, diff de árbore = 0 bytes, 66 ficheiros, 52 fixtures sen PROVENANCE.md, HEAD 3994cef."
+    }
+  },
+  "como_conferir": "git ls-remote origin refs/heads/codex/rex-kosinski-decoder; git diff 6a2218e:crates/rex-kosinski HEAD:crates/rex-kosinski; npm run crates:gates; sha256sum crates/rex-kosinski/fixtures/kosinski/golden/* | head"
+}

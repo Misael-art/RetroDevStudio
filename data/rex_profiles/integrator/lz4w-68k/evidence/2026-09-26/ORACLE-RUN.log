@@ -1,0 +1,110 @@
+== pinos ==
+/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/src/tools/reverse/decomp/rex_codecs.rs: SUCESSO
+/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/data/canonical-local-2026-09-21/corpus/references/hamoopig-reference.bin: SUCESSO
+== driver (encoder/decoder do produto, cópia verbatim) ==
+driver-sha256=640151a8013ca64e31bf75887657a0b00270e4b6d3eab367c3f784a5e87b7e95
+casos gerados: 10
+i20_lits_odd: plain=11 stream=16 dict=0 só literais
+i21_short_mix: plain=16 stream=18 dict=0 curtos off 2/off 1
+i22_long_far_nodict: plain=620 stream=656 dict=0 longo auto-referente
+i23_long_zero_value: plain=44 stream=10 dict=0 longo value=0x0000 (off 1)
+i24_dict_mixed: plain=34 stream=12 dict=1200 dict 600w misto
+i14_encoder_deep_16384: on-disk long não-ROM len=3 off=16384 value=0x4001
+i14_encoder_deep_16384: plain=6 stream=8 dict=32772 emitido pelo encoder; off 16384
+i15_hardware_ceiling_16385: on-disk long não-ROM len=3 off=16385 value=0x4000
+i16_beyond_ceiling_16386: on-disk long não-ROM len=3 off=16386 value=0x3FFF
+i15_hardware_ceiling_16385: plain=6 stream=8 dict=32774 aceito pelo produto
+i16_beyond_ceiling_16386: plain=6 stream=8 dict=32776 recusado pelo produto (invalid_reference)
+i18-slot: stream 150 bytes vs slot original 144 bytes — NÃO cabe: needs_space honesto, nunca sobrescrever vizinhos
+i09_corpus_orig_c8cc8: plain=288 stream=144 dict=4096 original do corpus; prefixo mínimo aceito 4096 bytes
+i18_corpus_edit_c8cc8: plain=288 stream=150 dict=1024 edição canônica pelo encoder atual; prefixo 1024 bytes; slot original 144 bytes
+
+==== runI (i20_lits_odd,i21_short_mix,i22_long_far_nodict,i23_long_zero_value,i24_dict_mixed) ====
+caso=i20_lits_odd dict=0 stream=16 plain=11 stride=0x200 off=0x0 dict_committed=False
+caso=i21_short_mix dict=0 stream=18 plain=16 stride=0x200 off=0x200 dict_committed=False
+caso=i22_long_far_nodict dict=0 stream=656 plain=620 stride=0x400 off=0x400 dict_committed=False
+caso=i23_long_zero_value dict=0 stream=10 plain=44 stride=0x200 off=0x800 dict_committed=False
+caso=i24_dict_mixed dict=1200 stream=12 plain=34 stride=0x700 off=0xa00 dict_committed=True
+total=5 wam_bytes=0x1100
+identidade-oficial: OK (5056 bytes, sha256=ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787)
+rom_size=524288
+rom=/tmp/rex-68k-int-2026-09-26/runI/rom.bin sha256=8aa7cb1e7a2870811f40da593e66b8707e01dff4df9633ecd46d450948fbd8f2
+REX-DUMP frames=1 sentinel=DEADBEEF -> /tmp/rex-68k-int-2026-09-26/runI/capture.bin
+capture: /tmp/rex-68k-int-2026-09-26/runI/capture.bin (4608 bytes, sha256=8440e2c8daec0f2134718d55d8986ecd311e6300a39d5ac0059f938ea277503c)
+OK       i20_lits_odd                 ret68k=   11 esperado=   11 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i21_short_mix                ret68k=   16 esperado=   16 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i22_long_far_nodict          ret68k=  620 esperado=  620 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i23_long_zero_value          ret68k=   44 esperado=   44 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+OK       i24_dict_mixed               ret68k=   34 esperado=   34 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)
+rom-sha256=8aa7cb1e7a2870811f40da593e66b8707e01dff4df9633ecd46d450948fbd8f2
+capture-sha256=8440e2c8daec0f2134718d55d8986ecd311e6300a39d5ac0059f938ea277503c
+
+==== runC (i09_corpus_orig_c8cc8) ====
+caso=i09_corpus_orig_c8cc8 dict=4096 stream=144 plain=288 stride=0x1300 off=0x0 dict_committed=True
+total=1 wam_bytes=0x1300
+identidade-oficial: OK (5056 bytes, sha256=ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787)
+rom_size=524288
+rom=/tmp/rex-68k-int-2026-09-26/runC/rom.bin sha256=fc38f818784b3f3d66b83111fee3f855616f614ec6b96a235a630b6d56b9fbb2
+REX-DUMP frames=1 sentinel=DEADBEEF -> /tmp/rex-68k-int-2026-09-26/runC/capture.bin
+capture: /tmp/rex-68k-int-2026-09-26/runC/capture.bin (5120 bytes, sha256=6aa4a4ac1399b5dae4224e4c5e7b04655220797e45c8ec119b1ccbf48cf66ade)
+OK       i09_corpus_orig_c8cc8        ret68k=  288 esperado=  288 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)
+rom-sha256=fc38f818784b3f3d66b83111fee3f855616f614ec6b96a235a630b6d56b9fbb2
+capture-sha256=6aa4a4ac1399b5dae4224e4c5e7b04655220797e45c8ec119b1ccbf48cf66ade
+
+==== runE (i18_corpus_edit_c8cc8) ====
+caso=i18_corpus_edit_c8cc8 dict=1024 stream=150 plain=288 stride=0x700 off=0x0 dict_committed=True
+total=1 wam_bytes=0x700
+identidade-oficial: OK (5056 bytes, sha256=ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787)
+rom_size=524288
+rom=/tmp/rex-68k-int-2026-09-26/runE/rom.bin sha256=9e2088a634fae43b8754f85798f9a56941fdf9a6de980d64073198e562bf0e40
+REX-DUMP frames=1 sentinel=DEADBEEF -> /tmp/rex-68k-int-2026-09-26/runE/capture.bin
+capture: /tmp/rex-68k-int-2026-09-26/runE/capture.bin (2048 bytes, sha256=727c9f87e427341c497f8073055f588ecf9d5089d70c395d9d2855d3ab296e40)
+OK       i18_corpus_edit_c8cc8        ret68k=  288 esperado=  288 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)
+rom-sha256=9e2088a634fae43b8754f85798f9a56941fdf9a6de980d64073198e562bf0e40
+capture-sha256=727c9f87e427341c497f8073055f588ecf9d5089d70c395d9d2855d3ab296e40
+
+==== run14 (i14_encoder_deep_16384) ====
+caso=i14_encoder_deep_16384 dict=32772 stream=8 plain=6 stride=0x8200 off=0x0 dict_committed=True
+total=1 wam_bytes=0x8200
+identidade-oficial: OK (5056 bytes, sha256=ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787)
+rom_size=524288
+rom=/tmp/rex-68k-int-2026-09-26/run14/rom.bin sha256=0e705a6747cce67644bc6a8d29ebadf86ba25b37616b2eac8d549f6ee200ca54
+REX-DUMP frames=6 sentinel=DEADBEEF -> /tmp/rex-68k-int-2026-09-26/run14/capture.bin
+capture: /tmp/rex-68k-int-2026-09-26/run14/capture.bin (33536 bytes, sha256=be735717bebf4ba5c1d728460f160827a63f90a130e77c030c09516c942020b2)
+OK       i14_encoder_deep_16384       ret68k=    6 esperado=    6 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)
+rom-sha256=0e705a6747cce67644bc6a8d29ebadf86ba25b37616b2eac8d549f6ee200ca54
+capture-sha256=be735717bebf4ba5c1d728460f160827a63f90a130e77c030c09516c942020b2
+
+==== run15 (i15_hardware_ceiling_16385) ====
+caso=i15_hardware_ceiling_16385 dict=32774 stream=8 plain=6 stride=0x8200 off=0x0 dict_committed=True
+total=1 wam_bytes=0x8200
+identidade-oficial: OK (5056 bytes, sha256=ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787)
+rom_size=524288
+rom=/tmp/rex-68k-int-2026-09-26/run15/rom.bin sha256=b3c6aadeead6f44aa339ba803e1c5d723c769d0d626d231890f347f7f1ab601d
+REX-DUMP frames=6 sentinel=DEADBEEF -> /tmp/rex-68k-int-2026-09-26/run15/capture.bin
+capture: /tmp/rex-68k-int-2026-09-26/run15/capture.bin (33536 bytes, sha256=c2a491f47cb28160b8996867e72501049a055f92b90b1e3b6a51f4fdf76e89b8)
+OK       i15_hardware_ceiling_16385   ret68k=    6 esperado=    6 68k_igu=S jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+RESULTADO: TODOS OS CASOS IDÊNTICES (68k == jar == esperado-Rust)
+rom-sha256=b3c6aadeead6f44aa339ba803e1c5d723c769d0d626d231890f347f7f1ab601d
+capture-sha256=c2a491f47cb28160b8996867e72501049a055f92b90b1e3b6a51f4fdf76e89b8
+
+==== run16 (i16_beyond_ceiling_16386) ====
+caso=i16_beyond_ceiling_16386 dict=32776 stream=8 plain=6 stride=0x8200 off=0x0 dict_committed=True
+total=1 wam_bytes=0x8200
+identidade-oficial: OK (5056 bytes, sha256=ff18bacb349174a4324df9e9386f2635a948b3c527aab5e91c994a0e162f7787)
+rom_size=524288
+rom=/tmp/rex-68k-int-2026-09-26/run16/rom.bin sha256=7b2ac68f5d1875cd874cb5d406a38f38a3ab2a660c20a6af618daa6a906fd9ee
+REX-DUMP frames=6 sentinel=DEADBEEF -> /tmp/rex-68k-int-2026-09-26/run16/capture.bin
+capture: /tmp/rex-68k-int-2026-09-26/run16/capture.bin (33536 bytes, sha256=c030fb65b58b75d323aa0c85540fe6cde8a64b7ec4293a92234d7aeddc07e24c)
+DIVERGE  i16_beyond_ceiling_16386     ret68k=    6 esperado=    6 68k_igu=N jar_igu=S(rc=0) prefix_ok=S sem_overwrite=S
+         primeiro diff 68k @0: 68k=36 esperado=190 (len 68k=6 esperado=6)
+RESULTADO: 1 caso(s) com divergência
+rom-sha256=7b2ac68f5d1875cd874cb5d406a38f38a3ab2a660c20a6af618daa6a906fd9ee
+capture-sha256=c030fb65b58b75d323aa0c85540fe6cde8a64b7ec4293a92234d7aeddc07e24c
+run16: DIVERGÊNCIA DO 68k CONFIRMADA (recusa do produto é correta)
+
+reproduce: FIM — workdir /tmp/rex-68k-int-2026-09-26

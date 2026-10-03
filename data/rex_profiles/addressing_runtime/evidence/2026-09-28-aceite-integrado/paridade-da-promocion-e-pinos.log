@@ -1,0 +1,31 @@
+INICIO 2026-09-28T12:01:59Z
+$ git ls-remote origin 'refs/heads/codex/rex-rust-*'   # 2026-09-28T11:2xZ
+0e5f8046571a34b4cbf239c738e92f6a957bc068	refs/heads/codex/rex-rust-addressing
+30cb3118a5e2680b5c3df76e05021589c288c955	refs/heads/codex/rex-rust-recursos
+
+$ git log --format='%h %ad %s' --date=iso 30cb311..0e5f804   # os 5 commits novos de A
+0e5f804 2026-09-28 08:23:05 -0300 Codex docs(rex): forma galega en dous versos do aceite
+785320c 2026-09-28 08:17:17 -0300 Codex docs(rex): informe da rolda de invariantes e aceite do adaptador
+cc8026c 2026-09-28 08:10:13 -0300 Codex docs(rex): corrixe dous números do informe de invariantes
+d7e3925 2026-09-28 08:04:31 -0300 Codex docs(rex): informe de invariantes, aceite do adaptador e contaxes por árbore
+0a371b7 2026-09-28 08:03:37 -0300 Codex test(rex): vectores de aceite do adaptador con oráculo independente
+
+$ git ls-tree -r --name-only 0e5f804 scripts/rex_profiles/addressing_runtime/rex-addressing | sed 's|.*/rex-addressing/||' | sort > /tmp/a_files.txt
+$ git ls-tree -r --name-only HEAD crates/rex-addressing | sed 's|crates/rex-addressing/||' | sort > /tmp/m_files.txt
+ficheiros en A: 42 · neste tronco: 42
+$ diff /tmp/a_files.txt /tmp/m_files.txt   # baleiro = paridade de contido
+(sen diferenzas)
+
+$ git diff --stat 0e5f804:scripts/rex_profiles/addressing_runtime/rex-addressing HEAD:crates/rex-addressing   # só o README (nota de localización do integrador)
+ README.md | 28 +++++++++++++++-------------
+ 1 file changed, 15 insertions(+), 13 deletions(-)
+
+$ sha256sum crates/rex-addressing/vectors/acceptance-v1.json   # pino publicado por A e FICHEIRO_SHA256 do test
+54ba2b6e864c53ba69228b51d0a4cf079735182ad875ecb8e98b6dbbf257a216  crates/rex-addressing/vectors/acceptance-v1.json
+63:const FICHEIRO_SHA256: &str = "54ba2b6e864c53ba69228b51d0a4cf079735182ad875ecb8e98b6dbbf257a216";
+
+$ sha256sum src-tauri/src/tools/reverse/decomp/rex_addressing.rs   # o adaptador non se tocou nesta perna
+7bd75ea96a598623c77787410a826aa891333d117745cf9f1e84daea3eb2ef76  src-tauri/src/tools/reverse/decomp/rex_addressing.rs
+$ git rev-parse HEAD:crates/rex-addressing   # árbore do paquete graduado
+9101cfb5fb6ec809b457007ac104b0ef6e0822b2
+FIN 2026-09-28T12:02:01Z

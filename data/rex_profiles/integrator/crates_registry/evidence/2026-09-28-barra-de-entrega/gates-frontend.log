@@ -1,0 +1,46 @@
+# barra de entrega — branch codex/rex-integrator-crates-registry — HEAD 9f83d15 — 2026-09-28T03:04:15Z
+## npm run check:tree
+npm notice run retrodev-studio@0.1.0 check:tree
+npm notice run node scripts/check-tree.cjs
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+RC_CHECK_TREE=0
+## npm run lint
+npm notice run retrodev-studio@0.1.0 lint
+npm notice run eslint src vite.config.ts --max-warnings=0
+RC_LINT=0
+## npx tsc --noEmit
+npm notice run retrodev-studio@0.1.0 npx
+npm notice run 'tsc' --noEmit
+RC_TSC=0
+## npm test
+(node:1735657) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/creatorWorkflow.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+(node:1735721) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/nodegraph/nodeEngine.recovered.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+(node:1735753) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/importedEntityContext.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:1735785) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/keyColorTransparency.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:1735817) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/sceneAssetHealth.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:1735849) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m scripts/tauri-version-alignment.test.mjs [2m([22m[2m1 test[22m[2m)[22m[32m 5[2mms[22m[39m
+(node:1735881) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m src/core/entityDisplay.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+(node:1735916) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [2m[90m↓[39m[22m src/core/validateUpstreamWindows.test.ts [2m([22m[2m2 tests[22m[2m | [22m[33m2 skipped[39m[2m)[22m
+
+[2m Test Files [22m [1m[32m79 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (80)[39m
+[2m      Tests [22m [1m[32m747 passed[39m[22m[2m | [22m[33m6 skipped[39m[90m (753)[39m
+[2m   Start at [22m 00:04:45
+[2m   Duration [22m 118.35s[2m (transform 3.36s, setup 590ms, import 7.31s, tests 39.15s, environment 55.95s)[22m
+
+RC_NPM_TEST=0

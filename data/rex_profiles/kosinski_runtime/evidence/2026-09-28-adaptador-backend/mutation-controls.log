@@ -1,0 +1,24 @@
+== M1: mapeo empty_input -> 'truncated' (debe falar a proba de código) ==
+2026-09-28T15:03:49Z
+thread 'tools::reverse::decomp::rex_kosinski::tests::entrada_espida_recusa_empty_input_non_texto_xeral' (55060) panicked at src/tools/reverse/decomp/rex_kosinski.rs:316:9:
+assertion `left == right` failed: CodecError { code: "truncated", detail: "Kosinski decode: entrada de cero bytes" }
+  left: "truncated"
+ right: "empty_input"
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 835 filtered out; finished in 0.00s
+== M2: bytes_consumed da resposta IPC = len(stream) (debe falar a proba de consumo 11) ==
+2026-09-28T15:04:10Z
+thread 'tools::reverse::decomp::rex_kosinski::tests::ipc_decode_devolve_base64_sha_e_consumo_da_stream_rexistrada' (56011) panicked at src/tools/reverse/decomp/rex_kosinski.rs:409:9:
+assertion `left == right` failed: o padding post-terminator non se consume
+  left: 12
+ right: 11
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 835 filtered out; finished in 0.00s
+== M3: mapeo StreamLimit -> 'work_limit' (deben falar as probas de stream_limit) ==
+2026-09-28T15:04:30Z
+test tools::reverse::decomp::rex_kosinski::tests::encode_respeita_o_limite_de_stream_con_erro_estruturado ... FAILED
+test tools::reverse::decomp::rex_kosinski::tests::ipc_encode_preserva_o_codigo_stream_limit ... FAILED
+test result: FAILED. 14 passed; 2 failed; 0 ignored; 0 measured; 820 filtered out; finished in 0.00s
+== restauración: SHA == orixinal ==
+3b4115ab6f95d7f28740f9dd6c0f86f8db6efe2b59eeb7a988d76701d45eb4e2  src/tools/reverse/decomp/rex_kosinski.rs
+== re-execución verde tras restaurar ==
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 820 filtered out; finished in 0.00s
+2026-09-28T15:04:53Z

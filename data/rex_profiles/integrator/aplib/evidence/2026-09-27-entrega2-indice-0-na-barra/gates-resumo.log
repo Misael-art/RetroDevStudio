@@ -1,0 +1,18 @@
+### check:tree
+check:tree rc=0
+### lint
+lint rc=0
+### tsc
+tsc rc=0
+### npm test
+npm test rc=0
+### cargo fmt
+cargo fmt rc=0
+### cargo clippy
+cargo clippy rc=101
+### cargo test --lib
+cargo test rc=101
+### cargo clippy (manifest src-tauri)
+cargo clippy rc=0
+### cargo test --lib
+cargo test rc=0

@@ -24,6 +24,7 @@ import NodeGraphEditor, {
   validateNodeGraph,
   type NodeGraph,
 } from "./NodeGraphEditor";
+import { getNodeCategory } from "../../core/nodegraph/nodeCatalog";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { AnimationDef, Entity, SpriteCommandBinding } from "../../core/ipc/sceneService";
 
@@ -35,6 +36,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../core/scenePersistence", () => ({
   persistActiveScene: mocks.persistActiveScene,
+  registerPendingEditFlusher: () => () => undefined,
+}));
+
+vi.mock("@tauri-apps/api/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tauri-apps/api/core")>()),
+  convertFileSrc: (path: string) => `asset://${path}`,
 }));
 
 vi.mock("../../core/ipc/projectService", () => ({
@@ -239,6 +246,8 @@ const VALID_EXEC_ENTITY = buildLogicSpriteEntity("hero", "Hero", VALID_EXEC_GRAP
     },
   ],
 });
+// The valid graph plays the "miss" sound, so its entity declares that SFX resource.
+VALID_EXEC_ENTITY.components.audio = { sfx: { miss: "assets/audio/miss.wav" } };
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -342,7 +351,7 @@ describe("NodeGraphEditor helpers", () => {
     expect(appendedNodes.every((node) => node.x > 1840)).toBe(true);
   });
 
-  it("auto-layout groups imported graphs into readable system lanes", () => {
+  it("auto-layout follows real connections, keeps node order and never invents edges", () => {
     const chaotic: NodeGraph = {
       nodes: [
         { ...GRAPH_FIXTURE.nodes[2], id: "sound", type: "action_sound", x: 8, y: 8 },
@@ -377,22 +386,27 @@ describe("NodeGraphEditor helpers", () => {
           params: { budget: "sprite_scanline" },
         },
       ],
-      edges: [],
+      edges: [
+        { id: "e_entry_hadouken", fromNode: "entry", fromPort: "exec", toNode: "hadouken", toPort: "exec" },
+        { id: "e_hadouken_move", fromNode: "hadouken", fromPort: "exec", toNode: "move", toPort: "exec" },
+        { id: "e_move_sound", fromNode: "move", fromPort: "exec", toNode: "sound", toPort: "exec" },
+      ],
     };
 
     const arranged = autoLayoutNodeGraph(chaotic);
-    const entry = arranged.nodes.find((node) => node.id === "entry")!;
-    const hadouken = arranged.nodes.find((node) => node.id === "hadouken")!;
-    const move = arranged.nodes.find((node) => node.id === "move")!;
-    const sound = arranged.nodes.find((node) => node.id === "sound")!;
-    const budget = arranged.nodes.find((node) => node.id === "budget")!;
+    const at = (id: string) => arranged.nodes.find((node) => node.id === id)!;
 
-    expect(entry.x).toBeLessThan(move.x);
-    expect(entry.x).toBeLessThan(hadouken.x);
-    expect(hadouken.x).toBeLessThan(move.x);
-    expect(move.y).toBeLessThan(sound.y);
-    expect(budget.y).toBeGreaterThan(sound.y);
-    expect(arranged.nodes.map((node) => node.id)).toEqual(["entry", "hadouken", "move", "sound", "budget"]);
+    // Colunas seguem as conexoes existentes: entrada -> comando -> mover -> som.
+    expect(at("entry").x).toBeLessThan(at("hadouken").x);
+    expect(at("hadouken").x).toBeLessThan(at("move").x);
+    expect(at("move").x).toBeLessThan(at("sound").x);
+    // O no solto (budget) nao ganha conexao e vai para baixo do comportamento.
+    expect(at("budget").y).toBeGreaterThan(at("sound").y);
+    expect(arranged.edges).toEqual(chaotic.edges);
+    // A ordem do array (semantica) e preservada; so x/y mudam.
+    expect(arranged.nodes.map((node) => node.id)).toEqual(chaotic.nodes.map((node) => node.id));
+    const withoutPosition = (graph: NodeGraph) => graph.nodes.map((node) => ({ ...node, x: 0, y: 0 }));
+    expect(withoutPosition(arranged)).toEqual(withoutPosition(chaotic));
   });
 
   it("keeps cursor-centered zoom, pan-aware dot grid and snap helpers deterministic", () => {
@@ -448,7 +462,7 @@ describe("NodeGraphEditor helpers", () => {
       "error_unsupported",
     ]);
 
-    const groups = buildNodeGraphGroupBoxes({
+    const groupedGraph: NodeGraph = {
       nodes: [
         { ...VALID_EXEC_GRAPH.nodes[0], id: "command", type: "input_command", x: 100, y: 100 },
         { ...VALID_EXEC_GRAPH.nodes[1], id: "anim", type: "set_animation_state", x: 380, y: 120 },
@@ -471,20 +485,28 @@ describe("NodeGraphEditor helpers", () => {
         },
       ],
       edges: [],
-    });
+    };
 
-    expect(groups.map((group) => group.label)).toEqual(
-      expect.arrayContaining([
-        "Trigger/Input",
-        "Animation",
-        "Hardware Budget",
-        "Bridge/Source Mapping",
-      ])
+    // Categorias classificam (busca/cor); o espaco do canvas so ganha caixas de grupos nomeados.
+    expect(buildNodeGraphGroupBoxes(groupedGraph)).toEqual([]);
+    expect(getNodeCategory("input_command").label).toBe("Eventos e controle");
+    expect(getNodeCategory("set_animation_state").label).toBe("Animacao");
+    expect(getNodeCategory("hardware_budget_check").label).toBe("Limites do hardware");
+    expect(getNodeCategory("bridge_unconverted_source").label).toBe("Codigo recuperado");
+
+    const size = { width: 100, height: 50 };
+    const boxes = buildNodeGraphGroupBoxes(
+      { ...groupedGraph, groups: [{ id: "g1", label: "Comando", nodeIds: ["command", "anim"] }] },
+      () => size
     );
-    expect(groups.every((group) => group.zIndex < 0 && group.pointerEvents === "none")).toBe(true);
-    expect(canEditGraphNode(groups.length ? groups[0] && VALID_EXEC_GRAPH.nodes[0] : VALID_EXEC_GRAPH.nodes[0])).toBe(
-      true
-    );
+    expect(boxes).toHaveLength(1);
+    expect(boxes[0]).toMatchObject({ groupId: "g1", label: "Comando", nodeIds: ["command", "anim"], collapsed: false });
+    // A caixa envolve os dois cartoes (com margem e cabecalho).
+    expect(boxes[0].x).toBeLessThan(100);
+    expect(boxes[0].y).toBeLessThan(100);
+    expect(boxes[0].x + boxes[0].width).toBeGreaterThan(380 + size.width);
+    expect(boxes[0].y + boxes[0].height).toBeGreaterThan(120 + size.height);
+    expect(canEditGraphNode(VALID_EXEC_GRAPH.nodes[0])).toBe(true);
     expect(
       canEditGraphNode({
         id: "bridge",
@@ -499,7 +521,7 @@ describe("NodeGraphEditor helpers", () => {
     ).toBe(false);
   });
 
-  it("groups the action_music node under the Audio category instead of Error/Unsupported", () => {
+  it("classifies the action_music node under the Audio category instead of Error/Unsupported", () => {
     const musicGraph: NodeGraph = {
       nodes: [
         { ...VALID_EXEC_GRAPH.nodes[0], id: "start", type: "event_start", x: 100, y: 100, outputs: [{ id: "exec", label: "▶", kind: "exec" }], params: {} },
@@ -517,9 +539,9 @@ describe("NodeGraphEditor helpers", () => {
       edges: [{ id: "e_music", fromNode: "start", fromPort: "exec", toNode: "music", toPort: "exec" }],
     };
 
-    const groups = buildNodeGraphGroupBoxes(musicGraph);
-    expect(groups.map((group) => group.label)).toContain("Audio");
-    expect(groups.map((group) => group.label)).not.toContain("Error/Unsupported");
+    expect(musicGraph.nodes.map((node) => getNodeCategory(node.type).id)).toContain("audio");
+    expect(getNodeCategory("action_music").label).toBe("Som");
+    expect(musicGraph.nodes.map((node) => getNodeCategory(node.type).id)).not.toContain("error_unsupported");
   });
 
   it("round-trips an action_music node and accepts it during validation", () => {
@@ -1251,6 +1273,51 @@ describe("NodeGraphEditor", () => {
     expect(container.textContent).toContain("Origem do grafo: importado do graph_ref");
   });
 
+  it("does not let a graph_ref re-hydration overwrite unsaved local edits", async () => {
+    const heroSource: Entity = {
+      entity_id: "hero",
+      display_name: "Hero",
+      prefab: null,
+      transform: { x: 16, y: 24 },
+      components: { logic: { graph_ref: "graphs/hero.json", graph_origin: "imported_ref" } },
+    };
+    const sourceScene = buildSceneWithGraph(EMPTY_GRAPH, [heroSource]);
+    const resolvedScene = buildSceneWithGraph(GRAPH_FIXTURE, [
+      {
+        ...heroSource,
+        components: {
+          logic: { graph: serializeNodeGraph(GRAPH_FIXTURE), graph_ref: "graphs/hero.json", graph_origin: "imported_ref" },
+        },
+      },
+    ]);
+    mocks.resolveScenePrefabs.mockResolvedValue({ ok: true, error: "", scene_json: JSON.stringify(resolvedScene) });
+    await act(async () => {
+      useEditorStore.setState({ activeScene: sourceScene, activeSceneSource: sourceScene, selectedEntityId: "hero" });
+      await flush();
+      await flush();
+    });
+    const countCards = () => container.querySelectorAll("[data-testid^='node-card-']").length;
+    const hydratedCount = countCards();
+    expect(hydratedCount).toBeGreaterThan(0);
+
+    // Local edit, then another panel replaces the scene source before the 600ms autosave.
+    const paletteButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => !button.disabled && button.querySelector("span.truncate")?.textContent === "Ao Iniciar"
+    );
+    expect(paletteButton).toBeInstanceOf(HTMLButtonElement);
+    await act(async () => {
+      paletteButton!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      await flush();
+    });
+    expect(countCards()).toBe(hydratedCount + 1);
+    await act(async () => {
+      useEditorStore.setState({ activeSceneSource: structuredClone(sourceScene) });
+      await flush();
+      await flush();
+    });
+    expect(countCards()).toBe(hydratedCount + 1);
+  });
+
   it("adds an entry node from the overview when the graph has no event node yet", async () => {
     await act(async () => {
       useEditorStore.setState({
@@ -1367,8 +1434,12 @@ describe("NodeGraphEditor", () => {
     const text = container.textContent ?? "";
     expect(container.querySelectorAll("[data-testid^='node-card-']").length).toBeGreaterThanOrEqual(20);
     expect(text).toContain("Mini Platformer No-Code");
-    expect(text).toContain("BUTTON_RIGHT");
-    expect(text).toContain("BUTTON_A");
+    const buttonValues = Array.from(
+      container.querySelectorAll<HTMLSelectElement>("select[data-testid^='node-param-'][data-testid$='-button']")
+    ).map((select) => select.value);
+    expect(buttonValues).toEqual(expect.arrayContaining(["BUTTON_RIGHT", "BUTTON_A"]));
+    expect(text).toContain("Enquanto segurar Direcional → (tecla Seta →)");
+    expect(text).toContain("Ao apertar Botao A (tecla Z)");
     expect(text).toContain("jump");
     expect(text).toContain("Camera Segue");
     expect(text).toContain("Colisao (Overlap)");

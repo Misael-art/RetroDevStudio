@@ -10,6 +10,22 @@ export interface EmulatorCommandResult {
   diagnostics?: ActionableDiagnostic[];
 }
 
+export interface EmulatorObservationResult {
+  ok: boolean;
+  message: string;
+  rom_path: string;
+  rom_size: number;
+  rom_sha256: string;
+  core_label: string;
+  core_path: string;
+  frames_run: number;
+  framebuffer_width: number;
+  framebuffer_height: number;
+  framebuffer_sha256: string;
+  non_black_pixels: number;
+  framebuffer_rgba: number[];
+}
+
 export interface EmulatorMemoryResult {
   ok: boolean;
   data: number[];
@@ -68,6 +84,14 @@ export function emulatorRunFrame(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_run_frame");
 }
 
+export function emulatorRunFrames(frames: number): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_run_frames", { frames });
+}
+
+export function emulatorObserve(): Promise<EmulatorObservationResult> {
+  return invoke<EmulatorObservationResult>("emulator_observe");
+}
+
 export function emulatorSaveState(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_save_state");
 }
@@ -100,8 +124,18 @@ export function emulatorReadMemory(
   return invoke<EmulatorMemoryResult>("emulator_read_memory", { region, offset, length });
 }
 
-export function emulatorSendInput(joypad: JoypadState): Promise<EmulatorCommandResult> {
-  return invoke<EmulatorCommandResult>("emulator_send_input", { joypad });
+export function emulatorSendInput(
+  joypad: JoypadState,
+  sessionEpoch?: number
+): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_send_input", {
+    joypad,
+    sessionEpoch: sessionEpoch ?? null,
+  });
+}
+
+export function emulatorGetCoreEpoch(): Promise<number> {
+  return invoke<number>("emulator_get_core_epoch");
 }
 
 export function emulatorStop(): Promise<EmulatorCommandResult> {
@@ -162,6 +196,77 @@ export async function startFrameLoop(
   return stop;
 }
 
+/**
+ * Observabilidade do encaminhamento de audio core → WebAudio. Separa o que o
+ * core gerou (recebido), o que foi entregue ao grafo de saida do AudioContext
+ * (renderizado) e o estado do contexto. Nao prova captura acustica/loopback.
+ */
+export type AudioOutputTelemetry = {
+  receivedFrames: number;
+  receivedNonZeroFrames: number;
+  renderedFrames: number;
+  renderedNonZeroFrames: number;
+  renderedPeak: number;
+  contextState: string | null;
+  contextSampleRate: number | null;
+  muted: boolean;
+};
+
+const audioOutputTelemetry: AudioOutputTelemetry = {
+  receivedFrames: 0,
+  receivedNonZeroFrames: 0,
+  renderedFrames: 0,
+  renderedNonZeroFrames: 0,
+  renderedPeak: 0,
+  contextState: null,
+  contextSampleRate: null,
+  muted: false,
+};
+
+export function recordAudioOutput(update: Partial<AudioOutputTelemetry> & {
+  addReceived?: { frames: number; nonZero: number };
+  addRendered?: { frames: number; nonZero: number; peak: number };
+}): void {
+  const { addReceived, addRendered, ...fields } = update;
+  Object.assign(audioOutputTelemetry, fields);
+  if (addReceived) {
+    audioOutputTelemetry.receivedFrames += addReceived.frames;
+    audioOutputTelemetry.receivedNonZeroFrames += addReceived.nonZero;
+  }
+  if (addRendered) {
+    audioOutputTelemetry.renderedFrames += addRendered.frames;
+    audioOutputTelemetry.renderedNonZeroFrames += addRendered.nonZero;
+    audioOutputTelemetry.renderedPeak = Math.max(audioOutputTelemetry.renderedPeak, addRendered.peak);
+  }
+}
+
+/** Last seconds of stereo samples received from the core, addressed by absolute index. */
+const AUDIO_RING_CAPACITY = 44100 * 2 * 10;
+const audioRing = new Int16Array(AUDIO_RING_CAPACITY);
+let audioRingTotal = 0;
+let audioRingSampleRate = 0;
+
+export function recordReceivedAudioSamples(samples: ArrayLike<number>, sampleRate: number): void {
+  audioRingSampleRate = sampleRate;
+  for (let index = 0; index < samples.length; index += 1) {
+    audioRing[(audioRingTotal + index) % AUDIO_RING_CAPACITY] = samples[index];
+  }
+  audioRingTotal += samples.length;
+}
+
+/** Samples [from, from+count) if still in the ring; `total` is the running sample count. */
+export function readReceivedAudioSamples(from: number, count: number): { total: number; sampleRate: number; from: number; samples: number[] } {
+  const start = Math.max(from, audioRingTotal - AUDIO_RING_CAPACITY, 0);
+  const end = Math.min(start + count, audioRingTotal);
+  const samples: number[] = [];
+  for (let index = start; index < end; index += 1) samples.push(audioRing[index % AUDIO_RING_CAPACITY]);
+  return { total: audioRingTotal, sampleRate: audioRingSampleRate, from: start, samples };
+}
+
+export function getAudioOutputTelemetry(): AudioOutputTelemetry {
+  return { ...audioOutputTelemetry };
+}
+
 export async function listenToAudioStream(
   onAudio: (payload: AudioPayload) => void
 ): Promise<UnlistenFn> {
@@ -172,25 +277,71 @@ export async function listenToAudioStream(
 
 // ── Keyboard → JoypadState mapping ───────────────────────────────────────────
 
-/** Mapeia teclas do teclado para botões do Mega Drive */
-const KEY_MAP: Record<string, keyof JoypadState> = {
+export type JoypadPlatform = "megadrive" | "snes";
+
+/**
+ * Teclado → RetroPad. Os campos de `JoypadState` sao ids do RetroPad Libretro,
+ * nao botoes do console. O Genesis Plus GX liga RetroPad Y→A, B→B e A→C do
+ * Mega Drive (verificado com ROM SGDK real: so `y` aciona `BUTTON_A`), entao
+ * Z/X/C precisam mirar Y/B/A para chegarem como A/B/C no jogo.
+ */
+const MEGADRIVE_KEY_MAP: Record<string, keyof JoypadState> = {
   ArrowUp:    "up",
   ArrowDown:  "down",
   ArrowLeft:  "left",
   ArrowRight: "right",
-  KeyZ:       "a",    // A (Mega Drive)
-  KeyX:       "b",    // B
-  KeyC:       "y",    // C → Y (superset)
+  KeyZ:       "y",    // Mega Drive A
+  KeyX:       "b",    // Mega Drive B
+  KeyC:       "a",    // Mega Drive C
   Enter:      "start",
   ShiftRight: "select",
 };
 
+/** SNES: RetroPad segue o layout nativo do controle. */
+const SNES_KEY_MAP: Record<string, keyof JoypadState> = {
+  ArrowUp:    "up",
+  ArrowDown:  "down",
+  ArrowLeft:  "left",
+  ArrowRight: "right",
+  KeyZ:       "a",
+  KeyX:       "b",
+  KeyC:       "y",
+  Enter:      "start",
+  ShiftRight: "select",
+};
+
+/** Botao do Mega Drive (como o SGDK o nomeia, sem o prefixo `BUTTON_`). */
+export type MegadriveButton = "A" | "B" | "C" | "START" | "UP" | "DOWN" | "LEFT" | "RIGHT";
+
+/** RetroPad → botao do Mega Drive, conforme o core Genesis Plus GX (ver comentario acima). */
+const MEGADRIVE_RETROPAD_TO_BUTTON: Partial<Record<keyof JoypadState, MegadriveButton>> = {
+  y: "A",
+  b: "B",
+  a: "C",
+  start: "START",
+  up: "UP",
+  down: "DOWN",
+  left: "LEFT",
+  right: "RIGHT",
+};
+
+/**
+ * Teclas do teclado que chegam ao jogo como `button` no Mega Drive. Derivado do mesmo
+ * `MEGADRIVE_KEY_MAP` usado pela Game View, para a UI nunca divergir do core.
+ */
+export function megadriveKeyboardKeysForButton(button: MegadriveButton): string[] {
+  return Object.entries(MEGADRIVE_KEY_MAP)
+    .filter(([, retroPad]) => MEGADRIVE_RETROPAD_TO_BUTTON[retroPad] === button)
+    .map(([key]) => key);
+}
+
 export function keyToJoypad(
   current: JoypadState,
   key: string,
-  pressed: boolean
+  pressed: boolean,
+  platform: JoypadPlatform = "megadrive"
 ): JoypadState | null {
-  const button = KEY_MAP[key];
+  const button = (platform === "snes" ? SNES_KEY_MAP : MEGADRIVE_KEY_MAP)[key];
   if (!button) return null;
   return { ...current, [button]: pressed };
 }

@@ -1,0 +1,69 @@
+{
+  "ref": "86fb1b8e54b0f6cff190d4332b3de64a1bdf5e7a",
+  "checks": [
+    {
+      "id": 111038212812,
+      "name": "desktop-smoke",
+      "head_sha": "86fb1b8e54b0f6cff190d4332b3de64a1bdf5e7a",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-10-02T21:50:06Z",
+      "html_url": "https://github.com/Misael-art/retro-dev-studio/actions/runs/37064296163/job/111038212812"
+    },
+    {
+      "id": 111028148006,
+      "name": "desktop-smoke",
+      "head_sha": "86fb1b8e54b0f6cff190d4332b3de64a1bdf5e7a",
+      "status": "completed",
+      "conclusion": "failure",
+      "completed_at": "2026-10-02T21:17:39Z",
+      "html_url": "https://github.com/Misael-art/retro-dev-studio/actions/runs/37064296163/job/111028148006"
+    },
+    {
+      "id": 111028148004,
+      "name": "validate",
+      "head_sha": "86fb1b8e54b0f6cff190d4332b3de64a1bdf5e7a",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-10-02T21:25:19Z",
+      "html_url": "https://github.com/Misael-art/retro-dev-studio/actions/runs/37064296157/job/111028148004"
+    },
+    {
+      "id": 111028147405,
+      "name": "linux-validate",
+      "head_sha": "86fb1b8e54b0f6cff190d4332b3de64a1bdf5e7a",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-10-02T21:15:47Z",
+      "html_url": "https://github.com/Misael-art/retro-dev-studio/actions/runs/37064296157/job/111028147405"
+    },
+    {
+      "id": 111027919714,
+      "name": "linux-validate",
+      "head_sha": "86fb1b8e54b0f6cff190d4332b3de64a1bdf5e7a",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-10-02T21:12:23Z",
+      "html_url": "https://github.com/Misael-art/retro-dev-studio/actions/runs/37064226955/job/111027919714"
+    },
+    {
+      "id": 111027919481,
+      "name": "validate",
+      "head_sha": "86fb1b8e54b0f6cff190d4332b3de64a1bdf5e7a",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-10-02T21:25:22Z",
+      "html_url": "https://github.com/Misael-art/retro-dev-studio/actions/runs/37064226955/job/111027919481"
+    },
+    {
+      "id": 111027916353,
+      "name": "desktop-smoke",
+      "head_sha": "86fb1b8e54b0f6cff190d4332b3de64a1bdf5e7a",
+      "status": "completed",
+      "conclusion": "success",
+      "completed_at": "2026-10-02T21:19:41Z",
+      "html_url": "https://github.com/Misael-art/retro-dev-studio/actions/runs/37064225877/job/111027916353"
+    }
+  ],
+  "interpretation": "initial PR desktop job failed on tilemap-after-reopen; single rerun passed; initial failure preserved; this is not the CI of the later barrier commit"
+}

@@ -1,0 +1,43 @@
+== gates Rust da árvore final — passo 5 pernas 2 e 4 — HEAD 94bfa81, 2026-09-27T04:10:46-03:00 ==
+$ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+rc=0
+
+$ cargo clippy --lib -- -D warnings
+    Checking retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.87s
+rc=0
+
+$ cargo test --lib byor_aplib_varre_edicoes -- --ignored --nocapture  (varredura de capacidade, ROM BYOR local)
+  ],
+  "rom_sha256": "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+  "schema": "rex-aplib-capacidade-da-barra/v1"
+}
+test tools::reverse::decomp::rex_resources::tests::byor_aplib_varre_edicoes_de_um_pixel_que_a_barra_sabe_expressar ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 768 filtered out; finished in 75.43s
+
+rc=0
+
+$ cargo test --lib rex06_hamoopig_aplib -- --ignored --nocapture  (cópia da barra executada pelo jogo)
+     Running unittests src/lib.rs (target-test/debug/deps/app_lib-716403bf8cac2e87)
+
+running 1 test
+REX HAMOOPIG aPLib edit da barra: 232 pixels alterados em 116 frames, primeiro frame 59, coordenadas [[213, 207], [285, 135]] | original 558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9 -> modificada 80249128d1e6ec871aad993e7cc3fdbbeed7e8c5b191f8b72a159db6fa2c7dce | run rex06-hamoopig-aplib-barra-edit-1790493156 (corpus sha256:558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9)
+test core::project_mgr::tests::rex06_hamoopig_aplib_edicao_da_barra_executa_no_core ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 768 filtered out; finished in 12.24s
+
+rc=0
+
+$ cargo test --lib -- --nocapture  (suíte completa não ignorada)
+test tools::photo2sgdk::tests::earthquake_large_recommends_downscale_and_meta_sprite_handling ... ok
+
+test result: ok. 706 passed; 0 failed; 63 ignored; 0 measured; 0 filtered out; finished in 46.87s
+
+rc=0
+
+binário de teste: $(sha256sum src-tauri/target-test/debug/deps/app_lib-716403bf8cac2e87)
+ec26ddae5b080f125ac9466f819200c362ac732c8c9ff03cf92e6e03140810e1  src-tauri/target-test/debug/deps/app_lib-716403bf8cac2e87
+app desktop (não reconstruído nesta perna): 
+7a52345d6635b5db68a4f6caccf1e93881afe7f9033769c41ea96b34cf530996  src-tauri/target-test/debug/retro-dev-studio
+DONE=0

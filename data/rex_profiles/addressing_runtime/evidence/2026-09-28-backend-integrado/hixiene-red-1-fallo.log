@@ -1,0 +1,39 @@
+   Compiling rex-addressing v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/crates/rex-addressing)
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 17s
+     Running unittests src/lib.rs (target/debug/deps/app_lib-8a79e4e52b0ce39b)
+
+running 17 tests
+test tools::reverse::decomp::rex_addressing::tests::a_fixture_temporal_se_descarta_ao_saír_do_alcance ... FAILED
+test tools::reverse::decomp::rex_addressing::tests::a_imaxe_autoral_congelase_no_digest_pinado ... ok
+test tools::reverse::decomp::rex_addressing::tests::erro_interno_preserva_codigo_e_detalle_util ... ok
+test tools::reverse::decomp::rex_addressing::tests::enderezo_fora_do_barramento_e_recusado ... ok
+test tools::reverse::decomp::rex_addressing::tests::estado_sen_rom_size_e_recusado ... ok
+test tools::reverse::decomp::rex_addressing::tests::identidade_divergente_e_recusada_antes_de_qualquer_enderezamento ... ok
+test tools::reverse::decomp::rex_addressing::tests::chave_de_banco_non_remapable_e_recusada ... ok
+test tools::reverse::decomp::rex_addressing::tests::perfil_inexistente_e_recusado_con_a_lista_exposta ... ok
+test tools::reverse::decomp::rex_addressing::tests::perfil_implementado_na_biblioteca_e_non_expuesto_polo_adaptador_e_recusado ... ok
+test tools::reverse::decomp::rex_addressing::tests::cada_segmento_leva_o_estado_com_que_foi_lido ... ok
+test tools::reverse::decomp::rex_addressing::tests::lonxitude_cero_e_recusada_antes_de_percorrer ... ok
+test tools::reverse::decomp::rex_addressing::tests::rom_size_fora_do_intervalo_do_perfil_e_recusado ... ok
+test tools::reverse::decomp::rex_addressing::tests::os_bytes_viaxan_en_base64_co_sha256_lateral ... ok
+test tools::reverse::decomp::rex_addressing::tests::rexion_non_rom_e_recusada_e_non_se_inventan_bytes ... ok
+test tools::reverse::decomp::rex_addressing::tests::rom_size_que_a_imaxe_non_cobre_e_recusado ... ok
+test tools::reverse::decomp::rex_addressing::tests::cambiar_o_banco_move_a_xanela_esperada ... ok
+test tools::reverse::decomp::rex_addressing::tests::leitura_autoral_devolve_os_bytes_e_a_procedencia_de_cada_segmento ... ok
+
+failures:
+
+---- tools::reverse::decomp::rex_addressing::tests::a_fixture_temporal_se_descarta_ao_saír_do_alcance stdout ----
+
+thread 'tools::reverse::decomp::rex_addressing::tests::a_fixture_temporal_se_descarta_ao_saír_do_alcance' (2694043) panicked at src/tools/reverse/decomp/rex_addressing.rs:737:9:
+a fixture temporal non se descartou: /tmp/rds-rex-addressing-descarte-2694041/rom.bin
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tools::reverse::decomp::rex_addressing::tests::a_fixture_temporal_se_descarta_ao_saír_do_alcance
+
+test result: FAILED. 16 passed; 1 failed; 0 ignored; 0 measured; 803 filtered out; finished in 2.12s
+
+error: test failed, to rerun pass `--lib`

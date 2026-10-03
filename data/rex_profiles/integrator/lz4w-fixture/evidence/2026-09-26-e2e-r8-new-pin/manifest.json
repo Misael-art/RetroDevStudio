@@ -1,0 +1,58 @@
+{
+ "schema": "rex-integrator-evidence/v1",
+ "id": "lz4w-fixture-e2e-2026-09-26-r8-new-pin",
+ "measured_at": "2026-09-26",
+ "missao": "Reexecução do cenário E2E `rex-lz4w-fixture-effect` no binário construíDO DEPOIS do incremento de encoder da rodada r7. Existia porque a matriz promovia a ETAPA E com números de um binário anterior (e6907792…) e declarava a reexecução como pendente.",
+ "sob_medicao": {
+  "binario": "e36f9f49de6481215589a63a0a7f0e5f8ec219055f2742da126f1c6474283777 (src-tauri/target-test/debug/retro-dev-studio, `npm run build:debug` desta corrida)",
+  "commits": "cde88cc (rex_codecs.rs) + 8a22689 (rex_resources.rs) + b1d3df4 (oráculo r15) + 9b6d25e (matriz r7), sobre b8cf3b0",
+  "rex_codecs.rs": "6044135b30f51bc746f8b15e6baf6b94cabbbd52c067ce969ea0cb231fa83e18",
+  "rex_resources.rs": "d84776089b3bbc316aff716a2b3d4db25f215c87b64cf9ee3eceef8230d8a0e5",
+  "fixture_rom": "159298eb1c9a437a6abc83c80becfe38c52d469d6284aeab4dc9dc06e9b2b9b5 lida do caminho DURÁVEL do repositório (src-tauri/target-test/validation/rex-lz4w-fixture/project/out/rom.bin) — a limitação (d) da ETAPA E, que registrava leitura de ROM em /tmp, não se aplica a esta corrida"
+ },
+ "resultado": {
+  "run2_rc": "0 (fim do log com `E2E_RC=0`)",
+  "passos": "11 registros; a cadeia causal inteira verde: descoberta+decode pela UI (header 95464, stream 0x5f988, slot 444 B, 1/5 candidatos), no-op honesto, edição (tile 0, linha 5, col 7, 0->15) aplicada pela transação, escrita confinada ao slot (`diferenteForaDoSlot: 0`), BPS re-aplicado com hash exato, cópia reaberta decodificando no plain editado (pixels `917048cc35508e9a` == esperado), 1 byte em WRAM (0x5e f0->ff), exatamente 1 pixel de tela distinto na coordenada prevista (7,5) (`0x212021 -> 0x8c008c`, 11 classes), canvas == framebuffer (320x224)",
+  "escrita": {
+   "modifiedSha": "07905193e758c478190d9488f81f63eacfa57f6f5af0ed34f43c6e0605ddcad6",
+   "patchSha": "c3bc1e942efc3ab47b9b0da4dc27be6d3b28c03c6533e9753ba7dce8e61dd34b",
+   "patchBytes": 62,
+   "bytesDiferentes": 264,
+   "faixaAlterada": [
+    "5f9a1",
+    "5fb3b"
+   ],
+   "stream_de_436_bytes_no_slot_sha256": "2776ec2cb542bc43981342447b7843bdc5b614932a96aee4f3794ec40811773e"
+  },
+  "triangulacao_nova": "A stream que a INTERFACE escreveu neste binário tem SHA-256 IDÊNTICO ao caso `i41` do replay 68k r15 (`2776ec2c…`), isto é, o byte exato que o desempacotador 68000 oficial leu em hardware é o byte que o produto gravou pela UI — três caminhos independentes (UI->ROM, driver->ROM+MAME, decoder do produto) sobre a mesma stream. Isso não era afirmado antes: o ETAPA E provava a escrita pelo produto e o i41 provava a do driver, sem confronto direto entre eles."
+ },
+ "por_que_diferem_do_run11": {
+  "run11": "modifiedSha e55dba92…, patch 52ce036f… (74 B), 268 bytes diferentes, faixa 5f9a1..5fb3f, binário e6907792… (~08:41)",
+  "paridade_com_o_pino_anterior": "A asserção `i41` de r15 diz que o caminho de escrita reproduz byte a byte o que o PINO b8cf3b0 (só-guloso, já com 39c0fd9) escrevia — e é isso que se confirma aqui. Ela nunca afirmou paridade com binários anteriores a 39c0fd9.",
+  "causa_atribuida": "39c0fd9 (11:53, 'percorre dicionário e saída mesclados por proximidade') mudou a codificação gulosa do fixture — é o incremento r1->r4 já publicado na matriz, NÃO o incremento desta sessão. Verificado: o stream de 436 B que o run11 escreveu tem SHA-256 `47cfeb81…` no slot e o que este binário escreve tem `2776ec2c…` — comprimentos iguais, bytes diferentes. O plain do run2 foi conferido pela prévia (917048cc…); NÃO verifiquei que o stream do run11 decodifica no mesmo plain, então essa equivalência fica declarada como não aferida aqui."
+ },
+ "achado_da_reexecucao": {
+  "nome": "asserção de E2E apodrecida pelo próprio passo 4",
+  "detalhe": "A corrida 1 falhou (rc=1) com 'edição com tile 16 entrou na fila da UI: nenhuma edição pendente'. Não foi regressão de código: 6351f15 (PASSO 4) passou a renderizar 'nenhuma edição pendente' quando a fila está vazia, e o cenário ainda exigia o literal `^\\s*0\\b`. A asserção estava morta desde 11:55 e só apareceu agora, porque o E2E não tinha sido reexecutado desde então.",
+  "correcao": "Em vez de afrouxar só o padrão, o passo 10 agora exige as duas coisas que o contrato do PASSO 4 promete: fila vazia E `rex-resource-notice` dizendo 'tile 16 fora do recurso … a fila atual foi preservada'. A recusa do núcleo continua provada no teste unitário, não aqui.",
+  "commit_da_correcao": "fa98bda (scripts/e2e-tauri-build-run.mjs). Este pacote de evidência foi gerado PELO cenário já com o padrão corrigido (foi a corrida 2 que passou), mas antes da renumeração de passos feita no mesmo commit: o `report-run2.json` promovido aqui lista o índice '10' duas vezes (o negativo de intervalo e os negativos finais, ambos com seus `claim` completos e legíveis). O script agora emite 10 e 11. Não há edição manual de relatório.",
+  "registro_honesto": "Isto é uma falha de processo minha: entregar uma mudança de UI sem reexecutar o cenário que a observa."
+ },
+ "limite": [
+  "Prova de MECANISMO no fixture autoral (consumidor conhecido por construção). Não é cobertura do corpus: o alvo comercial `0xc8cc8` continua `BLOQUEADO` quanto ao que representa, e `semanticState` desta ROM autoral é VERIFIED só para o fixture.",
+  "Perna de VRAM NÃO PROVADA: o core Genesis Plus GX v1.7.4 46a5521 não expõe VIDEO_RAM (total_size=0); a cadeia fica provada por WRAM + framebuffer.",
+  "Nenhum byte comercial escrito: as ROMs modificadas vivem em ~/.retrodev (fora do git); aqui só hashes, comprimentos e logs de texto.",
+  "O run1 (falho) é promovido junto com o run2 verde de propósito: a falha é a evidência do achado acima."
+ ],
+ "reproducao": "RDS_REX_LZ4W_FIXTURE_ROM=$PWD/src-tauri/target-test/validation/rex-lz4w-fixture/project/out/rom.bin node scripts/e2e-tauri-build-run.mjs --scenario rex-lz4w-fixture-effect   (sem --skip-build: reconstrói o debug app; com --skip-build usa o binário canônico existente)",
+ "arquivos": {
+  "run1-build-e-assert-apodrecido.log": "rc=1, contém o `E2E_RC=1` e o passo que falhou",
+  "run2-rc0.log": "rc=0 com os 11 registros",
+  "report-run2.json": "relatório estruturado do run2 (application.sha256 = e36f9f49…, fixture.romPath no caminho durável)"
+ },
+ "arquivos_promovidos_sha256": {
+  "run1-build-e-assert-apodrecido.log": "3d9d76172481406780be2501d2dd75ab248557ecc3f633342881826f9835d96f",
+  "run2-rc0.log": "4543133669627f7e3ae116665a04880beb1b8ece524e1b6e56a9a1e782d8d738",
+  "report-run2.json": "0bab958e1a9d86e72dd7f306ec1bbdf7077894a6e82c5959fa6df587f914b020"
+ }
+}

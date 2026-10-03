@@ -1,0 +1,30 @@
+{
+  "schema": "rex-sonic-frame-barrier-r2-manifest/v1",
+  "date": "2026-10-02",
+  "classification": "Experimental; authored reference QA, Sonic product profile remains assisted",
+  "code_head": "8166d4f1d0f105e04cd1faf3a43601da19ad7e2d",
+  "product_frontend_commit": "f646ccf6de220f38dc9bf2b175cd56d79ff4be82",
+  "application_sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0",
+  "previous_evidence": "../2026-10-02-frame-barrier/manifest.json",
+  "privacy": "No commercial ROM, ROM bytes, commercial PNG, RGBA dump, or pixel array is included. Raw execution artifacts remain local and are referenced by SHA-256.",
+  "artifacts": [
+    {"path":"data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/README.md","kind":"versioned_summary","bytes":2230,"sha256":"16265aae3a2e48ecb9bf96b8b0ef3ca5edb1b28517e6f0b31798cb98f2063e19"},
+    {"path":"data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/gates.json","kind":"versioned_summary","bytes":2562,"sha256":"5b7142bf4b4766c57cd73c2f76ea8a10a48c2a561efe923cf6a20b5fecc49d88"},
+    {"path":"data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/reference-desktop.json","kind":"versioned_summary","bytes":2366,"sha256":"9a2e2d01afba0e2cbc38d5b3ead1f3def2bfba2314bffc6dbd5e2fdf2d5eae8e"},
+    {"path":"data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/ci-terminal-8166d4f.json","kind":"versioned_ci_snapshot","bytes":1842,"sha256":"6483cca6dd7c083f7eebe42617b23a5339326295634db057c79754485151cb78"},
+    {"path":"docs/rex_profiles/sonic_multiframe/REPORT.md","kind":"versioned_report","bytes":17908,"sha256":"0c8f81acacb39357f57c07eb8a241205702d0c6f15a38c3bd8d4b3ef8f9aa75e"},
+    {"path":"docs/06_CURRENT_WAVE_AI_BANK.md","kind":"versioned_project_state","bytes":547766,"sha256":"ca42e993c9b2656e05277d57ad97ccbbf663e331bc713d18e58d05968577ac8d"},
+    {"path":"docs/06_AI_MEMORY_BANK.md","kind":"versioned_project_memory","bytes":391759,"sha256":"eabf64a36b77ae9654c9d6149c1d8310119a19943b6233f631377f95b05aa1b3"},
+    {"path":"scripts/e2e-tauri-build-run.mjs","kind":"tested_harness_source","bytes":1010792,"sha256":"0da40327df092c943a4a308634790ae444c78168194d38687eef9be2ead38e76"},
+    {"path":"scripts/e2e-build-frame.test.mjs","kind":"tested_regression_source","bytes":3794,"sha256":"95168f68bd90ac3b51cfa7ae01d21993cbb576766e1206131008d46e07a5e788"},
+    {"path":"src-tauri/target-test/validation/reference-platformer-2026-10-02T23-03-26-132Z-report.json","kind":"local_e2e_report","bytes":93943,"sha256":"36de5e735552a142d5442f6045ee3746da1a112182e8b4e5cd2cc91bc7b147ae"},
+    {"path":"src-tauri/target-test/validation/sonic-multiframe/reference-replay-r2.py","kind":"local_replay_helper","bytes":2672,"sha256":"6acbc81f4f2c40c5be91690014d4007f753285c388af637731bbf28960f3e308"},
+    {"path":"src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-barrier-r2.log","kind":"local_e2e_log","bytes":2644,"sha256":"b19e95d7ef52aea1f023928e15438b2f8806ab65a81eab84d42a858792edeabe"},
+    {"path":"src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-barrier-r2.rc","kind":"local_exit_code","bytes":2,"sha256":"9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"},
+    {"path":"src-tauri/target-test/validation/sonic-multiframe/gates/frame-progress-mutation.log","kind":"local_mutation_log","bytes":2729,"sha256":"7922a9ff5e716c465bdbd2e21585965cbb27d8972ab472bd980c3d07a0bd2d22"},
+    {"path":"src-tauri/target-test/validation/sonic-multiframe/gates/frame-progress-mutation.rc","kind":"local_mutation_exit_code","bytes":2,"sha256":"4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"},
+    {"path":"src-tauri/target-test/validation/host-readiness.json","kind":"local_host_certification","bytes":11385,"sha256":"c95d6292b67c77ad74afcec98d24bc802c6d17273154e5f4c13cd6e841c0e382"},
+    {"path":"src-tauri/target-test/validation/upstream-validation-linux.json","kind":"local_upstream_validation","bytes":4026,"sha256":"a766c73a1df9ae791f8d749ac752f1e9c372f37d8a2e74e46c55ff8becfa3b4d"},
+    {"path":"src-tauri/target-test/debug/retro-dev-studio","kind":"local_tested_application","bytes":413283920,"sha256":"1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0"}
+  ]
+}

@@ -1,0 +1,11 @@
+# Reconsulta de estado dos PRs tras o merge (comando fresco, 2026-09-29T12:38:07Z UTC)
+# gh pr view 86 --json state,mergedAt,mergeCommit
+MERGED  2026-09-29T11:51:51Z  10c1a3c66e5c5423adaec0eae09f7f79ab3e5bed
+# gh pr view 85 --json state,isDraft,mergedAt,commits|length
+MERGED  isDraft=true  mergedAt=2026-09-29T11:51:53Z  commits=22
+
+# Lectura: #86 mesclado por acción do integrador (gh pr merge 86 --merge). #85 foi marcado
+# MERGED automaticamente por GitHub dous segundos despois, porque a súa cabeza bd02e3c
+# tornou-se alcanzable desde o tronco via 10c1a3c. Non se executou ningunha acción sobre #85
+# (sen merge manual, sen comentario, sen revisión); isDraft=true e os 22 commits permanecen
+# intactos, como ordenou o operador ("Non mexer no #85 além de referenciá-lo").

@@ -1,0 +1,27 @@
+# Paridade entre as duas implementacoes da mesma gate, executadas localmente (node + pwsh).
+PowerShell 7.6.6
+v26.8.1
+
+## caso A — crates/ sem registro
+cjs rc=1
+  - crates/registry.json nao existe. crates/ so e aceito com registro explicito de pacotes.
+ps1 rc=1
+  - crates/registry.json não existe. crates/ só é aceito com registro explícito de pacotes.
+
+## caso B — manifesto declarado com separadores de Windows
+cjs rc=1
+  - crates/registry.json: pacote "rex-exemplo" declara manifesto crates\rex-exemplo\Cargo.toml; esperado crates/rex-exemplo/Cargo.toml.
+ps1 rc=1
+  - crates/registry.json: pacote rex-exemplo declara manifesto crates\rex-exemplo\Cargo.toml; esperado crates/rex-exemplo/Cargo.toml.
+
+## caso C — registro canonico sem campo manifesto (deve aceitar)
+cjs rc=0
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+ps1 rc=0
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+
+## caso D — registro canonico com manifesto POSIX explicito (deve aceitar)
+cjs rc=0
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+ps1 rc=0
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.

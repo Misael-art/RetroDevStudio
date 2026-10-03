@@ -367,6 +367,54 @@ fn is_zero_u32(value: &u32) -> bool {
     *value == 0
 }
 
+/// Regra de gameplay recuperada do binario (REX, Experimental).
+///
+/// Guarda-se na escena para que a entidade poida reabrirse sen volver á ROM:
+/// a identidade (`rom_sha256`), a rutina (entrada/saidas/bloques), o parámetro
+/// soportado (limiar, coa súa faixa) e o `graph_json` **verbatim** do núcleo
+/// (`crates/rex-gameplay`), que contén nós, arestas e mapeamentos de orixe cos
+/// bytes. O backend non interpreta este bloque: só o conserva; quen o le e o
+/// revalida é a capa de interface, que recusa calquera bloque incompleto.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecoveredRule {
+    #[serde(default)]
+    pub version: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub profile_id: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub rom_path: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub rom_sha256: String,
+    #[serde(default)]
+    pub entry: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub exits: Vec<u32>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub blocks: Vec<(u32, u32)>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub operator: String,
+    #[serde(default)]
+    pub threshold_recovered: i64,
+    #[serde(default)]
+    pub threshold_current: i64,
+    #[serde(default)]
+    pub threshold_min: i64,
+    #[serde(default)]
+    pub threshold_max: i64,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub graph_json: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub limitations: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct LogicComponent {
     #[serde(default)]
@@ -388,6 +436,10 @@ pub struct LogicComponent {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub imported_semantics: Option<ImportedLogicSemantics>,
+    /// Regra de gameplay recuperada e gardada verbatim (Experimental).
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovered_rule: Option<RecoveredRule>,
     #[serde(default)]
     pub variables: HashMap<String, LogicVariable>,
 }

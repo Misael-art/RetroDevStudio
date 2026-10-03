@@ -1,5 +1,14 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { dispatchGraphHistory } from "./core/nodegraph/graphHistory";
 import { open } from "@tauri-apps/plugin-dialog";
+import { MugenCompatibilityPanel } from "./components/common/MugenCompatibilityPanel";
+import MugenSourceReviewPanel from "./components/common/MugenSourceReviewPanel";
+import type { MugenReviewOptions } from "./core/mugenReview";
+import {
+  loadMugenImportReports,
+  summarizeLosses,
+  type LoadedMugenReport,
+} from "./core/mugenCompatibility";
 import {
   Group,
   Panel,
@@ -12,10 +21,19 @@ import UnifiedTopBar, {
   type UnifiedTopBarSection,
 } from "./components/common/UnifiedTopBar";
 import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
+import { buildTilemapAuthoringBrush } from "./core/entityAuthoring";
 import LayerPanel from "./components/hierarchy/LayerPanel";
 import type { ToolTab, ToolWorkspace } from "./components/tools/ToolsPanel";
 import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
-import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
+import {
+  emulatorGetCoreEpoch,
+  emulatorLoadRom,
+  emulatorObserve,
+  emulatorStop,
+  getAudioOutputTelemetry,
+  readReceivedAudioSamples,
+  type AudioOutputTelemetry,
+} from "./core/ipc/emulatorService";
 import { inspectRomMastering } from "./core/ipc/projectCapabilityService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
@@ -48,6 +66,7 @@ import {
 import {
   useEditorStore,
   type EditorWorkspace,
+  type JoypadObservation,
 } from "./core/store/editorStore";
 import {
   clearSceneDraft,
@@ -1429,10 +1448,51 @@ type AutomationState = {
     diagnostic: ActionableDiagnostic | null;
   }>;
   projectSourceKind: string;
+  mugenCompatibility?: {
+    open: boolean;
+    characters: Array<{
+      id: string;
+      totals: Record<string, number> | null;
+      categories: Array<{ id: string; status: string }>;
+    }>;
+  };
 };
 
 type AutomationApi = {
   openProject: (projectDir: string) => Promise<boolean>;
+  /** Carrega uma ROM no emulador pelo mesmo caminho do controle visível
+   * "Carregar ROM" (sem o diálogo nativo, que a automação não dirige).
+   * `options.startPaused` deixa a sessão pausada (frame 0 definido, sem o
+   * loop livre rodar) — usado para alinhar o protocolo de automação.
+   * E2E / QA. */
+  loadRomForEmulation: (
+    romPath: string,
+    options?: { startPaused?: boolean }
+  ) => Promise<boolean>;
+  pauseEmulator: () => boolean;
+  /** Áudio core → WebAudio: recebido do core vs. entregue ao AudioContext. E2E / QA. */
+  getAudioOutputTelemetry: () => AudioOutputTelemetry;
+  /** Last scene revision bumps with the caller stack (QA diagnostics). */
+  getSceneRevisionLog: () => { revision: number; at: number; stack: string[] }[];
+  /** Core samples received by the app (ring buffer, absolute indices). E2E / QA. */
+  readReceivedAudioSamples: (from: number, count: number) => ReturnType<typeof readReceivedAudioSamples>;
+  /** Observação do caminho de input do produto. `lastJoypadRequest` é apenas
+   * intenção registrada antes do IPC; a prova de entrega é `lastJoypadAck`,
+   * gravado somente quando o backend responde `ok: true` para aquela mesma
+   * sequência. Asserções de E2E devem usar o ack, nunca a request.
+   * E2E / QA. */
+  getLastInputObservation: () => {
+    lastJoypadRequest: JoypadObservation | null;
+    lastJoypadAck: JoypadObservation | null;
+    lastJoypadSendError: { sessionId: string; seq: number; message: string } | null;
+    joypadSessionId: string | null;
+    joypadSessionHold: boolean;
+    joypadBlockedCount: number;
+  };
+  /** Para o emulador pelo mesmo caminho do controle visível "Parar",
+   * desligando o runtime do core — a carga seguinte parte de power-on real.
+   * E2E / QA. */
+  stopEmulator: () => Promise<boolean>;
   /** Importa doador SGDK para `baseDir` e abre o projeto nativo gerado; devolve o caminho absoluto. */
   importSgdkProject: (
     projectName: string,
@@ -1472,6 +1532,7 @@ type AutomationApi = {
       graph_ref: string | null;
       graph_origin: string | null;
       has_graph: boolean;
+      graph_json: string | null;
       source_paths: string[];
       external_source_refs: string[];
     } | null;
@@ -1479,6 +1540,7 @@ type AutomationApi = {
       graph_ref: string | null;
       graph_origin: string | null;
       has_graph: boolean;
+      graph_json: string | null;
       source_paths: string[];
       external_source_refs: string[];
     } | null;
@@ -1487,6 +1549,9 @@ type AutomationApi = {
     entityId: string,
     relativePath?: string | null
   ) => Promise<{ ok: boolean; absolute_path: string | null; relative_path: string | null }>;
+  /** Proximo caminho devolvido pelo seletor de pasta da importacao externa, no lugar do
+   * dialogo nativo (que a automacao nao dirige). O resto do fluxo continua visivel. E2E / QA. */
+  setNextExternalImportPath: (path: string) => boolean;
   getState: () => AutomationState;
 };
 
@@ -1514,6 +1579,9 @@ export default function App() {
     setActiveTarget,
     emulatorLoaded,
     setEmulatorLoaded,
+    emulatorLaunchRequest,
+    clearEmulatorLaunchRequest,
+    setEmulatorRomIdentity,
     setActiveScene,
     setActiveScenePath,
     activeWorkspace,
@@ -1639,6 +1707,15 @@ export default function App() {
   const [showExternalImportSection, setShowExternalImportSection] = useState(false);
   const [templateDonorPaths, setTemplateDonorPaths] = useState<Record<string, string>>({});
   const [lastSgdkImportSummary, setLastSgdkImportSummary] = useState<SgdkImportSummary | null>(null);
+  // Compatibilidade MUGEN (Experimental): relatorios gravados pelo importador do produto.
+  const [mugenReports, setMugenReports] = useState<LoadedMugenReport[]>([]);
+  const [mugenReportsProjectDir, setMugenReportsProjectDir] = useState<string | null>(null);
+  const [mugenPanelOpen, setMugenPanelOpen] = useState(false);
+  const [mugenReviewPath, setMugenReviewPath] = useState<string | null>(null);
+  const mugenStateRef = useRef({ open: false, reports: [] as LoadedMugenReport[] });
+  mugenStateRef.current = { open: mugenPanelOpen, reports: mugenReports };
+  // Automacao E2E: substitui SO o dialogo nativo de pasta (que o WebDriver nao dirige).
+  const pendingExternalImportPathRef = useRef<string | null>(null);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -1847,10 +1924,10 @@ export default function App() {
         void handleGenerateC();
         break;
       case "edit.undo":
-        undo();
+        if (!dispatchGraphHistory("undo")) undo();
         break;
       case "edit.redo":
-        redo();
+        if (!dispatchGraphHistory("redo")) redo();
         break;
       case "layout.focus":
         toggleFocusMode();
@@ -2356,6 +2433,17 @@ export default function App() {
           title: getShortcutTitle("scene.save", "Salvar cena ativa", shortcuts),
         },
         {
+          label: "Relatorio MUGEN",
+          onClick: () => {
+            if (activeProjectDir) void showMugenCompatibility(activeProjectDir, true);
+          },
+          disabled: !activeProjectDir,
+          title: activeProjectDir
+            ? "Reabrir o relatorio de compatibilidade da importacao MUGEN (Experimental)"
+            : "Abra um projeto importado de MUGEN para ver o relatorio",
+          testId: "menu-action-mugen-report",
+        },
+        {
           label: "Configuracoes",
           onClick: () => void handleOpenProjectSettings(),
           disabled: !activeProjectDir,
@@ -2441,13 +2529,18 @@ export default function App() {
   ];
 
   async function resetEmulatorSession(switchToScene = false) {
+    // Invalidação antes do await do stop: a época morre aqui, não na resposta.
+    useEditorStore.getState().beginJoypadSessionHold();
     try {
+      useEditorStore.getState().releaseJoypadSessionHold();
       await emulatorStop();
     } catch {
+      useEditorStore.getState().releaseJoypadSessionHold();
       // Project and target transitions should still reset local editor state even if the core is already stopped.
     }
 
     setEmulatorLoaded(false);
+    useEditorStore.getState().setCoreEpoch(null);
     setEmulPaused(false);
 
     if (switchToScene) {
@@ -2766,6 +2859,11 @@ export default function App() {
   }
 
   async function chooseExternalProjectPath(profile: ExternalImportProfileSummary) {
+    const automationPath = pendingExternalImportPathRef.current;
+    if (automationPath) {
+      pendingExternalImportPathRef.current = null;
+      return automationPath;
+    }
     const selected = await open({
       title: `Escolher projeto ${profile.name} para importar`,
       directory: true,
@@ -2853,7 +2951,34 @@ export default function App() {
     }
   }
 
-  async function handleImportExternalProject() {
+  // Le sempre do disco (assets/mugen/*_import_report.json); `reopened` = pedido pelo menu
+  // depois da importacao, sem depender de nada guardado pela sessao que importou.
+  async function showMugenCompatibility(projectDir: string, reopened = false) {
+    try {
+      const reports = await loadMugenImportReports(projectDir);
+      setMugenReports(reports);
+      setMugenReportsProjectDir(projectDir);
+      if (reports.length === 0) {
+        logMessage(
+          "warn",
+          reopened
+            ? "[MUGEN] Este projeto nao tem relatorio de compatibilidade MUGEN (nao foi importado de MUGEN/Ikemen)."
+            : "[MUGEN] Importacao sem relatorio de compatibilidade: confira o console e o projeto."
+        );
+        return;
+      }
+      if (!reopened) {
+        for (const loaded of reports) {
+          logMessage("success", `[MUGEN] ${loaded.id} (Experimental): ${summarizeLosses(loaded.report)}.`);
+        }
+      }
+      setMugenPanelOpen(true);
+    } catch (error) {
+      logMessage("warn", `[MUGEN] Relatorio de compatibilidade ilegivel: ${describeError(error)}`);
+    }
+  }
+
+  async function handleImportExternalProject(review?: MugenReviewOptions, reviewedPath?: string) {
     if (!newProjName.trim()) {
       logMessage("warn", "[Projeto] Informe um nome para o projeto importado.");
       return;
@@ -2878,18 +3003,27 @@ export default function App() {
 
     let projectPath: string | null = null;
     try {
-      projectPath = await chooseExternalProjectPath(selectedExternalImportProfile);
+      projectPath = reviewedPath ?? await chooseExternalProjectPath(selectedExternalImportProfile);
       if (!projectPath) {
         return;
       }
 
+      if (!reviewedPath && (selectedExternalImportProfile.id === "mugen" || selectedExternalImportProfile.id === "ikemen_go")) {
+        setMugenReviewPath(projectPath);
+        return;
+      }
+
       setCreatingProject(true);
-      const result = await importExternalProject(
+      const importArgs = [
         newProjName.trim(),
         newProjBaseDir.trim(),
         selectedExternalImportProfile.id,
-        projectPath
-      );
+        projectPath,
+      ] as const;
+      const result = review
+        ? await importExternalProject(...importArgs, review)
+        : await importExternalProject(...importArgs);
+      setMugenReviewPath(null);
       setLastSgdkImportSummary(
         selectedExternalImportProfile.id === "sgdk" ? result.import_summary ?? null : null
       );
@@ -2906,6 +3040,9 @@ export default function App() {
         );
         if (result.notice) {
           logMessage("info", `[Projeto] ${result.notice}`);
+        }
+        if (selectedExternalImportProfile.id === "mugen" || selectedExternalImportProfile.id === "ikemen_go") {
+          await showMugenCompatibility(result.path);
         }
       } else {
         logMessage(
@@ -3024,6 +3161,8 @@ export default function App() {
     }
   }
 
+  /** Carrega uma ROM no emulador pelo mesmo caminho do controle visível
+   * "Carregar ROM" (diálogo nativo incluído). */
   async function handleEmulatorLoadRom() {
     try {
       const selected = await open({
@@ -3033,39 +3172,7 @@ export default function App() {
       if (!selected) return;
 
       const romPath = typeof selected === "string" ? selected : selected[0];
-      const romDependency = await detectRomDependency(romPath);
-      if (romDependency.dependency_id) {
-        const ready = await ensureDependencies(
-          [romDependency.dependency_id],
-          "Carregar esta ROM requer o core Libretro correspondente."
-        );
-        if (!ready) return;
-      }
-
-      const result = await emulatorLoadRom(romPath);
-      if (!result.ok) {
-        setEmulatorLoaded(false);
-        const failureMessage = formatEmulatorFailureMessage(result.message);
-        logMessage("error", failureMessage);
-        if (result.message.includes("Nenhum core Libretro")) {
-          openRuntimeSetupForIssue();
-        }
-        reportDiagnostic(
-          result.diagnostics?.[0] ??
-            createFallbackDiagnostic({
-              area: "libretro_emulation",
-              sourcePath: romPath,
-              technicalDetail: failureMessage,
-            })
-        );
-        return;
-      }
-
-      setEmulatorLoaded(true);
-      trackProductMetric({ kind: "rom_loaded" });
-      logMessage("success", `ROM carregada: ${romPath}`);
-      setActiveViewportTab("game");
-      setEmulPaused(false);
+      await loadRomIntoEmulator(romPath);
     } catch (error) {
       reportDiagnostic(
         createFallbackDiagnostic({
@@ -3075,6 +3182,95 @@ export default function App() {
       );
     }
   }
+
+  /** Mesma sequência do controle visível "Carregar ROM" após a escolha do
+   * arquivo; usada também pela automação E2E, que não consegue dirigir o
+   * diálogo nativo de arquivos do sistema operacional. */
+  async function loadRomIntoEmulator(
+    romPath: string,
+    options?: { startPaused?: boolean; sourceLabel?: string }
+  ) {
+    // Invalidação ANTES de qualquer await: durante a carga em voo a época
+    // antiga já não existe — inputs da sessão velha são bloqueados (e
+    // contados), nunca aceitos na janela de transição.
+    useEditorStore.getState().beginJoypadSessionHold();
+    try {
+      await loadRomIntoEmulatorInner(romPath, options);
+    } finally {
+      useEditorStore.getState().releaseJoypadSessionHold();
+    }
+  }
+
+  async function loadRomIntoEmulatorInner(
+    romPath: string,
+    options?: { startPaused?: boolean; sourceLabel?: string }
+  ) {
+    const romDependency = await detectRomDependency(romPath);
+    if (romDependency.dependency_id) {
+      const ready = await ensureDependencies(
+        [romDependency.dependency_id],
+        "Carregar esta ROM requer o core Libretro correspondente."
+      );
+      if (!ready) return;
+    }
+
+    const result = await emulatorLoadRom(romPath);
+    if (!result.ok) {
+      setEmulatorLoaded(false);
+      const failureMessage = formatEmulatorFailureMessage(result.message);
+      logMessage("error", failureMessage);
+      if (result.message.includes("Nenhum core Libretro")) {
+        openRuntimeSetupForIssue();
+      }
+      reportDiagnostic(
+        result.diagnostics?.[0] ??
+          createFallbackDiagnostic({
+            area: "libretro_emulation",
+            sourcePath: romPath,
+            technicalDetail: failureMessage,
+          })
+      );
+      return;
+    }
+
+    // Publish the paused state before exposing the loaded core to the render
+    // loop. This keeps startPaused deterministic: no free frame may execute
+    // between the backend load and the controlled E2E warmup.
+    if (options?.startPaused) {
+      setEmulPaused(true);
+    }
+    setEmulatorLoaded(true);
+    // Ancora a época do core para os envios de input (o backend recusa época
+    // obsoleta — ver CORE_EPOCH em lib.rs).
+    const coreEpoch = await emulatorGetCoreEpoch().catch(() => null);
+    useEditorStore.getState().setCoreEpoch(coreEpoch);
+    const identity = await emulatorObserve().catch(() => null);
+    if (identity?.ok) {
+      setEmulatorRomIdentity({
+        path: identity.rom_path,
+        size: identity.rom_size,
+        sha256: identity.rom_sha256,
+        coreLabel: identity.core_label,
+        corePath: identity.core_path,
+        sourceLabel: options?.sourceLabel ?? "ROM carregada",
+      });
+    }
+    trackProductMetric({ kind: "rom_loaded" });
+    logMessage("success", `ROM carregada: ${romPath}${options?.sourceLabel ? ` (${options.sourceLabel})` : ""}`);
+    setActiveViewportTab("game");
+    if (!options?.startPaused) {
+      setEmulPaused(false);
+    }
+  }
+
+  useEffect(() => {
+    const request = emulatorLaunchRequest;
+    if (!request) return;
+    clearEmulatorLaunchRequest();
+    void loadRomIntoEmulator(request.romPath, { sourceLabel: request.sourceLabel });
+    // The request is consumed exactly once. Loading still goes through the
+    // same canonical function used by the visible ROM loader and Build & Run.
+  }, [emulatorLaunchRequest, clearEmulatorLaunchRequest]);
 
   function handleEmulatorPause() {
     if (!emulatorLoaded) {
@@ -3320,7 +3516,19 @@ export default function App() {
         setRomMasteringStatus("inspect_failed");
         logMessage("error", `[ROM Mastering] ${error instanceof Error ? error.message : String(error)}`);
       }
-      const loadResult = await emulatorLoadRom(result.rom_path);
+      // Same epoch contract as loadRomIntoEmulator: the backend bumps the core epoch on
+      // every load and refuses input carrying an older one, so the store must hold the
+      // new epoch or every keyboard input after a rebuild is silently rejected.
+      useEditorStore.getState().beginJoypadSessionHold();
+      let loadResult: Awaited<ReturnType<typeof emulatorLoadRom>>;
+      try {
+        loadResult = await emulatorLoadRom(result.rom_path);
+        if (loadResult.ok) {
+          useEditorStore.getState().setCoreEpoch(await emulatorGetCoreEpoch().catch(() => null));
+        }
+      } finally {
+        useEditorStore.getState().releaseJoypadSessionHold();
+      }
       if (!loadResult.ok) {
         setEmulatorLoaded(false);
         const failureMessage = formatEmulatorFailureMessage(loadResult.message);
@@ -3340,6 +3548,18 @@ export default function App() {
       }
 
       setEmulatorLoaded(true);
+      // Same identity contract as loadRomIntoEmulator: the Game View shows which ROM runs.
+      const builtIdentity = await emulatorObserve().catch(() => null);
+      if (builtIdentity?.ok) {
+        setEmulatorRomIdentity({
+          path: builtIdentity.rom_path,
+          size: builtIdentity.rom_size,
+          sha256: builtIdentity.rom_sha256,
+          coreLabel: builtIdentity.core_label,
+          corePath: builtIdentity.core_path,
+          sourceLabel: "Build & Run",
+        });
+      }
       trackProductMetric({ kind: "rom_loaded" });
       logMessage("success", "ROM carregada no emulador.");
       setEmulPaused(false);
@@ -3387,6 +3607,9 @@ export default function App() {
     resetHwValidation();
     setSelectedEntityId(null);
     setLastSgdkImportSummary(null);
+    setMugenPanelOpen(false);
+    setMugenReports([]);
+    setMugenReportsProjectDir(null);
     setShowProjectSettings(false);
     setProjectSettings(null);
     setProjectSettingsDraft(null);
@@ -3777,6 +4000,45 @@ export default function App() {
 
     window.__RDS_E2E__ = {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
+      setNextExternalImportPath: (path: string) => {
+        pendingExternalImportPathRef.current = path;
+        return true;
+      },
+      loadRomForEmulation: async (
+        romPath: string,
+        options?: { startPaused?: boolean }
+      ) => {
+        if (options?.startPaused) {
+          // Quiesce the existing render loop before the asynchronous load so
+          // the next core starts paused from its first observable frame.
+          useEditorStore.getState().setEmulPaused(true);
+        }
+        await loadRomIntoEmulator(romPath, options);
+        return useEditorStore.getState().emulatorLoaded;
+      },
+      pauseEmulator: () => {
+        useEditorStore.getState().setEmulPaused(true);
+        return useEditorStore.getState().emulPaused;
+      },
+      getAudioOutputTelemetry: () => getAudioOutputTelemetry(),
+      getSceneRevisionLog: () => [...sceneRevisionLog],
+      readReceivedAudioSamples: (from: number, count: number) => readReceivedAudioSamples(from, count),
+      getLastInputObservation: () => {
+        const state = useEditorStore.getState();
+        return {
+          lastJoypadRequest: state.lastJoypadRequest,
+          lastJoypadAck: state.lastJoypadAck,
+          lastJoypadSendError: state.lastJoypadSendError,
+          joypadSessionId: state.joypadSessionId,
+          joypadSessionHold: state.joypadSessionHold,
+          joypadBlockedCount: state.joypadBlockedCount,
+          coreEpoch: state.coreEpoch,
+        };
+      },
+      stopEmulator: async () => {
+        await handleEmulatorStop();
+        return !useEditorStore.getState().emulatorLoaded;
+      },
       importSgdkProject: async (projectName: string, baseDir: string, sgdkDonorPath: string) => {
         const result = await importSgdkProject(projectName, baseDir, sgdkDonorPath);
         const hydrated = await hydrateProjectState(
@@ -3954,6 +4216,7 @@ export default function App() {
                 graph_ref: sourceEntity.components.logic?.graph_ref ?? null,
                 graph_origin: sourceEntity.components.logic?.graph_origin ?? null,
                 has_graph: Boolean(sourceEntity.components.logic?.graph?.trim()),
+                graph_json: sourceEntity.components.logic?.graph ?? null,
                 source_paths: [...(sourceEntity.components.logic?.imported_semantics?.source_paths ?? [])],
                 external_source_refs: [...(sourceEntity.components.logic?.external_source_refs ?? [])],
               }
@@ -3963,6 +4226,7 @@ export default function App() {
                 graph_ref: resolvedEntity.components.logic?.graph_ref ?? null,
                 graph_origin: resolvedEntity.components.logic?.graph_origin ?? null,
                 has_graph: Boolean(resolvedEntity.components.logic?.graph?.trim()),
+                graph_json: resolvedEntity.components.logic?.graph ?? null,
                 source_paths: [...(resolvedEntity.components.logic?.imported_semantics?.source_paths ?? [])],
                 external_source_refs: [...(resolvedEntity.components.logic?.external_source_refs ?? [])],
               }
@@ -4042,6 +4306,17 @@ export default function App() {
         }
 
         return {
+          mugenCompatibility: {
+            open: mugenStateRef.current.open,
+            characters: mugenStateRef.current.reports.map((loaded) => ({
+              id: loaded.id,
+              totals: loaded.report.summary?.totals ?? null,
+              categories: (loaded.report.summary?.categories ?? []).map((category) => ({
+                id: category.id,
+                status: category.status,
+              })),
+            })),
+          },
           activeProjectDir: state.activeProjectDir,
           activeProjectName: state.activeProjectName,
           activeTarget: state.activeTarget,
@@ -4049,6 +4324,7 @@ export default function App() {
           activeViewportTab: state.activeViewportTab,
           activeScenePath: state.activeScenePath,
           emulatorLoaded: state.emulatorLoaded,
+          emulatorRomIdentity: state.emulatorRomIdentity,
           emulPaused: state.emulPaused,
           sceneRevision: state.sceneRevision,
           selectedEntityId: state.selectedEntityId,
@@ -4084,6 +4360,15 @@ export default function App() {
                   x: entity.transform.x,
                   y: entity.transform.y,
                   spriteAsset: entity.components.sprite?.asset ?? null,
+                  tilemap: entity.components.tilemap
+                    ? {
+                        mapWidth: entity.components.tilemap.map_width,
+                        mapHeight: entity.components.tilemap.map_height,
+                        tileWidth: 8,
+                        tileHeight: 8,
+                        cells: [...(entity.components.tilemap.cells ?? [])],
+                      }
+                    : null,
                   type: entity.components.camera
                     ? "camera"
                     : entity.components.tilemap
@@ -4452,6 +4737,7 @@ export default function App() {
                         label={creatingProject ? "Importando..." : "Importar Projeto Externo"}
                         onClick={() => void handleImportExternalProject()}
                         disabled={creatingProject || templatesLoading}
+                        testId="external-import-confirm"
                       />
                     </div>
                   </div>
@@ -4486,6 +4772,7 @@ export default function App() {
                 <button
                   key={target}
                   type="button"
+                  data-testid={`wizard-target-${target}`}
                   disabled={selectedTemplateMegadriveOnly && target === "snes"}
                   onClick={() => setNewProjTarget(target)}
                   className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
@@ -4613,13 +4900,22 @@ export default function App() {
               className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#313244] bg-[#181825] pt-3"
             >
               {activeProjectDir ? (
-                <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
+                <ToolbarButton
+                  label="Cancelar"
+                  onClick={() => setShowProjectWizard(false)}
+                  testId="wizard-cancel"
+                />
               ) : null}
-              <ToolbarButton label="Abrir Projeto" onClick={() => void handleOpenProject()} />
+              <ToolbarButton
+                label="Abrir Projeto"
+                onClick={() => void handleOpenProject()}
+                testId="wizard-open-project"
+              />
               <ToolbarButton
                 label={creatingProject ? "Criando..." : "Criar Projeto"}
                 onClick={() => void confirmNewProject()}
                 accent="primary"
+                testId="wizard-create-project"
                 disabled={
                   creatingProject ||
                   templatesLoading ||
@@ -4899,6 +5195,14 @@ export default function App() {
         </div>
       )}
 
+      <MugenCompatibilityPanel
+        open={mugenPanelOpen}
+        projectDir={mugenReportsProjectDir}
+        reports={mugenReports}
+        onClose={() => setMugenPanelOpen(false)}
+      />
+      {mugenReviewPath && <MugenSourceReviewPanel sourcePath={mugenReviewPath} onCancel={() => setMugenReviewPath(null)} onImport={(options) => handleImportExternalProject(options, mugenReviewPath)} />}
+
       {showCommandPalette && (
         <CommandPaletteDialog
           results={commandPaletteResults}
@@ -5069,6 +5373,7 @@ export default function App() {
                 limit={hwStatus.palette_banks_limit}
               />
             )}
+            {activeProjectDir ? <SceneSaveStatusChip /> : null}
             {draftSavedAt ? (
               <span
                 data-testid="scene-draft-saved-at"
@@ -5172,8 +5477,18 @@ export default function App() {
         <SgdkImportSummaryCard summary={lastSgdkImportSummary} />
       ) : null}
 
+      {!showProjectWizard && shellPersona === "guiado" && activeProjectDir ? (
+        <GuidedStepBar
+          activeWorkspace={activeWorkspace}
+          onOpenWorkspace={(workspace) => handleWorkspaceSelect(workspace)}
+          onOpenPalette={() => openToolsWorkspace("palette", "editing")}
+          onOpenInspector={() => setRightPanelMode("inspector")}
+          onTest={() => void handleBuildAndRun()}
+        />
+      ) : null}
       {!showProjectWizard &&
         !focusedShell &&
+        shellPersona !== "guiado" &&
         workspaceGuide &&
         activeWorkspace !== "artstudio" &&
         activeWorkspace !== "retrofx" && (
@@ -5388,5 +5703,183 @@ export default function App() {
       />
       <Console variant="drawer" />
     </div>
+  );
+}
+
+/** Truthful save indicator: reflects persistActiveScene outcomes and unsaved revisions. */
+const sceneRevisionLog: { revision: number; at: number; stack: string[] }[] = [];
+useEditorStore.subscribe((state, previous) => {
+  if (state.sceneRevision !== previous.sceneRevision) {
+    sceneRevisionLog.push({
+      revision: state.sceneRevision,
+      at: Date.now(),
+      stack: (new Error().stack ?? "").split("\n").slice(2, 12),
+    });
+    if (sceneRevisionLog.length > 20) sceneRevisionLog.shift();
+  }
+});
+
+function SceneSaveStatusChip() {
+  const saveState = useEditorStore((state) => state.sceneSaveState);
+  const sceneRevision = useEditorStore((state) => state.sceneRevision);
+  const status =
+    saveState.status === "saving"
+      ? "saving"
+      : saveState.status === "failed"
+        ? "failed"
+        : saveState.status === "saved" && saveState.revision === sceneRevision
+          ? "saved"
+          : saveState.status === "idle" && sceneRevision === 0
+            ? "idle"
+            : "dirty";
+  const label = {
+    saving: "Salvando…",
+    saved: "Salvo",
+    failed: "Falha ao salvar",
+    dirty: "Alterações não salvas",
+    idle: "Sem alterações",
+  }[status];
+  const tone = {
+    saving: "text-[#89b4fa] border-[#89b4fa]/40",
+    saved: "text-[#a6e3a1] border-[#a6e3a1]/40",
+    failed: "text-[#f38ba8] border-[#f38ba8]/60",
+    dirty: "text-[#f9e2af] border-[#f9e2af]/40",
+    idle: "text-[var(--rds-text-muted)] border-[#313244]",
+  }[status];
+  return (
+    <span
+      data-testid="scene-save-status"
+      data-status={status}
+      data-revision={sceneRevision}
+      data-saved-revision={saveState.revision ?? ""}
+      role="status"
+      aria-live="polite"
+      title={status === "failed" ? `Falha ao salvar: ${saveState.message ?? "erro desconhecido"}. As alterações continuam no editor.` : label}
+      className={`shrink-0 rounded border px-2 py-0.5 text-[10px] font-semibold ${tone}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+type GuidedStepId = "cenario" | "personagem" | "regras" | "sons" | "testar";
+
+/**
+ * Guided path over the existing workspaces (no parallel UI or project model): each step
+ * opens the canonical surface with the relevant entity selected.
+ */
+function GuidedStepBar({
+  activeWorkspace,
+  onOpenWorkspace,
+  onOpenPalette,
+  onOpenInspector,
+  onTest,
+}: {
+  activeWorkspace: string;
+  onOpenWorkspace: (workspace: "scene" | "logic") => void;
+  onOpenPalette: () => void;
+  onOpenInspector: () => void;
+  onTest: () => void;
+}) {
+  const scene = useEditorStore((state) => state.activeScene);
+  const selectedEntityId = useEditorStore((state) => state.selectedEntityId);
+  const [lastStep, setLastStep] = useState<GuidedStepId | null>(null);
+  const entities = scene?.entities ?? [];
+  const tilemapId = entities.find((entity) => entity.components.tilemap)?.entity_id ?? null;
+  const playerId =
+    entities.find((entity) => entity.components.input)?.entity_id ??
+    entities.find((entity) => entity.components.physics)?.entity_id ??
+    null;
+  const select = (entityId: string | null) => {
+    if (entityId) useEditorStore.getState().setSelectedEntityId(entityId);
+  };
+  const steps: { id: GuidedStepId; label: string; hint: string; run: () => void }[] = [
+    {
+      id: "cenario",
+      label: "Cenário",
+      hint: "Pintar tiles e ajustar a colisão do mapa",
+      run: () => {
+        onOpenWorkspace("scene");
+        select(tilemapId);
+        if (tilemapId) {
+          // Same path as the Hierarchy "Editar" action on a tilemap.
+          const store = useEditorStore.getState();
+          store.setActiveViewportTab("scene");
+          store.setActiveTilemapId(tilemapId);
+          store.setEditorMode("paint");
+          const brush = buildTilemapAuthoringBrush(entities.find((entity) => entity.entity_id === tilemapId) ?? null);
+          if (brush) store.setActiveBrush(brush);
+          onOpenPalette();
+        }
+      },
+    },
+    {
+      id: "personagem",
+      label: "Personagem",
+      hint: "Posição, sprite e animações do jogador",
+      run: () => {
+        onOpenWorkspace("scene");
+        useEditorStore.getState().setEditorMode("select");
+        select(playerId);
+        onOpenInspector();
+      },
+    },
+    {
+      id: "regras",
+      label: "Regras",
+      hint: "Quando → Se → Fazer, passagens e condições de vitória",
+      run: () => {
+        select(playerId);
+        onOpenWorkspace("logic");
+      },
+    },
+    {
+      id: "sons",
+      label: "Sons",
+      hint: "Associar efeitos sonoros aos eventos",
+      run: () => {
+        select(playerId);
+        onOpenWorkspace("logic");
+        window.setTimeout(() => document.querySelector("[data-testid='nodegraph-sounds']")?.scrollIntoView({ block: "center" }), 50);
+      },
+    },
+    { id: "testar", label: "Testar", hint: "Compilar e jogar pelo teclado (setas; botoes e teclas em Regras)", run: onTest },
+  ];
+  const current: GuidedStepId | null =
+    lastStep === "sons" && activeWorkspace === "logic"
+      ? "sons"
+      : activeWorkspace === "logic"
+        ? "regras"
+        : activeWorkspace === "game"
+          ? "testar"
+          : activeWorkspace === "scene"
+            ? selectedEntityId && selectedEntityId === playerId
+              ? "personagem"
+              : "cenario"
+            : null;
+  return (
+    <nav aria-label="Etapas do modo guiado" data-testid="guided-steps" className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[#313244] bg-[#0b1020] px-3 py-1.5">
+      {steps.map((step, index) => (
+        <button
+          key={step.id}
+          type="button"
+          data-testid={`guided-step-${step.id}`}
+          aria-current={current === step.id ? "step" : undefined}
+          title={step.hint}
+          onClick={() => {
+            setLastStep(step.id);
+            step.run();
+          }}
+          className={`rounded-md border px-3 py-1 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#89b4fa] ${
+            current === step.id
+              ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#cdd6f4]"
+              : "border-[#313244] text-[#a6adc8] hover:border-[#89b4fa] hover:text-[#cdd6f4]"
+          }`}
+        >
+          {index + 1}. {step.label}
+        </button>
+      ))}
+      <span className="ml-auto text-[11px] text-[#7f849c]">{steps.find((step) => step.id === current)?.hint ?? "Escolha uma etapa"}</span>
+    </nav>
   );
 }

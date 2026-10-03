@@ -1,0 +1,6 @@
+npm notice run retrodev-studio@0.1.0 security:audit
+npm notice run npm audit --audit-level=high
+npm error code EALLOWSCRIPTS
+npm error --allow-scripts is not allowed in project-scoped installs. Add the entries to the "allowScripts" field in package.json, or to .npmrc, instead.
+npm error A complete log of this run can be found in: /home/misael/.npm/_logs/2026-09-28T10_58_24_972Z-debug-0.log
+RC=1

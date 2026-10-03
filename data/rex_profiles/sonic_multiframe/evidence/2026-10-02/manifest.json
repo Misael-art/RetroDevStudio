@@ -1,0 +1,447 @@
+{
+  "schema": "rex-sonic-multiframe-evidence/v1",
+  "date": "2026-10-02",
+  "classification": "Experimental / local profile validation; no general extraction or full-animation claim",
+  "base_commit": "0ef540e95463faf74bc32202744ed27872592d8e",
+  "product_commit": "f646ccf6de220f38dc9bf2b175cd56d79ff4be82",
+  "frontend_commit": "f646ccf6de220f38dc9bf2b175cd56d79ff4be82",
+  "binary_sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0",
+  "base_rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "base_rom_size": 531577,
+  "branch": "codex/rex-sonic-multiframe-ui",
+  "parent_pr": 98,
+  "fresh": {
+    "desktop_multiframe": {
+      "scenario": "sonic-multiframe",
+      "unique_frames": 10,
+      "steps": 16,
+      "runtime_effect": "not measured in this scenario",
+      "edited_rom_sha256": "21e54148e82ba3769c29911e4a698b6fa5a99c50bc4a2cd0a8a759e152eb3dce",
+      "bps_sha256": "3ba1566fc26836e13eb123b5c2abdfe13a2ebb79b4b474d713ff5193a3e96089"
+    },
+    "desktop_stand_regression": {
+      "scenario": "inspection-sonic-tiles",
+      "changed_framebuffer_pixels": 96,
+      "box": {
+        "x0": 74,
+        "x1": 85,
+        "y0": 170,
+        "y1": 177
+      },
+      "base_framebuffer_sha256": "680faf48878e4639d956c78f9807de72ba070e2e32508c94dfa674b42c9d0cd8",
+      "applied_framebuffer_sha256": "ffcca5dba8daf32ede0ed42b052ce4a79485e681043c51a5ecc7f48d52eb346c",
+      "edited_rom_sha256": "7b3801f791264b56f68bcecdfa524ac1664b227933cdea46dbcdbd4edbf6dabf",
+      "bps_sha256": "b004a5f048f13d5a4892f827562fa616dbb33041a14d845a55003248944c5625",
+      "scope": "stand rectangle edit plus UI BPS/application/1200-frame observation/restart/reopen; keyboard gameplay not exercised by this branch of the scenario."
+    }
+  },
+  "commercial_content": "ROM/PNG/PPM/RGBA arrays stay local ignored; metadata, hashes and test-source only are versioned.",
+  "artifacts": [
+    {
+      "path": "src-tauri/target-test/debug/retro-dev-studio",
+      "kind": "tested_app",
+      "versioned": false,
+      "bytes": 413283920,
+      "sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0"
+    },
+    {
+      "path": "/home/misael/RDS-REX-CORPUS-E/.staging/Sonic the Hedgehog (USA, Europe).bin",
+      "kind": "local_byor_original",
+      "versioned": false,
+      "bytes": 531577,
+      "sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb"
+    },
+    {
+      "path": "dist/index.html",
+      "kind": "canonical_frontend",
+      "versioned": false,
+      "bytes": 400,
+      "sha256": "984ad2f9ff486df7cd8e5b42a400fe5d0e559ff7c12bec16ecb11f0f554724fa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-39-03-558Z-multiframe/report.json",
+      "kind": "local_raw_report",
+      "versioned": false,
+      "bytes": 33964,
+      "sha256": "95dd9e310da359daebed5b87bc26cd841db0f3514a2519705005190bcb1e5aad"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic1-pilot-2026-10-02T20-42-36-997Z/sonic1-stand-tiles-summary.json",
+      "kind": "local_raw_report",
+      "versioned": false,
+      "bytes": 77357,
+      "sha256": "14dc9fa8da11e57ef1961b499094ae1aaf1f7e0948452ee6091c7034fdcc7f4b"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/work/sonic-multiframe-proof.json",
+      "kind": "local_raw_report",
+      "versioned": false,
+      "bytes": 261008,
+      "sha256": "36a5e691e898edbae55359235eb03d132a0ff03475dcec4ca57e101c1eeb15af"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/work/independent-oracle.json",
+      "kind": "local_raw_report",
+      "versioned": false,
+      "bytes": 2573,
+      "sha256": "d41659f4d99adb70546e21b31833a2d5ee44314166730575e73da33ba5e0822d"
+    },
+    {
+      "path": "src-tauri/target-test/validation/host-readiness.json",
+      "kind": "local_raw_report",
+      "versioned": false,
+      "bytes": 11385,
+      "sha256": "25026be67dbf4de2d8413c137537d09e9ff81d53d9f8f03b2c76b0de5ebb7982"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/fmt.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/clippy.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 30,
+      "sha256": "caa636ec9c7cba2c4f265005f356629e3a1e8fe35395de581375a782de9931bc"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/clippy-default.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 30,
+      "sha256": "caa636ec9c7cba2c4f265005f356629e3a1e8fe35395de581375a782de9931bc"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/tree.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 61,
+      "sha256": "bbe6273eb45a185b1b4edbe1202f8076f5535b191f5b7468b4ef87419adaf6c9"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/lint.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 3,
+      "sha256": "dc51b8c96c2d745df3bd5590d990230a482fd247123599548e0632fdbf97fc22"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/tsc.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 71,
+      "sha256": "40194098c9e1378e1e6309a476ec448f9491e98fa0614b887595c1ff8f84cb05"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/crates.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 25965,
+      "sha256": "d9b260c929769f32d5f91d79a95e6c6eec357fe77690d07d7e644535a2a8f1dc"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/core-reinsertion.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 818,
+      "sha256": "e61e35fe4573208844ea86c29ffc5a326d8ef428334bbc027cd52898dae3d210"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/final-ui.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 1444,
+      "sha256": "6ffb41dc8e160d9bf316e2fc001224b2a5c5c9e41db7b3be188b1c83a07933ea"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/build-final-source.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 3812,
+      "sha256": "aa78d5232f29036ed889c3684192118c9ab7378f49f0ad4f47cf72de5694e8d5"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/build-final-source.rc",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/host-certify-final.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 107057,
+      "sha256": "5f7f7b0ef37e52a362cee65b46e3814f9ee8db4022e840a19f6752b6e5f5da64"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/host-certify-final.rc",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/npm-security.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 297,
+      "sha256": "5c347bb49b50a8a6d8164c30a78b1778f0fd064f12f2d96251618a68362eb755"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/npm-security.rc",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/npm-security-isolated.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 770,
+      "sha256": "100ab2ecb9b94352d86161e08903641056849ce989a675d7210214abd9336af7"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/npm-security-isolated.rc",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/cargo-audit.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 2174,
+      "sha256": "5830459f90091625796103b4dffb995fbfbd045dd2bac7ff6d3fae7dcf2e4981"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/cargo-audit.rc",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/desktop-final.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 59144,
+      "sha256": "da77236505ab494f2f87010173e88a640cfbb9399d35a059d9bf3b12461a29c1"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/desktop-final.json",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 391,
+      "sha256": "387b40046a54575280371347b9a162c86bfed6841ece511738b41ae77a91fff8"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/desktop-stand-regression.log",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 137320,
+      "sha256": "a035b73046419f5ed90f485cb56b1ef6e6d1d377c15089b268c738f9fb3f1576"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/desktop-stand-regression.json",
+      "kind": "local_gate_evidence",
+      "versioned": false,
+      "bytes": 397,
+      "sha256": "a8319fdac20169f389efaae96d96f03006ed4138b8f164ff6e214d0a1fd7b02d"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-39-03-558Z-multiframe-before.png",
+      "kind": "local_commercial_screenshot",
+      "versioned": false,
+      "bytes": 255227,
+      "sha256": "9de1877d1c41fa5e1b4dc0b3ec8a6433dcf580da52f82ac96b82575aa4b36330"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-39-03-558Z-multiframe-after-restart.png",
+      "kind": "local_commercial_screenshot",
+      "versioned": false,
+      "bytes": 265090,
+      "sha256": "e1e43bb5c68ef4d3af478e373c4ebc598337b7077ea3b7b6fac2ad9d632a1b8d"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-stand-base.png",
+      "kind": "local_commercial_screenshot",
+      "versioned": false,
+      "bytes": 255916,
+      "sha256": "813687d640e114810505d26fee0ddf8f352dccf376ca912e939f2cdb5269a850"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-stand-edited.png",
+      "kind": "local_commercial_screenshot",
+      "versioned": false,
+      "bytes": 258055,
+      "sha256": "99ff8799d9c01626f2cb71d4a0ab71b59d36656794e90d68d18fee885ee9483d"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-emulator-base.png",
+      "kind": "local_commercial_screenshot",
+      "versioned": false,
+      "bytes": 267616,
+      "sha256": "6eb9d6fbb708bd19bcd9ba97aa2efff99e177d5b045d3fb018a941bad734c7a4"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-emulator-applied.png",
+      "kind": "local_commercial_screenshot",
+      "versioned": false,
+      "bytes": 278621,
+      "sha256": "c9937f537099b324e66aa87d066596bf1609d6c8d20878372721a706f18cef99"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-42-11-680Z-sonic-stand-reopened.png",
+      "kind": "local_commercial_screenshot",
+      "versioned": false,
+      "bytes": 266113,
+      "sha256": "c52a850572b624b044d15df4c48f5d8acb204a56eb5813da3efa736a91480e4f"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/work/contact-sheet.png",
+      "kind": "local_commercial_gallery",
+      "versioned": false,
+      "bytes": 12215,
+      "sha256": "0ccec3ed9364d7f70a3dbb85e97a2eef46681173a5616a69af3fa73fb0ab92ff"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02/backend-byor.json",
+      "kind": "sanitized_versioned_evidence",
+      "versioned": true,
+      "bytes": 4295,
+      "sha256": "35ea30b96884108429ad1c500da6036c3f1c3b338373f5fb26bc5298f3179e8e"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02/desktop-multiframe.json",
+      "kind": "sanitized_versioned_evidence",
+      "versioned": true,
+      "bytes": 33965,
+      "sha256": "fe7ee45c1f8d05c06c0cf47026cd0652d78f625ae5a4532beb09bc2deaab7e3f"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02/desktop-stand-regression.json",
+      "kind": "sanitized_versioned_evidence",
+      "versioned": true,
+      "bytes": 5433,
+      "sha256": "8a8fa914fdecb6f94a68aea31c914dc55411a292d6b69a49fcc94497190b3e16"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02/gates.json",
+      "kind": "sanitized_versioned_evidence",
+      "versioned": true,
+      "bytes": 3070,
+      "sha256": "039d2c307723f9ed3727831b57e84e1f44d00087f55fc34d0204eb9710a12444"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02/independent-oracle.json",
+      "kind": "sanitized_versioned_evidence",
+      "versioned": true,
+      "bytes": 2573,
+      "sha256": "d41659f4d99adb70546e21b31833a2d5ee44314166730575e73da33ba5e0822d"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02/redactions.json",
+      "kind": "sanitized_versioned_evidence",
+      "versioned": true,
+      "bytes": 278,
+      "sha256": "30c0c8181aa2c0afb1e13866ed1d5b6081fed2dcca63f9736898234c4984fe87"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02/xvfb-provenance.json",
+      "kind": "sanitized_versioned_evidence",
+      "versioned": true,
+      "bytes": 571,
+      "sha256": "e12b00b9398ac16bc502033d31df8c7dee9f9ce61e9450022c62fe3975ed6542"
+    },
+    {
+      "path": "scripts/qa/run-sonic-desktop-isolated.py",
+      "kind": "versioned_tested_source",
+      "versioned": true,
+      "bytes": 4578,
+      "sha256": "e3ba7c58c4479b7adfd6b739324cf84d6d020c7ee10309709431ae996b139471"
+    },
+    {
+      "path": "scripts/qa/sonic-multiframe-oracle.py",
+      "kind": "versioned_tested_source",
+      "versioned": true,
+      "bytes": 4968,
+      "sha256": "a0ea22221486bcd17735d77a12a314478353105f2c28631cdabed4bcfe1b79d6"
+    },
+    {
+      "path": "scripts/qa/sonic-frame-reference.mjs",
+      "kind": "versioned_tested_source",
+      "versioned": true,
+      "bytes": 2328,
+      "sha256": "f280f3f978e90d1ce977ff904fe26bd937646ebab7202e25afa08f8b2e7a3280"
+    },
+    {
+      "path": "scripts/qa/test-sonic-frame-reference.mjs",
+      "kind": "versioned_tested_source",
+      "versioned": true,
+      "bytes": 1188,
+      "sha256": "0ca91692124a204fc15abe55f1640c662e04b3016b1f52e55fc91e82fb0f7377"
+    },
+    {
+      "path": "scripts/e2e-tauri-build-run.mjs",
+      "kind": "versioned_tested_source",
+      "versioned": true,
+      "bytes": 1007088,
+      "sha256": "c18c6e6369efb19d65711cb5208e10c27fde81f13006136188c57434b0715b2a"
+    },
+    {
+      "path": "src-tauri/src/tools/reverse/decomp/sonic_sprite.rs",
+      "kind": "versioned_tested_source",
+      "versioned": true,
+      "bytes": 11338,
+      "sha256": "25da59bba9ff1668713ebe441fd61073c1ae5eb374d1c8222b947d837ca273e3"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/desktop-work-final/extract/c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb/edits/sonic1-sprite-md_rgb333_palette_word-21e54148e82ba3769c29911e4a698b6fa5a99c50bc4a2cd0a8a759e152eb3dce.bin",
+      "kind": "local_modified_rom",
+      "versioned": false,
+      "bytes": 531577,
+      "sha256": "21e54148e82ba3769c29911e4a698b6fa5a99c50bc4a2cd0a8a759e152eb3dce"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-39-03-558Z-multiframe/applied.bin",
+      "kind": "local_bps_applied_rom",
+      "versioned": false,
+      "bytes": 531577,
+      "sha256": "21e54148e82ba3769c29911e4a698b6fa5a99c50bc4a2cd0a8a759e152eb3dce"
+    },
+    {
+      "path": "src-tauri/target-test/validation/inspection-2026-10-02T20-39-03-558Z-multiframe/multiframe.bps",
+      "kind": "local_exported_bps",
+      "versioned": false,
+      "bytes": 39,
+      "sha256": "3ba1566fc26836e13eb123b5c2abdfe13a2ebb79b4b474d713ff5193a3e96089"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/desktop-stand-regression/extract/c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb/edits/sonic1-sprite-md_4bpp_tile_nibbles-7b3801f791264b56f68bcecdfa524ac1664b227933cdea46dbcdbd4edbf6dabf.bin",
+      "kind": "local_modified_rom",
+      "versioned": false,
+      "bytes": 531577,
+      "sha256": "7b3801f791264b56f68bcecdfa524ac1664b227933cdea46dbcdbd4edbf6dabf"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic1-pilot-2026-10-02T20-42-36-997Z/sonic1-stand-tiles-applied.bin",
+      "kind": "local_bps_applied_rom",
+      "versioned": false,
+      "bytes": 531577,
+      "sha256": "7b3801f791264b56f68bcecdfa524ac1664b227933cdea46dbcdbd4edbf6dabf"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic1-pilot-2026-10-02T20-42-36-997Z/sonic1-stand-tiles.bps",
+      "kind": "local_exported_bps",
+      "versioned": false,
+      "bytes": 92,
+      "sha256": "b004a5f048f13d5a4892f827562fa616dbb33041a14d845a55003248944c5625"
+    }
+  ]
+}

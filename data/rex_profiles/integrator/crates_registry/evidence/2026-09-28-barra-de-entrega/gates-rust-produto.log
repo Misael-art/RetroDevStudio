@@ -1,0 +1,6 @@
+# gates do produto (cargo a partir de src-tauri, target-test canônico) — 2026-09-28T03:12:53Z
+## cargo fmt -- --check
+RC_FMT=0
+## cargo clippy -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.38s
+RC_CLIPPY=0

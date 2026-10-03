@@ -1,0 +1,5 @@
+plain 256 words | dicionário 195780 words | janela 16384 | cap 128 candidatos compartilhados
+   pos   word   ideal      real         mesclado     ganho
+   200  0x0000  (3, 156)    (2, 1135)    (3, 156)     real não vê match aceitável (orçamento esgotado)
+   222  0x0000  (2, 22)     (2, 1157)    (2, 22)      real não vê match aceitável (orçamento esgotado)
+posições com candidatos: 125 | ganho potencial total: 0 words (0 bytes) — antes de lazy, chunking de literais e custo do terminador

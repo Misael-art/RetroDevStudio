@@ -1,0 +1,1341 @@
+{
+  "scenario": "sonic-multiframe",
+  "binary_sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0",
+  "base_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "steps": [
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/stand",
+      "pixels": {
+        "width": 32,
+        "height": 40,
+        "pixelsSha256": "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 96,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 98,
+          "right": 1507.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1459,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 32
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 96
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1459,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/wait-1",
+      "pixels": {
+        "width": 32,
+        "height": 40,
+        "pixelsSha256": "b3227f2adb99a4b9d450d482b70e57d79979d84d4cebde0de3a386ce7d5b51b5"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 96,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 98,
+          "right": 1507.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1459,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 32
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 96
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1459,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/look-up",
+      "pixels": {
+        "width": 32,
+        "height": 40,
+        "pixelsSha256": "3c065b5884848e8513665810ca1d34325b75afab77654b6d0ad990665c4d13cd"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 96,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 98,
+          "right": 1507.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1459,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 32
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 96
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1459,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-1",
+      "pixels": {
+        "width": 40,
+        "height": 40,
+        "pixelsSha256": "6e11229e0f62da227a4a004db38fe7b19dc794e08e05e651435042b2fe8a0338"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 120,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 122,
+          "right": 1531.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1471,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 40
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 120
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1471,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-2",
+      "pixels": {
+        "width": 40,
+        "height": 40,
+        "pixelsSha256": "c3b131207e904cf7b45d4d361ce4b8321d01db5369d4511c2a5a976ea553c42a"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 120,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 122,
+          "right": 1531.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1471,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 40
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 120
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1471,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-3",
+      "pixels": {
+        "width": 24,
+        "height": 40,
+        "pixelsSha256": "f13373247f150e2ce40b182732e0ac4a8c2193fbc86d889a0d56f66a950bb7a0"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 72,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 74,
+          "right": 1483.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1447,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 24
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 72
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1447,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1482.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1482.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-4",
+      "pixels": {
+        "width": 40,
+        "height": 40,
+        "pixelsSha256": "5809c688fb2456b297205ec6cdcf7aa5f472329a01b7a88fbde062771f312700"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 120,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 122,
+          "right": 1531.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1471,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 40
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 120
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1471,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-5",
+      "pixels": {
+        "width": 32,
+        "height": 40,
+        "pixelsSha256": "13a8bf3079d735e38137d9483de39da67d0c0ca62f20d716ec6328fab35b03d4"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 96,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 98,
+          "right": 1507.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1459,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 32
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 96
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1459,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-6",
+      "pixels": {
+        "width": 40,
+        "height": 40,
+        "pixelsSha256": "699f8e5e9c8c772d948ba6f995b9292f1f84d5f023fbc3bc88a64a938868cdc9"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 120,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 122,
+          "right": 1531.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1471,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 40
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 120
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1471,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/run-1",
+      "pixels": {
+        "width": 32,
+        "height": 40,
+        "pixelsSha256": "fa974afe26da1dad14ec178b0d3c940927dfea4161ea7978ff7db7b87bba09ea"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 96,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 98,
+          "right": 1507.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1459,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 32
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 96
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1459,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1506.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-1",
+      "pixels": {
+        "width": 40,
+        "height": 40,
+        "pixelsSha256": "6e11229e0f62da227a4a004db38fe7b19dc794e08e05e651435042b2fe8a0338"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 120,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 122,
+          "right": 1531.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1471,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 40
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 120
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1471,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "native_paint",
+      "offset": 139582,
+      "index": 15,
+      "shared_confirmation_required": true
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-1",
+      "pixels": {
+        "width": 40,
+        "height": 40,
+        "pixelsSha256": "cd2f5cd5555a1bd2a720a957a4c6218bd724b1f334ef7908308fd5f8466bf4d1"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 120,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 122,
+          "right": 1531.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1471,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 40
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 120
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1471,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "bps_export_apply",
+      "rom_sha256": "21e54148e82ba3769c29911e4a698b6fa5a99c50bc4a2cd0a8a759e152eb3dce",
+      "patch_sha256": "3ba1566fc26836e13eb123b5c2abdfe13a2ebb79b4b474d713ff5193a3e96089"
+    },
+    {
+      "step": "independent_preview",
+      "frameId": "sonic1_sonic/walk-1",
+      "pixels": {
+        "width": 40,
+        "height": 40,
+        "pixelsSha256": "cd2f5cd5555a1bd2a720a957a4c6218bd724b1f334ef7908308fd5f8466bf4d1"
+      },
+      "layout": {
+        "css": {
+          "height": 120,
+          "width": 120,
+          "boxSizing": "content-box",
+          "imageRendering": "pixelated"
+        },
+        "rect": {
+          "x": 1409.84375,
+          "width": 122,
+          "right": 1531.84375,
+          "height": 122,
+          "y": 691.984375,
+          "bottom": 813.984375
+        },
+        "topTestId": "inspection-sprite-frame-image",
+        "pixelated": true,
+        "integerScale": true,
+        "topTag": "IMG",
+        "point": {
+          "x": 1471,
+          "y": 753
+        },
+        "fullyVisible": true,
+        "naturalSize": {
+          "height": 40,
+          "width": 40
+        },
+        "unobstructed": true,
+        "content": {
+          "height": 120,
+          "width": 120
+        },
+        "borders": {
+          "left": 1,
+          "bottom": 1,
+          "right": 1,
+          "top": 1
+        },
+        "stageOverflowX": "auto",
+        "exactContentDimensions": true,
+        "hitTests": [
+          {
+            "x": 1471,
+            "y": 753,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 693.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1411.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          },
+          {
+            "x": 1530.34375,
+            "y": 812.484375,
+            "image": true,
+            "testId": "inspection-sprite-frame-image",
+            "tag": "IMG"
+          }
+        ],
+        "stageRect": {
+          "x": 1400.84375,
+          "height": 140,
+          "width": 493.15625,
+          "y": 682.984375
+        },
+        "metadataRect": {
+          "x": 1400.84375,
+          "height": 197,
+          "width": 493.15625,
+          "y": 834.984375
+        },
+        "metadataBelow": true
+      }
+    },
+    {
+      "step": "restart_reopen",
+      "frame_id": "sonic1_sonic/walk-1",
+      "base_unchanged": true
+    }
+  ],
+  "runtime_effect": "not measured in this scenario",
+  "screenshots": [
+    "/home/misael/Projects/REX-SONIC-MULTIFRAME-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-02T20-39-03-558Z-multiframe-before.png",
+    "/home/misael/Projects/REX-SONIC-MULTIFRAME-2026-10-02/src-tauri/target-test/validation/inspection-2026-10-02T20-39-03-558Z-multiframe-after-restart.png"
+  ]
+}

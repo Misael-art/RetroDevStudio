@@ -4,16 +4,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ReverseWorkspace from "./ReverseWorkspace";
 import { useEditorStore } from "../../core/store/editorStore";
+import { GRAFO_REAL, LIMITACIONES, respostaRecuperar } from "../../test/fixtures/rexGameplay";
+import { construirRegraRecuperada, type RegraRecuperada } from "../../core/nodegraph/rexGameplayScene";
+import type { Entity, Scene } from "../../core/ipc/sceneService";
 
 const mocks = vi.hoisted(() => ({
   reverseExplorerRead: vi.fn(),
   romAnalyzeWithEmulatorTrace: vi.fn(),
   romDisassemble: vi.fn(),
   romSaveAnnotations: vi.fn(),
+  rexGameplayRecover: vi.fn(),
+  rexGameplayScan: vi.fn(),
+  persistActiveScene: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
+}));
+
+vi.mock("../../core/scenePersistence", () => ({
+  persistActiveScene: mocks.persistActiveScene,
 }));
 
 vi.mock("../../core/ipc/toolsService", () => ({
@@ -21,6 +31,10 @@ vi.mock("../../core/ipc/toolsService", () => ({
   romAnalyzeWithEmulatorTrace: mocks.romAnalyzeWithEmulatorTrace,
   romDisassemble: mocks.romDisassemble,
   romSaveAnnotations: mocks.romSaveAnnotations,
+  rexGameplayRecover: mocks.rexGameplayRecover,
+  rexGameplayScan: mocks.rexGameplayScan,
+  rexGameplayEditThreshold: vi.fn(),
+  rexGameplayRebuild: vi.fn(),
 }));
 
 function flush() {
@@ -370,5 +384,125 @@ describe("ReverseWorkspace", () => {
     expect(edgeCards[0]?.textContent).toContain("000300 → 000400");
     expect(edgeCards[0]?.textContent).toContain("Trace");
     expect(edgeCards[1]?.textContent).toContain("000200 → 000600");
+  });
+
+  describe("regra de gameplay na escena", () => {
+    const ROM = "F:/roms/goal.md";
+
+    function regraDaROM(): RegraRecuperada {
+      const r = construirRegraRecuperada(respostaRecuperar(), ROM);
+      if (!r.ok) throw new Error(`fixture invalida: ${r.motivo}`);
+      return r.regra;
+    }
+
+    function escenaCon(bloque: RegraRecuperada | null): Scene {
+      const entidade: Entity = {
+        entity_id: "player",
+        transform: { x: 0, y: 0 },
+        components: { logic: bloque ? { recovered_rule: bloque } : {} },
+      };
+      return {
+        scene_id: "scene_goal",
+        entities: [entidade],
+        background_layers: [],
+        palettes: [],
+      };
+    }
+
+    async function abrirBarraECode() {
+      const romInput = Array.from(container.querySelectorAll("input")).find((element) =>
+        element.getAttribute("placeholder")?.includes("/roms/game.md")
+      );
+      if (!(romInput instanceof HTMLInputElement)) throw new Error("sen barra de ROM");
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(romInput, ROM);
+        romInput.dispatchEvent(new Event("input", { bubbles: true }));
+        await flush();
+      });
+      await act(async () => {
+        findButton(container, "Analisar ROM").click();
+        await flush();
+        await flush();
+      });
+      await act(async () => {
+        findButton(container, "Code").click();
+        await flush();
+        await flush();
+      });
+    }
+
+    function porTestId(testid: string): HTMLElement {
+      const element = container.querySelector(`[data-testid="${testid}"]`) as HTMLElement | null;
+      if (!element) throw new Error(`sen elemento: ${testid}`);
+      return element;
+    }
+
+    it("garda o bloque recuperado na entidade e escribe a escena", async () => {
+      await act(async () => {
+        useEditorStore.setState({
+          activeProjectDir: "F:/Projects/proxecto",
+          activeScene: escenaCon(null),
+          activeSceneSource: escenaCon(null),
+          selectedEntityId: "player",
+        });
+        await flush();
+      });
+      mocks.rexGameplayRecover.mockResolvedValue(respostaRecuperar());
+      mocks.persistActiveScene.mockResolvedValue(true);
+
+      await abrirBarraECode();
+      await act(async () => {
+        (porTestId("rex-gameplay-recover") as HTMLButtonElement).click();
+        await flush();
+        await flush();
+      });
+      expect(porTestId("rex-gameplay-source").textContent).toMatch(/ROM/);
+
+      await act(async () => {
+        (porTestId("rex-gameplay-save-scene") as HTMLButtonElement).click();
+        await flush();
+        await flush();
+      });
+
+      expect(mocks.persistActiveScene).toHaveBeenCalledWith("F:/Projects/proxecto", expect.any(String));
+      expect(porTestId("rex-gameplay-saved-state").textContent).toContain("player");
+      const gardado = useEditorStore.getState().activeScene?.entities[0]?.components.logic
+        ?.recovered_rule;
+      expect(gardado).toEqual(regraDaROM());
+      expect(gardado?.graph_json).toBe(GRAFO_REAL);
+      expect(gardado?.limitations).toEqual(LIMITACIONES);
+    });
+
+    it("reabre desde a escena sen chamar ao backend, co limiar e as orixes gardadas", async () => {
+      const bloque = regraDaROM();
+      await act(async () => {
+        useEditorStore.setState({
+          activeProjectDir: "F:/Projects/proxecto",
+          activeScene: escenaCon(bloque),
+          activeSceneSource: escenaCon(bloque),
+          selectedEntityId: "player",
+        });
+        await flush();
+      });
+
+      await abrirBarraECode();
+
+      expect(mocks.rexGameplayRecover).not.toHaveBeenCalled();
+      expect(porTestId("rex-gameplay-source").textContent).toMatch(/escena/);
+      expect(porTestId("rex-gameplay-identity").textContent).toMatch(/non revalidada/);
+      expect(porTestId("rex-gameplay-rule-text").textContent).toContain("compar");
+      expect((porTestId("rex-gameplay-threshold") as HTMLInputElement).value).toBe(
+        String(bloque.threshold_current)
+      );
+      // As orixes na ROM sobreviven ao round-trip da escena: cada no mostra o
+      // seu rango, bytes e mnemónico tal como os devolveu o crate.
+      const nos = Array.from(
+        container.querySelectorAll("[data-testid^='rex-gameplay-node-']")
+      ).map((element) => element.textContent ?? "");
+      expect(nos.length).toBeGreaterThan(0);
+      expect(nos.join(" ")).toContain("0x000946..0x00094A");
+      expect(nos.join(" ")).toContain("0x000CAE");
+    });
   });
 });

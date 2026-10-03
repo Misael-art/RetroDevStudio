@@ -1,0 +1,44 @@
+# ETAPA 3 — capa de interface: projetor do grafo recuperado + validadores de formulario
+# RetroDev Studio · branch codex/rex-integrator-crates-registry · base 617ea15 (ETAPA 2)
+# Executado en 2026-09-28 (UTC-03) no posto de traballo canónico.
+
+Arquivos desta entrega:
+- src/core/nodegraph/rexGameplayGraph.ts         (projetor + validadores, novos)
+- src/core/nodegraph/rexGameplayGraph.test.ts    (14 probas, escrita antes da implementación)
+- src/core/nodegraph/nodeTypes.ts                (+7 NodeType do perfil, union e isNodeType)
+- src/core/nodegraph/nodeDefinitions.ts          (+7 NODE_DEFS con portos exec/true/false)
+- src/core/nodegraph/nodeCatalog.ts              (+7 entradas na palette "ROM recuperada")
+- src/core/ipc/toolsService.ts                   (+DTOs e wrappers rex_gameplay_{scan,recover,edit_threshold,rebuild})
+- src/components/tools/RexGameplayRulePanel.tsx  (painel novo, montado en ReverseWorkspace vista "code")
+
+## Secuencia real (TDD, na orde en que aconteceu)
+
+### 1a. RED do projetor — esperado escrito antes de existir a implementación
+`rexGameplayGraph.test.ts` (7 probas) falei por import non resolvido, VITEST_RC=1.
+Saída completa en `red-proxector-ui.log`.
+
+### 1b. GREEN do projetor (7/7)
+Despois de engadir os 7 tipos ao modelo do editor e escribir o projetor.
+Unha espera axustouse entón: a liña escalar de orixe inclúe tamén os bytes
+(`0x000946..0x00094A 08000003 BTST #3,D0`); o asserted segue sendo exacto.
+
+### 1c. RED dos validadores de formulario (funcións novas, esperadas primeiro)
+$ npx vitest run src/core/nodegraph/rexGameplayGraph.test.ts
+Tests  6 failed | 7 passed (13)   VITEST_RC=1
+Fallos: `parseHexOffsets is not a function`, `validateGameplayRecoverForm is not a function`,
+`validateGameplayThreshold is not a function` — é dicir, RECUSANSE porque aínda non existen,
+non por erros de sintaxe nin de fixture.
+
+### 1d. GREEN con 14/14 (inclúe a proba de round-trip do editor)
+Ver `green-capa-ui.log` (suíte completa, tsc, lint, check:tree) e `mutaciones-capa-ui.log`.
+
+## Limitación honesta desta entrega
+O painel e a súa renderización React NON teñen proba unitaria de compoñente:
+este repo non dispón de @testing-library/react e a convención é probar a
+renderización no E2E real (ETAPA 6). O que si esta probado aqui son as
+funcións puras que o panel usa para decidir que se mostra e que se recusa.
+# CORRECCION (ETAPA 4, 2026-09-28): a primeira afirmacion e falsa. O repo si
+# renderiza compoñentes en probas (vitest + jsdom + createRoot/act; ver
+# ReverseWorkspace.test.tsx). A ETAPA 4 engadiu 9 render-probas do painel e 2
+# da ponte coa escena; ver etapa4-gardar-reabrir.log e a correccion en
+# green-capa-ui.log.

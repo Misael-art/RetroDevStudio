@@ -1,0 +1,18 @@
+warning: duplicated attribute
+    --> src/compiler/ast_generator.rs:3479:5
+     |
+3479 |     #[test]
+     |     ^^^^^^^
+     |
+     = note: `#[warn(duplicate_macro_attributes)]` on by default
+
+warning: `retro-dev-studio` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.93s
+     Running unittests src/lib.rs (target-test/debug/deps/app_lib-e369975b16dd563a)
+
+running 1 test
+test tools::reverse::decomp::inspection::tests::sonic_cadence_runtime_oracle_measures_effective_durations_on_real_core has been running for over 60 seconds
+test tools::reverse::decomp::inspection::tests::sonic_cadence_runtime_oracle_measures_effective_durations_on_real_core ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 923 filtered out; finished in 406.55s
+

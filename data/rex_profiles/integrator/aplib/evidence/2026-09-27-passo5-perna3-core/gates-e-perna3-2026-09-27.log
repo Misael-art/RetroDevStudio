@@ -1,0 +1,18 @@
+### data: 2026-09-27T03:15:16-03:00 | HEAD: d43fdde | árvore: 9 arquivos alterados
+### cargo fmt --check
+rc=0
+### cargo test --lib rex05_hamoopig_aplib -- --ignored --nocapture
+REX HAMOOPIG aPLib edit: 238 pixels alterados em 119 frames, primeiro frame 59, coordenadas [[212, 200], [284, 128]] | original 558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9 -> modificada 69389ec2b400220c7a069e4c36326ca3c26d81e85ff0ab81bf798dc9ae4038ac | run rex05-hamoopig-aplib-edit-1790489737 (corpus sha256:558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9)
+test core::project_mgr::tests::rex05_hamoopig_aplib_edit_pelo_produto_executa_no_core ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 766 filtered out; finished in 19.08s
+
+### cargo clippy --lib -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s
+rc=0
+### cargo test --lib (suite completa)
+
+test result: ok. 706 passed; 0 failed; 61 ignored; 0 measured; 0 filtered out; finished in 46.51s
+
+rc=0
+### FIM 2026-09-27T03:16:25-03:00

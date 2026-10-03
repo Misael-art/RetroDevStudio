@@ -1,0 +1,15 @@
+{
+  "dst_total": 4864,
+  "cases": [
+    {
+      "id": "i09_corpus_orig_c8cc8",
+      "dict_len": 4096,
+      "dict_sha256": "91c6c0d0ab2049940e7d93949863d1672f3f0c5d17515716591e84f97062ec62",
+      "dict_committed": true,
+      "stream_len": 144,
+      "plain_len": 288,
+      "stride": 4864,
+      "dst_offset": 0
+    }
+  ]
+}

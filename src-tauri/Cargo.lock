@@ -2875,6 +2875,10 @@ dependencies = [
  "base64 0.22.1",
  "image",
  "libloading 0.8.9",
+ "rex-addressing",
+ "rex-gameplay",
+ "rex-kosinski",
+ "rex-mugen",
  "serde",
  "serde_json",
  "sevenz-rust2",
@@ -2883,6 +2887,22 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
 ]
+
+[[package]]
+name = "rex-addressing"
+version = "0.1.0"
+
+[[package]]
+name = "rex-gameplay"
+version = "0.1.0"
+
+[[package]]
+name = "rex-kosinski"
+version = "0.1.0"
+
+[[package]]
+name = "rex-mugen"
+version = "0.1.0"
 
 [[package]]
 name = "rfd"

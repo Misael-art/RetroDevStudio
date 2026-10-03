@@ -1,0 +1,15 @@
+PASSO 1 — linha de base (caminho durável, sem /tmp)
+data: 2026-09-26T13:28:08Z
+HEAD: 47f2c8911a579ae05901d206a596a2e53981766c
+fixture ROM: /home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/rex-lz4w-fixture/project/out/rom.bin
+
+=== [1/3] sintéticos: cargo test --lib ===
+test tools::reverse::tests::analyze_rom_populates_all_extractors_for_snes ... ok
+test tools::photo2sgdk::tests::blackheart_gif_profile_is_processed_with_frames_and_palette ... ok
+test tools::reverse::decomp::holdout::tests::holdout_measurements_are_deterministic ... ok
+test tools::photo2sgdk::tests::kenmasters_uses_corner_background_heuristic_for_transparency ... ok
+test tools::photo2sgdk::tests::earthquake_large_recommends_downscale_and_meta_sprite_handling ... ok
+
+test result: ok. 669 passed; 0 failed; 51 ignored; 0 measured; 0 filtered out; finished in 55.85s
+
+rc_sintetico=0

@@ -1,0 +1,10 @@
+# inventario-fontes.tsv — selección acoutada da MISSAO A (Fase 1)
+# Formato: papel <TAB> sha256-do-contenedor <TAB> camino-relativo-desde-$REX_CORPUS_A
+# O sha256 comprébase ANTES de calquera lectura; diverxencia = RECUSA, nunca extracción.
+# Ningún byte comercial se versiona: aquí só hai hashes, tamaños e nomes.
+desenvolvimento	c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb	genesis/Sonic the Hedgehog (USA, Europe).bin
+desenvolvimento	4384a0994f81c93791f470e65a303fff47b5ddb3f06c99f04757f5a1346dcde2	genesis/Sonic the Hedgehog (USA, Europe) (Translated PtBr).zip
+desenvolvimento	f6e9d1e07138ac0e508f54cd771c4a98b9fff711bf04e48bf29b38ca533ea833	genesis/Altered Beast (USA, Europe) (Translated PtBr).zip
+desenvolvimento	123440e91aa8b03deae86c256009eab36ca5525eedbd9d7f1a73219931a42a13	genesis/Golden Axe (World) (Translated PtBr).zip
+desenvolvimento	26c8e48c0e5b6b8bc22fdedbfad7a4a306207ddb47bd853bf7ed51918f7d1c58	genesis/Rocket Knight Adventures (USA) (Translated PtBr).zip
+reservada	fbb1f3694132fb85cfd1ccc2d39642da0b0306c523d834fadda792ea3ab68efc	genesis/Streets of Rage (World) (Translated PtBr).zip

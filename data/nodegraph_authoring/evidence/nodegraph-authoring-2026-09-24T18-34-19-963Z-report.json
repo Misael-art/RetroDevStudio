@@ -1,0 +1,1100 @@
+{
+  "generatedAt": "2026-09-24T18:35:42.935Z",
+  "scenario": "nodegraph-authoring",
+  "testedApplication": {
+    "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "12dc97d9b007062dad64a92ac3e2f521ce6f6a50b1b147108818971839183ac0"
+  },
+  "artifacts": [
+    {
+      "label": "grafo como entregue pelo template (enquadrado)",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-01-before-organize.png"
+    },
+    {
+      "label": "pulo localizado: botao A = tecla Z, impulso e som",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-02-jump-located.png"
+    },
+    {
+      "label": "grafo organizado pelas conexoes (enquadrado)",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-03-after-organize.png"
+    },
+    {
+      "label": "comportamento Pulo agrupado e recolhido",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-04-grouped-collapsed.png"
+    },
+    {
+      "label": "NodeGraph em 1366x768",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-05-layout-1366x768.png"
+    },
+    {
+      "label": "NodeGraph com escala 125%",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-06-layout-scaled.png"
+    },
+    {
+      "label": "grafo reaberto: organizado, agrupado e editado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-07-reopened.png"
+    },
+    {
+      "label": "linha do tempo do jogo por teclado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-play-timeline.json"
+    },
+    {
+      "label": "jogo apos vencer pelo teclado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-08-victory.png"
+    },
+    {
+      "label": "grafo maior organizado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-09-larger-graph.png"
+    }
+  ],
+  "steps": [
+    {
+      "id": "create_project",
+      "status": "passed",
+      "at": "2026-09-24T18:34:26.193Z",
+      "projectDir": "/home/misael/Documents/RetroDevProjects/NodeGraph_1790274863465",
+      "shippedNodes": 34,
+      "shippedEdges": 30
+    },
+    {
+      "id": "graph_before_organize",
+      "status": "passed",
+      "at": "2026-09-24T18:34:29.977Z",
+      "geometry": {
+        "overlaps": [
+          [
+            "start",
+            "music"
+          ],
+          [
+            "start",
+            "right"
+          ],
+          [
+            "music",
+            "update_right"
+          ],
+          [
+            "music",
+            "right"
+          ],
+          [
+            "music",
+            "passage_collision"
+          ],
+          [
+            "music",
+            "move_right"
+          ],
+          [
+            "update_right",
+            "right"
+          ],
+          [
+            "update_right",
+            "update_left"
+          ],
+          [
+            "update_right",
+            "left"
+          ],
+          [
+            "right",
+            "passage_collision"
+          ],
+          [
+            "right",
+            "move_right"
+          ],
+          [
+            "right",
+            "update_left"
+          ],
+          [
+            "right",
+            "left"
+          ],
+          [
+            "right",
+            "passage_collision_left"
+          ],
+          [
+            "passage_collision",
+            "passage_open_value"
+          ],
+          [
+            "passage_collision",
+            "move_right"
+          ],
+          [
+            "passage_collision",
+            "left"
+          ],
+          [
+            "passage_collision",
+            "passage_collision_left"
+          ],
+          [
+            "passage_collision",
+            "passage_open_left_value"
+          ],
+          [
+            "passage_collision",
+            "passage_open_left"
+          ],
+          [
+            "passage_open_value",
+            "passage_open"
+          ],
+          [
+            "passage_open_value",
+            "move_right"
+          ],
+          [
+            "passage_open",
+            "passage_open_left"
+          ],
+          [
+            "passage_open",
+            "move_left"
+          ],
+          [
+            "move_right",
+            "left"
+          ],
+          [
+            "move_right",
+            "passage_collision_left"
+          ],
+          [
+            "move_right",
+            "passage_open_left_value"
+          ],
+          [
+            "move_right",
+            "passage_open_left"
+          ],
+          [
+            "update_left",
+            "left"
+          ],
+          [
+            "update_left",
+            "update_jump"
+          ],
+          [
+            "update_left",
+            "jump"
+          ],
+          [
+            "left",
+            "passage_collision_left"
+          ],
+          [
+            "left",
+            "update_jump"
+          ],
+          [
+            "left",
+            "jump"
+          ],
+          [
+            "left",
+            "jump_velocity"
+          ],
+          [
+            "passage_collision_left",
+            "passage_open_left_value"
+          ],
+          [
+            "passage_collision_left",
+            "passage_open_left"
+          ],
+          [
+            "passage_collision_left",
+            "jump"
+          ],
+          [
+            "passage_collision_left",
+            "jump_velocity"
+          ],
+          [
+            "passage_collision_left",
+            "jump_sound"
+          ],
+          [
+            "passage_open_left_value",
+            "passage_open_left"
+          ],
+          [
+            "passage_open_left_value",
+            "move_left"
+          ],
+          [
+            "passage_open_left_value",
+            "jump_velocity"
+          ],
+          [
+            "passage_open_left_value",
+            "jump_sound"
+          ],
+          [
+            "passage_open_left",
+            "move_left"
+          ],
+          [
+            "passage_open_left",
+            "jump_velocity"
+          ],
+          [
+            "passage_open_left",
+            "jump_sound"
+          ],
+          [
+            "move_left",
+            "jump_sound"
+          ],
+          [
+            "update_jump",
+            "jump"
+          ],
+          [
+            "update_jump",
+            "update_goal"
+          ],
+          [
+            "update_jump",
+            "goal_overlap"
+          ],
+          [
+            "jump",
+            "jump_velocity"
+          ],
+          [
+            "jump",
+            "update_goal"
+          ],
+          [
+            "jump",
+            "goal_overlap"
+          ],
+          [
+            "jump_velocity",
+            "jump_sound"
+          ],
+          [
+            "jump_velocity",
+            "goal_overlap"
+          ],
+          [
+            "jump_velocity",
+            "goal_state_get"
+          ],
+          [
+            "jump_velocity",
+            "goal_not_reached"
+          ],
+          [
+            "jump_sound",
+            "goal_not_reached"
+          ],
+          [
+            "jump_sound",
+            "goal_sound"
+          ],
+          [
+            "update_score",
+            "score_input"
+          ],
+          [
+            "update_score",
+            "update_goal"
+          ],
+          [
+            "update_score",
+            "goal_overlap"
+          ],
+          [
+            "score_input",
+            "score_get"
+          ],
+          [
+            "score_input",
+            "update_goal"
+          ],
+          [
+            "score_input",
+            "goal_overlap"
+          ],
+          [
+            "score_input",
+            "goal_state_get"
+          ],
+          [
+            "score_get",
+            "score_add"
+          ],
+          [
+            "score_get",
+            "goal_state_get"
+          ],
+          [
+            "score_add",
+            "score_set"
+          ],
+          [
+            "score_add",
+            "goal_state_get"
+          ],
+          [
+            "score_add",
+            "goal_not_reached"
+          ],
+          [
+            "score_set",
+            "score_threshold_get"
+          ],
+          [
+            "score_set",
+            "score_threshold"
+          ],
+          [
+            "score_set",
+            "goal_not_reached"
+          ],
+          [
+            "score_set",
+            "goal_sound"
+          ],
+          [
+            "score_set",
+            "mark_goal"
+          ],
+          [
+            "score_threshold_get",
+            "score_threshold"
+          ],
+          [
+            "score_threshold_get",
+            "open_goal"
+          ],
+          [
+            "score_threshold_get",
+            "close_goal"
+          ],
+          [
+            "score_threshold",
+            "open_goal"
+          ],
+          [
+            "score_threshold",
+            "close_goal"
+          ],
+          [
+            "score_threshold",
+            "goal_sound"
+          ],
+          [
+            "score_threshold",
+            "mark_goal"
+          ],
+          [
+            "open_goal",
+            "hide_goal"
+          ],
+          [
+            "open_goal",
+            "close_goal"
+          ],
+          [
+            "open_goal",
+            "mark_goal"
+          ],
+          [
+            "hide_goal",
+            "close_goal"
+          ],
+          [
+            "update_goal",
+            "goal_overlap"
+          ],
+          [
+            "goal_overlap",
+            "goal_state_get"
+          ],
+          [
+            "goal_state_get",
+            "goal_not_reached"
+          ],
+          [
+            "goal_not_reached",
+            "goal_sound"
+          ],
+          [
+            "goal_sound",
+            "mark_goal"
+          ]
+        ],
+        "skippedOffscreen": 0,
+        "zoom": 0.849,
+        "pageScale": 1,
+        "window": [
+          1920,
+          1080
+        ],
+        "worst": {
+          "wire": [
+            819.5,
+            229.1
+          ],
+          "shellScroll": [
+            0,
+            0
+          ],
+          "end": "from",
+          "port": [
+            819.4548950195312,
+            229.04522705078125
+          ],
+          "card": {
+            "x": "720",
+            "left": "635.238671px",
+            "y": "80",
+            "h": 233,
+            "top": "139.915408px"
+          },
+          "edge": "nodegraph-edge-right_open",
+          "deviation": 0.0709544588394941
+        },
+        "portEndsChecked": 60,
+        "maxDeviation": 0.0709544588394941,
+        "cards": 34
+      }
+    },
+    {
+      "id": "locate_jump",
+      "status": "passed",
+      "at": "2026-09-24T18:34:31.051Z",
+      "jumpRuleText": "Quando A cada frame · Se tecla A (Z) pressionadaBotao A · tecla ZBotao B · tecla XBotao C · tecla CStart · tecla EnterDirecional ↑ · tecla Seta ↑Direcional ↓ · tecla Seta ↓Direcional ← · tecla Seta ←Direcional → · tecla Seta → · Fazer impulso em player (0, -64)Velocidade XVelocidade Y, tocar som jumpgoal_soundjumpvictory",
+      "jumpUnderstood": {
+        "action": "Ao apertar Botao A (tecla Z)",
+        "button": "Botao AtecladoZ",
+        "velocity": "Impulsionar player para cima (vy -64)",
+        "sound": "Tocar som \"jump\"",
+        "details": "id: jumptipo: input_pressedrotulo: Press ApadJOY_1"
+      }
+    },
+    {
+      "id": "rebind_jump",
+      "status": "passed",
+      "at": "2026-09-24T18:34:31.222Z",
+      "action": "Ao apertar Botao B (tecla X)",
+      "rule": "BUTTON_B"
+    },
+    {
+      "id": "edit_one_passage",
+      "status": "passed",
+      "at": "2026-09-24T18:34:32.136Z",
+      "main": "12",
+      "second": "60",
+      "card": "12"
+    },
+    {
+      "id": "bind_sound",
+      "status": "passed",
+      "at": "2026-09-24T18:34:32.278Z",
+      "rule": "victory",
+      "panel": "victory",
+      "issue": null
+    },
+    {
+      "id": "organize_undo_redo",
+      "status": "passed",
+      "at": "2026-09-24T18:34:34.186Z",
+      "layoutReport": {
+        "testid": "nodegraph-layout-report",
+        "moved": "45",
+        "ms": "13",
+        "overlaps": "0",
+        "conflicts": "0"
+      },
+      "organizeUiMs": 164,
+      "before": {
+        "overlaps": 93
+      },
+      "organized": {
+        "overlaps": [],
+        "skippedOffscreen": 14,
+        "zoom": 0.35,
+        "pageScale": 1,
+        "window": [
+          1920,
+          1080
+        ],
+        "worst": {
+          "wire": [
+            547.9,
+            310.4
+          ],
+          "shellScroll": [
+            0,
+            0
+          ],
+          "end": "from",
+          "port": [
+            547.9499816894531,
+            310.34375
+          ],
+          "card": {
+            "x": "1280",
+            "left": "472px",
+            "y": "576",
+            "h": 173,
+            "top": "273.6px"
+          },
+          "edge": "nodegraph-edge-edge_passage_2_open_get_2_value_passage_2_open_check_3_6",
+          "deviation": 0.07524780249673968
+        },
+        "portEndsChecked": 72,
+        "maxDeviation": 0.07524780249673968,
+        "cards": 46
+      },
+      "edges": 43,
+      "stillBound": {
+        "button": "BUTTON_B",
+        "threshold": "12",
+        "sound": "victory"
+      }
+    },
+    {
+      "id": "group_behavior",
+      "status": "passed",
+      "at": "2026-09-24T18:34:36.360Z",
+      "groupId": "group_mufvfq0n",
+      "selection": "4 selecionado(s) · 35%"
+    },
+    {
+      "id": "layout_sizes_scales",
+      "status": "passed",
+      "at": "2026-09-24T18:34:44.056Z",
+      "1920x1080": {
+        "reach": [
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-undo",
+            "hit": "nodegraph-undo"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-redo",
+            "hit": "nodegraph-redo"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-organize-all",
+            "hit": "nodegraph-organize-all"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-organize-selection",
+            "hit": "nodegraph-organize-selection"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-fit-view",
+            "hit": "nodegraph-fit-view"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-select-behavior",
+            "hit": "nodegraph-select-behavior"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-pin-selection",
+            "hit": "nodegraph-pin-selection"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-group-selection",
+            "hit": "nodegraph-group-selection"
+          }
+        ],
+        "geometry": {
+          "overlaps": [],
+          "skippedOffscreen": 10,
+          "zoom": 0.35,
+          "pageScale": 1,
+          "window": [
+            1920,
+            1080
+          ],
+          "worst": {
+            "wire": [
+              1037.3,
+              150
+            ],
+            "shellScroll": [
+              0,
+              0
+            ],
+            "end": "to",
+            "port": [
+              1037.25,
+              149.9375
+            ],
+            "card": {
+              "x": "1600",
+              "left": "1032px",
+              "y": "431",
+              "h": 233,
+              "top": "113.2px"
+            },
+            "edge": "nodegraph-edge-edge_passage_2_gate_1_true_passage_2_open_check_3_5",
+            "deviation": 0.0800390529678822
+          },
+          "portEndsChecked": 70,
+          "maxDeviation": 0.0800390529678822,
+          "cards": 43
+        }
+      },
+      "1366x768": {
+        "reach": [
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-undo",
+            "hit": "nodegraph-undo"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-redo",
+            "hit": "nodegraph-redo"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-organize-all",
+            "hit": "nodegraph-organize-all"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-organize-selection",
+            "hit": "nodegraph-organize-selection"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-fit-view",
+            "hit": "nodegraph-fit-view"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-select-behavior",
+            "hit": "nodegraph-select-behavior"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-pin-selection",
+            "hit": "nodegraph-pin-selection"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-group-selection",
+            "hit": "nodegraph-group-selection"
+          }
+        ],
+        "geometry": {
+          "overlaps": [],
+          "skippedOffscreen": 36,
+          "zoom": 0.35,
+          "pageScale": 1,
+          "window": [
+            1366,
+            721
+          ],
+          "worst": {
+            "wire": [
+              1037.3,
+              150
+            ],
+            "shellScroll": [
+              0,
+              0
+            ],
+            "end": "to",
+            "port": [
+              1037.25,
+              149.9375
+            ],
+            "card": {
+              "x": "1600",
+              "left": "1032px",
+              "y": "431",
+              "h": 233,
+              "top": "113.2px"
+            },
+            "edge": "nodegraph-edge-edge_passage_2_gate_1_true_passage_2_open_check_3_5",
+            "deviation": 0.0800390529678822
+          },
+          "portEndsChecked": 44,
+          "maxDeviation": 0.0800390529678822,
+          "cards": 43
+        }
+      },
+      "1366x768@125%": {
+        "reach": [
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-undo",
+            "hit": "nodegraph-undo"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-organize-all",
+            "hit": "nodegraph-organize-all"
+          },
+          {
+            "ok": true,
+            "inside": true,
+            "id": "nodegraph-fit-view",
+            "hit": "nodegraph-fit-view"
+          }
+        ],
+        "geometry": {
+          "overlaps": [],
+          "skippedOffscreen": 60,
+          "zoom": 0.35,
+          "pageScale": 1.2497096399535423,
+          "window": [
+            1366,
+            721
+          ],
+          "worst": {
+            "wire": [
+              772,
+              89.1
+            ],
+            "shellScroll": [
+              0,
+              0
+            ],
+            "end": "from",
+            "port": [
+              772.1993922123679,
+              89.00067867576855
+            ],
+            "card": {
+              "x": "640",
+              "left": "696px",
+              "y": "257",
+              "h": 233,
+              "top": "52.3px"
+            },
+            "edge": "nodegraph-edge-right_blocked",
+            "deviation": 0.2227599151554359
+          },
+          "portEndsChecked": 20,
+          "maxDeviation": 0.2227599151554359,
+          "cards": 43
+        }
+      },
+      "zoom-in": {
+        "geometry": {
+          "overlaps": [],
+          "skippedOffscreen": 69,
+          "zoom": 2.4,
+          "pageScale": 1,
+          "window": [
+            1920,
+            1080
+          ],
+          "worst": {
+            "wire": [
+              1588.6,
+              659.3
+            ],
+            "shellScroll": [
+              0,
+              0
+            ],
+            "end": "to",
+            "port": [
+              1588.5625,
+              659.3125
+            ],
+            "card": {
+              "x": "1280",
+              "left": "1552.571429px",
+              "y": "1888",
+              "h": 213,
+              "top": "407.314286px"
+            },
+            "edge": "nodegraph-edge-score_open",
+            "deviation": 0.03952847075203284
+          },
+          "portEndsChecked": 11,
+          "maxDeviation": 0.03952847075203284,
+          "cards": 43
+        }
+      }
+    },
+    {
+      "id": "saved_file",
+      "status": "passed",
+      "at": "2026-09-24T18:34:44.282Z",
+      "savedChecks": {
+        "jumpButton": "BUTTON_B",
+        "mainThreshold": 12,
+        "secondThreshold": 60,
+        "goalSfx": "victory",
+        "groups": [
+          {
+            "collapsed": true,
+            "id": "group_mufvfq0n",
+            "label": "Pulo (botao B)",
+            "nodeIds": [
+              "jump",
+              "update_jump",
+              "jump_velocity",
+              "jump_sound"
+            ]
+          }
+        ],
+        "jumpPosition": [
+          320,
+          1369
+        ]
+      },
+      "materializedDefaults": [
+        "update_right.rate=frame",
+        "update_left.rate=frame",
+        "update_jump.rate=frame",
+        "update_score.rate=frame",
+        "update_goal.rate=frame"
+      ],
+      "untouchedNodes": 31,
+      "rewiredForSecondPassage": [
+        {
+          "fromNode": "passage_collision",
+          "fromPort": "false",
+          "id": "right_clear",
+          "toNode": "move_right",
+          "toPort": "exec"
+        },
+        {
+          "fromNode": "passage_open",
+          "fromPort": "true",
+          "id": "right_open",
+          "toNode": "move_right",
+          "toPort": "exec"
+        },
+        {
+          "fromNode": "passage_collision_left",
+          "fromPort": "false",
+          "id": "left_clear",
+          "toNode": "move_left",
+          "toPort": "exec"
+        },
+        {
+          "fromNode": "passage_open_left",
+          "fromPort": "true",
+          "id": "left_open",
+          "toNode": "move_left",
+          "toPort": "exec"
+        }
+      ]
+    },
+    {
+      "id": "restart_reopen",
+      "status": "passed",
+      "at": "2026-09-24T18:34:53.470Z",
+      "jumpRule": "BUTTON_B",
+      "mainThreshold": "12",
+      "secondThreshold": "60",
+      "sound": "victory",
+      "group": {
+        "collapsed": "true",
+        "label": "▸Pulo (botao B)4 no(s) recolhido(s) · logica intacta"
+      },
+      "visibleMatch": true,
+      "geometry": {
+        "overlaps": [],
+        "skippedOffscreen": 14,
+        "zoom": 0.35,
+        "pageScale": 1,
+        "window": [
+          1920,
+          1080
+        ],
+        "worst": {
+          "wire": [
+            547.9,
+            310.4
+          ],
+          "shellScroll": [
+            0,
+            0
+          ],
+          "end": "from",
+          "port": [
+            547.9499816894531,
+            310.34375
+          ],
+          "card": {
+            "x": "1280",
+            "left": "472px",
+            "y": "576",
+            "h": 173,
+            "top": "273.6px"
+          },
+          "edge": "nodegraph-edge-edge_passage_2_open_get_2_value_passage_2_open_check_3_6",
+          "deviation": 0.07524780249673968
+        },
+        "portEndsChecked": 66,
+        "maxDeviation": 0.07524780249673968,
+        "cards": 43
+      }
+    },
+    {
+      "id": "keyboard_play",
+      "status": "passed",
+      "at": "2026-09-24T18:35:34.331Z",
+      "rom": {
+        "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/nodegraph-authoring-2026-09-24T18-34-19-963Z-played.rom",
+        "sha256": "6db0af9f55d705049c68ff0808507c6a10ae2024912e24cf17963c894a69af7b"
+      },
+      "acks": 6,
+      "jumpProof": {
+        "groundY": 176,
+        "zMinY": 176,
+        "xMinY": 161,
+        "zSamples": 17,
+        "xSamples": 16
+      },
+      "mainOpenedAt": {
+        "x": 36,
+        "y": 176,
+        "score": 12,
+        "mainOpen": 1,
+        "secondOpen": 0,
+        "goal": 0,
+        "audioTotal": 125110,
+        "t": 1790274911377
+      },
+      "secondOpenedAt": {
+        "x": 106,
+        "y": 176,
+        "score": 60,
+        "mainOpen": 1,
+        "secondOpen": 1,
+        "goal": 0,
+        "audioTotal": 195762,
+        "t": 1790274920206
+      },
+      "closedAtOldThreshold": {
+        "x": 36,
+        "y": 176,
+        "score": 6,
+        "mainOpen": 0,
+        "secondOpen": 0,
+        "goal": 0,
+        "audioTotal": 116278,
+        "t": 1790274910598
+      },
+      "samples": 73,
+      "victory": {
+        "x": 132,
+        "y": 176,
+        "score": 73,
+        "mainOpen": 1,
+        "secondOpen": 1,
+        "goal": 1,
+        "audioTotal": 214896,
+        "t": 1790274922752
+      },
+      "audio": {
+        "sampleRate": 44100,
+        "before": {
+          "p1320": 0.07161365858071359,
+          "p880": 1.6883972066379573
+        },
+        "after": {
+          "p1320": 2407.5585416475233,
+          "p880": 26.549818161280793
+        }
+      }
+    },
+    {
+      "id": "larger_graph_performance",
+      "status": "passed",
+      "at": "2026-09-24T18:35:42.924Z",
+      "baseNodes": 46,
+      "visibleNodes": 106,
+      "totalNodes": 106,
+      "report": {
+        "testid": "nodegraph-layout-report",
+        "moved": "60",
+        "ms": "19",
+        "overlaps": "0",
+        "conflicts": "0"
+      },
+      "uiMs": 424,
+      "geometry": {
+        "overlaps": [],
+        "skippedOffscreen": 98,
+        "zoom": 0.35,
+        "pageScale": 1,
+        "window": [
+          1920,
+          1080
+        ],
+        "worst": {
+          "wire": [
+            547.9,
+            310.4
+          ],
+          "shellScroll": [
+            0,
+            0
+          ],
+          "end": "from",
+          "port": [
+            547.9499816894531,
+            310.34375
+          ],
+          "card": {
+            "x": "1280",
+            "left": "472px",
+            "y": "576",
+            "h": 173,
+            "top": "273.6px"
+          },
+          "edge": "nodegraph-edge-edge_passage_2_open_get_2_value_passage_2_open_check_3_6",
+          "deviation": 0.07524780249673968
+        },
+        "portEndsChecked": 72,
+        "maxDeviation": 0.07524780249673968,
+        "cards": 106
+      }
+    }
+  ],
+  "frames": [],
+  "roms": [],
+  "non_black_pixels": 0
+}

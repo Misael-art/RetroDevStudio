@@ -1,0 +1,50 @@
+# ETAPA 3 — GREEN e gates da capa de interface (medidos, non presumidos)
+# 2026-09-28 18:48Z–18:55Z · base 617ea15 (ETAPA 2) · árbore con cambios desta etapa
+
+## 1. npx vitest run src/core/nodegraph/rexGameplayGraph.test.ts   rc=0
+ ✓ src/core/nodegraph/rexGameplayGraph.test.ts (14 tests) 671ms
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+
+## 2. npm test (suíte frontend completa)                            rc=0
+ Test Files  80 passed | 1 skipped (81)
+      Tests  763 passed | 6 skipped (769)
+# Reconciliación de contaxes (medidas, non estimadas): a primeira suíte
+# completa de hoxe, coas 7 probas do projetor xa verdes, deu 756. A esta
+# engadíronselle 7 máis (2 parseHexOffsets + 3 formulario + 1 faixa +
+# 1 round-trip do editor) = 763. 756 + 7 = 763, cero regresións.
+
+## 3. npx tsc --noEmit                                              rc=0
+ (sen saída)
+
+## 4. npm run lint (eslint src vite.config.ts --max-warnings=0)     rc=0
+ (sen saída)
+
+## 5. npm run check:tree                                            rc=0
+ OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+
+## 6. Probas de mutación (non-vacuidade) — ver mutaciones-capa-ui.log
+ 8 mutacions sobre rexGameplayGraph.ts: 8/8 morreron; SHA-256 do arquivo
+ restaurado e conferido tras cada una (RESTAURACION_OK).
+ Primeira rola: M5 (booleano -> "1"/"0") SOBREVIVIU. non se disfrazou:
+ engadiuse a espera `params.understood === "false"` + round-trip do editor
+ e a mutación foi reexecutada (rolda 2: M5-boOLEAN-strings rc=1, morta).
+
+## Limite honesto
+O panel React non ten proba unitaria de render (sen @testing-library/react
+no repo, convención: E2E real na ETAPA 6). As funciones puras que deciden
+que se mostra e que se recusa si están provadas; a renderización visible,
+agora mesmo, non.
+
+## CORRECCION (2026-09-28, ETAPA 4) — a afirmación anterior era falsa
+O parágrafo "Limite honesto" e o equivalente en `red-capa-ui.log` dicían que
+este repo non pode facer probas de render de React. Non e certo: a convención
+existente é vitest + jsdom + `createRoot`/`act` con `IS_REACT_ACT_ENVIRONMENT`
+e `vi.mock` do servizo IPC, e xa se usa en
+`src/components/tools/ReverseWorkspace.test.tsx`, `InspectionPanel.test.tsx` e
+`CompressedResourcePanel.test.tsx`. O que non hai e @testing-library/react; iso
+non impide renderizar. A ETAPA 4 si trouxo esas probas
+(`RexGameplayRulePanel.test.tsx`, 9 render-probas + 2 en `ReverseWorkspace.test.tsx`);
+ver `etapa4-gardar-reabrir.log`. A xustificación de "renderización non probada"
+queda retirada; a ETAPA 6 segue tendo valor porque proba o binario real, non o
+componente illado.

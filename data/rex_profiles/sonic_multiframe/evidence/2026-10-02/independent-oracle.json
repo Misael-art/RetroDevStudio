@@ -1,0 +1,76 @@
+{
+  "base_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "frames": [
+    {
+      "frame": "sonic1_sonic/stand",
+      "rgba_sha256": "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7",
+      "pixels": 1280,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/wait-1",
+      "rgba_sha256": "b3227f2adb99a4b9d450d482b70e57d79979d84d4cebde0de3a386ce7d5b51b5",
+      "pixels": 1280,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/look-up",
+      "rgba_sha256": "3c065b5884848e8513665810ca1d34325b75afab77654b6d0ad990665c4d13cd",
+      "pixels": 1280,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/walk-1",
+      "rgba_sha256": "6e11229e0f62da227a4a004db38fe7b19dc794e08e05e651435042b2fe8a0338",
+      "pixels": 1600,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/walk-2",
+      "rgba_sha256": "c3b131207e904cf7b45d4d361ce4b8321d01db5369d4511c2a5a976ea553c42a",
+      "pixels": 1600,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/walk-3",
+      "rgba_sha256": "f13373247f150e2ce40b182732e0ac4a8c2193fbc86d889a0d56f66a950bb7a0",
+      "pixels": 960,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/walk-4",
+      "rgba_sha256": "5809c688fb2456b297205ec6cdcf7aa5f472329a01b7a88fbde062771f312700",
+      "pixels": 1600,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/walk-5",
+      "rgba_sha256": "13a8bf3079d735e38137d9483de39da67d0c0ca62f20d716ec6328fab35b03d4",
+      "pixels": 1280,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/walk-6",
+      "rgba_sha256": "699f8e5e9c8c772d948ba6f995b9292f1f84d5f023fbc3bc88a64a938868cdc9",
+      "pixels": 1600,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    },
+    {
+      "frame": "sonic1_sonic/run-1",
+      "rgba_sha256": "fa974afe26da1dad14ec178b0d3c940927dfea4161ea7978ff7db7b87bba09ea",
+      "pixels": 1280,
+      "order_mutation_rejected": true,
+      "pixel_mutation_rejected": true
+    }
+  ],
+  "classification": "independent static decode; no runtime equivalence claim"
+}

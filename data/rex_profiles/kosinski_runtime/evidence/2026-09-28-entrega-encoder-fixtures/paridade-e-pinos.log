@@ -1,0 +1,22 @@
+INICIO 2026-09-28T14:38:34Z
+--- $ git ls-remote origin refs/heads/codex/rex-kosinski-decoder
+6a2218ece0928b764f7cff79fa0237534998e5fc	refs/heads/codex/rex-kosinski-decoder
+--- $ git log --oneline 6a2218e --not f58ff05 -- (os 8 commits integrados, en orde)
+0b752b7 docs(rex-kosinski): contrato v1 do ENCODER fixado antes da implementacao (etapa 1 da missao de codificacao)
+2b50cab feat(rex-kosinski): codificador v1 com early-fetch espelhado e 16 testes de contrato
+36741a5 test(rex-kosinski): paridade bidirecional com koscmp e controles de corrupcao (etapa 3)
+f3c51f2 feat(rex-kosinski): contener de edicao autoral com ciclo completo provado por fora (etapa 4)
+a386da0 docs(rex-kosinski): entrega do encoder documentada — API, tamanhos, limitacoes e proposta de adaptacao (etapa 5)
+dafcf1d style(rex-kosinski): cargo fmt no exemplo de ciclo + SHAs e determinismo na entrega (etapa 6)
+9223e7a test(rex-kosinski): vendoriza 52 fixtures SHA-pinned e fecha a dívida de empacotamento
+6a2218e docs(rex): corrijo contagem do package list (68) e somo a prova git-archive
+--- $ git diff --stat 6a2218e:crates/rex-kosinski HEAD:crates/rex-kosinski   (baleiro = paridade byte a byte)
+--- $ git diff 6a2218e:crates/rex-kosinski HEAD:crates/rex-kosinski | wc -c
+0
+--- $ git ls-tree -r --name-only HEAD crates/rex-kosinski | wc -l
+66
+--- fixtures (sen PROVENANCE.md):
+52
+--- $ git rev-parse HEAD
+3994cef1145e7ea4f44b1a1da358005fb946828f
+FIN 2026-09-28T14:38:34Z

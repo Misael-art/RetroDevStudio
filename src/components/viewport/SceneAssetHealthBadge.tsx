@@ -14,10 +14,18 @@ export default function SceneAssetHealthBadge({
   return (
     <div
       data-testid="viewport-asset-health"
+      data-ready={health.ready}
+      data-referenced={health.referenced}
+      data-failed={health.failed}
+      data-missing={health.missing}
+      data-loading={health.loading}
       className={`absolute left-2 top-2 z-10 max-w-[320px] rounded border px-2.5 py-2 text-[10px] ${HEALTH_TONE[health.tone]}`}
     >
-      <p className="font-semibold">{health.title}</p>
+      <p className="font-semibold">Recursos visuais: {health.title}</p>
       <p className="mt-1 leading-relaxed text-[#cdd6f4]">{health.detail}</p>
+      {health.failed > 0 || health.missing > 0 ? (
+        <p className="mt-1 text-[#94a3b8]">Afeta só a pré-visualização; a prontidão para compilar aparece em “Pronto para build”.</p>
+      ) : null}
       <p className="mt-2 font-mono text-[#94a3b8]">
         {health.compactSummary}
         {health.loading > 0 ? ` | loading ${health.loading}` : ""}

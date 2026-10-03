@@ -1,0 +1,2684 @@
+{
+  "generatedAt": "2026-09-23T22:15:28.060Z",
+  "scenario": "reference-platformer",
+  "testedApplication": {
+    "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "9224bdd04343d14402e83b61d842a4ee0fe485c62805bb6715b1fbcfc629cb37"
+  },
+  "projectName": "Reference_Platformer_1790201643514",
+  "projectDir": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514",
+  "templateId": "reference_platformer",
+  "artifacts": [
+    {
+      "label": "reference template wizard",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-01-wizard.png"
+    },
+    {
+      "label": "reference platformer editor",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-02-editor.png"
+    },
+    {
+      "label": "reference platformer NodeGraph",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-03-nodegraph.png"
+    },
+    {
+      "label": "generated main.c",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-main.c"
+    },
+    {
+      "label": "generated resources.res",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-resources.res"
+    },
+    {
+      "label": "generated res/resources.h",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-res-resources.h"
+    },
+    {
+      "label": "generated res/resources.res",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-res-resources.res"
+    },
+    {
+      "label": "ROM baseline copied for controlled gameplay decision",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-original.rom"
+    },
+    {
+      "label": "ROM gerada antes da edicao: personagem bloqueado pela passagem fechada",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-04-goal-open-before-edit-blocked-before-open.png"
+    },
+    {
+      "label": "ROM gerada antes da edicao: passagem aberta no limiar, antes da travessia",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-04-goal-open-before-edit-open-at-threshold.png"
+    },
+    {
+      "label": "ROM gerada antes da edicao: personagem atravessou a passagem",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-04-goal-open-before-edit-traversed.png"
+    },
+    {
+      "label": "ROM gerada antes da edicao passagem atravessada e objetivo alcançado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-04-goal-open-before-edit.png"
+    },
+    {
+      "label": "editor com limiar autoral, semantica e source mapping",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-05-authored-threshold-editor.png"
+    },
+    {
+      "label": "immutable ROM snapshot compiled from the saved threshold=12 graph",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-edited.rom"
+    },
+    {
+      "label": "generated main.c with edited goal threshold",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-edited-goal-main.c"
+    },
+    {
+      "label": "ROM gerada apos edicao: personagem bloqueado pela passagem fechada",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-06-goal-closed-after-edit-blocked-before-open.png"
+    },
+    {
+      "label": "ROM gerada apos edicao: passagem aberta no limiar, antes da travessia",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-06-goal-closed-after-edit-open-at-threshold.png"
+    },
+    {
+      "label": "ROM gerada apos edicao: personagem atravessou a passagem",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-06-goal-closed-after-edit-traversed.png"
+    },
+    {
+      "label": "ROM gerada apos edicao passagem atravessada e objetivo alcançado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-06-goal-closed-after-edit.png"
+    },
+    {
+      "label": "painted generated main.c",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-painted-main.c"
+    },
+    {
+      "label": "native KeyZ jump trajectory from RAM",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-jump-trajectory.json"
+    },
+    {
+      "label": "reference gameplay controls",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-04-gameplay-controls.png"
+    },
+    {
+      "label": "reference project reopened",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-05-reopened.png"
+    },
+    {
+      "label": "reference reopened build run",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-06-reopened-build-run.png"
+    },
+    {
+      "label": "fosso e animacao editados",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-07-pit-and-animation-edit.png"
+    },
+    {
+      "label": "painel de passagens com segunda passagem",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-07-second-passage-panel.png"
+    },
+    {
+      "label": "passagens reabertas",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-08-second-passage-reopened.png"
+    },
+    {
+      "label": "ROM com duas passagens autorais",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-two-passages.rom"
+    },
+    {
+      "label": "main.c com duas passagens",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-two-passages-main.c"
+    },
+    {
+      "label": "linha do tempo RAM das duas passagens",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-two-passages-timeline.json"
+    }
+  ],
+  "steps": [
+    {
+      "id": "create_reference_platformer_from_wizard",
+      "status": "passed",
+      "at": "2026-09-23T22:14:04.198Z",
+      "projectDir": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514",
+      "entityIds": [
+        "reference_tilemap",
+        "player",
+        "passage_blocker",
+        "goal",
+        "goal_sensor",
+        "main_camera"
+      ]
+    },
+    {
+      "id": "inspect_visible_reference_nodegraph",
+      "status": "passed",
+      "at": "2026-09-23T22:14:04.838Z",
+      "graphRef": "graphs/reference_platformer_logic.json"
+    },
+    {
+      "id": "save_reference_platformer",
+      "status": "passed",
+      "at": "2026-09-23T22:14:05.210Z"
+    },
+    {
+      "id": "build_real_rom_and_start_game_view",
+      "status": "passed",
+      "at": "2026-09-23T22:14:12.326Z",
+      "rom": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/out/rom.bin",
+      "framebuffer": {
+        "framebuffer_hash": "87c97bfc",
+        "height": 224,
+        "non_black_pixels": 71680,
+        "width": 320,
+        "tilemap_cell_hash": "11cc6cc5"
+      }
+    },
+    {
+      "id": "execute_authored_goal_threshold_before_edit",
+      "status": "passed",
+      "at": "2026-09-23T22:14:18.662Z",
+      "label": "ROM gerada antes da edicao",
+      "romPath": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-original.rom",
+      "testedRomSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+      "generatedMainSha256": "1cb83428795338878269fbe716298749eb57ca0eb2a578f83647f4959f7002cb",
+      "generatedMainPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/src/main.c",
+      "goalSoundAndWinCode": {
+        "soundCall": "XGM_startPlayPCM(SFX_GOAL_SOUND, ...) emitted from goal sensor event chain",
+        "persistentWinCondition": "logic_var_goal_reached transitions 0→1 after sensor overlap",
+        "eventOrderObservedWithRuntimeWinFlag": true
+      },
+      "scoreComparison": {
+        "incrementSource": "logic_var_reference_score = (logic_var_reference_score + 1);",
+        "compareSource": "if ((logic_var_reference_score >= threshold))",
+        "comparesStoredPostIncrementValue": true,
+        "independentlyObservedScore": 8
+      },
+      "threshold": 6,
+      "inputSequences": {
+        "sameSequenceAcrossRoms": [
+          {
+            "right": true,
+            "frames": 8
+          }
+        ],
+        "boundaryAndTraversal": [
+          {
+            "right": true,
+            "frames": 5,
+            "expectedScore": 5,
+            "expectedOpen": false
+          },
+          {
+            "right": true,
+            "frames": 1,
+            "expectedScore": 6,
+            "expectedOpen": true
+          },
+          {
+            "right": true,
+            "frames": 1,
+            "expectedScore": 7,
+            "expectedOpen": true
+          },
+          {
+            "right": true,
+            "frames": 8,
+            "expectedToPassBarrierX": 50
+          },
+          {
+            "right": true,
+            "frames": 60,
+            "expectedObjectiveReached": true
+          }
+        ]
+      },
+      "sameEightFrameObservation": {
+        "context": "same-input-8-frames",
+        "score": 8,
+        "scoreSymbol": {
+          "value": 8,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00000800"
+        },
+        "passageOpen": 1,
+        "passageOpenSymbol": {
+          "value": 1,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000100"
+        },
+        "objectiveReached": 0,
+        "objectiveSymbol": {
+          "value": 0,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000000"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 21,
+          "yellowBounds": {
+            "x0": 42,
+            "y0": 180,
+            "x1": 149,
+            "y1": 199
+          },
+          "barrierPixels": 0,
+          "playerPixelBounds": {
+            "x0": 46,
+            "y0": 182,
+            "x1": 59,
+            "y1": 200
+          },
+          "framebufferSha256": "b0e226403c447bae771caad98cacd8c956f0f3aafeff6ef2c1304061e089e36a",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+          "framesRun": 128
+        },
+        "frame": 128
+      },
+      "boundaries": {
+        "below": {
+          "context": "threshold-minus-one",
+          "score": 5,
+          "scoreSymbol": {
+            "value": 5,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000500"
+          },
+          "passageOpen": 0,
+          "passageOpenSymbol": {
+            "value": 0,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000000"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 40,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 30,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 182,
+              "x1": 57,
+              "y1": 200
+            },
+            "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 125
+          },
+          "frame": 125
+        },
+        "equal": {
+          "context": "threshold-equal",
+          "score": 6,
+          "scoreSymbol": {
+            "value": 6,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000600"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 40,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 30,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 182,
+              "x1": 57,
+              "y1": 200
+            },
+            "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 128
+          },
+          "frame": 128
+        },
+        "above": {
+          "context": "threshold-plus-one",
+          "score": 7,
+          "scoreSymbol": {
+            "value": 7,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000700"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 40,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 0,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 182,
+              "x1": 57,
+              "y1": 200
+            },
+            "framebufferSha256": "fe9b696779c9fcbe54e84fe9107fccbe02f958d29c24b7aa138f17d9d7443e9a",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 129
+          },
+          "frame": 129
+        }
+      },
+      "blockedBeforeOpen": {
+        "x0": 44,
+        "y0": 182,
+        "x1": 57,
+        "y1": 200
+      },
+      "atThresholdBeforeMove": {
+        "x0": 44,
+        "y0": 182,
+        "x1": 57,
+        "y1": 200
+      },
+      "traversedAfterOpen": {
+        "x0": 60,
+        "y0": 183,
+        "x1": 75,
+        "y1": 200
+      },
+      "reachedObjective": {
+        "context": "reach-objective-sensor",
+        "score": 75,
+        "scoreSymbol": {
+          "value": 75,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00004b00"
+        },
+        "passageOpen": 1,
+        "passageOpenSymbol": {
+          "value": 1,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000100"
+        },
+        "objectiveReached": 1,
+        "objectiveSymbol": {
+          "value": 1,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000100"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 20,
+          "yellowBounds": {
+            "x0": 147,
+            "y0": 180,
+            "x1": 198,
+            "y1": 200
+          },
+          "barrierPixels": 0,
+          "playerPixelBounds": null,
+          "framebufferSha256": "912503ab54289e9e76d62fd4deb481dfbffe342a521344f4013626e05bb4b972",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+          "framesRun": 201
+        },
+        "frame": 201
+      },
+      "screenshots": {
+        "blockedScreenshot": {
+          "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+        },
+        "openScreenshot": {
+          "framebufferSha256": "b0e226403c447bae771caad98cacd8c956f0f3aafeff6ef2c1304061e089e36a",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+        },
+        "traversedScreenshot": {
+          "framebufferSha256": "a9eba0e8a220832d75bf52522da084e71d209e7c6d2a8b1afcc5efd2b12cd1c2",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+        }
+      },
+      "screenshotFramebuffer": {
+        "sha256": "f0f9a50a7e37717379f3e68df889ebc6ace0f556ea4a3d508e20e0457924e7e4",
+        "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+      },
+      "domFrame": {
+        "renderedFrames": 0,
+        "framebufferSha256": "f0f9a50a7e37717379f3e68df889ebc6ace0f556ea4a3d508e20e0457924e7e4",
+        "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+      },
+      "initialState": {
+        "context": "boot",
+        "score": 0,
+        "scoreSymbol": {
+          "value": 0,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00000000"
+        },
+        "passageOpen": 0,
+        "passageOpenSymbol": {
+          "value": 0,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000000"
+        },
+        "objectiveReached": 0,
+        "objectiveSymbol": {
+          "value": 0,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000000"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 21,
+          "yellowBounds": {
+            "x0": 36,
+            "y0": 180,
+            "x1": 149,
+            "y1": 199
+          },
+          "barrierPixels": 33,
+          "playerPixelBounds": {
+            "x0": 40,
+            "y0": 182,
+            "x1": 53,
+            "y1": 200
+          },
+          "framebufferSha256": "47a4cf053892010648f8650ec3ac84e02da7651fdc16b9a062ec5a8f92dd0ba0",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+          "framesRun": 120
+        },
+        "frame": 120
+      }
+    },
+    {
+      "id": "persist_reopen_compile_and_execute_edited_goal_threshold",
+      "status": "passed",
+      "at": "2026-09-23T22:14:31.517Z",
+      "reopened": {
+        "projectDir": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514",
+        "threshold": 12,
+        "sourceMapping": "graphs/reference_platformer_logic.json:28"
+      },
+      "originalRom": {
+        "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-original.rom",
+        "sha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+      },
+      "editedRom": {
+        "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-edited.rom",
+        "sha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+      },
+      "goalBeforeEdit": {
+        "label": "ROM gerada antes da edicao",
+        "romPath": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-original.rom",
+        "testedRomSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+        "generatedMainSha256": "1cb83428795338878269fbe716298749eb57ca0eb2a578f83647f4959f7002cb",
+        "generatedMainPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/src/main.c",
+        "goalSoundAndWinCode": {
+          "soundCall": "XGM_startPlayPCM(SFX_GOAL_SOUND, ...) emitted from goal sensor event chain",
+          "persistentWinCondition": "logic_var_goal_reached transitions 0→1 after sensor overlap",
+          "eventOrderObservedWithRuntimeWinFlag": true
+        },
+        "scoreComparison": {
+          "incrementSource": "logic_var_reference_score = (logic_var_reference_score + 1);",
+          "compareSource": "if ((logic_var_reference_score >= threshold))",
+          "comparesStoredPostIncrementValue": true,
+          "independentlyObservedScore": 8
+        },
+        "threshold": 6,
+        "inputSequences": {
+          "sameSequenceAcrossRoms": [
+            {
+              "right": true,
+              "frames": 8
+            }
+          ],
+          "boundaryAndTraversal": [
+            {
+              "right": true,
+              "frames": 5,
+              "expectedScore": 5,
+              "expectedOpen": false
+            },
+            {
+              "right": true,
+              "frames": 1,
+              "expectedScore": 6,
+              "expectedOpen": true
+            },
+            {
+              "right": true,
+              "frames": 1,
+              "expectedScore": 7,
+              "expectedOpen": true
+            },
+            {
+              "right": true,
+              "frames": 8,
+              "expectedToPassBarrierX": 50
+            },
+            {
+              "right": true,
+              "frames": 60,
+              "expectedObjectiveReached": true
+            }
+          ]
+        },
+        "sameEightFrameObservation": {
+          "context": "same-input-8-frames",
+          "score": 8,
+          "scoreSymbol": {
+            "value": 8,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000800"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 42,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 0,
+            "playerPixelBounds": {
+              "x0": 46,
+              "y0": 182,
+              "x1": 59,
+              "y1": 200
+            },
+            "framebufferSha256": "b0e226403c447bae771caad98cacd8c956f0f3aafeff6ef2c1304061e089e36a",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 128
+          },
+          "frame": 128
+        },
+        "boundaries": {
+          "below": {
+            "context": "threshold-minus-one",
+            "score": 5,
+            "scoreSymbol": {
+              "value": 5,
+              "address": 3774808148,
+              "offset": 84,
+              "rawHex": "00000500"
+            },
+            "passageOpen": 0,
+            "passageOpenSymbol": {
+              "value": 0,
+              "address": 3774808154,
+              "offset": 90,
+              "rawHex": "00000000"
+            },
+            "objectiveReached": 0,
+            "objectiveSymbol": {
+              "value": 0,
+              "address": 3774808144,
+              "offset": 80,
+              "rawHex": "00000000"
+            },
+            "framebuffer": {
+              "width": 320,
+              "height": 224,
+              "yellowPixels": 21,
+              "yellowBounds": {
+                "x0": 40,
+                "y0": 180,
+                "x1": 149,
+                "y1": 199
+              },
+              "barrierPixels": 30,
+              "playerPixelBounds": {
+                "x0": 44,
+                "y0": 182,
+                "x1": 57,
+                "y1": 200
+              },
+              "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+              "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+              "framesRun": 125
+            },
+            "frame": 125
+          },
+          "equal": {
+            "context": "threshold-equal",
+            "score": 6,
+            "scoreSymbol": {
+              "value": 6,
+              "address": 3774808148,
+              "offset": 84,
+              "rawHex": "00000600"
+            },
+            "passageOpen": 1,
+            "passageOpenSymbol": {
+              "value": 1,
+              "address": 3774808154,
+              "offset": 90,
+              "rawHex": "00000100"
+            },
+            "objectiveReached": 0,
+            "objectiveSymbol": {
+              "value": 0,
+              "address": 3774808144,
+              "offset": 80,
+              "rawHex": "00000000"
+            },
+            "framebuffer": {
+              "width": 320,
+              "height": 224,
+              "yellowPixels": 21,
+              "yellowBounds": {
+                "x0": 40,
+                "y0": 180,
+                "x1": 149,
+                "y1": 199
+              },
+              "barrierPixels": 30,
+              "playerPixelBounds": {
+                "x0": 44,
+                "y0": 182,
+                "x1": 57,
+                "y1": 200
+              },
+              "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+              "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+              "framesRun": 128
+            },
+            "frame": 128
+          },
+          "above": {
+            "context": "threshold-plus-one",
+            "score": 7,
+            "scoreSymbol": {
+              "value": 7,
+              "address": 3774808148,
+              "offset": 84,
+              "rawHex": "00000700"
+            },
+            "passageOpen": 1,
+            "passageOpenSymbol": {
+              "value": 1,
+              "address": 3774808154,
+              "offset": 90,
+              "rawHex": "00000100"
+            },
+            "objectiveReached": 0,
+            "objectiveSymbol": {
+              "value": 0,
+              "address": 3774808144,
+              "offset": 80,
+              "rawHex": "00000000"
+            },
+            "framebuffer": {
+              "width": 320,
+              "height": 224,
+              "yellowPixels": 21,
+              "yellowBounds": {
+                "x0": 40,
+                "y0": 180,
+                "x1": 149,
+                "y1": 199
+              },
+              "barrierPixels": 0,
+              "playerPixelBounds": {
+                "x0": 44,
+                "y0": 182,
+                "x1": 57,
+                "y1": 200
+              },
+              "framebufferSha256": "fe9b696779c9fcbe54e84fe9107fccbe02f958d29c24b7aa138f17d9d7443e9a",
+              "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+              "framesRun": 129
+            },
+            "frame": 129
+          }
+        },
+        "blockedBeforeOpen": {
+          "x0": 44,
+          "y0": 182,
+          "x1": 57,
+          "y1": 200
+        },
+        "atThresholdBeforeMove": {
+          "x0": 44,
+          "y0": 182,
+          "x1": 57,
+          "y1": 200
+        },
+        "traversedAfterOpen": {
+          "x0": 60,
+          "y0": 183,
+          "x1": 75,
+          "y1": 200
+        },
+        "reachedObjective": {
+          "context": "reach-objective-sensor",
+          "score": 75,
+          "scoreSymbol": {
+            "value": 75,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00004b00"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 1,
+          "objectiveSymbol": {
+            "value": 1,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000100"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 20,
+            "yellowBounds": {
+              "x0": 147,
+              "y0": 180,
+              "x1": 198,
+              "y1": 200
+            },
+            "barrierPixels": 0,
+            "playerPixelBounds": null,
+            "framebufferSha256": "912503ab54289e9e76d62fd4deb481dfbffe342a521344f4013626e05bb4b972",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 201
+          },
+          "frame": 201
+        },
+        "screenshots": {
+          "blockedScreenshot": {
+            "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+          },
+          "openScreenshot": {
+            "framebufferSha256": "b0e226403c447bae771caad98cacd8c956f0f3aafeff6ef2c1304061e089e36a",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+          },
+          "traversedScreenshot": {
+            "framebufferSha256": "a9eba0e8a220832d75bf52522da084e71d209e7c6d2a8b1afcc5efd2b12cd1c2",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+          }
+        },
+        "screenshotFramebuffer": {
+          "sha256": "f0f9a50a7e37717379f3e68df889ebc6ace0f556ea4a3d508e20e0457924e7e4",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+        },
+        "domFrame": {
+          "renderedFrames": 0,
+          "framebufferSha256": "f0f9a50a7e37717379f3e68df889ebc6ace0f556ea4a3d508e20e0457924e7e4",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+        },
+        "initialState": {
+          "context": "boot",
+          "score": 0,
+          "scoreSymbol": {
+            "value": 0,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000000"
+          },
+          "passageOpen": 0,
+          "passageOpenSymbol": {
+            "value": 0,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000000"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 36,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 33,
+            "playerPixelBounds": {
+              "x0": 40,
+              "y0": 182,
+              "x1": 53,
+              "y1": 200
+            },
+            "framebufferSha256": "47a4cf053892010648f8650ec3ac84e02da7651fdc16b9a062ec5a8f92dd0ba0",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 120
+          },
+          "frame": 120
+        }
+      },
+      "goalAfterEdit": {
+        "label": "ROM gerada apos edicao",
+        "romPath": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-edited.rom",
+        "testedRomSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+        "generatedMainSha256": "6045442d4b272fc9eadb223b6d990a580c0d7c25f6030f14f5052624edbc29cd",
+        "generatedMainPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/src/main.c",
+        "goalSoundAndWinCode": {
+          "soundCall": "XGM_startPlayPCM(SFX_GOAL_SOUND, ...) emitted from goal sensor event chain",
+          "persistentWinCondition": "logic_var_goal_reached transitions 0→1 after sensor overlap",
+          "eventOrderObservedWithRuntimeWinFlag": true
+        },
+        "scoreComparison": {
+          "incrementSource": "logic_var_reference_score = (logic_var_reference_score + 1);",
+          "compareSource": "if ((logic_var_reference_score >= threshold))",
+          "comparesStoredPostIncrementValue": true,
+          "independentlyObservedScore": 8
+        },
+        "threshold": 12,
+        "inputSequences": {
+          "sameSequenceAcrossRoms": [
+            {
+              "right": true,
+              "frames": 8
+            }
+          ],
+          "boundaryAndTraversal": [
+            {
+              "right": true,
+              "frames": 11,
+              "expectedScore": 11,
+              "expectedOpen": false
+            },
+            {
+              "right": true,
+              "frames": 1,
+              "expectedScore": 12,
+              "expectedOpen": true
+            },
+            {
+              "right": true,
+              "frames": 1,
+              "expectedScore": 13,
+              "expectedOpen": true
+            },
+            {
+              "right": true,
+              "frames": 8,
+              "expectedToPassBarrierX": 50
+            },
+            {
+              "right": true,
+              "frames": 60,
+              "expectedObjectiveReached": true
+            }
+          ]
+        },
+        "sameEightFrameObservation": {
+          "context": "same-input-8-frames",
+          "score": 8,
+          "scoreSymbol": {
+            "value": 8,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000800"
+          },
+          "passageOpen": 0,
+          "passageOpenSymbol": {
+            "value": 0,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000000"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 40,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 30,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 182,
+              "x1": 57,
+              "y1": 200
+            },
+            "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+            "framesRun": 128
+          },
+          "frame": 128
+        },
+        "boundaries": {
+          "below": {
+            "context": "threshold-minus-one",
+            "score": 11,
+            "scoreSymbol": {
+              "value": 11,
+              "address": 3774808148,
+              "offset": 84,
+              "rawHex": "00000b00"
+            },
+            "passageOpen": 0,
+            "passageOpenSymbol": {
+              "value": 0,
+              "address": 3774808154,
+              "offset": 90,
+              "rawHex": "00000000"
+            },
+            "objectiveReached": 0,
+            "objectiveSymbol": {
+              "value": 0,
+              "address": 3774808144,
+              "offset": 80,
+              "rawHex": "00000000"
+            },
+            "framebuffer": {
+              "width": 320,
+              "height": 224,
+              "yellowPixels": 21,
+              "yellowBounds": {
+                "x0": 40,
+                "y0": 180,
+                "x1": 149,
+                "y1": 199
+              },
+              "barrierPixels": 30,
+              "playerPixelBounds": {
+                "x0": 44,
+                "y0": 182,
+                "x1": 57,
+                "y1": 200
+              },
+              "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+              "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+              "framesRun": 131
+            },
+            "frame": 131
+          },
+          "equal": {
+            "context": "threshold-equal",
+            "score": 12,
+            "scoreSymbol": {
+              "value": 12,
+              "address": 3774808148,
+              "offset": 84,
+              "rawHex": "00000c00"
+            },
+            "passageOpen": 1,
+            "passageOpenSymbol": {
+              "value": 1,
+              "address": 3774808154,
+              "offset": 90,
+              "rawHex": "00000100"
+            },
+            "objectiveReached": 0,
+            "objectiveSymbol": {
+              "value": 0,
+              "address": 3774808144,
+              "offset": 80,
+              "rawHex": "00000000"
+            },
+            "framebuffer": {
+              "width": 320,
+              "height": 224,
+              "yellowPixels": 20,
+              "yellowBounds": {
+                "x0": 41,
+                "y0": 180,
+                "x1": 149,
+                "y1": 200
+              },
+              "barrierPixels": 29,
+              "playerPixelBounds": {
+                "x0": 44,
+                "y0": 183,
+                "x1": 59,
+                "y1": 200
+              },
+              "framebufferSha256": "f934eac9319c86d40121cb309647c12a6d8f500bff07f0e6bb497727a157a9c9",
+              "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+              "framesRun": 134
+            },
+            "frame": 134
+          },
+          "above": {
+            "context": "threshold-plus-one",
+            "score": 13,
+            "scoreSymbol": {
+              "value": 13,
+              "address": 3774808148,
+              "offset": 84,
+              "rawHex": "00000d00"
+            },
+            "passageOpen": 1,
+            "passageOpenSymbol": {
+              "value": 1,
+              "address": 3774808154,
+              "offset": 90,
+              "rawHex": "00000100"
+            },
+            "objectiveReached": 0,
+            "objectiveSymbol": {
+              "value": 0,
+              "address": 3774808144,
+              "offset": 80,
+              "rawHex": "00000000"
+            },
+            "framebuffer": {
+              "width": 320,
+              "height": 224,
+              "yellowPixels": 20,
+              "yellowBounds": {
+                "x0": 41,
+                "y0": 180,
+                "x1": 149,
+                "y1": 200
+              },
+              "barrierPixels": 0,
+              "playerPixelBounds": {
+                "x0": 44,
+                "y0": 183,
+                "x1": 59,
+                "y1": 200
+              },
+              "framebufferSha256": "419a92df1b7026338f9bfb956bbbed8a67b1f3213ee744f1722a93556b00597a",
+              "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+              "framesRun": 135
+            },
+            "frame": 135
+          }
+        },
+        "blockedBeforeOpen": {
+          "x0": 44,
+          "y0": 182,
+          "x1": 57,
+          "y1": 200
+        },
+        "atThresholdBeforeMove": {
+          "x0": 44,
+          "y0": 183,
+          "x1": 59,
+          "y1": 200
+        },
+        "traversedAfterOpen": {
+          "x0": 60,
+          "y0": 183,
+          "x1": 75,
+          "y1": 200
+        },
+        "reachedObjective": {
+          "context": "reach-objective-sensor",
+          "score": 81,
+          "scoreSymbol": {
+            "value": 81,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00005100"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 1,
+          "objectiveSymbol": {
+            "value": 1,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000100"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 20,
+            "yellowBounds": {
+              "x0": 147,
+              "y0": 180,
+              "x1": 198,
+              "y1": 200
+            },
+            "barrierPixels": 0,
+            "playerPixelBounds": null,
+            "framebufferSha256": "912503ab54289e9e76d62fd4deb481dfbffe342a521344f4013626e05bb4b972",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+            "framesRun": 207
+          },
+          "frame": 207
+        },
+        "screenshots": {
+          "blockedScreenshot": {
+            "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+          },
+          "openScreenshot": {
+            "framebufferSha256": "bcc6b4a15d8509706f081f11a5fce234b640fa232d42fbb16e7aa04cff7367d3",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+          },
+          "traversedScreenshot": {
+            "framebufferSha256": "a9eba0e8a220832d75bf52522da084e71d209e7c6d2a8b1afcc5efd2b12cd1c2",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+          }
+        },
+        "screenshotFramebuffer": {
+          "sha256": "f0f9a50a7e37717379f3e68df889ebc6ace0f556ea4a3d508e20e0457924e7e4",
+          "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+        },
+        "domFrame": {
+          "renderedFrames": 0,
+          "framebufferSha256": "038d90374805a4972b329bca04ecf5422cfd7e83be03adee23fbc4f637e81b96",
+          "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+        },
+        "initialState": {
+          "context": "boot",
+          "score": 0,
+          "scoreSymbol": {
+            "value": 0,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000000"
+          },
+          "passageOpen": 0,
+          "passageOpenSymbol": {
+            "value": 0,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000000"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 36,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 33,
+            "playerPixelBounds": {
+              "x0": 40,
+              "y0": 182,
+              "x1": 53,
+              "y1": 200
+            },
+            "framebufferSha256": "47a4cf053892010648f8650ec3ac84e02da7651fdc16b9a062ec5a8f92dd0ba0",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+            "framesRun": 120
+          },
+          "frame": 120
+        }
+      },
+      "generatedMainSha256": "6045442d4b272fc9eadb223b6d990a580c0d7c25f6030f14f5052624edbc29cd"
+    },
+    {
+      "id": "paint_tilemap_undo_redo_and_preserve_collision",
+      "status": "passed",
+      "at": "2026-09-23T22:14:32.973Z",
+      "cell": {
+        "col": 1,
+        "row": 25
+      },
+      "cellIndex": 1001,
+      "originalValue": 0,
+      "paintedValue": 2,
+      "undoValue": 0,
+      "redoValue": 2,
+      "collisionSolidCount": 88,
+      "normalizedPoint": {
+        "x": 0.28703703703703703,
+        "y": 0.6710526315789473
+      }
+    },
+    {
+      "id": "build_tilemap_authored_rom_and_observe_change",
+      "status": "passed",
+      "at": "2026-09-23T22:14:39.124Z",
+      "initial": {
+        "framebuffer_hash": "87c97bfc",
+        "height": 224,
+        "non_black_pixels": 71680,
+        "width": 320,
+        "tilemap_cell_hash": "11cc6cc5"
+      },
+      "painted": {
+        "framebuffer_hash": "664f3c52",
+        "height": 224,
+        "non_black_pixels": 71680,
+        "width": 320,
+        "tilemap_cell_hash": "1bd5bd07"
+      }
+    },
+    {
+      "id": "movement_native_input_ram",
+      "status": "passed",
+      "at": "2026-09-23T22:14:44.627Z",
+      "startX": 32,
+      "endX": 56,
+      "diffPixels": 1091,
+      "ack": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": false,
+          "x": false,
+          "b": false,
+          "right": true,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-7",
+        "seq": 1
+      },
+      "releaseAck": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": false,
+          "x": false,
+          "b": false,
+          "right": false,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-7",
+        "seq": 2
+      }
+    },
+    {
+      "id": "jump_native_input_ram_trajectory",
+      "status": "passed",
+      "at": "2026-09-23T22:14:47.570Z",
+      "groundY": 176,
+      "apexY": 161,
+      "lift": 15,
+      "fellAfterApex": true,
+      "landedY": 176,
+      "heldLandedWhileHeld": 176,
+      "ack": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": true,
+          "x": false,
+          "b": false,
+          "right": false,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-7",
+        "seq": 3
+      },
+      "releaseAck": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": false,
+          "x": false,
+          "b": false,
+          "right": false,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-7",
+        "seq": 4
+      },
+      "trajectory": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-jump-trajectory.json"
+    },
+    {
+      "id": "audio_forwarded_to_output",
+      "status": "passed",
+      "at": "2026-09-23T22:14:50.948Z",
+      "forwarded": {
+        "receivedNonZeroFrames": 10303,
+        "renderedFrames": 66560,
+        "renderedNonZeroFrames": 10303,
+        "renderedPeak": 0.064544677734375,
+        "contextState": "running",
+        "contextSampleRate": 44100,
+        "muted": false
+      },
+      "loopback": {
+        "status": "unavailable",
+        "samples": 0,
+        "nonZero": 0,
+        "peak": 0,
+        "source": "@DEFAULT_MONITOR@"
+      },
+      "note": "loopback captures the whole default sink (other apps included); it is informative, not an assertion"
+    },
+    {
+      "id": "movement_pause_resume",
+      "status": "passed",
+      "at": "2026-09-23T22:14:52.172Z",
+      "movement": {
+        "frame": 70,
+        "sha256": "84bdc1abb28f0fe3231bb4c0cd55976a37e68346e2d7d4031ba3f858c59c4274",
+        "diffBytes": 1091,
+        "startX": 32,
+        "endX": 56,
+        "ack": {
+          "joypad": {
+            "left": false,
+            "l": false,
+            "start": false,
+            "select": false,
+            "y": false,
+            "x": false,
+            "b": false,
+            "right": true,
+            "r": false,
+            "up": false,
+            "a": false,
+            "down": false
+          },
+          "sessionId": "joypad-session-7",
+          "seq": 1
+        },
+        "releaseAck": {
+          "joypad": {
+            "left": false,
+            "l": false,
+            "start": false,
+            "select": false,
+            "y": false,
+            "x": false,
+            "b": false,
+            "right": false,
+            "r": false,
+            "up": false,
+            "a": false,
+            "down": false
+          },
+          "sessionId": "joypad-session-7",
+          "seq": 2
+        }
+      },
+      "pause": {
+        "paused": {
+          "romSha256": "c7f5cc53b98edf09b5d4258269c71d87c1f5fcf361ae31045aa1102cdea50cb3",
+          "lastInputRequestSeq": 6,
+          "width": 320,
+          "romPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/out/rom.bin",
+          "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+          "lastInputAckSeq": 6,
+          "gameStatus": "Emulador pausado",
+          "height": 224,
+          "corePath": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+          "renderedFrames": 100,
+          "romSize": 524288
+        },
+        "resumed": {
+          "romSha256": "c7f5cc53b98edf09b5d4258269c71d87c1f5fcf361ae31045aa1102cdea50cb3",
+          "lastInputRequestSeq": 6,
+          "width": 320,
+          "romPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/out/rom.bin",
+          "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+          "lastInputAckSeq": 6,
+          "gameStatus": "Emulador ativo",
+          "height": 224,
+          "corePath": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+          "renderedFrames": 110,
+          "romSize": 524288
+        }
+      }
+    },
+    {
+      "id": "reopen_project_and_validate_persisted_graph",
+      "status": "passed",
+      "at": "2026-09-23T22:14:53.440Z",
+      "projectDir": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514",
+      "entityIds": [
+        "reference_tilemap",
+        "player",
+        "passage_blocker",
+        "goal",
+        "goal_sensor",
+        "main_camera"
+      ],
+      "graphRef": "graphs/reference_platformer_logic.json",
+      "tilemapCell": {
+        "col": 1,
+        "row": 25
+      },
+      "tilemapCellIndex": 1001,
+      "tilemapValue": 2
+    },
+    {
+      "id": "rebuild_and_run_after_reopen",
+      "status": "passed",
+      "at": "2026-09-23T22:14:59.154Z",
+      "rom": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/out/rom.bin",
+      "framebuffer": {
+        "framebuffer_hash": "664f3c52",
+        "height": 224,
+        "non_black_pixels": 71680,
+        "width": 320,
+        "tilemap_cell_hash": "1bd5bd07"
+      }
+    },
+    {
+      "id": "scene_collision_and_animation_authored_in_ui",
+      "status": "passed",
+      "at": "2026-09-23T22:15:28.059Z",
+      "pitCells": [
+        [
+          10,
+          26
+        ]
+      ],
+      "collisionSolid": {
+        "before": 88,
+        "after": 87
+      },
+      "physicalPitDip": [
+        {
+          "frame": 39,
+          "x": 80,
+          "y": 184,
+          "score": 39,
+          "mainOpen": 1,
+          "secondOpen": 0
+        },
+        {
+          "frame": 40,
+          "x": 80,
+          "y": 184,
+          "score": 40,
+          "mainOpen": 1,
+          "secondOpen": 0
+        }
+      ],
+      "idleFps": 12,
+      "idleChangeFrames": [
+        3,
+        8,
+        13,
+        18,
+        23,
+        28,
+        33,
+        38
+      ],
+      "idleGaps": [
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ],
+      "pitVisualRegionSha256": {
+        "edited": "8b22c899d247c702a53d0a347ab97ad880ae0024d5ff71bfe5207941ef85e1ac",
+        "control": "a10bcabf2d22e9a04a65950b8795d284a8608778243542bc87658e4e62513d83"
+      },
+      "limits": "sem paredes de tile horizontais: andando, o personagem sobe a borda do fosso raso"
+    },
+    {
+      "id": "second_passage_authored_in_ui",
+      "status": "passed",
+      "at": "2026-09-23T22:15:28.060Z",
+      "reopened": {
+        "second": {
+          "threshold": "60",
+          "openVar": "passage_2_open",
+          "blocker": "passage_blocker_2"
+        },
+        "main": {
+          "threshold": "12",
+          "openVar": "goal_open",
+          "blocker": "passage_blocker"
+        }
+      },
+      "rom": {
+        "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-two-passages.rom",
+        "sha256": "3b848915f36236ecdaaf35c69e76332b38ba4d4c0679d94daa7f5fc87fff005f"
+      },
+      "mainOpened": {
+        "frame": 12,
+        "x": 36,
+        "y": 176,
+        "score": 12,
+        "mainOpen": 1,
+        "secondOpen": 0
+      },
+      "secondOpened": {
+        "frame": 60,
+        "x": 106,
+        "y": 176,
+        "score": 60,
+        "mainOpen": 1,
+        "secondOpen": 1
+      },
+      "heldFramesAtSecondBlocker": 5,
+      "maxXWhileSecondClosed": 106,
+      "final": {
+        "frame": 130,
+        "x": 246,
+        "y": 176,
+        "score": 130,
+        "mainOpen": 1,
+        "secondOpen": 1
+      },
+      "timeline": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-two-passages-timeline.json",
+      "inputDriver": "core emulator_send_input (controlled measurement; native keyboard is covered by movement/jump steps)"
+    }
+  ],
+  "roms": [
+    {
+      "label": "reference platformer initial build",
+      "rom_path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-original.rom",
+      "sega_header": "SEGA",
+      "rom_size_bytes": 524288,
+      "framebuffer": {
+        "framebuffer_hash": "87c97bfc",
+        "height": 224,
+        "non_black_pixels": 71680,
+        "width": 320,
+        "tilemap_cell_hash": "11cc6cc5"
+      }
+    },
+    {
+      "label": "reference platformer edited goal threshold build",
+      "rom_path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-edited.rom",
+      "sega_header": "SEGA",
+      "rom_size_bytes": 524288,
+      "framebuffer": {
+        "framebuffer_hash": "87c97bfc",
+        "height": 224,
+        "non_black_pixels": 71680,
+        "width": 320,
+        "tilemap_cell_hash": "11cc6cc5"
+      }
+    },
+    {
+      "label": "reference platformer tilemap-authored build",
+      "rom_path": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/out/rom.bin",
+      "sega_header": "SEGA",
+      "rom_size_bytes": 524288,
+      "framebuffer": {
+        "framebuffer_hash": "664f3c52",
+        "height": 224,
+        "non_black_pixels": 71680,
+        "width": 320,
+        "tilemap_cell_hash": "1bd5bd07"
+      }
+    },
+    {
+      "label": "reference platformer reopened build",
+      "rom_path": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/out/rom.bin",
+      "sega_header": "SEGA",
+      "rom_size_bytes": 524288,
+      "framebuffer": {
+        "framebuffer_hash": "664f3c52",
+        "height": 224,
+        "non_black_pixels": 71680,
+        "width": 320,
+        "tilemap_cell_hash": "1bd5bd07"
+      }
+    }
+  ],
+  "frames": [
+    {
+      "label": "reference platformer initial build",
+      "framebuffer_hash": "87c97bfc",
+      "height": 224,
+      "non_black_pixels": 71680,
+      "width": 320,
+      "tilemap_cell_hash": "11cc6cc5"
+    },
+    {
+      "label": "reference platformer tilemap-authored build",
+      "framebuffer_hash": "664f3c52",
+      "height": 224,
+      "non_black_pixels": 71680,
+      "width": 320,
+      "tilemap_cell_hash": "1bd5bd07"
+    },
+    {
+      "label": "movement",
+      "width": 320,
+      "height": 224,
+      "non_black_pixels": 71680,
+      "sha256": "84bdc1abb28f0fe3231bb4c0cd55976a37e68346e2d7d4031ba3f858c59c4274"
+    },
+    {
+      "label": "jump",
+      "width": 320,
+      "height": 224,
+      "non_black_pixels": 71680,
+      "sha256": "61d6a3ccece31314f9153d525e3966961b5c3fcf6965cfbd07a5b95c03058ee2"
+    },
+    {
+      "label": "reference platformer reopened build",
+      "framebuffer_hash": "664f3c52",
+      "height": 224,
+      "non_black_pixels": 71680,
+      "width": 320,
+      "tilemap_cell_hash": "1bd5bd07"
+    }
+  ],
+  "input": {
+    "before": {
+      "frame": 30,
+      "sha256": "8177064c254d48f3046b416a2f6beb6ca8b17b8ea196f30d5a674b06ed9fb5f3"
+    },
+    "movement": {
+      "frame": 70,
+      "sha256": "84bdc1abb28f0fe3231bb4c0cd55976a37e68346e2d7d4031ba3f858c59c4274",
+      "diffBytes": 1091,
+      "startX": 32,
+      "endX": 56,
+      "ack": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": false,
+          "x": false,
+          "b": false,
+          "right": true,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-7",
+        "seq": 1
+      },
+      "releaseAck": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": false,
+          "x": false,
+          "b": false,
+          "right": false,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-7",
+        "seq": 2
+      }
+    },
+    "jump": {
+      "frame": 70,
+      "sha256": "61d6a3ccece31314f9153d525e3966961b5c3fcf6965cfbd07a5b95c03058ee2",
+      "ack": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": true,
+          "x": false,
+          "b": false,
+          "right": false,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-7",
+        "seq": 3
+      },
+      "releaseAck": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": false,
+          "x": false,
+          "b": false,
+          "right": false,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-7",
+        "seq": 4
+      },
+      "groundY": 176,
+      "apexY": 161,
+      "landedY": 176
+    },
+    "pause": {
+      "paused": {
+        "romSha256": "c7f5cc53b98edf09b5d4258269c71d87c1f5fcf361ae31045aa1102cdea50cb3",
+        "lastInputRequestSeq": 6,
+        "width": 320,
+        "romPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/out/rom.bin",
+        "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+        "lastInputAckSeq": 6,
+        "gameStatus": "Emulador pausado",
+        "height": 224,
+        "corePath": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+        "renderedFrames": 100,
+        "romSize": 524288
+      },
+      "resumed": {
+        "romSha256": "c7f5cc53b98edf09b5d4258269c71d87c1f5fcf361ae31045aa1102cdea50cb3",
+        "lastInputRequestSeq": 6,
+        "width": 320,
+        "romPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/out/rom.bin",
+        "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+        "lastInputAckSeq": 6,
+        "gameStatus": "Emulador ativo",
+        "height": 224,
+        "corePath": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+        "renderedFrames": 110,
+        "romSize": 524288
+      }
+    }
+  },
+  "goalDecision": {
+    "beforeEdit": {
+      "label": "ROM gerada antes da edicao",
+      "romPath": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-original.rom",
+      "testedRomSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+      "generatedMainSha256": "1cb83428795338878269fbe716298749eb57ca0eb2a578f83647f4959f7002cb",
+      "generatedMainPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/src/main.c",
+      "goalSoundAndWinCode": {
+        "soundCall": "XGM_startPlayPCM(SFX_GOAL_SOUND, ...) emitted from goal sensor event chain",
+        "persistentWinCondition": "logic_var_goal_reached transitions 0→1 after sensor overlap",
+        "eventOrderObservedWithRuntimeWinFlag": true
+      },
+      "scoreComparison": {
+        "incrementSource": "logic_var_reference_score = (logic_var_reference_score + 1);",
+        "compareSource": "if ((logic_var_reference_score >= threshold))",
+        "comparesStoredPostIncrementValue": true,
+        "independentlyObservedScore": 8
+      },
+      "threshold": 6,
+      "inputSequences": {
+        "sameSequenceAcrossRoms": [
+          {
+            "right": true,
+            "frames": 8
+          }
+        ],
+        "boundaryAndTraversal": [
+          {
+            "right": true,
+            "frames": 5,
+            "expectedScore": 5,
+            "expectedOpen": false
+          },
+          {
+            "right": true,
+            "frames": 1,
+            "expectedScore": 6,
+            "expectedOpen": true
+          },
+          {
+            "right": true,
+            "frames": 1,
+            "expectedScore": 7,
+            "expectedOpen": true
+          },
+          {
+            "right": true,
+            "frames": 8,
+            "expectedToPassBarrierX": 50
+          },
+          {
+            "right": true,
+            "frames": 60,
+            "expectedObjectiveReached": true
+          }
+        ]
+      },
+      "sameEightFrameObservation": {
+        "context": "same-input-8-frames",
+        "score": 8,
+        "scoreSymbol": {
+          "value": 8,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00000800"
+        },
+        "passageOpen": 1,
+        "passageOpenSymbol": {
+          "value": 1,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000100"
+        },
+        "objectiveReached": 0,
+        "objectiveSymbol": {
+          "value": 0,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000000"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 21,
+          "yellowBounds": {
+            "x0": 42,
+            "y0": 180,
+            "x1": 149,
+            "y1": 199
+          },
+          "barrierPixels": 0,
+          "playerPixelBounds": {
+            "x0": 46,
+            "y0": 182,
+            "x1": 59,
+            "y1": 200
+          },
+          "framebufferSha256": "b0e226403c447bae771caad98cacd8c956f0f3aafeff6ef2c1304061e089e36a",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+          "framesRun": 128
+        },
+        "frame": 128
+      },
+      "boundaries": {
+        "below": {
+          "context": "threshold-minus-one",
+          "score": 5,
+          "scoreSymbol": {
+            "value": 5,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000500"
+          },
+          "passageOpen": 0,
+          "passageOpenSymbol": {
+            "value": 0,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000000"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 40,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 30,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 182,
+              "x1": 57,
+              "y1": 200
+            },
+            "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 125
+          },
+          "frame": 125
+        },
+        "equal": {
+          "context": "threshold-equal",
+          "score": 6,
+          "scoreSymbol": {
+            "value": 6,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000600"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 40,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 30,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 182,
+              "x1": 57,
+              "y1": 200
+            },
+            "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 128
+          },
+          "frame": 128
+        },
+        "above": {
+          "context": "threshold-plus-one",
+          "score": 7,
+          "scoreSymbol": {
+            "value": 7,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000700"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 40,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 0,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 182,
+              "x1": 57,
+              "y1": 200
+            },
+            "framebufferSha256": "fe9b696779c9fcbe54e84fe9107fccbe02f958d29c24b7aa138f17d9d7443e9a",
+            "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+            "framesRun": 129
+          },
+          "frame": 129
+        }
+      },
+      "blockedBeforeOpen": {
+        "x0": 44,
+        "y0": 182,
+        "x1": 57,
+        "y1": 200
+      },
+      "atThresholdBeforeMove": {
+        "x0": 44,
+        "y0": 182,
+        "x1": 57,
+        "y1": 200
+      },
+      "traversedAfterOpen": {
+        "x0": 60,
+        "y0": 183,
+        "x1": 75,
+        "y1": 200
+      },
+      "reachedObjective": {
+        "context": "reach-objective-sensor",
+        "score": 75,
+        "scoreSymbol": {
+          "value": 75,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00004b00"
+        },
+        "passageOpen": 1,
+        "passageOpenSymbol": {
+          "value": 1,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000100"
+        },
+        "objectiveReached": 1,
+        "objectiveSymbol": {
+          "value": 1,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000100"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 20,
+          "yellowBounds": {
+            "x0": 147,
+            "y0": 180,
+            "x1": 198,
+            "y1": 200
+          },
+          "barrierPixels": 0,
+          "playerPixelBounds": null,
+          "framebufferSha256": "912503ab54289e9e76d62fd4deb481dfbffe342a521344f4013626e05bb4b972",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+          "framesRun": 201
+        },
+        "frame": 201
+      },
+      "screenshots": {
+        "blockedScreenshot": {
+          "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+        },
+        "openScreenshot": {
+          "framebufferSha256": "b0e226403c447bae771caad98cacd8c956f0f3aafeff6ef2c1304061e089e36a",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+        },
+        "traversedScreenshot": {
+          "framebufferSha256": "a9eba0e8a220832d75bf52522da084e71d209e7c6d2a8b1afcc5efd2b12cd1c2",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+        }
+      },
+      "screenshotFramebuffer": {
+        "sha256": "f0f9a50a7e37717379f3e68df889ebc6ace0f556ea4a3d508e20e0457924e7e4",
+        "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+      },
+      "domFrame": {
+        "renderedFrames": 0,
+        "framebufferSha256": "f0f9a50a7e37717379f3e68df889ebc6ace0f556ea4a3d508e20e0457924e7e4",
+        "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b"
+      },
+      "initialState": {
+        "context": "boot",
+        "score": 0,
+        "scoreSymbol": {
+          "value": 0,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00000000"
+        },
+        "passageOpen": 0,
+        "passageOpenSymbol": {
+          "value": 0,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000000"
+        },
+        "objectiveReached": 0,
+        "objectiveSymbol": {
+          "value": 0,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000000"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 21,
+          "yellowBounds": {
+            "x0": 36,
+            "y0": 180,
+            "x1": 149,
+            "y1": 199
+          },
+          "barrierPixels": 33,
+          "playerPixelBounds": {
+            "x0": 40,
+            "y0": 182,
+            "x1": 53,
+            "y1": 200
+          },
+          "framebufferSha256": "47a4cf053892010648f8650ec3ac84e02da7651fdc16b9a062ec5a8f92dd0ba0",
+          "romSha256": "006307d5757099df09ba71e32c7cf5541e1ea965d6a27ba773a786b38e7cfa3b",
+          "framesRun": 120
+        },
+        "frame": 120
+      }
+    },
+    "afterEdit": {
+      "label": "ROM gerada apos edicao",
+      "romPath": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/reference-platformer-2026-09-23T22-14-01-409Z-goal-edited.rom",
+      "testedRomSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+      "generatedMainSha256": "6045442d4b272fc9eadb223b6d990a580c0d7c25f6030f14f5052624edbc29cd",
+      "generatedMainPath": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514/build/megadrive/src/main.c",
+      "goalSoundAndWinCode": {
+        "soundCall": "XGM_startPlayPCM(SFX_GOAL_SOUND, ...) emitted from goal sensor event chain",
+        "persistentWinCondition": "logic_var_goal_reached transitions 0→1 after sensor overlap",
+        "eventOrderObservedWithRuntimeWinFlag": true
+      },
+      "scoreComparison": {
+        "incrementSource": "logic_var_reference_score = (logic_var_reference_score + 1);",
+        "compareSource": "if ((logic_var_reference_score >= threshold))",
+        "comparesStoredPostIncrementValue": true,
+        "independentlyObservedScore": 8
+      },
+      "threshold": 12,
+      "inputSequences": {
+        "sameSequenceAcrossRoms": [
+          {
+            "right": true,
+            "frames": 8
+          }
+        ],
+        "boundaryAndTraversal": [
+          {
+            "right": true,
+            "frames": 11,
+            "expectedScore": 11,
+            "expectedOpen": false
+          },
+          {
+            "right": true,
+            "frames": 1,
+            "expectedScore": 12,
+            "expectedOpen": true
+          },
+          {
+            "right": true,
+            "frames": 1,
+            "expectedScore": 13,
+            "expectedOpen": true
+          },
+          {
+            "right": true,
+            "frames": 8,
+            "expectedToPassBarrierX": 50
+          },
+          {
+            "right": true,
+            "frames": 60,
+            "expectedObjectiveReached": true
+          }
+        ]
+      },
+      "sameEightFrameObservation": {
+        "context": "same-input-8-frames",
+        "score": 8,
+        "scoreSymbol": {
+          "value": 8,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00000800"
+        },
+        "passageOpen": 0,
+        "passageOpenSymbol": {
+          "value": 0,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000000"
+        },
+        "objectiveReached": 0,
+        "objectiveSymbol": {
+          "value": 0,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000000"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 21,
+          "yellowBounds": {
+            "x0": 40,
+            "y0": 180,
+            "x1": 149,
+            "y1": 199
+          },
+          "barrierPixels": 30,
+          "playerPixelBounds": {
+            "x0": 44,
+            "y0": 182,
+            "x1": 57,
+            "y1": 200
+          },
+          "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+          "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+          "framesRun": 128
+        },
+        "frame": 128
+      },
+      "boundaries": {
+        "below": {
+          "context": "threshold-minus-one",
+          "score": 11,
+          "scoreSymbol": {
+            "value": 11,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000b00"
+          },
+          "passageOpen": 0,
+          "passageOpenSymbol": {
+            "value": 0,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000000"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 21,
+            "yellowBounds": {
+              "x0": 40,
+              "y0": 180,
+              "x1": 149,
+              "y1": 199
+            },
+            "barrierPixels": 30,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 182,
+              "x1": 57,
+              "y1": 200
+            },
+            "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+            "framesRun": 131
+          },
+          "frame": 131
+        },
+        "equal": {
+          "context": "threshold-equal",
+          "score": 12,
+          "scoreSymbol": {
+            "value": 12,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000c00"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 20,
+            "yellowBounds": {
+              "x0": 41,
+              "y0": 180,
+              "x1": 149,
+              "y1": 200
+            },
+            "barrierPixels": 29,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 183,
+              "x1": 59,
+              "y1": 200
+            },
+            "framebufferSha256": "f934eac9319c86d40121cb309647c12a6d8f500bff07f0e6bb497727a157a9c9",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+            "framesRun": 134
+          },
+          "frame": 134
+        },
+        "above": {
+          "context": "threshold-plus-one",
+          "score": 13,
+          "scoreSymbol": {
+            "value": 13,
+            "address": 3774808148,
+            "offset": 84,
+            "rawHex": "00000d00"
+          },
+          "passageOpen": 1,
+          "passageOpenSymbol": {
+            "value": 1,
+            "address": 3774808154,
+            "offset": 90,
+            "rawHex": "00000100"
+          },
+          "objectiveReached": 0,
+          "objectiveSymbol": {
+            "value": 0,
+            "address": 3774808144,
+            "offset": 80,
+            "rawHex": "00000000"
+          },
+          "framebuffer": {
+            "width": 320,
+            "height": 224,
+            "yellowPixels": 20,
+            "yellowBounds": {
+              "x0": 41,
+              "y0": 180,
+              "x1": 149,
+              "y1": 200
+            },
+            "barrierPixels": 0,
+            "playerPixelBounds": {
+              "x0": 44,
+              "y0": 183,
+              "x1": 59,
+              "y1": 200
+            },
+            "framebufferSha256": "419a92df1b7026338f9bfb956bbbed8a67b1f3213ee744f1722a93556b00597a",
+            "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+            "framesRun": 135
+          },
+          "frame": 135
+        }
+      },
+      "blockedBeforeOpen": {
+        "x0": 44,
+        "y0": 182,
+        "x1": 57,
+        "y1": 200
+      },
+      "atThresholdBeforeMove": {
+        "x0": 44,
+        "y0": 183,
+        "x1": 59,
+        "y1": 200
+      },
+      "traversedAfterOpen": {
+        "x0": 60,
+        "y0": 183,
+        "x1": 75,
+        "y1": 200
+      },
+      "reachedObjective": {
+        "context": "reach-objective-sensor",
+        "score": 81,
+        "scoreSymbol": {
+          "value": 81,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00005100"
+        },
+        "passageOpen": 1,
+        "passageOpenSymbol": {
+          "value": 1,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000100"
+        },
+        "objectiveReached": 1,
+        "objectiveSymbol": {
+          "value": 1,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000100"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 20,
+          "yellowBounds": {
+            "x0": 147,
+            "y0": 180,
+            "x1": 198,
+            "y1": 200
+          },
+          "barrierPixels": 0,
+          "playerPixelBounds": null,
+          "framebufferSha256": "912503ab54289e9e76d62fd4deb481dfbffe342a521344f4013626e05bb4b972",
+          "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+          "framesRun": 207
+        },
+        "frame": 207
+      },
+      "screenshots": {
+        "blockedScreenshot": {
+          "framebufferSha256": "91fe5db41d0b6fbaf9e644d0796f1d5e3445f5fac7f9892e77dec1f88d8525a0",
+          "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+        },
+        "openScreenshot": {
+          "framebufferSha256": "bcc6b4a15d8509706f081f11a5fce234b640fa232d42fbb16e7aa04cff7367d3",
+          "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+        },
+        "traversedScreenshot": {
+          "framebufferSha256": "a9eba0e8a220832d75bf52522da084e71d209e7c6d2a8b1afcc5efd2b12cd1c2",
+          "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+        }
+      },
+      "screenshotFramebuffer": {
+        "sha256": "f0f9a50a7e37717379f3e68df889ebc6ace0f556ea4a3d508e20e0457924e7e4",
+        "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+      },
+      "domFrame": {
+        "renderedFrames": 0,
+        "framebufferSha256": "038d90374805a4972b329bca04ecf5422cfd7e83be03adee23fbc4f637e81b96",
+        "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4"
+      },
+      "initialState": {
+        "context": "boot",
+        "score": 0,
+        "scoreSymbol": {
+          "value": 0,
+          "address": 3774808148,
+          "offset": 84,
+          "rawHex": "00000000"
+        },
+        "passageOpen": 0,
+        "passageOpenSymbol": {
+          "value": 0,
+          "address": 3774808154,
+          "offset": 90,
+          "rawHex": "00000000"
+        },
+        "objectiveReached": 0,
+        "objectiveSymbol": {
+          "value": 0,
+          "address": 3774808144,
+          "offset": 80,
+          "rawHex": "00000000"
+        },
+        "framebuffer": {
+          "width": 320,
+          "height": 224,
+          "yellowPixels": 21,
+          "yellowBounds": {
+            "x0": 36,
+            "y0": 180,
+            "x1": 149,
+            "y1": 199
+          },
+          "barrierPixels": 33,
+          "playerPixelBounds": {
+            "x0": 40,
+            "y0": 182,
+            "x1": 53,
+            "y1": 200
+          },
+          "framebufferSha256": "47a4cf053892010648f8650ec3ac84e02da7651fdc16b9a062ec5a8f92dd0ba0",
+          "romSha256": "d694d18defcae479c5d5492675018553f4f20772db1f25b2d7f361e58b295fc4",
+          "framesRun": 120
+        },
+        "frame": 120
+      }
+    },
+    "sameSequence": true,
+    "authorship": "score chain and threshold authored in graphs/reference_platformer_logic.json",
+    "recoveryBoundary": "branch-compare remains assisted ROM recovery and is exercised separately"
+  },
+  "tilemapAuthoring": {
+    "cell": {
+      "col": 1,
+      "row": 25
+    },
+    "cellIndex": 1001,
+    "originalValue": 0,
+    "paintedValue": 2,
+    "collisionSolidCount": 88
+  },
+  "persistence": {
+    "projectDir": "/home/misael/Documents/RetroDevProjects/Reference_Platformer_1790201643514",
+    "entityIds": [
+      "reference_tilemap",
+      "player",
+      "passage_blocker",
+      "goal",
+      "goal_sensor",
+      "main_camera"
+    ],
+    "graphRef": "graphs/reference_platformer_logic.json",
+    "tilemapCell": {
+      "col": 1,
+      "row": 25
+    },
+    "tilemapCellIndex": 1001,
+    "tilemapValue": 2
+  },
+  "sceneAuthoring": {
+    "pitCells": [
+      [
+        10,
+        26
+      ]
+    ],
+    "solidBeforePit": 88,
+    "solidAfterPit": 87,
+    "idleFps": 12
+  },
+  "secondPassageSavedGraphSha256": "6e655724591efb52f2fb6b0efe2747a65c6368a3df25cf416b955e93f1f591d9",
+  "pitVisual": {
+    "edited": "8b22c899d247c702a53d0a347ab97ad880ae0024d5ff71bfe5207941ef85e1ac",
+    "control": "a10bcabf2d22e9a04a65950b8795d284a8608778243542bc87658e4e62513d83",
+    "reopenedFramebuffer": null
+  },
+  "non_black_pixels": 71680
+}

@@ -1,0 +1,731 @@
+{
+  "jumpProof": {
+    "groundY": 176,
+    "zMinY": 176,
+    "xMinY": 161,
+    "zSamples": 19,
+    "xSamples": 16
+  },
+  "timeline": [
+    {
+      "x": 34,
+      "y": 176,
+      "score": 1,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 108920,
+      "t": 1790243446101
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 2,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 110392,
+      "t": 1790243446295
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 3,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 111864,
+      "t": 1790243446536
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 4,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 113334,
+      "t": 1790243446695
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 5,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 114806,
+      "t": 1790243446794
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 6,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 116278,
+      "t": 1790243446909
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 7,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 117750,
+      "t": 1790243447030
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 8,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 119222,
+      "t": 1790243447146
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 9,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 120694,
+      "t": 1790243447261
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 10,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 122166,
+      "t": 1790243447380
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 11,
+      "mainOpen": 0,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 123638,
+      "t": 1790243447494
+    },
+    {
+      "x": 36,
+      "y": 176,
+      "score": 12,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 125110,
+      "t": 1790243447653
+    },
+    {
+      "x": 38,
+      "y": 176,
+      "score": 13,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 126582,
+      "t": 1790243447887
+    },
+    {
+      "x": 40,
+      "y": 176,
+      "score": 14,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 128054,
+      "t": 1790243448091
+    },
+    {
+      "x": 42,
+      "y": 176,
+      "score": 15,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 129526,
+      "t": 1790243448301
+    },
+    {
+      "x": 44,
+      "y": 176,
+      "score": 16,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 130998,
+      "t": 1790243448492
+    },
+    {
+      "x": 46,
+      "y": 176,
+      "score": 17,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 132470,
+      "t": 1790243448717
+    },
+    {
+      "x": 48,
+      "y": 176,
+      "score": 18,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 133942,
+      "t": 1790243448935
+    },
+    {
+      "x": 50,
+      "y": 176,
+      "score": 19,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 135414,
+      "t": 1790243449155
+    },
+    {
+      "x": 52,
+      "y": 176,
+      "score": 20,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 136886,
+      "t": 1790243449461
+    },
+    {
+      "x": 54,
+      "y": 176,
+      "score": 21,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 138358,
+      "t": 1790243449760
+    },
+    {
+      "x": 56,
+      "y": 176,
+      "score": 22,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 139830,
+      "t": 1790243450008
+    },
+    {
+      "x": 58,
+      "y": 176,
+      "score": 23,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 141300,
+      "t": 1790243450377
+    },
+    {
+      "x": 60,
+      "y": 176,
+      "score": 24,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 142772,
+      "t": 1790243450481
+    },
+    {
+      "x": 62,
+      "y": 176,
+      "score": 25,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 144244,
+      "t": 1790243450745
+    },
+    {
+      "x": 64,
+      "y": 176,
+      "score": 26,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 145716,
+      "t": 1790243450945
+    },
+    {
+      "x": 66,
+      "y": 176,
+      "score": 27,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 147188,
+      "t": 1790243451224
+    },
+    {
+      "x": 68,
+      "y": 176,
+      "score": 28,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 148660,
+      "t": 1790243451419
+    },
+    {
+      "x": 70,
+      "y": 176,
+      "score": 29,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 150132,
+      "t": 1790243451637
+    },
+    {
+      "x": 72,
+      "y": 176,
+      "score": 30,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 151604,
+      "t": 1790243451835
+    },
+    {
+      "x": 74,
+      "y": 176,
+      "score": 31,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 153076,
+      "t": 1790243452021
+    },
+    {
+      "x": 76,
+      "y": 176,
+      "score": 32,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 154548,
+      "t": 1790243452225
+    },
+    {
+      "x": 78,
+      "y": 176,
+      "score": 33,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 156020,
+      "t": 1790243452420
+    },
+    {
+      "x": 80,
+      "y": 176,
+      "score": 34,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 157492,
+      "t": 1790243452624
+    },
+    {
+      "x": 82,
+      "y": 176,
+      "score": 35,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 158964,
+      "t": 1790243452818
+    },
+    {
+      "x": 84,
+      "y": 176,
+      "score": 36,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 160436,
+      "t": 1790243453011
+    },
+    {
+      "x": 86,
+      "y": 176,
+      "score": 37,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 161908,
+      "t": 1790243453236
+    },
+    {
+      "x": 88,
+      "y": 176,
+      "score": 38,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 163380,
+      "t": 1790243453462
+    },
+    {
+      "x": 90,
+      "y": 176,
+      "score": 39,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 164852,
+      "t": 1790243453704
+    },
+    {
+      "x": 92,
+      "y": 176,
+      "score": 40,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 166324,
+      "t": 1790243453886
+    },
+    {
+      "x": 94,
+      "y": 176,
+      "score": 41,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 167796,
+      "t": 1790243454094
+    },
+    {
+      "x": 96,
+      "y": 176,
+      "score": 42,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 169266,
+      "t": 1790243454307
+    },
+    {
+      "x": 98,
+      "y": 176,
+      "score": 43,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 170738,
+      "t": 1790243454514
+    },
+    {
+      "x": 100,
+      "y": 176,
+      "score": 44,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 172210,
+      "t": 1790243454703
+    },
+    {
+      "x": 102,
+      "y": 176,
+      "score": 45,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 173682,
+      "t": 1790243454908
+    },
+    {
+      "x": 104,
+      "y": 176,
+      "score": 46,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 175154,
+      "t": 1790243455135
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 47,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 176626,
+      "t": 1790243455389
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 48,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 178098,
+      "t": 1790243455626
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 49,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 179570,
+      "t": 1790243455782
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 50,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 181042,
+      "t": 1790243455927
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 51,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 182514,
+      "t": 1790243456067
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 52,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 183986,
+      "t": 1790243456222
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 53,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 185458,
+      "t": 1790243456322
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 54,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 186930,
+      "t": 1790243456438
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 55,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 188402,
+      "t": 1790243456544
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 56,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 189874,
+      "t": 1790243456655
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 57,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 191346,
+      "t": 1790243456775
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 58,
+      "mainOpen": 1,
+      "secondOpen": 0,
+      "goal": 0,
+      "audioTotal": 194290,
+      "t": 1790243457029
+    },
+    {
+      "x": 106,
+      "y": 176,
+      "score": 60,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 195762,
+      "t": 1790243457170
+    },
+    {
+      "x": 108,
+      "y": 176,
+      "score": 61,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 197232,
+      "t": 1790243457393
+    },
+    {
+      "x": 110,
+      "y": 176,
+      "score": 62,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 198704,
+      "t": 1790243457672
+    },
+    {
+      "x": 112,
+      "y": 176,
+      "score": 63,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 200176,
+      "t": 1790243457939
+    },
+    {
+      "x": 114,
+      "y": 176,
+      "score": 64,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 201648,
+      "t": 1790243458173
+    },
+    {
+      "x": 116,
+      "y": 176,
+      "score": 65,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 203120,
+      "t": 1790243458394
+    },
+    {
+      "x": 118,
+      "y": 176,
+      "score": 66,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 204592,
+      "t": 1790243458552
+    },
+    {
+      "x": 120,
+      "y": 176,
+      "score": 67,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 206064,
+      "t": 1790243458734
+    },
+    {
+      "x": 122,
+      "y": 176,
+      "score": 68,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 207536,
+      "t": 1790243458914
+    },
+    {
+      "x": 124,
+      "y": 176,
+      "score": 69,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 209008,
+      "t": 1790243459112
+    },
+    {
+      "x": 126,
+      "y": 176,
+      "score": 70,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 210480,
+      "t": 1790243459334
+    },
+    {
+      "x": 128,
+      "y": 176,
+      "score": 71,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 211952,
+      "t": 1790243459530
+    },
+    {
+      "x": 130,
+      "y": 176,
+      "score": 72,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 0,
+      "audioTotal": 213424,
+      "t": 1790243459718
+    },
+    {
+      "x": 132,
+      "y": 176,
+      "score": 73,
+      "mainOpen": 1,
+      "secondOpen": 1,
+      "goal": 1,
+      "audioTotal": 214896,
+      "t": 1790243459915
+    }
+  ]
+}

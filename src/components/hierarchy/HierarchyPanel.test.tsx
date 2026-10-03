@@ -167,6 +167,29 @@ describe("HierarchyPanel", () => {
     container.remove();
   });
 
+  it("remounting (workspace switch) keeps unsaved edits instead of re-reading the scene from disk", async () => {
+    // beforeEach mounted the panel and loaded the scene for this project once.
+    const edited = {
+      ...useEditorStore.getState().activeScene!,
+      entities: [{ entity_id: "unsaved_entity", prefab: null, transform: { x: 7, y: 7 }, components: {} }],
+    };
+    useEditorStore.setState({ activeScene: edited, activeSceneSource: edited, sceneRevision: 42 });
+    mocks.getSceneData.mockClear();
+    await act(async () => {
+      root.unmount();
+      await flush();
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<HierarchyPanel />);
+      await flush();
+      await flush();
+    });
+    expect(mocks.getSceneData).not.toHaveBeenCalled();
+    expect(useEditorStore.getState().activeScene?.entities.map((entity) => entity.entity_id)).toEqual(["unsaved_entity"]);
+    expect(useEditorStore.getState().sceneRevision).toBe(42);
+  });
+
   it("creates a starter sprite from the empty-scene CTA", async () => {
     expect(container.querySelector("[data-testid='hierarchy-scene-notice']")?.textContent).toContain(
       "Cena importada"

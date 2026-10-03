@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   validateProject: vi.fn(),
   generateCCode: vi.fn(),
   emulatorLoadRom: vi.fn(),
+  emulatorGetCoreEpoch: vi.fn(async () => 7),
+  emulatorObserve: vi.fn(async () => ({ ok: true, rom_path: "F:/Temp/game.md", rom_size: 131072, rom_sha256: "ab".repeat(32), core_label: "Genesis Plus GX", core_path: "core.so" })),
   emulatorSaveState: vi.fn(),
   emulatorLoadState: vi.fn(),
   emulatorRewindStep: vi.fn(),
@@ -567,6 +569,8 @@ vi.mock("./core/ipc/emulatorService", () => ({
     r: false,
   },
   emulatorLoadRom: mocks.emulatorLoadRom,
+  emulatorGetCoreEpoch: mocks.emulatorGetCoreEpoch,
+  emulatorObserve: mocks.emulatorObserve,
   emulatorSaveState: mocks.emulatorSaveState,
   emulatorLoadState: mocks.emulatorLoadState,
   emulatorRewindStep: mocks.emulatorRewindStep,
@@ -578,6 +582,10 @@ vi.mock("./core/ipc/emulatorService", () => ({
   startFrameLoop: mocks.startFrameLoop,
   listenToAudioStream: mocks.listenToAudioStream,
   keyToJoypad: vi.fn(() => null),
+  recordAudioOutput: vi.fn(),
+  recordReceivedAudioSamples: vi.fn(),
+  readReceivedAudioSamples: vi.fn(() => ({ total: 0, sampleRate: 0, from: 0, samples: [] })),
+  getAudioOutputTelemetry: vi.fn(() => null),
 }));
 
 vi.mock("./core/ipc/hwService", () => ({
@@ -942,6 +950,32 @@ function defaultProjectTemplates() {
       source_kind: "builtin",
       recommended_target: "megadrive",
       experimental: false,
+      available: true,
+      availability_reason: null,
+      default_donor_path: null,
+    },
+    {
+      id: "reference_platformer",
+      name: "Jogo de Referência — Plataforma",
+      description:
+        "Pequeno jogo autocontido com personagem animado, movimento, salto, colisão, tilemap, câmera, áudio e objetivo por NodeGraph.",
+      genre: "platformer",
+      difficulty: "beginner",
+      features: [
+        "sprite",
+        "animation",
+        "tilemap",
+        "physics",
+        "collision",
+        "input",
+        "audio",
+        "camera",
+        "goal",
+        "logic",
+      ],
+      source_kind: "builtin",
+      recommended_target: "megadrive",
+      experimental: true,
       available: true,
       availability_reason: null,
       default_donor_path: null,
@@ -2026,6 +2060,12 @@ describe("App build flow", () => {
     expect(useEditorStore.getState().activeWorkspace).toBe("game");
     expect(useEditorStore.getState().activeViewportTab).toBe("game");
     expect(useEditorStore.getState().emulatorLoaded).toBe(true);
+    // Build & Run must anchor the epoch of the freshly loaded core; a stale epoch
+    // makes the backend reject every keyboard input after a rebuild.
+    expect(useEditorStore.getState().coreEpoch).toBe(7);
+    expect(useEditorStore.getState().emulatorRomIdentity?.sha256).toBe("ab".repeat(32));
+    expect(useEditorStore.getState().joypadSessionHold).toBe(false);
+    expect(useEditorStore.getState().joypadSessionId).not.toBeNull();
     expect(container.textContent).toContain("Emulador ativo");
     expect(putImageDataSpy).toHaveBeenCalled();
   });
@@ -2542,6 +2582,30 @@ describe("App build flow", () => {
     expect(state.consoleEntries[state.consoleEntries.length - 1]?.message).toContain("Importar Asset");
   });
 
+  it("offers the MUGEN report from the menu and explains when the project has none", async () => {
+    const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
+    if (!(menuTrigger instanceof HTMLButtonElement)) {
+      throw new Error("Topbar menu trigger not found");
+    }
+    await act(async () => {
+      menuTrigger.click();
+      await flush();
+    });
+
+    const reportButton = container.querySelector("[data-testid='menu-action-mugen-report']");
+    expect(reportButton).toBeInstanceOf(HTMLButtonElement);
+    expect((reportButton as HTMLButtonElement).textContent).toContain("Relatorio MUGEN");
+
+    await act(async () => {
+      (reportButton as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='mugen-compat-panel']")).toBeNull();
+    const messages = useEditorStore.getState().consoleEntries.map((entry) => entry.message);
+    expect(messages.some((m) => m.includes("nao tem relatorio de compatibilidade MUGEN"))).toBe(true);
+  });
+
   it("opens project settings with actionable SRAM warnings and saves through project.rds", async () => {
     const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
     if (!(menuTrigger instanceof HTMLButtonElement)) {
@@ -3043,6 +3107,44 @@ describe("App build flow", () => {
       "megadrive",
       "F:/Projects/RetroDevStudio/tests/fixtures",
       "starter_guided",
+      undefined
+    );
+  });
+
+  it("exposes the self-contained reference platformer through the real wizard controls", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const referenceCard = container.querySelector(
+      "[data-testid='template-card-reference_platformer']"
+    ) as HTMLButtonElement | null;
+    expect(referenceCard).toBeInstanceOf(HTMLButtonElement);
+    expect(referenceCard?.textContent).toContain("Experimental");
+
+    const createButton = findButton(container, "Criar Projeto");
+    await act(async () => {
+      referenceCard?.click();
+      await flush();
+      createButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.createProjectFromTemplate).toHaveBeenCalledWith(
+      "MeuProjeto",
+      "megadrive",
+      "",
+      "reference_platformer",
       undefined
     );
   });

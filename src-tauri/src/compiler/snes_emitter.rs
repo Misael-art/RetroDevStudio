@@ -106,7 +106,22 @@ fn build_main_c_with_collision(
     let bgm_tracks = collect_bgm_tracks(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let input_commands = collect_input_commands(ast);
-    let unsupported_semantics = crate::compiler::ast_generator::collect_unsupported_semantics(ast);
+    let mut unsupported_semantics =
+        crate::compiler::ast_generator::collect_unsupported_semantics(ast);
+    // Sem fisica com estado de apoio no SNES: nunca traduzir para "falso" silencioso.
+    for var_name in crate::compiler::sgdk_emitter::collect_grounded_vars(ast) {
+        unsupported_semantics.push(crate::compiler::ast_generator::UnsupportedSemantic {
+            node_id: format!("condition_on_ground({var_name})"),
+            reason: "estado de apoio no chao nao existe no SNES".to_string(),
+        });
+    }
+    // Runtime MUGEN so existe no emissor Mega Drive: bloquear, nunca aproximar.
+    for var_name in crate::compiler::mugen_runtime::anim_done_vars(ast) {
+        unsupported_semantics.push(crate::compiler::ast_generator::UnsupportedSemantic {
+            node_id: format!("sprite_anim_done({var_name})"),
+            reason: "fim de animacao MUGEN nao existe no emissor SNES".to_string(),
+        });
+    }
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
     let default_size_config = SpriteSizeConfig {
         oam_size: "OBJ_SIZE16_L32",
@@ -399,6 +414,8 @@ fn build_main_c_with_collision(
                 max_velocity_y,
                 friction,
                 bounce,
+                floor_y: _,
+                ground: _,
             } => render_apply_physics(
                 &mut out,
                 &context,
@@ -410,6 +427,8 @@ fn build_main_c_with_collision(
                     max_velocity_y: *max_velocity_y,
                     friction: *friction,
                     bounce: *bounce,
+                    floor_y: None,
+                    ground: None,
                 },
             ),
             AstNode::DrawText { x, y, text, .. } => {
@@ -1121,10 +1140,17 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     ));
                 }
             }
+            LogicOp::MugenSetVelocityX { .. } | LogicOp::MugenProgramStep { .. } => {
+                out.push_str(&format!(
+                    "{indent}#error \"RetroDev MUGEN: VelSet nao existe no runtime SNES (perfil mugen.character.v1 e so Mega Drive)\"\n",
+                    indent = indent_str
+                ));
+            }
             LogicOp::SetVelocity {
                 target_name,
                 vx,
                 vy,
+                ..
             } => {
                 out.push_str(&format!(
                     "{indent}logic_var_{target}_vx = {vx};\n",
@@ -1271,6 +1297,11 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     var_name = var_name,
                     value_expr = value_expr
                 ));
+            }
+            LogicOp::RomAddQWord { .. } | LogicOp::RomBranchCompareWord { .. } => {
+                out.push_str(
+                    "#error \"Source Bridge blocks codegen: recovered M68K ROM logic profile is Mega Drive-only.\"\n",
+                );
             }
             LogicOp::WhileLoop {
                 condition,
@@ -1489,6 +1520,9 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
                 )
             }
         }
+        // Estado de apoio so existe na fisica do emissor Mega Drive.
+        // Placeholder: o `#error` de `render_unsupported_semantics` ja bloqueou o build.
+        LogicBoolExpr::Grounded { .. } | LogicBoolExpr::SpriteAnimDone { .. } => "0".to_string(),
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
             left_x = logic_x_expr(left),
@@ -1737,6 +1771,7 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             target_name,
             vx,
             vy,
+            ..
         } => {
             vars.insert(format!("{}_vx", target_name));
             vars.insert(format!("{}_vy", target_name));
@@ -1968,7 +2003,9 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
 
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
-        LogicBoolExpr::Literal(_) => false,
+        LogicBoolExpr::Literal(_)
+        | LogicBoolExpr::Grounded { .. }
+        | LogicBoolExpr::SpriteAnimDone { .. } => false,
         LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
@@ -2265,6 +2302,7 @@ mod tests {
             frames: vec![0, 1, 2],
             frame_time: 6,
             looping: true,
+            mugen: None,
         };
         SpriteAsset {
             resource_name: "hero".to_string(),
@@ -2374,6 +2412,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.ppm".to_string(),
                     map_width: 64,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "background_tilemap".to_string(),
@@ -2718,6 +2757,8 @@ mod tests {
                     max_velocity_y: 96,
                     friction: 2,
                     bounce: 35,
+                    floor_y: None,
+                    ground: None,
                 },
                 AstNode::SpriteUpdate,
                 AstNode::VSync,
@@ -2755,6 +2796,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2830,6 +2872,7 @@ mod tests {
                     asset_path: "assets/tilesets/level.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "level_bg".to_string(),
@@ -2843,6 +2886,7 @@ mod tests {
                     asset_path: "assets/tilesets/foreground.png".to_string(),
                     map_width: 32,
                     map_height: 32,
+                    cells: vec![],
                 },
                 AstNode::DrawTilemap {
                     resource_name: "foreground".to_string(),
@@ -3000,6 +3044,7 @@ mod tests {
                         target_name: "player".to_string(),
                         vx: LogicMathExpr::Literal(2),
                         vy: LogicMathExpr::Literal(0),
+                        runtime_var: None,
                     }),
                 }],
             }],

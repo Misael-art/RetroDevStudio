@@ -1,0 +1,8 @@
+{
+  "discovery": null,
+  "file_interval_byte": 23,
+  "rom_path": "/home/misael/rds-scratch/cadence-oracle-20261003-04/oracle/manual-consumer-tampered.bin",
+  "rom_sha256": "ade14b16fb2dd5af6e5517ee53b662212dc42bf4b3c97adeff98608416aca350",
+  "run_id": "D-consumidor-adulterado",
+  "schema": "rex-sonic-cadence-run/v1"
+}

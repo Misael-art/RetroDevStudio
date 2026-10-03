@@ -1,0 +1,56 @@
+{
+  "schema": "rex-crate-integration/v1",
+  "descricao": "Adaptador Kosinski no backend do produto: capa rex_kosinski.rs sobre crates/rex-kosinski (mapeo KosError/EncError ao CodecError { code, detail } do contrato de codecs) e comandos Tauri reais rex_kosinski_decode / rex_kosinski_encode. Decodificar e codificar quedan como operacions separadas; o contenedor edit::reinsert NON se expone.",
+  "quando_utc": "2026-09-28T14:45Z-15:06Z (UTC)",
+  "quem": "integrador (célula Qoder, sesión 99209e15)",
+  "branch": "codex/rex-integrator-crates-registry",
+  "ferramenta": "cargo test --lib; cargo clippy --lib -- -D warnings; cargo fmt -- --check; npm run check:tree; sed sobre o adaptador para controles de mutacion con restauracion por SHA-256",
+  "medicion": {
+    "red_1_capa_codec": "E0432 (ipc/kosinski_api inexistente) antes de calquera producion; RED_RC=101 rexistrado en red-compile-fail.log",
+    "red_2_capa_ipc": "E0432 para ipc_decode/ipc_encode/KosinskiDecodeRequest/KosinskiEncodeRequest; RED_RC=101 rexistrado en red-ipc-layer.log",
+    "green_modulo": "16 probas ok (10 capa codec + 6 capa IPC), 0 fallos",
+    "suite_destino": "cargo test --lib: 770 executados, 0 fallos, 66 ignorados (base 754 + 16 novos)",
+    "clippy_destino": "cargo clippy --lib -- -D warnings: rc=0",
+    "fmt": "cargo fmt -- --check: rc=0",
+    "check_tree": "npm run check:tree: OK",
+    "mutaciones": "M1 empty_input->'truncated' fala a proba de codigo; M2 bytes_consumed=stream.len() fala a proba do consumo 11; M3 StreamLimit->'work_limit' falan as duas probas de stream_limit. Restauracion conferida: SHA-256 do adaptador identico antes e despues (3b4115ab...d45eb4e2) e re-execucion verde 16/16.",
+    "paridade_pacote_sen_tocar": "crates/rex-kosinski non se modificou nesta perna; os seus gates (51/0/0) midironse na entrega anterior e o adaptador usa as esperas independentes alí rexistradas (abcdef consumed=11, sonda 0200ffff, [0xff], minima de encode b'' -> 020000F000)."
+  },
+  "compromisos_non_expostos": [
+    "rex_kosinski::edit (build/open/reinsert): proba de contrato da fronte B, NON transaccion canonica de producion; non hai comando IPC que a chame.",
+    "Non se alega descuberta de recursos, lectura sobre xogos reais nin fluxo do usuario: as chamadas só transforman streams en memoria.",
+    "Ningunha UI consume aínda rex_kosinski_decode/rex_kosinski_encode."
+  ],
+  "artefactos": [
+    {
+      "nome": "red-compile-fail.log",
+      "sha256": "bc07dcdb62b862047a7aca8ce89ec1ce43aafb51d578eadb58b7622c65929cd9",
+      "liñas": 15,
+      "nota": "RED da capa codec: E0432 unresolved imports, rc=101."
+    },
+    {
+      "nome": "red-ipc-layer.log",
+      "sha256": "47b753ee872c51e89bd6ec43aaec118ba9d60cfbd5057aacdfe05c3b3f65f771",
+      "liñas": 28,
+      "nota": "RED da capa IPC: E0432 para ipc_decode/ipc_encode e os tipos de pedido, rc=101."
+    },
+    {
+      "nome": "mutation-controls.log",
+      "sha256": "826563c82f870094b37b51357826a54588944bb815b24a9424a380f091473329",
+      "liñas": 24,
+      "nota": "Tres mutaciones discriminantes (M1/M2/M3) con timestamps, fallos esperados e restauracion conferida por SHA."
+    },
+    {
+      "nome": "green-e-gates.log",
+      "sha256": "7fba791b3707b4e86627d39f03e1f38bc1b5a1071285ca9459343500a46a64d8",
+      "liñas": 35,
+      "nota": "GREEN 16/16, suite 770/0/66, clippy rc=0, fmt rc=0, check:tree OK, SHA do adaptador e HEAD ddab0ac no momento do rexistro."
+    },
+    {
+      "nome": "ci-consulta-7d46dc3.log",
+      "sha256": "f62bd8016dd802e28d1f48a9002c4f6e878d82d49aa10ce7e7a20fa502838eb3",
+      "liñas": 11,
+      "nota": "Rollup terminal do CI do SHA 7d46dc36570e100676ccc73d999cf1f749ed1dba (empurrado 15:22Z): 9 consultas pontuais nun único log sen monitor permanente; ROLLUP_TERMINAL ás 15:45:07Z con CI=success e Desktop E2E=success. O rollup vale só para este SHA."
+    }
+  ]
+}

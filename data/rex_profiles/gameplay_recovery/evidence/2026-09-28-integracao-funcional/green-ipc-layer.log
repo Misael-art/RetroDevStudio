@@ -1,0 +1,23 @@
+# GREEN — capa IPC de rex_gameplay (adaptador) + catro comandos Tauri rexistrados
+# UTC: 2026-09-28T17:43:44Z  HEAD base: 63d39a2 (curaduría ETAPA 1)
+# arquivos: src-tauri/src/tools/reverse/decomp/rex_gameplay.rs, src-tauri/src/lib.rs
+# rc medidos con 0, non co do pipe (a pasada anterior tiña CLIPPY_RC enganoso: corrixiuse)
+
+## cargo clippy --lib -- -D warnings
+CLIPPY_RC=0
+    Checking retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.08s
+
+## cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+FMT_RC=0
+
+## cargo test --lib (suite completa)
+TEST_LIB_RC=0
+test result: ok. 780 passed; 0 failed; 67 ignored; 0 measured; 0 filtered out; finished in 62.87s
+
+## npm run crates:gates (os tres paquetes registrados)
+CRATES_GATES_RC=0
+OK: rex-addressing fmt
+OK: rex-addressing clippy
+OK: rex-addressing test
+OK: 3 pacote(s) registrado(s), gates proprios aprovados.

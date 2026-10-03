@@ -11,10 +11,23 @@ export interface AnimationDef {
   frames: number[];
   fps: number;
   loop: boolean;
+  /** Ticks de 1/60 s por quadro (-1 = parado). Fonte da ROM nas animacoes MUGEN. */
   frame_durations?: number[];
   loop_start?: number;
+  /** Presente so nas animacoes importadas de MUGEN; `duration` espelha `frame_durations`. */
+  mugen_frames?: MugenAnimationFrame[];
   onion_skin?: SpriteAnimationOnionSkin;
   hitboxes?: SpriteAnimationHitbox[];
+}
+
+export interface MugenAnimationFrame {
+  group: number;
+  image: number;
+  axis?: Pivot | null;
+  duration: number;
+  flags?: string[];
+  clsn1?: unknown[];
+  clsn2?: unknown[];
 }
 
 export interface SpriteAnimationOnionSkin {
@@ -135,14 +148,41 @@ export interface ImportedLogicSemantics {
   blocking_gaps?: string[];
 }
 
+/**
+ * Mirror de `ugdm::components::RecoveredRule` (Experimental).
+ *
+ * Bloque opaco para o backend: guardase e devolvese tal cal para que a
+ * entidade poida reabrirse sen volver á ROM. Quen o interpreta e revalida a
+ * identidade e a capa de interface (`core/nodegraph/rexGameplayScene.ts`).
+ */
+export interface RecoveredRule {
+  version: number;
+  profile_id: string;
+  rom_path: string;
+  rom_sha256: string;
+  entry: number;
+  exits: number[];
+  blocks: [number, number][];
+  operator: string;
+  threshold_recovered: number;
+  threshold_current: number;
+  threshold_min: number;
+  threshold_max: number;
+  /** `graph_json` do núcleo, verbatim: nós, arestas e mapeamentos con bytes. */
+  graph_json: string;
+  limitations: string[];
+}
+
 export interface LogicComponent {
   graph?: string;
   graph_ref?: string | null;
-  graph_origin?: "imported_ref" | "user_edited_ref" | null;
+  graph_origin?: "imported_ref" | "user_edited_ref" | "rom_recovered" | null;
   logic_hints?: string[];
   /** Caminhos no doador (ex. C) rastreados sem carregar AST no frontend. */
   external_source_refs?: string[];
   imported_semantics?: ImportedLogicSemantics | null;
+  /** Experimental: regra de gameplay recuperada e persistida na escena. */
+  recovered_rule?: RecoveredRule | null;
   variables?: Record<string, LogicVariable>;
 }
 

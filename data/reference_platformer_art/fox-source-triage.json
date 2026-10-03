@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0.0",
+  "source_path": "data/reference_platformer_art/fox-concept.png",
+  "source_class": "high_res_full_body_character",
+  "intended_role": "identity_authority",
+  "matte_policy": "existing_alpha",
+  "reviewer": "agent_visual_triage",
+  "observations": {
+    "baked_checkerboard": false,
+    "ground_shadow": "absent",
+    "dust_or_particles": "absent",
+    "smoke_or_clouds": "absent",
+    "floor_line": "absent",
+    "text_or_annotation": "absent",
+    "multiple_overlapping_poses": false,
+    "cropped_extremities": false,
+    "occluded_identity_features": false,
+    "motion_blur": false,
+    "background_color_collision": false,
+    "notes": "Prancha de cinco poses separadas, transparência alfa real. Fonte de identidade e gesto, não sprite nativo nem strip pronto. Recortar e avaliar uma pose por vez."
+  }
+}

@@ -1,0 +1,184 @@
+{
+  "schema": "rex-crate-registry/v1",
+  "descricao": "Lista explicita dos pacotes Rust autonomos desta arvore. Fonte unica: consumida por `npm run check:tree` (que reprova diretorio nao registrado e registro sem diretorio) e por `npm run crates:gates` (fmt, clippy --all-targets -D warnings, test --locked). Registro de modulos e manifests sao responsabilidade do integrador.",
+  "escalade": [
+    "biblioteca-implementada",
+    "gates-proprios-aprovados",
+    "backend-integrado",
+    "fluxo-do-usuario-comprovado"
+  ],
+  "regra": "Compilar e passar nos gates proprios NAO registra integracao ao produto. O nivel backend-integrado exige, na ordem: dependencia por path em src-tauri/Cargo.toml (sem criar workspace na raiz), adaptador no backend e uma chamada real testada pelo backend.",
+  "pacotes": [
+    {
+      "nome": "rex-kosinski",
+      "manifesto": "crates/rex-kosinski/Cargo.toml",
+      "descricao": "Codec Kosinski v1 da frente B (decode + encode, variante base nao-modular). O produto xa o consume: src-tauri/Cargo.toml ten dependencia por path e o adaptador src-tauri/src/tools/reverse/decomp/rex_kosinski.rs expón decodificar e codificar como chamadas reais do backend (comandos Tauri rex_kosinski_decode / rex_kosinski_encode). Non exposto: o contenedor de edición (edit::build/open/reinsert).",
+      "maturidade": "backend-integrado",
+      "maturidade_data": "2026-09-28",
+      "gates": {
+        "medidos_em": "2026-09-28T02:48Z (decoder, 25 testes); re-medido 2026-09-28T14:36Z-14:37Z depois da entrega mais recente de B (encoder + paridade + contenedor + 52 fixtures)",
+        "fmt": "OK",
+        "clippy_all_targets": "OK",
+        "test_locked": "OK — 51 testes executados (22 contract + 8 edit + 16 encode + 2 fixtures + 3 mutations), 0 falhas, 0 ignorados; fmt e clippy --all-targets OK. A carreira rex-addressing do mesmo gate deu 138/0/10 sem cambios. Registrei os numeros medidos, non os anunciados.",
+        "evidencia": "data/rex_profiles/kosinski_runtime/evidence/2026-09-28-integrador-gates/, .../2026-09-28-entrega-encoder-fixtures/ e .../2026-09-28-adaptador-backend/",
+        "cargo_target_dir": "target/crates-gates (fora da arvore rastreada; .gitignore ja cobre target/)"
+      },
+      "acoplamento_declarado": "Fechado pola propia B na entrega 9223e7a: as 52 fixtures vendorizan-se dentro do paquete (fixtures/kosinski/, fixtures/runtime/) con SHA-256 pinada en tests/fixtures.rs e re-verificada a cada run. O paquete e relocable: a carreira de gates 14:36Z executou neste tronco sen tocar en data/rex_profiles/codec/. Ningunha fixture e ROM: todas autorais/sinteticas (fixtures/PROVENANCE.md, oraculo koscmp usado so como comparacion, cero codigo seu copiado).",
+      "nao_alega": "nada de fluxo do usuario: ningun chamador da interface usa rex_kosinski_decode/rex_kosinski_encode e non hai pantalla de codec. O módulo edit (contenedor REXKOS) e proba de contrato — a propia doc del di «NON transacción canónica de producción» — e non se expón como reinserción: as transacións canónicas do produto aínda non consomen Kosinski. Non se alega descuberta de recursos nin lectura sobre xogos reais: a capa só transforma streams declarados por quen chama.",
+      "integracion_backend": {
+        "medida_em": "2026-09-28T14:45Z..15:08Z UTC, branch codex/rex-integrator-crates-registry, HEAD do commit 3428b69",
+        "dependencia": "src-tauri/Cargo.toml: rex-kosinski = { path = \"../crates/rex-kosinski\" }. Sen workspace na raíz; Cargo.lock gaña só a entrada do paquete local (sen campo source) e cero crates externos novos (diff de 5 liñas conferido).",
+        "adaptador": "src-tauri/src/tools/reverse/decomp/rex_kosinski.rs — mapeo 1:1 de KosError/EncError ao CodecError { code, detail } do contrato de codecs (truncated/invalid_reference/excessive_output/work_limit/empty_input; stream_limit/work_limit), preserving bytes_consumed coa regra do contrato v1 §3 (o padding post-terminator non se consume). DTOs de fronteira snake_case con deny_unknown_fields, binarios en base64 + SHA-256 laterais, limites explícitos cos defectos do contrato; o erro viaxa como InspectionError conservando código e detalle, retryable=false para erros deterministas de entrada.",
+        "chamada_real": "dous comandos Tauri, rex_kosinski_decode e rex_kosinski_encode, rexistrados en generate_handler! e executados fora do fio principal con run_heavy_command_off_main_thread (mesmo padriño de rex_addressing_read_snapshot). Decodificar e codificar son chamadas separadas: ningunha escribe en ROM ningunha.",
+        "testes_do_adaptador": "16 (10 da capa codec + 6 da capa IPC), con esperas independentes rexistradas pola fronte B e SHA-pinnadas no gate do paquete: abcdef.kos -> b\\\"ABCDEF\\\" con bytes_consumed=11; sonda 0200ffff -> invalid_reference; [0xff] -> truncated; espido -> empty_input; max_output=5 -> excessive_output; max_work=3 -> work_limit; encode(b\\\"\\\") -> 020000F000; round-trip autoral; stream_limit e work_limit na codificación",
+        "controles_de_mutacao": "M1 (mapeo empty_input->'truncated'), M2 (bytes_consumed da resposta IPC = lonxitude do stream) e M3 (mapeo StreamLimit->'work_limit') mataron cada un as suas pruebas (1, 1 e 2); restauración conferida por SHA-256 do adaptador (3b4115ab...d45eb4e2 idéntica antes e despois) e re-execución verde 16/16.",
+        "gates_no_destino": "cargo test --lib: 770 executados, 0 falhas, 66 ignorados, rc=0 (base 754 + 16 novos). cargo clippy --lib -- -D warnings: rc=0. cargo fmt --check: rc=0. npm run check:tree: rc=0. npm run lint: rc=0. npx tsc --noEmit: rc=0. npm test: 749 executados, 0 falhas, 6 saltados (755), rc=0 — sen cambios de frontend.",
+        "evidencia": "data/rex_profiles/kosinski_runtime/evidence/2026-09-28-adaptador-backend/ (manifesto rex-crate-integration/v1: dous logs RED, mutaciones e gates; autocomprobado: 4 listados, 4 presentes, 0 diverxencias)"
+      },
+      "propriedade": "agente B (PR #81); registro e manifests sao do integrador",
+      "origem": "Entrega 3fea06e + 1af7017 (PR #81) por cherry-pick -x (locais 96dbd20/f58ff05). Depois, 8 commits 0b752b7..6a2218e (encoder v1, paridade koscmp bidireccional, contenedor de edición, docs da entrega, fmt, 52 fixtures vendorizadas, package list) pinados en 6a2218e — tip conferido por `git ls-remote` o 2026-09-28T14:38:34Z — e integrados por cherry-pick -x sen conflitos (locais 20d686d..3994cef); a árbore crates/rex-kosinski resultante e byte-idéntica á dela (diff = 0 bytes).",
+      "perfil": {
+        "contrato": "docs/rex_profiles/kosinski_runtime/CONTRACT.md",
+        "relatorio": "docs/rex_profiles/kosinski_runtime/REPORT.md",
+        "dados": "data/rex_profiles/kosinski_runtime/",
+        "comparacao_externa": "scripts/rex_profiles/codecs/kosinski_runtime/differential-vs-koscmp.sh",
+        "contrato_encode": "docs/rex_profiles/kosinski_runtime/ENCODE-CONTRACT.md",
+        "entrega_encode": "docs/rex_profiles/kosinski_runtime/ENCODE-DELIVERY.md"
+      },
+      "byor": "nenhum teste ordinario do pacote depende de ROM comercial; a comparacao com koscmp fica no script de perfil, fora da suite"
+    },
+    {
+      "nome": "rex-gameplay",
+      "manifesto": "crates/rex-gameplay/Cargo.toml",
+      "descricao": "Recuperacion delimitada de unha regra de gameplay M68K (guarda de input + contador + limiar + escrita de estado + chamada externa opaca) a partir dos bytes dunha ROM Mega Drive, con grafo NodeGraph v1 editable so no limiar e reconstrucion por patch ou regeneracion sen crecemento. Perfil m68k.counter_threshold_state_gate.v1, Experimental. Contrato en crates/rex-gameplay/CONTRACT.md. O backend xa a consume (adaptador + catro comandos Tauri rexistrados, chamadas reais testadas); o degrau non se promove nesta rolda por ordem expresa do operador.",
+      "maturidade": "gates-proprios-aprovados",
+      "maturidade_data": "2026-09-28",
+      "maturidade_nota": "A escada diria backend-integrado (hai dependencia por path, adaptador e chamadas reais testadas). NON se promove: o operador ordenou «sem merge, release ou promoción de maturidade» nesta rolda e falta aínda o fluxo pola interface. Rexístranse os feitos medidos; o degrau queda para cando o operador o autorice.",
+      "gates": {
+        "medidos_em": "2026-09-28T17:08Z UTC no tronco do integrador, despois do cherry-pick -x (local f35ed0d)",
+        "fmt": "OK (rc=0)",
+        "clippy_all_targets": "OK (rc=0, -D warnings)",
+        "test_locked": "OK — 16 testes executados (6 lib + 10 profile), 0 fallos, 0 ignorados; numeros medidos na localizacion nova, non os anunciados pola fronte",
+        "evidencia": "docs/rex_profiles/gameplay_recovery/REPORT.md (fronte) e data/rex_profiles/gameplay_recovery/evidence/2026-09-28-prova-real/ (report.json, real-run.log, SHA256SUMS; prova real SGDK+core executada pola fronte, non re-executada por min ata a rolda de integracion)"
+      },
+      "camada_backend": {
+        "medido_em": "2026-09-28T17:38Z..17:49Z UTC, branch codex/rex-integrator-crates-registry sobre 63d39a2",
+        "dependencia": "src-tauri/Cargo.toml: rex-gameplay = { path = \"../crates/rex-gameplay\" }; Cargo.lock gaña só a entrada local (cero crates externos novos)",
+        "adaptador": "src-tauri/src/tools/reverse/decomp/rex_gameplay.rs — DTOs de fronteira snake_case con deny_unknown_fields nos requests; erros como InspectionError { code, message, retryable=false } co conxunto pechado invalid_request / identity_mismatch / range_refused / graph_tampered / io_error / profile_refused (o texto integro do crate viaxa en message); limites explicitos: ROM 32 MiB, grafo 8 MiB, 64 saidas, 512 rotulos, request_id <=128; identidade: o grafo leva rom_sha256 e a reconstrucion exixe SHA da base == esperado == do grafo",
+        "comandos": "catro comandos Tauri en src-tauri/src/lib.rs rexistrados en generate_handler! e executados fora do fio principal con run_heavy_command_off_main_thread (fallback command_interrupted, retryable=true): rex_gameplay_scan, rex_gameplay_recover, rex_gameplay_edit_threshold, rex_gameplay_rebuild. A PROPOSTA (a63e3a3) pedía rom_scan_gameplay_gate / rom_recover_gameplay_gate / rom_edit_gameplay_threshold / rom_rebuild_gameplay; o integrador renomounos para a convencion rex_* do produto (rex_addressing_*, rex_kosinski_*, rex_resource_*) e substituíu os argumentos soltos por un request DTO con request_id, para poder recusar respostas de sesion anterior",
+        "testes": "10 probas da capa (9 novas desta rolda + a do adaptador previo): identidade na recuperacion, recusa de fronteira por motivo estruturado, varredura con candidatos e ambiguidade, edicion so do limiar na faixa, grafo adulterado na reapertura, patch vs. regeneracion byte-identicos, recusa de resultado antigo tras trocar a ROM, limiar fora de faixa na via de reconstrucion. Suite do backend: 780 executados / 0 fallos / 67 ignorados (rc=0). clippy --lib -D warnings rc=0. fmt --check rc=0.",
+        "mutaciones": "M1..M5 mataron 2, 1, 1, 1 e 2 probas (identity_mismatch, eco de request_id, marca de ambiguidade, limite de bytes do grafo, range_refused); restauracion conferida por SHA-256 do adaptador (0b562d3a...c3ab79 identica antes e despois) e re-execucion verde",
+        "evidencia": "data/rex_profiles/gameplay_recovery/evidence/2026-09-28-integracao-funcional/ (red-ipc-layer.log, green-ipc-layer.log, mutaciones-ipc.log)"
+      },
+      "acoplamento_declarado": "Zero dependencias externas (Cargo.lock do paquete con 7 liñas); as 3 fixtures hex vendorizan-se dentro do paquete con PROVENANCE.md; non depende de data/ externamente.",
+      "nao_alega": "non e decompilacion xeral nin descubrimento automatico de rotinas: so o perfil pechado m68k.counter_threshold_state_gate.v1, con recusa explícita fora del. A equivalencia e por conxunto declarado de estados (80/80), non universal. Non se alega fluxo do usuario: a rolda de integracion en curso publica comandos e UI como Experimental; calquera promotura de degrau queda para o operador. JSR segue opaco; vivacidade de rexistros tras a chamada non analizada.",
+      "propriedade": "frente de recuperacion de gameplay (PR #84, branch codex/rex-gameplay-recovery); registro, manifests, lib.rs, UI e harness E2E son do integrador",
+      "origem": "Commits 308fd44 (paquete + adaptador + docs + evidencia) e a63e3a3 (PROPOSTA de superficies compartidas, base a08c2c6) da PR #84. O de paquete entrou por cherry-pick -x (local f35ed0d); a PROPOSTA non se aceptou tal cal: o integrador reescribiu registry/Cargo.toml/Cargo.lock/mod.rs coas convencións actuais.",
+      "perfil": {
+        "contrato": "crates/rex-gameplay/CONTRACT.md",
+        "relatorio": "docs/rex_profiles/gameplay_recovery/REPORT.md",
+        "proposta_integracion": "docs/rex_profiles/gameplay_recovery/INTEGRATION_PROPOSAL.md",
+        "dados": "data/rex_profiles/gameplay_recovery/"
+      },
+      "byor": "a prova real usa ROM do template autoral reference_platformer compilada co pipeline canónico; cero ROM comercial; o core Libretro actua como oráculo independente sobre esa imaxe propia"
+    },
+    {
+      "nome": "rex-addressing",
+      "manifesto": "crates/rex-addressing/Cargo.toml",
+      "descricao": "Perfis de endereçamento MD linear / MD SSF2 / SNES LoROM / HiROM / ExHiROM (frente A): leitura com limites, erros estruturados e escritas puras. O produto xa a consume: src-tauri/Cargo.toml ten dependencia por path e o adaptador src-tauri/src/tools/reverse/decomp/rex_addressing.rs publica a lectura con snapshot fixo a través do comando Tauri rex_addressing_read_snapshot. Exposto: perfis md-linear e md-ssf2, só lectura. Non exposto: lectura con transicións de banco (read_sequence), escritas, os tres perfis SNES (a fronteira de identidade do produto só da fe en imaxes Mega Drive).",
+      "maturidade": "backend-integrado",
+      "propriedade": "agente A (PR #82); registro, manifests e a promocao de localizacao sao do integrador",
+      "origem": "17 commits 9b27941..57e51d3 (pin revisado 57e51d3, PR #82, branch codex/rex-rust-addressing), aplicados por cherry-pick -x; movido de scripts/rex_profiles/addressing_runtime/rex-addressing para crates/rex-addressing pelo integrador, conforme a promocao que o CONTRATO.md do proprio perfil pedia. Depois, 7 commits 58a06dd..30cb311 (pin 30cb311, PR #83, branch codex/rex-rust-recursos: etapas 2-5 — capa de lectura de recursos con procedencia, bateria discriminante, exemplo consumidor e varredura 'nunca panica'), tambem por cherry-pick -x; o fetch puntual anterior a integracion confirmou que 30cb311 seguia ser o tip, polo que a entrega máis recente de A entra por completo, incluidas as suas dependencias. Depois, 5 commits 30cb311..0e5f804 (pin conferido por `git ls-remote` o 2026-09-28T11:25Z: 0e5f804 seguia sendo o tip de codex/rex-rust-addressing), que A publicou mentres este integrador medía os gates do adaptador: vectores de aceite con oráculo independente (0a371b7), INVARIANTES + ACEITE-ADAPTADOR (d7e3925, cc8026c), RELATORIO_ACEITE_ADAPTADOR_2026-09-28 (785320c) e forma galega (0e5f804). Os dous commits que tocan o paquete aplicanse con reescrita de ruta (o crate de A ainda vivia em scripts/rex_profiles/addressing_runtime/rex-addressing; a promocao e minha) conservando autor, data e mensagem mais `(cherry picked from commit ...)`; os tres de solos docs entran por `cherry-pick -x` sem conflitos. Locais: 10a8f5d, 32d2e26, 42756e2, d252a5f, aa46265.",
+      "perfil": {
+        "contrato": "docs/rex_profiles/addressing_runtime/CONTRATO.md",
+        "classificacao": "docs/rex_profiles/addressing_runtime/CLASSIFICACION.md",
+        "controles_de_mutacao": "docs/rex_profiles/addressing_runtime/MUTATION-CONTROLS.md",
+        "relatorio": "docs/rex_profiles/addressing_runtime/RELATORIO_ENDERAZAMENTO_RUST_2026-09-27.md",
+        "vetores": "crates/rex-addressing/vectors/ (dentro do pacote: o pacote e relocavel)",
+        "aceite_do_adaptador": "docs/rex_profiles/addressing_runtime/ACEITE-ADAPTADOR.md",
+        "invariantes": "docs/rex_profiles/addressing_runtime/INVARIANTES.md",
+        "relatorio_aceite": "docs/rex_profiles/addressing_runtime/RELATORIO_ACEITE_ADAPTADOR_2026-09-28.md"
+      },
+      "byor": "nenhum teste ordinario depende de ROM: os 8 testes BYOR e o preimage exaustivo vao marcados #[ignore] e no corren no gate; a segunda referencia e declarativa e vive no proprio pacote (tests/support/windows_engine.rs)",
+      "maturidade_data": "2026-09-28",
+      "gates": {
+        "medidos_em": "2026-09-28T11:44Z UTC (rolda de aceite, xa con examples/ dentro do paquete), 08:14Z UTC (re-executados despois dos cherry-picks das etapas 2-5) e 02:58Z UTC (promoción de localización), branch codex/rex-integrator-crates-registry, na localización crates/rex-addressing",
+        "fmt": "OK nas duas carreiras",
+        "clippy_all_targets": "OK nas duas carreiras",
+        "test_locked": "OK — 138 executados, 0 falhas, 9+1 ignorados (8 BYOR + preimage exaustiva + o caso que rexeita o JSON publicado), 17 targets; na carreira de 08:14Z eran 127 (77 + 4 doc-tests) e de 02:58Z 81, ambas antes da rolda de aceite. A rexeneración do ficheiro de aceite vai `#[ignore]` e non se executou en ningunha carreira. Rexistrei o número medido, non o anunciado no README do paquete.",
+        "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-integrador-gates/, .../2026-09-28-backend-integrado/ e .../2026-09-28-aceite-integrado/",
+        "cargo_target_dir": "target/crates-gates"
+      },
+      "integracion_backend": {
+        "medida_em": "2026-09-28T09:05Z..09:25Z UTC, branch codex/rex-integrator-crates-registry",
+        "dependencia": "src-tauri/Cargo.toml: rex-addressing = { path = \"../crates/rex-addressing\" }. Sen workspace na raíz; Cargo.lock gaña só o paquete local (entrada sen campo source) e cero crates externos novos.",
+        "adaptador": "src-tauri/src/tools/reverse/decomp/rex_addressing.rs — DTOs snake_case con deny_unknown_fields, binario en base64 + SHA-256 lateral, erros do nucleo convertidos no InspectionError do produto conservando código e detalle, identidade da ROM conferida na fronteira de acceso aos bytes (rex_read_rom + platform::identify_md), procedencia por segmento e limites do núcleo devolvidos na resposta.",
+        "chamada_real": "comando Tauri rex_addressing_read_snapshot en src-tauri/src/lib.rs, rexistrado en generate_handler! e executado fora do fio principal con run_heavy_command_off_main_thread.",
+        "testes_do_adaptador": "17 (un por capacidade declarada: bytes + procedencia, estado por segmento, cambio de banco que move a xanela, rexión non-ROM, limite do barramento, lonxitude 0, perfil descoñecido, SNES non exposto, faltas e excesos de rom_size, chave de banco non remapeábel, identidade divergente, preservacion do detalle, base64 + SHA-256 + limites, fixture conxelada polo hash pinado, descarte da fixture temporal)",
+        "controles_de_mutacao": "M1 garda de identidade anulada, M2 rom_offset substituido polo enderezo do bus, M3 erros do nucleo achatados en código xenérico — cada un matou as pruebas esperadas (1 / 2 / 8) e a árbore restaurouse por hash; M1 re-executado tras o reparo de hixiene con igual resultado.",
+        "gates_no_destino": "cargo test --lib: 754 executados, 0 falhas, 66 ignorados, rc=0 (a base sen o adaptador era 737; 754 - 17 = 737). cargo clippy --lib -- -D warnings: rc=0. cargo fmt --check: rc=0. npm run check:tree: rc=0. npm run lint: rc=0. npx tsc --noEmit: rc=0. npm test: 749 executados, 0 falhas, 6 saltados (755) en 79 ficheiros verdes + 1 saltado, rc=0.",
+        "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-backend-integrado/"
+      },
+      "relocable": "si — os vectores pinados (vectors/rust-vectors-v1.json, sha proxectada no harness_selfcheck) e os de aceite (vectors/acceptance-v1.json, sha 54ba2b6e...a216 pinada dentro de tests/acceptance.rs) viven dentro do paquete; a diferenza de rex-kosinski, non depende de data/ externamente",
+      "achado_de_revisao": "15 chamadas .expect() en produción (md_linear 4, md_ssf2 4, snes_exhirom 3, snes_hirom 2, snes_lorom 2), cada unha xustificada por validación previa; a cobertura de 'nunca panica' con entradas adversarias non aleatorias non está no gate ordinario (o preimage exaustivo vai #[ignore]). Devolto ao axente A como pendencia e PECHADO por el na etapa 5 (upstream cae6b58, nesta branch como 6453cd4): tests/no_panic_sweep.rs con 277 610 chamadas determinísticas sobre estados e enderezaos hostís dos cinco perfís máis a capa de recursos, cun chan de chamadas derivado do dominio para que a varredura non poida quedar vacía.",
+      "nao_alega": "non se alega fluxo-do-usuario-comprovado: ningún chamador da interface usa o comando rex_addressing_read_snapshot e non hai pantalla de endereçamento. Non se alega descuberta de recursos nin lectura sobre xogos reais: a única chamada probada usa imaxes autorais deste adaptador, cero corpus BYOR no gate. Non se expoñen as escritas puras nin a lectura con transicións de banco (read_sequence), que seguen existentes no nucleo sen adaptador. Non se autodetecta perfil: quen chama declara perfil e estado, e os tres perfís SNES receben profile_not_exposed porque a fronteira de identidade do produto so da fe en imaxes Mega Drive.",
+      "roda_de_aceite": {
+        "medida_em": "2026-09-28T11:44Z..12:02Z UTC, branch codex/rex-integrator-crates-registry",
+        "o_que_e": "tests/acceptance.rs (1783 linhas) + vectors/acceptance-v1.json (15 casos, 18 774 B, SHA-256 54ba2b6e864c53ba69228b51d0a4cf079735182ad875ecb8e98b6dbbf257a216) graduando read_resource/read_sequence contra um oráculo independente (motor de xanelas declarativo, táboa boards.bml de bsnes, modelo GPGX para SSF2) e non contra as fórmulas dos perfis",
+        "integracion": "os dous commits de paquete aplicados con reescrita de ruta e os tres de docs por cherry-pick -x; paridade conferida ficheiro a ficheiro: 42 no paquete de A, 42 neste tronco, 0 diferenzas de nome, única diferenza de contido README.md (a miña nota de localizacao)",
+        "debeda_de_promocion": "achada aquí e reparada por daefb43: a promoción (9f83d15) deixara examples/resource_report.rs na ruta vella, polo que o paquete graduado ás 08:14Z non tiña exemplo e clippy --all-targets nunca o lintaba; e catro ligazóns relativas do README do paquete apuntaban tres niveis por riba da raíz. Revalidadas: 0 ligazons rotas. As receitas `cd scripts/...` de ACEITE-ADAPTADOR.md e EXEMPLO-CONSUMIDOR.md pasaron a `cd crates/rex-addressing` porque foi a miña promoción a que as rompeu; a narración histórica e os logs do worktree de A non se reescribiron",
+        "gates_reexecutados": "npm run crates:gates rc=0: rex-addressing 138 executados / 0 falhas / 10 ignorados em 17 targets (fmt OK, clippy --all-targets -D warnings OK, test --locked OK) e rex-kosinski 25 / 0 / 0 sen cambios. Exemplo executado desde a localización nova rc=0 (13 lecturas / 14 recusas / 7 códigos, resumo sha256 27bebc7b...). No destino: cargo test --lib 754 / 0 / 66 con CARGO_RC=0 e as 17 probas do adaptador entre elas, check:tree rc=0, cargo fmt --check rc=0, cargo clippy --lib -D warnings rc=0. SHA do adaptador inalterado: 7bd75ea96a598623c77787410a826aa891333d117745cf9f1e84daea3eb2ef76",
+        "o_que_non_prova": "estes vectores gradúan read_resource / read_sequence da crate, superficies que o adaptador do produto NON expón: non son evidencia do adaptador e non moven o degrau backend-integrado. Tamén fica rexistrado que a primeira carreira do lib pipesouse a `tail -30`, polo que o seu `TEST_LIB_RC` era o código de `tail`; a carreira autorizada e cargo-test-lib-pos-aceite.log",
+        "evidencia": "data/rex_profiles/addressing_runtime/evidence/2026-09-28-aceite-integrado/ (manifesto rex-crate-integration/v1 con sha256 e linhas por ficheiro; autocomprobado: 6 listados, 6 presentes, 0 diverxencias)"
+      }
+    },
+    {
+      "nome": "rex-mugen",
+      "manifesto": "crates/rex-mugen/Cargo.toml",
+      "descricao": "Perfil mugen.character.v1 (Experimental): importa un paquete MUGEN de personagem (AIR, SFF v1 indexado, paleta na grade do VDP, subset CMD/CNS) e proxecta a animacion para rescomp/SGDK, con diagnostico rexistrado rex-mugen/diag/v1 e relatorio de compatibilidade retrodev.mugen_import_report/v1 en 7 categorias. O producto consume o perfil (camada core + panel na UI + E2E pola interface). O degrau alega SO ese fluxo probado: non hai soporte xeral de MUGEN. Contrato en crates/rex-mugen/CONTRACT.md.",
+      "maturidade": "fluxo-do-usuario-comprovado",
+      "maturidade_data": "2026-09-29",
+      "maturidade_nota": "Promovido a fluxo-do-usuario-comprovado o 2026-09-29 por ordem expresa do operador, despois de revisar e mesclar o PR #86 (merge commit 10c1a3c no tronco do integrador). Base medida: E2E desktop mugen-import verde 2026-09-29T02:46Z sobre o binario SHA-256 1b46ff504ba3..., que probou pola interface importacion, panel de compatibilidade, Build & Run co personagem no canvas, edicion no Inspector e persistencia tras salvar/reiniciar/reabrir, mais o negativo de camiño fóra do paquete. Escopo do alegato: UN caso de uso (subconxunto air + sff v1 + paleta VDP + CMD/CNS como perfis), sen soporte xeral. Seguen fóra e declarados: SFF v2, som, stage e colision loxica; comando por teclado e golpe teñen proba tecnica/core, non de UI; o relatorio non ten reapertura futura; o Inspector etiqueta «FPS» o que e duracion/animacion MUGEN; o runtime C mg_* non se copia. O rótulo de produto mantense Experimental: subir este degrau non promove nada na UI nin no roadmap.",
+      "gates": {
+        "medidos_em": "2026-09-29T02:08Z..02:20Z UTC no tronco do integrador, sobre o merge b410de0, reexecutado sobre a arvore final curada em 2026-09-29T03:00Z..03:17Z UTC com as mesmas contaxes",
+        "fmt": "OK (rc=0)",
+        "clippy_all_targets": "OK (rc=0, -D warnings) sobre ESTE paquete. A débeda de clippy --all-targets que reproba esta no tronco é do backend (46 avisos #[cfg(test)] previos ao PR), non do crate; ningunha das 45 localizaciones unicas cae nas liñas do PR.",
+        "test_locked": "OK — 12 testes executados (8 lib: 3 air + 2 palette + 2 sff + 1 sha256; 4 en tests/fixture_probe.rs), 0 fallos, 0 ignorados. A contaxe midiuse na localizacion nova, non a que anunciou a fronte.",
+        "npm_run_crates_gates": "rc=0 cos 4 paquetes registrados (rex-kosinski, rex-gameplay, rex-addressing, rex-mugen)",
+        "evidencia": "data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/ (crates-gates.log, check-tree.log, lint.log, tsc.log, npm-test.log, cargo-fmt.log, cargo-clippy-lib.log, cargo-clippy.log, cargo-test-lib.log, SHA256SUMS) e a reexecucion pos-curaduria em data/rex_profiles/mugen_sgdk/evidence/2026-09-29-pos-curaduria/ (LEIAME.md coa tabela de rc por gate, host-certify.log).",
+        "host_certify": "rc=0 na reexecucion: host READY, fingerprint 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2, lock dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377, smoke oficial SGDK/PVSnesLib Success: true"
+      },
+      "camada_backend": {
+        "medido_em": "2026-09-29T02:08Z..02:30Z UTC, branch codex/rex-integrator-mugen-85 (merge b410de0, pais e319fb9 + bd02e3c)",
+        "dependencia": "src-tauri/Cargo.toml: rex-mugen = { path = \"../crates/rex-mugen\" }, a convivir con rex-kosinski e rex-gameplay. Este foi o UNICO conflito material co tronco (2 liñas de path-deps) e resolveuse conservando as tres.",
+        "adaptador": "src-tauri/src/core/mugen_profile.rs (1951 liñas): contencion de caminhos resolve_inside() (absoluto, prefixo, RootDir e calquera `..` que saia do paquete recusan), read_limited() con MAX_TEXT_BYTES 1 MiB e sff::MAX_FILE_BYTES 32 MiB, validacion integral ANTES de calquera escritura e relatorio retrodev.mugen_import_report/v1 con 7 categorias.",
+        "escritura": "project_mgr crea a seccion MUGEN do proxecto cun so save_rgba_image despois do match; compiler/mugen_runtime.rs (317 liñas) xera o runtime de animacion e a condicion sprite_anim_done; ganchos en ast_generator, sgdk_emitter, snes_emitter e build_orch.",
+        "falha_limpa": "lib.rs envolve a importacion e chama discard_failed_import(project_dir, origin) segundo a origem reservada do cartafol (Created / ExistingEmpty / ExistingNonEmpty); o aviso de exito fusiona mugen_profile::summary_line(), tanto na importacion MUGEN como na externa.",
+        "ui": "src/components/common/MugenCompatibilityPanel.tsx (243 liñas) + src/core/mugenCompatibility.ts (147); App.tsx garda mugenCompatibility no estado e publica __RDS_E2E__.setNextExternalImportPath, que substitue SO o dialogo nativo de escoller carpeta.",
+        "diagnostica": "src/core/diagnostics.ts: mugenImportCause() devolve causa + accion para `..` fóra do paquete, bytes acima do limite, celula acima do orzamento (248 px) e SFF v2; todas as catro rematan en «Nenhum projeto foi criado.»",
+        "testes": "Suite do backend no destino: 796 executados / 0 fallos / 70 ignorados (rc=0). Reconciliacion independente: base a08c2c6 con 770/66 + PR con 15 executados e 3 ignorados (os 18 #[test] de mugen_profile.rs, 3 deles #[ignore] para a proba real SGDK) + integrador con 11 executados e 1 ignorados (1 en project_mgr.rs, 11+1 en rex_gameplay.rs). Frontend: npm test 812 passed / 0 failed / 6 skipped, 83 ficheiros passed | 1 skipped (+5 respecto da base: panel + diagnostics)."
+      },
+      "e2e_interface": {
+        "medido_em": "2026-09-29T02:46Z..02:47Z UTC (run7, verde)",
+        "comando": "node scripts/e2e-tauri-build-run.mjs --scenario mugen-import",
+        "binario": "src-tauri/target-test/debug/retro-dev-studio SHA-256 1b46ff504ba3aacab59f27c3c3bb664fcf0d83428fc1499207acc507d31abb09; o informe leva o sha do binario que o produciu.",
+        "resultados": "Importacion pola UI (wizard -> perfil mugen -> Importar); panel coas 7 categorias {sprites, animations, commands, states: direct; collisions: manual; sound, stage: absent} e resumo «12 funcionam igual, 0 con diferenca, 1 precisam de ajuste seu, 0 non convertidos»; Build & Run real co personagem no canvas 320x224 (mostra en (96,96): idle0=11, idle1=14); edicion +44 no Inspector -> Salvar -> reinicio -> reapertura (x=140) -> ROM distinta (10658a6c vs 5a6aff76), co personagem na posicion nova e a vella baleira (idle0=0, idle1=0); negativo ../fora.sff recusado con mensaxe especifica, sen cartafol desta execucion e sen cambiar o proxecto activo.",
+        "condicion_do_host": "O output primario pasou a ser un panel rotado de 1280x800+0+0 e o compositor recorta alí calquera xanela, de xeito que o redimensionado a 1920x1080 CSS era imposible (inner=948x564). A xanela da app de proba colocouse no monitor externo (3456x1458+1281+0, tamaño fisico 2592x1458 = 1920x1080 CSS a DPR 1,35) cun vixia temporal fóra do repo, para reproducir o mesmo viewport co que a fronte probou. Non se mudou a configuracion de pantallas do operador nin se alterou o harness para aceptar outra xeometría.",
+        "evidencia": "data/rex_profiles/mugen_sgdk/evidence/2026-09-28-integracao-integrador/ (e2e-mugen-import-run7.log, e2e-mugen-import-report-run7.json, 6 capturas e2e-run7-*.png, LEIAME-e2e-e-host.md co detalle dos descartes e dos dous achados no harness)"
+      },
+      "acoplamento_declarado": "Zero dependencias externas (Cargo.lock do paquete con 7 liñas e 1 paquete). As 3 mostras (Probe, Sentinel, Warden) xéranse por codigo en src/fixture.rs, son autorais e deterministicas, e fixtures/.gitattributes pon «* -text» para que ninguen lles altere os bytes; o paquete non depende de data/ externamente.",
+      "nao_alega": "Non e conversion integral de MUGEN: so personagem v1 (SFF v1, AIR e o subset CMD/CNS que entende o importador do produto). Seguen fóra SFF v2, som, stage e colision loxica — as caixas consérvanse por frame pero ningunha regra de xogo as usa no perfil v1. O comando por teclado e o golpe non teñen proba de UI: seguen sendo proba tecnica/core. O relatorio non ten reabertura futura: pechado o panel, non hai forma de volver velo. O Inspector usa a etiqueta «FPS» para a animacion MUGEN, que non son FPS. Non se copia o runtime C mg_*, baseado no HAMOOPIG de terceiros con licenza non verificada (docs/rex_profiles/mugen_sgdk/AUDIT.md), e non se asume licenza estra. Non se alega soporte xeral de MUGEN: o degrau fluxo-do-usuario-comprovado cobre só o caso importacion -> panel -> Build & Run -> edicion no Inspector -> salvar/reiniciar/reabrir medido no E2E mugen-import. Non se alega compatibilidade con SFF v2, som, stage nin colision loxica; non se alega proba de UI do comando por teclado nin do golpe; non se alega reapertura futura do relatorio; non se alega que a etiqueta «FPS» do Inspector sexa correcta para unha animacion MUGEN; non se alega posesion nin licenza do runtime C mg_* (base HAMOOPIG de terceiros, licenza non verificada, docs/rex_profiles/mugen_sgdk/AUDIT.md), que non se copia.",
+      "propriedade": "frente MUGEN->SGDK (PR #85, branch codex/rex-mugen-sgdk; a fronte segue historica, a API marcouna MERGED por alcanzabilidade tras o merge de #86); registro, manifests, src-tauri/src/lib.rs, App.tsx, core/diagnostics.ts, harness E2E principal e docs de estado son do integrador",
+      "origem": "PR #85: 22 commits desde a base comun a08c2c6 ata bd02e3c. Entrada feita polo integrador como merge curado propio (b410de0, pais e319fb9 do tronco + bd02e3c da fronte), porque o conflito material estaba en superficies reservadas (2 liñas de path-deps en src-tauri/Cargo.toml). Publicado como PR #86 (head codex/rex-integrator-mugen-85 @ 35d0450, 11 gates rc=0, CI verde) e mesclado no tronco do integrador por merge commit 10c1a3c (pais e319fb9 + 35d0450) o 2026-09-29. Sobre o PR #85 non se executou ningunha accion — só se referenciou, como ordenou o operador — pero GitHub marcouo MERGED automaticamente as 11:51:53Z porque a súa cabeza bd02e3c tornou-se alcanzable desde o tronco via 10c1a3c; isDraft=true e os 22 commits permanecen intactos.",
+      "perfil": {
+        "contrato": "crates/rex-mugen/CONTRACT.md",
+        "relatorio": "docs/rex_profiles/mugen_sgdk/REPORT.md",
+        "auditoria": "docs/rex_profiles/mugen_sgdk/AUDIT.md",
+        "proposta_integracion": "docs/rex_profiles/mugen_sgdk/INTEGRATION_PROPOSAL.md",
+        "proposta_memoria": "docs/rex_profiles/mugen_sgdk/MEMORY_BANK_PROPOSAL.md",
+        "dados": "data/rex_profiles/mugen_sgdk/"
+      },
+      "byor": "Ningun test ordinario do paquete necesita ROM: a mostra do E2E e un paquete MUGEN autoral xerado por codigo e a ROM compílase polo pipeline canonico SGDK dentro do cartafol de validacion. Cero ROM comercial; o corpus non se trata como dependencia provisionable."
+    }
+  ]
+}

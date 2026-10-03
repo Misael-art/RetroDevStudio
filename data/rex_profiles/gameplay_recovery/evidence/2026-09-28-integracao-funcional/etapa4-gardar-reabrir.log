@@ -1,0 +1,122 @@
+# ETAPA 4 — gardar e reabrir a regra de gameplay na escena do produto
+# RetroDev Studio · branch codex/rex-integrator-crates-registry · base 617ea15→a08c2c6 (ETAPA 3)
+# Executado 2026-09-28 (UTC-03) no posto de traballo canónico. Un job pesado por vez.
+
+## Que tiña que probar esta etapa
+"salvar/reabrir preservando ROM-base, rotina, parámetro, conexións, source
+mappings e limitacións, revalidando identidade" — polo camiño real do produto
+(entidade da escena + persistencia), non só a función pura.
+
+## Perigo central que determinou o deseño
+`save_scene_data` (src-tauri/src/lib.rs:3535) deserializa a escena nunha
+estrutura tipada `ugdm::entities::Scene` e volve serializar: calquera campo que
+non estea na estrutura Rust DESCARTA-SE EN SILENCIO. Engadir o bloque só en
+TypeScript non gardaba nada. Por iso a entrega é de dous lados:
+
+- Lado Rust: `RecoveredRule` novo en src-tauri/src/ugdm/components.rs (+ campo
+  `LogicComponent.recovered_rule`). 39 literais de `LogicComponent` no backend
+  recibiron `recovered_rule: None`.
+- Lado TS: espello `RecoveredRule` en src/core/ipc/sceneService.ts e o tipo
+  `recovered_rule?: RecoveredRule | null` en `LogicComponent`.
+
+Decisión arquitectural: o grafo do crate NON sobrevive á rolda polo editor
+NodeGraph (`GraphNode.params` é `Record<string, string|number>`). A escena
+garda o `graph_json` do crate VERBATIM dentro de `components.logic.recovered_rule`
+e a interface reproxecta sempre desde aí: unha soa fonte de verdade.
+
+## Arquivos desta entrega
+- src-tauri/src/ugdm/components.rs                    (RecoveredRule + campo, novo)
+- src-tauri/src/core/project_mgr.rs                   (proba de rolda carga→gardar→recarga)
+- src/core/ipc/sceneService.ts                        (espello TS do bloque)
+- src/core/nodegraph/rexGameplayScene.ts              (construir/ler/revalidar/editar, novo)
+- src/core/nodegraph/rexGameplayScene.test.ts         (19 probas, novas)
+- src/test/fixtures/rexGameplay.ts                    (GRAFO_REAL + respostaRecuperar, extraído do test da ETAPA 3)
+- src/core/nodegraph/rexGameplayGraph.test.ts         (fixture movida; 14 probas sen cambios de comportamento)
+- src/components/tools/RexGameplayRulePanel.tsx       (gardar/reabrir/revalidar; fonte unificada)
+- src/components/tools/RexGameplayRulePanel.test.tsx  (9 render-probas, escritas antes da implementación)
+- src/components/tools/ReverseWorkspace.tsx           (ponte painel↔escena: entidade, updateEntity, persistActiveScene)
+- src/components/tools/ReverseWorkspace.test.tsx      (+2 render-probas do rolda completo pola escena)
+
+## Secuencia real (TDD, na orde en que aconteceu)
+
+### 1a. RED Rust — a rolda na escena, escrita antes do tipo existir
+Proba `save_scene_e_reabertura_preservam_a_regra_recuperada_sem_descartar_nada`:
+fallou primeiro porque `RecoveredRule` non existía (E0433/E0609 ao compilar) e,
+tras engadir o tipo, fallou por E0063 en 3 literais de `LogicComponent` que o
+sed non tocara. Corrixidos eses 3, a proba asertou e deu RED real:
+`assert!(en_disco.contains("\"fromPort\":\"true\""))` — falso porque
+`graph_json` e unha *string* JSON (as aspas internas van escapadas).
+A espera substituíuse por analizar o JSON do disco e comparar
+`gardada["graph_json"].as_str() == Some(graph_json)`, que e a propiedade que
+de verdade se quere ("verbatim"). GREEN: `ok. 1 passed`.
+
+### 1b. RED/GREEN do nucleo TS de gardado
+`rexGameplayScene.test.ts` escribiuse primeiro (18 probas): falei con
+`construirRegraRecuperada is not a function` (VITEST_RC=1) e despois verdiu ao
+implementar ler/construir/revalidar/editar.
+Paso intermedio honesto: introducín axudantes de "canonicalización" de enteiros
+(`canonInt`) sobre unha premisa falsa (JS non distingue 1 e 1.0;
+`Number.isSafeInteger(2374.0) === true`). Deu `ReferenceError: canonInt is not
+defined` en 9 probas; revertiuse o axudante e eliminouse a proba vacua que
+pretendía xustificalo ("aceita a forma canónica cando Rust escribe 1.0").
+
+### 1c. RED do painel (9 render-probas) antes de tocar RexGameplayRulePanel.tsx
+$ npx vitest run src/components/tools/RexGameplayRulePanel.test.tsx
+9 fallos, todos por `sen boton: rex-gameplay-save-scene` /
+`sen elemento` — é dicir, a UI aínda non tiña a superficie de gardado, non por
+erros de fixture. As probas renderizan o compoñente real (createRoot + act +
+vi.mock do servizo IPC), seguindo a convención xa existente no repo.
+
+### 1d. GREEN do painel: 9/9. Despois, RED da ponte coa escena
+$ npx vitest run src/components/tools/ReverseWorkspace.test.tsx
+As 2 probas novas falei por `expected "vi.fn()" to be called with arguments:
+['F:/Projects/proxecto', Any<String>] — Number of calls: 0` (aínda non había
+ponte) e, na segunda, porque o bloque da escena non se reabrirá.
+
+### 1e. GREEN final (montaxe en ReverseWorkspace)
+4/4 no workspace, 9/9 no painel, 19/19 no nucleo de gardado, 14/14 no projetor.
+
+## Probas de mutación (non-vacuidade) desta entrega
+- M1 (ReverseWorkspace: gardar `graph_json: ""` no bloque) → MORTA por
+  "garda o bloque recuperado na entidade e escribe a escena" (aserción
+  `gardado.graph_json === GRAFO_REAL`).
+- M2 (ReverseWorkspace: `gardada: bloque` → `gardada: null`) → MORTA por
+  "reabre desde a escena sen chamar ao backend".
+- M3 (rexGameplayScene: `revalidarIdentidade` acepta calquera SHA de 64) →
+  MORTA en dous niveis: "cun SHA distinto retira a regra e di os dous
+  identificadores" (painel) e "aceita o mesmo SHA e recusa calquera outro con
+  motivo explícito" (nucleo).
+- M4 (rexGameplayScene: desactivar a coherencia limiar↔grafo) → MORTA. Ningunha
+  proba existente a detectaba, así que se engadiu
+  "recusa un bloque cuxo limiar gardado non bate co que di o grafo" (limiar 4 e
+  dentro da faixa -127..128: o único que o descobre e esta coherencia). A proba
+  escribiuse contra o código mutado e falei primeiro (`expected true to be
+  false`); restaurada a garda, verdiu.
+Todas as mutacions revertíronse e a árbore quedou nos conteos verdes de abaixo.
+
+## Gates medidas (rc=0 agás onde se indica)
+- npx vitest run (4 arquivos da entrega)                 46 passed (46)
+- npm test (suíte frontend completa)                     793 passed | 6 skipped (799), 82 arquivos
+- npx tsc --noEmit                                       sen saída
+- npm run lint (--max-warnings=0)                        sen saída
+- cargo clippy --lib -- -D warnings                      Finished dev profile
+- cargo test --lib                                       781 passed | 0 failed | 67 ignored
+- cargo fmt --check                                      sen saída (un formato propio devolvía
+                                                         `assert_eq!` multiliña; aplicouse cargo fmt)
+- npm run check:tree                                     OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+
+## Limites honestos desta entrega
+1. A revalidación de identidade usa `rex_gameplay_scan` (que le e hashrea a ROM
+   da barra) como orixe do SHA observado; non hai unha ruta "hash desta ROM"
+   dedicada. Vale para dicir "a ROM da barra e a mesma que a gardada", non para
+   comparar dous ficheiros calquera.
+2. `persistActiveScene` devolve `true` cando non hai escena fonte na loja; a
+   pantalla fía a súa afirmación "escrita no disco" a ese contrato. Non se
+   modificou (fora do alcance desta etapa) e por iso a ponte só se exerce cando
+   a escena esta aberta desde o proxecto. A ruta real binario-arribar prova-se
+   na ETAPA 6.
+3. Non se garda ningunha ligazón ao grafo do editor NodeGraph: a escena garda o
+   `graph_json` do crate, e se o usuario despois edita o grafo da entidade polo
+   editor xeral, esas edicións NON se reinterpretan como regra de gameplay.
+   Rexistro escollido deliberately (ver decisión arriba); a promoción de
+   maturidade NON se tocou: `rex-gameplay` segue en `gates-proprios-aprovados`.

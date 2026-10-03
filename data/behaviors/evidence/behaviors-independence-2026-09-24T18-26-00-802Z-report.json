@@ -1,0 +1,268 @@
+{
+  "generatedAt": "2026-09-24T18:33:10.165Z",
+  "scenario": "behaviors-independence",
+  "testedApplication": {
+    "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "12dc97d9b007062dad64a92ac3e2f521ce6f6a50b1b147108818971839183ac0"
+  },
+  "artifacts": [
+    {
+      "label": "Movimento e salto aplicado em Player 2",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T18-26-00-802Z-01-behavior-player2.png"
+    },
+    {
+      "label": "Player 2 inalterado apos editar Player 3",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T18-26-00-802Z-02-player2-unchanged.png"
+    },
+    {
+      "label": "comportamentos apos reiniciar e reabrir",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T18-26-00-802Z-03-reopened.png"
+    },
+    {
+      "label": "jogo apos a prova por teclado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T18-26-00-802Z-04-played.png"
+    },
+    {
+      "label": "prova de salto e passagem (RAM + colisao)",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T18-26-00-802Z-play-proof.json"
+    }
+  ],
+  "steps": [
+    {
+      "id": "duplicate_players_and_blockers",
+      "status": "passed",
+      "at": "2026-09-24T18:26:35.259Z",
+      "warning": "A copia recebe os comportamentos desta entidade (remapeados para a copia), mas nao a logica manual (34 no(s)): ela continuaria controlando a entidade original.Duplicar assimCancelar",
+      "blockers": {
+        "A": 150,
+        "B": 250,
+        "C": 90
+      },
+      "player2X": 200,
+      "player3X": 100
+    },
+    {
+      "id": "apply_behaviors",
+      "status": "passed",
+      "at": "2026-09-24T18:27:22.555Z",
+      "instanceA": {
+        "id": "bh_move_player_2_1",
+        "text": "Movimento e salto — Player 2Player 2 anda 8 px por quadro para a direita segurando →, para a esquerda com ←, salta (so do chao) com forca 64 ao apertar B (X) tocando \"jump\".Ver no grafoEditarRemover"
+      },
+      "summaryA": "Resultado: Player 2 anda 8 px por quadro para a direita segurando →, para a esquerda com ←, salta (so do chao) com forca 64 ao apertar B (X) tocando \"jump\".",
+      "passageRight2": {
+        "summary": "Resultado: \"Closed Passage Blocker 3\" bloqueia o movimento ate reference_score >= 20; entao o bloqueio some e a passagem abre.",
+        "id": "bh_pass_passage_blocker_3_1"
+      },
+      "passageLeft2": {
+        "summary": "Resultado: \"Closed Passage Blocker 2\" bloqueia o movimento ate reference_score >= 20; entao o bloqueio some e a passagem abre.",
+        "id": "bh_pass_passage_blocker_2_1"
+      },
+      "instanceB": {
+        "id": "bh_move_player_3_1",
+        "text": "Movimento e salto — Player 3Player 3 anda 2 px por quadro para a direita segurando C (C), para a esquerda com A (Z), salta (so do chao) com forca 40 ao apertar Start (Enter).Ver no grafoEditarRemover"
+      },
+      "summaryB": "Resultado: Player 3 anda 2 px por quadro para a direita segurando C (C), para a esquerda com A (Z), salta (so do chao) com forca 40 ao apertar Start (Enter).",
+      "passage3": {
+        "summary": "Resultado: \"Closed Passage Blocker 4\" bloqueia o movimento ate reference_score >= 60; entao o bloqueio some e a passagem abre.",
+        "id": "bh_pass_passage_blocker_4_1"
+      },
+      "invalid": "Velocidade: use um inteiro entre 1 e 8."
+    },
+    {
+      "id": "edit_undo_redo",
+      "status": "passed",
+      "at": "2026-09-24T18:27:28.518Z",
+      "instanceA": {
+        "id": "bh_move_player_2_1",
+        "text": "Movimento e salto — Player 2Player 2 anda 8 px por quadro para a direita segurando →, para a esquerda com ←, salta (so do chao) com forca 64 ao apertar B (X) tocando \"jump\".Ver no grafoEditarRemover"
+      }
+    },
+    {
+      "id": "duplicate_remap_remove",
+      "status": "passed",
+      "at": "2026-09-24T18:27:56.299Z",
+      "copiedAll": [
+        {
+          "id": "bh_move_player_2_2_1",
+          "text": "Movimento e salto — Player 2Player 2 2 anda 8 px por quadro para a direita segurando →, para a esquerda com ←, salta (so do chao) com forca 64 ao apertar B (X) tocando \"jump\".Ver no grafoEditarRemover"
+        },
+        {
+          "id": "bh_pass_passage_blocker_3_2",
+          "text": "Passagem condicionada — Closed Passage Blocker 3\"Closed Passage Blocker 3\" bloqueia o movimento ate reference_score >= 20; entao o bloqueio some e a passagem abre.Ver no grafoEditarRemover"
+        },
+        {
+          "id": "bh_pass_passage_blocker_2_2",
+          "text": "Passagem condicionada — Closed Passage Blocker 2\"Closed Passage Blocker 2\" bloqueia o movimento ate reference_score >= 20; entao o bloqueio some e a passagem abre.Ver no grafoEditarRemover"
+        }
+      ],
+      "refusal": "Remova antes \"Passagem condicionada — Closed Passage Blocker 3\", \"Passagem condicionada — Closed Passage Blocker 2\", que depende(m) deste comportamento.",
+      "copyMoves": [
+        {
+          "id": "bh_move_player_2_2_1__right_move",
+          "target": "player_2_2",
+          "dx": 8
+        },
+        {
+          "id": "bh_move_player_2_2_1__left_move",
+          "target": "player_2_2",
+          "dx": -8
+        }
+      ]
+    },
+    {
+      "id": "restart_reopen",
+      "status": "passed",
+      "at": "2026-09-24T18:28:34.447Z",
+      "reopenedA": [
+        {
+          "id": "bh_move_player_2_1",
+          "text": "Movimento e salto — Player 2Player 2 anda 8 px por quadro para a direita segurando →, para a esquerda com ←, salta (so do chao) com forca 64 ao apertar B (X) tocando \"jump\".Ver no grafoEditarRemover"
+        },
+        {
+          "id": "bh_pass_passage_blocker_3_1",
+          "text": "Passagem condicionada — Closed Passage Blocker 3\"Closed Passage Blocker 3\" bloqueia o movimento ate reference_score >= 20; entao o bloqueio some e a passagem abre.Ver no grafoEditarRemover"
+        },
+        {
+          "id": "bh_pass_passage_blocker_2_1",
+          "text": "Passagem condicionada — Closed Passage Blocker 2\"Closed Passage Blocker 2\" bloqueia o movimento ate reference_score >= 20; entao o bloqueio some e a passagem abre.Ver no grafoEditarRemover"
+        }
+      ],
+      "reopenedB": [
+        {
+          "id": "bh_move_player_3_1",
+          "text": "Movimento e salto — Player 3Player 3 anda 3 px por quadro para a direita segurando C (C), para a esquerda com A (Z), salta (so do chao) com forca 40 ao apertar Start (Enter).Ver no grafoEditarRemover"
+        },
+        {
+          "id": "bh_pass_passage_blocker_4_1",
+          "text": "Passagem condicionada — Closed Passage Blocker 4\"Closed Passage Blocker 4\" bloqueia o movimento ate reference_score >= 60; entao o bloqueio some e a passagem abre.Ver no grafoEditarRemover"
+        }
+      ],
+      "reopenedCopy": []
+    },
+    {
+      "id": "keyboard_jump_and_passage",
+      "status": "passed",
+      "at": "2026-09-24T18:33:10.164Z",
+      "rom": {
+        "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T18-26-00-802Z-played.rom",
+        "sha256": "bdd7749d90512040a7ca279e77e473264a2d2906e967504747d0579a3bb78f38"
+      },
+      "jump": {
+        "apex1": 15,
+        "p3DuringJ1": true,
+        "airPressAtY": 161,
+        "apex2": 15,
+        "apexHeld": 15,
+        "heldAfterLanding": true,
+        "apex4": 15,
+        "p3Apex": 5,
+        "p2ApexWhileP3Air": 15
+      },
+      "passage": {
+        "A": {
+          "left": 150,
+          "right": 174
+        },
+        "B": {
+          "left": 250,
+          "right": 274
+        },
+        "C": {
+          "left": 90,
+          "right": 114
+        },
+        "fromLeft": {
+          "stopX": 232,
+          "maxRight": 246,
+          "score": 10,
+          "overlapped": false
+        },
+        "fromRight": {
+          "stopX": 176,
+          "minLeft": 176,
+          "overlapped": false
+        },
+        "p3StartedOverlapped": true,
+        "p3Exit": {
+          "from": 100,
+          "to": 130,
+          "gcd": 3,
+          "p2Static": true,
+          "copyStatic": true
+        },
+        "p3BeforeThreshold": {
+          "stopX": 115,
+          "minLeft": 115,
+          "overlapped": false,
+          "score": 12
+        },
+        "cross": {
+          "firstInsideB": {
+            "p1": [
+              32,
+              176
+            ],
+            "p2": [
+              240,
+              176
+            ],
+            "p3": [
+              115,
+              176
+            ],
+            "copy": [
+              224,
+              176
+            ],
+            "score": 21,
+            "openB": 1,
+            "openA": 1,
+            "openC": 0,
+            "frame": 360
+          },
+          "openedAtScore": 21,
+          "beforeOpenInside": 0,
+          "end": {
+            "p1": [
+              42,
+              176
+            ],
+            "p2": [
+              280,
+              176
+            ],
+            "p3": [
+              115,
+              176
+            ],
+            "copy": [
+              224,
+              176
+            ],
+            "score": 26,
+            "openB": 1,
+            "openA": 1,
+            "openC": 0,
+            "frame": 360
+          }
+        },
+        "p3AfterThreshold": {
+          "stopX": 115,
+          "minLeft": 115,
+          "overlapped": false,
+          "score": 28
+        },
+        "openStates": {
+          "A": 1,
+          "B": 1,
+          "C": 0,
+          "score": 28
+        }
+      }
+    }
+  ],
+  "frames": [],
+  "roms": [],
+  "non_black_pixels": 0
+}

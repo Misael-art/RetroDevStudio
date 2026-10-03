@@ -29,6 +29,16 @@ RetroDevStudio/
 |-- eslint.config.mjs
 |-- package.json
 |-- vite.config.ts
+|-- crates/
+|   |-- registry.json      (registro canonico de pacotes; unico fonte de verdade do gate)
+|   |-- README.md
+|   `-- <nome>/            (uma biblioteca Rust standalone por diretorio)
+|       |-- Cargo.toml
+|       |-- Cargo.lock
+|       |-- src/
+|       |-- examples/
+|       `-- tests/
+|
 |-- data/
 |   |-- Blackheart_grande.gif
 |   |-- Earthquake_large.png
@@ -83,6 +93,11 @@ RetroDevStudio/
 |   |   |   |-- nodeTypes.ts
 |   |   |   |-- nodeDefinitions.ts
 |   |   |   |-- nodeEngine.ts
+|   |   |   |-- nodeCatalog.ts (registro unico: categoria, nome, icone, descricao, botao x tecla)
+|   |   |   |-- nodeLayout.ts (Organizar visualmente: so posicoes; assinatura semantica)
+|   |   |   |-- graphHistory.ts (desfazer/refazer do grafo e ponte com Ctrl+Z/Ctrl+Y)
+|   |   |   |-- behaviorLibrary.ts (comportamentos parametrizados: planejar/aplicar/editar/remover/duplicar)
+|   |   |   |-- ruleSummary.ts / passageAuthoring.ts / buildProvenance.ts
 |   |   |   `-- nodeCompiler.ts (legado/experimental; guard de isolamento em teste)
 |   |   `-- store/
 |   |-- test/
@@ -156,6 +171,8 @@ RetroDevStudio/
 |   |-- create-icon.mjs
 |   |-- diagnose-desktop-e2e.ps1
 |   |-- e2e-tauri-build-run.mjs
+|   |-- verify-mugen-real.py
+|   |-- verify-mugen-chain.py
 |   |-- license-inventory.mjs
 |   |-- release-rehearsal-linux.mjs
 |   |-- release-readiness.mjs
@@ -188,6 +205,10 @@ RetroDevStudio/
 - O reverse core canonico de ROMs deve viver em `src-tauri/src/tools/reverse/`; wrappers legados como `asset_extractor.rs` e `reverse_explorer.rs` continuam como superfícies de compatibilidade.
 - IPC de frontend fica em `src/core/ipc/`.
 - Fixtures backend ficam em `src-tauri/tests/fixtures/`.
+- `crates/<nome>/` e a localizacao oficial de bibliotecas Rust independentes (standalone), cada uma com seu `Cargo.toml` e seus proprios gates. Nao existe `Cargo.toml` de workspace na raiz e nao se cria um apenas para fazer esses pacotes compilarem; o build do aplicativo permanece em `src-tauri/`.
+- Todo pacote em `crates/` deve estar declarado em `crates/registry.json` antes de existir. O gate `npm run check:tree` exige o registro (`crates/` sem `registry.json` reprova), rejeita diretorio nao declarado, rejeita pacote declarado cujo `Cargo.toml` nao existe e so permite arquivos soltos em `crates/` nos nomes declarados (`registry.json`, `README.md`). Quando o pacote declara `manifesto`, o valor deve ser exatamente `crates/<nome>/Cargo.toml` em barras POSIX: a comparacao e literal e nao muda conforme o SO onde a gate roda. A finalidade do gate permanece a mesma: recusar o que nao esta declarado.
+- Binarios de build (`crates/<nome>/target/`), ROMs e corpus BYOR jamais entram em `crates/`; sao dados do usuario ou artefatos descartaveis, nao fonte do projeto.
+- Integrar uma biblioteca ao aplicativo e etapa posterior e separada: acrescenta-se a dependencia por path em `src-tauri/Cargo.toml`, implementa-se o adaptador e comprova-se uma chamada real pelo backend. Compilar e passar nos gates proprios NAO registra integracao ao produto.
 - Toolchains ativos vivem no cache nativo por lock digest; o cartao guarda somente artefatos verificaveis em `toolchains/.cache/artifacts/` e compatibilidade legada validada. Binarios nao devem ser versionados.
 - `toolchains/host-requirements.lock.json` e a excecao rastreada: contem apenas contrato, pins, fontes imutaveis e hashes; binarios continuam ignorados.
 - Artefatos oficiais cacheados por SHA-256 vivem em `toolchains/.cache/artifacts/` e nao devem ser versionados no Git.
@@ -229,3 +250,9 @@ RetroDevStudio/
 - `docs/13_PLANO_EXECUCAO_PARALELA.md` define tickets, ownership e comparação; não substitui a maturidade do roadmap.
 - `docs/AVALIACAO_DESENVOLVIMENTO_2026_09_06.md` preserva snapshot histórico; novas evidências/deltas vivem no Current Wave.
 - `docs/PROMPT_AGENTE_{INTEGRADOR,A,B,C}.md` são entradas de execução por papel. Apenas o integrador atualiza docs canônicos durante rodadas paralelas.
+
+## Programa de reconstrução e edição de ROMs (planejamento 2026-09-10)
+
+- O plano ampliado permanece no documento canônico `docs/12_DECOMPILACAO_PAREADA_PLANO.md`, seção Programa REX; não constitui implementação ou promoção de suporte.
+- `docs/PROMPT_AGENTE_RECONSTRUCAO_ROM.md` contém o handoff executável do Programa REX.
+- Relatórios gerados usam os diretórios de validação existentes ou diretório BYOR externo; nenhuma ROM ou asset comercial entra no Git.

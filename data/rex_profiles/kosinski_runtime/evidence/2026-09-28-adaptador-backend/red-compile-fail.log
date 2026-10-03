@@ -1,0 +1,15 @@
+   Compiling rex-addressing v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/crates/rex-addressing)
+   Compiling retro-dev-studio v0.1.0 (/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri)
+error[E0432]: unresolved imports `super::kosinski_decode`, `super::kosinski_encode`, `super::KosinskiDecodeLimits`, `super::KosinskiEncodeLimits`
+ --> src/tools/reverse/decomp/rex_kosinski.rs:7:9
+  |
+7 |         kosinski_decode, kosinski_encode, KosinskiDecodeLimits, KosinskiEncodeLimits,
+  |         ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^ no `KosinskiEncodeLimits` in `tools::reverse::decomp::rex_kosinski`
+  |         |                |                |
+  |         |                |                no `KosinskiDecodeLimits` in `tools::reverse::decomp::rex_kosinski`
+  |         |                no `kosinski_encode` in `tools::reverse::decomp::rex_kosinski`
+  |         no `kosinski_decode` in `tools::reverse::decomp::rex_kosinski`
+
+For more information about this error, try `rustc --explain E0432`.
+error: could not compile `retro-dev-studio` (lib test) due to 1 previous error
+RED_RC=101

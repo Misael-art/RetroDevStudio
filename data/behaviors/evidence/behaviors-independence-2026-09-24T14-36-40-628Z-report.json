@@ -1,0 +1,169 @@
+{
+  "generatedAt": "2026-09-24T14:38:14.644Z",
+  "scenario": "behaviors-independence",
+  "testedApplication": {
+    "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/debug/retro-dev-studio",
+    "sha256": "ccd0dab9e0317138c5f20c7762d3371c50c5cedd11dbf7686952b2596a85aac4"
+  },
+  "artifacts": [
+    {
+      "label": "Movimento e salto aplicado em Player 2",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T14-36-40-628Z-01-behavior-player2.png"
+    },
+    {
+      "label": "Player 2 inalterado apos editar Player 3",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T14-36-40-628Z-02-player2-unchanged.png"
+    },
+    {
+      "label": "comportamentos apos reiniciar e reabrir",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T14-36-40-628Z-03-reopened.png"
+    },
+    {
+      "label": "linha do tempo por teclado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T14-36-40-628Z-play-timeline.json"
+    },
+    {
+      "label": "jogo apos teclado",
+      "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T14-36-40-628Z-04-played.png"
+    }
+  ],
+  "steps": [
+    {
+      "id": "duplicate_players",
+      "status": "passed",
+      "at": "2026-09-24T14:36:55.575Z",
+      "warning": "A copia recebe os comportamentos desta entidade (remapeados para a copia), mas nao a logica manual (34 no(s)): ela continuaria controlando a entidade original.Duplicar assimCancelar"
+    },
+    {
+      "id": "apply_behaviors",
+      "status": "passed",
+      "at": "2026-09-24T14:37:10.368Z",
+      "instanceA": {
+        "id": "bh_move_player_2_1",
+        "text": "Movimento e salto — Player 2Player 2 anda 1 px por quadro para a direita segurando →, para a esquerda com ←, salta com forca 64 ao apertar B (X) tocando \"jump\".Ver no grafoEditarRemover"
+      },
+      "summaryA": "Resultado: Player 2 anda 1 px por quadro para a direita segurando →, para a esquerda com ←, salta com forca 64 ao apertar B (X) tocando \"jump\".",
+      "instanceB": {
+        "id": "bh_move_player_3_1",
+        "text": "Movimento e salto — Player 3Player 3 anda 2 px por quadro para a direita segurando C (C), salta com forca 40 ao apertar Start (Enter).Ver no grafoEditarRemover"
+      },
+      "summaryB": "Resultado: Player 3 anda 2 px por quadro para a direita segurando C (C), salta com forca 40 ao apertar Start (Enter).",
+      "passageId": "bh_pass_goal_1",
+      "passageSummary": "Resultado: \"Goal Marker\" bloqueia o movimento ate reference_score >= 20; entao o bloqueio some e a passagem abre.",
+      "invalid": "Velocidade: use um inteiro entre 1 e 8."
+    },
+    {
+      "id": "edit_undo_redo",
+      "status": "passed",
+      "at": "2026-09-24T14:37:13.810Z",
+      "instanceA": {
+        "id": "bh_move_player_2_1",
+        "text": "Movimento e salto — Player 2Player 2 anda 1 px por quadro para a direita segurando →, para a esquerda com ←, salta com forca 64 ao apertar B (X) tocando \"jump\".Ver no grafoEditarRemover"
+      }
+    },
+    {
+      "id": "duplicate_remap_remove",
+      "status": "passed",
+      "at": "2026-09-24T14:37:18.453Z",
+      "copied": {
+        "id": "bh_move_player_2_2_1",
+        "text": "Movimento e salto — Player 2Player 2 2 anda 1 px por quadro para a direita segurando →, para a esquerda com ←, salta com forca 64 ao apertar B (X) tocando \"jump\".Ver no grafoEditarRemover"
+      },
+      "copyMoves": [
+        {
+          "id": "bh_move_player_2_2_1__right_move",
+          "target": "player_2_2",
+          "dx": 1
+        },
+        {
+          "id": "bh_move_player_2_2_1__left_move",
+          "target": "player_2_2",
+          "dx": -1
+        }
+      ]
+    },
+    {
+      "id": "restart_reopen",
+      "status": "passed",
+      "at": "2026-09-24T14:37:34.771Z",
+      "reopenedA": [
+        {
+          "id": "bh_move_player_2_1",
+          "text": "Movimento e salto — Player 2Player 2 anda 1 px por quadro para a direita segurando →, para a esquerda com ←, salta com forca 64 ao apertar B (X) tocando \"jump\".Ver no grafoEditarRemover"
+        }
+      ],
+      "reopenedB": [
+        {
+          "id": "bh_move_player_3_1",
+          "text": "Movimento e salto — Player 3Player 3 anda 3 px por quadro para a direita segurando C (C), salta com forca 40 ao apertar Start (Enter).Ver no grafoEditarRemover"
+        },
+        {
+          "id": "bh_pass_goal_1",
+          "text": "Passagem condicionada — Goal Marker\"Goal Marker\" bloqueia o movimento ate reference_score >= 20; entao o bloqueio some e a passagem abre.Ver no grafoEditarRemover"
+        }
+      ],
+      "reopenedCopy": []
+    },
+    {
+      "id": "keyboard_independence",
+      "status": "passed",
+      "at": "2026-09-24T14:38:14.639Z",
+      "rom": {
+        "path": "/home/misael/Projects/RetroDevStudio-CANONICAL-2026-09-21/src-tauri/target-test/validation/behaviors-independence-2026-09-24T14-36-40-628Z-played.rom",
+        "sha256": "32525aab5935887de35b73c625d8b37e5239f1f439b6fb81d9e72300605281e5"
+      },
+      "proof": {
+        "right": {
+          "p2": 28,
+          "p3": 0,
+          "copy": 0,
+          "p2Gcd": 1
+        },
+        "c": {
+          "p2": 0,
+          "p3": 81,
+          "p3Gcd": 3
+        },
+        "x": {
+          "p2Jump": 15,
+          "p3Jump": 0
+        },
+        "enter": {
+          "p2Jump": 0,
+          "p3Jump": 5
+        },
+        "score": 28,
+        "passageOpen": [
+          0,
+          1
+        ],
+        "passageOpenedEarly": 0,
+        "passageFirstOpen": {
+          "p1": [
+            64,
+            176
+          ],
+          "p2": [
+            220,
+            176
+          ],
+          "p3": [
+            250,
+            176
+          ],
+          "copy": [
+            224,
+            176
+          ],
+          "score": 20,
+          "passageOpen": 1,
+          "t": 1790260673920,
+          "frame": 70
+        }
+      }
+    }
+  ],
+  "frames": [],
+  "roms": [],
+  "non_black_pixels": 0
+}

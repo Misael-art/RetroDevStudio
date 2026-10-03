@@ -1,3 +1,4 @@
+import { loadShellPersona } from "../../core/surfaceRegistry";
 import { useEffect, useMemo, useRef, useState } from "react";
 import EmptyState from "../common/EmptyState";
 import Panel from "../common/Panel";
@@ -115,6 +116,9 @@ function importedEntityKindChip(entityType: string, roleLabel: string | null): s
   return null;
 }
 
+/** Project whose scene this panel last loaded from disk (survives remounts). */
+let lastHydratedProjectDir: string | null = null;
+
 export default function HierarchyPanel({
   onOpenProject,
 }: {
@@ -217,10 +221,19 @@ export default function HierarchyPanel({
     };
 
     setIsLoadingScenes(true);
+    // The panel remounts on every workspace switch. When the editor already holds this
+    // project's scene, only refresh the scene catalog: re-reading the scene from disk
+    // here would silently discard edits that are not saved yet.
+    const sceneAlreadyLoaded =
+      Boolean(useEditorStore.getState().activeScene) && lastHydratedProjectDir === projectDirAtStart;
     void (async () => {
       try {
         const scenes = await listScenes(projectDirAtStart);
         if (!isCurrent()) return;
+        if (sceneAlreadyLoaded) {
+          setSceneItems(scenes);
+          return;
+        }
         const result = await getSceneData(projectDirAtStart);
         if (!isCurrent()) return;
 
@@ -237,6 +250,7 @@ export default function HierarchyPanel({
           hydrated?.resolvedScene ?? null,
           hydrated?.sourceScene ?? null
         );
+        lastHydratedProjectDir = hydrated ? projectDirAtStart : null;
         if (!result.ok) {
           logMessage("warn", `[Hierarchy] ${result.error}`);
         } else if (!hydrated) {
@@ -597,7 +611,7 @@ export default function HierarchyPanel({
           <p className="mt-1 truncate text-[10px] text-[#45475a]">
             {activeSceneSelectValue || "Nenhuma cena ativa"}
           </p>
-          {activeProjectDir ? (
+          {activeProjectDir && loadShellPersona() !== "guiado" ? (
             <div className="mt-2">
               <SceneWorkspaceNotice
                 context={sceneContext}
@@ -823,6 +837,7 @@ export default function HierarchyPanel({
                                 </span>
                                 <button
                                   type="button"
+                                  data-testid={`hierarchy-tilemap-edit-${entity.entity_id}`}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     setSelectedEntityId(entity.entity_id);

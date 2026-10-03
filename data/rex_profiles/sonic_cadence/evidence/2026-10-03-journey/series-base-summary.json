@@ -1,0 +1,241 @@
+{
+  "rom_path_note": "path local; arquivo-ROM nao versionado",
+  "rom_path": "/home/misael/RDS-REX-CORPUS-E/.staging/Sonic the Hedgehog (USA, Europe).bin",
+  "rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "interval_byte": 23,
+  "core_label": "Genesis Plus GX v1.7.4 46a5521",
+  "route": {
+    "totalFrames": 2901,
+    "warmupFrames": 900,
+    "startFrames": 2,
+    "tailFrames": 1999,
+    "recordFrom": 1500,
+    "recordTo": 2900,
+    "region": 2,
+    "offset": 53248,
+    "length": 64,
+    "epoch": 3,
+    "frames_before_start": 900,
+    "frames_after_tail": 2901,
+    "start_batch_rows": []
+  },
+  "dropped_outside_window": [
+    2901
+  ],
+  "checks": [
+    {
+      "name": "base.observacao_rota_ok",
+      "pass": true,
+      "observed": {
+        "epoch": 3,
+        "core": "Genesis Plus GX v1.7.4 46a5521"
+      }
+    },
+    {
+      "name": "base.observacao_orcamento_e_ancoragem",
+      "pass": true,
+      "observed": {
+        "frames_before": 900,
+        "frames_after": 2901
+      }
+    },
+    {
+      "name": "base.observacao_janela_completa",
+      "pass": true,
+      "observed": {
+        "bruto": 1402,
+        "janela": 1401,
+        "descartada_fora_da_janela": 1,
+        "first": 1500,
+        "last": 2901
+      }
+    },
+    {
+      "name": "base.observacao_identidade_rom",
+      "pass": true,
+      "observed": {
+        "sha": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+        "path": "/home/misael/RDS-REX-CORPUS-E/.staging/Sonic the Hedgehog (USA, Europe).bin"
+      }
+    },
+    {
+      "name": "base.cobertura_idle",
+      "pass": true,
+      "observed": 1,
+      "required": ">=0.40"
+    },
+    {
+      "name": "base.candidato_timer_decrementa_1",
+      "pass": true,
+      "observed": 0.9586,
+      "required": ">=0.80 em pares adjacentes idle"
+    },
+    {
+      "name": "base.recargas_0_para_byte",
+      "pass": true,
+      "observed": 58,
+      "required": ">=3"
+    },
+    {
+      "name": "base.transicoes_de_frame",
+      "pass": true,
+      "observed": 58,
+      "required": ">=5"
+    },
+    {
+      "name": "base.modo_dos_gaps",
+      "pass": true,
+      "observed": 24,
+      "required": "==24"
+    },
+    {
+      "name": "base.razao_do_modo",
+      "pass": true,
+      "observed": 1,
+      "required": ">=0.80"
+    }
+  ],
+  "metrics": {
+    "expected_interval_byte": 23,
+    "samples": 1401,
+    "idle_coverage_ratio": 1,
+    "adjacent_idle_pairs": 1400,
+    "timer_decrement_one_ratio": 0.9586,
+    "adjacent_frame_transitions": 58,
+    "clean_reloads_zero_to_byte": 58,
+    "reload_frames": [
+      1520,
+      1544,
+      1568,
+      1592,
+      1616,
+      1640,
+      1664,
+      1688,
+      1712,
+      1736,
+      1760,
+      1784,
+      1808,
+      1832,
+      1856,
+      1880,
+      1904,
+      1928,
+      1952,
+      1976,
+      2000,
+      2024,
+      2048,
+      2072,
+      2096,
+      2120,
+      2144,
+      2168,
+      2192,
+      2216,
+      2240,
+      2264,
+      2288,
+      2312,
+      2336,
+      2360,
+      2384,
+      2408,
+      2432,
+      2456,
+      2480,
+      2504,
+      2528,
+      2552,
+      2576,
+      2600,
+      2624,
+      2648,
+      2672,
+      2696,
+      2720,
+      2744,
+      2768,
+      2792,
+      2816,
+      2840,
+      2864,
+      2888
+    ],
+    "gaps": [
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24,
+      24
+    ],
+    "gap_histogram": {
+      "24": 57
+    },
+    "gap_mode": 24,
+    "gap_mode_ratio": 1,
+    "frames_after_first_idle": 1400
+  },
+  "raw_rows_first_last": [
+    1500,
+    2901
+  ],
+  "raw_rows_count": 1402,
+  "raw_rows_sha256_of_full_json": "4571f445c156b6ecae211f693114b96743aa80595902d0addeaa023424ac1e95",
+  "redacted_fields": [
+    "raw_rows[].bytes_hex removidos (estados de RAM por frame); serie completa fica local e via sha pinado"
+  ]
+}

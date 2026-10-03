@@ -1,0 +1,33 @@
+INICIO 2026-09-28T11:54:32Z
+test tools::reverse::loader::tests::rex02_smd_without_header_round_trip ... ok
+test tools::reverse::loader::tests::rex02_smd_interleaved_round_trip_restores_original_sha ... ok
+test tools::reverse::tests::analyze_rom_builds_canonical_manifest_for_megadrive ... ok
+test tools::reverse::tests::analyze_rom_populates_all_extractors_for_megadrive ... ok
+test tools::reverse::tests::analyze_rom_detects_megadrive_sram_header ... ok
+test tools::reverse::tests::analyze_rom_rejects_inverted_megadrive_sram_range ... ok
+test tools::reverse::decomp::rex_resources::tests::byor_preview_of_modified_artifact ... ok
+test tools::reverse::text::tests::analyze_text_finds_ascii_regions ... ok
+test tools::reverse::text::tests::analyze_text_finds_megadrive_be32_pointer_table ... ok
+test tools::reverse::text::tests::analyze_text_finds_shift_jis_like_regions ... ok
+test tools::reverse::text::tests::analyze_text_finds_snes_le16_pointer_table ... ok
+test tools::reverse_explorer::tests::inspect_rom_uses_canonical_disassembly_for_megadrive ... ok
+test tools::reverse::tests::analyze_rom_with_trace_marks_executed_functions_for_megadrive ... ok
+test tools::reverse_explorer::tests::inspect_rom_uses_canonical_disassembly_for_snes ... ok
+test ugdm::components::sprite_command_tests::animation_def_round_trips_artstudio_frame_authoring_metadata ... ok
+test ugdm::components::sprite_command_tests::sprite_component_commands_round_trip_json ... ok
+test ugdm::components::tilemap_tests::legacy_tilemap_without_cells_field_parses_empty ... ok
+test ugdm::components::tilemap_tests::tilemap_with_cells_roundtrips ... ok
+test ugdm::components::tilemap_tests::tilemap_without_cells_roundtrips_without_field ... ok
+test ugdm::serde_helpers::tests::deserialize_f64_to_i32_accepts_float ... ok
+test ugdm::serde_helpers::tests::deserialize_f64_to_i32_accepts_int ... ok
+test tools::reverse::decomp::rex_resources::tests::ui_edite_recurso_aplib_pela_mesma_fronteira_do_lz4w ... ok
+test tools::reverse::tests::analyze_rom_builds_canonical_manifest_for_snes ... ok
+test tools::reverse::tests::analyze_rom_populates_all_extractors_for_snes ... ok
+test tools::reverse::decomp::rex_codecs::tests::lz4w_encode_dp_iguala_busca_exaustiva_em_entradas_pequenas ... ok
+test tools::photo2sgdk::tests::kenmasters_uses_corner_background_heuristic_for_transparency ... ok
+test tools::photo2sgdk::tests::earthquake_large_recommends_downscale_and_meta_sprite_handling ... ok
+
+test result: ok. 754 passed; 0 failed; 66 ignored; 0 measured; 0 filtered out; finished in 51.28s
+
+TEST_LIB_RC=0
+FIN 2026-09-28T11:55:38Z

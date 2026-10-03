@@ -1,0 +1,9 @@
+== check:tree
+npm notice run retrodev-studio@0.1.0 check:tree
+npm notice run node scripts/check-tree.cjs
+OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md.
+RC_CHECKTREE=0
+== lint
+npm notice run retrodev-studio@0.1.0 lint
+npm notice run eslint src vite.config.ts --max-warnings=0
+RC_LINT=0

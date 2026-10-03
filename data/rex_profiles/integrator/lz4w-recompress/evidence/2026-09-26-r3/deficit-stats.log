@@ -1,0 +1,5 @@
+# estatísticas do déficit remanescente, calculadas sobre o bench.json desta rodada
+$ python3 -c "import json,statistics as st
+rows=[r['folga_base'] for r in json.load(open('bench.json'))['recursos'] if r['conjunto']=='S-B-corpus' and r['folga_base'] is not None]
+print('n=',len(rows),'mediana=',st.median(rows),'min=',min(rows),'max=',max(rows),'soma=',sum(rows))"
+n= 160 mediana= -56.0 min= -148 max= 2 soma= -9156
