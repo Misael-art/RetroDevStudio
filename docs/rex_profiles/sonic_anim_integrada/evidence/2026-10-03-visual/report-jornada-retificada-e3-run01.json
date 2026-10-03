@@ -1,0 +1,437 @@
+{
+  "schema": "rex-sonic-anim-integrada/v1",
+  "artifact_prefix": "inspection-2026-10-03T21-23-15-534Z",
+  "expectations": "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (driver R-1..R-4) + EXPECTATIONS-ETAPA5-ADDENDUM-2.md (meio M-1) + EXPECTATIONS-VISUAL-ETAPA3.md (E3-0..E3-7)",
+  "binary_sha256": "ce54d579381257364514c28833876127359edbaf61448726fee9709602ec7623",
+  "base_rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "webkit_disable_compositing_mode": null,
+  "expected_journey_sha256": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a",
+  "paint": {
+    "frame_id": "sonic1_sonic/walk-1",
+    "offset": 139582,
+    "high_nibble": true,
+    "old_index": 0,
+    "new_index": 15
+  },
+  "pilot_dir": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T21-23-15-534Z-anim-integrada",
+  "steps": [
+    {
+      "step": 1,
+      "name": "abrir_byor",
+      "rom_path": "/home/misael/RDS-REX-CORPUS-E/.staging/Sonic the Hedgehog (USA, Europe).bin",
+      "base_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb"
+    },
+    {
+      "step": 2,
+      "name": "localizar_id_wait",
+      "frames": 18
+    },
+    {
+      "step": 3,
+      "name": "pintar_pixel",
+      "frame_id": "sonic1_sonic/walk-1",
+      "offset": 139582,
+      "new_index": 15,
+      "copy_sha256": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86"
+    },
+    {
+      "step": 4,
+      "name": "duracao_40",
+      "painel": {
+        "current": "Aplicado na cópia: 40 ticks (0x28)",
+        "prediction": "Previsão medida no core (oracle, veredito H_N+1): byte 40 ⇒ cada quadro fica 41 frames de tela em NTSC ≈ 0.68 s; PAL permanece não medido."
+      }
+    },
+    {
+      "step": 5,
+      "name": "conferir_copia_crua",
+      "changed_offsets": [
+        80814,
+        139582
+      ],
+      "copy_sha256": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a"
+    },
+    {
+      "step": 6,
+      "name": "bps_export_apply",
+      "patch_path": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T21-23-15-534Z-anim-integrada/anim-integrada.bps",
+      "applied_path": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T21-23-15-534Z-anim-integrada/anim-integrada-aplicada.bin",
+      "patch_sha256": "4c03998059c8f0b6d418510611cf7e7dcd6a24c8c5cd0b880cd5b7088b739255"
+    },
+    {
+      "step": 7,
+      "name": "jogar_modificada",
+      "core": "Genesis Plus GX v1.7.4 46a5521"
+    },
+    {
+      "step": 8,
+      "name": "salvar_reabrir",
+      "session": "inspection-1791062598-00000000",
+      "wizard": {
+        "explicitClose": true,
+        "visible": true,
+        "firstUse": true
+      }
+    },
+    {
+      "step": 9,
+      "name": "confirmar_estado_reaberto",
+      "painel": {
+        "current": "Aplicado na cópia: 40 ticks (0x28)",
+        "prediction": "Previsão medida no core (oracle, veredito H_N+1): byte 40 ⇒ cada quadro fica 41 frames de tela em NTSC ≈ 0.68 s; PAL permanece não medido."
+      },
+      "ledger_entries": 2,
+      "provenvenience": "ROM modificada 3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a · offsets 0x013BAE, 0x02213E · 2 byte(s)",
+      "recompose": {
+        "pixels_checked": {
+          "width": 40,
+          "height": 40,
+          "pixelsSha256": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac"
+        },
+        "layout_unobstructed": true
+      },
+      "apresentacao": {
+        "tentativas": 1,
+        "crop_mismatches": 0,
+        "fonte": "x11-root-pixmap"
+      }
+    },
+    {
+      "step": 10,
+      "name": "restaurar_duracao_pixel_intacto",
+      "copy_sha256": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86",
+      "painel": "Aplicado na cópia: 23 ticks (0x17)"
+    }
+  ],
+  "checks": [
+    {
+      "name": "passo1.byor_pinado",
+      "pass": true,
+      "observed": {
+        "base_sha": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+        "session_id": "inspection-1791062598-00000000"
+      }
+    },
+    {
+      "name": "passo2.id_wait_18_quadros",
+      "pass": true,
+      "observed": {
+        "frame_count": 18
+      }
+    },
+    {
+      "name": "passo2.original_23_previsao_24",
+      "pass": true,
+      "observed": {
+        "original": "Original: 23 ticks (0x17)",
+        "current": "Aplicado na cópia: 23 ticks (0x17)",
+        "prediction": "Previsão medida no core (oracle, veredito H_N+1): byte 23 ⇒ cada quadro fica 24 frames de tela em NTSC ≈ 0.40 s; PAL permanece não medido."
+      }
+    },
+    {
+      "name": "passo2.linguagem_iniciante",
+      "pass": true,
+      "observed": {
+        "maisLento": true,
+        "maisRapido": true,
+        "rotulo": true
+      }
+    },
+    {
+      "name": "passo3.pintura_offset_unico",
+      "pass": true,
+      "observed": {
+        "format": "md_4bpp_tile_nibbles",
+        "changed_offsets": [
+          139582
+        ],
+        "bytes_changed": 1
+      },
+      "required": [
+        139582
+      ]
+    },
+    {
+      "name": "passo3.copia_so_pixel",
+      "pass": true,
+      "observed": {
+        "copy_sha": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86",
+        "edit_sha": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86"
+      },
+      "required": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86"
+    },
+    {
+      "name": "passo4.mensagem_com_sha_da_copia_acumulada",
+      "pass": true,
+      "observed": "[Inspeção] Cadência id_Wait aplicada: byte em 0x13BAE agora 40 ticks na cópia 3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a.",
+      "required": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a"
+    },
+    {
+      "name": "passo5.byte_cadencia_cru",
+      "pass": true,
+      "observed": {
+        "byte": 40,
+        "format": "sonic1_wait_interval_byte",
+        "changed_offsets": [
+          80814,
+          139582
+        ],
+        "bytes_changed": 2
+      },
+      "required": [
+        80814,
+        139582
+      ]
+    },
+    {
+      "name": "passo5.nibble_cru",
+      "pass": true,
+      "observed": {
+        "offset": 139582,
+        "high": true,
+        "nibble": 15
+      },
+      "required": 15
+    },
+    {
+      "name": "passo5.diff_exatamente_dois_bytes",
+      "pass": true,
+      "observed": [
+        "0x13bae",
+        "0x2213e"
+      ],
+      "required": [
+        "0x2213e",
+        "0x13bae"
+      ]
+    },
+    {
+      "name": "passo5.copia_identica_mutacao_independente",
+      "pass": true,
+      "observed": {
+        "copy_sha": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a",
+        "edit_sha": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a"
+      },
+      "required": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a"
+    },
+    {
+      "name": "passo6.bps_reproduz_copia",
+      "pass": true,
+      "observed": {
+        "applied_sha": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a",
+        "patch_sha": "4c03998059c8f0b6d418510611cf7e7dcd6a24c8c5cd0b880cd5b7088b739255"
+      },
+      "required": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a"
+    },
+    {
+      "name": "modificada-integrada.identidade_rom",
+      "pass": true,
+      "observed": {
+        "sha": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a",
+        "size": 531577
+      },
+      "required": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a"
+    },
+    {
+      "name": "modificada-integrada.reancoragem_do_contador",
+      "pass": true,
+      "observed": 10,
+      "required": "<=1200 apos carga"
+    },
+    {
+      "name": "modificada-integrada.ack_de_start",
+      "pass": true,
+      "observed": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": false,
+          "x": false,
+          "b": false,
+          "right": false,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-1",
+        "seq": 2
+      },
+      "required": "sequencia ACK avancou"
+    },
+    {
+      "name": "modificada-integrada.frames_avancados_tras_primeira_observacao",
+      "pass": true,
+      "observed": 10,
+      "required": ">=10 frames de tela ao vivo apos o ACK"
+    },
+    {
+      "name": "modificada-integrada.negativo_tecla_nao_mapeada",
+      "pass": true,
+      "observed": {
+        "joypad": {
+          "left": false,
+          "l": false,
+          "start": false,
+          "select": false,
+          "y": false,
+          "x": false,
+          "b": false,
+          "right": false,
+          "r": false,
+          "up": false,
+          "a": false,
+          "down": false
+        },
+        "sessionId": "joypad-session-1",
+        "seq": 2
+      },
+      "required": "ACK inalterado por KeyQ"
+    },
+    {
+      "name": "modificada-integrada.framebuffer_nao_reutilizado",
+      "pass": true,
+      "observed": "031b9bce935483291fe23ffa9159723d9824ba92ce93dc2c07eb4f94ae254d1e",
+      "required": "diversos do frame anterior"
+    },
+    {
+      "name": "passo8.wizard_coexiste_com_fecho_visivel",
+      "pass": true,
+      "observed": {
+        "explicitClose": true,
+        "visible": true,
+        "firstUse": true
+      },
+      "required": "wizard visivel so pode coexistir com fecho explicito visivel (E10)"
+    },
+    {
+      "name": "e34.banner_retomada_cede_apos_reabertura_explicita",
+      "pass": true,
+      "observed": {
+        "banner_present": false
+      },
+      "required": "sem banner quando existe sessao viva reaberta"
+    },
+    {
+      "name": "passo9.ledger_nomeia_os_dominios",
+      "pass": true,
+      "observed": [
+        {
+          "seq": 1,
+          "format": "md_4bpp_tile_nibbles",
+          "offsets": [
+            139582
+          ],
+          "old_bytes": [
+            0
+          ],
+          "new_bytes": [
+            240
+          ],
+          "copy_sha256": "b1ed600d361a"
+        },
+        {
+          "seq": 2,
+          "format": "sonic1_wait_interval_byte",
+          "offsets": [
+            80814
+          ],
+          "old_bytes": [
+            23
+          ],
+          "new_bytes": [
+            40
+          ],
+          "copy_sha256": "3274e7c422c0"
+        }
+      ]
+    },
+    {
+      "name": "passo9.copia_reaberta_e_a_jornada",
+      "pass": true,
+      "observed": {
+        "edit_sha": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a"
+      },
+      "required": "3274e7c422c0b70ff2b67d4e11671df6650274f8400b41d0588f0e15d2a9778a"
+    },
+    {
+      "name": "e33.esperado_identico_ao_medido_no_run03",
+      "pass": true,
+      "observed": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac",
+      "required": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac"
+    },
+    {
+      "name": "e33.analisador_reprova_o_defeito_arquivado",
+      "pass": true,
+      "observed": {
+        "mismatches": 12258,
+        "total": 14400,
+        "capture_sha": "207b233f7ef4"
+      },
+      "required": "mismatches > 0 — o gate E3-2 discrimina o mundo do defeito"
+    },
+    {
+      "name": "e32.sprite_visivel_na_janela_pos_reabertura",
+      "pass": true,
+      "observed": {
+        "attempts": 1,
+        "mismatches": 0,
+        "source": "x11-root-pixmap",
+        "proof_error": null
+      },
+      "required": "recorte da janela identico ao raster independente (0 mismatches) com dados intactos; magenta puro diverge e falha"
+    },
+    {
+      "name": "passo10.cadencia_volta_23_pixel_intacto",
+      "pass": true,
+      "observed": {
+        "cadence_byte": 23,
+        "pixel_byte": 240,
+        "diff": [
+          "0x2213e"
+        ],
+        "edit_offsets": [
+          139582
+        ],
+        "edit_bytes_changed": 1
+      }
+    },
+    {
+      "name": "passo10.ledger_registra_a_restauracao",
+      "pass": true,
+      "observed": {
+        "antes": 2,
+        "depois": 3,
+        "ultima_copia": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86"
+      },
+      "required": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86"
+    },
+    {
+      "name": "final.base_preservada",
+      "pass": true,
+      "observed": {
+        "rom_path": "/home/misael/RDS-REX-CORPUS-E/.staging/Sonic the Hedgehog (USA, Europe).bin"
+      }
+    }
+  ],
+  "e32_apresentacao": {
+    "attempts": [
+      {
+        "attempt": 1,
+        "canvas_matches": true,
+        "crop_matches": true,
+        "mismatches": 0,
+        "solid": null,
+        "magenta_fraction": 0.57,
+        "proof_error": null
+      }
+    ],
+    "capture_path": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T21-23-15-534Z-visual-e3-walk1-visivel-pos-reabertura-1.png",
+    "capture_source": "x11-root-pixmap"
+  },
+  "runtime_effect": "pixel+cadencia acumulados na mesma copia, restauracao seletiva provada byte a byte na UI real",
+  "allPass": true,
+  "finished_at": "2026-10-03T21:25:56.388Z"
+}
