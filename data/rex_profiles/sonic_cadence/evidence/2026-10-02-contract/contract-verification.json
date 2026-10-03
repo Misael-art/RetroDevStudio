@@ -1,0 +1,567 @@
+{
+  "classification": "contrato-provado-estaticamente-efeito-medido-no-core-etapa-4",
+  "rom": {
+    "sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+    "size": 531577,
+    "address_convention": "file_offset = cpu_addr - 0x100000 (sem bias)"
+  },
+  "table": {
+    "base": 80712,
+    "count": 31,
+    "scripts_base": 80774
+  },
+  "target": {
+    "anim": 5,
+    "name": "id_Wait / SonAni_Wait",
+    "script_addr": 80814,
+    "interval_byte_addr": 80814,
+    "interval_raw": 23,
+    "declared_ticks_per_frame": 23,
+    "frame_count": 18,
+    "loop_period_ticks": 414,
+    "editable_range": {
+      "min": 1,
+      "max": 127
+    },
+    "reserved_values": [
+      {
+        "value": 0,
+        "reason": "comportamento degenerado nao comprovado; recusado ate medicao"
+      },
+      {
+        "value": "0x80-0xff",
+        "reason": "bit7 leva ao handler especial walk/run/roll"
+      },
+      {
+        "value": "0xfd-0xff como frame",
+        "reason": "tokens afChange/afBack/afEnd; nenhum frame do alvo usa esses bytes"
+      }
+    ]
+  },
+  "scripts": [
+    {
+      "anim": 0,
+      "addr": 80774,
+      "intervalRaw": 255,
+      "special": true,
+      "frames": [
+        8,
+        9,
+        10,
+        11,
+        6,
+        7
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 1,
+      "addr": 80782,
+      "intervalRaw": 255,
+      "special": true,
+      "frames": [
+        30,
+        31,
+        32,
+        33
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 2,
+      "addr": 80790,
+      "intervalRaw": 254,
+      "special": true,
+      "frames": [
+        46,
+        47,
+        48,
+        49,
+        50
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 3,
+      "addr": 80798,
+      "intervalRaw": 254,
+      "special": true,
+      "frames": [
+        46,
+        47,
+        50,
+        48,
+        49,
+        50
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 4,
+      "addr": 80806,
+      "intervalRaw": 253,
+      "special": true,
+      "frames": [
+        69,
+        70,
+        71,
+        72
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 5,
+      "addr": 80814,
+      "intervalRaw": 23,
+      "special": false,
+      "frames": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        3,
+        2,
+        2,
+        2,
+        3,
+        4
+      ],
+      "terminator": {
+        "type": "back",
+        "k": 2
+      }
+    },
+    {
+      "anim": 6,
+      "addr": 80836,
+      "intervalRaw": 31,
+      "special": false,
+      "frames": [
+        58,
+        59
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 7,
+      "addr": 80840,
+      "intervalRaw": 63,
+      "special": false,
+      "frames": [
+        5
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 8,
+      "addr": 80844,
+      "intervalRaw": 63,
+      "special": false,
+      "frames": [
+        57
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 9,
+      "addr": 80848,
+      "intervalRaw": 63,
+      "special": false,
+      "frames": [
+        51
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 10,
+      "addr": 80852,
+      "intervalRaw": 63,
+      "special": false,
+      "frames": [
+        52
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 11,
+      "addr": 80856,
+      "intervalRaw": 63,
+      "special": false,
+      "frames": [
+        53
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 12,
+      "addr": 80860,
+      "intervalRaw": 63,
+      "special": false,
+      "frames": [
+        54
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 13,
+      "addr": 80864,
+      "intervalRaw": 7,
+      "special": false,
+      "frames": [
+        55,
+        56
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 14,
+      "addr": 80868,
+      "intervalRaw": 7,
+      "special": false,
+      "frames": [
+        60,
+        63
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 15,
+      "addr": 80872,
+      "intervalRaw": 7,
+      "special": false,
+      "frames": [
+        60,
+        61,
+        83,
+        62,
+        84
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 16,
+      "addr": 80880,
+      "intervalRaw": 47,
+      "special": false,
+      "frames": [
+        64
+      ],
+      "terminator": {
+        "type": "change",
+        "anim": 0
+      }
+    },
+    {
+      "anim": 17,
+      "addr": 80884,
+      "intervalRaw": 4,
+      "special": false,
+      "frames": [
+        65,
+        66
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 18,
+      "addr": 80888,
+      "intervalRaw": 15,
+      "special": false,
+      "frames": [
+        67,
+        67,
+        67
+      ],
+      "terminator": {
+        "type": "back",
+        "k": 1
+      }
+    },
+    {
+      "anim": 19,
+      "addr": 80894,
+      "intervalRaw": 15,
+      "special": false,
+      "frames": [
+        67,
+        68
+      ],
+      "terminator": {
+        "type": "back",
+        "k": 1
+      }
+    },
+    {
+      "anim": 20,
+      "addr": 80900,
+      "intervalRaw": 63,
+      "special": false,
+      "frames": [
+        73
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 21,
+      "addr": 80904,
+      "intervalRaw": 11,
+      "special": false,
+      "frames": [
+        86,
+        86,
+        10,
+        11
+      ],
+      "terminator": {
+        "type": "change",
+        "anim": 0
+      }
+    },
+    {
+      "anim": 22,
+      "addr": 80912,
+      "intervalRaw": 32,
+      "special": false,
+      "frames": [
+        75
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 23,
+      "addr": 80916,
+      "intervalRaw": 47,
+      "special": false,
+      "frames": [
+        76
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 24,
+      "addr": 80920,
+      "intervalRaw": 3,
+      "special": false,
+      "frames": [
+        77
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 25,
+      "addr": 80924,
+      "intervalRaw": 3,
+      "special": false,
+      "frames": [
+        78,
+        79,
+        80,
+        81,
+        82,
+        0
+      ],
+      "terminator": {
+        "type": "back",
+        "k": 1
+      }
+    },
+    {
+      "anim": 26,
+      "addr": 80934,
+      "intervalRaw": 3,
+      "special": false,
+      "frames": [
+        85
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 27,
+      "addr": 80938,
+      "intervalRaw": 7,
+      "special": false,
+      "frames": [
+        85,
+        87
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 28,
+      "addr": 80942,
+      "intervalRaw": 119,
+      "special": false,
+      "frames": [
+        0
+      ],
+      "terminator": {
+        "type": "change",
+        "anim": 0
+      }
+    },
+    {
+      "anim": 29,
+      "addr": 80946,
+      "intervalRaw": 3,
+      "special": false,
+      "frames": [
+        60,
+        61,
+        83,
+        62,
+        84
+      ],
+      "terminator": {
+        "type": "loop"
+      }
+    },
+    {
+      "anim": 30,
+      "addr": 80954,
+      "intervalRaw": 3,
+      "special": false,
+      "frames": [
+        60
+      ],
+      "terminator": {
+        "type": "change",
+        "anim": 0
+      }
+    }
+  ],
+  "checks": [
+    {
+      "name": "rom-sha256-pino",
+      "pass": true,
+      "detail": "observado c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb"
+    },
+    {
+      "name": "tabela-scripts-apos-base",
+      "pass": true,
+      "detail": "0x3E,0x46,0x4E,0x56,0x5E,0x66,0x7C,0x80,0x84,0x88,0x8C,0x90,0x94,0x98,0x9C,0xA0,0xA8,0xAC,0xB0,0xB6,0xBC,0xC0,0xC8,0xCC,0xD0,0xD4,0xDE,0xE2,0xE6,0xEA,0xF2"
+    },
+    {
+      "name": "sem-colisao-de-token",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "consumidor-unico-da-tabela",
+      "pass": true,
+      "detail": "prologue=0x139C4 refs=0x139C6"
+    },
+    {
+      "name": "wait-endereco",
+      "pass": true,
+      "detail": "0x13BAE"
+    },
+    {
+      "name": "wait-intervalo-raw",
+      "pass": true,
+      "detail": "0x17"
+    },
+    {
+      "name": "wait-nao-especial",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "wait-frames",
+      "pass": true,
+      "detail": "0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x1,0x3,0x2,0x2,0x2,0x3,0x4"
+    },
+    {
+      "name": "wait-terminador",
+      "pass": true,
+      "detail": "{\"type\":\"back\",\"k\":2}"
+    },
+    {
+      "name": "death-caso-reservado",
+      "pass": true,
+      "detail": "0x3,0x4D,0xFF,0x0"
+    },
+    {
+      "name": "death-frame-unico",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "setador-wait",
+      "pass": true,
+      "detail": "0x12F02,0x131C2"
+    },
+    {
+      "name": "setador-stop",
+      "pass": true,
+      "detail": "0x130D2,0x13138"
+    },
+    {
+      "name": "setador-death",
+      "pass": true,
+      "detail": "0x1B0CC"
+    },
+    {
+      "name": "setador-hurt",
+      "pass": true,
+      "detail": "0x1B066"
+    },
+    {
+      "name": "intervalo-nao-compartilhado",
+      "pass": true,
+      "detail": "31 intervalos, 31 unicos"
+    }
+  ],
+  "allPass": true
+}
