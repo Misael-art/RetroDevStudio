@@ -10688,7 +10688,7 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
   const report = {
     schema: "rex-sonic-anim-integrada/v1",
     artifact_prefix: prefix,
-    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md",
+    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (correcoes de driver R-1..R-4)",
     binary_sha256: hash(await readFile(app)),
     base_rom_sha256: baseSha256,
     expected_journey_sha256: journeySha256,
@@ -10806,7 +10806,13 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
     if (!journeyEdit?.modified_rom_path) fail(`A sessao nao expoe a copia editada: ${JSON.stringify(journeyStatus?.session?.status)}`);
     const journeyCopy = await readFile(journeyEdit.modified_rom_path);
     const changedAgainstBase = diffOffsets(base, journeyCopy);
-    report.checks.push({ name: "passo5.byte_cadencia_cru", pass: journeyCopy[CADENCE_JOURNEY_WAIT_ADDR] === 40 && journeyEdit.format === "sonic1_wait_interval_byte" && JSON.stringify(journeyEdit.changed_offsets) === JSON.stringify([CADENCE_JOURNEY_WAIT_ADDR]), observed: { byte: journeyCopy[CADENCE_JOURNEY_WAIT_ADDR], format: journeyEdit.format, changed_offsets: journeyEdit.changed_offsets } });
+    // E1 congela o DIFF CUMULATIVO da copia contra a base; o produto reporta
+    // changed_offsets/bytes_changed nessa semantica cumulativa (diff base→copia
+    // em inspection.rs:1398), enquanto o por-operacao vive no ledger (offsets
+    // do entry). A assercao abaixo confere o conjunto cumulativo dos dois
+    // dominios, nao um dominio unico.
+    const cumulativeOffsets = [CADENCE_JOURNEY_WAIT_ADDR, at.offset].sort((x, y) => x - y);
+    report.checks.push({ name: "passo5.byte_cadencia_cru", pass: journeyCopy[CADENCE_JOURNEY_WAIT_ADDR] === 40 && journeyEdit.format === "sonic1_wait_interval_byte" && JSON.stringify(journeyEdit.changed_offsets) === JSON.stringify(cumulativeOffsets) && journeyEdit.bytes_changed === 2, observed: { byte: journeyCopy[CADENCE_JOURNEY_WAIT_ADDR], format: journeyEdit.format, changed_offsets: journeyEdit.changed_offsets, bytes_changed: journeyEdit.bytes_changed }, required: cumulativeOffsets });
     const nibbleAt = (at.high ? journeyCopy[at.offset] >> 4 : journeyCopy[at.offset] & 0x0f);
     report.checks.push({ name: "passo5.nibble_cru", pass: nibbleAt === paintIndex, observed: { offset: at.offset, high: at.high, nibble: nibbleAt }, required: paintIndex });
     report.checks.push({ name: "passo5.diff_exatamente_dois_bytes", pass: changedAgainstBase.length === 2 && changedAgainstBase.includes(at.offset) && changedAgainstBase.includes(CADENCE_JOURNEY_WAIT_ADDR), observed: changedAgainstBase.map((i) => `0x${i.toString(16)}`), required: [`0x${at.offset.toString(16)}`, "0x13bae"] });
@@ -10859,14 +10865,31 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
     sessionIdRef = await createSession(app);
     currentE2eRunContext.sessionId = sessionIdRef;
     await waitForAppWindowReady(sessionIdRef, uiBootstrapTimeoutMs, "O app da jornada integrada nao reabriu");
-    const wizardAfterRestart = await executeScript(
+    // Aguarda o wizard montar (evita passe vacuo por ler antes do render);
+    // a ausencia stabile depois da espera tambem e registrada como observacao.
+    const wizardAfterRestart = await waitFor(
+      async () => {
+        const probe = await executeScript(
+          sessionIdRef,
+          `return {
+            visible: Boolean(document.querySelector('[data-testid="project-wizard-body"]')),
+            firstUse: document.body.innerText.includes("Wizard de Primeiro Uso"),
+            explicitClose: Boolean(document.querySelector('[data-testid="wizard-continue-without-project"]')),
+          };`
+        );
+        return probe.visible && probe.firstUse ? probe : false;
+      },
+      15000,
+      "probe de wizard (tolerada ausencia: o fecho explicito so e obrigatorio quando o wizard aparece)",
+      250
+    ).catch(() => executeScript(
       sessionIdRef,
       `return {
         visible: Boolean(document.querySelector('[data-testid="project-wizard-body"]')),
         firstUse: document.body.innerText.includes("Wizard de Primeiro Uso"),
         explicitClose: Boolean(document.querySelector('[data-testid="wizard-continue-without-project"]')),
       };`
-    );
+    ));
     report.checks.push({ name: "passo8.wizard_coexiste_com_fecho_visivel", pass: !wizardAfterRestart.visible || (wizardAfterRestart.firstUse ? wizardAfterRestart.explicitClose : true), observed: wizardAfterRestart, required: "wizard visivel so pode coexistir com fecho explicito visivel (E10)" });
     if (!report.checks.at(-1).pass) throw new Error(`PASSO 8: o wizard na reabertura nao expoe fecho explicito visivel: ${JSON.stringify(wizardAfterRestart)}`);
     await handleProjectWizardVisibly(sessionIdRef, "anim-integrada-restart");
@@ -10912,7 +10935,9 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
     const reopenedStatus = await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId });
     const ledger = reopenedStatus?.session?.applied_edits ?? [];
     const ledgerFormats = ledger.map((entry) => entry.format);
-    report.checks.push({ name: "passo9.ledger_nomeia_os_dominios", pass: ledgerFormats.includes("md_4bpp_tile_nibbles") && ledgerFormats.includes("sonic1_wait_interval_byte") && ledger.every((entry) => typeof entry.copy_sha256 === "string" && entry.copy_sha256.length === 64), observed: ledger.map((entry) => ({ seq: entry.seq, format: entry.format, offsets: entry.offsets, copy_sha256: entry.copy_sha256.slice(0, 12) })) });
+    const ledgerCadence = ledger.find((entry) => entry.format === "sonic1_wait_interval_byte");
+    const ledgerPaint = ledger.find((entry) => entry.format === "md_4bpp_tile_nibbles");
+    report.checks.push({ name: "passo9.ledger_nomeia_os_dominios", pass: ledgerFormats.includes("md_4bpp_tile_nibbles") && ledgerFormats.includes("sonic1_wait_interval_byte") && ledger.every((entry) => typeof entry.copy_sha256 === "string" && entry.copy_sha256.length === 64) && JSON.stringify(ledgerCadence?.offsets) === JSON.stringify([CADENCE_JOURNEY_WAIT_ADDR]) && JSON.stringify(ledgerCadence?.old_bytes) === JSON.stringify([23]) && JSON.stringify(ledgerCadence?.new_bytes) === JSON.stringify([40]) && JSON.stringify(ledgerPaint?.offsets) === JSON.stringify([at.offset]) && JSON.stringify(ledgerPaint?.old_bytes) === JSON.stringify([base[at.offset]]) && JSON.stringify(ledgerPaint?.new_bytes) === JSON.stringify([paintedBytes[at.offset]]), observed: ledger.map((entry) => ({ seq: entry.seq, format: entry.format, offsets: entry.offsets, old_bytes: entry.old_bytes, new_bytes: entry.new_bytes, copy_sha256: entry.copy_sha256.slice(0, 12) })) });
     report.checks.push({ name: "passo9.copia_reaberta_e_a_jornada", pass: reopenedStatus?.session?.edit?.modified_rom_sha256 === journeySha256, observed: { edit_sha: reopenedStatus?.session?.edit?.modified_rom_sha256 }, required: journeySha256 });
     if (report.checks.some((entry) => !entry.pass)) throw new Error(`PASSO 9: procedencia reaberta nao bate: ${JSON.stringify(report.checks.slice(-2))}`);
     const reopenedProvenience = await waitFor(
@@ -10965,7 +10990,7 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       async () => {
         const status = await invokeCoreObserveCommand(sessionIdRef, "rex_inspection_status", { sessionId: savedId });
         const edit = status?.session?.edit;
-        return edit?.modified_rom_path && JSON.stringify(edit?.changed_offsets) === JSON.stringify([CADENCE_JOURNEY_WAIT_ADDR]) && edit.modified_rom_sha256 === hash(paintedBytes) ? edit : false;
+        return edit?.modified_rom_path && edit.modified_rom_sha256 === hash(paintedBytes) ? edit : false;
       },
       30000,
       "A restauracao da duracao nao produziu a copia esperada (so o byte de cadencia de volta a 23)",
@@ -10973,7 +10998,7 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
     );
     const restoredCopy = await readFile(restoredEdit.modified_rom_path);
     const restoredDiff = diffOffsets(base, restoredCopy);
-    report.checks.push({ name: "passo10.cadencia_volta_23_pixel_intacto", pass: restoredCopy[CADENCE_JOURNEY_WAIT_ADDR] === 23 && restoredCopy[at.offset] === paintedBytes[at.offset] && JSON.stringify(restoredDiff) === JSON.stringify([at.offset]), observed: { cadence_byte: restoredCopy[CADENCE_JOURNEY_WAIT_ADDR], pixel_byte: restoredCopy[at.offset], diff: restoredDiff.map((i) => `0x${i.toString(16)}`) } });
+    report.checks.push({ name: "passo10.cadencia_volta_23_pixel_intacto", pass: restoredCopy[CADENCE_JOURNEY_WAIT_ADDR] === 23 && restoredCopy[at.offset] === paintedBytes[at.offset] && JSON.stringify(restoredDiff) === JSON.stringify([at.offset]) && JSON.stringify(restoredEdit.changed_offsets) === JSON.stringify([at.offset]) && restoredEdit.bytes_changed === 1, observed: { cadence_byte: restoredCopy[CADENCE_JOURNEY_WAIT_ADDR], pixel_byte: restoredCopy[at.offset], diff: restoredDiff.map((i) => `0x${i.toString(16)}`), edit_offsets: restoredEdit.changed_offsets, edit_bytes_changed: restoredEdit.bytes_changed } });
     const panelRestored = await waitFor(
       async () => {
         const state = await readCadencePanelState(sessionIdRef);
