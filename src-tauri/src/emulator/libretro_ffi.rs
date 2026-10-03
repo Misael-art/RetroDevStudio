@@ -356,6 +356,8 @@ fn default_trace_base_pc(target: CoreTarget, rom_data: &[u8]) -> u32 {
 struct LoadedGame {
     rom_path: CString,
     rom_data: Vec<u8>,
+    rom_sha256: String,
+    rom_len: usize,
 }
 
 struct LoadedCore {
@@ -479,9 +481,15 @@ impl LoadedCore {
             .map_err(|_| format!("Caminho da ROM contem byte nulo: {}", rom_path.display()))?;
         let rom_data = fs::read(rom_path)
             .map_err(|e| format!("Nao foi possivel ler ROM '{}': {}", rom_path.display(), e))?;
+        let (rom_sha256, rom_len) = (
+            crate::core::rom_mastering::sha256_hex(&rom_data),
+            rom_data.len(),
+        );
         let game = LoadedGame {
             rom_path: rom_path_cstr,
             rom_data,
+            rom_sha256,
+            rom_len,
         };
 
         let game_info = if system_info.need_fullpath {
@@ -1117,6 +1125,16 @@ impl EmulatorCore {
             .ok()
             .filter(|state| !state.rom_path.is_empty())
             .map(|state| PathBuf::from(&state.rom_path))
+    }
+
+    /// Identidade dos bytes de ROM efetivamente lidos na carga do core
+    /// (SHA-256 + tamanho). Diferencia "ROM carregada" de "arquivo atual
+    /// neste caminho": amostras de execução ancoram nesta identidade, não
+    /// em releituras posteriores do disco.
+    pub fn loaded_rom_identity(&self) -> Option<(String, usize)> {
+        self.runtime
+            .as_ref()
+            .map(|runtime| (runtime._game.rom_sha256.clone(), runtime._game.rom_len))
     }
 
     pub fn frame_index(&self) -> u64 {

@@ -450,6 +450,8 @@ export interface InspectionSession {
   error?: InspectionError | null;
   sprite_frame_id?: string | null;
   edit?: InspectionEdit | null;
+  /** Historico cumulativo, por dominio, de tudo que ja foi aplicado a copia. */
+  applied_edits?: SonicAppliedEdit[];
 }
 
 export interface InspectionEdit {
@@ -470,6 +472,21 @@ export interface InspectionEdit {
   shared_with_frames?: number[];
   pixels_changed?: number | null;
   base_rom_sha256_after?: string | null;
+  /** true quando o valor solicitado ja era o vigente: ok explicito, nenhuma escrita. */
+  noop?: boolean;
+}
+
+/** Registro cumulativo de uma edicao efetivamente aplicada a copia imutavel. */
+export interface SonicAppliedEdit {
+  seq: number;
+  format: string;
+  frame_id: string;
+  summary: string;
+  offsets: number[];
+  old_bytes: number[];
+  new_bytes: number[];
+  copy_sha256: string;
+  at_unix: number;
 }
 
 /** Proven `id_Wait` cadence, read from the core contract (never recomputed in the UI). */

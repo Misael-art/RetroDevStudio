@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   inspectionSpriteFrame: vi.fn(),
   inspectionSonicCadence: vi.fn(),
   inspectionEditSonicDuration: vi.fn(),
+  inspectionEditSonicPalette: vi.fn(),
+  inspectionEditSonicTiles: vi.fn(),
 }));
 
 vi.mock("../../core/ipc/toolsService", () => mocks);
@@ -571,7 +573,7 @@ describe("InspectionPanel", () => {
       limitations: [],
     };
   }
-  async function openSonicCadenceSession(currentReplies: number[]) {
+  async function openSonicCadenceSession(currentReplies: number[], logSink?: (level: string, message: string) => void) {
     mocks.inspectionOpen.mockResolvedValue(completedSession);
     mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
     mocks.inspectionCatalogPage.mockResolvedValue({ session_id: completedSession.session_id, run_id: completed.run_id, offset: 0, limit: 24, total_candidates: 0, candidates: [], unknown_regions: [], user_choices: [] });
@@ -582,7 +584,7 @@ describe("InspectionPanel", () => {
       return cadenceInfo(value);
     });
     mocks.inspectionSpriteFrame.mockImplementation(async (_sessionId: string, _resourceId: string, frameId: string) => sonicFrameResponse(frameId));
-    await act(async () => { root.render(<InspectionPanel logMessage={vi.fn()} />); await flush(); });
+    await act(async () => { root.render(<InspectionPanel logMessage={logSink ?? vi.fn()} />); await flush(); });
     setTextInput(container.querySelector("input[type='text']") as Element, "/roms/test.md");
     await act(async () => { await flush(); });
     await act(async () => { (container.querySelector("[data-testid='inspection-identify']") as HTMLButtonElement).click(); await flush(); await flush(); });
@@ -632,8 +634,9 @@ describe("InspectionPanel", () => {
     expect(container.querySelector("[data-testid='inspection-sonic-edit-result']")?.textContent).toContain("1 byte(s)");
   });
 
-  it("refuses reserved and out-of-range values locally without sending anything to the core", async () => {
-    await openSonicCadenceSession([23]);
+  it("refuses out-of-range values locally and reports a re-applied value as an explicit no-op", async () => {
+    const logs: Array<[string, string]> = [];
+    await openSonicCadenceSession([23], (level, message) => { logs.push([level, message]); });
 
     setTextInput(container.querySelector("[data-testid='inspection-cadence-value']")!, "200");
     await act(async () => { (container.querySelector("[data-testid='inspection-cadence-apply']") as HTMLButtonElement).click(); await flush(); });
@@ -641,10 +644,13 @@ describe("InspectionPanel", () => {
     expect(container.querySelector("[data-testid='inspection-cadence-error']")?.textContent).toContain("nada foi enviado ao núcleo");
     expect(container.querySelector("[data-testid='inspection-cadence-error']")?.textContent).toContain("0x80..0xFF");
 
+    // Reaplicar o valor vigente e um resultado explicito ok, nao uma recusa tecnica.
+    mocks.inspectionEditSonicDuration.mockResolvedValue({ ...cadenceEdit(), noop: true, bytes_changed: 0, changed_offsets: [] });
     setTextInput(container.querySelector("[data-testid='inspection-cadence-value']")!, "23");
-    await act(async () => { (container.querySelector("[data-testid='inspection-cadence-apply']") as HTMLButtonElement).click(); await flush(); });
-    expect(mocks.inspectionEditSonicDuration).not.toHaveBeenCalled();
-    expect(container.querySelector("[data-testid='inspection-cadence-error']")?.textContent).toContain("no-op");
+    await act(async () => { (container.querySelector("[data-testid='inspection-cadence-apply']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    expect(mocks.inspectionEditSonicDuration).toHaveBeenCalledWith(completedSession.session_id, "sonic1_sonic", 23);
+    expect(container.querySelector("[data-testid='inspection-cadence-error']")?.textContent).toBe("");
+    expect(logs.some(([level, message]) => level === "info" && message.includes("No-op"))).toBe(true);
   });
 
   it("restores the original byte through the same pipeline and states the undo scope", async () => {
@@ -684,6 +690,47 @@ describe("InspectionPanel", () => {
     await act(async () => { pendingCadence.resolve(cadenceInfo(60)); await flush(); await flush(); });
     expect(container.querySelector("[data-testid='inspection-sonic-cadence-panel']")).toBeNull();
     expect(container.querySelector("[data-testid='inspection-cadence-current']")).toBeNull();
+  });
+
+  it("discards a palette reply that arrives after the session closed (no ghost write)", async () => {
+    const logs: Array<[string, string]> = [];
+    const pendingPalette = createDeferred<ReturnType<typeof cadenceEdit>>();
+    await openSonicCadenceSession([23], (level, message) => { logs.push([level, message]); });
+    mocks.inspectionEditSonicPalette.mockReturnValue(pendingPalette.promise);
+
+    await act(async () => { (container.querySelector("[data-testid='inspection-sonic-edit']") as HTMLButtonElement).click(); await flush(); });
+    expect(mocks.inspectionEditSonicPalette).toHaveBeenCalled();
+
+    await act(async () => {
+      const closeButton = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Fechar sessão") as HTMLButtonElement;
+      closeButton.click();
+      await flush();
+    });
+    await act(async () => { pendingPalette.resolve({ ...cadenceEdit(), format: "sonic1_md_palette_word", modified_rom_sha256: "d".repeat(64) }); await flush(); await flush(); });
+
+    expect(container.querySelector("[data-testid='inspection-sonic-edit-result']")).toBeNull();
+    expect(logs.some(([level, message]) => level === "success" && message.includes("Paleta"))).toBe(false);
+    expect(logs.some(([, message]) => message.includes("cópia dddddddd"))).toBe(false);
+  });
+
+  it("discards a pixel reply that arrives after the session closed (no ghost write)", async () => {
+    const logs: Array<[string, string]> = [];
+    const pendingPixels = createDeferred<ReturnType<typeof cadenceEdit>>();
+    await openSonicCadenceSession([23], (level, message) => { logs.push([level, message]); });
+    mocks.inspectionEditSonicTiles.mockReturnValue(pendingPixels.promise);
+
+    await act(async () => { (container.querySelector("[data-testid='inspection-sonic-tile-edit-apply']") as HTMLButtonElement).click(); await flush(); });
+    expect(mocks.inspectionEditSonicTiles).toHaveBeenCalled();
+
+    await act(async () => {
+      const closeButton = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === "Fechar sessão") as HTMLButtonElement;
+      closeButton.click();
+      await flush();
+    });
+    await act(async () => { pendingPixels.resolve({ ...cadenceEdit(), format: "md_4bpp_tile_nibbles", modified_rom_sha256: "e".repeat(64) }); await flush(); await flush(); });
+
+    expect(container.querySelector("[data-testid='inspection-sonic-edit-result']")).toBeNull();
+    expect(logs.some(([level, message]) => level === "success" && message.includes("Pintura"))).toBe(false);
   });
 
 });

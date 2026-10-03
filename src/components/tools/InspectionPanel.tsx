@@ -484,11 +484,9 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       return;
     }
     if (purpose === "restore" && cadence.current_interval === cadence.original_interval) {
-      setCadenceError(`Nada a restaurar: o byte já vale o original ${cadence.original_interval} ticks.`);
-      return;
-    }
-    if (purpose === "apply" && cadence.current_interval === nextValue) {
-      setCadenceError(`O byte aplicado já vale ${nextValue} ticks; enviar de novo seria um no-op recusado pelo núcleo.`);
+      // Idempotencia honesta: devolver ao vigente nao e falha, mas tampouco escreve.
+      setCadenceError("");
+      logMessage("info", `[Inspeção] Nada a restaurar: o byte já está no valor original ${cadence.original_interval} ticks; nenhuma escrita foi realizada.`);
       return;
     }
     const request = ++cadenceEditSeq.current;
@@ -501,10 +499,18 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       sessionRef.current = next;
       setSession(next);
       await loadCadence(current.session_id);
-      logMessage(
-        "success",
-        `[Inspeção] Cadência id_Wait ${purpose === "restore" ? "restaurada" : "aplicada"}: byte em 0x${hex(cadence.interval_addr, 5)} agora ${nextValue} ticks na cópia ${edit.modified_rom_sha256}.`,
-      );
+      if (edit.noop) {
+        // No-op e resultado explicito do nucleo: valor ja vigente, copia imutavel intacta.
+        logMessage(
+          "info",
+          `[Inspeção] No-op explícito: o byte já valia ${nextValue} ticks; nenhuma escrita adicional. Cópia ${edit.modified_rom_sha256}.`,
+        );
+      } else {
+        logMessage(
+          "success",
+          `[Inspeção] Cadência id_Wait ${purpose === "restore" ? "restaurada" : "aplicada"}: byte em 0x${hex(cadence.interval_addr, 5)} agora ${nextValue} ticks na cópia ${edit.modified_rom_sha256}.`,
+        );
+      }
     } catch (error) {
       if (request !== cadenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
       setCadenceError(`Edição de cadência recusada: ${describeError(error)} A base original não foi tocada.`);
@@ -555,7 +561,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       sessionRef.current = next;
       setSession(next);
       await composeSpriteFrame();
-      logMessage("success", `[Inspeção] Pintura acumulada na cópia ${edit.modified_rom_sha256}.`);
+      logMessage(edit.noop ? "info" : "success", `[Inspeção] ${edit.noop ? "No-op explícito (pixels já vigentes), nenhuma escrita adicional" : "Pintura acumulada"} na cópia ${edit.modified_rom_sha256}.`);
     } finally {
       if (request === editRequestSeq.current) setEditBusy(false);
     }
@@ -573,7 +579,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       sessionRef.current = next;
       setSession(next);
       await composeSpriteFrame();
-      logMessage("success", `[Inspeção] Paleta acumulada na cópia ${edit.modified_rom_sha256}.`);
+      logMessage(edit.noop ? "info" : "success", `[Inspeção] ${edit.noop ? "No-op explícito (paleta já vigente), nenhuma escrita adicional" : "Paleta acumulada"} na cópia ${edit.modified_rom_sha256}.`);
     } catch (error) {
       if (request === editRequestSeq.current) logMessage("error", `[Inspeção] Edição recusada: ${describeError(error)}`);
     } finally {
