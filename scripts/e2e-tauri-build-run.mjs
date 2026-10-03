@@ -2454,7 +2454,7 @@ function assertExactPreviewPixels(actual, expected, context) {
 // compartilhe o caminho de apresentacao em teste. O decoder PNG e minimo
 // (8-bit, nao-interlaced, RGB/RGBA) e usa apenas node:zlib: nenhuma
 // dependencia nova e introduzida.
-function decodeWindowPng(buffer) {
+export function decodeWindowPng(buffer) {
   if (buffer.length < 24 || buffer.readUInt32BE(0) !== 0x89504e47) fail("Captura de janela sem assinatura PNG.");
   if (buffer.readUInt32BE(12) !== 0x49484452) fail("Captura de janela sem IHDR primeiro chunk.");
   let offset = 8;
@@ -2524,7 +2524,7 @@ function decodeWindowPng(buffer) {
 // inteira vizinho-mais-proximo sobre o fundo CSS do <img> (alfa 0 => fundo;
 // alfa 255 => cor do pixel). Exatamente o que uma apresentacao correta deve
 // pintar, calculado sem nenhum codigo do produto.
-function renderPresentedFrameRaster(reference, scale, background) {
+export function renderPresentedFrameRaster(reference, scale, background) {
   const { width, height, pixels } = reference;
   const out = Buffer.alloc(width * scale * height * scale * 3);
   for (let y = 0; y < height; y += 1) {
@@ -2547,7 +2547,7 @@ function renderPresentedFrameRaster(reference, scale, background) {
   return { width: width * scale, height: height * scale, pixels: out };
 }
 
-function cropWindowRgb(decoded, cropX, cropY, cropWidth, cropHeight) {
+export function cropWindowRgb(decoded, cropX, cropY, cropWidth, cropHeight) {
   if (decoded.width < cropX + cropWidth || decoded.height < cropY + cropHeight) {
     fail(`Recorte fora da captura de janela: ${JSON.stringify({ capture: [decoded.width, decoded.height], crop: [cropX, cropY, cropWidth, cropHeight] })}`);
   }
@@ -2580,7 +2580,7 @@ function classifyWindowCrop(crop, cropWidth) {
   };
 }
 
-function compareWindowCropToExpected(crop, cropWidth, expected) {
+export function compareWindowCropToExpected(crop, cropWidth, expected) {
   let mismatches = 0;
   let firstDifference = null;
   for (let y = 0; y < expected.height; y += 1) {
@@ -10910,6 +10910,11 @@ async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, sav
 async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
   const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
   const baseSha256 = hash(base);
+  // E3-1 (EXPECTATIONS-VISUAL-ETAPA3.md): com a mitigacao ativa no ambiente a
+  // corrida nao conta como prova de correcao de produto — aborta, não segue.
+  if (process.env.WEBKIT_DISABLE_COMPOSITING_MODE === "1") {
+    fail("ETAPA 3 (E3-1): WEBKIT_DISABLE_COMPOSITING_MODE=1 esta ativo no ambiente; a jornada retificada exige ausencia da mitigacao (a correcao e do binario, E3-0)");
+  }
   if (base.length !== 531577) fail(`A jornada integrada exige a ROM BYOR pinada de 531577 bytes: ${base.length}`);
   if (base[CADENCE_JOURNEY_WAIT_ADDR] !== 23) fail(`O byte de intervalo da base nao e $17: ${base[CADENCE_JOURNEY_WAIT_ADDR]}`);
   if (!CADENCE_JOURNEY_WAIT_FRAMES.every((frame, index) => base[CADENCE_JOURNEY_WAIT_ADDR + 1 + index] === frame)) {
@@ -10942,9 +10947,10 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
   const report = {
     schema: "rex-sonic-anim-integrada/v1",
     artifact_prefix: prefix,
-    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (driver R-1..R-4) + EXPECTATIONS-ETAPA5-ADDENDUM-2.md (meio M-1)",
+    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (driver R-1..R-4) + EXPECTATIONS-ETAPA5-ADDENDUM-2.md (meio M-1) + EXPECTATIONS-VISUAL-ETAPA3.md (E3-0..E3-7)",
     binary_sha256: hash(await readFile(app)),
     base_rom_sha256: baseSha256,
+    webkit_disable_compositing_mode: process.env.WEBKIT_DISABLE_COMPOSITING_MODE ?? null,
     expected_journey_sha256: journeySha256,
     paint: { frame_id: `sonic1_sonic/walk-1`, offset: at.offset, high_nibble: at.high, old_index: oldIndex, new_index: paintIndex },
     pilot_dir: pilotDir,
@@ -11171,6 +11177,17 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       "A sessao integrada nao foi reaberta com estado completo",
       100
     );
+    // E3-4 (EXPECTATIONS-VISUAL-ETAPA3.md): na instancia nova o banner de
+    // retomada (E2-7) pode coexistir com o fluxo explicito, mas deve ceder
+    // quando ha sessao viva — condicao verificavel, nunca fantasma.
+    const bannerCedido = await waitFor(
+      async () => executeScript(sessionIdRef, `return !document.querySelector('[data-testid="inspection-resume-banner"]');`),
+      10000,
+      "O banner de retomada permaneceu com a sessao viva reaberta pelo fluxo explicito",
+      250
+    );
+    report.checks.push({ name: "e34.banner_retomada_cede_apos_reabertura_explicita", pass: bannerCedido === true, observed: { banner_present: !bannerCedido }, required: "sem banner quando existe sessao viva reaberta" });
+    if (!report.checks.at(-1).pass) throw new Error("E3-4: o banner de retomada nao cedeu lugar a sessao viva reaberta explicitamente");
     // A selecao do frame restaurada nao faz parte do congelado (E9 pede
     // sequencia+duracao+pixel+procedencia): o frame pintado e selecionado de
     // forma explicita na recomposicao do PASSO 9, como a jornada de cadencia
@@ -11234,7 +11251,50 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       "O walk-1 reaberto ficou obstruido ou mal dimensionado",
       100
     );
-    report.steps.push({ step: 9, name: "confirmar_estado_reaberto", painel: { current: reopenedPanel.current, prediction: reopenedPanel.prediction }, ledger_entries: ledger.length, provenvenience: reopenedProvenience.slice(0, 200), recompose: { pixels_checked: recomposedPixels, layout_unobstructed: Boolean(recomposedLayout) } });
+
+    // E3-3 (EXPECTATIONS-VISUAL-ETAPA3.md): prova analitica de nao-vacuidade.
+    // O MESMO analisador de recorte usado no gate ao vivo deve reprovar a
+    // captura defeituosa arquivada da ETAPA 1 (janela magenta com dados ok).
+    const defectCapturePath = path.join(repoRoot, "docs/rex_profiles/sonic_anim_integrada/evidence/2026-10-03-visual/capture-inspection-2026-10-03T16-44-57-791Z-visual-o3-walk1-pos-reabertura.png");
+    if (!(await pathExists(defectCapturePath))) fail(`E3-3: a captura defeituosa arquivada nao existe em ${defectCapturePath}`);
+    const defectBytes = await readFile(defectCapturePath);
+    if (hash(defectBytes) !== "207b233f7ef40cda74ee55925c942d458dbcf93f0683a1c25bf910b8f81c11fe") {
+      fail(`E3-3: o hash da captura defeituosa arquivada nao bate com o arquivado em CAUSA-MAGENTA.md: ${hash(defectBytes)}`);
+    }
+    const expectedRaster = renderPresentedFrameRaster(recomposedReference, 3, [255, 0, 255]);
+    const referencePixelsSha256 = hash(Buffer.from(recomposedReference.pixels));
+    report.checks.push({ name: "e33.esperado_identico_ao_medido_no_run03", pass: referencePixelsSha256 === "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac", observed: referencePixelsSha256, required: "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac" });
+    if (!report.checks.at(-1).pass) throw new Error(`E3-3: a referencia recomposta nao e o bitmap medido no run-03: ${referencePixelsSha256}`);
+    const defectCrop = cropWindowRgb(decodeWindowPng(defectBytes), Math.round(1409.84375 + 1), Math.round(691.984375 + 1), expectedRaster.width, expectedRaster.height);
+    const defectComparison = compareWindowCropToExpected(defectCrop, expectedRaster.width, expectedRaster);
+    report.checks.push({ name: "e33.analisador_reprova_o_defeito_arquivado", pass: defectComparison.mismatches > 0, observed: { mismatches: defectComparison.mismatches, total: defectComparison.total, capture_sha: hash(defectBytes).slice(0, 12) }, required: "mismatches > 0 — o gate E3-2 discrimina o mundo do defeito" });
+    if (!(report.checks.at(-1).pass)) throw new Error(`E3-3: o analisador aceitou a captura defeituosa (gate E3-2 seria vacuo): ${JSON.stringify(defectComparison)}`);
+
+    // E3-2: gate de apresentacao na janela real pos-reabertura, sem mitigacao
+    // de ambiente (a correcao e do proprio binario, E3-0). Aguarda condicao
+    // verificavel de apresentacao; serie bruta de tentativas registrada.
+    const visualAttempts = [];
+    let visualObservation = null;
+    const visualDeadline = Date.now() + 20000;
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      visualObservation = await captureVisualObservation(sessionIdRef, `e3-walk1-visivel-pos-reabertura-${attempt}`, prefix, recomposedReference, [255, 0, 255]);
+      visualAttempts.push({
+        attempt,
+        canvas_matches: visualObservation.canvas_matches_reference === true,
+        crop_matches: visualObservation.window_crop_matches_expected === true,
+        mismatches: visualObservation.window_crop?.mismatches ?? null,
+        solid: visualObservation.window_crop?.solidColor ?? null,
+        magenta_fraction: (visualObservation.window_crop?.topColors ?? []).find((entry) => entry.color === "255,0,255")?.fraction ?? 0,
+        proof_error: visualObservation.window_proof?.error ?? null,
+      });
+      if (visualObservation.window_crop_matches_expected === true) break;
+      if (Date.now() >= visualDeadline) break;
+    }
+    report.e32_apresentacao = { attempts: visualAttempts, capture_path: visualObservation?.capture_path, capture_source: visualObservation?.capture_source };
+    report.checks.push({ name: "e32.sprite_visivel_na_janela_pos_reabertura", pass: visualObservation?.window_crop_matches_expected === true && visualObservation?.canvas_matches_reference === true, observed: { attempts: visualAttempts.length, mismatches: visualObservation?.window_crop?.mismatches ?? null, source: visualObservation?.capture_source, proof_error: visualObservation?.window_proof?.error ?? null }, required: "recorte da janela identico ao raster independente (0 mismatches) com dados intactos; magenta puro diverge e falha" });
+    if (!report.checks.at(-1).pass) throw new Error(`PASSO 9 (E3-2): o sprite pos-reabertura nao ficou visivel na janela: ${JSON.stringify(visualAttempts)}`);
+
+    report.steps.push({ step: 9, name: "confirmar_estado_reaberto", painel: { current: reopenedPanel.current, prediction: reopenedPanel.prediction }, ledger_entries: ledger.length, provenvenience: reopenedProvenience.slice(0, 200), recompose: { pixels_checked: recomposedPixels, layout_unobstructed: Boolean(recomposedLayout) }, apresentacao: { tentativas: visualAttempts.length, crop_mismatches: visualObservation.window_crop.mismatches, fonte: visualObservation.capture_source } });
     await captureScreenshot(sessionIdRef, `${prefix}-anim-integrada-passo9.png`);
 
     // PASSO 10 — restaurar so a duracao: o byte 0x13BAE volta a $17 e o pixel
@@ -11487,12 +11547,23 @@ async function runSonicAnimVisualDiagnosticoScenario(sessionId, app, romPath, ba
     await callAutomationApi(sessionIdRef, "openToolsWorkspace", ["reverse", "debug", true]);
     await waitForBodyText(sessionIdRef, "Analisar ROM", 20000, "O Reverse Workspace nao voltou apos o Parar (O2)");
     await clickButtonByTestIdNativeWhenReady(sessionIdRef, "reverse-tab-inspection", "reabrir a aba de inspecao apos o Parar (O2)");
-    await waitFor(
-      async () => (await readRenderedSpriteFramePixels(sessionIdRef)) === null,
+    // E3-4 (EXPECTATIONS-VISUAL-ETAPA3.md): o contrato do remontage mudou na
+    // ETAPA 2 de proposito (gate E2-7): com sessao viva na mesma pagina o
+    // painel hidrata o estado pelo cache de modulo em vez de montar vazio.
+    // O wait "quadro ausente" codificava o produto pre-E2-7; a perna passa a
+    // exigir a sessao viva hidratada SEM navegar pelo catalogo. As etapas
+    // seguintes (selecionar + recompor) continuam produzindo a observacao.
+    const hydratedRemount = await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
       15000,
-      "A inspecao remontada ainda exibia frame composto antes do reabrir (O2)",
-      100
+      "ETAPA 3 (E3-4): o painel remontado nao hidratou a sessao viva pelo cache de modulo (contrato E2-7)",
+      250
     );
+    pushCheck({ name: "e34.remontagem_hidrata_sessao_viva", pass: hydratedRemount?.session?.id === savedId, observed: { session: hydratedRemount?.session, frame_present: (await readRenderedSpriteFramePixels(sessionIdRef)) !== null } });
+    if (!report.checks.at(-1).pass) throw new Error(`E3-4: remontagem nao hidratou a sessao viva: ${JSON.stringify(hydratedRemount)}`);
     await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-refresh-sessions", "listar sessoes apos o Parar (O2)");
     await waitFor(
       async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),
