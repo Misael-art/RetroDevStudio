@@ -10515,7 +10515,7 @@ async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, sav
       label: "modificada",
       expectedBytes,
       intervalByte: 40,
-      oldGameFrame: null,
+      oldGameFrame: await readCanonicalGameFrame(sessionIdRef),
       report,
     });
     report.checks.push({
