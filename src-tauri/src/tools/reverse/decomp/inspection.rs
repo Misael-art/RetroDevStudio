@@ -1380,15 +1380,30 @@ fn persist_sonic_edit(
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    let selected = sonic::frame_index(&edit.frame_id)?;
-    edit.shared_with_frames = sonic::dplc_tiles(base)?
-        .iter()
-        .enumerate()
-        .filter(|(i, tiles)| {
-            *i != selected && tiles.iter().any(|t| edit.art_tiles.contains(&(*t as u32)))
-        })
-        .map(|(i, _)| i as u32)
-        .collect();
+    edit.shared_with_frames = if edit.format == super::sonic_cadence::EDIT_FORMAT {
+        if edit.art_tiles.is_empty() {
+            Vec::new()
+        } else {
+            sonic::dplc_tiles(base)?
+                .iter()
+                .enumerate()
+                .filter(|(_, tiles)| {
+                    tiles.iter().any(|t| edit.art_tiles.contains(&(*t as u32)))
+                })
+                .map(|(i, _)| i as u32)
+                .collect()
+        }
+    } else {
+        let selected = sonic::frame_index(&edit.frame_id)?;
+        sonic::dplc_tiles(base)?
+            .iter()
+            .enumerate()
+            .filter(|(i, tiles)| {
+                *i != selected && tiles.iter().any(|t| edit.art_tiles.contains(&(*t as u32)))
+            })
+            .map(|(i, _)| i as u32)
+            .collect()
+    };
     edit.base_rom_sha256_after = Some(base_after.normalized_sha256);
     edit.modified_rom_sha256 = sha256_hex(rom);
     let root = canonical_dir_under(
@@ -1554,6 +1569,55 @@ pub fn edit_sonic_tiles(
     }
     let mut edit = sonic_edit_record(frame_id, "md_4bpp_tile_nibbles");
     edit.pixels_changed = Some(changed.len() as u32);
+    persist_sonic_edit(stored, &base, &rom, edit)
+}
+
+/// Wire errors from the cadence core keep their proven contract code.
+fn cadence_error(message: String) -> String {
+    let (code, detail) = match message.split_once(':') {
+        Some((code, detail)) => (code, detail.trim_start()),
+        None => ("cadence_invalid", message.as_str()),
+    };
+    error(code, detail, false)
+}
+
+/// The proven `id_Wait` cadence as read from this session's ROMs. All
+/// addresses and limits come from the core contract; the UI renders this.
+pub fn sonic_cadence_info(session_id: &str) -> Result<super::sonic_cadence::CadenceInfo, String> {
+    let stored = get_stored_session(session_id)?;
+    let (base, rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)
+        .map_err(|e| error("cadence_rom_unreadable", e, false))?;
+    super::sonic_cadence::describe(&base, &rom).map_err(cadence_error)
+}
+
+/// Changes only the proven duration byte, on the accumulated copy.
+pub fn edit_sonic_duration(
+    session_id: &str,
+    resource_id: &str,
+    value: u8,
+) -> Result<InspectionEdit, String> {
+    if resource_id != "sonic1_sonic" {
+        return Err(error(
+            "edit_resource_unsupported",
+            "Recurso não comprovado",
+            false,
+        ));
+    }
+    let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
+    let stored = get_stored_session(session_id)?;
+    let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    super::sonic_cadence::validate_base(&base).map_err(cadence_error)?;
+    let current = super::sonic_cadence::read_interval(&rom).map_err(cadence_error)?;
+    if value == current {
+        return Err(error(
+            "edit_noop",
+            "A duração já tem esse valor na cópia atual; nenhuma alteração",
+            false,
+        ));
+    }
+    super::sonic_cadence::set_interval(&mut rom, value).map_err(cadence_error)?;
+    let mut edit = sonic_edit_record("id_Wait", super::sonic_cadence::EDIT_FORMAT);
+    edit.pixels_changed = None;
     persist_sonic_edit(stored, &base, &rom, edit)
 }
 

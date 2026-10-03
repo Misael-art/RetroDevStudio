@@ -29,6 +29,7 @@ pub mod rex_gameplay;
 pub mod rex_kosinski;
 pub mod rex_resources;
 pub mod rom_library;
+pub mod sonic_cadence;
 pub mod sonic_sprite;
 pub mod sprite_composition;
 pub mod symbols;

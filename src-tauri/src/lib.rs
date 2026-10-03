@@ -2434,6 +2434,30 @@ fn rex_inspection_edit_sonic_tiles(
 }
 
 #[tauri::command]
+fn rex_inspection_sonic_cadence(
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::sonic_cadence::CadenceInfo,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::sonic_cadence_info(&session_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_edit_sonic_duration(
+    session_id: String,
+    resource_id: String,
+    value: u8,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionEdit,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::edit_sonic_duration(&session_id, &resource_id, value)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
 fn rom_save_annotations(
     rom_path: String,
     annotations: Vec<ReverseAnnotation>,
@@ -5471,6 +5495,8 @@ pub fn run() {
             rex_inspection_save,
             rex_inspection_edit_sonic_palette,
             rex_inspection_edit_sonic_tiles,
+            rex_inspection_sonic_cadence,
+            rex_inspection_edit_sonic_duration,
             rex_resource_list,
             rex_resource_preview,
             rex_resource_context,

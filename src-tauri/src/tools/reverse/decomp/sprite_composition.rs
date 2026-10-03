@@ -549,7 +549,8 @@ fn artifact_name_component(value: &str) -> String {
 }
 
 /// Reads the original and the accumulated copy, authorizing only changes in
-/// the bounded raw art and palette ranges. Shared by preview and edit paths.
+/// the bounded raw art and palette ranges plus the single proven cadence
+/// interval byte. Shared by preview and edit paths.
 pub(crate) fn read_sonic_session_rom(
     session: &InspectionSession,
 ) -> Result<(Vec<u8>, Vec<u8>), String> {
@@ -584,8 +585,9 @@ pub(crate) fn read_sonic_session_rom(
         a != b
             && !(sonic::ART_OFFSET..sonic::ART_OFFSET + sonic::ART_SIZE).contains(&i)
             && !(sonic::PALETTE_OFFSET..sonic::PALETTE_OFFSET + PALETTE_SIZE).contains(&i)
+            && i != super::sonic_cadence::WAIT_ADDR
     }) {
-        return Err("sprite_edit_scope: cópia alterou bytes fora da arte e paleta".into());
+        return Err("sprite_edit_scope: cópia alterou bytes fora da arte, paleta e do byte de duração comprovado".into());
     }
     Ok((base, rom))
 }
@@ -673,7 +675,7 @@ fn compose_sonic_frame(
         donor_evidence: vec!["s1disasm Rev00 · Map_Sonic / SonicDynPLC; nomes assistidos, não descoberta automática".into(),
             "VDP sprite: células por coluna; pixels 4bpp high-nibble-first; slots resolvidos por DPLC".into()],
         limitations: vec!["10 frames de perfil pinado; não cobre todos os frames, compressão ou decompilação universal".into(),
-            "Prévia estática; cadência de animação dependente do jogo não recuperada".into(),
+            "Prévia estática; cadência comprovada existe só para id_Wait via contrato sonic_cadence; demais animações não recuperadas".into(),
             "Peças sobrepostas, VRAM herdada e bancos de paleta não comprovados são recusados".into()],
         sonic_context: Some(SonicFrameContext { geometry_version: "vdp-column-major-dplc/v1".into(),
             mapping_index: geometry.index, anchor_x: geometry.anchor_x, anchor_y: geometry.anchor_y,

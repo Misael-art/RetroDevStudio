@@ -472,6 +472,26 @@ export interface InspectionEdit {
   base_rom_sha256_after?: string | null;
 }
 
+/** Proven `id_Wait` cadence, read from the core contract (never recomputed in the UI). */
+export interface SonicCadenceInfo {
+  anim: number;
+  name: string;
+  script_addr: number;
+  interval_addr: number;
+  original_interval: number;
+  current_interval: number;
+  frames: number[];
+  terminator: string;
+  editable_min: number;
+  editable_max: number;
+  reserved: string[];
+  unit: string;
+  semantics: string;
+  provenience: string[];
+  limitations: string[];
+  contract_path: string;
+}
+
 export interface InspectionPixelEdit {
   x: number;
   y: number;
@@ -720,6 +740,24 @@ export function inspectionEditSonicTiles(
     frameId,
     pixels,
     allowSharedTiles,
+  });
+}
+
+/** Reads the proven id_Wait cadence (frames, current byte, limits) from the core. */
+export function inspectionSonicCadence(sessionId: string): Promise<SonicCadenceInfo> {
+  return invoke<SonicCadenceInfo>("rex_inspection_sonic_cadence", { sessionId });
+}
+
+/** Writes the single proven duration byte for id_Wait on a revalidated copy. */
+export function inspectionEditSonicDuration(
+  sessionId: string,
+  resourceId: string,
+  value: number
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_edit_sonic_duration", {
+    sessionId,
+    resourceId,
+    value,
   });
 }
 
