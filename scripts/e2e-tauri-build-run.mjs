@@ -10237,15 +10237,42 @@ async function playCadenceRunLiveGates(sessionId, runOptions) {
     `A Game View nao avancou 10 frames na corrida ${label}`,
     100
   );
-  const bootFrame = await waitFor(
-    async () => {
-      const progress = await readCanonicalGameProgress(sessionId);
-      return progress && progress.renderedFrames >= 890 ? progress : false;
-    },
-    120000,
-    `A ROM ${label} nao atravessou o boot ate o ponto de entrada na jornada`,
-    100
-  );
+  // Diagnostico cru da perna ao vivo (meio, nao expectativa): se o gate de
+  // boot estourar, persistir a serie de frames (a cada ~5s) + ultimo estado
+  // lido + cauda do console do app antes de repropagar o erro. Distingue
+  // pump morto (serie plana) de pump lento (serie crescente) e revela a
+  // mensagem de falha do frame loop, se houver.
+  const bootStartedAt = Date.now();
+  const bootTrace = [];
+  let lastBootProgress = null;
+  let bootFrame;
+  try {
+    bootFrame = await waitFor(
+      async () => {
+        const progress = await readCanonicalGameProgress(sessionId);
+        if (progress) {
+          lastBootProgress = progress;
+          const elapsedMs = Date.now() - bootStartedAt;
+          if (bootTrace.length === 0 || elapsedMs >= bootTrace[bootTrace.length - 1].t_ms + 5000) {
+            bootTrace.push({ t_ms: elapsedMs, rf: progress.renderedFrames, status: progress.gameStatus });
+          }
+        }
+        return progress && progress.renderedFrames >= 890 ? progress : false;
+      },
+      120000,
+      `A ROM ${label} nao atravessou o boot ate o ponto de entrada na jornada`,
+      100
+    );
+  } catch (error) {
+    const state = await readAutomationState(sessionId).catch(() => null);
+    console.log(`[cadence-journey-live-diagnostic] ${JSON.stringify({
+      label,
+      trace: bootTrace,
+      last_progress: lastBootProgress,
+      console_tail: ((state?.consoleEntries ?? []).slice(-16)).map((entry) => String(entry?.message ?? "")).filter(Boolean),
+    })}`);
+    throw error;
+  }
   await focusGameCanvasNatively(sessionId);
   const inputBeforeStart = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
   await sendNativeGameKey(sessionId, "Enter", "keyDown", `START de entrada da fase ${label} (jornada cadencia)`);
