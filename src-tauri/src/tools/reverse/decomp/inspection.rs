@@ -430,7 +430,7 @@ fn load_stored_session_from_disk(
     }
     let dir = session_dir(&decomp_work_dir(), &identity.normalized_sha256)?;
     let prefix = format!("session-{session_id}-");
-    let mut newest: Option<InspectionSession> = None;
+    let mut newest: Option<(InspectionSession, Option<std::time::SystemTime>)> = None;
     for entry in fs::read_dir(&dir).map_err(|e| error("session_io", e.to_string(), true))? {
         let path = entry.map_err(|e| e.to_string())?.path();
         let name = path
@@ -453,21 +453,28 @@ fn load_stored_session_from_disk(
         {
             continue;
         }
-        let replace = newest.as_ref().is_none_or(|old| {
-            session.completed_at_unix.unwrap_or(session.created_at_unix)
-                >= old.completed_at_unix.unwrap_or(old.created_at_unix)
+        // Snapshots share one created_at second; the file write order is the
+        // only total order that matches user intent (last saved state wins).
+        let mtime = metadata.modified().ok();
+        let replace = newest.as_ref().is_none_or(|(old, old_mtime)| {
+            mtime > *old_mtime
+                || (mtime == *old_mtime
+                    && session.completed_at_unix.unwrap_or(session.created_at_unix)
+                        >= old.completed_at_unix.unwrap_or(old.created_at_unix))
         });
         if replace {
-            newest = Some(session);
+            newest = Some((session, mtime));
         }
     }
-    let session = newest.ok_or_else(|| {
-        error(
-            "session_missing",
-            "Sessão não encontrada para esta identidade de ROM",
-            false,
-        )
-    })?;
+    let session = newest
+        .map(|(session, _)| session)
+        .ok_or_else(|| {
+            error(
+                "session_missing",
+                "Sessão não encontrada para esta identidade de ROM",
+                false,
+            )
+        })?;
     if session.schema_version != INSPECTION_SCHEMA_V1 {
         return Err(error(
             "session_schema",
@@ -497,7 +504,7 @@ pub fn list_sessions() -> Result<Vec<InspectionSession>, String> {
         ));
     }
 
-    let mut latest = HashMap::<String, InspectionSession>::new();
+    let mut latest = HashMap::<String, (InspectionSession, Option<std::time::SystemTime>)>::new();
     for entry in
         fs::read_dir(&extract_dir).map_err(|e| error("session_list_io", e.to_string(), true))?
     {
@@ -552,16 +559,20 @@ pub fn list_sessions() -> Result<Vec<InspectionSession>, String> {
             {
                 continue;
             }
-            let replace = latest.get(&session.session_id).is_none_or(|current| {
-                session.completed_at_unix.unwrap_or(session.created_at_unix)
-                    >= current.completed_at_unix.unwrap_or(current.created_at_unix)
+            let replace = latest.get(&session.session_id).is_none_or(|(current, old_mtime)| {
+                let mtime = file_metadata.modified().ok();
+                mtime > *old_mtime
+                    || (mtime == *old_mtime
+                        && session.completed_at_unix.unwrap_or(session.created_at_unix)
+                            >= current.completed_at_unix.unwrap_or(current.created_at_unix))
             });
             if replace {
-                latest.insert(session.session_id.clone(), session);
+                let mtime = file_metadata.modified().ok();
+                latest.insert(session.session_id.clone(), (session, mtime));
             }
         }
     }
-    let mut sessions: Vec<_> = latest.into_values().collect();
+    let mut sessions: Vec<_> = latest.into_values().map(|(session, _)| session).collect();
     sessions.sort_by(|left, right| {
         right
             .completed_at_unix
@@ -1779,8 +1790,141 @@ mod tests {
     }
 
     #[test]
-    fn session_ids_cannot_become_paths() {
-        assert!(validate_session_id("inspection-123-00000001").is_ok());
+    #[ignore = "BYOR Sonic pinado; RDS_SONIC_MULTIFRAME_ROM obrigatório; escreva em RDS_DECOMP_WORK isolado"]
+    fn sonic_cadence_byor_edits_interval_and_reopens_without_touching_base() {
+        use super::super::{sonic_cadence as cadence, sprite_composition as comp};
+        let path = std::env::var("RDS_SONIC_MULTIFRAME_ROM").expect("BYOR obrigatório");
+        assert!(
+            std::env::var("RDS_DECOMP_WORK").is_ok(),
+            "diretório de prova isolado obrigatório"
+        );
+        let session = open(&path).unwrap();
+        let (_, base) = rex_read_rom(Path::new(&path)).unwrap();
+        cadence::validate_base(&base).expect("contrato na ROM pinada");
+
+        let info = sonic_cadence_info(&session.session_id).unwrap();
+        assert_eq!(info.current_interval, cadence::WAIT_ORIGINAL_INTERVAL);
+        assert_eq!(info.original_interval, cadence::WAIT_ORIGINAL_INTERVAL);
+        assert_eq!(info.frames, cadence::WAIT_FRAMES.to_vec());
+
+        for reserved in [cadence::EDITABLE_MIN - 1, 0x80, 0xfe] {
+            let refused = edit_sonic_duration(&session.session_id, "sonic1_sonic", reserved)
+                .unwrap_err();
+            assert!(refused.contains("cadence_value_reserved"), "{refused}");
+            assert!(
+                get_stored_session(&session.session_id)
+                    .unwrap()
+                    .session
+                    .edit
+                    .is_none(),
+                "recusa não pode deixar edição registrada"
+            );
+        }
+        let noop = edit_sonic_duration(
+            &session.session_id,
+            "sonic1_sonic",
+            cadence::WAIT_ORIGINAL_INTERVAL,
+        )
+        .unwrap_err();
+        assert!(noop.contains("edit_noop"), "{noop}");
+        let wrong_resource =
+            edit_sonic_duration(&session.session_id, "sonic1_tails", 40).unwrap_err();
+        assert!(wrong_resource.contains("edit_resource_unsupported"));
+
+        let first = edit_sonic_duration(&session.session_id, "sonic1_sonic", 40).unwrap();
+        assert_eq!(first.bytes_changed, 1);
+        assert_eq!(first.changed_offsets, vec![cadence::WAIT_ADDR as u64]);
+        assert_eq!(first.format, cadence::EDIT_FORMAT);
+        let first_rom = rex_read_rom(Path::new(&first.modified_rom_path)).unwrap().1;
+        assert_eq!(first_rom.len(), base.len());
+        assert_eq!(first_rom[cadence::WAIT_ADDR], 40);
+        assert_eq!(
+            (0..base.len())
+                .filter(|&i| base[i] != first_rom[i])
+                .collect::<Vec<_>>(),
+            vec![cadence::WAIT_ADDR]
+        );
+
+        let second = edit_sonic_duration(&session.session_id, "sonic1_sonic", 60).unwrap();
+        let second_rom = rex_read_rom(Path::new(&second.modified_rom_path)).unwrap().1;
+        assert_eq!(second.changed_offsets, vec![cadence::WAIT_ADDR as u64]);
+        assert_eq!(second_rom[cadence::WAIT_ADDR], 60);
+        let info_after = sonic_cadence_info(&session.session_id).unwrap();
+        assert_eq!(
+            (
+                info_after.original_interval,
+                info_after.current_interval
+            ),
+            (cadence::WAIT_ORIGINAL_INTERVAL, 60)
+        );
+
+        // Cadência e pintura coexistem na mesma cópia cumulativa autorizada.
+        let geometry =
+            super::super::sonic_sprite::read_frame(&base, "sonic1_sonic/stand").unwrap();
+        let loc = geometry.source_pixel(8, 8).unwrap();
+        let previous = if loc.high_nibble {
+            base[loc.byte_offset] >> 4
+        } else {
+            base[loc.byte_offset] & 15
+        };
+        let painted = edit_sonic_tiles(
+            &session.session_id,
+            "sonic1_sonic",
+            "sonic1_sonic/stand",
+            &[InspectionPixelEdit {
+                x: 8,
+                y: 8,
+                index: (previous + 1) % 16,
+            }],
+            true,
+        )
+        .unwrap();
+        assert!(painted
+            .changed_offsets
+            .contains(&(cadence::WAIT_ADDR as u64)));
+        assert_eq!(painted.bytes_changed, 2);
+        let painted_rom = rex_read_rom(Path::new(&painted.modified_rom_path)).unwrap().1;
+        assert_eq!(painted_rom[cadence::WAIT_ADDR], 60);
+        let composed = comp::compose_for_session(
+            &get_stored_session(&session.session_id).unwrap().session,
+            "sonic1_sonic",
+            "sonic1_sonic/stand",
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(composed.rom_sha256, painted.modified_rom_sha256);
+
+        let saved = save(&session.session_id, None).unwrap();
+        sessions().lock().unwrap().remove(&session.session_id);
+        let reopened = reopen(&path, &session.session_id).unwrap();
+        assert_eq!(reopened.edit, saved.edit);
+        let info_reopened = sonic_cadence_info(&session.session_id).unwrap();
+        assert_eq!(info_reopened.current_interval, 60);
+        assert_eq!(
+            rex_read_rom(Path::new(&path)).unwrap().1,
+            base,
+            "BYOR intacta"
+        );
+        let report = serde_json::json!({
+            "base_sha256": comp::SONIC1_REFERENCE_SHA256,
+            "interval_byte_addr": format!("0x{:X}", cadence::WAIT_ADDR),
+            "original": cadence::WAIT_ORIGINAL_INTERVAL,
+            "durations": [40, 60],
+            "cumulative_with_paint": painted.bytes_changed,
+            "edit": second,
+            "reopened_current_interval": info_reopened.current_interval,
+            "base_unchanged": true,
+        });
+        fs::write(
+            decomp_work_dir().join("sonic-cadence-proof.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn session_ids_cannot_become_paths() {        assert!(validate_session_id("inspection-123-00000001").is_ok());
         assert!(validate_session_id("../outside").is_err());
         assert!(validate_session_id("inspection/../outside").is_err());
         assert!(validate_session_id(&"a".repeat(161)).is_err());
