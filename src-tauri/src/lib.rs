@@ -2544,6 +2544,7 @@ async fn rex_inspection_sprite_frame(
     frame_id: String,
     flip_x: bool,
     flip_y: bool,
+    from_base: Option<bool>,
 ) -> Result<
     tools::reverse::decomp::sprite_composition::InspectionSpriteFrame,
     tools::reverse::decomp::inspection::InspectionError,
@@ -2555,6 +2556,7 @@ async fn rex_inspection_sprite_frame(
             &frame_id,
             flip_x,
             flip_y,
+            from_base.unwrap_or(false),
         )
     })
     .await

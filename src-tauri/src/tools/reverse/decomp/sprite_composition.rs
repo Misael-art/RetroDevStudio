@@ -39,7 +39,7 @@ const SONIC1_SOURCE_PALETTE_SHA256: &str =
     "8391d8af82c19043c89e32abf87bdd057dbe2a845c58a3a58761edceaeeb9f8a";
 const SONIC1_SOURCE_MAPPING_SHA256: &str =
     "18749e9ba7ab2eae27ebafd451a6f8a05e42b426b841d03d6ef28b08ed0abae1";
-const SONIC1_STAND_PIXELS_SHA256: &str =
+pub(crate) const SONIC1_STAND_PIXELS_SHA256: &str =
     "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7";
 const SONIC1_STAND_MAPPING: [u8; 21] = [
     0x04, 0xec, 0x08, 0x00, 0x00, 0xf0, 0xf4, 0x0d, 0x00, 0x03, 0xf0, 0x04, 0x08, 0x00, 0x0b, 0xf0,
@@ -597,8 +597,12 @@ fn compose_sonic_frame(
     frame_id: &str,
     flip_x: bool,
     flip_y: bool,
+    from_base: bool,
 ) -> Result<InspectionSpriteFrame, String> {
-    let (base, rom) = read_sonic_session_rom(session)?;
+    let (base, copy) = read_sonic_session_rom(session)?;
+    // Comparação original/modificado (ETAPA 2 visual): from_base compõe os
+    // bytes da ROM base intocada pelo MESMO pipeline; nenhuma reimplementação.
+    let rom = if from_base { base.clone() } else { copy };
     let geometry = sonic::read_frame(&rom, frame_id)?;
     let palette = &rom[sonic::PALETTE_OFFSET..sonic::PALETTE_OFFSET + PALETTE_SIZE];
     let image = compose_sonic_geometry(
@@ -609,7 +613,7 @@ fn compose_sonic_frame(
         flip_y,
     )?;
     let pixels_sha256 = sha256_hex(image.as_raw());
-    if session.edit.is_none()
+    if (session.edit.is_none() || from_base)
         && frame_id == "sonic1_sonic/stand"
         && !flip_x
         && !flip_y
@@ -668,7 +672,11 @@ fn compose_sonic_frame(
         tile_data_offset: sonic::ART_OFFSET as u64, tile_data_size: sonic::ART_SIZE as u64,
         palette_offset: sonic::PALETTE_OFFSET as u64, palette_size: PALETTE_SIZE as u64,
         descriptor_offset: geometry.mapping_offset as u64, flip_x, flip_y, transparency_index: 0, parts,
-        metadata_source: "Perfil assistido Sonic 1 Rev00: mapping + DPLC; bytes da base e cópia revalidados".into(),
+        metadata_source: if from_base {
+            "Original (ROM base intocada): perfil assistido Sonic 1 Rev00; mapping + DPLC; bytes da base revalidados".into()
+        } else {
+            "Perfil assistido Sonic 1 Rev00: mapping + DPLC; bytes da base e cópia revalidados".into()
+        },
         rom_evidence: vec![format!("base_sha256={}", sha256_hex(&base)),
             format!("mapping_index={}", geometry.index), format!("mapping_offset=0x{:X}", geometry.mapping_offset),
             format!("dplc_offset=0x{:X}", geometry.dplc_offset), format!("art_bytes_sha256={}", sha256_hex(&rom[sonic::ART_OFFSET..sonic::ART_OFFSET+sonic::ART_SIZE]))],
@@ -692,10 +700,11 @@ pub fn compose_for_session(
     frame_id: &str,
     flip_x: bool,
     flip_y: bool,
+    from_base: bool,
 ) -> Result<InspectionSpriteFrame, String> {
     if resource_id == "sonic1_sonic" {
         sonic::resolve_index(frame_id)?;
-        return compose_sonic_frame(session, frame_id, flip_x, flip_y);
+        return compose_sonic_frame(session, frame_id, flip_x, flip_y, from_base);
     }
     let manifest = manifest_for(resource_id, frame_id)?;
     let rom_path = Path::new(&session.rom_path);

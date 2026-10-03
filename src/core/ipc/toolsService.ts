@@ -696,7 +696,8 @@ export function inspectionSpriteFrame(
   resourceId: string,
   frameId = `${resourceId}/frame-0`,
   flipX = false,
-  flipY = false
+  flipY = false,
+  fromBase = false
 ): Promise<InspectionSpriteFrame> {
   return invoke<InspectionSpriteFrame>("rex_inspection_sprite_frame", {
     sessionId,
@@ -704,6 +705,7 @@ export function inspectionSpriteFrame(
     frameId,
     flipX,
     flipY,
+    fromBase,
   });
 }
 
