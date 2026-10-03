@@ -10,6 +10,7 @@ import {
   type InspectionSpriteFrame,
   inspectionCancel,
   inspectionCatalogPage,
+  inspectionEditSonicDuration,
   inspectionEditSonicPalette,
   inspectionEditSonicTiles,
   type InspectionPixelEdit,
@@ -19,12 +20,14 @@ import {
   inspectionReopen,
   inspectionSave,
   inspectionSavePaletteChoice,
+  inspectionSonicCadence,
   inspectionSpriteFrame,
   inspectionStatus,
   inspectionStart,
   listenInspectionProgress,
   patchApplyBps,
   patchCreateBps,
+  type SonicCadenceInfo,
 } from "../../core/ipc/toolsService";
 import {
   emulatorGetCoreEpoch,
@@ -58,6 +61,10 @@ function describeError(error: unknown): string {
 
 function hex(value: number, width = 6): string {
   return value.toString(16).toUpperCase().padStart(width, "0");
+}
+
+function cadenceThumbId(byte: number): string {
+  return `sonic1_sonic/anim-${byte.toString(16).padStart(2, "0")}`;
 }
 
 function statusLabel(status: string): string {
@@ -103,6 +110,13 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [editGreen, setEditGreen] = useState(7);
   const [editBlue, setEditBlue] = useState(7);
   const [editBusy, setEditBusy] = useState(false);
+  const [cadence, setCadence] = useState<SonicCadenceInfo | null>(null);
+  const [cadenceValue, setCadenceValue] = useState<number | "">("");
+  const [cadenceBusy, setCadenceBusy] = useState(false);
+  const [cadenceError, setCadenceError] = useState("");
+  const [cadenceThumbs, setCadenceThumbs] = useState<Record<string, InspectionSpriteFrame>>({});
+  const [cadencePlaying, setCadencePlaying] = useState(false);
+  const [cadenceTick, setCadenceTick] = useState(0);
   const [emulatorObservation, setEmulatorObservation] = useState<EmulatorObservationResult | null>(null);
   const [emulatorObservationLabel, setEmulatorObservationLabel] = useState("");
   const [emulatorObservationHistory, setEmulatorObservationHistory] = useState<Array<{ label: string; observation: EmulatorObservationResult }>>([]);
@@ -125,6 +139,8 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const sessionRequestSeq = useRef(0);
   const statusRequestSeq = useRef(0);
   const savedSessionsRequestSeq = useRef(0);
+  const cadenceRequestSeq = useRef(0);
+  const cadenceEditSeq = useRef(0);
   const progressListener = useRef<{ sessionId: string; generation: number; unlisten?: () => void } | null>(null);
   const bufferedProgress = useRef(new Map<string, InspectionProgress>());
 
@@ -146,6 +162,14 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     setSpriteFrameBusy(false);
     setSonicFrames([]);
     setSpriteFrame(null);
+    cadenceRequestSeq.current += 1;
+    cadenceEditSeq.current += 1;
+    setCadence(null);
+    setCadenceThumbs({});
+    setCadenceBusy(false);
+    setCadenceError("");
+    setCadencePlaying(false);
+    setCadenceTick(0);
   }
 
   function applyProgress(progress: InspectionProgress) {
@@ -239,6 +263,26 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       0,
     );
   }, [emulatorObservation]);
+
+  useEffect(() => {
+    const sessionId = session?.session_id;
+    if (!sessionId || session?.status !== "completed") return;
+    if (!spriteFrameId.startsWith("sonic1_sonic/")) return;
+    void loadCadence(sessionId);
+  }, [session?.session_id, session?.status, spriteFrameId.startsWith("sonic1_sonic/")]);
+
+  useEffect(() => {
+    if (!spriteFrameId.startsWith("sonic1_sonic/")) {
+      setCadencePlaying(false);
+      setCadenceTick(0);
+    }
+  }, [spriteFrameId]);
+
+  useEffect(() => {
+    if (!cadencePlaying || !cadence) return;
+    const timer = window.setInterval(() => setCadenceTick((tick) => tick + 1), 1000 / 60);
+    return () => window.clearInterval(timer);
+  }, [cadencePlaying, cadence]);
 
   async function refreshCatalog(sessionId: string, offset: number, nextQuery = queryRef.current, nextKind = kindRef.current) {
     const requestId = ++catalogRequestSeq.current;
@@ -377,10 +421,9 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     }
   }
 
-  async function composeSpriteFrame() {
+  async function composeSpriteFrame(requestedFrameId = spriteFrameId) {
     const sessionId = sessionRef.current?.session_id;
     if (!sessionId) return;
-    const requestedFrameId = spriteFrameId;
     const resourceId = requestedFrameId.split("/", 1)[0] || "spr_ryo_100";
     const requestId = ++previewRequestSeq.current;
     setSpriteFrame(null);
@@ -399,6 +442,75 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
       logMessage("error", `[Inspeção] Composição de sprite recusada: ${describeError(error)}`);
     } finally {
       if (requestId === previewRequestSeq.current) setSpriteFrameBusy(false);
+    }
+  }
+
+  async function loadCadence(sessionId: string) {
+    const request = ++cadenceRequestSeq.current;
+    setCadenceBusy(true);
+    setCadenceError("");
+    try {
+      const info = await inspectionSonicCadence(sessionId);
+      if (request !== cadenceRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
+      setCadence(info);
+      setCadenceValue(info.current_interval);
+      const thumbs: Record<string, InspectionSpriteFrame> = {};
+      for (const byte of [...new Set(info.frames)]) {
+        const frameId = cadenceThumbId(byte);
+        const frame = await inspectionSpriteFrame(sessionId, "sonic1_sonic", frameId, false, false);
+        if (request !== cadenceRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
+        if (frame.resource_id !== "sonic1_sonic" || frame.frame_id !== frameId) {
+          throw new Error(`Resposta de composição incompatível: esperado ${frameId}, recebido ${frame.resource_id}/${frame.frame_id}`);
+        }
+        thumbs[frameId] = frame;
+      }
+      setCadenceThumbs(thumbs);
+    } catch (error) {
+      if (request === cadenceRequestSeq.current && sessionRef.current?.session_id === sessionId) {
+        setCadenceError(`Contrato de cadência indisponível: ${describeError(error)} Reabra a sessão ou tente novamente.`);
+      }
+    } finally {
+      if (request === cadenceRequestSeq.current) setCadenceBusy(false);
+    }
+  }
+
+  async function applyCadence(nextValue: number, purpose: "apply" | "restore") {
+    const current = sessionRef.current;
+    if (!current || !cadence) return;
+    if (!Number.isInteger(nextValue) || nextValue < cadence.editable_min || nextValue > cadence.editable_max) {
+      setCadenceError(
+        `Valor ${String(nextValue)} fora do intervalo comprovado (${cadence.editable_min}–${cadence.editable_max} ticks); nada foi enviado ao núcleo. Reservados: ${cadence.reserved.join(" · ")}.`,
+      );
+      return;
+    }
+    if (purpose === "restore" && cadence.current_interval === cadence.original_interval) {
+      setCadenceError(`Nada a restaurar: o byte já vale o original ${cadence.original_interval} ticks.`);
+      return;
+    }
+    if (purpose === "apply" && cadence.current_interval === nextValue) {
+      setCadenceError(`O byte aplicado já vale ${nextValue} ticks; enviar de novo seria um no-op recusado pelo núcleo.`);
+      return;
+    }
+    const request = ++cadenceEditSeq.current;
+    setCadenceBusy(true);
+    setCadenceError("");
+    try {
+      const edit = await inspectionEditSonicDuration(current.session_id, "sonic1_sonic", nextValue);
+      if (request !== cadenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
+      const next = { ...sessionRef.current, edit };
+      sessionRef.current = next;
+      setSession(next);
+      await loadCadence(current.session_id);
+      logMessage(
+        "success",
+        `[Inspeção] Cadência id_Wait ${purpose === "restore" ? "restaurada" : "aplicada"}: byte em 0x${hex(cadence.interval_addr, 5)} agora ${nextValue} ticks na cópia ${edit.modified_rom_sha256}.`,
+      );
+    } catch (error) {
+      if (request !== cadenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
+      setCadenceError(`Edição de cadência recusada: ${describeError(error)} A base original não foi tocada.`);
+      logMessage("error", `[Inspeção] Edição de cadência recusada: ${describeError(error)}`);
+    } finally {
+      if (request === cadenceEditSeq.current) setCadenceBusy(false);
     }
   }
 
@@ -632,6 +744,9 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
 
   const currentProgress = run?.progress;
   const percent = currentProgress ? Math.min(100, Math.round((currentProgress.completed_work / Math.max(currentProgress.total_work, 1)) * 100)) : 0;
+  const cadenceActiveIndex = cadence && cadence.frames.length > 0
+    ? Math.floor(cadenceTick / Math.max(1, cadence.current_interval)) % cadence.frames.length
+    : 0;
 
   return (
     <div data-testid="reverse-inspection-panel" className="min-w-0 max-w-full space-y-3 [overflow-wrap:anywhere]">
@@ -737,6 +852,52 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
             {spriteFrameId.startsWith("sonic1_sonic/") && <div data-testid="inspection-sonic-edit-panel" className="mt-3 rounded border border-[#f9e2af]/30 bg-[#2a2414] p-3 text-[10px]">
               <div className="font-semibold uppercase tracking-[0.16em] text-[#f9e2af]">Edição piloto · paleta MD RGB333</div>
               <div className="mt-1 text-[#cdd6f4]">Opera somente sobre uma cópia persistida da ROM; o arquivo BYOR original nunca é sobrescrito.</div>
+              <div data-testid="inspection-sonic-cadence-panel" className="mt-2 rounded border border-[#89b4fa]/30 bg-[#101b2e] p-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">Duração da animação · {cadence?.name ?? "id_Wait"} · Experimental</div>
+                  {cadence && <button type="button" data-testid="inspection-cadence-preview-toggle" onClick={() => { setCadenceTick(0); setCadencePlaying((playing) => !playing); }} className="rounded border border-[#89b4fa]/50 px-2 py-1 text-[#89b4fa]">{cadencePlaying ? "Pausar prévia" : "Reproduzir prévia"}</button>}
+                </div>
+                <p className="mt-1 text-[#cdd6f4]">Sequência comprovada de duração fixa do Sonic parado. A ordem dos quadros vem do script real da ROM lido pelo núcleo; a interface não reimplementa endereços, tokens nem duração.</p>
+                {cadenceBusy && !cadence && <div className="mt-1 text-[#7f849c]">Lendo o contrato de cadência no núcleo…</div>}
+                {cadence && <>
+                  <div className="mt-2 flex flex-wrap items-end gap-2">
+                    <label className="flex flex-col gap-1 text-[#7f849c]">Ticks por quadro<input data-testid="inspection-cadence-value" type="number" min={cadence.editable_min} max={cadence.editable_max} step={1} value={cadenceValue} onChange={(event) => setCadenceValue(event.target.value === "" ? "" : Number(event.target.value))} className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                    <button type="button" data-testid="inspection-cadence-apply" disabled={cadenceBusy || editBusy} onClick={() => void applyCadence(cadenceValue === "" ? Number.NaN : cadenceValue, "apply")} className="rounded bg-[#89b4fa] px-3 py-1 font-semibold text-[#111827]">{cadenceBusy ? "Aplicando…" : "Aplicar duração"}</button>
+                    <button type="button" data-testid="inspection-cadence-restore" disabled={cadenceBusy || editBusy} onClick={() => void applyCadence(cadence.original_interval, "restore")}>Restaurar original</button>
+                  </div>
+                  <div className="mt-2 grid gap-1 md:grid-cols-2">
+                    <div data-testid="inspection-cadence-original" className="text-[#cdd6f4]">Original: {cadence.original_interval} ticks (0x{hex(cadence.original_interval, 2)})</div>
+                    <div data-testid="inspection-cadence-current" className="text-[#a6e3a1]">Aplicado na cópia: {cadence.current_interval} ticks (0x{hex(cadence.current_interval, 2)})</div>
+                  </div>
+                  {cadenceValue !== "" && Number.isInteger(Number(cadenceValue)) && Number(cadenceValue) !== cadence.current_interval && <div data-testid="inspection-cadence-pending" className="mt-1 text-[#f9e2af]">Pendente: {cadenceValue} ticks ainda não foi gravado; a cópia mantém {cadence.current_interval}. Nada muda no jogo até você clicar em “Aplicar duração”.</div>}
+                  <div className="mt-1 text-[#7f849c]">Unidade: {cadence.unit}. {cadence.semantics}</div>
+                  <div className="mt-1 text-[#7f849c]">Equivalente só explicativo: {cadence.current_interval} ticks ≈ {(cadence.current_interval / 60).toFixed(2)} s se 1 tick = 1 frame de tela em NTSC; a relação byte→frames exibidos será medida no core, e PAL não medido permanece não medido.</div>
+                  <div className="mt-1 text-[#a6e3a1]">Escopo do desfazer: “Restaurar original” altera somente o byte do intervalo em 0x{hex(cadence.interval_addr, 5)}; pinturas de arte e paleta já acumuladas na cópia permanecem.</div>
+                  <div data-testid="inspection-cadence-timeline" className="mt-2 flex flex-wrap gap-1" aria-label="Quadros da sequência em ordem">
+                    {cadence.frames.map((byte, index) => {
+                      const frameId = cadenceThumbId(byte);
+                      const thumb = cadenceThumbs[frameId];
+                      const active = cadencePlaying && index === cadenceActiveIndex;
+                      return <button key={`${frameId}-${index}`} type="button" data-testid={`inspection-cadence-frame-${index}`} data-frame-byte={byte} data-active={String(active)} data-selected={String(spriteFrameId === frameId)} title={`Quadro ${index + 1}: índice de arte 0x${hex(byte, 2)}; clique para compor`} onClick={() => { setSpriteFrameId(frameId); void composeSpriteFrame(frameId); }} className={`rounded border p-1 ${active ? "border-[#89b4fa] bg-[#16263f]" : spriteFrameId === frameId ? "border-[#cba6f7] bg-[#1b1630]" : "border-[#313244] bg-[#0b0f19]"}`}>
+                        {thumb?.available && thumb.data_url
+                          ? <img src={thumb.data_url} alt={`Quadro ${index + 1}`} width={thumb.width * 2} height={thumb.height * 2} className="block bg-[#ff00ff] [image-rendering:pixelated]" style={{ imageRendering: "pixelated" }} />
+                          : <span className="block px-1 py-2 font-mono text-[9px] text-[#7f849c]">{hex(byte, 2)}</span>}
+                      </button>;
+                    })}
+                  </div>
+                  <div className="mt-1 text-[#7f849c]">{cadence.frames.length} quadros na ordem do script. A prévia toca no ritmo do byte declarado usando o relógio do navegador — é demonstração, não prova da duração dentro do jogo. Toque num quadro para compô-lo no palco acima.</div>
+                  <div data-testid="inspection-cadence-terminator" className="mt-1 text-[#bac2de]">Término: {cadence.terminator}</div>
+                  <div data-testid="inspection-cadence-limits" className="mt-1 text-[#bac2de]">Intervalo editável comprovado: {cadence.editable_min}–{cadence.editable_max} ticks. Valores recusados: {cadence.reserved.join(" · ")}.</div>
+                  <div data-testid="inspection-cadence-provenience" className="mt-2 space-y-1 border-t border-[#313244] pt-2 text-[9px] text-[#7f849c]">
+                    <div className="uppercase tracking-[0.14em] text-[#bac2de]">Proveniência</div>
+                    {cadence.provenience.map((line) => <div key={line}>{line}</div>)}
+                    <div className="pt-1 uppercase tracking-[0.14em] text-[#bac2de]">Limitações</div>
+                    {cadence.limitations.map((line) => <div key={line}>{line}</div>)}
+                    <div className="break-all font-mono">Contrato: {cadence.contract_path}</div>
+                  </div>
+                </>}
+                <div aria-live="polite" data-testid="inspection-cadence-error" className="mt-2 break-words text-[#f38ba8]">{cadenceError}</div>
+              </div>
               <div className="mt-2 flex flex-wrap items-end gap-2">
                 <label className="flex flex-col gap-1 text-[#7f849c]">Índice<input data-testid="inspection-sonic-palette-index" type="number" min={1} max={15} value={editPaletteIndex} onChange={(event) => setEditPaletteIndex(Number(event.target.value))} className="w-16 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
                 <label className="flex flex-col gap-1 text-[#7f849c]">R<input data-testid="inspection-sonic-palette-red" type="number" min={0} max={7} value={editRed} onChange={(event) => setEditRed(Number(event.target.value))} className="w-16 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
