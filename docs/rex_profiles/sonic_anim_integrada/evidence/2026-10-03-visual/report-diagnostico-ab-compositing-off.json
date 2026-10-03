@@ -1,0 +1,414 @@
+{
+  "schema": "rex-sonic-anim-visual-diagnostico/v1",
+  "expectations": "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-VISUAL-ETAPA1.md",
+  "binary_sha256": "8cc79c724d0192cda0fe4adc87b740a8c73f3558d93c73799957b145e4e0fed6",
+  "base_rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "webkit_disable_compositing_mode": "1",
+  "observations": [
+    {
+      "label": "o0-stand-instancia1",
+      "capture_source": "x11-root-pixmap",
+      "capture_path": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T16-50-21-710Z-visual-o0-stand-instancia1.png",
+      "device_pixel_ratio": 1,
+      "canvas": {
+        "image": true,
+        "frameId": "sonic1_sonic/stand",
+        "romSha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+        "pngSha256": "45d32cae5d2f09bd651e623963e7f874d7e1b2287cc45862d8cdbc96efbb5a1d",
+        "pixelsSha256": "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7",
+        "naturalWidth": 32,
+        "naturalHeight": 40
+      },
+      "layout_rect": {
+        "x": 1409.84375,
+        "width": 98,
+        "right": 1507.84375,
+        "height": 122,
+        "y": 691.984375,
+        "bottom": 813.984375
+      },
+      "layout_borders": {
+        "left": 1,
+        "bottom": 1,
+        "right": 1,
+        "top": 1
+      },
+      "canvas_pixels_sha256": "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7",
+      "canvas_matches_reference": true,
+      "window_crop": {
+        "sha256": "3ea211227b082efa9d77be7fbcc163f2c015bfa48ca565edfb5fe78deadc71b1",
+        "distinctColors": 15,
+        "solidColor": null,
+        "topColors": [
+          {
+            "color": "255,0,255",
+            "count": 6192,
+            "fraction": 0.5375
+          },
+          {
+            "color": "36,36,144",
+            "count": 1215,
+            "fraction": 0.10546875
+          },
+          {
+            "color": "72,72,180",
+            "count": 900,
+            "fraction": 0.078125
+          },
+          {
+            "color": "108,108,216",
+            "count": 531,
+            "fraction": 0.04609375
+          },
+          {
+            "color": "0,0,0",
+            "count": 450,
+            "fraction": 0.0390625
+          },
+          {
+            "color": "252,180,144",
+            "count": 405,
+            "fraction": 0.03515625
+          }
+        ],
+        "total": 11520,
+        "mismatches": 0,
+        "firstDifference": null
+      },
+      "window_crop_matches_expected": true
+    },
+    {
+      "label": "o1-walk1-instancia1",
+      "capture_source": "x11-root-pixmap",
+      "capture_path": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T16-50-21-710Z-visual-o1-walk1-instancia1.png",
+      "device_pixel_ratio": 1,
+      "canvas": {
+        "image": true,
+        "frameId": "sonic1_sonic/walk-1",
+        "romSha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+        "pngSha256": "89f5c020433c98f5d8ce986cf649b73119da9e7ef49803b5eab22d5e7294eeca",
+        "pixelsSha256": "6e11229e0f62da227a4a004db38fe7b19dc794e08e05e651435042b2fe8a0338",
+        "naturalWidth": 40,
+        "naturalHeight": 40
+      },
+      "layout_rect": {
+        "x": 1409.84375,
+        "width": 122,
+        "right": 1531.84375,
+        "height": 122,
+        "y": 691.984375,
+        "bottom": 813.984375
+      },
+      "layout_borders": {
+        "left": 1,
+        "bottom": 1,
+        "right": 1,
+        "top": 1
+      },
+      "canvas_pixels_sha256": "6e11229e0f62da227a4a004db38fe7b19dc794e08e05e651435042b2fe8a0338",
+      "canvas_matches_reference": true,
+      "window_crop": {
+        "sha256": "03d274735398afd2edf8f355b7d73a2fca4b6d4d1f6225e810e35d1bbc71b334",
+        "distinctColors": 15,
+        "solidColor": null,
+        "topColors": [
+          {
+            "color": "255,0,255",
+            "count": 8217,
+            "fraction": 0.570625
+          },
+          {
+            "color": "72,72,180",
+            "count": 1152,
+            "fraction": 0.08
+          },
+          {
+            "color": "36,36,144",
+            "count": 873,
+            "fraction": 0.060625
+          },
+          {
+            "color": "108,108,216",
+            "count": 864,
+            "fraction": 0.06
+          },
+          {
+            "color": "252,252,252",
+            "count": 549,
+            "fraction": 0.038125
+          },
+          {
+            "color": "0,0,0",
+            "count": 486,
+            "fraction": 0.03375
+          }
+        ],
+        "total": 14400,
+        "mismatches": 0,
+        "firstDifference": null
+      },
+      "window_crop_matches_expected": true
+    },
+    {
+      "label": "o2-walk1-pos-pump",
+      "capture_source": "x11-root-pixmap",
+      "capture_path": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T16-50-21-710Z-visual-o2-walk1-pos-pump.png",
+      "device_pixel_ratio": 1,
+      "canvas": {
+        "image": true,
+        "frameId": "sonic1_sonic/walk-1",
+        "romSha256": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86",
+        "pngSha256": "1333f79a48ab87eeb061d704e815618aa22e9502beaf29f31bd026f11ad6e725",
+        "pixelsSha256": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac",
+        "naturalWidth": 40,
+        "naturalHeight": 40
+      },
+      "layout_rect": {
+        "x": 1409.84375,
+        "width": 122,
+        "right": 1531.84375,
+        "height": 122,
+        "y": 691.984375,
+        "bottom": 813.984375
+      },
+      "layout_borders": {
+        "left": 1,
+        "bottom": 1,
+        "right": 1,
+        "top": 1
+      },
+      "canvas_pixels_sha256": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac",
+      "canvas_matches_reference": true,
+      "window_crop": {
+        "sha256": "df32b838692f84b28fc4eaf1ad1a3da54ae2488ad07c40bc1948dfb8d90ed888",
+        "distinctColors": 16,
+        "solidColor": null,
+        "topColors": [
+          {
+            "color": "255,0,255",
+            "count": 8208,
+            "fraction": 0.57
+          },
+          {
+            "color": "72,72,180",
+            "count": 1152,
+            "fraction": 0.08
+          },
+          {
+            "color": "36,36,144",
+            "count": 873,
+            "fraction": 0.060625
+          },
+          {
+            "color": "108,108,216",
+            "count": 864,
+            "fraction": 0.06
+          },
+          {
+            "color": "252,252,252",
+            "count": 549,
+            "fraction": 0.038125
+          },
+          {
+            "color": "0,0,0",
+            "count": 486,
+            "fraction": 0.03375
+          }
+        ],
+        "total": 14400,
+        "mismatches": 0,
+        "firstDifference": null
+      },
+      "window_crop_matches_expected": true
+    },
+    {
+      "label": "o3-walk1-pos-reabertura",
+      "capture_source": "x11-root-pixmap",
+      "capture_path": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T16-50-21-710Z-visual-o3-walk1-pos-reabertura.png",
+      "device_pixel_ratio": 1,
+      "canvas": {
+        "image": true,
+        "frameId": "sonic1_sonic/walk-1",
+        "romSha256": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86",
+        "pngSha256": "1333f79a48ab87eeb061d704e815618aa22e9502beaf29f31bd026f11ad6e725",
+        "pixelsSha256": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac",
+        "naturalWidth": 40,
+        "naturalHeight": 40
+      },
+      "layout_rect": {
+        "x": 1409.84375,
+        "width": 122,
+        "right": 1531.84375,
+        "height": 122,
+        "y": 691.984375,
+        "bottom": 813.984375
+      },
+      "layout_borders": {
+        "left": 1,
+        "bottom": 1,
+        "right": 1,
+        "top": 1
+      },
+      "canvas_pixels_sha256": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac",
+      "canvas_matches_reference": true,
+      "window_crop": {
+        "sha256": "df32b838692f84b28fc4eaf1ad1a3da54ae2488ad07c40bc1948dfb8d90ed888",
+        "distinctColors": 16,
+        "solidColor": null,
+        "topColors": [
+          {
+            "color": "255,0,255",
+            "count": 8208,
+            "fraction": 0.57
+          },
+          {
+            "color": "72,72,180",
+            "count": 1152,
+            "fraction": 0.08
+          },
+          {
+            "color": "36,36,144",
+            "count": 873,
+            "fraction": 0.060625
+          },
+          {
+            "color": "108,108,216",
+            "count": 864,
+            "fraction": 0.06
+          },
+          {
+            "color": "252,252,252",
+            "count": 549,
+            "fraction": 0.038125
+          },
+          {
+            "color": "0,0,0",
+            "count": 486,
+            "fraction": 0.03375
+          }
+        ],
+        "total": 14400,
+        "mismatches": 0,
+        "firstDifference": null
+      },
+      "window_crop_matches_expected": true
+    }
+  ],
+  "checks": [
+    {
+      "name": "dados.canvas_igual_referencia.o0-stand-instancia1",
+      "pass": true,
+      "observed": {
+        "canvas_sha": "7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7",
+        "capture_source": "x11-root-pixmap"
+      }
+    },
+    {
+      "name": "dados.canvas_igual_referencia.o1-walk1-instancia1",
+      "pass": true,
+      "observed": {
+        "canvas_sha": "6e11229e0f62da227a4a004db38fe7b19dc794e08e05e651435042b2fe8a0338",
+        "capture_source": "x11-root-pixmap"
+      }
+    },
+    {
+      "name": "dados.canvas_igual_referencia.o2-walk1-pos-pump",
+      "pass": true,
+      "observed": {
+        "canvas_sha": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac",
+        "capture_source": "x11-root-pixmap"
+      }
+    },
+    {
+      "name": "dados.canvas_igual_referencia.o3-walk1-pos-reabertura",
+      "pass": true,
+      "observed": {
+        "canvas_sha": "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac",
+        "capture_source": "x11-root-pixmap"
+      }
+    },
+    {
+      "name": "apresentacao.baseline_o0_o1_o2_janela_igual_raster",
+      "pass": true,
+      "observed": [
+        {
+          "label": "o0-stand-instancia1",
+          "matches": true,
+          "mismatches": 0,
+          "solid": null
+        },
+        {
+          "label": "o1-walk1-instancia1",
+          "matches": true,
+          "mismatches": 0,
+          "solid": null
+        },
+        {
+          "label": "o2-walk1-pos-pump",
+          "matches": true,
+          "mismatches": 0,
+          "solid": null
+        }
+      ]
+    },
+    {
+      "name": "ab.com_pos_reabertura_apresentacao_correta",
+      "pass": true,
+      "observed": {
+        "compositing_disabled": true,
+        "canvas_ok": true,
+        "crop_matches": true,
+        "mismatches": 0,
+        "solid": null,
+        "magenta_fraction": 0.57
+      },
+      "required": "com WEBKIT_DISABLE_COMPOSITING_MODE=1 a janela deve bater com o raster esperado"
+    }
+  ],
+  "notes": [
+    "adaptacao de conducao 1 (evidencia run 2026-10-03T16:28): a troca nativa de frame nao confirma selecao com o runtime da Game View vivo no mesmo contexto; a recomposicao da O2 passa a ocorrer depois do encerramento pelo caminho visivel 'Parar' (stopEmulator).",
+    "adaptacao de conducao 2 (evidencia run 2026-10-03T16:36): 'Parar' navega para o workspace Scene (App.tsx resetEmulatorSession(true)) e a sessao de inspecao e useState local (InspectionPanel.tsx:85); a volta a superficie se faz reabrindo a sessao salva, salva antes do pump. O contrato de observacoes O0..O3 e os gates permanecem os congelados em EXPECTATIONS-VISUAL-ETAPA1.md (08d3918)."
+  ],
+  "pump": {
+    "reached": true,
+    "trace": [
+      {
+        "t_ms": 206,
+        "rf": 0,
+        "status": "Emulador ativo"
+      },
+      {
+        "t_ms": 5227,
+        "rf": 30,
+        "status": "Emulador ativo"
+      },
+      {
+        "t_ms": 10264,
+        "rf": 70,
+        "status": "Emulador ativo"
+      },
+      {
+        "t_ms": 15266,
+        "rf": 100,
+        "status": "Emulador ativo"
+      }
+    ],
+    "last": {
+      "romSha256": "b1ed600d361af9b146a06fb42545572999c12194731fc69de3ba319852079b86",
+      "lastInputRequestSeq": 0,
+      "width": 320,
+      "romPath": "/home/misael/Projects/REX-SONIC-ANIM-VISUAL-2026-10-03/src-tauri/target-test/validation/inspection-2026-10-03T16-50-21-710Z-anim-visual/diagnostico-aplicada.bin",
+      "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+      "lastInputAckSeq": 0,
+      "gameStatus": "Emulador ativo",
+      "height": 224,
+      "corePath": "/home/misael/.cache/retrodevstudio/dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377/toolchains/libretro/cores/genesis_plus_gx_libretro.so",
+      "renderedFrames": 120,
+      "romSize": 531577
+    }
+  },
+  "defeito_reproduzido": false,
+  "veredito": "A/B: com compositing desabilitado a apresentacao bate com o raster independente na reabertura",
+  "allPass": true,
+  "finished_at": "2026-10-03T16:51:36.934Z"
+}
