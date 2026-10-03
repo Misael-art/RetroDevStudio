@@ -17,6 +17,7 @@ import path from "node:path";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
+import zlib from "node:zlib";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   UI_LAYOUT_ORACLE_RESOLUTIONS,
@@ -477,6 +478,7 @@ function parseArgs(argv) {
           "sonic-multiframe",
           "sonic-cadence-journey",
           "sonic-anim-integrada",
+          "sonic-anim-visual-diagnostico",
           "rex-lz4w-effect",
           "rex-lz4w-fixture-effect",
           "rex-aplib-byor-effect",
@@ -2443,6 +2445,228 @@ function assertExactPreviewPixels(actual, expected, context) {
     height: actual.height,
     pixelsSha256: createHash("sha256").update(actualPixels).digest("hex"),
   };
+}
+
+// --- Prova visual da missao visual (ETAPA 1, congelado em
+// docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-VISUAL-ETAPA1.md) ---
+// O raster autoritativo da janela e o pixmap X11 capturado por fora do
+// WebView (ImageMagick `import -window root`), para que a captura nao
+// compartilhe o caminho de apresentacao em teste. O decoder PNG e minimo
+// (8-bit, nao-interlaced, RGB/RGBA) e usa apenas node:zlib: nenhuma
+// dependencia nova e introduzida.
+export function decodeWindowPng(buffer) {
+  if (buffer.length < 24 || buffer.readUInt32BE(0) !== 0x89504e47) fail("Captura de janela sem assinatura PNG.");
+  if (buffer.readUInt32BE(12) !== 0x49484452) fail("Captura de janela sem IHDR primeiro chunk.");
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlace = 0;
+  const idat = [];
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+  if (bitDepth !== 8 || interlace !== 0 || (colorType !== 2 && colorType !== 6)) {
+    fail(`Captura de janela fora do suporte do prova-visual: depth=${bitDepth} colorType=${colorType} interlace=${interlace}`);
+  }
+  const channels = colorType === 6 ? 4 : 3;
+  const inflated = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const pixels = Buffer.alloc(stride * height);
+  let previous = Buffer.alloc(stride);
+  let cursor = 0;
+  for (let y = 0; y < height; y += 1) {
+    const filterType = inflated[cursor];
+    cursor += 1;
+    const line = inflated.subarray(cursor, cursor + stride);
+    cursor += stride;
+    const current = Buffer.alloc(stride);
+    for (let x = 0; x < stride; x += 1) {
+      const a = x >= channels ? current[x - channels] : 0;
+      const b = previous[x];
+      const c = x >= channels ? previous[x - channels] : 0;
+      let value;
+      if (filterType === 0) value = line[x];
+      else if (filterType === 1) value = line[x] + a;
+      else if (filterType === 2) value = line[x] + b;
+      else if (filterType === 3) value = line[x] + ((a + b) >> 1);
+      else if (filterType === 4) {
+        const estimate = a + b - c;
+        const pa = Math.abs(estimate - a);
+        const pb = Math.abs(estimate - b);
+        const pc = Math.abs(estimate - c);
+        value = line[x] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c);
+      } else fail(`Filtro PNG nao suportado na captura de janela: ${filterType}`);
+      current[x] = value & 0xff;
+    }
+    current.copy(pixels, y * stride);
+    previous = current;
+  }
+  return { width, height, channels, pixels };
+}
+
+// Raster esperado na janela: referencia independente ampliada em escala
+// inteira vizinho-mais-proximo sobre o fundo CSS do <img> (alfa 0 => fundo;
+// alfa 255 => cor do pixel). Exatamente o que uma apresentacao correta deve
+// pintar, calculado sem nenhum codigo do produto.
+export function renderPresentedFrameRaster(reference, scale, background) {
+  const { width, height, pixels } = reference;
+  const out = Buffer.alloc(width * scale * height * scale * 3);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const source = (y * width + x) * 4;
+      const transparent = pixels[source + 3] === 0;
+      const red = transparent ? background[0] : pixels[source];
+      const green = transparent ? background[1] : pixels[source + 1];
+      const blue = transparent ? background[2] : pixels[source + 2];
+      for (let dy = 0; dy < scale; dy += 1) {
+        for (let dx = 0; dx < scale; dx += 1) {
+          const target = ((y * scale + dy) * width * scale + x * scale + dx) * 3;
+          out[target] = red;
+          out[target + 1] = green;
+          out[target + 2] = blue;
+        }
+      }
+    }
+  }
+  return { width: width * scale, height: height * scale, pixels: out };
+}
+
+export function cropWindowRgb(decoded, cropX, cropY, cropWidth, cropHeight) {
+  if (decoded.width < cropX + cropWidth || decoded.height < cropY + cropHeight) {
+    fail(`Recorte fora da captura de janela: ${JSON.stringify({ capture: [decoded.width, decoded.height], crop: [cropX, cropY, cropWidth, cropHeight] })}`);
+  }
+  const out = Buffer.alloc(cropWidth * cropHeight * 3);
+  for (let y = 0; y < cropHeight; y += 1) {
+    for (let x = 0; x < cropWidth; x += 1) {
+      const shot = ((cropY + y) * decoded.width + cropX + x) * decoded.channels;
+      const target = (y * cropWidth + x) * 3;
+      out[target] = decoded.pixels[shot];
+      out[target + 1] = decoded.pixels[shot + 1];
+      out[target + 2] = decoded.pixels[shot + 2];
+    }
+  }
+  return out;
+}
+
+function classifyWindowCrop(crop, cropWidth) {
+  const counts = new Map();
+  for (let p = 0; p < crop.length / 3; p += 1) {
+    const key = `${crop[p * 3]},${crop[p * 3 + 1]},${crop[p * 3 + 2]}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const total = crop.length / 3;
+  return {
+    sha256: createHash("sha256").update(crop).digest("hex"),
+    distinctColors: counts.size,
+    solidColor: counts.size === 1 ? sorted[0][0] : null,
+    topColors: sorted.slice(0, 6).map(([color, count]) => ({ color, count, fraction: count / total })),
+  };
+}
+
+export function compareWindowCropToExpected(crop, cropWidth, expected) {
+  let mismatches = 0;
+  let firstDifference = null;
+  for (let y = 0; y < expected.height; y += 1) {
+    for (let x = 0; x < expected.width; x += 1) {
+      const shot = (y * cropWidth + x) * 3;
+      const exp = (y * expected.width + x) * 3;
+      if (crop[shot] !== expected.pixels[exp] || crop[shot + 1] !== expected.pixels[exp + 1] || crop[shot + 2] !== expected.pixels[exp + 2]) {
+        mismatches += 1;
+        if (!firstDifference) {
+          firstDifference = {
+            x, y,
+            observed: [crop[shot], crop[shot + 1], crop[shot + 2]],
+            expected: [expected.pixels[exp], expected.pixels[exp + 1], expected.pixels[exp + 2]],
+          };
+        }
+      }
+    }
+  }
+  return { total: expected.width * expected.height, mismatches, firstDifference };
+}
+
+async function captureWindowRaster(sessionId, filename) {
+  await ensureValidationDir();
+  const outputPath = path.join(validationDir, filename);
+  try {
+    await new Promise((resolve, reject) => {
+      execFile("import", ["-window", "root", outputPath], { env: process.env, timeout: 15000 }, (error) => (error ? reject(error) : resolve()));
+    });
+    return { path: outputPath, source: "x11-root-pixmap" };
+  } catch (error) {
+    console.log(`[visual-proof] captura X11 indisponivel (${String(error?.message ?? error)}); usando screenshot WebDriver como fonte secundaria`);
+    const fallback = await captureScreenshot(sessionId, filename);
+    return { path: fallback, source: "webdriver-snapshot" };
+  }
+}
+
+// Observacao completa de uma apresentacao: identidade no canvas (dados) +
+// recorte da janela real (apresentacao). Nunca altera o produto.
+async function captureVisualObservation(sessionId, label, prefix, reference, background) {
+  const layout = await waitFor(
+    async () => {
+      const next = await ensureSpriteFrameVisibleAndUnobstructed(sessionId);
+      return next?.fullyVisible && next.unobstructed && next.exactContentDimensions ? next : false;
+    },
+    15000,
+    `Frame ${label} ficou obstruido, invisivel ou mal dimensionado antes da observacao visual`,
+    100
+  );
+  const canvas = await readRenderedSpriteFramePixels(sessionId);
+  const dpr = await executeScript(sessionId, "return window.devicePixelRatio;");
+  const raster = await captureWindowRaster(sessionId, `${prefix}-visual-${label}.png`);
+  const decoded = decodeWindowPng(await readFile(raster.path));
+  const observation = {
+    label,
+    capture_source: raster.source,
+    capture_path: raster.path,
+    device_pixel_ratio: dpr,
+    canvas: canvas
+      ? { image: true, frameId: canvas.frameId, romSha256: canvas.romSha256, pngSha256: canvas.pngSha256, pixelsSha256: canvas.pixelsSha256, naturalWidth: canvas.naturalWidth, naturalHeight: canvas.naturalHeight }
+      : null,
+    layout_rect: layout.rect,
+    layout_borders: layout.borders,
+  };
+  if (canvas?.pixels) {
+    const canvasPixels = Buffer.from(canvas.pixels);
+    observation.canvas_pixels_sha256 = createHash("sha256").update(canvasPixels).digest("hex");
+    observation.canvas_matches_reference = canvasPixels.length === reference.pixels.length && canvasPixels.equals(reference.pixels);
+  }
+  if (dpr !== 1) {
+    observation.window_proof = { error: `devicePixelRatio ${dpr} != 1; o congelado pinna GDK_SCALE=1 e a comparacao exige escala 1:1` };
+    return observation;
+  }
+  const cropX = Math.round(layout.rect.x + layout.borders.left);
+  const cropY = Math.round(layout.rect.y + layout.borders.top);
+  const expected = renderPresentedFrameRaster(reference, 3, background);
+  if (Math.round(layout.content.width) !== expected.width || Math.round(layout.content.height) !== expected.height) {
+    observation.window_proof = { error: `conteudo CSS ${layout.content.width}x${layout.content.height} != referencia 3x ${expected.width}x${expected.height}` };
+    return observation;
+  }
+  const crop = cropWindowRgb(decoded, cropX, cropY, expected.width, expected.height);
+  observation.window_crop = {
+    ...classifyWindowCrop(crop, expected.width),
+    ...compareWindowCropToExpected(crop, expected.width, expected),
+  };
+  observation.window_crop_matches_expected = observation.window_crop.mismatches === 0;
+  return observation;
 }
 
 async function createUnavailablePreviewFixture() {
@@ -10686,6 +10910,11 @@ async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, sav
 async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
   const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
   const baseSha256 = hash(base);
+  // E3-1 (EXPECTATIONS-VISUAL-ETAPA3.md): com a mitigacao ativa no ambiente a
+  // corrida nao conta como prova de correcao de produto — aborta, não segue.
+  if (process.env.WEBKIT_DISABLE_COMPOSITING_MODE === "1") {
+    fail("ETAPA 3 (E3-1): WEBKIT_DISABLE_COMPOSITING_MODE=1 esta ativo no ambiente; a jornada retificada exige ausencia da mitigacao (a correcao e do binario, E3-0)");
+  }
   if (base.length !== 531577) fail(`A jornada integrada exige a ROM BYOR pinada de 531577 bytes: ${base.length}`);
   if (base[CADENCE_JOURNEY_WAIT_ADDR] !== 23) fail(`O byte de intervalo da base nao e $17: ${base[CADENCE_JOURNEY_WAIT_ADDR]}`);
   if (!CADENCE_JOURNEY_WAIT_FRAMES.every((frame, index) => base[CADENCE_JOURNEY_WAIT_ADDR + 1 + index] === frame)) {
@@ -10718,9 +10947,10 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
   const report = {
     schema: "rex-sonic-anim-integrada/v1",
     artifact_prefix: prefix,
-    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (driver R-1..R-4) + EXPECTATIONS-ETAPA5-ADDENDUM-2.md (meio M-1)",
+    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (driver R-1..R-4) + EXPECTATIONS-ETAPA5-ADDENDUM-2.md (meio M-1) + EXPECTATIONS-VISUAL-ETAPA3.md (E3-0..E3-7)",
     binary_sha256: hash(await readFile(app)),
     base_rom_sha256: baseSha256,
+    webkit_disable_compositing_mode: process.env.WEBKIT_DISABLE_COMPOSITING_MODE ?? null,
     expected_journey_sha256: journeySha256,
     paint: { frame_id: `sonic1_sonic/walk-1`, offset: at.offset, high_nibble: at.high, old_index: oldIndex, new_index: paintIndex },
     pilot_dir: pilotDir,
@@ -10947,6 +11177,17 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       "A sessao integrada nao foi reaberta com estado completo",
       100
     );
+    // E3-4 (EXPECTATIONS-VISUAL-ETAPA3.md): na instancia nova o banner de
+    // retomada (E2-7) pode coexistir com o fluxo explicito, mas deve ceder
+    // quando ha sessao viva — condicao verificavel, nunca fantasma.
+    const bannerCedido = await waitFor(
+      async () => executeScript(sessionIdRef, `return !document.querySelector('[data-testid="inspection-resume-banner"]');`),
+      10000,
+      "O banner de retomada permaneceu com a sessao viva reaberta pelo fluxo explicito",
+      250
+    );
+    report.checks.push({ name: "e34.banner_retomada_cede_apos_reabertura_explicita", pass: bannerCedido === true, observed: { banner_present: !bannerCedido }, required: "sem banner quando existe sessao viva reaberta" });
+    if (!report.checks.at(-1).pass) throw new Error("E3-4: o banner de retomada nao cedeu lugar a sessao viva reaberta explicitamente");
     // A selecao do frame restaurada nao faz parte do congelado (E9 pede
     // sequencia+duracao+pixel+procedencia): o frame pintado e selecionado de
     // forma explicita na recomposicao do PASSO 9, como a jornada de cadencia
@@ -11010,7 +11251,50 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       "O walk-1 reaberto ficou obstruido ou mal dimensionado",
       100
     );
-    report.steps.push({ step: 9, name: "confirmar_estado_reaberto", painel: { current: reopenedPanel.current, prediction: reopenedPanel.prediction }, ledger_entries: ledger.length, provenvenience: reopenedProvenience.slice(0, 200), recompose: { pixels_checked: recomposedPixels, layout_unobstructed: Boolean(recomposedLayout) } });
+
+    // E3-3 (EXPECTATIONS-VISUAL-ETAPA3.md): prova analitica de nao-vacuidade.
+    // O MESMO analisador de recorte usado no gate ao vivo deve reprovar a
+    // captura defeituosa arquivada da ETAPA 1 (janela magenta com dados ok).
+    const defectCapturePath = path.join(repoRoot, "docs/rex_profiles/sonic_anim_integrada/evidence/2026-10-03-visual/capture-inspection-2026-10-03T16-44-57-791Z-visual-o3-walk1-pos-reabertura.png");
+    if (!(await pathExists(defectCapturePath))) fail(`E3-3: a captura defeituosa arquivada nao existe em ${defectCapturePath}`);
+    const defectBytes = await readFile(defectCapturePath);
+    if (hash(defectBytes) !== "207b233f7ef40cda74ee55925c942d458dbcf93f0683a1c25bf910b8f81c11fe") {
+      fail(`E3-3: o hash da captura defeituosa arquivada nao bate com o arquivado em CAUSA-MAGENTA.md: ${hash(defectBytes)}`);
+    }
+    const expectedRaster = renderPresentedFrameRaster(recomposedReference, 3, [255, 0, 255]);
+    const referencePixelsSha256 = hash(Buffer.from(recomposedReference.pixels));
+    report.checks.push({ name: "e33.esperado_identico_ao_medido_no_run03", pass: referencePixelsSha256 === "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac", observed: referencePixelsSha256, required: "abbf2d5e76e7a3f78a26504a8dbb58bb93c8d190b6769b45e8e0413178ed78ac" });
+    if (!report.checks.at(-1).pass) throw new Error(`E3-3: a referencia recomposta nao e o bitmap medido no run-03: ${referencePixelsSha256}`);
+    const defectCrop = cropWindowRgb(decodeWindowPng(defectBytes), Math.round(1409.84375 + 1), Math.round(691.984375 + 1), expectedRaster.width, expectedRaster.height);
+    const defectComparison = compareWindowCropToExpected(defectCrop, expectedRaster.width, expectedRaster);
+    report.checks.push({ name: "e33.analisador_reprova_o_defeito_arquivado", pass: defectComparison.mismatches > 0, observed: { mismatches: defectComparison.mismatches, total: defectComparison.total, capture_sha: hash(defectBytes).slice(0, 12) }, required: "mismatches > 0 — o gate E3-2 discrimina o mundo do defeito" });
+    if (!(report.checks.at(-1).pass)) throw new Error(`E3-3: o analisador aceitou a captura defeituosa (gate E3-2 seria vacuo): ${JSON.stringify(defectComparison)}`);
+
+    // E3-2: gate de apresentacao na janela real pos-reabertura, sem mitigacao
+    // de ambiente (a correcao e do proprio binario, E3-0). Aguarda condicao
+    // verificavel de apresentacao; serie bruta de tentativas registrada.
+    const visualAttempts = [];
+    let visualObservation = null;
+    const visualDeadline = Date.now() + 20000;
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      visualObservation = await captureVisualObservation(sessionIdRef, `e3-walk1-visivel-pos-reabertura-${attempt}`, prefix, recomposedReference, [255, 0, 255]);
+      visualAttempts.push({
+        attempt,
+        canvas_matches: visualObservation.canvas_matches_reference === true,
+        crop_matches: visualObservation.window_crop_matches_expected === true,
+        mismatches: visualObservation.window_crop?.mismatches ?? null,
+        solid: visualObservation.window_crop?.solidColor ?? null,
+        magenta_fraction: (visualObservation.window_crop?.topColors ?? []).find((entry) => entry.color === "255,0,255")?.fraction ?? 0,
+        proof_error: visualObservation.window_proof?.error ?? null,
+      });
+      if (visualObservation.window_crop_matches_expected === true) break;
+      if (Date.now() >= visualDeadline) break;
+    }
+    report.e32_apresentacao = { attempts: visualAttempts, capture_path: visualObservation?.capture_path, capture_source: visualObservation?.capture_source };
+    report.checks.push({ name: "e32.sprite_visivel_na_janela_pos_reabertura", pass: visualObservation?.window_crop_matches_expected === true && visualObservation?.canvas_matches_reference === true, observed: { attempts: visualAttempts.length, mismatches: visualObservation?.window_crop?.mismatches ?? null, source: visualObservation?.capture_source, proof_error: visualObservation?.window_proof?.error ?? null }, required: "recorte da janela identico ao raster independente (0 mismatches) com dados intactos; magenta puro diverge e falha" });
+    if (!report.checks.at(-1).pass) throw new Error(`PASSO 9 (E3-2): o sprite pos-reabertura nao ficou visivel na janela: ${JSON.stringify(visualAttempts)}`);
+
+    report.steps.push({ step: 9, name: "confirmar_estado_reaberto", painel: { current: reopenedPanel.current, prediction: reopenedPanel.prediction }, ledger_entries: ledger.length, provenvenience: reopenedProvenience.slice(0, 200), recompose: { pixels_checked: recomposedPixels, layout_unobstructed: Boolean(recomposedLayout) }, apresentacao: { tentativas: visualAttempts.length, crop_mismatches: visualObservation.window_crop.mismatches, fonte: visualObservation.capture_source } });
     await captureScreenshot(sessionIdRef, `${prefix}-anim-integrada-passo9.png`);
 
     // PASSO 10 — restaurar so a duracao: o byte 0x13BAE volta a $17 e o pixel
@@ -11054,6 +11338,381 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       fail(`Jornada integrada INCONCLUSIVA/FAIL frente ao congelado (sem promover nada): ${JSON.stringify({ failed, report_path: path.join(pilotDir, "report.json") })}`);
     }
     console.log(`OK: Sonic anim-integrada journey E2E; allPass=true; report=${path.join(pilotDir, "report.json")}`);
+    return sessionIdRef;
+  } catch (error) {
+    await persistReport({ allPass: false, aborted: true, error: String(error?.message ?? error), finished_at: new Date().toISOString() }).catch(() => null);
+    throw error;
+  }
+}
+
+// Cenario de diagnostico da missao visual (ETAPA 1, congelado em
+// docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-VISUAL-ETAPA1.md):
+// separa DADOS (pixels do canvas vs referencia independente) de
+// APRESENTACAO (recorte do pixmap X11 da janela real vs raster esperado) em
+// cada transicao de estado da jornada: instancia 1 (O0/O1), pump do core na
+// mesma instancia (O2) e reabertura pos-destruicao da janela (O3). Sondas
+// P1..P3 classificam o mecanismo quando o defeito se reproduz. Nada aqui
+// altera o produto nem promove entregas.
+async function runSonicAnimVisualDiagnosticoScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
+  const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const baseSha256 = hash(base);
+  if (base.length !== 531577 || baseSha256 !== "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb") {
+    fail(`O diagnostico visual exige a ROM BYOR pinada de Sonic 1 (USA, Europe): ${baseSha256}`);
+  }
+  const compositingDisabled = process.env.WEBKIT_DISABLE_COMPOSITING_MODE === "1";
+  await ensureValidationDir();
+  const pilotDir = path.join(validationDir, `${prefix}-anim-visual`);
+  await mkdir(pilotDir, { recursive: true });
+  const report = {
+    schema: "rex-sonic-anim-visual-diagnostico/v1",
+    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-VISUAL-ETAPA1.md",
+    binary_sha256: hash(await readFile(app)),
+    base_rom_sha256: baseSha256,
+    webkit_disable_compositing_mode: process.env.WEBKIT_DISABLE_COMPOSITING_MODE ?? null,
+    observations: [],
+    checks: [],
+    notes: [
+      "adaptacao de conducao 1 (evidencia run 2026-10-03T16:28): a troca nativa de frame nao confirma selecao com o runtime da Game View vivo no mesmo contexto; a recomposicao da O2 passa a ocorrer depois do encerramento pelo caminho visivel 'Parar' (stopEmulator).",
+      "adaptacao de conducao 2 (evidencia run 2026-10-03T16:36): 'Parar' navega para o workspace Scene (App.tsx resetEmulatorSession(true)) e a sessao de inspecao e useState local (InspectionPanel.tsx:85); a volta a superficie se faz reabrindo a sessao salva, salva antes do pump. O contrato de observacoes O0..O3 e os gates permanecem os congelados em EXPECTATIONS-VISUAL-ETAPA1.md (08d3918).",
+    ],
+  };
+  const persistReport = async (extra = {}) => {
+    await writeFile(path.join(pilotDir, "report.json"), JSON.stringify({ ...report, ...extra }, null, 2));
+  };
+  const pushCheck = (entry) => {
+    report.checks.push(entry);
+    return entry;
+  };
+  let sessionIdRef = sessionId;
+  try {
+    // O0 — instancia 1 com o stand ja composto e verificado pelo preload.
+    const standReference = renderSonicFrameReference(base, 1);
+    const o0 = await captureVisualObservation(sessionIdRef, "o0-stand-instancia1", prefix, standReference, [255, 0, 255]);
+    report.observations.push(o0);
+    await persistReport();
+
+    // O1 — walk-1 da base na mesma instancia.
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes de compor walk-1 (O1)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "compor walk-1 base (O1)");
+    const walkBaseReference = renderSonicFrameReference(base, 6);
+    await waitFor(
+      async () => {
+        const v = await readRenderedSpriteFramePixels(sessionIdRef);
+        return v?.frameId === "sonic1_sonic/walk-1" && v.romSha256 === baseSha256 ? v : false;
+      },
+      30000,
+      "O walk-1 da base nao compondo na instancia 1 (O1)",
+      100
+    );
+    const o1 = await captureVisualObservation(sessionIdRef, "o1-walk1-instancia1", prefix, walkBaseReference, [255, 0, 255]);
+    report.observations.push(o1);
+    await persistReport();
+
+    // Pintura de 1 pixel pela interface nativa para habilitar a copia e o
+    // play da modificada — transicoes de estado do caminho real da jornada.
+    const paintedReferenceProbe = renderSonicFrameReference(base, 6);
+    const at = paintedReferenceProbe.locations[0];
+    if (!at) fail("Pixel de controle nao pertence ao mapping independente do walk-1");
+    const oldIndex = at.high ? base[at.offset] >> 4 : base[at.offset] & 15;
+    const paintIndex = oldIndex === 15 ? 14 : 15;
+    const paintedBytes = Buffer.from(base);
+    paintedBytes[at.offset] = at.high
+      ? (paintedBytes[at.offset] & 0x0f) | (paintIndex << 4)
+      : (paintedBytes[at.offset] & 0xf0) | paintIndex;
+    const paintedSha256 = hash(paintedBytes);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `sonic-color-${paintIndex}`, "selecionar a cor de pintura (diagnostico)");
+    const paintPoint = await executeScript(sessionIdRef, `
+      const img=document.querySelector('[data-testid="sonic-paint-image"]');
+      img?.scrollIntoView({block:'center',inline:'center'});
+      const r=img?.getBoundingClientRect(); if(!r) return null;
+      const x=r.left+r.width/(Number(arguments[0])*2),y=r.top+r.height/(Number(arguments[1])*2);
+      return {x,y,unobstructed:document.elementFromPoint(x,y)===img};
+    `, [paintedReferenceProbe.width, paintedReferenceProbe.height]);
+    if (!paintPoint?.unobstructed) fail(`Pintura do diagnostico obstruida: ${JSON.stringify(paintPoint)}`);
+    await webdriverRequest("POST", `/session/${sessionIdRef}/actions`, { actions: [{ type: "pointer", id: "sonic-paint-pointer", parameters: { pointerType: "mouse" },
+      actions: [{ type: "pointerMove", duration: 0, x: Math.round(paintPoint.x), y: Math.round(paintPoint.y), origin: "viewport" }, { type: "pointerDown", button: 0 }, { type: "pointerUp", button: 0 }] }] });
+    const sharedSelector = '[data-testid="sonic-paint-confirm-shared"]';
+    const sharedVisible = await executeScript(sessionIdRef, `return Boolean(document.querySelector(${JSON.stringify(sharedSelector)}));`);
+    if (sharedVisible) {
+      await clickElementWithDiagnostics(sessionIdRef, await findElement(sessionIdRef, sharedSelector), sharedSelector);
+    }
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "sonic-paint-apply", "aplicar pintura do diagnostico");
+    await waitFor(
+      async () => (await readRenderedSpriteFramePixels(sessionIdRef))?.romSha256 === paintedSha256,
+      30000,
+      "A pintura do diagnostico nao confirmou os bytes independentes",
+      100
+    );
+
+    // Exportar/aplicar BPS para habilitar "Jogar ROM modificada" pelo fluxo
+    // real da superficie (mesmo caminho da jornada multiframe).
+    const patchPath = path.join(pilotDir, "diagnostico.bps");
+    const appliedPath = path.join(pilotDir, "diagnostico-aplicada.bin");
+    const nativePathInput = async (testId, value) => {
+      const selector = `[data-testid="${testId}"] input`;
+      const element = await findElement(sessionIdRef, selector);
+      await clickElementWithDiagnostics(sessionIdRef, element, selector);
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/clear`, {});
+      await webdriverRequest("POST", `/session/${sessionIdRef}/element/${element}/value`, { text: value, value: [...value] });
+    };
+    await nativePathInput("sonic-patch-path", patchPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-export-patch", "exportar BPS do diagnostico");
+    await waitFor(() => pathExists(patchPath), 15000, "O BPS do diagnostico nao foi exportado", 100);
+    await nativePathInput("sonic-applied-path", appliedPath);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-apply-patch", "aplicar BPS do diagnostico");
+    await waitFor(() => pathExists(appliedPath), 15000, "O BPS do diagnostico nao foi aplicado", 100);
+    if (!(await readFile(appliedPath)).equals(paintedBytes)) fail("A aplicacao BPS do diagnostico divergiu da ROM calculada independentemente");
+
+    // Salvar a sessao ANTES do pump: o controle visivel "Parar" devolve o
+    // app ao workspace Scene (App.tsx: resetEmulatorSession(true)) e a
+    // sessao de inspecao vive em useState local (InspectionPanel.tsx:85).
+    // A volta pelo proprio produto se faz reabrindo a sessao salva; salvar
+    // continua precedendo destruir nas duas pernas (O2 intra-instancia,
+    // O3 restart), preservando o congelado "salvar -> destruir -> reabrir".
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-save", "salvar sessao antes do pump (diagnostico visual)");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="inspection-saved-session"][data-session-id="${savedId}"]'));`),
+      15000,
+      "A sessao salva do diagnostico nao apareceu na lista antes do pump",
+      100
+    );
+
+    // O2 — pump do core na MESMA instancia (orcamento limitado e
+    // diagnosticavel: traco cru de frames, sem sleep arbitrario).
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-sonic-play-modified", "pump do core na instancia 1 (O2)");
+    await waitFor(
+      async () => {
+        const frame = await readCanonicalGameFrame(sessionIdRef);
+        return frame && frame.romSha256 === paintedSha256 && frame.romSize === paintedBytes.length ? frame : false;
+      },
+      30000,
+      "A Game View nao confirmou a identidade da copia pintada (O2)",
+      100
+    );
+    const pumpStartedAt = Date.now();
+    const pumpTrace = [];
+    let pumpLast = null;
+    const pumpGoal = await waitFor(
+      async () => {
+        const progress = await readCanonicalGameProgress(sessionIdRef);
+        if (progress) {
+          pumpLast = progress;
+          const elapsedMs = Date.now() - pumpStartedAt;
+          if (pumpTrace.length === 0 || elapsedMs >= pumpTrace[pumpTrace.length - 1].t_ms + 5000) {
+            pumpTrace.push({ t_ms: elapsedMs, rf: progress.renderedFrames, status: progress.gameStatus });
+          }
+        }
+        return progress && progress.renderedFrames >= 120 ? progress : false;
+      },
+      120000,
+      "O pump do core nao alcancou 120 frames no orcamento do diagnostico",
+      100
+    ).catch(() => null);
+    report.pump = { reached: Boolean(pumpGoal), trace: pumpTrace, last: pumpLast };
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "viewport-pause", "pausar o pump antes da observacao O2");
+    const rfHoldBefore = await readCanonicalGameProgress(sessionIdRef);
+    await waitFor(
+      async () => {
+        const after = await readCanonicalGameProgress(sessionIdRef);
+        return after && after.renderedFrames === rfHoldBefore.renderedFrames ? after : false;
+      },
+      5000,
+      "O pump da Game View nao estabilizou com viewport-pause antes da O2",
+      250
+    );
+    await persistReport();
+
+    // Encerrar a execucao pelo mesmo caminho do controle visivel "Parar"
+    // (stopEmulator): com runtime ativo no mesmo contexto, a troca nativa de
+    // frame nao confirmava selecao (run de 2026-10-03 16:29) — o teclado
+    // pertence a Game View. Paused nao e encerrado; parar e o caminho do UX.
+    const stoppedRun = await executeAsyncScript(sessionIdRef, `const done = arguments[arguments.length - 1]; window.__RDS_E2E__?.stopEmulator?.().then((ok) => done(Boolean(ok))).catch(() => done(false));`);
+    if (!stoppedRun) fail("O encerramento da execucao (Parar) nao confirmou parada do core antes da recomposicao (O2)");
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionIdRef);
+        return state && state.emulatorLoaded === false ? state : false;
+      },
+      15000,
+      "O estado do app nao registrou emulatorLoaded=false apos o encerramento (O2)",
+      100
+    );
+
+    // Voltar a area de inspecao pelo caminho real do produto: o "Parar"
+    // navegou para Scene. Reabrir a sessao salva restaura o estado pela
+    // persistencia (nao por memoria de UI) e o painel remonta sem frame —
+    // a recomposicao exige selecao + compose novos, nunca um elemento antigo.
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "workspace-rail-debug", "voltar ao Debug Workspace apos o Parar (O2)");
+    await callAutomationApi(sessionIdRef, "openToolsWorkspace", ["reverse", "debug", true]);
+    await waitForBodyText(sessionIdRef, "Analisar ROM", 20000, "O Reverse Workspace nao voltou apos o Parar (O2)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "reverse-tab-inspection", "reabrir a aba de inspecao apos o Parar (O2)");
+    // E3-4 (EXPECTATIONS-VISUAL-ETAPA3.md): o contrato do remontage mudou na
+    // ETAPA 2 de proposito (gate E2-7): com sessao viva na mesma pagina o
+    // painel hidrata o estado pelo cache de modulo em vez de montar vazio.
+    // O wait "quadro ausente" codificava o produto pre-E2-7; a perna passa a
+    // exigir a sessao viva hidratada SEM navegar pelo catalogo. As etapas
+    // seguintes (selecionar + recompor) continuam produzindo a observacao.
+    const hydratedRemount = await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
+      15000,
+      "ETAPA 3 (E3-4): o painel remontado nao hidratou a sessao viva pelo cache de modulo (contrato E2-7)",
+      250
+    );
+    pushCheck({ name: "e34.remontagem_hidrata_sessao_viva", pass: hydratedRemount?.session?.id === savedId, observed: { session: hydratedRemount?.session, frame_present: (await readRenderedSpriteFramePixels(sessionIdRef)) !== null } });
+    if (!report.checks.at(-1).pass) throw new Error(`E3-4: remontagem nao hidratou a sessao viva: ${JSON.stringify(hydratedRemount)}`);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-refresh-sessions", "listar sessoes apos o Parar (O2)");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),
+      30000,
+      "A sessao salva nao reapareceu na lista apos o Parar (O2)",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `select-saved-session-${savedId}`, "selecionar sessao salva apos o Parar (O2)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-reopen", "reabrir sessao apos o Parar (O2)");
+    await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
+      30000,
+      "A sessao nao foi reaberta com estado completo apos o Parar (O2)",
+      100
+    );
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes de recompor walk-1 pos-pump (O2)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "recompor walk-1 pos-pump (O2)");
+    const paintedReference = renderSonicFrameReference(paintedBytes, 6);
+    await waitFor(
+      async () => {
+        const v = await readRenderedSpriteFramePixels(sessionIdRef);
+        return v?.frameId === "sonic1_sonic/walk-1" && v.romSha256 === paintedSha256 ? v : false;
+      },
+      30000,
+      "O walk-1 recomposto nao corresponde copia pintada apos o pump (O2)",
+      100
+    );
+    const o2 = await captureVisualObservation(sessionIdRef, "o2-walk1-pos-pump", prefix, paintedReference, [255, 0, 255]);
+    report.observations.push(o2);
+    await persistReport();
+
+    // O3 — destruir a janela, recriar a instancia e reabrir do disco. A
+    // sessao ja foi salva antes do pump e nada altera a sessao entre O2 e
+    // O3 (a recomposicao e leitura), entao o salvar -> destruir -> reabrir
+    // do congelado permanece integro na ordem.
+    await deleteSession(sessionIdRef);
+    sessionIdRef = await createSession(app);
+    currentE2eRunContext.sessionId = sessionIdRef;
+    await waitForAppWindowReady(sessionIdRef, uiBootstrapTimeoutMs, "O app do diagnostico visual nao reabriu");
+    await handleProjectWizardVisibly(sessionIdRef, "anim-visual-diagnostico-restart");
+    await setSessionWindowRect(sessionIdRef, 1920, 1080);
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "workspace-rail-debug", "reabrir Debug Workspace no diagnostico");
+    await callAutomationApi(sessionIdRef, "openToolsWorkspace", ["reverse", "debug", true]);
+    await waitForBodyText(sessionIdRef, "Analisar ROM", 20000, "O Reverse Workspace nao voltou no diagnostico");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "reverse-tab-inspection", "reabrir inspecao no diagnostico");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-refresh-sessions", "listar sessoes no diagnostico");
+    await waitFor(
+      async () => executeScript(sessionIdRef, `return Boolean(document.querySelector('[data-testid="select-saved-session-${savedId}"]'));`),
+      30000,
+      "A sessao salva nao reapareceu apos destruir a janela (diagnostico)",
+      100
+    );
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, `select-saved-session-${savedId}`, "selecionar sessao salva (diagnostico)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-reopen", "reabrir sessao (diagnostico)");
+    await waitFor(
+      async () => {
+        const state = await readInspectionUiState(sessionIdRef);
+        return state?.session?.id === savedId && state.session.status === "completed" ? state : false;
+      },
+      30000,
+      "A sessao do diagnostico nao foi reaberta com estado completo",
+      100
+    );
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
+    await closeVisibleConsoleDrawer(sessionIdRef, "antes da recomposicao pos-reabertura (O3)");
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "recompor walk-1 pos-reabertura (O3)");
+    await waitFor(
+      async () => {
+        const v = await readRenderedSpriteFramePixels(sessionIdRef);
+        return v?.frameId === "sonic1_sonic/walk-1" && v.romSha256 === paintedSha256 ? v : false;
+      },
+      30000,
+      "O walk-1 reaberto nao corresponde copia pintada (O3)",
+      100
+    );
+    const o3 = await captureVisualObservation(sessionIdRef, "o3-walk1-pos-reabertura", prefix, paintedReference, [255, 0, 255]);
+    report.observations.push(o3);
+    await persistReport();
+
+    // Gates do congelado: dados intactos em toda observacao; apresentacao
+    // correta nas observacoes de linha de base; reproducao/classificacao na
+    // reabertura.
+    for (const observation of [o0, o1, o2, o3]) {
+      pushCheck({ name: `dados.canvas_igual_referencia.${observation.label}`, pass: observation.canvas_matches_reference === true, observed: { canvas_sha: observation.canvas_pixels_sha256, capture_source: observation.capture_source } });
+    }
+    pushCheck({ name: "apresentacao.baseline_o0_o1_o2_janela_igual_raster", pass: [o0, o1, o2].every((observation) => observation.window_crop_matches_expected === true), observed: [o0, o1, o2].map((observation) => ({ label: observation.label, matches: observation.window_crop_matches_expected, mismatches: observation.window_crop?.mismatches, solid: observation.window_crop?.solidColor })) });
+    const defeitoReproduzido = o3.canvas_matches_reference === true && o3.window_crop_matches_expected === false;
+    pushCheck({
+      name: compositingDisabled ? "ab.com_pos_reabertura_apresentacao_correta" : "reproducao.defeito_pos_reabertura",
+      pass: compositingDisabled ? o3.window_crop_matches_expected === true : defeitoReproduzido,
+      observed: { compositing_disabled: compositingDisabled, canvas_ok: o3.canvas_matches_reference, crop_matches: o3.window_crop_matches_expected, mismatches: o3.window_crop?.mismatches, solid: o3.window_crop?.solidColor, magenta_fraction: (o3.window_crop?.topColors ?? []).find((entry) => entry.color === "255,0,255")?.fraction ?? 0 },
+      required: compositingDisabled ? "com WEBKIT_DISABLE_COMPOSITING_MODE=1 a janela deve bater com o raster esperado" : "na execucacao sem mitigacao a janela deve divergir com dados intactos (achado do run-4)",
+    });
+    report.defeito_reproduzido = defeitoReproduzido;
+
+    // Sondas discriminantes somente quando o defeito se reproduziu.
+    if (defeitoReproduzido) {
+      const imageSelector = "[data-testid=\"inspection-sprite-frame-image\"]";
+      await executeScript(sessionIdRef, `const img=document.querySelector(${JSON.stringify(imageSelector)}); img.style.backgroundColor='transparent'; return true;`);
+      const p1 = await captureVisualObservation(sessionIdRef, "p1-fundo-transparente", prefix, paintedReference, [11, 15, 25]);
+      report.observations.push(p1);
+      await executeScript(sessionIdRef, `const img=document.querySelector(${JSON.stringify(imageSelector)}); img.style.backgroundColor=''; return true;`);
+      await executeAsyncScript(sessionIdRef, `
+        const done = arguments[arguments.length - 1];
+        const img = document.querySelector(${JSON.stringify(imageSelector)});
+        img.style.display = 'none';
+        void img.offsetWidth;
+        img.style.display = 'block';
+        requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
+      `);
+      const p2 = await captureVisualObservation(sessionIdRef, "p2-repaint-display", prefix, paintedReference, [255, 0, 255]);
+      report.observations.push(p2);
+      await executeAsyncScript(sessionIdRef, `
+        const done = arguments[arguments.length - 1];
+        const img = document.querySelector(${JSON.stringify(imageSelector)});
+        const src = img.getAttribute('src');
+        img.removeAttribute('src');
+        requestAnimationFrame(() => {
+          img.onload = () => done(true);
+          setTimeout(() => done(false), 8000);
+          img.setAttribute('src', src);
+        });
+      `);
+      const p3 = await captureVisualObservation(sessionIdRef, "p3-reatribuicao-src", prefix, paintedReference, [255, 0, 255]);
+      report.observations.push(p3);
+      report.probes = {
+        p1: { crop_matches: p1.window_crop_matches_expected, solid: p1.window_crop?.solidColor, mismatches: p1.window_crop?.mismatches },
+        p2: { crop_matches: p2.window_crop_matches_expected, solid: p2.window_crop?.solidColor, mismatches: p2.window_crop?.mismatches },
+        p3: { crop_matches: p3.window_crop_matches_expected, solid: p3.window_crop?.solidColor, mismatches: p3.window_crop?.mismatches },
+      };
+      await persistReport();
+    }
+
+    const allPass = report.checks.every((entry) => entry.pass !== false);
+    report.veredito = allPass
+      ? (compositingDisabled
+        ? "A/B: com compositing desabilitado a apresentacao bate com o raster independente na reabertura"
+        : "Reproduzido: dados intactos e janela sem bitmap pintado na reabertura; sondas registradas para classificacao do mecanismo")
+      : "Diagnostico nao classificou conforme o congelado — ver checks e observacoes cruas";
+    await persistReport({ allPass, finished_at: new Date().toISOString() });
+    if (!allPass) {
+      const failed = report.checks.filter((entry) => entry.pass === false);
+      fail(`Diagnostico visual INCONCLUSIVO/FAIL frente ao congelado (sem promover nada): ${JSON.stringify({ failed, report_path: path.join(pilotDir, "report.json") })}`);
+    }
+    console.log(`OK: Sonic anim-visual diagnostico E2E; allPass=true; report=${path.join(pilotDir, "report.json")}`);
     return sessionIdRef;
   } catch (error) {
     await persistReport({ allPass: false, aborted: true, error: String(error?.message ?? error), finished_at: new Date().toISOString() }).catch(() => null);
@@ -15830,10 +16489,12 @@ async function main() {
     const sonicMultiframeMode = options.scenario === "sonic-multiframe";
     const sonicCadenceMode = options.scenario === "sonic-cadence-journey";
     const sonicAnimIntegradaMode = options.scenario === "sonic-anim-integrada";
+    const sonicAnimVisualMode = options.scenario === "sonic-anim-visual-diagnostico";
     const sonicTilesMode = options.scenario === "inspection-sonic-tiles";
     if (sonicMultiframeMode) options.scenario = "inspection-sonic";
     if (sonicCadenceMode) options.scenario = "inspection-sonic";
     if (sonicAnimIntegradaMode) options.scenario = "inspection-sonic";
+    if (sonicAnimVisualMode) options.scenario = "inspection-sonic";
     if (sonicTilesMode) options.scenario = "inspection-sonic";
     if (["inspection", "inspection-cancel", "inspection-complete", "inspection-sprite-secondary", "inspection-sonic", "inspection-preview-unavailable"].includes(options.scenario)) {
       let inspectionRom = process.env.RDS_INSPECTION_ROM ?? "";
@@ -16004,6 +16665,11 @@ async function main() {
         }
         if (sonicAnimIntegradaMode) {
           sessionId = await runSonicAnimIntegradaScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
+          currentE2eRunContext.sessionId = sessionId;
+          return;
+        }
+        if (sonicAnimVisualMode) {
+          sessionId = await runSonicAnimVisualDiagnosticoScenario(sessionId, options.app, inspectionRom, inspectionRomBytes, completedState.session.id, artifactPrefix, uiBootstrapTimeoutMs);
           currentE2eRunContext.sessionId = sessionId;
           return;
         }

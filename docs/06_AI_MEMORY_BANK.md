@@ -2563,3 +2563,58 @@ arquivos-ROM ficam LOCAIS (hashes pinados no manifesto em
 Classificação mantida: Experimental / local profile validation — sem merge,
 release ou promoção de maturidade por esta frente; integração é decisão do
 integrador.
+
+### Checkpoint 2026-10-03 — frente VISUAL da jornada Sonic (ETAPAs 1–4, branch própria)
+
+Frente `codex/rex-sonic-anim-visual` (worktree REX-SONIC-ANIM-VISUAL-2026-10-03),
+filha da entrega `codex/rex-sonic-anim-integrada` @ 8edf69d (PR #101); PR
+dependente daquela. Missão: tornar a capacidade atual visualmente correta e
+utilizável, sem ampliar codecs/variantes/animações.
+
+ETAPA 1 (fechada, `256779d`): causa do preview walk-1 todo magenta após
+reabertura estabelecida com reprodução e evidência — sob compositor acelerado
+do WebKitGTK, janela destruída/recriada nunca repinta o bitmap do `<img>`; A/B
+com `WEBKIT_DISABLE_COMPOSITING_MODE=1` restaura byte-exact (relatório
+`89a35a2b…`, análise offline da captura defeituosa: 12258 mismatches, bloco
+magenta 120×120 defasado +99px em y; extração/deco, bytes da ROM, host e
+caminho de screenshot exonerados). Registrado em
+`docs/rex_profiles/sonic_anim_integrada/evidence/2026-10-03-visual/CAUSA-MAGENTA.md`.
+
+ETAPA 2 (fechada, `87a9b48`+`ac08fbb`): workspace de animação na UI real —
+área dedicada com grupos (duração/cor/pixels), comparação lado a lado
+Original · ROM base intocada vs Cópia atual via composição `from_base` com
+guarda de oracle estendida, estado pendente/aplicado/salvo, política de
+PROPOSTA para Mais lento/Mais rápido (nada grava sem "Aplicar duração"),
+mensagens inline junto da operação, bloco de ações (BPS, aplicar, jogar,
+observar) e retomada por banner + cache de sessão viva. Gates E2-1..E2-10
+congelados em `EXPECTATIONS-VISUAL-ETAPA2.md` (`d4eb3ef`) antes de implementar.
+
+ETAPA 3 (fechada, `94f5fca`→`932f2c6`→`a0067d8`→`b396abb`): correção NO
+PRODUTO — `app_lib::run()` define `WEBKIT_DISABLE_COMPOSITING_MODE=1` em
+Linux antes do Builder (trade-off: render por software, aceito e registrado).
+Jornada retificada (E3-1 aborta se a mitigação estiver no ambiente do harness;
+E3-2 gate de raster da janela via pixmap X11 vs raster independente; E3-3
+prova offline discriminante contra a captura defeituosa arquivada; E3-4
+remontagem hidratada pelo contrato E2-7 e banner que cede à reabertura
+explícita) passou **allPass 28/28 no binário final** `ce54d579…` construído em
+`a0067d8` limpo (gate de proveniência ativo), sem mitigação de ambiente, com
+sprite visível pós-reabertura na 1ª captura (0 mismatches, magenta_fraction
+0,57 = matte correto) e restauração seletiva preservando o pixel. Expectativas
+`EXPECTATIONS-VISUAL-ETAPA3.md` congeladas sozinhas antes de implementar.
+
+ETAPA 4 (fechada neste checkpoint): `CX-ROTEIRO.md` revisado contra a
+superfície entregue (caminho real Ferramentas → Reverse Workspace → Inspeção
+visual; política de proposta; "Editar cor da paleta"; comparação lado a lado;
+banner que cede; tarefa 2b nova de pixel+comparação) — **validação humana
+continua pendente por design**; nenhuma alegação de usabilidade.
+Reconciliação de gates com comandos realmente executados em
+`GATES-ETAPA4.md`: check:tree, lint, tsc, vitest 930/0/6skip, fmt, clippy
+CANÔNICO, cargo test --lib 850/0/80 e host:certify READY (fingerprint
+`60249508…`) executados no HEAD da ETAPA 4; `clippy --all-targets` e audits de
+segurança NÃO aparecem como aprovados (dívida preexistente de 46 falhas de
+código de teste da base; dependências inalteradas — `git diff` vazio de
+package/lock/Cargo desde a base — auditorias ficam a cargo do CI do PR).
+
+Classificação mantida: Experimental / local profile validation — sem merge,
+release, promoção ou push forçado por esta frente; Linux-only para a
+correção de apresentação; integração é decisão do integrador.

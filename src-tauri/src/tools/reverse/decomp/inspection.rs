@@ -1270,6 +1270,7 @@ pub fn sprite_frame(
     frame_id: &str,
     flip_x: bool,
     flip_y: bool,
+    from_base: bool,
 ) -> Result<super::sprite_composition::InspectionSpriteFrame, String> {
     let stored = get_stored_session(session_id)?;
     super::sprite_composition::compose_for_session(
@@ -1278,6 +1279,7 @@ pub fn sprite_frame(
         frame_id,
         flip_x,
         flip_y,
+        from_base,
     )
 }
 
@@ -1755,9 +1757,15 @@ mod tests {
         let (_, base) = rex_read_rom(Path::new(&path)).unwrap();
         let mut evidence = Vec::new();
         for choice in sonic::choices() {
-            let preview =
-                comp::compose_for_session(&session, "sonic1_sonic", &choice.id, false, false)
-                    .unwrap();
+            let preview = comp::compose_for_session(
+                &session,
+                "sonic1_sonic",
+                &choice.id,
+                false,
+                false,
+                false,
+            )
+            .unwrap();
             assert_eq!(
                 preview.sonic_context.as_ref().unwrap().mapping_index,
                 choice.mapping_index
@@ -1875,7 +1883,8 @@ mod tests {
         assert_eq!(reopened.sprite_frame_id.as_deref(), Some(frame_id));
         assert_eq!(reopened.edit, saved.edit);
         let after =
-            comp::compose_for_session(&reopened, "sonic1_sonic", frame_id, false, false).unwrap();
+            comp::compose_for_session(&reopened, "sonic1_sonic", frame_id, false, false, false)
+                .unwrap();
         assert_eq!(after.rom_sha256, second.modified_rom_sha256);
         assert_eq!(
             rex_read_rom(Path::new(&path)).unwrap().1,
@@ -2011,9 +2020,31 @@ mod tests {
             "sonic1_sonic/stand",
             false,
             false,
+            false,
         )
         .unwrap();
         assert_eq!(composed.rom_sha256, painted.modified_rom_sha256);
+        // E2-3 (EXPECTATIONS-VISUAL-ETAPA2): a composição original usa os bytes
+        // da base intocada pelo mesmo pipeline, mesmo com edições acumuladas.
+        let original = comp::compose_for_session(
+            &get_stored_session(&session.session_id).unwrap().session,
+            "sonic1_sonic",
+            "sonic1_sonic/stand",
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(original.rom_sha256, super::sha256_hex(&base));
+        assert_eq!(
+            original.pixels_sha256.as_deref(),
+            Some(comp::SONIC1_STAND_PIXELS_SHA256),
+            "original pós-edição deve bater o golden da base"
+        );
+        assert_ne!(
+            original.pixels_sha256, composed.pixels_sha256,
+            "cópia pintada e original não podem colapsar na mesma imagem"
+        );
         // Os quatro índices distintos do script id_Wait compõem como frames
         // reais pelo mesmo pipeline (mapping/DPLC), sem geometria paralela.
         let live = get_stored_session(&session.session_id).unwrap().session;
@@ -2021,7 +2052,7 @@ mod tests {
         for byte in [0x01u8, 0x02, 0x03, 0x04] {
             let id = format!("sonic1_sonic/anim-{byte:02x}");
             let frame =
-                comp::compose_for_session(&live, "sonic1_sonic", &id, false, false).unwrap();
+                comp::compose_for_session(&live, "sonic1_sonic", &id, false, false, false).unwrap();
             assert!(frame.available, "{id} deveria compor");
             distinct.push((id, frame.pixels_sha256));
         }

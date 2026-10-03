@@ -2544,6 +2544,7 @@ async fn rex_inspection_sprite_frame(
     frame_id: String,
     flip_x: bool,
     flip_y: bool,
+    from_base: Option<bool>,
 ) -> Result<
     tools::reverse::decomp::sprite_composition::InspectionSpriteFrame,
     tools::reverse::decomp::inspection::InspectionError,
@@ -2555,6 +2556,7 @@ async fn rex_inspection_sprite_frame(
             &frame_id,
             flip_x,
             flip_y,
+            from_base.unwrap_or(false),
         )
     })
     .await
@@ -5587,6 +5589,11 @@ fn parse_input_command_file(path: String) -> Result<Vec<InputCommandDefinition>,
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK nao repinta bitmaps de <img> em janela destruida/recriada sob
+    // compositor acelerado (CAUSA-MAGENTA.md, A/B 89a35a2b); render por software.
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
