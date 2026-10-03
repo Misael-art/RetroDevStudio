@@ -1938,6 +1938,615 @@ mod tests {
         .unwrap();
     }
 
+    /// Etapa 4, passo 1 (sonda rotulada): liga o core Libretro real com a ROM
+    /// BYOR pinada, entra no jogo apenas por input e registra o que o core
+    /// expõe. Descobre por temporalidade (não por mapa fixo) o contador de
+    /// duração da animação do jogador e grava a log de mudanças do framebuffer.
+    /// Nada aqui é promovido a prova: a prova é o oracle que consome estes
+    /// endereços descobertos.
+    #[test]
+    #[ignore = "BYOR Sonic pinado + core Libretro real; requer RDS_SONIC_MULTIFRAME_ROM e RDS_DECOMP_WORK"]
+    fn sonic_cadence_byor_probe_discovers_player_timer_on_real_core() {
+        use super::super::{sonic_cadence as cadence, sprite_composition as comp};
+        use crate::core::rom_mastering::sha256_hex;
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+
+        let path = std::env::var("RDS_SONIC_MULTIFRAME_ROM").expect("BYOR obrigatório");
+        assert!(
+            std::env::var("RDS_DECOMP_WORK").is_ok(),
+            "diretório de prova isolado obrigatório"
+        );
+        let rom_bytes = fs::read(&path).unwrap();
+        assert_eq!(
+            sha256_hex(&rom_bytes),
+            comp::SONIC1_REFERENCE_SHA256,
+            "a sonda só roda contra a ROM pinada do contrato"
+        );
+
+        let mut emu = EmulatorCore::new(None);
+        emu.load_rom(Path::new(&path)).expect("core real + BYOR");
+        let regions: Vec<serde_json::Value> = emu
+            .capture_normalized_regions()
+            .into_iter()
+            .map(|region| {
+                serde_json::json!({
+                    "label": region.label,
+                    "region_id": region.region_id,
+                    "available": region.available,
+                    "size": region.size,
+                })
+            })
+            .collect();
+        let (probe_bytes, wram_total) = emu.read_memory(2, 0, usize::MAX).expect("leitura WRAM");
+        assert_eq!(probe_bytes.len(), wram_total, "WRAM legível no offset 0");
+
+        // Rota de entrada: neutro até o frame 900, START segurado por 2 frames,
+        // liberado, neutro ate o frame 2400. Nenhuma escrita em estado.
+        // (A execucao 2 desta sonda mostrou que um segundo START congela tudo:
+        // e o pause do jogo, o que confirma que o primeiro START entra em jogo.)
+        let total_frames = 2400usize;
+        // Triplo descoberto pela execucao anterior da sonda por voto temporal
+        // (nao por mapa fixo): timer 0xD01F, anim 0xD01D, frame 0xD01B.
+        // Esta execucao caracteriza a serie temporal desses bytes.
+        const TIMER_IDX: usize = 0xD01F;
+        const ANIM_IDX: usize = 0xD01D;
+        const FRAME_IDX: usize = 0xD01B;
+        let mut previous: Option<Vec<u8>> = None;
+        let mut timer_votes: std::collections::BTreeMap<usize, usize> =
+            std::collections::BTreeMap::new();
+        // Voto condicional: decremento observado com o byte de animacao do
+        // objeto (timer - 2, pois obAnim=$1C e obTimeFrame=$1E) igual a 5.
+        let mut wait_votes: std::collections::BTreeMap<usize, usize> =
+            std::collections::BTreeMap::new();
+        let mut center_roi_changes: Vec<usize> = Vec::new();
+        let mut previous_roi_hash: Option<String> = None;
+        let mut full_frame_changes: Vec<usize> = Vec::new();
+        let mut previous_full_hash: Option<String> = None;
+        let mut byte_series: Vec<serde_json::Value> = Vec::new();
+        let mut wram_at_probe_frame: Option<Vec<u8>> = None;
+
+        for frame in 0..total_frames {
+            let pressed = (900..902).contains(&frame);
+            let joypad = if pressed {
+                JoypadState {
+                    start: true,
+                    ..JoypadState::default()
+                }
+            } else {
+                JoypadState::default()
+            };
+            emu.set_joypad(joypad).unwrap();
+            emu.run_frame().unwrap();
+            let (current, _) = emu.read_memory(2, 0, usize::MAX).unwrap();
+            if frame == 2300 {
+                wram_at_probe_frame = Some(current.clone());
+            }
+            if (1200..total_frames).contains(&frame)
+                && current[ANIM_IDX] == cadence::WAIT_ANIM as u8
+            {
+                byte_series.push(serde_json::json!({
+                    "frame": frame,
+                    "timer": current[TIMER_IDX],
+                    "anim": current[ANIM_IDX],
+                    "frame_byte": current[FRAME_IDX],
+                }));
+            }
+            if frame > 1200 {
+                if let Some(previous) = &previous {
+                    for address in 0..current.len().min(previous.len()) {
+                        let (before, now) = (previous[address], current[address]);
+                        if before == now {
+                            continue;
+                        }
+                        let decreased =
+                            (before > 0 && now == before - 1) || (before == 0 && now == 23);
+                        if decreased {
+                            *timer_votes.entry(address).or_default() += 1;
+                            if address >= 0x2
+                                && current.get(address - 0x2) == Some(&(cadence::WAIT_ANIM as u8))
+                            {
+                                *wait_votes.entry(address).or_default() += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            {
+                let (raw, size, format) = emu.get_framebuffer().unwrap();
+                let payload = framebuffer_to_rgba(&raw, size, format);
+                let full_hash = sha256_hex(&payload.rgba);
+                if previous_full_hash
+                    .as_ref()
+                    .is_some_and(|last| *last != full_hash)
+                {
+                    full_frame_changes.push(frame);
+                }
+                previous_full_hash = Some(full_hash);
+                if frame > 1200 {
+                    let (w, h) = (payload.width as usize, payload.height as usize);
+                    let (x0, y0) = (w / 2 - 32, h / 2 - 24);
+                    let mut roi = Vec::with_capacity(64 * 48 * 4);
+                    for y in y0..y0 + 48 {
+                        for x in x0..x0 + 64 {
+                            let offset = (y * w + x) * 4;
+                            roi.extend_from_slice(&payload.rgba[offset..offset + 4]);
+                        }
+                    }
+                    let hash = sha256_hex(&roi);
+                    if previous_roi_hash.as_ref().is_some_and(|last| *last != hash) {
+                        center_roi_changes.push(frame);
+                    }
+                    previous_roi_hash = Some(hash);
+                }
+            }
+            previous = Some(current);
+        }
+
+        let hot_addresses: Vec<usize> = timer_votes
+            .iter()
+            .filter(|(_, votes)| **votes > 400)
+            .map(|(address, _)| *address)
+            .collect();
+        let hot_timers: Vec<serde_json::Value> = hot_addresses
+            .iter()
+            .map(|address| {
+                let base = address.checked_sub(0x1E);
+                serde_json::json!({
+                    "wram_offset": format!("0x{:04X}", address),
+                    "decrement_votes": timer_votes[address],
+                    "wait_anim_votes": wait_votes.get(address).copied().unwrap_or(0),
+                    "object_base_guess": base.map(|value| format!("0x{:04X}", value)),
+                })
+            })
+            .collect();
+        let window_dump = wram_at_probe_frame.map(|bytes| {
+            hot_addresses
+                .iter()
+                .filter_map(|address| {
+                    let base = address.checked_sub(0x1E)?;
+                    let end = base + 0x40;
+                    if end > bytes.len() {
+                        return None;
+                    }
+                    Some(serde_json::json!({
+                        "base": format!("0x{:04X}", base),
+                        "bytes_hex": bytes[base..end].iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+                    }))
+                })
+                .collect::<Vec<_>>()
+        });
+
+        let report = serde_json::json!({
+            "probe": true,
+            "rom_sha256": comp::SONIC1_REFERENCE_SHA256,
+            "core_file": emu.loaded_core_file().map(|value| value.display().to_string()),
+            "regions": regions,
+            "wram_total": wram_total,
+            "frames_run": emu.frame_index(),
+            "hot_timers": hot_timers,
+            "full_frame_change_frames": full_frame_changes,
+            "byte_series": byte_series,
+            "wait_vote_totals": wait_votes.iter().map(|(address, votes)| serde_json::json!({
+                "wram_offset": format!("0x{:04X}", address),
+                "votes": votes,
+            })).collect::<Vec<_>>(),
+            "center_roi_change_frames": center_roi_changes,
+            "window_dumps": window_dump,
+            "layer": "sonda rotulada: só observação passiva + input; nada é escrito no estado",
+        });
+        fs::write(
+            decomp_work_dir().join("sonic-cadence-probe.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        emu.stop().ok();
+    }
+
+    /// Etapa 4: oracle de duracoes efetivas. Roda no core real a ROM pinada,
+    /// as copias canonicas (intervalo 40 e 60) e controles, descobrindo o
+    /// triplo do jogador por voto temporal em CADA ROM (nunca por mapa fixo) e
+    /// gravando series por corrida em RDS_DECOMP_WORK/oracle/. A arbitragem
+    /// H-N vs H-N+1 e a avaliacao dos negativos pertencem ao verificador
+    /// independente scripts/qa/sonic-cadence-runtime-oracle.mjs; as assercoes
+    /// aqui so seguram as portas duras (escopo de byte, recusas, determinismo,
+    /// discriminacao entre durações). Expectativas congeladas antes da execucao
+    /// em docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA4.md.
+    #[test]
+    #[ignore = "BYOR Sonic pinado + core real; 6 corridas de ~3300 frames; requer RDS_SONIC_MULTIFRAME_ROM e RDS_DECOMP_WORK"]
+    fn sonic_cadence_runtime_oracle_measures_effective_durations_on_real_core() {
+        use super::super::{sonic_cadence as cadence, sprite_composition as comp};
+        use crate::core::rom_mastering::sha256_hex;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+
+        let rom_path = std::env::var("RDS_SONIC_MULTIFRAME_ROM").expect("BYOR obrigatorio");
+        let work =
+            std::env::var("RDS_DECOMP_WORK").expect("diretorio de prova isolado obrigatorio");
+        let oracle_dir = Path::new(&work).join("oracle");
+        fs::create_dir_all(&oracle_dir).unwrap();
+
+        // C6: somente a ROM pinada entra no oracle.
+        let base_bytes = fs::read(&rom_path).unwrap();
+        let base_sha = sha256_hex(&base_bytes);
+        assert_eq!(
+            base_sha,
+            comp::SONIC1_REFERENCE_SHA256,
+            "C6: ROM fora do SHA pinado e recusada antes de tocar o core"
+        );
+
+        // Copias produzidas PELO PIPELINE CANONICO (nada de byte-patch manual
+        // para as variantes 40/60).
+        let session = open(&rom_path).unwrap();
+        let edit40 = edit_sonic_duration(&session.session_id, "sonic1_sonic", 40).unwrap();
+        let edit60 = edit_sonic_duration(&session.session_id, "sonic1_sonic", 60).unwrap();
+
+        // C5: valores reservados enoop recusados pelo pipeline (nada chega ao core).
+        for reserved in [0u8, 0x80, 0xFE, 0xFF] {
+            assert!(
+                edit_sonic_duration(&session.session_id, "sonic1_sonic", reserved).is_err(),
+                "C5: valor reservado {reserved} deveria ser recusado"
+            );
+        }
+        assert!(edit_sonic_duration(&session.session_id, "sonic1_tails", 45).is_err());
+        assert!(
+            edit_sonic_duration(&session.session_id, "sonic1_sonic", 60).is_err(),
+            "C5: edicao noop (atual==60) deveria ser recusada"
+        );
+
+        // C4 + C7: lidos dos ARQUIVOS pelos bytes, sem parser do produto.
+        for (edit, expected) in [(&edit40, 40u8), (&edit60, 60u8)] {
+            let copy = fs::read(&edit.modified_rom_path).unwrap();
+            assert_eq!(copy.len(), base_bytes.len());
+            let diffs: Vec<usize> = (0..copy.len())
+                .filter(|i| copy[*i] != base_bytes[*i])
+                .collect();
+            assert_eq!(
+                diffs,
+                vec![cadence::WAIT_ADDR],
+                "C4: escopo exato de escrita"
+            );
+            assert_eq!(copy[cadence::WAIT_ADDR], expected);
+            assert_eq!(sha256_hex(&copy), edit.modified_rom_sha256);
+            assert_eq!(
+                &copy[0x139c4..0x139c4 + cadence::SONIC_ANIMATE_PROLOGUE.len()],
+                cadence::SONIC_ANIMATE_PROLOGUE,
+                "C7: consumidor da cadencia intacto na copia"
+            );
+        }
+
+        // D: consumidor adulterado manualmente (fora do pipeline), so para
+        // mostrar que a cadencia provada depende dele. Prologo em 0x139C4.
+        let mut tampered = base_bytes.clone();
+        tampered[0x139c4] ^= 0x01;
+        let tampered_path = oracle_dir.join("manual-consumer-tampered.bin");
+        fs::write(&tampered_path, &tampered).unwrap();
+
+        fn route(frame: usize) -> JoypadState {
+            if (900..902).contains(&frame) {
+                JoypadState {
+                    start: true,
+                    ..JoypadState::default()
+                }
+            } else {
+                JoypadState::default()
+            }
+        }
+
+        // Fase 1: descoberta do timer do jogador por voto temporal — byte que
+        // decresce de 1 por frame com o byte de animacao (2 antes, obAnim=$1C
+        // vs obTimeFrame=$1E) valendo 5. Nenhum endereco e assumido: cada ROM
+        // re-descobre o proprio indice de regiao.
+        fn discover(rom: &Path) -> Option<(usize, u8)> {
+            use super::super::sonic_cadence as cadence;
+            use crate::emulator::libretro_ffi::EmulatorCore;
+            const WINDOW: usize = 1200;
+            const END: usize = 1600;
+            let mut emu = EmulatorCore::new(None);
+            emu.load_rom(rom).ok()?;
+            let mut previous: Option<Vec<u8>> = None;
+            let mut votes: std::collections::BTreeMap<usize, usize> =
+                std::collections::BTreeMap::new();
+            let mut jumps: std::collections::BTreeMap<
+                usize,
+                std::collections::BTreeMap<u8, usize>,
+            > = std::collections::BTreeMap::new();
+            for frame in 0..END {
+                emu.set_joypad(route(frame)).ok()?;
+                emu.run_frame().ok()?;
+                let (current, _) = emu.read_memory(2, 0, usize::MAX).ok()?;
+                if frame >= WINDOW {
+                    if let Some(previous) = &previous {
+                        for address in 2..current.len() {
+                            if current[address - 2] != cadence::WAIT_ANIM as u8 {
+                                continue;
+                            }
+                            let (before, now) = (previous[address], current[address]);
+                            if before > 0 && now == before - 1 {
+                                *votes.entry(address).or_default() += 1;
+                            } else if before == 0 && now != 0 {
+                                *jumps.entry(address).or_default().entry(now).or_default() += 1;
+                            }
+                        }
+                    }
+                }
+                previous = Some(current);
+            }
+            emu.stop().ok();
+            let (timer, vote_count) = votes.into_iter().max_by_key(|(_, count)| *count)?;
+            if vote_count < (END - WINDOW) * 2 / 3 {
+                return None;
+            }
+            let reload = jumps
+                .remove(&timer)?
+                .into_iter()
+                .max_by_key(|(_, count)| *count)?
+                .0;
+            Some((timer, reload))
+        }
+
+        // Fase 2: serie temporal a partir do timer descoberto + transicoes do
+        // byte de frame ($1A = timer-4) + mudancas de framebuffer pleno.
+        fn series(rom: &Path, timer: usize) -> serde_json::Value {
+            use super::super::sonic_cadence as cadence;
+            use crate::core::rom_mastering::sha256_hex;
+            use crate::emulator::frame_buffer::framebuffer_to_rgba;
+            use crate::emulator::libretro_ffi::EmulatorCore;
+            const WINDOW: usize = 1200;
+            const END: usize = 3300;
+            let mut emu = EmulatorCore::new(None);
+            emu.load_rom(rom).expect("core real na fase 2");
+            let mut rows: Vec<serde_json::Value> = Vec::new();
+            let mut frame_changes: Vec<usize> = Vec::new();
+            let mut previous_full: Option<String> = None;
+            for frame in 0..END {
+                emu.set_joypad(route(frame)).unwrap();
+                emu.run_frame().unwrap();
+                let (current, _) = emu.read_memory(2, 0, usize::MAX).unwrap();
+                if frame >= WINDOW {
+                    if current.get(timer - 2) == Some(&(cadence::WAIT_ANIM as u8)) {
+                        rows.push(serde_json::json!({
+                            "frame": frame,
+                            "timer": current[timer],
+                            "frame_byte": current[timer - 4],
+                        }));
+                    }
+                    let (raw, size, format) = emu.get_framebuffer().unwrap();
+                    let payload = framebuffer_to_rgba(&raw, size, format);
+                    let full = sha256_hex(&payload.rgba);
+                    if previous_full.as_ref().is_some_and(|last| *last != full) {
+                        frame_changes.push(frame);
+                    }
+                    previous_full = Some(full);
+                }
+            }
+            emu.stop().ok();
+            let mut transitions: Vec<usize> = Vec::new();
+            for i in 1..rows.len() {
+                let before = rows[i - 1]["frame"].as_u64().unwrap() as usize;
+                let now = rows[i]["frame"].as_u64().unwrap() as usize;
+                if now != before + 1 {
+                    continue;
+                }
+                if rows[i]["frame_byte"] != rows[i - 1]["frame_byte"] {
+                    transitions.push(now);
+                }
+            }
+            let gaps: Vec<usize> = (1..transitions.len())
+                .map(|i| transitions[i] - transitions[i - 1])
+                .collect();
+            serde_json::json!({
+                "rows": rows,
+                "transitions": transitions,
+                "gaps": gaps,
+                "frame_change_frames": frame_changes,
+            })
+        }
+
+        fn mode_usize(values: &[usize]) -> Option<usize> {
+            let mut counts: std::collections::BTreeMap<usize, usize> =
+                std::collections::BTreeMap::new();
+            for value in values {
+                *counts.entry(*value).or_default() += 1;
+            }
+            counts
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(value, _)| value)
+        }
+
+        fn run_one(
+            run_id: &str,
+            rom: &Path,
+            rom_sha: &str,
+            oracle_dir: &Path,
+        ) -> serde_json::Value {
+            let file_interval_byte = fs::read(rom).ok().map(|bytes| bytes[cadence::WAIT_ADDR]);
+            let discovered = discover(rom);
+            let mut record = serde_json::json!({
+                "schema": "rex-sonic-cadence-run/v1",
+                "run_id": run_id,
+                "rom_path": rom.display().to_string(),
+                "rom_sha256": rom_sha,
+                "file_interval_byte": file_interval_byte,
+                "discovery": discovered.as_ref().map(|(timer, reload)| serde_json::json!({
+                    "timer_region_index": format!("0x{timer:04X}"),
+                    "reload_byte": reload,
+                })),
+            });
+            if let Some((timer, _)) = &discovered {
+                let captured = series(rom, *timer);
+                let gaps: Vec<usize> = captured["gaps"]
+                    .as_array()
+                    .map(|values| {
+                        values
+                            .iter()
+                            .filter_map(|value| value.as_u64())
+                            .map(|v| v as usize)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                record["gaps_mode"] = serde_json::json!(mode_usize(&gaps));
+                record["transition_count"] =
+                    serde_json::json!(captured["transitions"].as_array().map(Vec::len));
+                record["series"] = captured;
+            }
+            fs::write(
+                oracle_dir.join(format!("run-{run_id}.json")),
+                serde_json::to_vec_pretty(&record).unwrap(),
+            )
+            .unwrap();
+            record
+        }
+
+        // Ordem da tabela: A1/A2 (controle), variantes, A3 (no-op depois), D.
+        let a1 = run_one("A1-original", Path::new(&rom_path), &base_sha, &oracle_dir);
+        let a2 = run_one(
+            "A2-original-controle",
+            Path::new(&rom_path),
+            &base_sha,
+            &oracle_dir,
+        );
+        let b = run_one(
+            "B40-pipeline",
+            Path::new(&edit40.modified_rom_path),
+            &edit40.modified_rom_sha256,
+            &oracle_dir,
+        );
+        let c = run_one(
+            "C60-pipeline",
+            Path::new(&edit60.modified_rom_path),
+            &edit60.modified_rom_sha256,
+            &oracle_dir,
+        );
+        let a3 = run_one(
+            "A3-original-pos-variantes",
+            Path::new(&rom_path),
+            &base_sha,
+            &oracle_dir,
+        );
+        let tampered_sha = sha256_hex(&tampered);
+        let d = run_one(
+            "D-consumidor-adulterado",
+            &tampered_path,
+            &tampered_sha,
+            &oracle_dir,
+        );
+
+        // C1/C2: mesma ROM, mesma serie, antes e depois das variantes.
+        assert_eq!(
+            a1["series"], a2["series"],
+            "C1: a ROM pinada deve reproduzir a serie exata"
+        );
+        assert_eq!(
+            a1["series"], a3["series"],
+            "C2: a original segue inalterada depois de rodar as variantes"
+        );
+
+        let mode_a = a1["gaps_mode"]
+            .as_u64()
+            .expect("A1: cadencia descobrivivel");
+        let mode_b = b["gaps_mode"]
+            .as_u64()
+            .expect("B40: cadencia descobrivivel");
+        let mode_c = c["gaps_mode"]
+            .as_u64()
+            .expect("C60: cadencia descobrivivel");
+        assert!(
+            matches!(mode_a, 23 | 24),
+            "A1 esperado 23 (H-N) ou 24 (H-N+1); veio {mode_a}"
+        );
+        assert!(
+            matches!(mode_b, 40 | 41),
+            "B40 esperado 40 ou 41; veio {mode_b}"
+        );
+        assert!(
+            matches!(mode_c, 60 | 61),
+            "C60 esperado 60 ou 61; veio {mode_c}"
+        );
+        for record in [&a1, &b, &c] {
+            let count = record["transition_count"].as_u64().unwrap_or(0);
+            assert!(
+                count >= 5,
+                "transicoes insuficientes para arbitrar: {count}"
+            );
+        }
+
+        // C3: mutacao discriminante — as tres duracoes devem diferir entre si.
+        assert_ne!(mode_a, mode_b, "40 nao discriminou contra o original");
+        assert_ne!(mode_b, mode_c, "60 nao discriminou contra 40");
+        assert_ne!(mode_a, mode_c, "60 nao discriminou contra o original");
+
+        // O reload observado deve ser o byte do arquivo: prova de consumo.
+        for (record, expected) in [(&a1, 23u8), (&b, 40), (&c, 60)] {
+            let reload = record["discovery"]["reload_byte"].as_u64().unwrap() as u8;
+            assert_eq!(
+                reload, expected,
+                "{}: reload != byte do arquivo",
+                record["run_id"]
+            );
+        }
+
+        // D negativo: o consumidor adulterado a mao nao pode reproduzir a
+        // cadencia provada do original (23/24).
+        let mode_d = d["gaps_mode"].as_u64();
+        assert!(
+            !matches!(mode_d, Some(23) | Some(24)),
+            "consumidor adulterado ainda produz a cadencia original (modo {mode_d:?})"
+        );
+
+        let core_sha = {
+            // loaded_core_file() so aponta para o core depois de um load real;
+            // uma instancia virgem retornaria None e o manifesto sairia cego.
+            let mut tracer = EmulatorCore::new(None);
+            tracer.load_rom(Path::new(&rom_path)).ok();
+            let sha = tracer
+                .loaded_core_file()
+                .and_then(|path| fs::read(path).ok())
+                .map(|bytes| sha256_hex(&bytes));
+            tracer.stop().ok();
+            sha
+        };
+        let binary_sha = std::env::current_exe()
+            .ok()
+            .and_then(|path| fs::read(path).ok())
+            .map(|bytes| sha256_hex(&bytes));
+        let harness_sha = fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(file!()))
+            .ok()
+            .map(|bytes| sha256_hex(&bytes));
+        let runs_summary: Vec<serde_json::Value> = [&a1, &a2, &b, &c, &a3, &d]
+            .iter()
+            .map(|record| {
+                serde_json::json!({
+                    "run_id": record["run_id"],
+                    "rom_sha256": record["rom_sha256"],
+                    "file_interval_byte": record["file_interval_byte"],
+                    "discovery": record["discovery"],
+                    "gaps_mode": record["gaps_mode"],
+                    "transition_count": record["transition_count"],
+                })
+            })
+            .collect();
+        let manifest = serde_json::json!({
+            "schema": "rex-sonic-cadence-oracle/v1",
+            "expectations_doc": "docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA4.md",
+            "base_rom_sha256": base_sha,
+            "tampered_rom_sha256": tampered_sha,
+            "copy40_sha256": edit40.modified_rom_sha256,
+            "copy60_sha256": edit60.modified_rom_sha256,
+            "core_sha256": core_sha,
+            "test_binary_sha256": binary_sha,
+            "harness_source_sha256": harness_sha,
+            "route": "neutro ate 900, START segurado nos frames 900-901, neutro depois; nenhuma escrita em estado",
+            "pipeline_refusals": ["0x00", "0x80", "0xFE", "0xFF", "recurso nao comprovado", "noop"],
+            "runs": runs_summary,
+        });
+        fs::write(
+            oracle_dir.join("manifest.json"),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn session_ids_cannot_become_paths() {
         assert!(validate_session_id("inspection-123-00000001").is_ok());

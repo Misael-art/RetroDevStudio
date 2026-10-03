@@ -1,0 +1,85 @@
+{
+  "base_rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "copy40_sha256": "57026bd8fcf04f210988743800e734b54667150637df5ba101301cdf5a60c530",
+  "copy60_sha256": "8ab5415c694b545e6ceb8bb917a7ab2c990cb3751cfec7a0952206aced0deb32",
+  "core_sha256": "07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1",
+  "expectations_doc": "docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA4.md",
+  "harness_source_sha256": "e9c49ea7bb22d2f44ba9f0023146d61eb61058605ad176781d034695a572ee06",
+  "pipeline_refusals": [
+    "0x00",
+    "0x80",
+    "0xFE",
+    "0xFF",
+    "recurso nao comprovado",
+    "noop"
+  ],
+  "route": "neutro ate 900, START segurado nos frames 900-901, neutro depois; nenhuma escrita em estado",
+  "runs": [
+    {
+      "discovery": {
+        "reload_byte": 23,
+        "timer_region_index": "0xD01F"
+      },
+      "file_interval_byte": 23,
+      "gaps_mode": 24,
+      "rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+      "run_id": "A1-original",
+      "transition_count": 77
+    },
+    {
+      "discovery": {
+        "reload_byte": 23,
+        "timer_region_index": "0xD01F"
+      },
+      "file_interval_byte": 23,
+      "gaps_mode": 24,
+      "rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+      "run_id": "A2-original-controle",
+      "transition_count": 77
+    },
+    {
+      "discovery": {
+        "reload_byte": 40,
+        "timer_region_index": "0xD01F"
+      },
+      "file_interval_byte": 40,
+      "gaps_mode": 41,
+      "rom_sha256": "57026bd8fcf04f210988743800e734b54667150637df5ba101301cdf5a60c530",
+      "run_id": "B40-pipeline",
+      "transition_count": 39
+    },
+    {
+      "discovery": {
+        "reload_byte": 60,
+        "timer_region_index": "0xD01F"
+      },
+      "file_interval_byte": 60,
+      "gaps_mode": 61,
+      "rom_sha256": "8ab5415c694b545e6ceb8bb917a7ab2c990cb3751cfec7a0952206aced0deb32",
+      "run_id": "C60-pipeline",
+      "transition_count": 22
+    },
+    {
+      "discovery": {
+        "reload_byte": 23,
+        "timer_region_index": "0xD01F"
+      },
+      "file_interval_byte": 23,
+      "gaps_mode": 24,
+      "rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+      "run_id": "A3-original-pos-variantes",
+      "transition_count": 77
+    },
+    {
+      "discovery": null,
+      "file_interval_byte": 23,
+      "gaps_mode": null,
+      "rom_sha256": "ade14b16fb2dd5af6e5517ee53b662212dc42bf4b3c97adeff98608416aca350",
+      "run_id": "D-consumidor-adulterado",
+      "transition_count": null
+    }
+  ],
+  "schema": "rex-sonic-cadence-oracle/v1",
+  "tampered_rom_sha256": "ade14b16fb2dd5af6e5517ee53b662212dc42bf4b3c97adeff98608416aca350",
+  "test_binary_sha256": "bda8655f0d8f1d4b0c32b58cb2192fa6d7ee28d9ee474190b11b267fa17e1a83"
+}

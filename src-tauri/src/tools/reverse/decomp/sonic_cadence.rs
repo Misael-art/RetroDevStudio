@@ -3,8 +3,9 @@
 //! Contract: `docs/rex_profiles/sonic_cadence/CONTRACT.md`. Addresses, tokens,
 //! editable limits and refusals live here so the UI never reimplements them.
 //! Only the single interval byte at `WAIT_ADDR` may change; every other byte
-//! is out of scope. Effective durations are measured in emulated frames by
-//! the Etapa 4 oracles, never asserted from this module.
+//! is out of scope. Effective durations were measured in emulated frames by
+//! the Etapa 4 oracle (verdict `H_N+1`, NTSC non-special path); this module
+//! restates only that measured value, never a bare assumption.
 
 use serde::{Deserialize, Serialize};
 
@@ -204,7 +205,7 @@ pub fn describe(base: &[u8], rom: &[u8]) -> Result<CadenceInfo, String> {
             "0x80..0xFF — bit 7 é o handler especial de caminhada/corrida".into(),
         ],
         unit: "ticks da rotina de objetos (1 por frame de tela em 60 Hz; PAL não medido)".into(),
-        semantics: "o byte recarrega o contador, que decresce 1 por tick e troca o frame ao ficar negativo; a relação exata entre o byte e frames exibidos será medida no core, não é afirmada aqui".into(),
+        semantics: "o byte recarrega o contador, que decresce 1 por tick e troca o frame ao ficar negativo; medido no core (oracle da Etapa 4, veredito H_N+1): byte N mantém o frame visível por N+1 frames de tela em NTSC".into(),
         provenience: vec![
             "tabela Ani_Sonic em 0x13B48; script em 0x13BAE (offset de arquivo = CPU − $100000)".into(),
             "consumidor único Sonic_Animate em 0x139C4, referência absoluta única em 0x139C6".into(),
@@ -213,7 +214,7 @@ pub fn describe(base: &[u8], rom: &[u8]) -> Result<CadenceInfo, String> {
         limitations: vec![
             "perfil assistido Rev00 para uma ROM pinada; outras variantes serão recusadas".into(),
             "apenas a sequência id_Wait tem contrato; caminhada e corrida ficam fora por duração dependente de velocidade".into(),
-            "duração efetiva e transições dependem da medição em frames emulados (Etapa 4)".into(),
+            "duração efetiva medida no oracle da Etapa 4 (NTSC, caminho não-especial): byte N = N+1 frames de tela; transições de animação e PAL permanecem não medidos".into(),
         ],
         contract_path: "docs/rex_profiles/sonic_cadence/CONTRACT.md".into(),
     })

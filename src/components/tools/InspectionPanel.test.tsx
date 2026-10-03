@@ -603,6 +603,11 @@ describe("InspectionPanel", () => {
     expect(panel?.textContent).toContain("Experimental");
     expect(container.querySelector("[data-testid='inspection-cadence-original']")?.textContent).toContain("23 ticks");
     expect(container.querySelector("[data-testid='inspection-cadence-current']")?.textContent).toContain("23 ticks");
+    // Previsao = formula medida no core (oracle, veredito H_N+1): byte 23 -> 24 frames de tela.
+    const prediction = container.querySelector("[data-testid='inspection-cadence-prediction']")?.textContent ?? "";
+    expect(prediction).toContain("byte 23");
+    expect(prediction).toContain("24 frames de tela");
+    expect(prediction).not.toMatch(/ser[aá] medida/);
     expect(container.querySelectorAll("[data-testid^='inspection-cadence-frame-']")).toHaveLength(waitFrames.length);
     expect(container.querySelector("[data-testid='inspection-cadence-frame-0'] img")?.getAttribute("src")).toBe("data:image/png;base64,sonic1_sonic/anim-01");
     expect(container.querySelector("[data-testid='inspection-cadence-frame-13'] img")?.getAttribute("src")).toBe("data:image/png;base64,sonic1_sonic/anim-02");

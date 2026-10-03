@@ -1,13 +1,18 @@
 # CONTRATO de cadência — Sonic 1 `id_Wait` (SonAni_Wait)
 
-Classificação: **provado estaticamente contra a ROM pinada; duração efetiva será
-medida em frames emulados na Etapa 4**. Nada aqui depende de nome de arquivo,
-aparência, tamanho ou "parece uma animação".
+Classificação: **provado estaticamente contra a ROM pinada; duração efetiva
+medida em frames emulados na Etapa 4 — veredito `H_N+1` (byte N ⇒ o frame
+ficou visível por N+1 frames de tela em NTSC)**. Nada aqui depende de nome de
+arquivo, aparência, tamanho ou "parece uma animação".
 
 Verificador independente (não importa nenhum módulo de produto):
 `scripts/qa/sonic-cadence-contract.mjs`. Relatório da corrida:
 `data/rex_profiles/sonic_cadence/evidence/2026-10-02-contract/contract-verification.json`
-(16/16 checks, rc=0). Referências de semântica: cópia pinada do s1disasm
+(16/16 checks, rc=0). Verificador do oracle de runtime:
+`scripts/qa/sonic-cadence-runtime-oracle.mjs`, com manifesto, seis séries
+corridas e veredito em
+`data/rex_profiles/sonic_cadence/evidence/2026-10-03-oracle/`
+(allPass=true, hipótese única `H_N+1` sobre A/B/C). Referências de semântica: cópia pinada do s1disasm
 rev00 em `~/.cache/rex-corpus-d/s1disasm` (HEAD `064e3c6`), arquivos
 `_incObj/01 Sonic.asm` e `_anim/Sonic.asm`.
 
@@ -47,8 +52,12 @@ desalinharia as três âncoras acima simultaneamente.
   - 18 frames (índices de arte, ordem exata acima);
   - terminador `afBack $FE` com k=2 → retrocede 2 frames e repete para sempre
     os dois últimos (`03`,`04` = batida de pé).
-- Periodicidade declarada do loop: 18 frames × 23 ticks = 414 ticks por ciclo
-  completo (16 primeiros frames × intervalo + cauda de 2 frames alternando).
+- Periodicidade medida no loop estável (fase da batida de pé): troca de frame
+  a cada 24 frames de tela com byte 23 (moda cobre 0,99 dos gaps; 77
+  transições na run A1 do oracle). O ciclo completo das 18 passagens não é
+  afirmado: um gap atípico de 72 frames aparece uma vez na transição interna
+  do script e nenhuma fórmula de ciclo total foi provada. A fórmula anterior
+  "18 × 23 ticks" foi substituída por esta medição.
 
 ## 4. Consumidor e referências comprovadas
 
@@ -80,22 +89,26 @@ move.b d0, obTimeFrame(a0)  ; d0 = byte de intervalo lido do script
 avança para o próximo frame do script (aplicando afBack/afEnd/afChange)
 ```
 
-- **Duração declarada**: byte N ⇒ o contador é recarregado com N a cada troca de
-  frame e decresce 1 por tick; a troca ocorre quando ele fica negativo. Na
-  leitura do disasm isso resulta em N+1 ticks por frame (o reload acontece no
-  tick em que o frame avança, não no tick em que ele é exibido). A contagem
-  exata **N vs N+1** é a hipótese que a Etapa 4 mede em frames emulados; o
-  contrato NÃO afirma byte N = N frames sem essa medição.
+- **Duração efetiva (medida — Etapa 4)**: byte N ⇒ o frame fica visível por
+  **N+1 frames de tela** em NTSC. Veredito `H_N+1` único sobre as três
+  corridas do oracle: moda dos gaps = 24 (byte 23), 41 (byte 40), 61 (byte
+  60), com razão ≥ 0,95 e reload do contador igual ao byte do arquivo em cada
+  variante. Evidência: `data/rex_profiles/sonic_cadence/evidence/2026-10-03-oracle/`
+  (`veredito.json`, allPass=true). O contrato anterior NÃO afirmava byte N =
+  N frames antes desta medição; agora afirma byte N = N+1 frames exibidos,
+  somente para NTSC e o caminho não-especial.
 - **Unidade**: tick da rotina de objetos do jogo, igual a 1 frame de tela no
   caminho normal de `Sonic_Animate` (chamada 1× por VBlank em 60 Hz NTSC/PAL-50;
   PAL-60 não medido — permanece explícito como não medido).
-- **Duração efetiva**: frames emulados entre trocas de frame observáveis no
-  core (Etapa 4).
+- **Previsão para a UI**: duração prevista de exibição = (byte + 1) frames de
+  tela; em 60 Hz, `(byte + 1) / 60` segundos. A prévia da interface toca no
+  ritmo medido; continua rotulada como prévia e nunca usada como prova.
 - **Velocidade de apresentação da prévia na UI**: propriedade da UI, nunca
   usada como prova de duração; rotulada como prévia.
 - Ao trocar de anim (`obAnim != obPrevAni`): `obAniFrame=0`, `obTimeFrame=0` e
-  o primeiro frame é carregado no mesmo tick — transições também medidas na
-  Etapa 4.
+  o primeiro frame é carregado no mesmo tick — o efeito exato dessa
+  transição não foi medido isoladamente; os gaps medidos são do regime
+  estacionário.
 
 ## 6. Comandos de fim/retorno/mudança
 
@@ -150,8 +163,9 @@ rotulada como sonda).
 
 ## 11. O que este contrato NÃO afirma
 
-- Não afirma o valor exato N vs N+1 da duração efetiva (medição Etapa 4).
-- Não afirma comportamento em PAL ou em modo especial de stage (fora do alvo).
+- Não afirma comportamento em PAL (nem PAL-50 nem PAL-60) nem em modo
+  especial de stage (fora do alvo); a medição `H_N+1` vale para o caminho
+  não-especial em NTSC.
 - Não é recuperação automática: a identificação é assistida pelo perfil rev00 +
   verificação byte a byte desta ROM; outras ROMs/variantes serão recusadas até
   contrato próprio.

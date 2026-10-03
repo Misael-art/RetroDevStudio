@@ -744,8 +744,11 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
 
   const currentProgress = run?.progress;
   const percent = currentProgress ? Math.min(100, Math.round((currentProgress.completed_work / Math.max(currentProgress.total_work, 1)) * 100)) : 0;
+  // Ritmo medido no oracle da Etapa 4 (veredito H_N+1): byte N mantem o frame
+  // visivel por N+1 frames de tela em NTSC. A previa segue o ritmo medido.
+  const cadenceFrameTicks = Math.max(1, (cadence?.current_interval ?? 1) + 1);
   const cadenceActiveIndex = cadence && cadence.frames.length > 0
-    ? Math.floor(cadenceTick / Math.max(1, cadence.current_interval)) % cadence.frames.length
+    ? Math.floor(cadenceTick / cadenceFrameTicks) % cadence.frames.length
     : 0;
 
   return (
@@ -871,7 +874,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                   </div>
                   {cadenceValue !== "" && Number.isInteger(Number(cadenceValue)) && Number(cadenceValue) !== cadence.current_interval && <div data-testid="inspection-cadence-pending" className="mt-1 text-[#f9e2af]">Pendente: {cadenceValue} ticks ainda não foi gravado; a cópia mantém {cadence.current_interval}. Nada muda no jogo até você clicar em “Aplicar duração”.</div>}
                   <div className="mt-1 text-[#7f849c]">Unidade: {cadence.unit}. {cadence.semantics}</div>
-                  <div className="mt-1 text-[#7f849c]">Equivalente só explicativo: {cadence.current_interval} ticks ≈ {(cadence.current_interval / 60).toFixed(2)} s se 1 tick = 1 frame de tela em NTSC; a relação byte→frames exibidos será medida no core, e PAL não medido permanece não medido.</div>
+                  <div data-testid="inspection-cadence-prediction" className="mt-1 text-[#7f849c]">Previsão medida no core (oracle, veredito H_N+1): byte {cadence.current_interval} ⇒ cada quadro fica {cadence.current_interval + 1} frames de tela em NTSC ≈ {((cadence.current_interval + 1) / 60).toFixed(2)} s; PAL permanece não medido.</div>
                   <div className="mt-1 text-[#a6e3a1]">Escopo do desfazer: “Restaurar original” altera somente o byte do intervalo em 0x{hex(cadence.interval_addr, 5)}; pinturas de arte e paleta já acumuladas na cópia permanecem.</div>
                   <div data-testid="inspection-cadence-timeline" className="mt-2 flex flex-wrap gap-1" aria-label="Quadros da sequência em ordem">
                     {cadence.frames.map((byte, index) => {
@@ -885,7 +888,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                       </button>;
                     })}
                   </div>
-                  <div className="mt-1 text-[#7f849c]">{cadence.frames.length} quadros na ordem do script. A prévia toca no ritmo do byte declarado usando o relógio do navegador — é demonstração, não prova da duração dentro do jogo. Toque num quadro para compô-lo no palco acima.</div>
+                  <div className="mt-1 text-[#7f849c]">{cadence.frames.length} quadros na ordem do script. A prévia toca no ritmo medido no core (byte + 1 frames de tela) usando o relógio do navegador — é demonstração, não prova da duração dentro do jogo. Toque num quadro para compô-lo no palco acima.</div>
                   <div data-testid="inspection-cadence-terminator" className="mt-1 text-[#bac2de]">Término: {cadence.terminator}</div>
                   <div data-testid="inspection-cadence-limits" className="mt-1 text-[#bac2de]">Intervalo editável comprovado: {cadence.editable_min}–{cadence.editable_max} ticks. Valores recusados: {cadence.reserved.join(" · ")}.</div>
                   <div data-testid="inspection-cadence-provenience" className="mt-2 space-y-1 border-t border-[#313244] pt-2 text-[9px] text-[#7f849c]">
