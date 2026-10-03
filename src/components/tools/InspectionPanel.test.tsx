@@ -596,6 +596,17 @@ describe("InspectionPanel", () => {
     });
   }
 
+  it("nudges duration semantically: mais lento raises one tick, mais rápido lowers one tick", async () => {
+    await openSonicCadenceSession([23, 24]);
+    mocks.inspectionEditSonicDuration.mockResolvedValue(cadenceEdit());
+
+    await act(async () => { (container.querySelector("[data-testid='inspection-cadence-slower']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    expect(mocks.inspectionEditSonicDuration).toHaveBeenLastCalledWith(completedSession.session_id, "sonic1_sonic", 24);
+
+    await act(async () => { (container.querySelector("[data-testid='inspection-cadence-faster']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    expect(mocks.inspectionEditSonicDuration).toHaveBeenLastCalledWith(completedSession.session_id, "sonic1_sonic", 23);
+  });
+
   it("loads the proven id_Wait cadence contract and shows frames in order with thumbnails", async () => {
     await openSonicCadenceSession([23]);
 

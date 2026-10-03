@@ -80,6 +80,7 @@ function statusLabel(status: string): string {
 export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
   const requestEmulatorLaunch = useEditorStore((state) => state.requestEmulatorLaunch);
+  const consoleVisible = useEditorStore((state) => state.consoleVisible);
   const [romPath, setRomPath] = useState("");
   const [session, setSession] = useState<InspectionSession | null>(null);
   const [run, setRun] = useState<InspectionRun | null>(null);
@@ -520,6 +521,17 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     }
   }
 
+  // Passo semântico para iniciantes: "mais lento" aumenta os ticks por quadro,
+  // "mais rápido" diminui. Parte da proposta vigente (ou do valor aplicado) e
+  // é limitado ao domínio comprovado; nunca deixa o quadro fora do intervalo.
+  function stepCadence(delta: number) {
+    if (!cadence) return;
+    const start = cadenceValue === "" ? cadence.current_interval : Number(cadenceValue);
+    const clamped = Math.min(cadence.editable_max, Math.max(cadence.editable_min, start + delta));
+    setCadenceValue(clamped);
+    void applyCadence(clamped, "apply");
+  }
+
   async function saveChoice() {
     if (!session || !selected || selected.kind !== "tile4bpp_block" || !selectedPalette) return;
     try {
@@ -758,7 +770,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     : 0;
 
   return (
-    <div data-testid="reverse-inspection-panel" className="min-w-0 max-w-full space-y-3 [overflow-wrap:anywhere]">
+    <div data-testid="reverse-inspection-panel" className={`min-w-0 max-w-full space-y-3 [overflow-wrap:anywhere] ${consoleVisible ? "pb-[min(46vh,376px)]" : "pb-2"}`}>
       <div className="rounded border border-[#313244] bg-[#11111b] p-3">
         <div className="mb-2 text-[10px] uppercase tracking-[0.16em] text-[#cba6f7]">Inspeção visual · Experimental</div>
         <p className="mb-3 text-[10px] text-[#94a3b8]">Inspecione a ROM e edite uma cópia nos perfis assistidos disponíveis. A base é preservada; candidatos heurísticos não são sprites montados.</p>
@@ -870,7 +882,9 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                 {cadenceBusy && !cadence && <div className="mt-1 text-[#7f849c]">Lendo o contrato de cadência no núcleo…</div>}
                 {cadence && <>
                   <div className="mt-2 flex flex-wrap items-end gap-2">
-                    <label className="flex flex-col gap-1 text-[#7f849c]">Ticks por quadro<input data-testid="inspection-cadence-value" type="number" min={cadence.editable_min} max={cadence.editable_max} step={1} value={cadenceValue} onChange={(event) => setCadenceValue(event.target.value === "" ? "" : Number(event.target.value))} className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                    <label className="flex flex-col gap-1 text-[#7f849c]">Duração por etapa · ticks por quadro<input data-testid="inspection-cadence-value" type="number" min={cadence.editable_min} max={cadence.editable_max} step={1} value={cadenceValue} onChange={(event) => setCadenceValue(event.target.value === "" ? "" : Number(event.target.value))} className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[#cdd6f4]" /></label>
+                    <button type="button" data-testid="inspection-cadence-slower" disabled={cadenceBusy || editBusy} onClick={() => stepCadence(1)} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]" title="Aumenta os ticks: cada quadro fica mais tempo na tela">Mais lento</button>
+                    <button type="button" data-testid="inspection-cadence-faster" disabled={cadenceBusy || editBusy} onClick={() => stepCadence(-1)} className="rounded border border-[#89b4fa]/50 px-3 py-1 text-[#89b4fa]" title="Diminui os ticks: a sequência roda mais rápido">Mais rápido</button>
                     <button type="button" data-testid="inspection-cadence-apply" disabled={cadenceBusy || editBusy} onClick={() => void applyCadence(cadenceValue === "" ? Number.NaN : cadenceValue, "apply")} className="rounded bg-[#89b4fa] px-3 py-1 font-semibold text-[#111827]">{cadenceBusy ? "Aplicando…" : "Aplicar duração"}</button>
                     <button type="button" data-testid="inspection-cadence-restore" disabled={cadenceBusy || editBusy} onClick={() => void applyCadence(cadence.original_interval, "restore")}>Restaurar original</button>
                   </div>
