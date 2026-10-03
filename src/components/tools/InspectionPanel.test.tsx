@@ -2,7 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import InspectionPanel from "./InspectionPanel";
+import InspectionPanel, { __resetInspectionPanelSessionCacheForTests } from "./InspectionPanel";
 
 const mocks = vi.hoisted(() => ({
   inspectionOpen: vi.fn(),
@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   inspectionEditSonicDuration: vi.fn(),
   inspectionEditSonicPalette: vi.fn(),
   inspectionEditSonicTiles: vi.fn(),
+  patchCreateBps: vi.fn(),
+  patchApplyBps: vi.fn(),
 }));
 
 vi.mock("../../core/ipc/toolsService", () => mocks);
@@ -114,6 +116,9 @@ describe("InspectionPanel", () => {
   let root: Root;
 
   beforeEach(() => {
+    // E2-7: a cache de sessao viva e o hint de localStorage sao escopo de
+    // modulo; sem reset, a hidratacao do mount vazaria entre testes.
+    __resetInspectionPanelSessionCacheForTests();
     vi.clearAllMocks();
     mocks.inspectionOpen.mockResolvedValue(session);
     mocks.inspectionStart.mockResolvedValue(running);
@@ -573,9 +578,14 @@ describe("InspectionPanel", () => {
       limitations: [],
     };
   }
-  async function openSonicCadenceSession(currentReplies: number[], logSink?: (level: string, message: string) => void) {
-    mocks.inspectionOpen.mockResolvedValue(completedSession);
-    mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
+  async function openSonicCadenceSession(
+    currentReplies: number[],
+    logSink?: (level: string, message: string) => void,
+    baseSession = completedSession,
+    spriteFrameImpl?: (sessionId: string, resourceId: string, frameId: string, flipX: boolean, flipY: boolean, fromBase?: boolean) => Promise<Record<string, unknown>>,
+  ) {
+    mocks.inspectionOpen.mockResolvedValue(baseSession);
+    mocks.inspectionStatus.mockResolvedValue({ session: baseSession, run: completed });
     mocks.inspectionCatalogPage.mockResolvedValue({ session_id: completedSession.session_id, run_id: completed.run_id, offset: 0, limit: 24, total_candidates: 0, candidates: [], unknown_regions: [], user_choices: [] });
     let cadenceCalls = 0;
     mocks.inspectionSonicCadence.mockImplementation(async () => {
@@ -583,7 +593,8 @@ describe("InspectionPanel", () => {
       cadenceCalls += 1;
       return cadenceInfo(value);
     });
-    mocks.inspectionSpriteFrame.mockImplementation(async (_sessionId: string, _resourceId: string, frameId: string) => sonicFrameResponse(frameId));
+    mocks.inspectionSpriteFrame.mockImplementation(spriteFrameImpl
+      ?? (async (_sessionId: string, _resourceId: string, frameId: string) => sonicFrameResponse(frameId) as unknown as Record<string, unknown>));
     await act(async () => { root.render(<InspectionPanel logMessage={logSink ?? vi.fn()} />); await flush(); });
     setTextInput(container.querySelector("input[type='text']") as Element, "/roms/test.md");
     await act(async () => { await flush(); });
@@ -596,15 +607,29 @@ describe("InspectionPanel", () => {
     });
   }
 
-  it("nudges duration semantically: mais lento raises one tick, mais rápido lowers one tick", async () => {
-    await openSonicCadenceSession([23, 24]);
-    mocks.inspectionEditSonicDuration.mockResolvedValue(cadenceEdit());
+  // E2-0/E2-4 (EXPECTATIONS-VISUAL-ETAPA2): Mais lento/mais rapido sao
+  // politica de proposta — ajustam o valor proposto e o aviso de pendencia,
+  // mas nenhuma escrita vai ao nucleo. Aplicar/Restaurar gravam.
+  it("nudges duration as proposal only: value and pending update, no write reaches the core", async () => {
+    await openSonicCadenceSession([23]);
 
     await act(async () => { (container.querySelector("[data-testid='inspection-cadence-slower']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
-    expect(mocks.inspectionEditSonicDuration).toHaveBeenLastCalledWith(completedSession.session_id, "sonic1_sonic", 24);
+    expect(mocks.inspectionEditSonicDuration).not.toHaveBeenCalled();
+    expect((container.querySelector("[data-testid='inspection-cadence-value']") as HTMLInputElement).value).toBe("24");
+    expect(container.querySelector("[data-testid='inspection-cadence-pending']")?.textContent).toContain("Pendente: 24 ticks");
+    const proposal = container.querySelector("[data-testid='inspection-cadence-proposal-prediction']")?.textContent ?? "";
+    expect(proposal).toContain("byte 24");
+    expect(proposal).toContain("25 frames de tela");
 
     await act(async () => { (container.querySelector("[data-testid='inspection-cadence-faster']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
-    expect(mocks.inspectionEditSonicDuration).toHaveBeenLastCalledWith(completedSession.session_id, "sonic1_sonic", 23);
+    expect(mocks.inspectionEditSonicDuration).not.toHaveBeenCalled();
+    expect((container.querySelector("[data-testid='inspection-cadence-value']") as HTMLInputElement).value).toBe("23");
+    expect(container.querySelector("[data-testid='inspection-cadence-pending']")).toBeNull();
+    expect(container.querySelector("[data-testid='inspection-cadence-proposal-prediction']")).toBeNull();
+
+    // Negativo E2-4: nudge nunca produz "aplicado" novo.
+    expect(container.querySelector("[data-testid='inspection-state-applied']")?.getAttribute("data-visible")).toBe("false");
+    expect(container.querySelector("[data-testid='inspection-state-pending']")?.getAttribute("data-visible")).toBe("false");
   });
 
   it("loads the proven id_Wait cadence contract and shows frames in order with thumbnails", async () => {
@@ -742,6 +767,217 @@ describe("InspectionPanel", () => {
 
     expect(container.querySelector("[data-testid='inspection-sonic-edit-result']")).toBeNull();
     expect(logs.some(([level, message]) => level === "success" && message.includes("Pintura"))).toBe(false);
+  });
+
+  async function composeSelectedFrame() {
+    await act(async () => {
+      (container.querySelector("[data-testid='inspection-compose-sprite']") as HTMLButtonElement).click();
+      await flush(); await flush(); await flush();
+    });
+  }
+
+  it("E2-1/E2-2/E2-5/E2-8: animation area groups controls, separates entradas from desenhos únicos, and keeps technical detail in <details>", async () => {
+    await openSonicCadenceSession([23]);
+    await composeSelectedFrame();
+
+    const area = container.querySelector("[data-testid='inspection-animation-area']");
+    expect(area).toBeTruthy();
+    expect(area?.querySelector("[data-testid='inspection-sprite-frame-image']")).toBeTruthy();
+    expect(area?.querySelector("[data-testid='inspection-anim-group-duration']")).toBeTruthy();
+    expect(area?.querySelector("[data-testid='inspection-anim-group-color']")).toBeTruthy();
+    expect(area?.querySelector("[data-testid='inspection-anim-group-pixels']")).toBeTruthy();
+    expect(area?.querySelector("[data-testid='inspection-work-state']")).toBeTruthy();
+    expect(area?.querySelector("[data-testid='inspection-cadence-timeline']")).toBeTruthy();
+
+    // E2-2: 18 entradas no script; desenhos únicos = bytes distintos (1,2,3,4).
+    const caption = container.querySelector("[data-testid='inspection-cadence-caption']")?.textContent ?? "";
+    expect(caption).toContain("18 entradas na ordem do script");
+    expect(caption).toContain("4 desenhos únicos");
+
+    // E2-5: N+1 na previsão vigente e nenhuma equivalência declarada com FPS.
+    const prediction = container.querySelector("[data-testid='inspection-cadence-prediction']")?.textContent ?? "";
+    expect(prediction).toContain("byte 23");
+    expect(prediction).toContain("24 frames de tela");
+    expect(container.textContent).not.toMatch(/\bFPS\b/);
+
+    // E2-8: detalhe técnico secundário, mas todo texto de procedência permanece no DOM.
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-metadata']")?.closest("details")).toBeTruthy();
+    expect(container.querySelector("[data-testid='inspection-cadence-provenience']")?.closest("details")).toBeTruthy();
+    expect(container.querySelector("[data-testid='inspection-sonic-cadence-panel']")?.textContent).toContain("docs/rex_profiles/sonic_cadence/CONTRACT.md");
+    expect(container.querySelector("[data-testid='inspection-sonic-cadence-panel']")?.textContent).toContain("duração efetiva depende de medição em frames emulados");
+  });
+
+  it("E2-1 negative: non-Sonic resources keep the plain composed panel without an animation area", async () => {
+    mocks.inspectionOpen.mockResolvedValue(completedSession);
+    mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
+    mocks.inspectionCatalogPage.mockResolvedValue({ session_id: completedSession.session_id, run_id: completed.run_id, offset: 0, limit: 24, total_candidates: 0, candidates: [], unknown_regions: [], user_choices: [] });
+    await act(async () => { root.render(<InspectionPanel logMessage={vi.fn()} />); await flush(); });
+    setTextInput(container.querySelector("input[type='text']") as Element, "/roms/test.md");
+    await act(async () => { await flush(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-identify']") as HTMLButtonElement).click(); await flush(); await flush(); });
+    await composeSelectedFrame();
+
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='inspection-animation-area']")).toBeNull();
+  });
+
+  it("E2-3: edited copy and untouched base render side by side through the same pipeline (from_base=true)", async () => {
+    const edited = { ...completedSession, edit: cadenceEdit() };
+    await openSonicCadenceSession([23], undefined, edited, async (_sessionId: string, _resourceId: string, frameId: string, _flipX: boolean, _flipY: boolean, fromBase = false) => ({
+      ...(sonicFrameResponse(frameId) as Record<string, unknown>),
+      rom_sha256: fromBase ? "b".repeat(64) : "9".repeat(64),
+      png_sha256: fromBase ? "png-base" : "png-copia",
+      pixels_sha256: fromBase ? "pixels-base" : "pixels-copia",
+    }));
+    await composeSelectedFrame();
+
+    const copyImage = container.querySelector("[data-testid='inspection-sprite-frame-image']") as HTMLImageElement;
+    const originalImage = container.querySelector("[data-testid='inspection-sprite-frame-original-image']") as HTMLImageElement;
+    expect(copyImage).toBeTruthy();
+    expect(originalImage).toBeTruthy();
+    expect(copyImage.getAttribute("data-pixels-sha256")).toBe("pixels-copia");
+    expect(copyImage.getAttribute("data-sprite-rom-sha256")).toBe("9".repeat(64));
+    expect(originalImage.getAttribute("data-pixels-sha256")).toBe("pixels-base");
+    expect(originalImage.getAttribute("data-sprite-rom-sha256")).toBe("b".repeat(64));
+    expect(mocks.inspectionSpriteFrame).toHaveBeenCalledWith(completedSession.session_id, "sonic1_sonic", "sonic1_sonic/stand", false, false, true);
+  });
+
+  it("E2-3 negative: without applied edits the original is never composed (no from_base call)", async () => {
+    await openSonicCadenceSession([23]);
+    await composeSelectedFrame();
+
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-original-image']")).toBeNull();
+    expect(mocks.inspectionSpriteFrame.mock.calls.every((call) => call[5] !== true)).toBe(true);
+  });
+
+  it("E2-4: work state tracks proposta → aplicado → salvo → alterado through real operations", async () => {
+    await openSonicCadenceSession([23, 40, 40]);
+    mocks.inspectionEditSonicDuration.mockResolvedValue(cadenceEdit());
+    mocks.inspectionSave.mockResolvedValue({ ...completedSession, edit: cadenceEdit() });
+
+    // Proposta por nudge: pendente nomeia o valor, nada aplicado.
+    await act(async () => { (container.querySelector("[data-testid='inspection-cadence-slower']") as HTMLButtonElement).click(); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-state-pending']")?.getAttribute("data-visible")).toBe("true");
+    expect(container.querySelector("[data-testid='inspection-state-pending']")?.textContent).toContain("24 ticks propostos");
+    expect(container.querySelector("[data-testid='inspection-state-applied']")?.getAttribute("data-visible")).toBe("false");
+
+    // Aplicação real: aplicado à cópia com SHA; proposta deixa de pendente.
+    setTextInput(container.querySelector("[data-testid='inspection-cadence-value']")!, "40");
+    await act(async () => { (container.querySelector("[data-testid='inspection-cadence-apply']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-state-applied']")?.getAttribute("data-visible")).toBe("true");
+    expect(container.querySelector("[data-testid='inspection-state-applied']")?.textContent).toContain("9999999999999999");
+    expect(container.querySelector("[data-testid='inspection-state-pending']")?.getAttribute("data-visible")).toBe("false");
+    expect(container.querySelector("[data-testid='inspection-state-saved']")?.textContent).toContain("Nunca salvo");
+
+    // Salvar sessão: chip salvo com instante.
+    await act(async () => { (container.querySelector("[data-testid='inspection-save']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-state-saved']")?.getAttribute("data-visible")).toBe("true");
+    expect(container.querySelector("[data-testid='inspection-state-saved']")?.textContent).toContain("Salvo ·");
+    expect(container.querySelector("[data-testid='inspection-state-saved']")?.textContent).not.toContain("Alterado após salvar");
+
+    // Escrita após salvar: volta a "Alterado após salvar".
+    setTextInput(container.querySelector("[data-testid='inspection-cadence-value']")!, "25");
+    await act(async () => { (container.querySelector("[data-testid='inspection-cadence-apply']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-state-saved']")?.textContent).toContain("Alterado após salvar");
+    expect(container.querySelector("[data-testid='inspection-state-saved']")?.getAttribute("data-visible")).toBe("false");
+  });
+
+  it("E2-6: palette success and refusal report in the color-group slot, with the console trace preserved", async () => {
+    const logs: Array<[string, string]> = [];
+    await openSonicCadenceSession([23], (level, message) => { logs.push([level, message]); });
+
+    mocks.inspectionEditSonicPalette.mockResolvedValue(cadenceEdit());
+    await act(async () => { (container.querySelector("[data-testid='inspection-sonic-edit']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    const success = container.querySelector("[data-testid='inspection-palette-message']")?.textContent ?? "";
+    expect(success).toContain("Paleta acumulada");
+    expect(success).toContain("9".repeat(16));
+
+    mocks.inspectionEditSonicPalette.mockRejectedValue(new Error("paleta_recusada: índice fora da paleta 1"));
+    await act(async () => { (container.querySelector("[data-testid='inspection-sonic-edit']") as HTMLButtonElement).click(); await flush(); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-palette-message']")?.textContent).toContain("Edição recusada");
+    expect(container.querySelector("[data-testid='inspection-palette-message']")?.getAttribute("aria-live")).toBe("polite");
+    expect(logs.some(([level]) => level === "error")).toBe(true);
+  });
+
+  it("E2-6: invalid tile rectangle is refused locally in the pixel-group slot without touching the core", async () => {
+    await openSonicCadenceSession([23]);
+    setTextInput(container.querySelector("[data-testid='inspection-sonic-tile-index']")!, "99");
+    await act(async () => { (container.querySelector("[data-testid='inspection-sonic-tile-edit-apply']") as HTMLButtonElement).click(); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-tile-message']")?.textContent).toContain("nenhum envio realizado");
+    expect(mocks.inspectionEditSonicTiles).not.toHaveBeenCalled();
+  });
+
+  it("E2-6: BPS export reports in the actions slot", async () => {
+    await openSonicCadenceSession([23]);
+    mocks.inspectionEditSonicPalette.mockResolvedValue(cadenceEdit());
+    await act(async () => { (container.querySelector("[data-testid='inspection-sonic-edit']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    const patchInput = container.querySelector("[data-testid='sonic-patch-path'] input[type='text']") as HTMLInputElement;
+    expect(patchInput).toBeTruthy();
+    setTextInput(patchInput, "/patches/diff.bps");
+    mocks.patchCreateBps.mockResolvedValue({ ok: true, message: "BPS gerado com origem imutável", patch_hash: "ABC123" });
+    await act(async () => { (container.querySelector("[data-testid='inspection-sonic-export-patch']") as HTMLButtonElement).click(); await flush(); await flush(); });
+    expect(mocks.patchCreateBps).toHaveBeenCalledWith("/roms/test.md", "/edits/copy.bin", "/patches/diff.bps", null);
+    expect(container.querySelector("[data-testid='inspection-patch-message']")?.textContent).toContain("BPS exportado");
+  });
+
+  it("E2-7: the live session survives a panel remount without re-identification", async () => {
+    await openSonicCadenceSession([23]);
+    await composeSelectedFrame();
+    expect(container.querySelector("[data-testid='inspection-animation-area']")).toBeTruthy();
+
+    await act(async () => { root.unmount(); await flush(); });
+    root = createRoot(container);
+    mocks.inspectionOpen.mockClear();
+    await act(async () => { root.render(<InspectionPanel logMessage={vi.fn()} />); await flush(); await flush(); await flush(); });
+
+    expect(mocks.inspectionOpen).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-testid='inspection-session']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='inspection-sprite-frame-image']")).toBeTruthy();
+    expect((container.querySelector("[data-testid='inspection-sprite-frame-select']") as HTMLSelectElement).value).toBe("sonic1_sonic/stand");
+    expect(container.querySelector("[data-testid='inspection-sonic-cadence-panel']")).toBeTruthy();
+  });
+
+  it("E2-7: resume banner reopens the persisted session with one click", async () => {
+    window.localStorage.setItem("rds.inspection.lastSessionId", "session-persisted-002");
+    window.localStorage.setItem("rds.inspection.lastRomPath", "/roms/persisted.md");
+    const persisted = { ...completedSession, session_id: "session-persisted-002", rom_path: "/roms/persisted.md" };
+    mocks.inspectionReopen.mockResolvedValue(persisted);
+    mocks.inspectionStatus.mockResolvedValue({ session: persisted, run: completed });
+
+    await act(async () => { root.render(<InspectionPanel logMessage={vi.fn()} />); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-resume-banner']")).toBeTruthy();
+
+    await act(async () => { (container.querySelector("[data-testid='inspection-resume-reopen']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); });
+    expect(mocks.inspectionReopen).toHaveBeenCalledWith("/roms/persisted.md", "session-persisted-002");
+    expect(container.querySelector("[data-testid='inspection-resume-banner']")).toBeNull();
+    expect(container.querySelector("[data-testid='inspection-session']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='inspection-session-message']")?.textContent).toContain("reaberta e identidade verificada");
+  });
+
+  it("E2-7 negative: a persisted id with no live core session yields an actionable error, not a ghost session", async () => {
+    window.localStorage.setItem("rds.inspection.lastSessionId", "session-inexistente-000");
+    window.localStorage.setItem("rds.inspection.lastRomPath", "/roms/some.md");
+    mocks.inspectionReopen.mockRejectedValue(new Error("sessão não encontrada no núcleo"));
+
+    await act(async () => { root.render(<InspectionPanel logMessage={vi.fn()} />); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-resume-banner']")).toBeTruthy();
+    await act(async () => { (container.querySelector("[data-testid='inspection-resume-reopen']") as HTMLButtonElement).click(); await flush(); await flush(); });
+
+    expect(container.querySelector("[data-testid='inspection-session']")).toBeNull();
+    expect(container.querySelector("[data-testid='inspection-session-message']")?.textContent).toContain("Reabertura recusada");
+    expect(container.querySelector("[data-testid='inspection-session-message']")?.textContent).toContain("Reabrir sessão");
+    expect(container.querySelector("[data-testid='inspection-resume-banner']")).toBeTruthy();
+  });
+
+  it("E2-10: new anchors are natively focusable through the standard keyboard path", async () => {
+    await openSonicCadenceSession([23]);
+    await composeSelectedFrame();
+    for (const testid of ["inspection-compose-sprite", "inspection-cadence-slower", "inspection-cadence-apply", "inspection-sonic-edit"]) {
+      const element = container.querySelector(`[data-testid='${testid}']`) as HTMLElement;
+      expect(element).toBeTruthy();
+      await act(async () => { element.focus(); });
+      expect(document.activeElement).toBe(element);
+    }
   });
 
 });
