@@ -694,7 +694,7 @@ pub fn compose_for_session(
     flip_y: bool,
 ) -> Result<InspectionSpriteFrame, String> {
     if resource_id == "sonic1_sonic" {
-        sonic::frame_index(frame_id)?;
+        sonic::resolve_index(frame_id)?;
         return compose_sonic_frame(session, frame_id, flip_x, flip_y);
     }
     let manifest = manifest_for(resource_id, frame_id)?;

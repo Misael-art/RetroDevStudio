@@ -51,6 +51,30 @@ pub fn frame_index(id: &str) -> Result<usize, String> {
         .ok_or_else(|| "sprite_manifest_missing: frame Sonic não comprovado neste perfil".into())
 }
 
+/// Composition-only resolver. Animation scripts reference mapping indices
+/// directly (`Ani_Sonic` frame bytes index `Map_Sonic`), so the cadence
+/// preview renders real frames by `sonic1_sonic/anim-XX` (lowercase 2-digit
+/// hex, `00..57`). Painting and palette gates keep using `frame_index`.
+pub fn resolve_index(id: &str) -> Result<usize, String> {
+    if let Some(rest) = id.strip_prefix("sonic1_sonic/anim-") {
+        let valid = rest.len() == 2
+            && rest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase());
+        if !valid {
+            return Err(
+                "sprite_manifest_missing: use sonic1_sonic/anim-00 até sonic1_sonic/anim-57".into(),
+            );
+        }
+        let index = usize::from_str_radix(rest, 16).expect("dígitos hex validados");
+        if index >= FRAME_COUNT {
+            return Err("sprite_manifest_missing: índice além da tabela de mapping".into());
+        }
+        return Ok(index);
+    }
+    frame_index(id)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Piece {
     pub slot: usize,
@@ -121,7 +145,7 @@ pub fn dplc_tiles(rom: &[u8]) -> Result<Vec<Vec<usize>>, String> {
 }
 
 pub fn read_frame(rom: &[u8], id: &str) -> Result<Frame, String> {
-    let index = frame_index(id)?;
+    let index = resolve_index(id)?;
     if rom.len() < ART_OFFSET + ART_SIZE {
         return Err("sprite_structure_short: arte incompleta".into());
     }
@@ -286,6 +310,34 @@ mod tests {
         for n in [0, 1, MAP_TABLE, DPLC_TABLE, ART_OFFSET] {
             assert!(read_frame(&vec![0; n], "sonic1_sonic/stand").is_err());
         }
+    }
+
+    #[test]
+    fn animation_indices_resolve_for_composition_only_and_stay_strict() {
+        assert_eq!(resolve_index("sonic1_sonic/anim-03").unwrap(), 3);
+        assert_eq!(resolve_index("sonic1_sonic/anim-57").unwrap(), 87);
+        assert_eq!(resolve_index("sonic1_sonic/stand").unwrap(), 1);
+        for bad in [
+            "sonic1_sonic/anim-0",
+            "sonic1_sonic/anim-033",
+            "sonic1_sonic/anim-0A",
+            "sonic1_sonic/anim-58",
+            "sonic1_sonic/anim-zz",
+            "sonic1_sonic/wait-9",
+        ] {
+            assert!(resolve_index(bad).is_err(), "{bad} deveria recusar");
+        }
+        // The paint/palette gate keeps refusing anim ids: only the ten pilot
+        // frames are editable.
+        assert!(frame_index("sonic1_sonic/anim-03").is_err());
+        let rom = authored_rom();
+        let via_index = read_frame(&rom, "sonic1_sonic/anim-01").unwrap();
+        assert_eq!(
+            via_index.mapping_offset,
+            read_frame(&rom, "sonic1_sonic/stand")
+                .unwrap()
+                .mapping_offset
+        );
     }
 
     #[test]

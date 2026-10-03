@@ -466,15 +466,13 @@ fn load_stored_session_from_disk(
             newest = Some((session, mtime));
         }
     }
-    let session = newest
-        .map(|(session, _)| session)
-        .ok_or_else(|| {
-            error(
-                "session_missing",
-                "Sessão não encontrada para esta identidade de ROM",
-                false,
-            )
-        })?;
+    let session = newest.map(|(session, _)| session).ok_or_else(|| {
+        error(
+            "session_missing",
+            "Sessão não encontrada para esta identidade de ROM",
+            false,
+        )
+    })?;
     if session.schema_version != INSPECTION_SCHEMA_V1 {
         return Err(error(
             "session_schema",
@@ -559,13 +557,15 @@ pub fn list_sessions() -> Result<Vec<InspectionSession>, String> {
             {
                 continue;
             }
-            let replace = latest.get(&session.session_id).is_none_or(|(current, old_mtime)| {
-                let mtime = file_metadata.modified().ok();
-                mtime > *old_mtime
-                    || (mtime == *old_mtime
-                        && session.completed_at_unix.unwrap_or(session.created_at_unix)
-                            >= current.completed_at_unix.unwrap_or(current.created_at_unix))
-            });
+            let replace = latest
+                .get(&session.session_id)
+                .is_none_or(|(current, old_mtime)| {
+                    let mtime = file_metadata.modified().ok();
+                    mtime > *old_mtime
+                        || (mtime == *old_mtime
+                            && session.completed_at_unix.unwrap_or(session.created_at_unix)
+                                >= current.completed_at_unix.unwrap_or(current.created_at_unix))
+                });
             if replace {
                 let mtime = file_metadata.modified().ok();
                 latest.insert(session.session_id.clone(), (session, mtime));
@@ -1398,9 +1398,7 @@ fn persist_sonic_edit(
             sonic::dplc_tiles(base)?
                 .iter()
                 .enumerate()
-                .filter(|(_, tiles)| {
-                    tiles.iter().any(|t| edit.art_tiles.contains(&(*t as u32)))
-                })
+                .filter(|(_, tiles)| tiles.iter().any(|t| edit.art_tiles.contains(&(*t as u32))))
                 .map(|(i, _)| i as u32)
                 .collect()
         }
@@ -1808,8 +1806,8 @@ mod tests {
         assert_eq!(info.frames, cadence::WAIT_FRAMES.to_vec());
 
         for reserved in [cadence::EDITABLE_MIN - 1, 0x80, 0xfe] {
-            let refused = edit_sonic_duration(&session.session_id, "sonic1_sonic", reserved)
-                .unwrap_err();
+            let refused =
+                edit_sonic_duration(&session.session_id, "sonic1_sonic", reserved).unwrap_err();
             assert!(refused.contains("cadence_value_reserved"), "{refused}");
             assert!(
                 get_stored_session(&session.session_id)
@@ -1846,21 +1844,19 @@ mod tests {
         );
 
         let second = edit_sonic_duration(&session.session_id, "sonic1_sonic", 60).unwrap();
-        let second_rom = rex_read_rom(Path::new(&second.modified_rom_path)).unwrap().1;
+        let second_rom = rex_read_rom(Path::new(&second.modified_rom_path))
+            .unwrap()
+            .1;
         assert_eq!(second.changed_offsets, vec![cadence::WAIT_ADDR as u64]);
         assert_eq!(second_rom[cadence::WAIT_ADDR], 60);
         let info_after = sonic_cadence_info(&session.session_id).unwrap();
         assert_eq!(
-            (
-                info_after.original_interval,
-                info_after.current_interval
-            ),
+            (info_after.original_interval, info_after.current_interval),
             (cadence::WAIT_ORIGINAL_INTERVAL, 60)
         );
 
         // Cadência e pintura coexistem na mesma cópia cumulativa autorizada.
-        let geometry =
-            super::super::sonic_sprite::read_frame(&base, "sonic1_sonic/stand").unwrap();
+        let geometry = super::super::sonic_sprite::read_frame(&base, "sonic1_sonic/stand").unwrap();
         let loc = geometry.source_pixel(8, 8).unwrap();
         let previous = if loc.high_nibble {
             base[loc.byte_offset] >> 4
@@ -1883,7 +1879,9 @@ mod tests {
             .changed_offsets
             .contains(&(cadence::WAIT_ADDR as u64)));
         assert_eq!(painted.bytes_changed, 2);
-        let painted_rom = rex_read_rom(Path::new(&painted.modified_rom_path)).unwrap().1;
+        let painted_rom = rex_read_rom(Path::new(&painted.modified_rom_path))
+            .unwrap()
+            .1;
         assert_eq!(painted_rom[cadence::WAIT_ADDR], 60);
         let composed = comp::compose_for_session(
             &get_stored_session(&session.session_id).unwrap().session,
@@ -1894,6 +1892,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(composed.rom_sha256, painted.modified_rom_sha256);
+        // Os quatro índices distintos do script id_Wait compõem como frames
+        // reais pelo mesmo pipeline (mapping/DPLC), sem geometria paralela.
+        let live = get_stored_session(&session.session_id).unwrap().session;
+        let mut distinct = Vec::new();
+        for byte in [0x01u8, 0x02, 0x03, 0x04] {
+            let id = format!("sonic1_sonic/anim-{byte:02x}");
+            let frame =
+                comp::compose_for_session(&live, "sonic1_sonic", &id, false, false).unwrap();
+            assert!(frame.available, "{id} deveria compor");
+            distinct.push((id, frame.pixels_sha256));
+        }
+        let unique_hashes: std::collections::BTreeSet<_> =
+            distinct.iter().map(|(_, hash)| hash.clone()).collect();
+        assert!(
+            unique_hashes.len() >= 2,
+            "os índices do script não podem todos colapsar no mesmo pixel"
+        );
 
         let saved = save(&session.session_id, None).unwrap();
         sessions().lock().unwrap().remove(&session.session_id);
@@ -1924,7 +1939,8 @@ mod tests {
     }
 
     #[test]
-    fn session_ids_cannot_become_paths() {        assert!(validate_session_id("inspection-123-00000001").is_ok());
+    fn session_ids_cannot_become_paths() {
+        assert!(validate_session_id("inspection-123-00000001").is_ok());
         assert!(validate_session_id("../outside").is_err());
         assert!(validate_session_id("inspection/../outside").is_err());
         assert!(validate_session_id(&"a".repeat(161)).is_err());

@@ -17,8 +17,7 @@ pub const SCRIPTS_BASE: usize = ANI_TABLE + ANI_COUNT * 2;
 
 /// Prologue of `Sonic_Animate` (`lea $13B48.l,a1 … move.b $1C(a0),d0 …`).
 pub const SONIC_ANIMATE_PROLOGUE: &[u8] = &[
-    0x43, 0xf9, 0x00, 0x01, 0x3b, 0x48, 0x70, 0x00, 0x10, 0x28, 0x00, 0x1c, 0xb0, 0x28, 0x00,
-    0x1d,
+    0x43, 0xf9, 0x00, 0x01, 0x3b, 0x48, 0x70, 0x00, 0x10, 0x28, 0x00, 0x1c, 0xb0, 0x28, 0x00, 0x1d,
 ];
 /// Absolute-long operand inside that prologue; unique in the pinned ROM.
 pub const TABLE_ABSOLUTE_REF: &[u8] = &[0x00, 0x01, 0x3b, 0x48];
@@ -27,8 +26,8 @@ pub const WAIT_ANIM: usize = 5;
 pub const WAIT_ADDR: usize = 0x13bae;
 pub const WAIT_ORIGINAL_INTERVAL: u8 = 0x17;
 pub const WAIT_FRAMES: [u8; 18] = [
-    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x03, 0x02, 0x02,
-    0x02, 0x03, 0x04,
+    0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x03, 0x02, 0x02, 0x02,
+    0x03, 0x04,
 ];
 pub const WAIT_TERMINATOR: [u8; 2] = [0xfe, 0x02];
 
@@ -106,7 +105,10 @@ pub fn validate_base(base: &[u8]) -> Result<(), String> {
     if prologues.len() != 1 {
         return Err(err(
             "cadence_consumer_ambiguous",
-            format!("prólogo de Sonic_Animate encontrado {} vezes", prologues.len()),
+            format!(
+                "prólogo de Sonic_Animate encontrado {} vezes",
+                prologues.len()
+            ),
         ));
     }
     let references = find_all(base, TABLE_ABSOLUTE_REF);
@@ -228,7 +230,8 @@ mod tests {
         let mut rom = vec![0u8; SCRIPTS_BASE + 0x100];
         for i in 0..ANI_COUNT {
             let offset = (SCRIPTS_BASE - ANI_TABLE) + i * 0x10;
-            rom[ANI_TABLE + i * 2..ANI_TABLE + i * 2 + 2].copy_from_slice(&(offset as u16).to_be_bytes());
+            rom[ANI_TABLE + i * 2..ANI_TABLE + i * 2 + 2]
+                .copy_from_slice(&(offset as u16).to_be_bytes());
         }
         rom[ANI_TABLE + WAIT_ANIM * 2..ANI_TABLE + WAIT_ANIM * 2 + 2]
             .copy_from_slice(&((WAIT_ADDR - ANI_TABLE) as u16).to_be_bytes());
@@ -258,10 +261,14 @@ mod tests {
     fn wrong_variant_moved_table_and_tampered_consumer_refuse() {
         let mut rom = authored_base();
         rom.truncate(ANI_TABLE);
-        assert!(validate_base(&rom).unwrap_err().contains("cadence_rom_short"));
+        assert!(validate_base(&rom)
+            .unwrap_err()
+            .contains("cadence_rom_short"));
         let mut rom = authored_base();
         rom[ANI_TABLE + WAIT_ANIM * 2 + 1] = 0x99;
-        assert!(validate_base(&rom).unwrap_err().contains("cadence_table_moved"));
+        assert!(validate_base(&rom)
+            .unwrap_err()
+            .contains("cadence_table_moved"));
         let mut rom = authored_base();
         rom[0x139c4] = 0x00;
         assert!(validate_base(&rom)
@@ -335,6 +342,8 @@ mod tests {
                 rom[ANI_TABLE + i * 2..ANI_TABLE + i * 2 + 2].copy_from_slice(&0u16.to_be_bytes());
             }
         }
-        assert!(validate_base(&rom).unwrap_err().contains("cadence_table_moved"));
+        assert!(validate_base(&rom)
+            .unwrap_err()
+            .contains("cadence_table_moved"));
     }
 }
