@@ -23,6 +23,9 @@ Adaptações de harness: `a0067d8` (E3-1..E3-4).
   `507c1250daa1dc7a5408858808111e190570394b1aa1e732ca2c7d8bc29ed23a`) —
   `allPass: true`, 28 checks, 0 falhas, 0 aborted; 10 passos congelados
   executados na mesma jornada.
+- Log do runner: `desktop-e3-journey-run01.log` fica fora do repo
+  (`.gitignore` de `*.log`); SHA-256 `898121f039d00b00e3fda52ca1e91b5c3b130788556f5369912ade7cd8ba16d2`,
+  preservado em `~/rds-scratch/anim-e3-journey-20261003-01/desktop.log`.
 
 ## as cinco dimensões (separadas, como congelado)
 
