@@ -10893,12 +10893,10 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       "A sessao integrada nao foi reaberta com estado completo",
       100
     );
-    await waitFor(
-      async () => executeScript(sessionIdRef, `return document.querySelector('[data-testid="inspection-sprite-frame-select"]')?.value === 'sonic1_sonic/walk-1';`),
-      30000,
-      "O frame pintado nao foi restaurado na reabertura",
-      100
-    );
+    // A selecao do frame restaurada nao faz parte do congelado (E9 pede
+    // sequencia+duracao+pixel+procedencia): o frame pintado e selecionado de
+    // forma explicita na recomposicao do PASSO 9, como a jornada de cadencia
+    // faz com o stand.
     report.steps.push({ step: 8, name: "salvar_reabrir", session: reopened.session?.id, wizard: wizardAfterRestart });
 
     // PASSO 9 — confirmar sequencia + duracao + pixel + procedencia.
@@ -10926,6 +10924,7 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       "A proveniencia da edicao (SHA da copia) nao foi restaurada na reabertura",
       100
     );
+    await selectInspectionFrameNative(sessionIdRef, "sonic1_sonic/walk-1");
     await closeVisibleConsoleDrawer(sessionIdRef, "antes da recomposicao pos-reabertura integrada");
     await clickButtonByTestIdNativeWhenReady(sessionIdRef, "inspection-compose-sprite", "recompor walk-1 pos-reabertura integrada");
     // Verificacao no estilo do cenario multiframe (o caminho generico de
