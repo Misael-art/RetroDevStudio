@@ -10114,44 +10114,21 @@ async function runSonicMultiframeScenario(sessionId, app, romPath, base, savedId
 
 const CADENCE_JOURNEY_WAIT_ADDR = 0x13bae;
 const CADENCE_JOURNEY_WAIT_FRAMES = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3, 2, 2, 2, 3, 4];
-const CADENCE_JOURNEY_SAMPLE_WINDOW = [[1500, 1967], [1967, 2434], [2434, 2901]];
-
-async function sampleCadenceBurst(sessionId, startFrame, stopFrame, budgetMs) {
-  const result = await executeAsyncScript(
-    sessionId,
-    `
-      const done = arguments[arguments.length - 1];
-      const stopFrame = Number(arguments[1]);
-      const budgetMs = Number(arguments[2]);
-      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
-      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
-      if (!identity || typeof invoke !== "function") { done({ ok: false, error: "identidade da Game View ou invoke indisponivel" }); return; }
-      const samples = [];
-      const deadline = Date.now() + budgetMs;
-      const tick = () => {
-        const current = Number(identity.getAttribute('data-rendered-frames') || 0);
-        if (current >= stopFrame || Date.now() > deadline) {
-          done({ ok: true, samples, stoppedAt: current, deadlineHit: current < stopFrame });
-          return;
-        }
-        requestAnimationFrame(() => {
-          const readAt = Number(identity.getAttribute('data-rendered-frames') || 0);
-          invoke("emulator_read_memory", { region: 2, offset: 0xd000, length: 0x40 })
-            .then((value) => {
-              const d = value?.data ?? [];
-              samples.push([readAt, d[0x1b] ?? null, d[0x1d] ?? null, d[0x1f] ?? null]);
-              tick();
-            })
-            .catch((error) => done({ ok: false, error: String(error), samples, stoppedAt: readAt }));
-        });
-      };
-      tick();
-    `,
-    [startFrame, stopFrame, budgetMs]
-  );
-  if (!result?.ok) fail(`Burst de amostragem de cadencia recusado: ${JSON.stringify({ startFrame, stopFrame, error: result?.error })}`);
-  return result;
-}
+// Addendum-A: a rota exata da Etapa 4 (load → 900 frames → START nos frames
+// 900-901 → neutro → 2901 no total), com a janela 1500..2900 gravada frame a
+// frame DENTRO do core por `emulator_run_frames_sampled`. O contador usado
+// para gaps é o índice absoluto que o próprio core atribui a cada frame.
+const CADENCE_JOURNEY_OBSERVATION = {
+  totalFrames: 2901,
+  warmupFrames: 900,
+  startFrames: 2,
+  tailFrames: 1999,
+  recordFrom: 1500,
+  recordTo: 2900,
+  region: 2,
+  offset: 0xd000,
+  length: 0x40,
+};
 
 function analyzeCadenceRunSamples(samples, expectedByte) {
   let adjacentIdlePairs = 0;
@@ -10221,8 +10198,15 @@ async function readCadencePanelState(sessionId) {
   );
 }
 
-async function playAndSampleCadenceRun(sessionId, runOptions) {
-  const { buttonTestId, label, expectedBytes, intervalByte, oldGameFrame, report } = runOptions;
+// Perna AO VIVO da jornada (Game View real): gates de identidade, reancoragem,
+// START nativo com ACK, frames avancando ao vivo apos o ACK, framebuffer novo e
+// negativo de tecla. A medicao por frame foi movida para observeCadenceRunOnCore
+// (Addendum-A): o contador `data-rendered-frames` e quantizado em x10 e cada
+// leitura IPC pela pagina afama o pump de 1 frame por tick — amostrar ao vivo e
+// estruturalmente impossivel. Os numeros congelados sao conferidos na perna de
+// observacao, no proprio core, frame a frame.
+async function playCadenceRunLiveGates(sessionId, runOptions) {
+  const { buttonTestId, label, expectedBytes, oldGameFrame, report } = runOptions;
   const expectedSha256 = createHash("sha256").update(expectedBytes).digest("hex");
   await clickButtonByTestIdNativeWhenReady(sessionId, buttonTestId, `jogar ${label} na jornada de cadencia`);
   const identity = await waitFor(
@@ -10240,7 +10224,7 @@ async function playAndSampleCadenceRun(sessionId, runOptions) {
       return progress && progress.romSha256 === expectedSha256 && progress.renderedFrames >= 1 && progress.renderedFrames <= 1200 ? progress : false;
     },
     15000,
-    `O contador de frames nao reancorou na carga da ROM ${label} (janela de amostragem seria invalida)`,
+    `O contador de frames nao reancorou na carga da ROM ${label} (jogo ao vivo seria ambiguo)`,
     100
   );
   await waitFor(
@@ -10283,25 +10267,16 @@ async function playAndSampleCadenceRun(sessionId, runOptions) {
     `START nativo nao foi confirmado pelo produto na corrida ${label}`,
     100
   );
-  await waitFor(
+  const atAck = await readCanonicalGameProgress(sessionId);
+  const afterAck = await waitFor(
     async () => {
       const progress = await readCanonicalGameProgress(sessionId);
-      return progress && progress.renderedFrames >= 1500 ? progress : false;
+      return progress && progress.renderedFrames >= atAck.renderedFrames + 10 ? progress : false;
     },
-    120000,
-    `A corrida ${label} nao alcancou a janela de amostragem (frame 1500)`,
+    15000,
+    `O jogo nao avancou 10 frames apos a confirmacao de START na corrida ${label}`,
     100
   );
-  const samples = [];
-  const bursts = [];
-  for (const [from, to] of CADENCE_JOURNEY_SAMPLE_WINDOW) {
-    const burst = await sampleCadenceBurst(sessionId, from, to, 20000);
-    if (burst.deadlineHit) {
-      fail(`A amostragem da corrida ${label} nao acompanhou os frames de tela: ${JSON.stringify({ from, to, stoppedAt: burst.stoppedAt, samples: burst.samples.length })}`);
-    }
-    bursts.push({ from, to, stoppedAt: burst.stoppedAt, sample_count: burst.samples.length });
-    samples.push(...burst.samples);
-  }
   const gameplayFrame = await readCanonicalGameFrame(sessionId);
   const staleImageRejected = Boolean(oldGameFrame) ? oldGameFrame.framebufferSha256 !== gameplayFrame.framebufferSha256 : true;
   if (!staleImageRejected) fail(`A Game View reutilizou o framebuffer da corrida anterior em ${label}: ${gameplayFrame.framebufferSha256}`);
@@ -10311,26 +10286,113 @@ async function playAndSampleCadenceRun(sessionId, runOptions) {
   const negativeAfter = await executeScript(sessionId, "return window.__RDS_E2E__?.getLastInputObservation?.() ?? null;");
   const unmappedInputRejected = negativeAfter?.lastJoypadAck?.seq === negativeBefore?.lastJoypadAck?.seq;
   if (!unmappedInputRejected) fail(`Entrada nao mapeada foi aceita como input do jogo na corrida ${label}`);
-  const metrics = analyzeCadenceRunSamples(samples, intervalByte);
   const checks = [
-    { name: `${label}.cobertura_idle`, pass: metrics.idle_coverage_ratio !== null && metrics.idle_coverage_ratio >= 0.4, observed: metrics.idle_coverage_ratio, required: ">=0.40" },
-    { name: `${label}.candidato_timer_decrementa_1`, pass: metrics.timer_decrement_one_ratio !== null && metrics.timer_decrement_one_ratio >= 0.8, observed: metrics.timer_decrement_one_ratio, required: ">=0.80 em pares adjacentes idle" },
-    { name: `${label}.recargas_0_para_byte`, pass: metrics.clean_reloads_zero_to_byte >= 3, observed: metrics.clean_reloads_zero_to_byte, required: ">=3" },
-    { name: `${label}.transicoes_de_frame`, pass: metrics.adjacent_frame_transitions >= 5, observed: metrics.adjacent_frame_transitions, required: ">=5" },
-    { name: `${label}.frames_avancados_tras_primeira_observacao`, pass: metrics.frames_after_first_idle !== null && metrics.frames_after_first_idle >= 10, observed: metrics.frames_after_first_idle, required: ">=10" },
-    { name: `${label}.modo_dos_gaps`, pass: metrics.gap_mode === intervalByte + 1, observed: metrics.gap_mode, required: `==${intervalByte + 1}` },
-    { name: `${label}.razao_do_modo`, pass: metrics.gap_mode_ratio !== null && metrics.gap_mode_ratio >= 0.8, observed: metrics.gap_mode_ratio, required: ">=0.80" },
     { name: `${label}.identidade_rom`, pass: identity.romSha256 === expectedSha256 && identity.romSize === 531577, observed: { sha: identity.romSha256, size: identity.romSize }, required: expectedSha256 },
     { name: `${label}.reancoragem_do_contador`, pass: reanchored.renderedFrames <= 1200, observed: reanchored.renderedFrames, required: "<=1200 apos carga" },
     { name: `${label}.ack_de_start`, pass: startInput?.lastJoypadAck?.seq > (inputBeforeStart?.lastJoypadAck?.seq ?? 0), observed: startInput?.lastJoypadAck, required: "sequencia ACK avancou" },
+    { name: `${label}.frames_avancados_tras_primeira_observacao`, pass: afterAck.renderedFrames - atAck.renderedFrames >= 10, observed: afterAck.renderedFrames - atAck.renderedFrames, required: ">=10 frames de tela ao vivo apos o ACK" },
     { name: `${label}.negativo_tecla_nao_mapeada`, pass: unmappedInputRejected, observed: negativeAfter?.lastJoypadAck, required: "ACK inalterado por KeyQ" },
     { name: `${label}.framebuffer_nao_reutilizado`, pass: staleImageRejected, observed: gameplayFrame.framebufferSha256, required: "diversos do frame anterior" },
   ];
   for (const entry of checks) report.checks.push(entry);
-  console.log(`[cadence-journey-run] ${JSON.stringify({ label, core: identity.coreLabel, bursts, metrics })}`);
+  console.log(`[cadence-journey-live] ${JSON.stringify({ label, core: identity.coreLabel, rf_at_ack: atAck.renderedFrames, rf_after: afterAck.renderedFrames })}`);
+  return { identity, checks };
+}
+
+// Perna DE OBSERVACAO (Addendum-A): replicar exatamente a rota do painel
+// (InspectionPanel runRomAndObserve / Etapa 4): carregar a ROM no core,
+// esquentar 900 frames, pressionar START pelo comando de input do produto
+// (com epoch), soltar apos 2 frames e rodar o resto — tudo com
+// `emulator_run_frames_sampled`, que mantem o mutex do core e amostra a janela
+// de WRAM (regiao 2, 0xd000, 0x40) a cada frame executado 1:1. Os indices de
+// frame sao absolutos pos-execucao (o contador zera na carga), entao a janela
+// congelada 1500..2900 e exatamente 1401 linhas consecutivas.
+async function observeCadenceRunOnCore(sessionId, runOptions) {
+  const { romPath, expectedSha256, label, intervalByte, report } = runOptions;
+  const obs = CADENCE_JOURNEY_OBSERVATION;
+  await webdriverRequest("POST", `/session/${sessionId}/timeouts`, { script: 300000, pageLoad: 300000, implicit: 0 });
+  const wrapped = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== "function") { done({ ok: false, error: "Tauri invoke indisponivel na pagina" }); return; }
+      const romPath = arguments[0];
+      const cfg = arguments[1];
+      const neutral = { b: false, y: false, select: false, start: false, up: false, down: false, left: false, right: false, a: false, x: false, l: false, r: false };
+      const pressed = { ...neutral, start: true };
+      const sampled = (frames, recordFrom) => invoke("emulator_run_frames_sampled", { frames, region: cfg.region, offset: cfg.offset, length: cfg.length, recordFrom });
+      (async () => {
+        const load = await invoke("emulator_load_rom", { romPath });
+        const epoch = await invoke("emulator_get_core_epoch");
+        const warmup = await invoke("emulator_run_frames", { frames: cfg.warmupFrames });
+        const press = await invoke("emulator_send_input", { joypad: pressed, sessionEpoch: epoch });
+        const startBatch = await sampled(cfg.startFrames, cfg.recordFrom);
+        const release = await invoke("emulator_send_input", { joypad: neutral, sessionEpoch: epoch });
+        const tailBatch = await sampled(cfg.tailFrames, cfg.recordFrom);
+        return { load, epoch, warmup, press, startBatch, release, tailBatch };
+      })().then((value) => done({ ok: true, value })).catch((error) => done({ ok: false, error: String(error && error.message ? error.message : error) }));
+    `,
+    [romPath, obs]
+  );
+  const failCheck = (name, observed, required) => {
+    report.checks.push({ name: `${label}.${name}`, pass: false, observed, required });
+    fail(`Observacao ${label} abortada (${name}): ${JSON.stringify({ observed, required })}`);
+  };
+  if (!wrapped?.ok) failCheck("observacao_rota_ok", wrapped?.error ?? wrapped, "todos os comandos da rota retornaram ok");
+  const route = wrapped.value;
+  if (typeof route.epoch !== "number" || route.load?.ok === false || route.warmup?.ok === false || route.press?.ok === false || route.startBatch?.ok === false || route.release?.ok === false || route.tailBatch?.ok === false) {
+    failCheck("observacao_rota_ok", { load: route.load?.ok, warmup: route.warmup?.ok, press: route.press?.ok, start: route.startBatch?.ok, release: route.release?.ok, tail: route.tailBatch?.ok, epoch: route.epoch }, "cada comando da rota confirmou ok e o epoch e numerico");
+  }
+  const tail = route.tailBatch;
+  const start = route.startBatch;
+  if (start.frames_before !== obs.warmupFrames || start.frames_after !== obs.warmupFrames + obs.startFrames || start.rows.length !== 0 || tail.frames_after !== obs.totalFrames) {
+    failCheck("observacao_orcamento_e_ancoragem", { start_before: start.frames_before, start_after: start.frames_after, tail_after: tail.frames_after, start_rows: start.rows.length }, `warmup=${obs.warmupFrames}, START em ${obs.warmupFrames + 1}..${obs.warmupFrames + obs.startFrames}, total=${obs.totalFrames}, 0 linhas antes de ${obs.recordFrom}`);
+  }
+  const rows = tail.rows ?? [];
+  const expectedCount = obs.recordTo - obs.recordFrom + 1;
+  if (rows.length !== expectedCount || rows[0]?.frame !== obs.recordFrom || rows[rows.length - 1]?.frame !== obs.recordTo) {
+    failCheck("observacao_janela_completa", { rows: rows.length, first: rows[0]?.frame ?? null, last: rows[rows.length - 1]?.frame ?? null }, `${expectedCount} linhas de ${obs.recordFrom} a ${obs.recordTo}`);
+  }
+  for (let i = 1; i < rows.length; i += 1) {
+    if (rows[i].frame !== rows[i - 1].frame + 1) failCheck("observacao_janela_completa", { gap_entre: rows[i - 1].frame, e: rows[i].frame }, "indices de frame consecutivos, sem buracos");
+  }
+  if (tail.rom_sha256 !== expectedSha256 || tail.rom_path !== romPath) {
+    failCheck("observacao_identidade_rom", { sha: tail.rom_sha256, path: tail.rom_path }, `${expectedSha256} @ ${romPath}`);
+  }
+  const samples = rows.map((row) => {
+    const bytes = Buffer.from(row.bytes_hex, "hex");
+    return [row.frame, bytes[0x1b], bytes[0x1d], bytes[0x1f]];
+  });
+  const metrics = analyzeCadenceRunSamples(samples, intervalByte);
+  const checks = [
+    { name: `${label}.observacao_rota_ok`, pass: true, observed: { epoch: route.epoch, core: tail.core_label } },
+    { name: `${label}.observacao_orcamento_e_ancoragem`, pass: true, observed: { frames_before: start.frames_before, frames_after: tail.frames_after } },
+    { name: `${label}.observacao_janela_completa`, pass: true, observed: { rows: rows.length, first: rows[0].frame, last: rows[rows.length - 1].frame } },
+    { name: `${label}.observacao_identidade_rom`, pass: true, observed: { sha: tail.rom_sha256, path: tail.rom_path } },
+    { name: `${label}.cobertura_idle`, pass: metrics.idle_coverage_ratio !== null && metrics.idle_coverage_ratio >= 0.4, observed: metrics.idle_coverage_ratio, required: ">=0.40" },
+    { name: `${label}.candidato_timer_decrementa_1`, pass: metrics.timer_decrement_one_ratio !== null && metrics.timer_decrement_one_ratio >= 0.8, observed: metrics.timer_decrement_one_ratio, required: ">=0.80 em pares adjacentes idle" },
+    { name: `${label}.recargas_0_para_byte`, pass: metrics.clean_reloads_zero_to_byte >= 3, observed: metrics.clean_reloads_zero_to_byte, required: ">=3" },
+    { name: `${label}.transicoes_de_frame`, pass: metrics.adjacent_frame_transitions >= 5, observed: metrics.adjacent_frame_transitions, required: ">=5" },
+    { name: `${label}.modo_dos_gaps`, pass: metrics.gap_mode === intervalByte + 1, observed: metrics.gap_mode, required: `==${intervalByte + 1}` },
+    { name: `${label}.razao_do_modo`, pass: metrics.gap_mode_ratio !== null && metrics.gap_mode_ratio >= 0.8, observed: metrics.gap_mode_ratio, required: ">=0.80" },
+  ];
+  for (const entry of checks) report.checks.push(entry);
+  console.log(`[cadence-journey-observe] ${JSON.stringify({ label, rom_sha256: tail.rom_sha256, core: tail.core_label, metrics })}`);
   const seriesPath = path.join(validationDir, `${report.artifact_prefix}-cadence-journey-series-${label}.json`);
-  await writeFile(seriesPath, JSON.stringify({ label, rom_sha256: expectedSha256, interval_byte: intervalByte, core: { label: identity.coreLabel, path: identity.corePath }, window: CADENCE_JOURNEY_SAMPLE_WINDOW, bursts, checks, metrics, samples }, null, 2));
-  return { identity, metrics, checks, seriesPath, samples };
+  await writeFile(seriesPath, JSON.stringify({
+    schema: "rex-sonic-cadence-journey-series/v1",
+    label,
+    rom_path: romPath,
+    rom_sha256: tail.rom_sha256,
+    interval_byte: intervalByte,
+    core_label: tail.core_label,
+    route: { ...obs, epoch: route.epoch, frames_before_start: start.frames_before, frames_after_tail: tail.frames_after, start_batch_rows: start.rows },
+    checks,
+    metrics,
+    raw_rows: rows,
+  }, null, 2));
+  return { metrics, checks, seriesPath, rom_sha256: tail.rom_sha256 };
 }
 
 async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
@@ -10502,34 +10564,60 @@ async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, sav
     if (!report.checks.at(-1).pass) throw new Error("A base BYOR foi alterada antes mesmo do jogo");
 
     const oldGameFrame = await readCanonicalGameFrame(sessionIdRef);
-    const baseRun = await playAndSampleCadenceRun(sessionIdRef, {
+    const baseLive = await playCadenceRunLiveGates(sessionIdRef, {
       buttonTestId: "inspection-sonic-play-base",
       label: "base",
       expectedBytes: base,
-      intervalByte: 23,
       oldGameFrame,
       report,
     });
-    const modifiedRun = await playAndSampleCadenceRun(sessionIdRef, {
+    const modifiedLive = await playCadenceRunLiveGates(sessionIdRef, {
       buttonTestId: "inspection-sonic-play-modified",
       label: "modificada",
       expectedBytes,
-      intervalByte: 40,
       oldGameFrame: await readCanonicalGameFrame(sessionIdRef),
+      report,
+    });
+    // Congelar o pump da Game View antes da medicao: a observacao roda no mesmo
+    // core e cada frame do pump interleavado invalidaria a janela por frame.
+    await clickButtonByTestIdNativeWhenReady(sessionIdRef, "viewport-pause", "pausar o pump da Game View antes da observacao amostrada");
+    const rfBeforeHold = await readCanonicalGameProgress(sessionIdRef);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    const rfAfterHold = await readCanonicalGameProgress(sessionIdRef);
+    report.checks.push({ name: "observacao.pump_pausado", pass: rfBeforeHold.renderedFrames === rfAfterHold.renderedFrames, observed: { antes: rfBeforeHold.renderedFrames, depois: rfAfterHold.renderedFrames }, required: "contador estavel com a Game View pausada" });
+    if (!report.checks.at(-1).pass) fail(`O pump da Game View nao parou com viewport-pause: ${JSON.stringify({ antes: rfBeforeHold.renderedFrames, depois: rfAfterHold.renderedFrames })}`);
+    const baseObs = await observeCadenceRunOnCore(sessionIdRef, {
+      romPath,
+      expectedSha256: baseSha256,
+      label: "base",
+      intervalByte: 23,
+      report,
+    });
+    const modifiedObs = await observeCadenceRunOnCore(sessionIdRef, {
+      romPath: appliedPath,
+      expectedSha256: modifiedSha256,
+      label: "modificada",
+      intervalByte: 40,
       report,
     });
     report.checks.push({
       name: "discriminante.modos_diferentes",
-      pass: baseRun.metrics.gap_mode !== modifiedRun.metrics.gap_mode,
-      observed: { base: baseRun.metrics.gap_mode, modificada: modifiedRun.metrics.gap_mode },
+      pass: baseObs.metrics.gap_mode !== modifiedObs.metrics.gap_mode,
+      observed: { base: baseObs.metrics.gap_mode, modificada: modifiedObs.metrics.gap_mode },
       required: "modos distintos entre as duas corridas",
+    });
+    report.steps.push({
+      step: "cadence_play_observe",
+      live: { base_core: baseLive.identity.coreLabel, modificada_core: modifiedLive.identity.coreLabel },
+      base_series: baseObs.seriesPath,
+      modificada_series: modifiedObs.seriesPath,
     });
     if ((await readFile(romPath)).equals(base) === false) fail("A base BYOR mudou durante a jornada");
     report.checks.push({ name: "jogo.base_preservada_no_final", pass: true, observed: baseSha256 });
     const allPass = report.checks.every((entry) => entry.pass !== false);
     report.runtime_effect = {
-      base: { interval_byte: 23, measured_gap_mode: baseRun.metrics.gap_mode, verdict_expected: "H_N+1 => 24" },
-      modificada: { interval_byte: 40, measured_gap_mode: modifiedRun.metrics.gap_mode, verdict_expected: "H_N+1 => 41" },
+      base: { interval_byte: 23, measured_gap_mode: baseObs.metrics.gap_mode, verdict_expected: "H_N+1 => 24" },
+      modificada: { interval_byte: 40, measured_gap_mode: modifiedObs.metrics.gap_mode, verdict_expected: "H_N+1 => 41" },
     };
     await persistReport({ allPass, finished_at: new Date().toISOString() });
     if (!allPass) {

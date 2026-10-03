@@ -632,6 +632,156 @@ fn emulator_run_frames(frames: u32, emu: State<EmulatorCoreState>) -> EmulatorCo
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SampledMemoryRow {
+    pub frame: u64,
+    pub bytes_hex: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmulatorSampledRunResult {
+    pub ok: bool,
+    pub message: String,
+    pub rom_path: String,
+    pub rom_sha256: String,
+    pub core_label: String,
+    pub frames_before: u64,
+    pub frames_after: u64,
+    pub frames_requested: u32,
+    pub frames_run: u32,
+    pub rows: Vec<SampledMemoryRow>,
+}
+
+const SAMPLED_RUN_MAX_FRAMES: u32 = 10_000;
+const SAMPLED_RUN_MAX_WINDOW: usize = 512;
+
+/// Lote determinístico com o mutex do core tomado do início ao fim: executa
+/// `frames` via `run_frame` 1:1 e, a partir de `record_from` (índice absoluto
+/// `frame_index()`, zerado na carga da ROM), grava a janela de memória pedida
+/// uma vez por frame. O contador nunca é reconstruído por estimativa do
+/// lado da página — cada linha carrega o índice que o próprio core atribuiu
+/// ao frame recém-executado.
+fn run_frames_sampled_core(
+    core: &mut EmulatorCore,
+    frames: u32,
+    region: u32,
+    offset: usize,
+    length: usize,
+    record_from: u64,
+) -> Result<(u64, u64, Vec<SampledMemoryRow>), String> {
+    let (probe, total_size) = core.read_memory(region, offset, length)?;
+    if probe.len() < length {
+        return Err(format!(
+            "Janela de memoria [{offset}, +{length}) nao exposta pela regiao {region} do core ({} de {total_size} bytes leitaveis).",
+            probe.len()
+        ));
+    }
+    let frames_before = core.frame_index();
+    let mut rows = Vec::new();
+    for _ in 0..frames {
+        core.run_frame()?;
+        let index = core.frame_index();
+        if index >= record_from {
+            let (data, _) = core.read_memory(region, offset, length)?;
+            if data.len() != length {
+                return Err(format!(
+                    "Janela de memoria encolheu no frame {index} ({} de {length} bytes).",
+                    data.len()
+                ));
+            }
+            rows.push(SampledMemoryRow {
+                frame: index,
+                bytes_hex: data
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>(),
+            });
+        }
+    }
+    Ok((frames_before, core.frame_index(), rows))
+}
+
+/// Executa um lote de frames amostrando a memória frame a frame dentro do
+/// próprio core (mesma família dos lotes usados pela barra "Observar").
+/// Superfície Experimental de observação: nenhuma inferência de sucesso — a
+/// identidade da ROM carregada e os índices absolutos voltam na resposta
+/// para conferência independente.
+#[tauri::command]
+fn emulator_run_frames_sampled(
+    emu: State<EmulatorCoreState>,
+    frames: u32,
+    region: u32,
+    offset: usize,
+    length: usize,
+    record_from: u64,
+) -> EmulatorSampledRunResult {
+    let rejection = |message: String| EmulatorSampledRunResult {
+        ok: false,
+        message,
+        rom_path: String::new(),
+        rom_sha256: String::new(),
+        core_label: String::new(),
+        frames_before: 0,
+        frames_after: 0,
+        frames_requested: frames,
+        frames_run: 0,
+        rows: Vec::new(),
+    };
+    if length == 0 || length > SAMPLED_RUN_MAX_WINDOW {
+        return rejection(format!(
+            "Janela de amostragem fora do limite (1..={SAMPLED_RUN_MAX_WINDOW} bytes)."
+        ));
+    }
+    let mut core = match emu.0.lock() {
+        Ok(core) => core,
+        Err(error) => return rejection(error.to_string()),
+    };
+    let Some(rom_path) = core.loaded_rom_path() else {
+        return rejection("Nenhuma ROM carregada para execução amostrada.".to_string());
+    };
+    let rom_bytes = match fs::read(&rom_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return rejection(format!(
+                "Falha ao ler ROM carregada '{}': {error}",
+                rom_path.display()
+            ))
+        }
+    };
+    let frames_run = frames.min(SAMPLED_RUN_MAX_FRAMES);
+    let outcome =
+        run_frames_sampled_core(&mut core, frames_run, region, offset, length, record_from);
+    match outcome {
+        Ok((frames_before, frames_after, rows)) => EmulatorSampledRunResult {
+            ok: true,
+            message: format!(
+                "{frames_run} frame(s) executado(s); {} amostra(s) a partir do frame {record_from}.",
+                rows.len()
+            ),
+            rom_path: rom_path.display().to_string(),
+            rom_sha256: sha256_hex(&rom_bytes),
+            core_label: core.loaded_core_label().unwrap_or_default().to_string(),
+            frames_before,
+            frames_after,
+            frames_requested: frames,
+            frames_run,
+            rows,
+        },
+        Err(error) => EmulatorSampledRunResult {
+            ok: false,
+            message: error,
+            rom_path: rom_path.display().to_string(),
+            rom_sha256: sha256_hex(&rom_bytes),
+            core_label: core.loaded_core_label().unwrap_or_default().to_string(),
+            frames_before: core.frame_index(),
+            frames_after: core.frame_index(),
+            frames_requested: frames,
+            frames_run,
+            rows: Vec::new(),
+        },
+    }
+}
+
 /// Observa o estado real após a execução: identidade da ROM e do core,
 /// avanço de frames e o framebuffer RGBA produzido pelo core. Esta chamada
 /// não infere sucesso a partir da mensagem de `emulator_run_frame`.
@@ -5405,6 +5555,7 @@ pub fn run() {
             emulator_load_rom,
             emulator_run_frame,
             emulator_run_frames,
+            emulator_run_frames_sampled,
             emulator_observe,
             emulator_save_state,
             emulator_load_state,
@@ -7237,6 +7388,53 @@ pub extern "C" fn retro_run() {
             .expect("audio buffer should be drained")
             .1
             .is_empty());
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn run_frames_sampled_records_absolute_index_per_frame() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("sampled-run");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "sampled_run", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
+        assert_eq!(emulator.frame_index(), 0, "a carga ancora o contador");
+
+        let (before, after, rows) =
+            run_frames_sampled_core(&mut emulator, 5, 2, 0, 8, 3).expect("lote amostrado");
+        assert_eq!((before, after), (0, 5));
+        assert_eq!(
+            rows.iter().map(|row| row.frame).collect::<Vec<_>>(),
+            vec![3, 4, 5],
+            "indices absolutos pos-execucao, um por frame"
+        );
+        assert!(rows.iter().all(|row| row.bytes_hex.len() == 16));
+
+        // Lotes subsequentes continuam no contador do core, sem reancoragem.
+        let (before, after, rows) =
+            run_frames_sampled_core(&mut emulator, 2, 2, 0, 8, 6).expect("segundo lote");
+        assert_eq!((before, after), (5, 7));
+        assert_eq!(
+            rows.iter().map(|row| row.frame).collect::<Vec<_>>(),
+            vec![6, 7]
+        );
+
+        // Janela que o core nao expoe e recusada antes de executar qualquer frame.
+        let before_index = emulator.frame_index();
+        let error = run_frames_sampled_core(&mut emulator, 3, 2, 60, 8, 0)
+            .expect_err("janela fora da regiao deve recusar");
+        assert!(error.contains("nao exposta"), "{error}");
+        assert_eq!(
+            emulator.frame_index(),
+            before_index,
+            "recusa nao executa frames"
+        );
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);
