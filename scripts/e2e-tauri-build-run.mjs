@@ -10208,6 +10208,9 @@ async function readCadencePanelState(sessionId) {
 // observacao, no proprio core, frame a frame.
 async function playCadenceRunLiveGates(sessionId, runOptions) {
   const { buttonTestId, label, expectedBytes, oldGameFrame, report } = runOptions;
+  // Addendum-2 M-1: orcamento do gate de boot e meio de navegacao; o limiar
+  // de 890 frames nao muda e o padrao preserva a jornada de cadencia entregue.
+  const bootBudgetMs = runOptions.bootBudgetMs ?? 120000;
   const expectedSha256 = createHash("sha256").update(expectedBytes).digest("hex");
   await clickButtonByTestIdNativeWhenReady(sessionId, buttonTestId, `jogar ${label} na jornada de cadencia`);
   const identity = await waitFor(
@@ -10259,7 +10262,7 @@ async function playCadenceRunLiveGates(sessionId, runOptions) {
         }
         return progress && progress.renderedFrames >= 890 ? progress : false;
       },
-      120000,
+      bootBudgetMs,
       `A ROM ${label} nao atravessou o boot ate o ponto de entrada na jornada`,
       100
     );
@@ -10715,7 +10718,7 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
   const report = {
     schema: "rex-sonic-anim-integrada/v1",
     artifact_prefix: prefix,
-    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (correcoes de driver R-1..R-4)",
+    expectations: "docs/rex_profiles/sonic_anim_integrada/EXPECTATIONS-INTEGRADA.md + EXPECTATIONS-ETAPA5-ADDENDUM-1.md (driver R-1..R-4) + EXPECTATIONS-ETAPA5-ADDENDUM-2.md (meio M-1)",
     binary_sha256: hash(await readFile(app)),
     base_rom_sha256: baseSha256,
     expected_journey_sha256: journeySha256,
@@ -10877,6 +10880,7 @@ async function runSonicAnimIntegradaScenario(sessionId, app, romPath, base, save
       expectedBytes: journeyBytes,
       oldGameFrame,
       report,
+      bootBudgetMs: 300000,
     });
     report.steps.push({ step: 7, name: "jogar_modificada", core: modifiedLive.identity.coreLabel });
 
