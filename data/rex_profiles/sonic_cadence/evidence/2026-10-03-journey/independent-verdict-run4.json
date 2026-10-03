@@ -1,0 +1,187 @@
+{
+  "schema": "rex-sonic-cadence-journey-verification/v1",
+  "verdict": "H_N+1 confirmado na jornada desktop",
+  "measured": {
+    "base": {
+      "interval": 23,
+      "gap_mode": 24
+    },
+    "modificada": {
+      "interval": 40,
+      "gap_mode": 41
+    }
+  },
+  "checks": [
+    {
+      "name": "schema do report da jornada",
+      "pass": true,
+      "detail": "rex-sonic-cadence-journey/v1"
+    },
+    {
+      "name": "documento de expectativas referenciado",
+      "pass": true,
+      "detail": "docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA5.md"
+    },
+    {
+      "name": "report declara allPass=true",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "SHA da ROM base no report e o pinado",
+      "pass": true,
+      "detail": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb"
+    },
+    {
+      "name": "binary_sha256 registrado",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "serie base presente com schema v1",
+      "pass": true,
+      "detail": "rex-sonic-cadence-journey-series/v1"
+    },
+    {
+      "name": "arquivo-ROM base lido cru bate com o pin",
+      "pass": true,
+      "detail": "531577 bytes"
+    },
+    {
+      "name": "copia aplicada difere da base em exatamente 1 byte em 0x13BAE",
+      "pass": true,
+      "detail": "[80814]"
+    },
+    {
+      "name": "bytes da tabela lidos crus dos arquivos (23 base, 40 aplicada)",
+      "pass": true,
+      "detail": "23,40"
+    },
+    {
+      "name": "serie base: sha da ROM observada bate com o arquivo",
+      "pass": true,
+      "detail": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb"
+    },
+    {
+      "name": "serie base: core reportado",
+      "pass": true,
+      "detail": "Genesis Plus GX v1.7.4 46a5521"
+    },
+    {
+      "name": "serie base: bruto continuo 1500..2901 sem buracos",
+      "pass": true,
+      "detail": "ok (1402 linhas)"
+    },
+    {
+      "name": "serie base: descarte fora da janela = exatamente [2901]",
+      "pass": true,
+      "detail": "[2901]"
+    },
+    {
+      "name": "base: intervalo do arquivo-ROM == serie congelada (23)",
+      "pass": true,
+      "detail": 23
+    },
+    {
+      "name": "base: cobertura idle >= 0,40",
+      "pass": true,
+      "detail": "1.0000"
+    },
+    {
+      "name": "base: timer decresce de 1 em >= 80% dos pares adjacentes idle",
+      "pass": true,
+      "detail": "0.9586"
+    },
+    {
+      "name": "base: >= 3 recargas 0 -> 23",
+      "pass": true,
+      "detail": 58
+    },
+    {
+      "name": "base: >= 5 transicoes de frame",
+      "pass": true,
+      "detail": 58
+    },
+    {
+      "name": "base: modo dos gaps == 24 (H_N+1 congelado)",
+      "pass": true,
+      "detail": "modo=24 razao=1.000"
+    },
+    {
+      "name": "base: razao da moda >= 0,80",
+      "pass": true,
+      "detail": "1.0000"
+    },
+    {
+      "name": "base: todos os gaps sao a moda (histograma unico)",
+      "pass": true,
+      "detail": "[24,24,24,24,24]"
+    },
+    {
+      "name": "serie modificada: sha da ROM observada bate com o arquivo",
+      "pass": true,
+      "detail": "57026bd8fcf04f210988743800e734b54667150637df5ba101301cdf5a60c530"
+    },
+    {
+      "name": "serie modificada: core reportado",
+      "pass": true,
+      "detail": "Genesis Plus GX v1.7.4 46a5521"
+    },
+    {
+      "name": "serie modificada: bruto continuo 1500..2901 sem buracos",
+      "pass": true,
+      "detail": "ok (1402 linhas)"
+    },
+    {
+      "name": "serie modificada: descarte fora da janela = exatamente [2901]",
+      "pass": true,
+      "detail": "[2901]"
+    },
+    {
+      "name": "modificada: intervalo do arquivo-ROM == serie congelada (40)",
+      "pass": true,
+      "detail": 40
+    },
+    {
+      "name": "modificada: cobertura idle >= 0,40",
+      "pass": true,
+      "detail": "1.0000"
+    },
+    {
+      "name": "modificada: timer decresce de 1 em >= 80% dos pares adjacentes idle",
+      "pass": true,
+      "detail": "0.9750"
+    },
+    {
+      "name": "modificada: >= 3 recargas 0 -> 40",
+      "pass": true,
+      "detail": 35
+    },
+    {
+      "name": "modificada: >= 5 transicoes de frame",
+      "pass": true,
+      "detail": 30
+    },
+    {
+      "name": "modificada: modo dos gaps == 41 (H_N+1 congelado)",
+      "pass": true,
+      "detail": "modo=41 razao=1.000"
+    },
+    {
+      "name": "modificada: razao da moda >= 0,80",
+      "pass": true,
+      "detail": "1.0000"
+    },
+    {
+      "name": "modificada: todos os gaps sao a moda (histograma unico)",
+      "pass": true,
+      "detail": "[41,41,41,41,41]"
+    },
+    {
+      "name": "discriminante: modos base e modificada distintos",
+      "pass": true,
+      "detail": "24 vs 41"
+    }
+  ],
+  "allPass": true
+}

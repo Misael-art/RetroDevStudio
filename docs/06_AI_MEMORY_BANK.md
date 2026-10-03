@@ -2487,3 +2487,37 @@ host-readiness anterior foi sobrescrito pela certificação; o log READY permane
 íntegro. A nova saída tem cópia congelada; não se reescreveu a evidência antiga.
 CI posterior pertence ao SHA consultado na PR, sem alegação de verde herdado.
 Nenhuma frente, corpus ou worktree de outro agente foi alterada.
+
+### Checkpoint 2026-10-03 — fatia de cadência Sonic 1 (Etapas 1–6, branch própria)
+
+Frente `codex/rex-sonic-cadence` (worktree REX-SONIC-CADENCE-2026-10-02), filha
+da base da #98/#99. Entrega: um iniciante abre a própria ROM Sonic 1 (BYOR),
+vê os 18 quadros reais de `id_Wait` na ordem do script, entende a duração em
+unidades medidas, muda o byte de intervalo na CÓPIA pelo pipeline canônico
+(offset 0x13BAE, 1 byte, base intacta), vê previsão/oráculo H_N+1, exporta e
+aplica BPS pela UI, JOGA base e modificada na Game View real, salva/fecha/
+reabre com edição e procedência restauradas — e a cadência efetiva é medida
+no próprio core, provada por verificador independente.
+
+Números congelados ANTES das corridas (EXPECTATIONS-ETAPA5.md + Addendum-A +
+Retificação A, cada um commitado antes de tocar código) e confirmados na
+run-4: byte 23 → gaps de 24 frames de tela; byte 40 → 41 (veredito H_N+1,
+NTSC; PAL não medido). allPass 48/48 no driver + 35/35 no
+`scripts/qa/sonic-cadence-journey-verifier.mjs` (recalcula do hex bruto;
+recargas 58/35, razão da moda 1,0, cobertura idle 1,0, discriminante 24≠41).
+Falhas honestas registradas: run-2 (amostragem ao vivo estruturalmente
+impossível: contador ×10 em ViewportPanel e IPC faminto o pump) e run-3
+(borda inclusiva do `record_from`; 1402×1401 linhas). Produtos derivados:
+comando `emulator_run_frames_sampled` (lote com mutex no core, índices
+absolutos, identidade ROM no retorno; unit-tested) e CX-EVAL.md com quatro
+fricções residuais documentadas (drawer do console, wizard na reabertura,
+contador ×10, custo de IPC por leitura).
+
+Binário da prova: `2f09ced2…` reconstruído no HEAD exato `ec2c0a2`; pins
+Xvfb `5bfd315a…` e ROM `c7da53a1…`. Gates completos em
+`data/rex_profiles/sonic_cadence/evidence/2026-10-03-journey/gates.json`
+(check:tree/lint/tsc/npm test/clippy -D/fmt/cargo test 846/0/79/certify/audits).
+Séries brutas, prints e arquivos-ROM ficam LOCAIS (hash pinados no manifesto);
+só metadados/métricas/resumos são versionados. Classificação mantida:
+Experimental / local profile validation — sem merge, release ou promoção de
+maturidade por esta frente; integração é decisão do integrador.

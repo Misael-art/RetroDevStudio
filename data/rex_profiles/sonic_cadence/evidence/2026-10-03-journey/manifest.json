@@ -1,0 +1,75 @@
+{
+  "schema": "rex-sonic-cadence-journey-evidence/v1",
+  "date": "2026-10-03",
+  "classification": "Experimental / local profile validation; claim limitado a Sonic 1 (USA, Europe) Rev00 BYOR no core Genesis Plus GX deste host; nenhuma promessa de extracao geral ou maturidade",
+  "branch": "codex/rex-sonic-cadence",
+  "evidence_commits": {
+    "addendum_a_freeze": "d7a91a1",
+    "core_sampled_command_and_two_leg_driver": "59fba41",
+    "retificacao_a_freeze": "0b8ee90",
+    "driver_boundary_fix": "ec2c0a2",
+    "independent_verifier": "f95b909"
+  },
+  "binary_sha256": "2f09ced23d7dd38a45302256aa1fa39c16a55ef2a42b8f199807255a7dbcb369",
+  "base_rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "base_rom_size": 531577,
+  "modified_rom_sha256": "57026bd8fcf04f210988743800e734b54667150637df5ba101301cdf5a60c530",
+  "bps_sha256": "873dfd233b9b5dd9bfa055c0627e08925a314efca44b358094d090c24d47fe8b",
+  "xvfb_sha256": "5bfd315a8c7bc626d0b183d176e130c34f910a4a1279d9d53ea45769f62a3351",
+  "core": "Genesis Plus GX v1.7.4 46a5521",
+  "expectations": [
+    "docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA5.md",
+    "docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA5-ADDENDUM-A.md"
+  ],
+  "run_history": {
+    "run1": "rejeitada antes da execucao: binario anterior ao commit final (gate de fingerprint aprendido)",
+    "run2": "FAIL no amostrador ao vivo (14/14 portoes anteriores verdes); causa-raiz estrutural registrada no Addendum-A; evidencia hash-pinada em ~/rds-scratch/cadence-journey-20261003-02/evidence-run2/",
+    "run3": "FAIL em 1 portao de borda (1402 linhas vs 1401; semantics do record_from inclusivo); 26/26 anteriores verdes; Retificacao A congelada antes da correcao; evidencia em ~/rds-scratch/cadence-journey-20261003-03/evidence-run3/ (report ba2e3ebb, falha 939b6eeb, log 0134b614)",
+    "run4": "allPass=true: 48/48 checks do driver + 35/35 do verificador independente; modo base 24 (58 recargas, razao 1,0), modo modificada 41 (35 recargas, razao 1,0), discriminante 24 vs 41"
+  },
+  "verdict": "H_N+1 confirmado na jornada desktop",
+  "artifacts": [
+    {
+      "file": "report-journey-run4.json",
+      "sha256": "7cd5e182bfa694fa641a718899fc436a6517678984cba957b0e9f2e2f61e3d9d"
+    },
+    {
+      "file": "independent-verdict-run4.json",
+      "sha256": "bb162eda5f0167f956950f2e5065799ffc3103f884c0ae45ac7b99383960d836"
+    },
+    {
+      "file": "series-base-summary.json",
+      "sha256": "87af064adadb4ba9d7656c7e3433080a12c41f69f2f66c9b2304712b10b3d07d"
+    },
+    {
+      "file": "series-modificada-summary.json",
+      "sha256": "c15dd167a8a6c7ccd6d57d236494ed6dd7a129402d0211d943e8cc7916296005"
+    },
+    {
+      "file": "gates.json",
+      "sha256": "e3e68701a7de4f2aada3822e4ddb791905afbf52f2cebaddcdf1ee1dede8dd53"
+    }
+  ],
+  "screenshots_local": [
+    {
+      "file_local": "src-tauri/target-test/validation/inspection-2026-10-03T04-59-43-136Z-cadence-journey-panel-23.png",
+      "sha256": "a006a5f797b2b6bbcbcc6c676b71dd14036eef2756b277e522e9254d32204d8f",
+      "note": "screenshot local; nao versionado"
+    },
+    {
+      "file_local": "src-tauri/target-test/validation/inspection-2026-10-03T04-59-43-136Z-cadence-journey-panel-40.png",
+      "sha256": "4cf2d74fbd4286d40298fc1301ae472ce21b4934a91daafe6b69cc043a0dfd7b",
+      "note": "screenshot local; nao versionado"
+    },
+    {
+      "file_local": "src-tauri/target-test/validation/inspection-2026-10-03T04-59-43-136Z-cadence-journey-reopened.png",
+      "sha256": "7fc973aa404bb5c3af3e1904a261f7aee4cf0e04c89cb79fd65ae118ebab082c",
+      "note": "screenshot local; nao versionado"
+    }
+  ],
+  "full_series_local": [
+    "src-tauri/target-test/validation/inspection-2026-10-03T04-59-43-136Z-cadence-journey-series-base.json",
+    "src-tauri/target-test/validation/inspection-2026-10-03T04-59-43-136Z-cadence-journey-series-modificada.json"
+  ],
+  "commercial_content": "ROM/PNG/arrays de RAM por frame ficam locais (ignorados); apenas metadados, hashes, metricas e resumos sao versionados."
+}
