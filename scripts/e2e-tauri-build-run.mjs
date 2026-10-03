@@ -11445,6 +11445,22 @@ async function runSonicAnimVisualDiagnosticoScenario(sessionId, app, romPath, ba
     );
     await persistReport();
 
+    // Encerrar a execucao pelo mesmo caminho do controle visivel "Parar"
+    // (stopEmulator): com runtime ativo no mesmo contexto, a troca nativa de
+    // frame nao confirmava selecao (run de 2026-10-03 16:29) — o teclado
+    // pertence a Game View. Paused nao e encerrado; parar e o caminho do UX.
+    const stoppedRun = await executeAsyncScript(sessionIdRef, `const done = arguments[arguments.length - 1]; window.__RDS_E2E__?.stopEmulator?.().then((ok) => done(Boolean(ok))).catch(() => done(false));`);
+    if (!stoppedRun) fail("O encerramento da execucao (Parar) nao confirmou parada do core antes da recomposicao (O2)");
+    await waitFor(
+      async () => {
+        const state = await readAutomationState(sessionIdRef);
+        return state && state.emulatorLoaded === false ? state : false;
+      },
+      15000,
+      "O estado do app nao registrou emulatorLoaded=false apos o encerramento (O2)",
+      100
+    );
+
     // Recompor walk-1 (copia pintada) apos o pump na mesma instancia. A
     // troca para stand desmonta o <img> (condicao verificavel de saida), e a
     // volta exige composicao nova com a identidade da copia — nunca se
