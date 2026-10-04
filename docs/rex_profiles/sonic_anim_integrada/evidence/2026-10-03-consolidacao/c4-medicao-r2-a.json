@@ -1,0 +1,769 @@
+{
+  "scenario": "compositing-medicao",
+  "arm": "A",
+  "armMeaning": "produto — binário define WEBKIT_DISABLE_COMPOSITING_MODE=1 internamente (compositing-off)",
+  "appPath": "/home/misael/rds-scratch/c4-consolidacao-20261003/armA/retro-dev-studio",
+  "appSha256": "ce54d579381257364514c28833876127359edbaf61448726fee9709602ec7623",
+  "romPath": "/home/misael/RDS-REX-CORPUS-E/.staging/Sonic the Hedgehog (USA, Europe).bin",
+  "romSha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "windowConfig": {
+    "windows": 3,
+    "windowMs": 20000,
+    "sampleMs": 1000
+  },
+  "meta": {
+    "presentedCounter": "data-rendered-frames (pump do ViewportPanel; quantizado x10; leitura IPC de 1 Hz afama levemente o pump — medição grosseira assumida)",
+    "emulatedCounter": "emulator_observe.frames_run (exato, no core, não perturbado)",
+    "cpuSource": "cpu-sample.py externo (fora do processo), alinhado por t_start_ms/t_end_ms epoch de cada janela",
+    "responseApproach": "primario: round-trip de uma ida ao main thread durante o pump (sempre disponivel); secundario: latencia de ack do joypad via START nativo (so com sessao de input viva — no title screen fica lacuna)",
+    "nodegraphRepaintTick": "LACUNA — NodeGraph não tem hook de contagem de re-pintura (evento-driven, sem RAF)",
+    "mugenPreview": "LACUNA neste probe — prévia MUGEN exige jornada de import completa; fora de escopo de um probe de perf"
+  },
+  "surfaceResults": {
+    "game": {
+      "status": "medido",
+      "windows": [
+        {
+          "index": 1,
+          "t_start_ms": 1791073883084,
+          "t_end_ms": 1791073903791,
+          "wall_ms": 20707,
+          "rendered_start": 10,
+          "rendered_end": 170,
+          "frames_run_start": 14,
+          "frames_run_end": 177,
+          "presented_frames_delta": 160,
+          "emulated_frames_delta": 163,
+          "presented_fps": 7.73,
+          "emulated_fps": 7.87,
+          "validity_frames_run_advanced": true,
+          "interaction_latency_ms": null,
+          "ui_response_median_ms": 256,
+          "roundtrip_samples": [
+            208,
+            274,
+            212,
+            218,
+            228,
+            211,
+            213,
+            241,
+            326,
+            277,
+            300,
+            284,
+            322,
+            363,
+            385,
+            384,
+            226,
+            294,
+            225,
+            234,
+            256
+          ],
+          "samples": [
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 10,
+              "framesRun": 14,
+              "nowMs": 1791073883084,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 208
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 20,
+              "framesRun": 24,
+              "nowMs": 1791073884137,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 274
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 30,
+              "framesRun": 33,
+              "nowMs": 1791073885140,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 212
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 40,
+              "framesRun": 43,
+              "nowMs": 1791073886154,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 218
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 50,
+              "framesRun": 53,
+              "nowMs": 1791073887186,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 228
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 60,
+              "framesRun": 64,
+              "nowMs": 1791073888190,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 211
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 70,
+              "framesRun": 73,
+              "nowMs": 1791073889193,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 213
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 80,
+              "framesRun": 83,
+              "nowMs": 1791073890228,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 241
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 90,
+              "framesRun": 92,
+              "nowMs": 1791073891290,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 326
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 90,
+              "framesRun": 98,
+              "nowMs": 1791073892294,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 277
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 100,
+              "framesRun": 104,
+              "nowMs": 1791073893304,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 300
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 100,
+              "framesRun": 110,
+              "nowMs": 1791073894310,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 284
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 110,
+              "framesRun": 115,
+              "nowMs": 1791073895326,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 322
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 120,
+              "framesRun": 121,
+              "nowMs": 1791073896424,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 363
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 120,
+              "framesRun": 128,
+              "nowMs": 1791073897542,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 385
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 130,
+              "framesRun": 135,
+              "nowMs": 1791073898649,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 384
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 140,
+              "framesRun": 141,
+              "nowMs": 1791073899655,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 226
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 140,
+              "framesRun": 150,
+              "nowMs": 1791073900717,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 294
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 150,
+              "framesRun": 158,
+              "nowMs": 1791073901723,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 225
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 160,
+              "framesRun": 167,
+              "nowMs": 1791073902740,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 234
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 170,
+              "framesRun": 177,
+              "nowMs": 1791073903791,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 256
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "t_start_ms": 1791073904013,
+          "t_end_ms": 1791073923841,
+          "wall_ms": 19828,
+          "rendered_start": 170,
+          "rendered_end": 340,
+          "frames_run_start": 178,
+          "frames_run_end": 349,
+          "presented_frames_delta": 170,
+          "emulated_frames_delta": 171,
+          "presented_fps": 8.57,
+          "emulated_fps": 8.62,
+          "validity_frames_run_advanced": true,
+          "interaction_latency_ms": null,
+          "ui_response_median_ms": 282,
+          "roundtrip_samples": [
+            231,
+            223,
+            303,
+            224,
+            264,
+            297,
+            236,
+            234,
+            278,
+            304,
+            216,
+            274,
+            282,
+            382,
+            279,
+            284,
+            337,
+            282,
+            297,
+            282
+          ],
+          "samples": [
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 170,
+              "framesRun": 178,
+              "nowMs": 1791073904013,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 231
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 180,
+              "framesRun": 187,
+              "nowMs": 1791073905018,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 223
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 190,
+              "framesRun": 197,
+              "nowMs": 1791073906090,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 303
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 200,
+              "framesRun": 206,
+              "nowMs": 1791073907105,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 224
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 210,
+              "framesRun": 215,
+              "nowMs": 1791073908145,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 264
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 220,
+              "framesRun": 225,
+              "nowMs": 1791073909238,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 297
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 230,
+              "framesRun": 234,
+              "nowMs": 1791073910242,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 236
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 240,
+              "framesRun": 243,
+              "nowMs": 1791073911262,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 234
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 250,
+              "framesRun": 253,
+              "nowMs": 1791073912321,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 278
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 260,
+              "framesRun": 263,
+              "nowMs": 1791073913396,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 304
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 270,
+              "framesRun": 272,
+              "nowMs": 1791073914401,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 216
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 280,
+              "framesRun": 282,
+              "nowMs": 1791073915461,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 274
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 290,
+              "framesRun": 292,
+              "nowMs": 1791073916513,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 282
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 300,
+              "framesRun": 302,
+              "nowMs": 1791073917601,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 382
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 310,
+              "framesRun": 311,
+              "nowMs": 1791073918664,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 279
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 320,
+              "framesRun": 321,
+              "nowMs": 1791073919735,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 284
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 330,
+              "framesRun": 331,
+              "nowMs": 1791073920795,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 337
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 330,
+              "framesRun": 337,
+              "nowMs": 1791073921810,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 282
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 340,
+              "framesRun": 343,
+              "nowMs": 1791073922832,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 297
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 340,
+              "framesRun": 349,
+              "nowMs": 1791073923841,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 282
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "t_start_ms": 1791073924281,
+          "t_end_ms": 1791073944090,
+          "wall_ms": 19809,
+          "rendered_start": 350,
+          "rendered_end": 510,
+          "frames_run_start": 351,
+          "frames_run_end": 516,
+          "presented_frames_delta": 160,
+          "emulated_frames_delta": 165,
+          "presented_fps": 8.08,
+          "emulated_fps": 8.33,
+          "validity_frames_run_advanced": true,
+          "interaction_latency_ms": null,
+          "ui_response_median_ms": 258,
+          "roundtrip_samples": [
+            212,
+            224,
+            209,
+            314,
+            313,
+            307,
+            254,
+            202,
+            258,
+            257,
+            270,
+            266,
+            217,
+            331,
+            331,
+            232,
+            253,
+            219,
+            384,
+            337
+          ],
+          "samples": [
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 350,
+              "framesRun": 351,
+              "nowMs": 1791073924281,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 212
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 360,
+              "framesRun": 361,
+              "nowMs": 1791073925294,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 224
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 370,
+              "framesRun": 371,
+              "nowMs": 1791073926298,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 209
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 370,
+              "framesRun": 378,
+              "nowMs": 1791073927352,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 314
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 380,
+              "framesRun": 384,
+              "nowMs": 1791073928373,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 313
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 380,
+              "framesRun": 390,
+              "nowMs": 1791073929411,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 307
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 390,
+              "framesRun": 398,
+              "nowMs": 1791073930466,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 254
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 400,
+              "framesRun": 408,
+              "nowMs": 1791073931470,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 202
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 410,
+              "framesRun": 419,
+              "nowMs": 1791073932522,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 258
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 420,
+              "framesRun": 430,
+              "nowMs": 1791073933579,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 257
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 440,
+              "framesRun": 441,
+              "nowMs": 1791073934638,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 270
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 450,
+              "framesRun": 452,
+              "nowMs": 1791073935700,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 266
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 460,
+              "framesRun": 461,
+              "nowMs": 1791073936705,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 217
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 460,
+              "framesRun": 467,
+              "nowMs": 1791073937771,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 331
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 470,
+              "framesRun": 473,
+              "nowMs": 1791073938815,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 331
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 470,
+              "framesRun": 480,
+              "nowMs": 1791073939838,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 232
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 490,
+              "framesRun": 491,
+              "nowMs": 1791073940893,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 253
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 500,
+              "framesRun": 501,
+              "nowMs": 1791073941914,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 219
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 500,
+              "framesRun": 510,
+              "nowMs": 1791073943024,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 384
+            },
+            {
+              "gameStatus": "Emulador ativo",
+              "coreLabel": "Genesis Plus GX v1.7.4 46a5521",
+              "rendered": 510,
+              "framesRun": 516,
+              "nowMs": 1791073944090,
+              "reqSeq": 0,
+              "ackSeq": 0,
+              "roundtrip_ms": 337
+            }
+          ]
+        }
+      ],
+      "emulated_fps_median": 8.33,
+      "presented_fps_median": 8.08,
+      "ui_response_median_ms": 270,
+      "interaction_latency_median_ms": null,
+      "frames_run_advanced_in_all_windows": true
+    }
+  },
+  "status": "medido"
+}

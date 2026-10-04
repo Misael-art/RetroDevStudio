@@ -1,0 +1,130 @@
+{
+  "criterios": "latencia A<=B*1.5; fps_apresentado A>=B*0.6; CPU A<=B*1.5+10pp; frames_run A~B +-5%",
+  "braco_A_compositing_off": {
+    "arm": "A",
+    "status": "medido",
+    "appSha256": "ce54d579381257364514c28833876127359edbaf61448726fee9709602ec7623",
+    "romSha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+    "inconclusiveReason": null,
+    "aggregate": {
+      "emulated_fps_median": 7.74,
+      "presented_fps_median": 7.74,
+      "ui_response_median_ms": 276,
+      "interaction_latency_median_ms": null
+    },
+    "windows": [
+      {
+        "index": 1,
+        "emulated_fps": 7.74,
+        "presented_fps": 7.74,
+        "interaction_latency_ms": null,
+        "ui_response_median_ms": 273,
+        "frames_run_advanced": true,
+        "cpu_window": {
+          "samples": 21,
+          "cpu_mean_pct": 102.19,
+          "cpu_max_pct": 109.0,
+          "cpu_stdev_pct": 2.77
+        }
+      },
+      {
+        "index": 2,
+        "emulated_fps": 8.56,
+        "presented_fps": 8.61,
+        "interaction_latency_ms": null,
+        "ui_response_median_ms": 276,
+        "frames_run_advanced": true,
+        "cpu_window": {
+          "samples": 20,
+          "cpu_mean_pct": 100.65,
+          "cpu_max_pct": 106.0,
+          "cpu_stdev_pct": 1.82
+        }
+      },
+      {
+        "index": 3,
+        "emulated_fps": 7.51,
+        "presented_fps": 7.56,
+        "interaction_latency_ms": null,
+        "ui_response_median_ms": 294,
+        "frames_run_advanced": true,
+        "cpu_window": {
+          "samples": 19,
+          "cpu_mean_pct": 100.63,
+          "cpu_max_pct": 106.0,
+          "cpu_stdev_pct": 3.25
+        }
+      }
+    ]
+  },
+  "braco_B_baseline": {
+    "arm": "B",
+    "status": "medido",
+    "appSha256": "01896c37ad1d1528183030322800ef9273a8c1571516f24db91c9b456171fd67",
+    "romSha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+    "inconclusiveReason": null,
+    "aggregate": {
+      "emulated_fps_median": 8.31,
+      "presented_fps_median": 8.06,
+      "ui_response_median_ms": 286,
+      "interaction_latency_median_ms": null
+    },
+    "windows": [
+      {
+        "index": 1,
+        "emulated_fps": 7.99,
+        "presented_fps": 8.04,
+        "interaction_latency_ms": null,
+        "ui_response_median_ms": 310,
+        "frames_run_advanced": true,
+        "cpu_window": {
+          "samples": 20,
+          "cpu_mean_pct": 100.7,
+          "cpu_max_pct": 104.0,
+          "cpu_stdev_pct": 1.95
+        }
+      },
+      {
+        "index": 2,
+        "emulated_fps": 8.78,
+        "presented_fps": 9.08,
+        "interaction_latency_ms": null,
+        "ui_response_median_ms": 283,
+        "frames_run_advanced": true,
+        "cpu_window": {
+          "samples": 20,
+          "cpu_mean_pct": 99.35,
+          "cpu_max_pct": 103.0,
+          "cpu_stdev_pct": 2.06
+        }
+      },
+      {
+        "index": 3,
+        "emulated_fps": 8.31,
+        "presented_fps": 8.06,
+        "interaction_latency_ms": null,
+        "ui_response_median_ms": 283,
+        "frames_run_advanced": true,
+        "cpu_window": {
+          "samples": 20,
+          "cpu_mean_pct": 100.0,
+          "cpu_max_pct": 105.0,
+          "cpu_stdev_pct": 2.37
+        }
+      }
+    ]
+  },
+  "comparacao_A_vs_B": {
+    "emulated_fps_ratio_A_over_B": 0.931,
+    "emulated_within_5pct": false,
+    "presented_ratio_A_over_B": 0.96,
+    "presented_ok": true,
+    "ui_response_ratio_A_over_B": 0.965,
+    "ui_response_ok": true,
+    "cpu_A_mean": 100.65,
+    "cpu_B_mean": 100.0,
+    "cpu_ok": true,
+    "violations_available": 0,
+    "emulated_determinism_ok": false
+  }
+}

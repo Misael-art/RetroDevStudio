@@ -214,7 +214,11 @@ pub struct EmulatorObservationResult {
     pub message: String,
     pub rom_path: String,
     pub rom_size: usize,
+    /// SHA-256 dos bytes carregados no core nesta sessão (identidade da
+    /// execução observada), não do arquivo atual em disco.
     pub rom_sha256: String,
+    pub disk_file_sha256: Option<String>,
+    pub disk_matches_loaded: bool,
     pub core_label: String,
     pub core_path: String,
     pub frames_run: u64,
@@ -632,98 +636,258 @@ fn emulator_run_frames(frames: u32, emu: State<EmulatorCoreState>) -> EmulatorCo
     }
 }
 
-/// Observa o estado real após a execução: identidade da ROM e do core,
-/// avanço de frames e o framebuffer RGBA produzido pelo core. Esta chamada
-/// não infere sucesso a partir da mensagem de `emulator_run_frame`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SampledMemoryRow {
+    pub frame: u64,
+    pub bytes_hex: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EmulatorSampledRunResult {
+    pub ok: bool,
+    pub message: String,
+    pub rom_path: String,
+    /// SHA-256 dos bytes efetivamente carregados no core nesta sessão de
+    /// carga — identidade autoritativa da execução amostrada.
+    pub rom_sha256: String,
+    /// SHA-256 do arquivo atualmente presente em `rom_path` (diagnóstico;
+    /// `None` se o caminho não pôde ser lido).
+    pub disk_file_sha256: Option<String>,
+    /// `false` quando o arquivo em disco difere dos bytes carregados:
+    /// "ROM carregada" != "arquivo atual nesse caminho".
+    pub disk_matches_loaded: bool,
+    pub core_label: String,
+    pub frames_before: u64,
+    pub frames_after: u64,
+    pub frames_requested: u32,
+    pub frames_run: u32,
+    pub rows: Vec<SampledMemoryRow>,
+}
+
+const SAMPLED_RUN_MAX_FRAMES: u32 = 10_000;
+const SAMPLED_RUN_MAX_WINDOW: usize = 512;
+
+/// Lote determinístico com o mutex do core tomado do início ao fim: executa
+/// `frames` via `run_frame` 1:1 e, a partir de `record_from` (índice absoluto
+/// `frame_index()`, zerado na carga da ROM), grava a janela de memória pedida
+/// uma vez por frame. O contador nunca é reconstruído por estimativa do
+/// lado da página — cada linha carrega o índice que o próprio core atribuiu
+/// ao frame recém-executado.
+fn run_frames_sampled_core(
+    core: &mut EmulatorCore,
+    frames: u32,
+    region: u32,
+    offset: usize,
+    length: usize,
+    record_from: u64,
+) -> Result<(u64, u64, Vec<SampledMemoryRow>), String> {
+    let (probe, total_size) = core.read_memory(region, offset, length)?;
+    if probe.len() < length {
+        return Err(format!(
+            "Janela de memoria [{offset}, +{length}) nao exposta pela regiao {region} do core ({} de {total_size} bytes leitaveis).",
+            probe.len()
+        ));
+    }
+    let frames_before = core.frame_index();
+    let mut rows = Vec::new();
+    for _ in 0..frames {
+        core.run_frame()?;
+        let index = core.frame_index();
+        if index >= record_from {
+            let (data, _) = core.read_memory(region, offset, length)?;
+            if data.len() != length {
+                return Err(format!(
+                    "Janela de memoria encolheu no frame {index} ({} de {length} bytes).",
+                    data.len()
+                ));
+            }
+            rows.push(SampledMemoryRow {
+                frame: index,
+                bytes_hex: data
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>(),
+            });
+        }
+    }
+    Ok((frames_before, core.frame_index(), rows))
+}
+
+/// Executa um lote de frames amostrando a memória frame a frame dentro do
+/// próprio core (mesma família dos lotes usados pela barra "Observar").
+/// Superfície Experimental de observação: nenhuma inferência de sucesso — a
+/// identidade da ROM CARREGADA (bytes lidos na carga do core) e os índices
+/// absolutos voltam na resposta para conferência independente. O arquivo
+/// presente no caminho é diagnóstico separado: "ROM carregada" != "arquivo
+/// atual nesse caminho".
+fn sampled_run_on_core(
+    core: &mut EmulatorCore,
+    frames: u32,
+    region: u32,
+    offset: usize,
+    length: usize,
+    record_from: u64,
+) -> EmulatorSampledRunResult {
+    let rejection = |message: String| EmulatorSampledRunResult {
+        ok: false,
+        message,
+        rom_path: String::new(),
+        rom_sha256: String::new(),
+        disk_file_sha256: None,
+        disk_matches_loaded: false,
+        core_label: String::new(),
+        frames_before: 0,
+        frames_after: 0,
+        frames_requested: frames,
+        frames_run: 0,
+        rows: Vec::new(),
+    };
+    if length == 0 || length > SAMPLED_RUN_MAX_WINDOW {
+        return rejection(format!(
+            "Janela de amostragem fora do limite (1..={SAMPLED_RUN_MAX_WINDOW} bytes)."
+        ));
+    }
+    let Some(rom_path) = core.loaded_rom_path() else {
+        return rejection("Nenhuma ROM carregada para execução amostrada.".to_string());
+    };
+    let Some((loaded_sha, _loaded_len)) = core.loaded_rom_identity() else {
+        return rejection("Nenhuma ROM carregada para execução amostrada.".to_string());
+    };
+    let disk_file_sha256 = fs::read(&rom_path).ok().map(|bytes| sha256_hex(&bytes));
+    let disk_matches_loaded = disk_file_sha256.as_deref() == Some(loaded_sha.as_str());
+    let frames_run = frames.min(SAMPLED_RUN_MAX_FRAMES);
+    let outcome = run_frames_sampled_core(core, frames_run, region, offset, length, record_from);
+    match outcome {
+        Ok((frames_before, frames_after, rows)) => {
+            let mut message = format!(
+                "{frames_run} frame(s) executado(s); {} amostra(s) a partir do frame {record_from}.",
+                rows.len()
+            );
+            if !disk_matches_loaded {
+                message.push_str(
+                    " AVISO: o arquivo atual no caminho difere dos bytes carregados no core; \
+                     as amostras refletem a ROM carregada, nao o disco.",
+                );
+            }
+            EmulatorSampledRunResult {
+                ok: true,
+                message,
+                rom_path: rom_path.display().to_string(),
+                rom_sha256: loaded_sha,
+                disk_file_sha256,
+                disk_matches_loaded,
+                core_label: core.loaded_core_label().unwrap_or_default().to_string(),
+                frames_before,
+                frames_after,
+                frames_requested: frames,
+                frames_run,
+                rows,
+            }
+        }
+        Err(error) => EmulatorSampledRunResult {
+            ok: false,
+            message: error,
+            rom_path: rom_path.display().to_string(),
+            rom_sha256: loaded_sha,
+            disk_file_sha256,
+            disk_matches_loaded,
+            core_label: core.loaded_core_label().unwrap_or_default().to_string(),
+            frames_before: core.frame_index(),
+            frames_after: core.frame_index(),
+            frames_requested: frames,
+            frames_run,
+            rows: Vec::new(),
+        },
+    }
+}
+
 #[tauri::command]
-fn emulator_observe(emu: State<EmulatorCoreState>) -> EmulatorObservationResult {
-    let core = match emu.0.lock() {
-        Ok(c) => c,
+fn emulator_run_frames_sampled(
+    emu: State<EmulatorCoreState>,
+    frames: u32,
+    region: u32,
+    offset: usize,
+    length: usize,
+    record_from: u64,
+) -> EmulatorSampledRunResult {
+    let mut core = match emu.0.lock() {
+        Ok(core) => core,
         Err(error) => {
-            return EmulatorObservationResult {
+            return EmulatorSampledRunResult {
                 ok: false,
                 message: error.to_string(),
                 rom_path: String::new(),
-                rom_size: 0,
                 rom_sha256: String::new(),
+                disk_file_sha256: None,
+                disk_matches_loaded: false,
                 core_label: String::new(),
-                core_path: String::new(),
+                frames_before: 0,
+                frames_after: 0,
+                frames_requested: frames,
                 frames_run: 0,
-                framebuffer_width: 0,
-                framebuffer_height: 0,
-                framebuffer_sha256: String::new(),
-                non_black_pixels: 0,
-                framebuffer_rgba: Vec::new(),
+                rows: Vec::new(),
             };
         }
     };
+    sampled_run_on_core(&mut core, frames, region, offset, length, record_from)
+}
 
+/// Observa o estado real após a execução: identidade da ROM CARREGADA (bytes
+/// da sessão do core) e do core, avanço de frames e o framebuffer RGBA
+/// produzido pelo core. O arquivo em disco é reportado como diagnóstico
+/// separado (`disk_file_sha256`/`disk_matches_loaded`); a observação não é
+/// interrompida por divergência ou ausência do arquivo. Esta chamada não
+/// infere sucesso a partir da mensagem de `emulator_run_frame`.
+fn observe_on_core(core: &mut EmulatorCore) -> EmulatorObservationResult {
+    let blank = || EmulatorObservationResult {
+        ok: false,
+        message: String::new(),
+        rom_path: String::new(),
+        rom_size: 0,
+        rom_sha256: String::new(),
+        disk_file_sha256: None,
+        disk_matches_loaded: false,
+        core_label: String::new(),
+        core_path: String::new(),
+        frames_run: 0,
+        framebuffer_width: 0,
+        framebuffer_height: 0,
+        framebuffer_sha256: String::new(),
+        non_black_pixels: 0,
+        framebuffer_rgba: Vec::new(),
+    };
     let Some(rom_path) = core.loaded_rom_path() else {
-        return EmulatorObservationResult {
-            ok: false,
-            message: "Nenhuma ROM carregada para observação.".to_string(),
-            rom_path: String::new(),
-            rom_size: 0,
-            rom_sha256: String::new(),
-            core_label: String::new(),
-            core_path: String::new(),
-            frames_run: core.frame_index(),
-            framebuffer_width: 0,
-            framebuffer_height: 0,
-            framebuffer_sha256: String::new(),
-            non_black_pixels: 0,
-            framebuffer_rgba: Vec::new(),
-        };
+        let mut result = blank();
+        result.message = "Nenhuma ROM carregada para observação.".to_string();
+        result.frames_run = core.frame_index();
+        return result;
     };
-
-    let rom_bytes = match fs::read(&rom_path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            return EmulatorObservationResult {
-                ok: false,
-                message: format!(
-                    "Falha ao reler ROM carregada '{}': {error}",
-                    rom_path.display()
-                ),
-                rom_path: rom_path.display().to_string(),
-                rom_size: 0,
-                rom_sha256: String::new(),
-                core_label: core.loaded_core_label().unwrap_or_default().to_string(),
-                core_path: core
-                    .loaded_core_file()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_default(),
-                frames_run: core.frame_index(),
-                framebuffer_width: 0,
-                framebuffer_height: 0,
-                framebuffer_sha256: String::new(),
-                non_black_pixels: 0,
-                framebuffer_rgba: Vec::new(),
-            };
-        }
+    let Some((loaded_sha, loaded_len)) = core.loaded_rom_identity() else {
+        let mut result = blank();
+        result.message = "Nenhuma ROM carregada para observação.".to_string();
+        result.frames_run = core.frame_index();
+        return result;
     };
+    let disk_file_sha256 = fs::read(&rom_path).ok().map(|bytes| sha256_hex(&bytes));
+    let disk_matches_loaded = disk_file_sha256.as_deref() == Some(loaded_sha.as_str());
 
     let (framebuffer, size, pixel_format) = match core.get_framebuffer() {
         Ok(value) => value,
         Err(error) => {
-            return EmulatorObservationResult {
-                ok: false,
-                message: format!("Falha ao observar framebuffer: {error}"),
-                rom_path: rom_path.display().to_string(),
-                rom_size: rom_bytes.len(),
-                rom_sha256: sha256_hex(&rom_bytes),
-                core_label: core.loaded_core_label().unwrap_or_default().to_string(),
-                core_path: core
-                    .loaded_core_file()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_default(),
-                frames_run: core.frame_index(),
-                framebuffer_width: 0,
-                framebuffer_height: 0,
-                framebuffer_sha256: String::new(),
-                non_black_pixels: 0,
-                framebuffer_rgba: Vec::new(),
-            };
+            let mut result = blank();
+            result.message = format!("Falha ao observar framebuffer: {error}");
+            result.rom_path = rom_path.display().to_string();
+            result.rom_size = loaded_len;
+            result.rom_sha256 = loaded_sha;
+            result.disk_file_sha256 = disk_file_sha256;
+            result.disk_matches_loaded = disk_matches_loaded;
+            result.core_label = core.loaded_core_label().unwrap_or_default().to_string();
+            result.core_path = core
+                .loaded_core_file()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default();
+            result.frames_run = core.frame_index();
+            return result;
         }
     };
     let frame = framebuffer_to_rgba(&framebuffer, size, pixel_format);
@@ -732,7 +896,6 @@ fn emulator_observe(emu: State<EmulatorCoreState>) -> EmulatorObservationResult 
         .chunks_exact(4)
         .filter(|pixel| pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
         .count();
-    let rom_sha256 = sha256_hex(&rom_bytes);
     let framebuffer_sha256 = sha256_hex(&frame.rgba);
     let core_label = core.loaded_core_label().unwrap_or_default().to_string();
     let core_path = core
@@ -741,21 +904,31 @@ fn emulator_observe(emu: State<EmulatorCoreState>) -> EmulatorObservationResult 
         .unwrap_or_default();
     let frames_run = core.frame_index();
 
+    let mut message = format!(
+        "ROM {} carregada no core {}; {} frame(s), framebuffer {}x{}, {} pixel(s) não pretos, RGBA SHA-256 {}. Bytes carregados SHA-256 {}.",
+        rom_path.display(),
+        core_label,
+        frames_run,
+        frame.width,
+        frame.height,
+        non_black_pixels,
+        framebuffer_sha256,
+        loaded_sha
+    );
+    if !disk_matches_loaded {
+        message.push_str(
+            " AVISO: o arquivo atual no caminho difere dos bytes carregados; a observacao \
+             reflete a ROM carregada, nao o disco.",
+        );
+    }
     EmulatorObservationResult {
         ok: true,
-        message: format!(
-            "ROM {} carregada no core {}; {} frame(s), framebuffer {}x{}, {} pixel(s) não pretos, RGBA SHA-256 {}.",
-            rom_path.display(),
-            core_label,
-            frames_run,
-            frame.width,
-            frame.height,
-            non_black_pixels,
-            framebuffer_sha256
-        ),
+        message,
         rom_path: rom_path.display().to_string(),
-        rom_size: rom_bytes.len(),
-        rom_sha256,
+        rom_size: loaded_len,
+        rom_sha256: loaded_sha,
+        disk_file_sha256,
+        disk_matches_loaded,
         core_label,
         core_path,
         frames_run,
@@ -765,6 +938,35 @@ fn emulator_observe(emu: State<EmulatorCoreState>) -> EmulatorObservationResult 
         non_black_pixels,
         framebuffer_rgba: frame.rgba,
     }
+}
+
+#[tauri::command]
+fn emulator_observe(emu: State<EmulatorCoreState>) -> EmulatorObservationResult {
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(error) => {
+            let mut result = EmulatorObservationResult {
+                ok: false,
+                message: String::new(),
+                rom_path: String::new(),
+                rom_size: 0,
+                rom_sha256: String::new(),
+                disk_file_sha256: None,
+                disk_matches_loaded: false,
+                core_label: String::new(),
+                core_path: String::new(),
+                frames_run: 0,
+                framebuffer_width: 0,
+                framebuffer_height: 0,
+                framebuffer_sha256: String::new(),
+                non_black_pixels: 0,
+                framebuffer_rgba: Vec::new(),
+            };
+            result.message = error.to_string();
+            return result;
+        }
+    };
+    observe_on_core(&mut core)
 }
 
 trait EmulatorEventSink {
@@ -2342,6 +2544,7 @@ async fn rex_inspection_sprite_frame(
     frame_id: String,
     flip_x: bool,
     flip_y: bool,
+    from_base: Option<bool>,
 ) -> Result<
     tools::reverse::decomp::sprite_composition::InspectionSpriteFrame,
     tools::reverse::decomp::inspection::InspectionError,
@@ -2353,6 +2556,7 @@ async fn rex_inspection_sprite_frame(
             &frame_id,
             flip_x,
             flip_y,
+            from_base.unwrap_or(false),
         )
     })
     .await
@@ -2431,6 +2635,30 @@ fn rex_inspection_edit_sonic_tiles(
         allow_shared_tiles,
     )
     .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_sonic_cadence(
+    session_id: String,
+) -> Result<
+    tools::reverse::decomp::sonic_cadence::CadenceInfo,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::sonic_cadence_info(&session_id)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
+}
+
+#[tauri::command]
+fn rex_inspection_edit_sonic_duration(
+    session_id: String,
+    resource_id: String,
+    value: u8,
+) -> Result<
+    tools::reverse::decomp::inspection::InspectionEdit,
+    tools::reverse::decomp::inspection::InspectionError,
+> {
+    tools::reverse::decomp::inspection::edit_sonic_duration(&session_id, &resource_id, value)
+        .map_err(tools::reverse::decomp::inspection::InspectionError::from_wire)
 }
 
 #[tauri::command]
@@ -5361,6 +5589,11 @@ fn parse_input_command_file(path: String) -> Result<Vec<InputCommandDefinition>,
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK nao repinta bitmaps de <img> em janela destruida/recriada sob
+    // compositor acelerado (CAUSA-MAGENTA.md, A/B 89a35a2b); render por software.
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -5381,6 +5614,7 @@ pub fn run() {
             emulator_load_rom,
             emulator_run_frame,
             emulator_run_frames,
+            emulator_run_frames_sampled,
             emulator_observe,
             emulator_save_state,
             emulator_load_state,
@@ -5471,6 +5705,8 @@ pub fn run() {
             rex_inspection_save,
             rex_inspection_edit_sonic_palette,
             rex_inspection_edit_sonic_tiles,
+            rex_inspection_sonic_cadence,
+            rex_inspection_edit_sonic_duration,
             rex_resource_list,
             rex_resource_preview,
             rex_resource_context,
@@ -7211,6 +7447,124 @@ pub extern "C" fn retro_run() {
             .expect("audio buffer should be drained")
             .1
             .is_empty());
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn run_frames_sampled_records_absolute_index_per_frame() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("sampled-run");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "sampled_run", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
+        assert_eq!(emulator.frame_index(), 0, "a carga ancora o contador");
+
+        let (before, after, rows) =
+            run_frames_sampled_core(&mut emulator, 5, 2, 0, 8, 3).expect("lote amostrado");
+        assert_eq!((before, after), (0, 5));
+        assert_eq!(
+            rows.iter().map(|row| row.frame).collect::<Vec<_>>(),
+            vec![3, 4, 5],
+            "indices absolutos pos-execucao, um por frame"
+        );
+        assert!(rows.iter().all(|row| row.bytes_hex.len() == 16));
+
+        // Lotes subsequentes continuam no contador do core, sem reancoragem.
+        let (before, after, rows) =
+            run_frames_sampled_core(&mut emulator, 2, 2, 0, 8, 6).expect("segundo lote");
+        assert_eq!((before, after), (5, 7));
+        assert_eq!(
+            rows.iter().map(|row| row.frame).collect::<Vec<_>>(),
+            vec![6, 7]
+        );
+
+        // Janela que o core nao expoe e recusada antes de executar qualquer frame.
+        let before_index = emulator.frame_index();
+        let error = run_frames_sampled_core(&mut emulator, 3, 2, 60, 8, 0)
+            .expect_err("janela fora da regiao deve recusar");
+        assert!(error.contains("nao exposta"), "{error}");
+        assert_eq!(
+            emulator.frame_index(),
+            before_index,
+            "recusa nao executa frames"
+        );
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Etapa 2 da jornada integrada: a identidade reportada pela execucao
+    /// amostrada e a dos bytes CARREGADOS no core. Alterar o arquivo no
+    /// caminho depois da carga nao muda a identidade da execucao; a
+    /// divergencia aparece explicitamente em `disk_file_sha256` /
+    /// `disk_matches_loaded` (a amostragem continua, refletindo o core).
+    #[test]
+    fn load_identity_reports_loaded_bytes_not_disk_file() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("load-identity");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "identity_swap", "gen");
+
+        let disk_before = fs::read(&rom_path).expect("rom de teste");
+        let sha_before = sha256_hex(&disk_before);
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
+        let (loaded, loaded_len) = emulator
+            .loaded_rom_identity()
+            .expect("identidade capturada na carga");
+        assert_eq!(loaded, sha_before, "carga ancora o SHA dos bytes lidos");
+        assert_eq!(loaded_len, disk_before.len());
+
+        let first = sampled_run_on_core(&mut emulator, 2, 2, 0, 8, 0);
+        assert!(first.ok, "{:?}", first.message);
+        assert_eq!(first.rom_sha256, sha_before);
+        assert_eq!(first.disk_file_sha256.as_deref(), Some(sha_before.as_str()));
+        assert!(first.disk_matches_loaded, "caminho ainda igual à carga");
+
+        // Troca o ARQUIVO no caminho apos a carga (scratch isolado; corpus
+        // original nunca é alvo deste teste).
+        let mut swapped = disk_before.clone();
+        swapped[0] ^= 0xff;
+        let sha_swapped = sha256_hex(&swapped);
+        fs::write(&rom_path, &swapped).expect("escrever copia trocada");
+
+        let second = sampled_run_on_core(&mut emulator, 1, 2, 0, 8, 3);
+        assert!(second.ok, "{:?}", second.message);
+        assert_eq!(
+            second.rom_sha256, sha_before,
+            "rom_sha256 autoritativo = bytes carregados, nao disco"
+        );
+        assert_eq!(
+            second.disk_file_sha256.as_deref(),
+            Some(sha_swapped.as_str())
+        );
+        assert!(
+            !second.disk_matches_loaded,
+            "arquivo alterado apos a carga deve declarar divergencia"
+        );
+        assert!(second.message.contains("AVISO"), "{:?}", second.message);
+
+        let observed = observe_on_core(&mut emulator);
+        assert!(observed.ok);
+        assert_eq!(observed.rom_sha256, sha_before);
+        assert!(!observed.disk_matches_loaded);
+        assert!(observed.message.contains("AVISO"));
+
+        // Recarga no mesmo caminho re-ancora a identidade para os bytes novos.
+        emulator.load_rom(&rom_path).expect("recarregar apos troca");
+        let (reloaded, _) = emulator.loaded_rom_identity().expect("identidade nova");
+        assert_eq!(reloaded, sha_swapped);
+        let after_reload = observe_on_core(&mut emulator);
+        assert!(after_reload.disk_matches_loaded);
+        assert_eq!(after_reload.rom_sha256, sha_swapped);
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);

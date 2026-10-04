@@ -15,7 +15,11 @@ export interface EmulatorObservationResult {
   message: string;
   rom_path: string;
   rom_size: number;
+  /** SHA-256 dos bytes carregados no core nesta sessão (não do disco). */
   rom_sha256: string;
+  /** SHA-256 do arquivo atualmente em `rom_path`; diagnóstico separado. */
+  disk_file_sha256?: string | null;
+  disk_matches_loaded: boolean;
   core_label: string;
   core_path: string;
   frames_run: number;

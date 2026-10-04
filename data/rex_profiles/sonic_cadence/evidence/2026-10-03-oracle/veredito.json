@@ -1,0 +1,204 @@
+{
+  "schema": "rex-sonic-cadence-runtime-verification/v1",
+  "verdict": "H_N1",
+  "measured": {
+    "A1_original": {
+      "interval": 23,
+      "gap_mode": 24
+    },
+    "B40_pipeline": {
+      "interval": 40,
+      "gap_mode": 41
+    },
+    "C60_pipeline": {
+      "interval": 60,
+      "gap_mode": 61
+    },
+    "D_tampered": {
+      "gap_mode": null,
+      "transitions": 0
+    }
+  },
+  "votes": [
+    [
+      "A1-original",
+      "H_N1"
+    ],
+    [
+      "B40-pipeline",
+      "H_N1"
+    ],
+    [
+      "C60-pipeline",
+      "H_N1"
+    ]
+  ],
+  "checks": [
+    {
+      "name": "manifesto: schema rex-sonic-cadence-oracle/v1",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "manifesto: documento de expectativas anterior à execução referenciado",
+      "pass": true,
+      "detail": "docs/rex_profiles/sonic_cadence/EXPECTATIONS-ETAPA4.md"
+    },
+    {
+      "name": "C6/manifesto: SHA da ROM base é o pinado",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "manifesto: core é o pinado",
+      "pass": true,
+      "detail": "07c104765dcfe1f588d637c0fda1ab3987f86b94835d43b6506b0236948310b1"
+    },
+    {
+      "name": "manifesto: rota de input registrada",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "C5: recusas do pipeline registradas (0x00,0x80,0xFE,0xFF,noop,recurso)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "run presente: A1-original",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "run presente: B40-pipeline",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "run presente: C60-pipeline",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "run presente: A2-original-controle",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "run presente: A3-original-pos-variantes",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "run presente: D-consumidor-adulterado",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "C6: arquivo da ROM A com SHA pinado",
+      "pass": true,
+      "detail": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb"
+    },
+    {
+      "name": "C4: cópia B difere de A exatamente em 1 byte em 0x13BAE",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "C4: cópia C difere de A exatamente em 1 byte em 0x13BAE",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "byte B/C lido cru: 40 e 60",
+      "pass": true,
+      "detail": "40,60"
+    },
+    {
+      "name": "C7: prologue do consumidor intacto em A/B/C",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "D: adulteração é 1 byte e cai no prologue do consumidor",
+      "pass": true,
+      "detail": "[80324]"
+    },
+    {
+      "name": "A1-original: >= 5 transições",
+      "pass": true,
+      "detail": "transições=77"
+    },
+    {
+      "name": "A1-original: >= 80% dos gaps coincidem com a moda",
+      "pass": true,
+      "detail": "ratio=0.99 moda=24"
+    },
+    {
+      "name": "A1-original: reload observado == byte do arquivo (23)",
+      "pass": true,
+      "detail": "reload=23"
+    },
+    {
+      "name": "B40-pipeline: >= 5 transições",
+      "pass": true,
+      "detail": "transições=39"
+    },
+    {
+      "name": "B40-pipeline: >= 80% dos gaps coincidem com a moda",
+      "pass": true,
+      "detail": "ratio=0.97 moda=41"
+    },
+    {
+      "name": "B40-pipeline: reload observado == byte do arquivo (40)",
+      "pass": true,
+      "detail": "reload=40"
+    },
+    {
+      "name": "C60-pipeline: >= 5 transições",
+      "pass": true,
+      "detail": "transições=22"
+    },
+    {
+      "name": "C60-pipeline: >= 80% dos gaps coincidem com a moda",
+      "pass": true,
+      "detail": "ratio=0.95 moda=61"
+    },
+    {
+      "name": "C60-pipeline: reload observado == byte do arquivo (60)",
+      "pass": true,
+      "detail": "reload=60"
+    },
+    {
+      "name": "arbitragem: 23/24, 40/41, 60/61 exatamente sobre a tabela congelada",
+      "pass": true,
+      "detail": "[[\"A1-original\",\"H_N1\"],[\"B40-pipeline\",\"H_N1\"],[\"C60-pipeline\",\"H_N1\"]]"
+    },
+    {
+      "name": "arbitragem: hipótese única entre as três corridas",
+      "pass": true,
+      "detail": "H_N1"
+    },
+    {
+      "name": "C1: A1 == A2 (mesma ROM, mesma série)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "C2: A1 == A3 (original inalterada depois das variantes)",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "C3: modos A/B/C pairwise distintos",
+      "pass": true,
+      "detail": "24,41,61"
+    },
+    {
+      "name": "D: consumidor adulterado NÃO reproduz a cadência original (23/24)",
+      "pass": true,
+      "detail": "cadência não descobrível (esperado sob adulteração)"
+    }
+  ],
+  "allPass": true
+}

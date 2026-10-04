@@ -1,0 +1,28 @@
+{
+  "host:certify": 0,
+  "check:tree": 0,
+  "lint": 0,
+  "TypeScript": 0,
+  "harness_syntax": 0,
+  "diff_check": 0,
+  "frontend": {
+    "passed": 910,
+    "failed": 0,
+    "skipped": 3
+  },
+  "Rust": {
+    "passed": 839,
+    "failed": 0,
+    "ignored": 76
+  },
+  "reference_desktop": {
+    "passed_steps": 16,
+    "failed_steps": 0
+  },
+  "mutation": {
+    "old_nonblack_only_gate": "4 assertion failures",
+    "restored_gate": "4 tests passed under host:certify"
+  },
+  "source_scope": "only QA changed after f646ccf; Rust/product checks repeated by certify; previous fmt/clippy results apply to unchanged Rust sources",
+  "initial_light_gate_failure": "new blank line at end of the memory document, fixed before final light gates; no runtime failure"
+}

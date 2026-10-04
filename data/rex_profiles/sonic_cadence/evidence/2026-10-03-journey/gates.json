@@ -1,0 +1,31 @@
+{
+  "check_tree": {
+    "log_local": "/home/misael/rds-scratch/gates-run4-frontend.log",
+    "log_sha256": "33cf32863bea5703e88e220c997028fa824b37fdf7b5baa116e9d88d628853b3"
+  },
+  "rust_batch": {
+    "log_local": "/home/misael/rds-scratch/gates-run4-rust.log",
+    "log_sha256": "afe01eeb4580bc2abdc610f07ea704751db97a9e0239fc93d504563fa1d076f4"
+  },
+  "host_certify": {
+    "log_local": "/home/misael/rds-scratch/certify-run4.log",
+    "log_sha256": "f5c023409d172d7597daea58c906a8b2ce4430d8da83705f846ab3b0521fc2db"
+  },
+  "cargo_audit": {
+    "log_local": "/home/misael/rds-scratch/cargo-audit-run4.log",
+    "log_sha256": "923763226a3eedaea2b84f30d7e99685305fa71c4dd1889d48261d2b2dad6ee8"
+  },
+  "results": {
+    "check_tree_exit": 0,
+    "lint_exit": 0,
+    "tsc_noemit_exit": 0,
+    "npm_test_exit": 0,
+    "cargo_fmt_check_exit": 0,
+    "clippy_D_warnings_exit": 0,
+    "cargo_test_lib": "846 passed; 0 failed; 79 ignored",
+    "host_certify_exit": 0,
+    "npm_audit_high": "exit 0 (4 moderate; nenhuma high/critical). Obs: `npm run security:audit` falha com EALLOWSCRIPTS pelo wrapper rtk injetando flag; rodado sem filtro.",
+    "cargo_audit_exit": "0 (8 warnings unmaintained permitidos, sem erros)",
+    "clippy_lib_tests_preexisting": "47 erros pre-existentes em codigo de teste (identicos antes/depois desta entrega; gate canonical e sem --tests)"
+  }
+}

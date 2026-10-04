@@ -450,6 +450,8 @@ export interface InspectionSession {
   error?: InspectionError | null;
   sprite_frame_id?: string | null;
   edit?: InspectionEdit | null;
+  /** Historico cumulativo, por dominio, de tudo que ja foi aplicado a copia. */
+  applied_edits?: SonicAppliedEdit[];
 }
 
 export interface InspectionEdit {
@@ -470,6 +472,41 @@ export interface InspectionEdit {
   shared_with_frames?: number[];
   pixels_changed?: number | null;
   base_rom_sha256_after?: string | null;
+  /** true quando o valor solicitado ja era o vigente: ok explicito, nenhuma escrita. */
+  noop?: boolean;
+}
+
+/** Registro cumulativo de uma edicao efetivamente aplicada a copia imutavel. */
+export interface SonicAppliedEdit {
+  seq: number;
+  format: string;
+  frame_id: string;
+  summary: string;
+  offsets: number[];
+  old_bytes: number[];
+  new_bytes: number[];
+  copy_sha256: string;
+  at_unix: number;
+}
+
+/** Proven `id_Wait` cadence, read from the core contract (never recomputed in the UI). */
+export interface SonicCadenceInfo {
+  anim: number;
+  name: string;
+  script_addr: number;
+  interval_addr: number;
+  original_interval: number;
+  current_interval: number;
+  frames: number[];
+  terminator: string;
+  editable_min: number;
+  editable_max: number;
+  reserved: string[];
+  unit: string;
+  semantics: string;
+  provenience: string[];
+  limitations: string[];
+  contract_path: string;
 }
 
 export interface InspectionPixelEdit {
@@ -595,6 +632,17 @@ export interface InspectionSpriteFrame {
   rom_evidence: string[];
   donor_evidence: string[];
   limitations: string[];
+  sonic_context?: {
+    geometry_version: string;
+    mapping_index: number;
+    anchor_x: number;
+    anchor_y: number;
+    dplc_offset: number;
+    palette_rgba: [number, number, number, number][];
+    tile_uses: { art_tile: number; frames: number[] }[];
+    pixel_art_tiles: (number | null)[];
+    frames: { id: string; label: string; mapping_index: number }[];
+  } | null;
 }
 
 export const INSPECTION_PROGRESS_EVENT = "rex://inspection-progress";
@@ -648,7 +696,8 @@ export function inspectionSpriteFrame(
   resourceId: string,
   frameId = `${resourceId}/frame-0`,
   flipX = false,
-  flipY = false
+  flipY = false,
+  fromBase = false
 ): Promise<InspectionSpriteFrame> {
   return invoke<InspectionSpriteFrame>("rex_inspection_sprite_frame", {
     sessionId,
@@ -656,6 +705,7 @@ export function inspectionSpriteFrame(
     frameId,
     flipX,
     flipY,
+    fromBase,
   });
 }
 
@@ -709,6 +759,24 @@ export function inspectionEditSonicTiles(
     frameId,
     pixels,
     allowSharedTiles,
+  });
+}
+
+/** Reads the proven id_Wait cadence (frames, current byte, limits) from the core. */
+export function inspectionSonicCadence(sessionId: string): Promise<SonicCadenceInfo> {
+  return invoke<SonicCadenceInfo>("rex_inspection_sonic_cadence", { sessionId });
+}
+
+/** Writes the single proven duration byte for id_Wait on a revalidated copy. */
+export function inspectionEditSonicDuration(
+  sessionId: string,
+  resourceId: string,
+  value: number
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_edit_sonic_duration", {
+    sessionId,
+    resourceId,
+    value,
   });
 }
 

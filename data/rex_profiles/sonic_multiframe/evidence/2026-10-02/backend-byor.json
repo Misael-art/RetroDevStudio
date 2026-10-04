@@ -1,0 +1,166 @@
+{
+  "accumulation": true,
+  "base_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+  "base_unchanged": true,
+  "edit": {
+    "art_tiles": [
+      50
+    ],
+    "base_rom_sha256_after": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+    "blue": 0,
+    "bytes_changed": 3,
+    "changed_offsets": [
+      9098,
+      9099,
+      139582
+    ],
+    "format": "md_4bpp_tile_nibbles",
+    "frame_id": "sonic1_sonic/walk-1",
+    "green": 0,
+    "modified_rom_path": "/home/misael/Projects/REX-SONIC-MULTIFRAME-2026-10-02/src-tauri/target-test/validation/sonic-multiframe/work/extract/c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb/edits/sonic1-sprite-md_4bpp_tile_nibbles-3bd343faf88e7f46536ad1916e77e643e299122c1b2233de8a9ba631bfdb7a68.bin",
+    "modified_rom_sha256": "3bd343faf88e7f46536ad1916e77e643e299122c1b2233de8a9ba631bfdb7a68",
+    "original_rom_sha256": "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb",
+    "palette_index": 0,
+    "pixels_changed": 1,
+    "red": 0,
+    "resource_id": "sonic1_sonic",
+    "shared_with_frames": [
+      7,
+      11
+    ]
+  },
+  "reopened_pixels_sha256": "81ab856a2f6bc3cabd854e16e852fe04c93c59d10edc5d08e486be0b0841919d",
+  "frames": [
+    {
+      "frame_id": "sonic1_sonic/stand",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 1
+    },
+    {
+      "frame_id": "sonic1_sonic/wait-1",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 2
+    },
+    {
+      "frame_id": "sonic1_sonic/look-up",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 5
+    },
+    {
+      "frame_id": "sonic1_sonic/walk-1",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 6
+    },
+    {
+      "frame_id": "sonic1_sonic/walk-2",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 7
+    },
+    {
+      "frame_id": "sonic1_sonic/walk-3",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 8
+    },
+    {
+      "frame_id": "sonic1_sonic/walk-4",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 9
+    },
+    {
+      "frame_id": "sonic1_sonic/walk-5",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 10
+    },
+    {
+      "frame_id": "sonic1_sonic/walk-6",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 11
+    },
+    {
+      "frame_id": "sonic1_sonic/run-1",
+      "keys_recorded_in_raw_report": [
+        "context",
+        "frame_id",
+        "height",
+        "pixels_sha256",
+        "png",
+        "width"
+      ],
+      "geometry_version": "vdp-column-major-dplc/v1",
+      "mapping_index": 30
+    }
+  ],
+  "raw_report_sha256": "36a5e691e898edbae55359235eb03d132a0ff03475dcec4ca57e101c1eeb15af"
+}

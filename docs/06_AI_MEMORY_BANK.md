@@ -1,5 +1,30 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Checkpoint 2026-10-02 — barreira incremental de frames em Build & Run
+
+No branch `codex/rex-sonic-multiframe-ui`, commit de harness `8166d4f1`, a
+coleta do E2E agora espera dez frames novos depois da nova sessão, além de
+conferir o SHA da ROM, sessão diferente, hold encerrado e framebuffer não
+preto. O primeiro gate (`5b9d2b9`) só exigia contador absoluto ≥10 e podia
+aceitar frames de uma ROM idêntica já carregada; a nova barreira ancora no
+primeiro contador pós-sessão, exige delta ≥10 e reancora quando o renderer zera.
+Seis testes Vitest passaram; ao remover o teste incremental por mutação, os dois
+casos de contador retido/resetado falharam como esperado.
+
+Replay local `reference-platformer`, app SHA
+`1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0`: 16/16.
+A célula autoral do tilemap `(25,1)/1001` mudou `0→2`; a ROM construída e a
+reaberta compartilham SHA `fbbdd384…16511d4a`, e a célula reaberta voltou a
+`1bd5bd07`. Relatório bruto local:
+`src-tauri/target-test/validation/reference-platformer-2026-10-02T23-03-26-132Z-report.json`;
+resumo/manifesto versionado em
+`data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier-r2/`.
+`host:certify` READY: frontend 912/3, Rust 839/0/76, Clippy, lint, TypeScript,
+check:tree e validação upstream SGDK/PVSnesLib success. CI consultado no SHA
+`8166d4f` tinha três success e três in_progress na primeira consulta; a consulta
+final às 23:26:04Z confirmou CI 6/6 success, sem falhas ou pendências. Sem merge,
+release ou promoção; PR #99 segue draft e depende de #98.
+
 ### Checkpoint 2026-09-30 (o) — MUGEN: **cadeia original do Ken (Stand_X) convertida da fonte e comparada com referência independente** (Experimental mantido)
 
 Frente `codex/rex-mugen-original-chain`, dependente de `codex/rex-mugen-real` (PR #90 @ `508db51b20c701f61a8fcdbc9bf43a642d28fa3c`);
@@ -2388,3 +2413,208 @@ registradas para tratamento mediante regressão — nenhuma regressão observada
 (crates:gates 4/4); licenças intocadas. Consultas de CI serão pontuais por SHA
 da branch publicada, sem commit documental por consulta e sem observadores
 vivos.
+
+### Checkpoint 2026-10-02 — Sonic multi-frame e pintura visual, proposta isolada (Experimental)
+
+Branch `codex/rex-sonic-multiframe-ui`, base #98 `0ef540e95463faf74bc32202744ed27872592d8e`.
+Código/ frontend provado: `f646ccf6de220f38dc9bf2b175cd56d79ff4be82`; app canônico SHA
+`1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0`.
+Dez frames Sonic assistidos por mapping/DPLC do perfil Rev00, pintura visual pela
+paleta real (0 transparente), confirmação de compartilhamento, cópia cumulativa,
+BPS e salvar→reiniciar app→reabrir. Base BYOR `c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb`
+(531577 B) permanece byte-idêntica. Nenhuma ROM ou imagem comercial foi versionada.
+
+**Defeitos corrigidos com regressões discriminantes:** ordem das células VDP por
+coluna (prévia Sonic herdada e pesquisa D usavam linha; antigo golden concordante
+não era prova independente); edição posterior agora preserva a pintura/paleta
+anterior; selecionar outro frame já invalida uma composição pendente. Geometria
+composição→pintura tem uma única resolução no backend. O teste autoral 2×2 e o
+acesso de pintura (8,8) falharam antes da correção. Stand RGBA correto:
+`7354bcfb6af04b6dc5d95c56adbaca232f9658a5edb0cb4dbd98a98582c462e7`.
+Frente D precisa corrigir seus renders no território próprio; provas históricas
+ficam preservadas, sem recertificar intenção de coordenadas antigas.
+
+**Prova nova no mesmo app:** `sonic-multiframe` passou dez composições com RGBA
+independente, controles nativos, acúmulo pintura/paleta, BPS byte-exato e reabertura
+visual (centro+quatro cantos em IMG, metadados abaixo). Isso é prévia estática,
+não execução dos dez frames. Regressão separada `inspection-sonic-tiles` passou
+recusas, edição/BPS/aplicação, observação de 1200 frames no core e reinício/reabertura:
+96 pixels alterados no Sonic, ROI x=74..85/y=170..177. Não prova teclado/movimento/salto.
+Pillow: dez PNGs exatos e vinte mutações recusadas. Undo age na fila pendente; troca
+de frame não persiste essa fila. Novos bancos/overlap/VRAM herdada são recusados.
+
+**Gates finais:** `host:certify` READY, upstream SGDK/PVSnesLib `Success: true`;
+frontend 906/3 (direto 903/6, total909), Rust839/0/76, UI13/13;
+fmt/clippy(lib/default)/lint/tsc/check:tree/crates:gates4/4 passaram. Fingerprint
+`60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2`, lock `dd99a22f…`.
+Auditoria npm padrão: EALLOWSCRIPTS (config usuário); por chamada isolada preservando
+política repo: rc0 no limiar high, quatro moderados Vitest `GHSA-82fw-gwwq-j7x9`.
+Cargo audit: rc0, oito avisos permitidos. Não se declara zero vulnerabilidades.
+
+**Display:** monitor físico perdeu a resolução; prova final usa Xvfb externo de QA
+fixado e com assinatura verificada, SHA `5bfd315a8c7bc626d0b183d176e130c34f910a4a1279d9d53ea45769f62a3351`,
+autenticação própria/sem TCP, sem sudo/instalação de sistema/mudança dos monitores.
+Processos do cenário e do display foram encerrados. Limites e corridas intermediárias
+estão no relatório; não foi contado timeout como sucesso.
+
+**Evidência e próximo passo:** `docs/rex_profiles/sonic_multiframe/REPORT.md` e
+`data/rex_profiles/sonic_multiframe/evidence/2026-10-02/manifest.json` fixam código,
+app, fontes, resumos e arquivos locais por hash. PNG/base64/arrays RGBA ficam ignorados.
+Proposta dependente da #98 para revisão, sem merge/release/promoção. #97(P1) e #84
+não entram; nenhum checkout de outro agente foi alterado. CI remoto pertence ao SHA
+publicado, não é prova BYOR. Após a revisão, integrar na ordem da base e revalidar o
+fluxo afetado no destino; não usar a prova de um perfil como decompilação universal.
+
+### Complemento 2026-10-02 — PR #99 e barreira de identidade no E2E
+
+A proposta Sonic multi-frame segue draft, dependente da #98, sem merge/release.
+Produto/frontend e binário permanecem `f646ccf` / `1845aebf…b8b0`.
+Harness `5b9d2b96a4e6fd47ba938b88b33a463398d96ef4`: a coleta agora exige o SHA
+compilado na Game View, sessão nova fora de hold e dez frames renderizados.
+A aceitação antiga (canvas não preto) podia coletar ROM anterior/boot; quatro
+regressões discriminam esse caso. A comparação exata do tilemap foi mantida.
+
+No CI de `86fb1b8`, um desktop falhou no tilemap após reabertura, reproduzido
+localmente; a repetição remota única passou. A causa dinâmica específica das
+falhas iniciais não é estabelecida por seus logs incompletos. Com a barreira,
+`reference-platformer` passou 16/16 no mesmo app, incluindo pintura/reabertura
+(ROI `1bd5bd07`), teclado e duas passagens. Nova certificação: READY, upstream
+Success:true, frontend910/3, Rust839/0/76. As provas BYOR Sonic continuam separadas.
+
+Evidência complementar em `data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier/`.
+Auditoria histórica: 57/58 hashes reconfirmados; fontes pelo Git pinado. O JSON
+host-readiness anterior foi sobrescrito pela certificação; o log READY permanece
+íntegro. A nova saída tem cópia congelada; não se reescreveu a evidência antiga.
+CI posterior pertence ao SHA consultado na PR, sem alegação de verde herdado.
+Nenhuma frente, corpus ou worktree de outro agente foi alterada.
+
+### Checkpoint 2026-10-03 — fatia de cadência Sonic 1 (Etapas 1–6, branch própria)
+
+Frente `codex/rex-sonic-cadence` (worktree REX-SONIC-CADENCE-2026-10-02), filha
+da base da #98/#99. Entrega: um iniciante abre a própria ROM Sonic 1 (BYOR),
+vê os 18 quadros reais de `id_Wait` na ordem do script, entende a duração em
+unidades medidas, muda o byte de intervalo na CÓPIA pelo pipeline canônico
+(offset 0x13BAE, 1 byte, base intacta), vê previsão/oráculo H_N+1, exporta e
+aplica BPS pela UI, JOGA base e modificada na Game View real, salva/fecha/
+reabre com edição e procedência restauradas — e a cadência efetiva é medida
+no próprio core, provada por verificador independente.
+
+Números congelados ANTES das corridas (EXPECTATIONS-ETAPA5.md + Addendum-A +
+Retificação A, cada um commitado antes de tocar código) e confirmados na
+run-4: byte 23 → gaps de 24 frames de tela; byte 40 → 41 (veredito H_N+1,
+NTSC; PAL não medido). allPass 48/48 no driver + 35/35 no
+`scripts/qa/sonic-cadence-journey-verifier.mjs` (recalcula do hex bruto;
+recargas 58/35, razão da moda 1,0, cobertura idle 1,0, discriminante 24≠41).
+Falhas honestas registradas: run-2 (amostragem ao vivo estruturalmente
+impossível: contador ×10 em ViewportPanel e IPC faminto o pump) e run-3
+(borda inclusiva do `record_from`; 1402×1401 linhas). Produtos derivados:
+comando `emulator_run_frames_sampled` (lote com mutex no core, índices
+absolutos, identidade ROM no retorno; unit-tested) e CX-EVAL.md com quatro
+fricções residuais documentadas (drawer do console, wizard na reabertura,
+contador ×10, custo de IPC por leitura).
+
+Binário da prova: `2f09ced2…` reconstruído no HEAD exato `ec2c0a2`; pins
+Xvfb `5bfd315a…` e ROM `c7da53a1…`. Gates completos em
+`data/rex_profiles/sonic_cadence/evidence/2026-10-03-journey/gates.json`
+(check:tree/lint/tsc/npm test/clippy -D/fmt/cargo test 846/0/79/certify/audits).
+Séries brutas, prints e arquivos-ROM ficam LOCAIS (hash pinados no manifesto);
+só metadados/métricas/resumos são versionados. Classificação mantida:
+Experimental / local profile validation — sem merge, release ou promoção de
+maturidade por esta frente; integração é decisão do integrador.
+
+### Checkpoint 2026-10-03 — jornada integrada de animação Sonic 1 (Etapas 1–6, branch própria)
+
+Frente `codex/rex-sonic-anim-integrada` (worktree REX-SONIC-ANIM-INTEGRADA-2026-10-03),
+filha de `codex/rex-sonic-cadence` @ a59e7dc (PR #100); PR desta frente é
+dependente daquela. Entrega: na UI real de inspeção, uma ROM BYOR do usuário
+atravessa abrir → localizar `id_Wait` com 18 quadros reais → pintar 1 pixel
+com confirmação de compartilhamento → mudar a duração para 40 → conferir a
+cópia pelos dois bytes crus → exportar/aplicar BPS → JOGAR a cópia na Game
+View com identidade dos bytes confirmada → salvar/destruir janela/reiniciar/
+reabrir com sequência, duração, pixel e procedência restaurados → restaurar
+SÓ a duração mantendo o pixel intacto. Regra central provada: duas edições de
+domínios diferentes coexistem sem uma desfazer silenciosamente a outra
+(`changed_offsets` cumulativo `[80814, 139582]`, `bytes_changed=2`; ledger
+nomeia por operação; voltar a 23 devolve a cópia só-pixel `b1ed600d…`).
+
+Expectativas congeladas antes das corridas (a657423), com histórico honesto
+de 4 execuções: run-1 FAIL por suposição do driver (não do produto) —
+corrigida pelo Addendum-1 (R-1..R-4, congelado sozinho em 717ec2d); run-2 e
+run-3 FAIL no gate de boot do PASSO 7 — o traço cru da run-3 provou pump
+vivo e lento (~5,5 fps em software rendering Xvfb; série 10→660 crescente,
+zero mensagem de falha), classificado como meio e não expectativa, com única
+correção M-1 (orçamento do gate 120s→300s só nesta jornada; limiar de 890
+frames intocado) congelada no Addendum-2 (03986d0) antes de mexer no harness.
+Run-4: **allPass 24/24 checks nomeados, 10/10 passos, sem aborto**, binário
+`03628796…` reconstruído no HEAD exato `b824e11` (gate de proveniência
+dist==HEAD ativo); pins Xvfb `5bfd315a…`, ROM base `c7da53a1…`, cópia da
+jornada `3274e7c4…` (0x13BAE=40 + nibble 15 em 0x2213E), BPS `4c039980…`.
+
+Gates completos no HEAD final `db57f5d` (inclui correção de um lint que a
+própria frente introduzira em Etapa 4, com teste revalidado): check:tree,
+lint, tsc, npm test 918/0 (6 skipped), fmt, clippy canônico `-D warnings`
+verde, `--all-targets` com dívida preexistente da base registrada em
+`gates.json`, cargo test --lib 850/0/80, host:certify READY. Sem mudança de
+dependências (audits não disparados). CX (E10): roteiro de três tarefas
+entregue com **validação humana pendente** por design — a frente não afirma
+"iniciante consegue" sem participante. Série bruta, logs, prints e
+arquivos-ROM ficam LOCAIS (hashes pinados no manifesto em
+`data/rex_profiles/sonic_anim_integrada/evidence/2026-10-03-journey/`).
+Classificação mantida: Experimental / local profile validation — sem merge,
+release ou promoção de maturidade por esta frente; integração é decisão do
+integrador.
+
+### Checkpoint 2026-10-03 — frente VISUAL da jornada Sonic (ETAPAs 1–4, branch própria)
+
+Frente `codex/rex-sonic-anim-visual` (worktree REX-SONIC-ANIM-VISUAL-2026-10-03),
+filha da entrega `codex/rex-sonic-anim-integrada` @ 8edf69d (PR #101); PR
+dependente daquela. Missão: tornar a capacidade atual visualmente correta e
+utilizável, sem ampliar codecs/variantes/animações.
+
+ETAPA 1 (fechada, `256779d`): causa do preview walk-1 todo magenta após
+reabertura estabelecida com reprodução e evidência — sob compositor acelerado
+do WebKitGTK, janela destruída/recriada nunca repinta o bitmap do `<img>`; A/B
+com `WEBKIT_DISABLE_COMPOSITING_MODE=1` restaura byte-exact (relatório
+`89a35a2b…`, análise offline da captura defeituosa: 12258 mismatches, bloco
+magenta 120×120 defasado +99px em y; extração/deco, bytes da ROM, host e
+caminho de screenshot exonerados). Registrado em
+`docs/rex_profiles/sonic_anim_integrada/evidence/2026-10-03-visual/CAUSA-MAGENTA.md`.
+
+ETAPA 2 (fechada, `87a9b48`+`ac08fbb`): workspace de animação na UI real —
+área dedicada com grupos (duração/cor/pixels), comparação lado a lado
+Original · ROM base intocada vs Cópia atual via composição `from_base` com
+guarda de oracle estendida, estado pendente/aplicado/salvo, política de
+PROPOSTA para Mais lento/Mais rápido (nada grava sem "Aplicar duração"),
+mensagens inline junto da operação, bloco de ações (BPS, aplicar, jogar,
+observar) e retomada por banner + cache de sessão viva. Gates E2-1..E2-10
+congelados em `EXPECTATIONS-VISUAL-ETAPA2.md` (`d4eb3ef`) antes de implementar.
+
+ETAPA 3 (fechada, `94f5fca`→`932f2c6`→`a0067d8`→`b396abb`): correção NO
+PRODUTO — `app_lib::run()` define `WEBKIT_DISABLE_COMPOSITING_MODE=1` em
+Linux antes do Builder (trade-off: render por software, aceito e registrado).
+Jornada retificada (E3-1 aborta se a mitigação estiver no ambiente do harness;
+E3-2 gate de raster da janela via pixmap X11 vs raster independente; E3-3
+prova offline discriminante contra a captura defeituosa arquivada; E3-4
+remontagem hidratada pelo contrato E2-7 e banner que cede à reabertura
+explícita) passou **allPass 28/28 no binário final** `ce54d579…` construído em
+`a0067d8` limpo (gate de proveniência ativo), sem mitigação de ambiente, com
+sprite visível pós-reabertura na 1ª captura (0 mismatches, magenta_fraction
+0,57 = matte correto) e restauração seletiva preservando o pixel. Expectativas
+`EXPECTATIONS-VISUAL-ETAPA3.md` congeladas sozinhas antes de implementar.
+
+ETAPA 4 (fechada neste checkpoint): `CX-ROTEIRO.md` revisado contra a
+superfície entregue (caminho real Ferramentas → Reverse Workspace → Inspeção
+visual; política de proposta; "Editar cor da paleta"; comparação lado a lado;
+banner que cede; tarefa 2b nova de pixel+comparação) — **validação humana
+continua pendente por design**; nenhuma alegação de usabilidade.
+Reconciliação de gates com comandos realmente executados em
+`GATES-ETAPA4.md`: check:tree, lint, tsc, vitest 930/0/6skip, fmt, clippy
+CANÔNICO, cargo test --lib 850/0/80 e host:certify READY (fingerprint
+`60249508…`) executados no HEAD da ETAPA 4; `clippy --all-targets` e audits de
+segurança NÃO aparecem como aprovados (dívida preexistente de 46 falhas de
+código de teste da base; dependências inalteradas — `git diff` vazio de
+package/lock/Cargo desde a base — auditorias ficam a cargo do CI do PR).
+
+Classificação mantida: Experimental / local profile validation — sem merge,
+release, promoção ou push forçado por esta frente; Linux-only para a
+correção de apresentação; integração é decisão do integrador.

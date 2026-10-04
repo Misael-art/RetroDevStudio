@@ -1,0 +1,17 @@
+{
+  "schema": "rex-sonic-anim-integrada-gates/v1",
+  "head_gates": "db57f5d",
+  "note_prova": "A jornada allPass foi corrida no HEAD b824e11 (binario 03628796…); os gates abaixo foram executados no HEAD final db57f5d, cujo unico delta sobre b824e11 e uma linha de teste clippy-compliant (mesma semantica, teste revalidado isolado).",
+  "gates": {
+    "check_tree": "OK: Estrutura da raiz conforme docs/08_TREE_ARCHITECTURE.md",
+    "lint": "eslint src vite.config.ts --max-warnings=0 — OK",
+    "tsc_noEmit": "OK",
+    "npm_test": "Test Files 99 passed | 1 skipped (100); Tests 918 passed | 6 skipped (924); 0 falhas",
+    "cargo_fmt_check": "OK",
+    "cargo_clippy_canonico": "cargo clippy -- -D warnings (AGENTS.md) — OK, exit 0",
+    "cargo_clippy_all_targets": "46 erros residuais TODOS preexistentes na cadeia base (arquivos de teste/bench nao tocados por esta frente: ast_generator, build_orch, project_mgr, rex_aplib, rex_codecs, holdout, logic_recovery, graphics_discovery, lib.rs:165 anterior a frente). A frente introduziu 1 lint em Etapa 4 (sprite_composition.rs:1122) e o corrigiu em db57f5d; nenhum lint resta em arquivo tocado pela frente.",
+    "cargo_test_lib": "850 passed; 0 failed; 80 ignored (executado em b824e11; em db57f5d o teste afetado foi revalidado isolado: ok)",
+    "host_certify": "Success: true — READY; fingerprint 60249508aff61897cdd43160d4716b2344d69282507a36c5a457c0028143f6e2; lock dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377",
+    "security_audits": "NAO disparados: nenhum package.json/package-lock.json/Cargo.toml/Cargo.lock alterado nesta frente (diff a59e7dc..HEAD vazio para esses arquivos); AGENTS.md exige audits quando dependencias ou seguranca mudarem"
+  }
+}

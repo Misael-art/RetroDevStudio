@@ -1,0 +1,174 @@
+{
+  "schema": "rex-sonic-frame-barrier-evidence/v1",
+  "date": "2026-10-02",
+  "classification": "Experimental; authored reference QA and historical evidence audit",
+  "frontend_product_commit": "f646ccf6de220f38dc9bf2b175cd56d79ff4be82",
+  "harness_commit": "5b9d2b96a4e6fd47ba938b88b33a463398d96ef4",
+  "binary_sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0",
+  "previous_evidence": "../2026-10-02/manifest.json",
+  "historic_mutable_file_limitation": "See historical-audit.json; one readiness JSON was replaced; no retroactive change to the old manifest.",
+  "artifacts": [
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier/ci-history.json",
+      "kind": "versioned_summary",
+      "bytes": 2668,
+      "sha256": "4d28497ac6fe88ff643924e25f2ffa3e3f6d2ce01424335530cf60f6500f7d2c"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier/gates.json",
+      "kind": "versioned_summary",
+      "bytes": 755,
+      "sha256": "67a790142f3f490ab26f0e5844b1075395f5acea0455ef5f9f4eb59060141c6b"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier/historical-audit.json",
+      "kind": "versioned_summary",
+      "bytes": 885,
+      "sha256": "22ccf9e58e3cc13ab086300877be7a15aad6e68c05cc448789030a6587199397"
+    },
+    {
+      "path": "data/rex_profiles/sonic_multiframe/evidence/2026-10-02-frame-barrier/reference-desktop.json",
+      "kind": "versioned_summary",
+      "bytes": 10705,
+      "sha256": "15918729e248796ee2c9c0d59930248b0ef764938dcfb60c670c7ae682950087"
+    },
+    {
+      "path": "scripts/e2e-tauri-build-run.mjs",
+      "kind": "versioned_tested_source",
+      "bytes": 1010074,
+      "sha256": "ed7f1dbd2e9fd12f673585c7fe653a46737420fb6ffb33df7de5b8373b9e41d8"
+    },
+    {
+      "path": "scripts/e2e-build-frame.test.mjs",
+      "kind": "versioned_tested_source",
+      "bytes": 2659,
+      "sha256": "24ea739f40ca07aba5869de47f54d603fcd1fea8158933599c50ee8621fb7708"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-replay.log",
+      "kind": "local_log",
+      "bytes": 2443,
+      "sha256": "0fe8ee576b7f140033449e50a59227e1d1cbe368a894b7f37758e55a2a7164ea"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-replay.rc",
+      "kind": "local_log",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-diagnostics.log",
+      "kind": "local_log",
+      "bytes": 2957,
+      "sha256": "059b1d4d8521bb421cf58bd02482311ea443fc7aa0f30f960a0beb2c4ffd68cf"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-diagnostics.rc",
+      "kind": "local_log",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-barrier.log",
+      "kind": "local_log",
+      "bytes": 2957,
+      "sha256": "818c291df1b0a630bc8332315a6d52f5cddcf05347387158d109f3f3ec057146"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/reference-ci-barrier.rc",
+      "kind": "local_log",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/stale-frame-mutation-discriminant.log",
+      "kind": "local_log",
+      "bytes": 4079,
+      "sha256": "04eae2e5f48f7e0a89f24573ca6eb4e81e554706a59335647642c6ce67b60b46"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/stale-frame-mutation-discriminant.rc",
+      "kind": "local_log",
+      "bytes": 2,
+      "sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/host-certify-frame-barrier.log",
+      "kind": "local_log",
+      "bytes": 107284,
+      "sha256": "974caca4939a0027c4f6bb4a54a34296a3340fd69d87e26ab2749c28f44f4a07"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/host-certify-frame-barrier.rc",
+      "kind": "local_log",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/frame-barrier-light-gates-final.log",
+      "kind": "local_log",
+      "bytes": 527,
+      "sha256": "78e5109eab125cee8c660666762352293535ec30b1d5b6212a43f452ccf87f93"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/gates/frame-barrier-light-gates-final.rc",
+      "kind": "local_log",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/host-readiness-frame-barrier.json",
+      "kind": "local_evidence",
+      "bytes": 11384,
+      "sha256": "10088ecdf5552d5a3b591a5827a5bb828d30aef25d60caee2fc6a9b8be88e75e"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/upstream-validation-linux-frame-barrier.json",
+      "kind": "local_evidence",
+      "bytes": 4025,
+      "sha256": "735e8590db893b53073b90c2990d9a1fd6694fa7c7731e68f05dfa90efd271a7"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/ci-smoke-failure.log",
+      "kind": "local_evidence",
+      "bytes": 144216,
+      "sha256": "2aeb087c428b434280021ae0974cd56b29adf64ac0ecf0062fe93485aadf63ac"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/ci-failed-artifact-11252811510.zip",
+      "kind": "local_evidence",
+      "bytes": 4719025,
+      "sha256": "3f63fd5a153db508bf0674b9c6741cd036d6e44c6285f209d78840552ade88df"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/ci-failed-desktop-e2e-failure-reference-platformer.json",
+      "kind": "local_evidence",
+      "bytes": 1024,
+      "sha256": "30f25f60e5281812a789cb33a9f003e669a73ae45c90ad568fb4ce6550f9b924"
+    },
+    {
+      "path": "src-tauri/target-test/validation/sonic-multiframe/ci-eighth.json",
+      "kind": "local_evidence",
+      "bytes": 38104,
+      "sha256": "695452e89d950e68284b3a676e838f0dc54f633173c396bb4543640186e5edeb"
+    },
+    {
+      "path": "src-tauri/target-test/debug/retro-dev-studio",
+      "kind": "local_evidence",
+      "bytes": 413283920,
+      "sha256": "1845aebf1597a18cab74dd763d03fcf75c25ef2ec834c165fed5dc9529ccb8b0"
+    },
+    {
+      "path": "src-tauri/target-test/validation/reference-platformer-2026-10-02T21-49-47-220Z-report.json",
+      "kind": "local_evidence",
+      "bytes": 93949,
+      "sha256": "de877c5f6933b3b90c86d67d57fdfdaaace5727f47e57f3a9cecfc7e89b4122c"
+    },
+    {
+      "path": "src-tauri/target-test/validation/reference-platformer-2026-10-02T21-49-47-220Z-06-reopened-build-run.png",
+      "kind": "local_evidence",
+      "bytes": 145416,
+      "sha256": "a0e0d46dc4846ccd7a3d05f0e526c73911897f1505899b6a56c247b0c3237985"
+    }
+  ]
+}

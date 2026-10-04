@@ -2369,6 +2369,55 @@ describe("App build flow", () => {
     );
   });
 
+  it("closes the first-use wizard explicitly and keeps onboarding available afterwards", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Wizard de Primeiro Uso");
+    const closeButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='wizard-continue-without-project']"
+    );
+    expect(closeButton).toBeInstanceOf(HTMLButtonElement);
+    expect(closeButton?.textContent).toContain("Continuar sem projeto");
+
+    await act(async () => {
+      closeButton?.click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='project-wizard-body']")).toBeNull();
+    expect(container.textContent).not.toContain("Wizard de Primeiro Uso");
+    expect(mocks.createProjectFromTemplate).not.toHaveBeenCalled();
+    expect(mocks.openProjectPath).not.toHaveBeenCalled();
+    expect(mocks.importExternalProject).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      });
+      await flush();
+    });
+    await act(async () => {
+      useEditorStore.setState({ activeProjectDir: "" });
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Wizard de Primeiro Uso");
+    expect(
+      container.querySelector("[data-testid='wizard-continue-without-project']")
+    ).toBeInstanceOf(HTMLButtonElement);
+  });
+
   it("shows a contextual guide in the scene workspace and opens the asset browser from it", async () => {
     const guide = container.querySelector("[data-testid='workspace-guide']");
 
