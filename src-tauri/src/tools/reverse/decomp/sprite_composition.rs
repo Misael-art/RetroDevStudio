@@ -581,13 +581,35 @@ pub(crate) fn read_sonic_session_rom(
     if modified.normalized_sha256 != edit.modified_rom_sha256 || rom.len() != base.len() {
         return Err("sprite_edit_identity_mismatch: cópia mudou desde a edição".into());
     }
+    // Escopo do que uma cópia pode mudar vs a base: arte, paleta, o byte de
+    // duração (cadência) e a janela de reordenação do id_Wait. A janela de
+    // sequência só é aceita se o conjunto inteiro das 18 entradas permanecer
+    // uma permutação válida do multiconjunto original — assim um byte trocado
+    // fora de ordem legítima (ou uma adulteração no disco no reabrir) continua
+    // recusado, com a mesma checagem que o domínio usa ao editar.
+    use super::sonic_sequence as seq;
+    let mut touched_sequence = false;
     if base.iter().zip(&rom).enumerate().any(|(i, (a, b))| {
-        a != b
-            && !(sonic::ART_OFFSET..sonic::ART_OFFSET + sonic::ART_SIZE).contains(&i)
-            && !(sonic::PALETTE_OFFSET..sonic::PALETTE_OFFSET + PALETTE_SIZE).contains(&i)
-            && i != super::sonic_cadence::WAIT_ADDR
+        if a == b {
+            return false;
+        }
+        if (sonic::ART_OFFSET..sonic::ART_OFFSET + sonic::ART_SIZE).contains(&i)
+            || (sonic::PALETTE_OFFSET..sonic::PALETTE_OFFSET + PALETTE_SIZE).contains(&i)
+            || i == super::sonic_cadence::WAIT_ADDR
+        {
+            return false;
+        }
+        if (seq::FRAMES_ADDR..seq::FRAMES_END).contains(&i) {
+            touched_sequence = true;
+            return false;
+        }
+        true
     }) {
-        return Err("sprite_edit_scope: cópia alterou bytes fora da arte, paleta e do byte de duração comprovado".into());
+        return Err("sprite_edit_scope: cópia alterou bytes fora da arte, paleta, do byte de duração e da janela de ordem id_Wait comprovados".into());
+    }
+    if touched_sequence {
+        seq::read_frames(&rom)
+            .map_err(|e| format!("sprite_edit_scope: janela de ordem id_Wait inválida — {e}"))?;
     }
     Ok((base, rom))
 }
