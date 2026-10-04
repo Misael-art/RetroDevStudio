@@ -87,3 +87,27 @@ das 18 entradas de moldura. As expectativas de prova estão congeladas em
 Limites: nada aqui autoriza mudar contagem de frames, outro byte da ROM, outro
 jogo, nem animações de velocidade. PAL não medido. Prévia da UI é ilustração,
 nunca prova.
+
+## Interação com a frente de cadência (fork DELIBERADO, não implementado unilateralmente)
+
+Verificado no código, não assumido:
+
+- `sonic_cadence::describe`/`read_interval` revalidam a **cópia** com
+  `script_bytes_match`, que exige a ordem de molduras **exatamente** igual a
+  `WAIT_FRAMES`. Portanto:
+  - **reordenar depois de editar a duração**: permitido — `check_copy` desta
+    frente aceita qualquer intervalo válido (`<0x80`) com multiconjunto de
+    molduras íntegro, independentemente da ordem.
+  - **editar a duração (ou reabrir o painel de cadência) depois de reordenar**:
+    **recusado** pelo verificador da cadência (`cadence_structure_mismatch`).
+    Na UI isso aparece como "Contrato de cadência indisponível" para aquela
+    cópia; o painel da **sequência** permanece correto e autoritativo.
+- Consequência para a jornada P3: ela é **só-sequência** (sem edição de duração
+  intercalada). A recusa da cadência numa cópia reordenada é, ela mesma, uma
+  confirmação independente de que **somente a ordem** mudou.
+- Escolha registrada: **não** afrouxei a invariante de ordem exata de
+  `sonic_cadence.rs`. Generalizar uma propriedade *fail-closed* comprovada exige
+  aprovação do operador + verificador independente + testes próprios, e não é
+  necessária para este incremento. Fica como decisão aberta ao operador, não
+  implementada por conta própria.
+
