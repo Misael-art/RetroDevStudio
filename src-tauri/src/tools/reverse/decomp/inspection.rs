@@ -1417,7 +1417,9 @@ fn persist_sonic_edit(
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    edit.shared_with_frames = if edit.format == super::sonic_cadence::EDIT_FORMAT {
+    edit.shared_with_frames = if edit.format == super::sonic_cadence::EDIT_FORMAT
+        || edit.format == super::sonic_sequence::EDIT_FORMAT
+    {
         if edit.art_tiles.is_empty() {
             Vec::new()
         } else {
@@ -1462,6 +1464,12 @@ fn persist_sonic_edit(
             "Pixel: {} ponto(s) no frame {}",
             edit.pixels_changed.unwrap_or(0),
             edit.frame_id
+        ),
+        "sonic1_wait_frame_order" => format!(
+            "Sequencia id_Wait: {} entrada(s) reordenada(s) (janela {:#07x}..{:#07x})",
+            offsets.len(),
+            super::sonic_sequence::FRAMES_ADDR,
+            super::sonic_sequence::FRAMES_END - 1
         ),
         _ => {
             let prev_byte = old_bytes.first().copied().unwrap_or_default();
@@ -1732,6 +1740,86 @@ pub fn edit_sonic_duration(
     }
     super::sonic_cadence::set_interval(&mut rom, value).map_err(cadence_error)?;
     let mut edit = sonic_edit_record("id_Wait", super::sonic_cadence::EDIT_FORMAT);
+    edit.pixels_changed = None;
+    persist_sonic_edit(stored, &base, &previous, &rom, edit)
+}
+
+/// The proven `id_Wait` frame sequence as read from this session's ROMs:
+/// original vs current order plus the positions that differ. All addresses and
+/// refusals live in `sonic_sequence`; the UI only renders this view.
+pub fn sonic_sequence_info(
+    session_id: &str,
+) -> Result<super::sonic_sequence::SequenceInfo, String> {
+    let stored = get_stored_session(session_id)?;
+    let (base, rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)
+        .map_err(|e| error("sequence_rom_unreadable", e, false))?;
+    super::sonic_sequence::describe(&base, &rom).map_err(cadence_error)
+}
+
+/// Reorders the 18 frame entries of the accumulated copy, in place. Writes only
+/// `0x13BAF..0x13BC0`; the interval byte, terminator, pad and neighbours are
+/// never touched. A proposal identical to the current order (including a swap of
+/// two equal entries) is an explicit no-op, never a silent edit.
+pub fn edit_sonic_sequence(
+    session_id: &str,
+    resource_id: &str,
+    proposal: Vec<u8>,
+) -> Result<InspectionEdit, String> {
+    if resource_id != "sonic1_sonic" {
+        return Err(error(
+            "edit_resource_unsupported",
+            "Recurso não comprovado",
+            false,
+        ));
+    }
+    let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
+    let stored = get_stored_session(session_id)?;
+    let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    let previous = rom.clone();
+    super::sonic_cadence::validate_base(&base).map_err(cadence_error)?;
+    let outcome = super::sonic_sequence::permute(&mut rom, &proposal).map_err(cadence_error)?;
+    if outcome.noop {
+        return Ok(sonic_noop_record(
+            &stored,
+            "id_Wait",
+            super::sonic_sequence::EDIT_FORMAT,
+            &rom,
+        ));
+    }
+    let mut edit = sonic_edit_record("id_Wait", super::sonic_sequence::EDIT_FORMAT);
+    edit.pixels_changed = None;
+    persist_sonic_edit(stored, &base, &previous, &rom, edit)
+}
+
+/// Restores only the frame sequence to its original order. The interval byte
+/// (cadence domain), pixel edits, palette and terminator are left exactly as the
+/// accumulated copy holds them — this never rewrites a foreign domain.
+pub fn restore_sonic_sequence(
+    session_id: &str,
+    resource_id: &str,
+) -> Result<InspectionEdit, String> {
+    if resource_id != "sonic1_sonic" {
+        return Err(error(
+            "edit_resource_unsupported",
+            "Recurso não comprovado",
+            false,
+        ));
+    }
+    let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
+    let stored = get_stored_session(session_id)?;
+    let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    let previous = rom.clone();
+    super::sonic_cadence::validate_base(&base).map_err(cadence_error)?;
+    let prev_frames = super::sonic_sequence::restore(&mut rom).map_err(cadence_error)?;
+    if prev_frames == super::sonic_cadence::WAIT_FRAMES.to_vec() {
+        return Ok(sonic_noop_record(
+            &stored,
+            "id_Wait",
+            super::sonic_sequence::EDIT_FORMAT,
+            &rom,
+        ));
+    }
+    let mut edit = sonic_edit_record("id_Wait", super::sonic_sequence::EDIT_FORMAT);
     edit.pixels_changed = None;
     persist_sonic_edit(stored, &base, &previous, &rom, edit)
 }
@@ -2086,6 +2174,293 @@ mod tests {
         });
         fs::write(
             decomp_work_dir().join("sonic-cadence-proof.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// P3 (frente de sequência) — prova determinística pela PIPELINE CANÔNICA
+    /// na ROM pinada: abrir → editar ORDEM → aplicar à cópia → conferir escopo
+    /// byte a byte → exportar/reaplicar BPS (ida e volta) → negativos recusam
+    /// sem escrever → restaurar só a sequência devolve a integralidade da base.
+    /// Nada é injetado: a cópia reordenada sai do pipeline real e é conferida
+    /// por leitura direta dos bytes. A cópia reordenada vai para
+    /// `RDS_DECOMP_WORK/sequence-reordered.bin` para o verificador INDEPENDENTE
+    /// (`scripts/qa/sonic-sequence-contract.mjs`), que não importa produto.
+    #[test]
+    #[ignore = "BYOR Sonic pinado; RDS_SONIC_MULTIFRAME_ROM obrigatório; escreva em RDS_DECOMP_WORK isolado"]
+    fn sonic_sequence_byor_reorders_through_pipeline_and_bps_roundtrip() {
+        use super::super::{sonic_cadence as cadence, sonic_sequence as seq};
+        use crate::tools::patch_studio;
+        let path = std::env::var("RDS_SONIC_MULTIFRAME_ROM").expect("BYOR obrigatório");
+        assert!(
+            std::env::var("RDS_DECOMP_WORK").is_ok(),
+            "diretório de prova isolado obrigatório"
+        );
+        let session = open(&path).unwrap();
+        let (_, base) = rex_read_rom(Path::new(&path)).unwrap();
+        seq::describe(&base, &base).expect("contrato da sequência na ROM pinada");
+
+        // A sequência original é a ordem vigente; nada mudou ainda.
+        let info0 = sonic_sequence_info(&session.session_id).unwrap();
+        assert_eq!(info0.original_frames, cadence::WAIT_FRAMES.to_vec());
+        assert_eq!(info0.current_frames, cadence::WAIT_FRAMES.to_vec());
+        assert!(info0.changed_positions.is_empty());
+        assert_eq!(info0.frames_len, seq::FRAMES_LEN);
+
+        // A proposta DISCRIMINANTE congelada (EXPECTATIONS §5.1): mover a
+        // primeira `03` (índice 12) para a posição 0.
+        let mut proposal = cadence::WAIT_FRAMES.to_vec();
+        proposal.swap(0, 12);
+        assert_eq!(proposal[0], 0x03, "primeiro frame passa a ser arte 03");
+        assert_eq!(proposal[12], 0x01);
+
+        // ---- Negativos: cada recusa sem escrever e sem registrar edição ----
+        let no_registered_edit = |label: &str| {
+            let s = get_stored_session(&session.session_id).unwrap().session;
+            assert!(
+                s.edit.is_none(),
+                "{label}: recusa não pode registrar edição"
+            );
+            assert!(
+                s.applied_edits.is_empty(),
+                "{label}: recusa não pode ir ao ledger"
+            );
+        };
+        // seq_length_divergent (realloc / tamanho do script trocado).
+        let short: Vec<u8> = proposal.iter().copied().take(17).collect();
+        let e = edit_sonic_sequence(&session.session_id, "sonic1_sonic", short).unwrap_err();
+        assert!(e.contains("seq_length_divergent"), "{e}");
+        no_registered_edit("length-divergent");
+        // seq_token_reserved (token de script como moldura).
+        let mut tok = proposal.clone();
+        tok[3] = 0xfe;
+        let e = edit_sonic_sequence(&session.session_id, "sonic1_sonic", tok).unwrap_err();
+        assert!(e.contains("seq_token_reserved"), "{e}");
+        no_registered_edit("token-reserved");
+        // seq_frame_invalid (multiconjunto alterado: 04 extra no lugar de um 01).
+        let mut bad = proposal.clone();
+        bad[1] = 0x04;
+        let e = edit_sonic_sequence(&session.session_id, "sonic1_sonic", bad).unwrap_err();
+        assert!(e.contains("seq_frame_invalid"), "{e}");
+        no_registered_edit("frame-invalid");
+        // recurso errado (âmbito da sessão/recurso).
+        let e =
+            edit_sonic_sequence(&session.session_id, "sonic1_tails", proposal.clone()).unwrap_err();
+        assert!(e.contains("edit_resource_unsupported"), "{e}");
+        no_registered_edit("recurso-errado");
+        // no-op explícito: proposta igual à ordem vigente não grava.
+        let noop = edit_sonic_sequence(
+            &session.session_id,
+            "sonic1_sonic",
+            cadence::WAIT_FRAMES.to_vec(),
+        )
+        .unwrap();
+        assert!(noop.noop, "ordem vigente deve devolver no-op");
+        assert_eq!(noop.bytes_changed, 0);
+        assert!(noop.changed_offsets.is_empty());
+        no_registered_edit("noop");
+
+        // ---- Positivo discriminante pela pipeline ----
+        let edit =
+            edit_sonic_sequence(&session.session_id, "sonic1_sonic", proposal.clone()).unwrap();
+        assert!(!edit.noop);
+        assert_eq!(edit.format, seq::EDIT_FORMAT);
+        assert_eq!(edit.bytes_changed, 2, "só as duas posições trocadas");
+        assert_eq!(
+            edit.changed_offsets,
+            vec![seq::FRAMES_ADDR as u64, (seq::FRAMES_ADDR + 12) as u64]
+        );
+        let copy = fs::read(&edit.modified_rom_path).unwrap();
+        assert_eq!(copy.len(), base.len());
+        assert_eq!(super::sha256_hex(&copy), edit.modified_rom_sha256);
+        // Escrita confinada: toda divergência cai dentro da janela autorizada.
+        let diffs: Vec<usize> = (0..base.len()).filter(|&i| base[i] != copy[i]).collect();
+        assert_eq!(
+            diffs,
+            vec![seq::FRAMES_ADDR, seq::FRAMES_ADDR + 12],
+            "a reordenação não pode tocar nada fora de 0x13BAF..0x13BC0"
+        );
+        // Intervalo (cadência), terminador, pad e vizinho byte a byte intactos.
+        assert_eq!(copy[cadence::WAIT_ADDR], base[cadence::WAIT_ADDR]);
+        assert_eq!(
+            &copy[seq::TERMINATOR_ADDR..seq::TERMINATOR_ADDR + cadence::WAIT_TERMINATOR.len()],
+            &cadence::WAIT_TERMINATOR[..]
+        );
+        assert_eq!(copy[seq::TERMINATOR_ADDR + 2], 0x00, "padding intacto");
+        assert_eq!(
+            &copy[seq::FRAMES_END + 3..seq::FRAMES_END + 7],
+            &[0x1f, 0x3a, 0x3b, 0xff][..],
+            "início do script da anim 6 intacto (vizinho)"
+        );
+        assert_eq!(&copy[seq::FRAMES_ADDR..seq::FRAMES_END], &proposal[..]);
+        // proposed ≠ applied: antes de gravar a ordem vigente era a original.
+        let info1 = sonic_sequence_info(&session.session_id).unwrap();
+        assert_eq!(info1.current_frames, proposal);
+        assert_eq!(info1.changed_positions, vec![0, 12]);
+
+        // ---- BPS: exportar e reaplicar sobre a base reprodz a cópia ----
+        let patch = patch_studio::create_bps(&base, &copy).expect("BPS cria");
+        let back = patch_studio::apply_bps(&base, &patch).expect("BPS aplica");
+        assert_eq!(back, copy, "reaplicar BPS na base deve devolver a cópia");
+        assert!(!patch.is_empty(), "patch não pode ser vazio");
+        assert_ne!(back, base, "a cópia reordenada difere da base");
+
+        // Entregável para o verificador independente (node, sem produto).
+        let work = decomp_work_dir();
+        fs::write(work.join("sequence-reordered.bin"), &copy).unwrap();
+        fs::write(work.join("sequence-reorder.bps"), &patch).unwrap();
+
+        // ---- Restauração SELETIVA: só a sequência volta; cópia == base ----
+        let restored = restore_sonic_sequence(&session.session_id, "sonic1_sonic").unwrap();
+        assert!(
+            !restored.noop,
+            "havia ordem alterada; restaurar é não-trivial"
+        );
+        let restored_copy = fs::read(&restored.modified_rom_path).unwrap();
+        assert_eq!(
+            restored_copy, base,
+            "restaurar só a sequência deve devolver a ROM integral à base"
+        );
+        let info2 = sonic_sequence_info(&session.session_id).unwrap();
+        assert_eq!(info2.current_frames, cadence::WAIT_FRAMES.to_vec());
+        assert!(info2.changed_positions.is_empty());
+        // restaurar de novo é no-op.
+        let noop2 = restore_sonic_sequence(&session.session_id, "sonic1_sonic").unwrap();
+        assert!(noop2.noop);
+
+        // BYOR intocada do começo ao fim.
+        assert_eq!(
+            rex_read_rom(Path::new(&path)).unwrap().1,
+            base,
+            "BYOR intacta"
+        );
+
+        let report = serde_json::json!({
+            "schema": "rex-sonic-sequence-proof/v1",
+            "base_sha256": super::sha256_hex(&base),
+            "window": { "frames_addr": format!("0x{:X}", seq::FRAMES_ADDR),
+                        "frames_end_exclusive": format!("0x{:X}", seq::FRAMES_END) },
+            "proposal": proposal,
+            "changed_offsets": edit.changed_offsets,
+            "bytes_changed": edit.bytes_changed,
+            "outside_window_identical": diffs.iter().all(|&i| i >= seq::FRAMES_ADDR && i < seq::FRAMES_END),
+            "first_frame_original": cadence::WAIT_FRAMES[0],
+            "first_frame_reordered": proposal[0],
+            "bps_roundtrip_ok": back == copy,
+            "restore_equals_base": restored_copy == base,
+            "negatives": ["seq_length_divergent","seq_token_reserved","seq_frame_invalid","edit_resource_unsupported","noop"],
+            "reordered_copy_sha256": edit.modified_rom_sha256,
+        });
+        fs::write(
+            work.join("sonic-sequence-proof.json"),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// P3 (frente de sequência) — OBSERVAÇÃO NO CORE: a mesma cópia reordenada
+    /// produzida pela pipeline canônica é carregada no core Libretro real
+    /// (Genesis Plus GX, via `EmulatorCore`, sem injeção de estado) e o byte de
+    /// frame do objeto do jogador é lido da RAM quando o Sonic entra no estado
+    /// `id_Wait`. Expectativa congelada (EXPECTATIONS §5.3c): a assinatura do
+    /// primeiro frame passa de arte `01` (base) para arte `03` (reordenada) —
+    /// i.e. reordenar a ROM (não só miniaturas) é observável no core. Índices do
+    /// objeto do jogador comprovados pela sonda de cadência (frame 0xD01B,
+    /// anim 0xD01D, timer 0xD01F). A série bruta vai para o relatório; qualquer
+    /// desvio do valor esperado é FAIL honesto, não ajuste de expectativa.
+    #[test]
+    #[ignore = "BYOR Sonic pinado + core Libretro real; RDS_SONIC_MULTIFRAME_ROM e RDS_DECOMP_WORK obrigatórios"]
+    fn sonic_sequence_byor_core_first_wait_frame_becomes_art_03() {
+        use super::super::{sonic_cadence as cadence, sonic_sequence as seq};
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+        let path = std::env::var("RDS_SONIC_MULTIFRAME_ROM").expect("BYOR obrigatório");
+        assert!(
+            std::env::var("RDS_DECOMP_WORK").is_ok(),
+            "prova isolada obrigatória"
+        );
+        let (_, base) = rex_read_rom(Path::new(&path)).unwrap();
+
+        // Cópia reordenada sai da PIPELINE CANÔNICA (não de byte-patch manual).
+        let session = open(&path).unwrap();
+        let mut proposal = cadence::WAIT_FRAMES.to_vec();
+        proposal.swap(0, 12);
+        assert_eq!(cadence::WAIT_FRAMES[0], 0x01);
+        assert_eq!(proposal[0], 0x03);
+        let edit = edit_sonic_sequence(&session.session_id, "sonic1_sonic", proposal.clone())
+            .expect("edição de ordem na pipeline");
+        assert_eq!(
+            edit.changed_offsets,
+            vec![seq::FRAMES_ADDR as u64, (seq::FRAMES_ADDR + 12) as u64]
+        );
+
+        const TIMER_IDX: usize = 0xD01F;
+        const ANIM_IDX: usize = 0xD01D;
+        const FRAME_IDX: usize = 0xD01B;
+        const TOTAL: usize = 1600;
+        fn probe(rom: &Path) -> (Vec<serde_json::Value>, Option<(usize, u8)>) {
+            let mut emu = EmulatorCore::new(None);
+            emu.load_rom(rom).expect("core real + BYOR");
+            let mut series = Vec::new();
+            let mut first: Option<(usize, u8)> = None;
+            for frame in 0..TOTAL {
+                let pressed = (900..902).contains(&frame);
+                let joypad = if pressed {
+                    JoypadState {
+                        start: true,
+                        ..JoypadState::default()
+                    }
+                } else {
+                    JoypadState::default()
+                };
+                emu.set_joypad(joypad).unwrap();
+                emu.run_frame().unwrap();
+                let (cur, _) = emu.read_memory(2, 0, usize::MAX).unwrap();
+                if cur[ANIM_IDX] == cadence::WAIT_ANIM as u8 {
+                    if first.is_none() {
+                        first = Some((frame, cur[FRAME_IDX]));
+                    }
+                    if frame >= 1000 && series.len() < 200 {
+                        series.push(serde_json::json!({
+                            "frame": frame, "timer": cur[TIMER_IDX], "frame_byte": cur[FRAME_IDX],
+                        }));
+                    }
+                }
+            }
+            emu.stop().ok();
+            (series, first)
+        }
+
+        let (base_series, base_first) = probe(Path::new(&path));
+        let (mod_series, mod_first) = probe(Path::new(&edit.modified_rom_path));
+        let bf = base_first.expect("base: o jogador entra no estado id_Wait no core");
+        let mf = mod_first.expect("cópia: o jogador entra no estado id_Wait no core");
+
+        // Discriminante congelado: primeiro frame do id_Wait observado no core.
+        assert_eq!(bf.1, 0x01, "base: primeiro frame deve ser a arte 01");
+        assert_eq!(
+            mf.1, 0x03,
+            "cópia: primeiro frame deve virar a arte 03 (no core)"
+        );
+        assert_ne!(
+            bf.1, mf.1,
+            "a reordenação da ROM deve ser observável no core"
+        );
+
+        let report = serde_json::json!({
+            "schema": "rex-sonic-sequence-core/v1",
+            "core": "Genesis Plus GX via EmulatorCore (sem injeção de estado)",
+            "object_indices": { "frame": format!("0x{FRAME_IDX:X}"), "anim": format!("0x{ANIM_IDX:X}"), "timer": format!("0x{TIMER_IDX:X}") },
+            "base_first_wait": { "frame": bf.0, "frame_byte": bf.1 },
+            "reordered_first_wait": { "frame": mf.0, "frame_byte": mf.1 },
+            "expected": { "base": 0x01, "reordered": 0x03 },
+            "reordered_copy_sha256": edit.modified_rom_sha256,
+            "base_sha256": super::sha256_hex(&base),
+            "base_series_head": base_series,
+            "reordered_series_head": mod_series,
+        });
+        fs::write(
+            decomp_work_dir().join("sonic-sequence-core-proof.json"),
             serde_json::to_vec_pretty(&report).unwrap(),
         )
         .unwrap();
