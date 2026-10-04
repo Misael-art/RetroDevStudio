@@ -1417,7 +1417,9 @@ fn persist_sonic_edit(
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
-    edit.shared_with_frames = if edit.format == super::sonic_cadence::EDIT_FORMAT {
+    edit.shared_with_frames = if edit.format == super::sonic_cadence::EDIT_FORMAT
+        || edit.format == super::sonic_sequence::EDIT_FORMAT
+    {
         if edit.art_tiles.is_empty() {
             Vec::new()
         } else {
@@ -1462,6 +1464,12 @@ fn persist_sonic_edit(
             "Pixel: {} ponto(s) no frame {}",
             edit.pixels_changed.unwrap_or(0),
             edit.frame_id
+        ),
+        "sonic1_wait_frame_order" => format!(
+            "Sequencia id_Wait: {} entrada(s) reordenada(s) (janela {:#07x}..{:#07x})",
+            offsets.len(),
+            super::sonic_sequence::FRAMES_ADDR,
+            super::sonic_sequence::FRAMES_END - 1
         ),
         _ => {
             let prev_byte = old_bytes.first().copied().unwrap_or_default();
@@ -1732,6 +1740,86 @@ pub fn edit_sonic_duration(
     }
     super::sonic_cadence::set_interval(&mut rom, value).map_err(cadence_error)?;
     let mut edit = sonic_edit_record("id_Wait", super::sonic_cadence::EDIT_FORMAT);
+    edit.pixels_changed = None;
+    persist_sonic_edit(stored, &base, &previous, &rom, edit)
+}
+
+/// The proven `id_Wait` frame sequence as read from this session's ROMs:
+/// original vs current order plus the positions that differ. All addresses and
+/// refusals live in `sonic_sequence`; the UI only renders this view.
+pub fn sonic_sequence_info(
+    session_id: &str,
+) -> Result<super::sonic_sequence::SequenceInfo, String> {
+    let stored = get_stored_session(session_id)?;
+    let (base, rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)
+        .map_err(|e| error("sequence_rom_unreadable", e, false))?;
+    super::sonic_sequence::describe(&base, &rom).map_err(cadence_error)
+}
+
+/// Reorders the 18 frame entries of the accumulated copy, in place. Writes only
+/// `0x13BAF..0x13BC0`; the interval byte, terminator, pad and neighbours are
+/// never touched. A proposal identical to the current order (including a swap of
+/// two equal entries) is an explicit no-op, never a silent edit.
+pub fn edit_sonic_sequence(
+    session_id: &str,
+    resource_id: &str,
+    proposal: Vec<u8>,
+) -> Result<InspectionEdit, String> {
+    if resource_id != "sonic1_sonic" {
+        return Err(error(
+            "edit_resource_unsupported",
+            "Recurso não comprovado",
+            false,
+        ));
+    }
+    let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
+    let stored = get_stored_session(session_id)?;
+    let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    let previous = rom.clone();
+    super::sonic_cadence::validate_base(&base).map_err(cadence_error)?;
+    let outcome = super::sonic_sequence::permute(&mut rom, &proposal).map_err(cadence_error)?;
+    if outcome.noop {
+        return Ok(sonic_noop_record(
+            &stored,
+            "id_Wait",
+            super::sonic_sequence::EDIT_FORMAT,
+            &rom,
+        ));
+    }
+    let mut edit = sonic_edit_record("id_Wait", super::sonic_sequence::EDIT_FORMAT);
+    edit.pixels_changed = None;
+    persist_sonic_edit(stored, &base, &previous, &rom, edit)
+}
+
+/// Restores only the frame sequence to its original order. The interval byte
+/// (cadence domain), pixel edits, palette and terminator are left exactly as the
+/// accumulated copy holds them — this never rewrites a foreign domain.
+pub fn restore_sonic_sequence(
+    session_id: &str,
+    resource_id: &str,
+) -> Result<InspectionEdit, String> {
+    if resource_id != "sonic1_sonic" {
+        return Err(error(
+            "edit_resource_unsupported",
+            "Recurso não comprovado",
+            false,
+        ));
+    }
+    let _guard = SONIC_EDIT_GUARD.lock().map_err(|e| e.to_string())?;
+    let stored = get_stored_session(session_id)?;
+    let (base, mut rom) = super::sprite_composition::read_sonic_session_rom(&stored.session)?;
+    let previous = rom.clone();
+    super::sonic_cadence::validate_base(&base).map_err(cadence_error)?;
+    let prev_frames = super::sonic_sequence::restore(&mut rom).map_err(cadence_error)?;
+    if prev_frames == super::sonic_cadence::WAIT_FRAMES.to_vec() {
+        return Ok(sonic_noop_record(
+            &stored,
+            "id_Wait",
+            super::sonic_sequence::EDIT_FORMAT,
+            &rom,
+        ));
+    }
+    let mut edit = sonic_edit_record("id_Wait", super::sonic_sequence::EDIT_FORMAT);
     edit.pixels_changed = None;
     persist_sonic_edit(stored, &base, &previous, &rom, edit)
 }

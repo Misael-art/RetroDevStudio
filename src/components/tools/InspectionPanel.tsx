@@ -12,15 +12,18 @@ import {
   inspectionCatalogPage,
   inspectionEditSonicDuration,
   inspectionEditSonicPalette,
+  inspectionEditSonicSequence,
   inspectionEditSonicTiles,
   type InspectionPixelEdit,
   inspectionListSessions,
   inspectionOpen,
   inspectionPreview,
   inspectionReopen,
+  inspectionRestoreSonicSequence,
   inspectionSave,
   inspectionSavePaletteChoice,
   inspectionSonicCadence,
+  inspectionSonicSequence,
   inspectionSpriteFrame,
   inspectionStatus,
   inspectionStart,
@@ -28,6 +31,7 @@ import {
   patchApplyBps,
   patchCreateBps,
   type SonicCadenceInfo,
+  type SonicSequenceInfo,
 } from "../../core/ipc/toolsService";
 import {
   emulatorGetCoreEpoch,
@@ -154,6 +158,13 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const [cadenceThumbs, setCadenceThumbs] = useState<Record<string, InspectionSpriteFrame>>({});
   const [cadencePlaying, setCadencePlaying] = useState(false);
   const [cadenceTick, setCadenceTick] = useState(0);
+  const [sequence, setSequence] = useState<SonicSequenceInfo | null>(null);
+  const [sequenceProposal, setSequenceProposal] = useState<number[] | null>(null);
+  const [sequenceSelected, setSequenceSelected] = useState<number | null>(null);
+  const [sequenceBusy, setSequenceBusy] = useState(false);
+  const [sequenceError, setSequenceError] = useState("");
+  const [sequenceMessage, setSequenceMessage] = useState("");
+  const [sequenceThumbs, setSequenceThumbs] = useState<Record<string, InspectionSpriteFrame>>({});
   const [emulatorObservation, setEmulatorObservation] = useState<EmulatorObservationResult | null>(null);
   const [emulatorObservationLabel, setEmulatorObservationLabel] = useState("");
   const [emulatorObservationHistory, setEmulatorObservationHistory] = useState<Array<{ label: string; observation: EmulatorObservationResult }>>([]);
@@ -187,6 +198,8 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
   const savedSessionsRequestSeq = useRef(0);
   const cadenceRequestSeq = useRef(0);
   const cadenceEditSeq = useRef(0);
+  const sequenceRequestSeq = useRef(0);
+  const sequenceEditSeq = useRef(0);
   const originalRequestSeq = useRef(0);
   const progressListener = useRef<{ sessionId: string; generation: number; unlisten?: () => void } | null>(null);
   const bufferedProgress = useRef(new Map<string, InspectionProgress>());
@@ -217,6 +230,15 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     setCadenceError("");
     setCadencePlaying(false);
     setCadenceTick(0);
+    sequenceRequestSeq.current += 1;
+    sequenceEditSeq.current += 1;
+    setSequence(null);
+    setSequenceProposal(null);
+    setSequenceSelected(null);
+    setSequenceThumbs({});
+    setSequenceBusy(false);
+    setSequenceError("");
+    setSequenceMessage("");
   }
 
   function applyProgress(progress: InspectionProgress) {
@@ -353,6 +375,7 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     if (!sessionId || session?.status !== "completed") return;
     if (!spriteFrameId.startsWith("sonic1_sonic/")) return;
     void loadCadence(sessionId);
+    void loadSequence(sessionId);
   }, [session?.session_id, session?.status, spriteFrameId.startsWith("sonic1_sonic/")]);
 
   // E2-3: o "Original" só existe quando há edições na cópia; vem do mesmo
@@ -654,6 +677,113 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
     const clamped = Math.min(cadence.editable_max, Math.max(cadence.editable_min, start + delta));
     setCadenceValue(clamped);
     setCadenceError("");
+  }
+
+  // PART 2 — ordem das 18 entradas do script id_Wait. Lê o contrato no núcleo
+  // (nunca reimplementa endereços/tokens), permite selecionar uma posição,
+  // movê-la antes/depois, comparar proposta vs original vs aplicado, aplicar à
+  // cópia e restaurar SOMENTE a sequência. Reconhece repetições: mover duas
+  // entradas iguais não altera o byte stream e é tratado como no-op.
+  async function loadSequence(sessionId: string) {
+    const request = ++sequenceRequestSeq.current;
+    setSequenceBusy(true);
+    setSequenceError("");
+    try {
+      const info = await inspectionSonicSequence(sessionId);
+      if (request !== sequenceRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
+      setSequence(info);
+      setSequenceProposal(info.current_frames.slice());
+      setSequenceSelected(null);
+      const thumbs: Record<string, InspectionSpriteFrame> = {};
+      for (const byte of Array.from(new Set(info.current_frames))) {
+        const frameId = cadenceThumbId(byte);
+        try {
+          const frame = await inspectionSpriteFrame(sessionId, "sonic1_sonic", frameId, false, false);
+          if (frame.resource_id === "sonic1_sonic" && frame.frame_id === frameId) thumbs[frameId] = frame;
+        } catch {
+          /* miniatura opcional — o byte é exibido em hex quando indisponível */
+        }
+        if (request !== sequenceRequestSeq.current || sessionRef.current?.session_id !== sessionId) return;
+      }
+      setSequenceThumbs(thumbs);
+    } catch (error) {
+      if (request === sequenceRequestSeq.current && sessionRef.current?.session_id === sessionId) {
+        setSequence(null);
+        setSequenceError(`Contrato da sequência indisponível: ${describeError(error)} Reabra a sessão ou tente novamente.`);
+      }
+    } finally {
+      if (request === sequenceRequestSeq.current) setSequenceBusy(false);
+    }
+  }
+
+  function moveSequencePosition(index: number, delta: number) {
+    if (!sequence || !sequenceProposal) return;
+    const target = index + delta;
+    if (target < 0 || target >= sequenceProposal.length) return;
+    const next = sequenceProposal.slice();
+    const tmp = next[index];
+    next[index] = next[target];
+    next[target] = tmp;
+    setSequenceProposal(next);
+    setSequenceSelected(target);
+    setSequenceError("");
+    const equalsApplied = next.every((b, i) => b === sequence.current_frames[i]);
+    setSequenceMessage(equalsApplied
+      ? "Proposta igual à ordem já gravada: mover duas entradas idênticas não altera a sequência."
+      : "");
+  }
+
+  async function applySequence() {
+    const current = sessionRef.current;
+    if (!current || !sequence || !sequenceProposal) return;
+    if (sequenceProposal.every((b, i) => b === sequence.current_frames[i])) {
+      setSequenceError("");
+      setSequenceMessage("Nada a aplicar: a proposta é idêntica à ordem já gravada na cópia (trocar entradas repetidas não muda a sequência).");
+      return;
+    }
+    const request = ++sequenceEditSeq.current;
+    setSequenceBusy(true);
+    setSequenceError("");
+    setSequenceMessage("");
+    try {
+      const edit = await inspectionEditSonicSequence(current.session_id, "sonic1_sonic", sequenceProposal);
+      if (request !== sequenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
+      await loadSequence(current.session_id);
+      if (request !== sequenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
+      logMessage("success", `[Inspeção] Ordem id_Wait aplicada: janela 0x${hex(sequence.frames_addr, 5)}..0x${hex(sequence.frames_addr + sequence.frames_len - 1, 5)} reordenada na cópia ${edit.modified_rom_sha256}.`);
+    } catch (error) {
+      if (request !== sequenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
+      setSequenceError(`Edição da sequência recusada: ${describeError(error)} A base original não foi tocada.`);
+    } finally {
+      if (request === sequenceEditSeq.current) setSequenceBusy(false);
+    }
+  }
+
+  async function restoreSequence() {
+    const current = sessionRef.current;
+    if (!current || !sequence) return;
+    if (sequence.current_frames.every((b, i) => b === sequence.original_frames[i])) {
+      setSequenceError("");
+      setSequenceMessage("Nada a restaurar: a sequência já está na ordem original; nenhuma escrita foi realizada.");
+      setSequenceProposal(sequence.original_frames.slice());
+      return;
+    }
+    const request = ++sequenceEditSeq.current;
+    setSequenceBusy(true);
+    setSequenceError("");
+    setSequenceMessage("");
+    try {
+      await inspectionRestoreSonicSequence(current.session_id, "sonic1_sonic");
+      if (request !== sequenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
+      await loadSequence(current.session_id);
+      if (request !== sequenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
+      logMessage("info", `[Inspeção] Sequência id_Wait restaurada à ordem original (somente a janela 0x${hex(sequence.frames_addr, 5)}..0x${hex(sequence.frames_addr + sequence.frames_len - 1, 5)}); duração, pixels e paleta permanecem.`);
+    } catch (error) {
+      if (request !== sequenceEditSeq.current || sessionRef.current?.session_id !== current.session_id) return;
+      setSequenceError(`Restauração da sequência recusada: ${describeError(error)} A base original não foi tocada.`);
+    } finally {
+      if (request === sequenceEditSeq.current) setSequenceBusy(false);
+    }
   }
 
   async function saveChoice() {
@@ -1114,6 +1244,61 @@ export default function InspectionPanel({ logMessage }: InspectionPanelProps) {
                   </details>
                 </>}
                 <div aria-live="polite" data-testid="inspection-cadence-error" className="mt-2 break-words text-[#f38ba8]">{cadenceError}</div>
+              </div>
+              </div>
+              <div data-testid="inspection-anim-group-sequence" className="mt-2">
+              <div data-testid="inspection-sonic-sequence-panel" className="rounded border border-[#94e2d5]/30 bg-[#0d2021] p-2">
+                <div className="font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">Ordem das entradas · {sequence?.name ?? "id_Wait"} · Experimental</div>
+                <p className="mt-1 text-[#cdd6f4]">Reordene as {sequence?.frames_len ?? 18} entradas do script id_Wait. A edição escreve só na janela 0x{hex(sequence?.frames_addr ?? 0, 5)}..0x{hex((sequence?.frames_addr ?? 0) + (sequence?.frames_len ?? 18) - 1, 5)}: o byte de duração (0x{hex((sequence?.script_addr ?? 0), 5)}), o terminador e o script vizinho nunca mudam. Entradas repetidas são posições distintas — mover duas iguais não altera a sequência.</p>
+                {sequenceBusy && !sequence && <div className="mt-1 text-[#7f849c]">Lendo o contrato da sequência no núcleo…</div>}
+                {sequence && <>
+                  <div className="mt-2 flex flex-wrap items-end gap-2">
+                    <button type="button" data-testid="inspection-sequence-move-before" disabled={sequenceBusy || editBusy || sequenceSelected === null || sequenceSelected === 0} onClick={() => { if (sequenceSelected !== null) moveSequencePosition(sequenceSelected, -1); }} className="rounded border border-[#94e2d5]/50 px-3 py-1 text-[#94e2d5]" title="Proposta: move a entrada selecionada uma posição para trás; nada é gravado até “Aplicar ordem”">Mover antes</button>
+                    <button type="button" data-testid="inspection-sequence-move-after" disabled={sequenceBusy || editBusy || sequenceSelected === null || !sequenceProposal || sequenceSelected >= sequenceProposal.length - 1} onClick={() => { if (sequenceSelected !== null) moveSequencePosition(sequenceSelected, 1); }} className="rounded border border-[#94e2d5]/50 px-3 py-1 text-[#94e2d5]" title="Proposta: move a entrada selecionada uma posição para frente; nada é gravado até “Aplicar ordem”">Mover depois</button>
+                    <button type="button" data-testid="inspection-sequence-apply" disabled={sequenceBusy || editBusy} onClick={() => void applySequence()} className="rounded bg-[#94e2d5] px-3 py-1 font-semibold text-[#111827]">{sequenceBusy ? "Aplicando…" : "Aplicar ordem"}</button>
+                    <button type="button" data-testid="inspection-sequence-restore" disabled={sequenceBusy || editBusy} onClick={() => void restoreSequence()}>Restaurar sequência</button>
+                  </div>
+                  <div data-testid="inspection-sequence-timeline" className="mt-2 flex flex-wrap gap-1" aria-label="Entradas da sequência na ordem proposta">
+                    {(sequenceProposal ?? sequence.current_frames).map((byte, index) => {
+                      const frameId = cadenceThumbId(byte);
+                      const thumb = sequenceThumbs[frameId];
+                      const changedVsOriginal = byte !== sequence.original_frames[index];
+                      const pendingVsApplied = byte !== sequence.current_frames[index];
+                      const selected = sequenceSelected === index;
+                      return <div key={`seq-${index}`} className="flex flex-col items-center gap-0.5">
+                        <button type="button" data-testid={`inspection-sequence-entry-${index}`} data-byte={byte} data-selected={String(selected)} data-changed={String(changedVsOriginal)} data-pending={String(pendingVsApplied)} title={`Posição ${index + 1}: índice de arte 0x${hex(byte, 2)}${changedVsOriginal ? " · difere do original" : ""}${pendingVsApplied ? " · pendente na cópia" : ""}`} onClick={() => setSequenceSelected(index)} className={`rounded border p-1 ${selected ? "border-[#cba6f7] bg-[#1b1630]" : pendingVsApplied ? "border-[#94e2d5] bg-[#0d2021]" : changedVsOriginal ? "border-[#f9e2af]/60 bg-[#2a2414]" : "border-[#313244] bg-[#0b0f19]"}`}>
+                          {thumb?.available && thumb.data_url
+                            ? <img src={thumb.data_url} alt={`Entrada ${index + 1}`} width={thumb.width * 2} height={thumb.height * 2} className="block bg-[#ff00ff] [image-rendering:pixelated]" style={{ imageRendering: "pixelated" }} />
+                            : <span className="block px-1 py-2 font-mono text-[9px] text-[#7f849c]">{hex(byte, 2)}</span>}
+                        </button>
+                        <span className="font-mono text-[8px] text-[#7f849c]">{index + 1}</span>
+                      </div>;
+                    })}
+                  </div>
+                  <div className="mt-2 grid gap-1 md:grid-cols-3">
+                    <div data-testid="inspection-sequence-original" className="text-[#cdd6f4]">Original: {sequence.original_frames.map((b) => hex(b, 2)).join(" ")}</div>
+                    <div data-testid="inspection-sequence-current" className="text-[#a6e3a1]">Aplicado na cópia: {sequence.current_frames.map((b) => hex(b, 2)).join(" ")}</div>
+                    <div data-testid="inspection-sequence-proposed" className="text-[#94e2d5]">Proposta: {(sequenceProposal ?? sequence.current_frames).map((b) => hex(b, 2)).join(" ")}</div>
+                  </div>
+                  {sequenceProposal && sequenceProposal.some((b, i) => b !== sequence.current_frames[i]) && <div data-testid="inspection-sequence-pending" className="mt-1 text-[#f9e2af]">Pendente: {sequenceProposal.filter((b, i) => b !== sequence.current_frames[i]).length} posição(ões) diferem da ordem aplicada; nada muda no jogo até você clicar em “Aplicar ordem”.</div>}
+                  {sequenceProposal && sequenceProposal.every((b, i) => b === sequence.current_frames[i]) && !sequenceMessage && <div data-testid="inspection-sequence-none-pending" className="mt-1 text-[#7f849c]">Nenhuma reordenação pendente: a proposta coincide com a ordem aplicada na cópia.</div>}
+                  {sequenceProposal && <div data-testid="inspection-sequence-diff-original" className="mt-1 text-[#bac2de]">{sequenceProposal.filter((b, i) => b !== sequence.original_frames[i]).length} posição(ões) diferem do original · {new Set(sequenceProposal).size} desenhos únicos (bytes distintos).</div>}
+                  <div className="mt-1 text-[#a6e3a1]">Escopo: esta ferramenta altera somente a ordem das entradas; a duração, o byte de intervalo, o terminador, os pixels e a paleta já acumulados na cópia permanecem intactos. Restaurar sequência devolve só a ordem original.</div>
+                  <div data-testid="inspection-sequence-loop-effect" className="mt-1 text-[#bac2de]">Efeito do loop: {sequence.loop_effect}</div>
+                  <div data-testid="inspection-sequence-terminator" className="mt-1 text-[#bac2de]">Término: {sequence.terminator}</div>
+                  <div data-testid="inspection-sequence-domain" className="mt-1 text-[#bac2de]">Valores válidos como entrada: {sequence.valid_values.map((b) => `0x${hex(b, 2)}`).join(", ")}. Recusados: {sequence.reserved.join(" · ")}.</div>
+                  <details className="mt-2 border-t border-[#313244] pt-2">
+                    <summary className="cursor-pointer text-[9px] uppercase tracking-[0.14em] text-[#bac2de]">Proveniência e limitações do contrato (detalhe técnico)</summary>
+                    <div data-testid="inspection-sequence-provenience" className="mt-1 space-y-1 text-[9px] text-[#7f849c]">
+                      {sequence.provenience.map((line) => <div key={line}>{line}</div>)}
+                      <div className="pt-1 uppercase tracking-[0.14em] text-[#bac2de]">Limitações</div>
+                      {sequence.limitations.map((line) => <div key={line}>{line}</div>)}
+                      <div className="break-all font-mono">Contrato: {sequence.contract_path}</div>
+                    </div>
+                  </details>
+                </>}
+                <div aria-live="polite" data-testid="inspection-sequence-message" className="mt-2 break-words text-[#a6e3a1]">{sequenceMessage}</div>
+                <div aria-live="polite" data-testid="inspection-sequence-error" className="mt-2 break-words text-[#f38ba8]">{sequenceError}</div>
               </div>
               </div>
               <div data-testid="inspection-anim-group-color" className="mt-2">

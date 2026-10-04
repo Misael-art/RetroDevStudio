@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => ({
   inspectionSpriteFrame: vi.fn(),
   inspectionSonicCadence: vi.fn(),
   inspectionEditSonicDuration: vi.fn(),
+  inspectionSonicSequence: vi.fn(),
+  inspectionEditSonicSequence: vi.fn(),
+  inspectionRestoreSonicSequence: vi.fn(),
   inspectionEditSonicPalette: vi.fn(),
   inspectionEditSonicTiles: vi.fn(),
   patchCreateBps: vi.fn(),
@@ -606,6 +609,128 @@ describe("InspectionPanel", () => {
       await flush(); await flush(); await flush();
     });
   }
+
+  // PART 2 — ordem das entradas id_Wait. Um unico adjacento swap entre valores
+  // DISTINTOS (posicoes 11 e 12: 01 <-> 03) muda o byte stream — prova
+  // discriminante. Um adjacento swap entre iguais (01 e 01) nao muda nada.
+  function sequenceInfoFor(currentFrames: number[]) {
+    return {
+      anim: 5,
+      name: "id_Wait · Parado esperando",
+      script_addr: 0x13bae,
+      frames_addr: 0x13baf,
+      frames_len: 18,
+      original_frames: waitFrames,
+      current_frames: currentFrames,
+      changed_positions: currentFrames.map((b, i) => (b !== waitFrames[i] ? i : -1)).filter((i) => i >= 0),
+      terminator: "FE 02 — afBack k=2 (preservado)",
+      loop_effect: "o loop fixa as duas últimas posições do script",
+      valid_values: [1, 2, 3, 4],
+      reserved: ["0x00 e 0x80..0xFF — nunca são molduras", "0xFD, 0xFE, 0xFF — tokens"],
+      provenience: ["script id_Wait em 0x13BAE; janela escrevível 0x13BAF..0x13BC0"],
+      limitations: ["só a ordem das 18 entradas muda; duração/pixel/paleta intactos"],
+      contract_path: "docs/rex_profiles/sonic_sequencia/CONTRACT-SEQUENCIA.md",
+    };
+  }
+  function sequenceEdit(currentFrames: number[]) {
+    return {
+      format: "sonic1_wait_frame_order",
+      resource_id: "sonic1_sonic",
+      frame_id: "id_Wait",
+      palette_index: 0,
+      red: 0,
+      green: 0,
+      blue: 0,
+      original_rom_sha256: "b".repeat(64),
+      modified_rom_sha256: "9".repeat(64),
+      modified_rom_path: "/edits/seq.bin",
+      changed_offsets: currentFrames.map((b, i) => (b !== waitFrames[i] ? 0x13baf + i : -1)).filter((i) => i >= 0),
+      bytes_changed: currentFrames.filter((b, i) => b !== waitFrames[i]).length,
+    };
+  }
+  // Mock com estado: `applied` reflete a ordem gravada na cópia; a UI recarrega
+  // após aplicar/restaurar, então o pending some exatamente como no produto.
+  async function openSonicSequenceSession(initial = [...waitFrames]) {
+    const applied = initial.slice();
+    mocks.inspectionOpen.mockResolvedValue(completedSession);
+    mocks.inspectionStatus.mockResolvedValue({ session: completedSession, run: completed });
+    mocks.inspectionCatalogPage.mockResolvedValue({ session_id: completedSession.session_id, run_id: completed.run_id, offset: 0, limit: 24, total_candidates: 0, candidates: [], unknown_regions: [], user_choices: [] });
+    mocks.inspectionSonicCadence.mockImplementation(async () => cadenceInfo(23));
+    mocks.inspectionSonicSequence.mockImplementation(async () => sequenceInfoFor(applied));
+    mocks.inspectionEditSonicSequence.mockImplementation(async (_sessionId: string, _resourceId: string, proposal: number[]) => {
+      applied.length = 0;
+      applied.push(...proposal);
+      return sequenceEdit(applied);
+    });
+    mocks.inspectionRestoreSonicSequence.mockImplementation(async () => {
+      applied.length = 0;
+      applied.push(...waitFrames);
+      return sequenceEdit(applied);
+    });
+    mocks.inspectionSpriteFrame.mockImplementation(async (_sessionId: string, _resourceId: string, frameId: string) => sonicFrameResponse(frameId) as unknown as Record<string, unknown>);
+    await act(async () => { root.render(<InspectionPanel logMessage={vi.fn()} />); await flush(); });
+    setTextInput(container.querySelector("input[type='text']") as Element, "/roms/test.md");
+    await act(async () => { await flush(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-identify']") as HTMLButtonElement).click(); await flush(); await flush(); });
+    const frameSelect = container.querySelector("[data-testid='inspection-sprite-frame-select']") as HTMLSelectElement;
+    await act(async () => {
+      frameSelect.value = "sonic1_sonic/stand";
+      frameSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush(); await flush(); await flush();
+    });
+    return { applied };
+  }
+
+  it("reorders distinct entries as a proposal only: pending updates, no write reaches the core until Aplicar ordem", async () => {
+    const state = await openSonicSequenceSession();
+    expect(container.querySelector("[data-testid='inspection-sonic-sequence-panel']")).not.toBeNull();
+
+    // Adjacent swap of DISTINCT values (positions 12<->13 => 03<->02) is discriminating.
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-entry-12']") as HTMLButtonElement).click(); await flush(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-move-after']") as HTMLButtonElement).click(); await flush(); });
+    expect(mocks.inspectionEditSonicSequence).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-testid='inspection-sequence-pending']")?.textContent).toContain("Pendente");
+    const expected = waitFrames.slice();
+    [expected[12], expected[13]] = [expected[13], expected[12]];
+    expect(container.querySelector("[data-testid='inspection-sequence-proposed']")?.textContent).toContain(expected.map((b) => b.toString(16).padStart(2, "0")).join(" "));
+
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-apply']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); await flush(); });
+    expect(mocks.inspectionEditSonicSequence).toHaveBeenCalledTimes(1);
+    expect(mocks.inspectionEditSonicSequence).toHaveBeenCalledWith(completedSession.session_id, "sonic1_sonic", expected);
+    expect(state.applied).toEqual(expected);
+    // After the write, the copy's applied order equals the proposal → no pending.
+    expect(container.querySelector("[data-testid='inspection-sequence-pending']")).toBeNull();
+  });
+
+  it("recognizes repeats: swapping two identical entries is a no-op and never writes", async () => {
+    await openSonicSequenceSession();
+    // Positions 0 and 1 are both 0x01 in the original — swapping them changes nothing.
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-entry-0']") as HTMLButtonElement).click(); await flush(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-move-after']") as HTMLButtonElement).click(); await flush(); });
+    expect(container.querySelector("[data-testid='inspection-sequence-message']")?.textContent).toContain("Proposta igual à ordem já gravada");
+    expect(container.querySelector("[data-testid='inspection-sequence-pending']")).toBeNull();
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-apply']") as HTMLButtonElement).click(); await flush(); });
+    expect(mocks.inspectionEditSonicSequence).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-testid='inspection-sequence-message']")?.textContent).toContain("Nada a aplicar");
+  });
+
+  it("restores only the sequence, and reports a no-op when already original", async () => {
+    const state = await openSonicSequenceSession();
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-entry-12']") as HTMLButtonElement).click(); await flush(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-move-after']") as HTMLButtonElement).click(); await flush(); });
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-apply']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); await flush(); });
+    expect(state.applied).not.toEqual(waitFrames);
+
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-restore']") as HTMLButtonElement).click(); await flush(); await flush(); await flush(); await flush(); });
+    expect(mocks.inspectionRestoreSonicSequence).toHaveBeenCalledWith(completedSession.session_id, "sonic1_sonic");
+    expect(state.applied).toEqual(waitFrames);
+
+    // Second restore is a no-op: nothing to restore, never a silent write.
+    mocks.inspectionRestoreSonicSequence.mockClear();
+    await act(async () => { (container.querySelector("[data-testid='inspection-sequence-restore']") as HTMLButtonElement).click(); await flush(); });
+    expect(mocks.inspectionRestoreSonicSequence).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-testid='inspection-sequence-message']")?.textContent).toContain("Nada a restaurar");
+  });
 
   // E2-0/E2-4 (EXPECTATIONS-VISUAL-ETAPA2): Mais lento/mais rapido sao
   // politica de proposta — ajustam o valor proposto e o aviso de pendencia,

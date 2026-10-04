@@ -509,6 +509,27 @@ export interface SonicCadenceInfo {
   contract_path: string;
 }
 
+/**
+ * Proven `id_Wait` frame sequence: original vs current order of the 18 entries
+ * in `0x13BAF..0x13BC0`. Read from the core contract, never recomputed in the UI.
+ */
+export interface SonicSequenceInfo {
+  anim: number;
+  name: string;
+  script_addr: number;
+  frames_addr: number;
+  frames_len: number;
+  original_frames: number[];
+  current_frames: number[];
+  changed_positions: number[];
+  terminator: string;
+  loop_effect: string;
+  valid_values: number[];
+  reserved: string[];
+  provenience: string[];
+  limitations: string[];
+  contract_path: string;
+}
 export interface InspectionPixelEdit {
   x: number;
   y: number;
@@ -777,6 +798,35 @@ export function inspectionEditSonicDuration(
     sessionId,
     resourceId,
     value,
+  });
+}
+
+/** Reads the proven id_Wait frame sequence (original vs current order) from the core. */
+export function inspectionSonicSequence(sessionId: string): Promise<SonicSequenceInfo> {
+  return invoke<SonicSequenceInfo>("rex_inspection_sonic_sequence", { sessionId });
+}
+
+/** Reorders the 18 id_Wait frame entries on a revalidated copy (in place, size-preserving). */
+export function inspectionEditSonicSequence(
+  sessionId: string,
+  resourceId: string,
+  proposal: number[]
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_edit_sonic_sequence", {
+    sessionId,
+    resourceId,
+    proposal,
+  });
+}
+
+/** Restores only the id_Wait frame sequence to its original order. */
+export function inspectionRestoreSonicSequence(
+  sessionId: string,
+  resourceId: string
+): Promise<InspectionEdit> {
+  return invoke<InspectionEdit>("rex_inspection_restore_sonic_sequence", {
+    sessionId,
+    resourceId,
   });
 }
 
