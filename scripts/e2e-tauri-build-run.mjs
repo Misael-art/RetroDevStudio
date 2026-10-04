@@ -479,6 +479,7 @@ function parseArgs(argv) {
           "sonic-cadence-journey",
           "sonic-anim-integrada",
           "sonic-anim-visual-diagnostico",
+          "compositing-medicao",
           "rex-lz4w-effect",
           "rex-lz4w-fixture-effect",
           "rex-aplib-byor-effect",
@@ -10661,6 +10662,223 @@ async function observeCadenceRunOnCore(sessionId, runOptions) {
   return { metrics, checks, seriesPath, rom_sha256: tail.rom_sha256 };
 }
 
+// C4 — medição do efeito GLOBAL da decisão de produto que define
+// WEBKIT_DISABLE_COMPOSITING_MODE=1 em todo Linux (`app_lib::run`,
+// lib.rs:5593-5595). Não é prova funcional: é um probe de apresentação que
+// separa TEMPO EMULADO (`emulator_observe.frames_run`, no core) de FLUIDEZ
+// APRESENTADA (contador de pump `data-rendered-frames`, no produto). A CPU é
+// amostrada FORA do processo por `cpu-sample.py` e alinhada pelas janelas em
+// epoch-ms gravadas aqui. A única variável entre braços é o binário (env
+// `RDS_C4_ARM` = A|B); nenhum braço define a flag pelo ambiente do harness —
+// a assertiva abaixo garante isso (estilo E3-1). Game View é a única superfície
+// do app com loop de re-pintura contínuo (pump ~16 ms), o caminho onde o custo
+// do compositor se decide; NodeGraph e a prévia MUGEN re-pintam por evento/
+// timeout e são registrados como lacunas de métrica neste mesmo JSON.
+async function runCompositingMedicaoScenario(sessionId, appPath) {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
+  const romSha256 = "c7da53a10c317f882f5bba93af31c3972fc1ded18d8507d4f3d5a06190c81ebb";
+  const arm = (process.env.RDS_C4_ARM || "").trim().toUpperCase();
+  if (arm !== "A" && arm !== "B") {
+    fail("RDS_C4_ARM deve ser 'A' (produto, compositing-off) ou 'B' (baseline, sem a linha).");
+  }
+  if (process.env.WEBKIT_DISABLE_COMPOSITING_MODE) {
+    fail(
+      "O ambiente do harness define WEBKIT_DISABLE_COMPOSITING_MODE externamente. "
+      + "Isso trocaria a correção por variável oculta no harness: nos dois braços a "
+      + "flag só pode vir do código do binário (A) ou de nenhuma fonte (B)."
+    );
+  }
+
+  const windowsCount = Number(process.env.RDS_C4_WINDOWS || 3);
+  const windowMs = Number(process.env.RDS_C4_WINDOW_MS || 20000);
+  const sampleMs = Number(process.env.RDS_C4_SAMPLE_MS || 1000);
+  if (!Number.isInteger(windowsCount) || windowsCount < 1) fail(`RDS_C4_WINDOWS inválido: ${windowsCount}`);
+  if (!Number.isInteger(windowMs) || windowMs < 5000) fail(`RDS_C4_WINDOW_MS inválido: ${windowMs}`);
+  if (!Number.isInteger(sampleMs) || sampleMs < 200) fail(`RDS_C4_SAMPLE_MS inválido: ${sampleMs}`);
+
+  const outDir = process.env.RDS_C4_OUT_DIR || validationDir;
+  await mkdir(outDir, { recursive: true });
+  const seriesPath = path.join(outDir, `compositing-medicao-${arm.toLowerCase()}.json`);
+
+  const romPath = process.env.RDS_INSPECTION_ROM || "";
+  if (!romPath || !(await pathExists(romPath))) {
+    fail("RDS_INSPECTION_ROM deve apontar para a ROM BYOR de Sonic pinada (não é dependência provisionável).");
+  }
+  const romBytes = await readFile(romPath);
+  const romSha = hash(romBytes);
+  if (romSha !== romSha256) fail(`ROM inesperada para a medição C4: ${romSha}`);
+  const appSha = appPath ? hash(await readFile(appPath)) : null;
+
+  // Uma única ida ao main thread por amostra lê o contador apresentado (DOM) e
+  // o emulado (core) juntos, para minimizar a perturbação do pump que cada
+  // leitura IPC causa (ver Addendum-A: `data-rendered-frames` é quantizado x10
+  // e cada leitura afama o pump de 1 frame por tick). Por isso a medição
+  // apresentada é grosseira (1 Hz, x10) e o sinal primário é CPU externa.
+  const sample = async () => executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const nowMs = Date.now();
+      const identity = document.querySelector('[data-testid="viewport-emulator-identity"]');
+      const attr = (n) => identity ? Number(identity.getAttribute(n) || 0) : null;
+      const rendered = attr('data-rendered-frames');
+      const reqSeq = attr('data-last-input-request-seq');
+      const ackSeq = attr('data-last-input-ack-seq');
+      const status = document.querySelector('[data-testid="viewport-game-status"]');
+      const invoke = window.__TAURI__?.core?.invoke ?? window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke !== 'function') {
+        done({ nowMs, rendered, reqSeq, ackSeq, gameStatus: status ? status.textContent.trim() : null, framesRun: null, coreError: 'invoke-indisponivel' });
+        return;
+      }
+      invoke('emulator_observe', {})
+        .then((v) => done({ nowMs, rendered, reqSeq, ackSeq, gameStatus: status ? status.textContent.trim() : null, framesRun: Number.isFinite(v?.frames_run) ? v.frames_run : null, coreLabel: v?.core_label ?? null }))
+        .catch((e) => done({ nowMs, rendered, reqSeq, ackSeq, gameStatus: status ? status.textContent.trim() : null, framesRun: null, coreError: String((e && e.message) || e) }));
+    `
+  );
+
+  const result = {
+    scenario: "compositing-medicao",
+    arm,
+    armMeaning: arm === "A"
+      ? "produto — binário define WEBKIT_DISABLE_COMPOSITING_MODE=1 internamente (compositing-off)"
+      : "baseline — binário SEM as 3 linhas da mitigação (compositing segue o default do WebKitGTK)",
+    appPath,
+    appSha256: appSha,
+    romPath,
+    romSha256: romSha,
+    windowConfig: { windows: windowsCount, windowMs, sampleMs },
+    meta: {
+      presentedCounter: "data-rendered-frames (pump do ViewportPanel; quantizado x10; leitura IPC de 1 Hz afama levemente o pump — medição grosseira assumida)",
+      emulatedCounter: "emulator_observe.frames_run (exato, no core, não perturbado)",
+      cpuSource: "cpu-sample.py externo (fora do processo), alinhado por t_start_ms/t_end_ms epoch de cada janela",
+      nodegraphRepaintTick: "LACUNA — NodeGraph não tem hook de contagem de re-pintura (evento-driven, sem RAF)",
+      mugenPreview: "LACUNA neste probe — prévia MUGEN exige jornada de import completa; fora de escopo de um probe de perf",
+    },
+    surfaceResults: {},
+  };
+
+  let bootSample = null;
+  const bootTrace = [];
+  const outcome = { status: "ok" };
+  try {
+    // Carrega a ROM em execução (sem startPaused): o ViewportPanel define a aba
+    // 'game' e inicia o pump contínuo. É a única superfície de re-pintura viva.
+    const loaded = await callAutomationApi(sessionId, "loadRomForEmulation", [romPath, {}]);
+    if (loaded !== true) fail(`Emulador não confirmou a carga da ROM para a medição: ${JSON.stringify(loaded)}`);
+
+    const bootDeadline = Date.now() + 30000;
+    while (Date.now() < bootDeadline) {
+      const s = await sample();
+      bootTrace.push(s);
+      if (s && Number.isFinite(s.rendered) && s.rendered >= 8 && Number.isFinite(s.framesRun)) {
+        bootSample = s;
+        break;
+      }
+      await sleep(500);
+    }
+  } catch (error) {
+    outcome.status = "error";
+    outcome.error = String(error && error.message ? error.message : error);
+  }
+
+  if (!bootSample) {
+    result.status = "INCONCLUSIVE";
+    result.inconclusiveReason = outcome.status === "error"
+      ? `erro ao carregar/bombear a Game View: ${outcome.error}`
+      : "a Game View não confirmou pump vivo (renderedFrames>=8 e frames_run observável) em 30 s; qualquer fps lido seria estruturalmente inválido";
+    result.bootTrace = bootTrace.slice(-24);
+    await writeFile(seriesPath, JSON.stringify(result, null, 2));
+    console.log(`[compositing-medicao] BRAÇO ${arm}: INCONCLUSIVE — ${result.inconclusiveReason} → ${seriesPath}`);
+    return;
+  }
+
+  const windows = [];
+  for (let w = 0; w < windowsCount; w += 1) {
+    const start = await sample();
+    const series = [start];
+    let last = start;
+    const deadline = start.nowMs + windowMs;
+    while (Date.now() < deadline) {
+      const elapsedSinceLast = Date.now() - last.nowMs;
+      await sleep(Math.max(50, sampleMs - elapsedSinceLast));
+      last = await sample();
+      series.push(last);
+    }
+    const wallMs = last.nowMs - start.nowMs;
+    const renderedDelta = Number.isFinite(start.rendered) && Number.isFinite(last.rendered) ? last.rendered - start.rendered : null;
+    const framesRunDelta = Number.isFinite(start.framesRun) && Number.isFinite(last.framesRun) ? last.framesRun - start.framesRun : null;
+    const presentedFps = renderedDelta != null && wallMs > 0 ? +(renderedDelta / (wallMs / 1000)).toFixed(2) : null;
+    const emulatedFps = framesRunDelta != null && wallMs > 0 ? +(framesRunDelta / (wallMs / 1000)).toFixed(2) : null;
+
+    // Resposta à interação: START nativo (Enter) no canvas focado; latência =
+    // tempo até o ack do pipeline de joypad avançar. Métrica disponível apenas
+    // se a sessão de input estiver viva; senão é lacuna, nunca falha a corrida.
+    const ackBefore = last.ackSeq;
+    let interactionLatencyMs = null;
+    try {
+      await focusGameCanvasNatively(sessionId);
+      const pressAt = Date.now();
+      await sendNativeGameKey(sessionId, "Enter", "keyDown", `START medição ${arm} janela ${w + 1}`);
+      await sendNativeGameKey(sessionId, "Enter", "keyUp", `liberar START ${arm} janela ${w + 1}`);
+      const pollDeadline = Date.now() + 2000;
+      while (Date.now() < pollDeadline) {
+        const s = await sample();
+        if (Number.isFinite(s.ackSeq) && Number.isFinite(ackBefore) && s.ackSeq > ackBefore) {
+          interactionLatencyMs = s.nowMs - pressAt;
+          break;
+        }
+        await sleep(25);
+      }
+    } catch {
+      interactionLatencyMs = null;
+    }
+
+    windows.push({
+      index: w + 1,
+      t_start_ms: start.nowMs,
+      t_end_ms: last.nowMs,
+      wall_ms: wallMs,
+      rendered_start: start.rendered,
+      rendered_end: last.rendered,
+      frames_run_start: start.framesRun,
+      frames_run_end: last.framesRun,
+      presented_frames_delta: renderedDelta,
+      emulated_frames_delta: framesRunDelta,
+      presented_fps: presentedFps,
+      emulated_fps: emulatedFps,
+      validity_frames_run_advanced: framesRunDelta != null ? framesRunDelta > 0 : null,
+      interaction_latency_ms: interactionLatencyMs,
+      samples: series,
+    });
+    console.log(
+      `[compositing-medicao] BRAÇO ${arm} janela ${w + 1}/${windowsCount}: `
+      + `emulado=${emulatedFps} fps (Δ${framesRunDelta}) apresentado=${presentedFps} fps (Δ${renderedDelta}) `
+      + `START=${interactionLatencyMs != null ? `${interactionLatencyMs}ms` : "lacuna"}`
+    );
+  }
+
+  const validWindows = windows.filter((x) => x.emulated_fps != null && x.emulated_fps > 0);
+  const median = (arr) => {
+    if (!arr.length) return null;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : +((sorted[mid - 1] + sorted[mid]) / 2).toFixed(2);
+  };
+  result.surfaceResults.game = {
+    status: validWindows.length ? "medido" : "INCONCLUSIVE (nenhuma janela com frames_run>0)",
+    windows,
+    emulated_fps_median: median(windows.map((x) => x.emulated_fps).filter((v) => v != null)),
+    presented_fps_median: median(windows.map((x) => x.presented_fps).filter((v) => v != null)),
+    interaction_latency_median_ms: median(windows.map((x) => x.interaction_latency_ms).filter((v) => v != null)),
+    frames_run_advanced_in_all_windows: windows.every((x) => x.validity_frames_run_advanced === true),
+  };
+  result.status = validWindows.length ? "medido" : "INCONCLUSIVE";
+
+  await writeFile(seriesPath, JSON.stringify(result, null, 2));
+  console.log(`[compositing-medicao] BRAÇO ${arm}: ${result.status} → ${seriesPath}`);
+}
+
 async function runSonicCadenceJourneyScenario(sessionId, app, romPath, base, savedId, prefix, uiBootstrapTimeoutMs) {
   const hash = (buffer) => createHash("sha256").update(buffer).digest("hex");
   const baseSha256 = hash(base);
@@ -16483,6 +16701,12 @@ async function main() {
     if (options.scenario === "rex-context-fixture-effect") {
       currentE2eRunContext.appPath = options.app;
       await runRexContextFixtureEffectScenario(sessionId);
+      return;
+    }
+
+    if (options.scenario === "compositing-medicao") {
+      currentE2eRunContext.appPath = options.app;
+      await runCompositingMedicaoScenario(sessionId, options.app);
       return;
     }
 
