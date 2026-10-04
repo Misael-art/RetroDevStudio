@@ -10752,6 +10752,7 @@ async function runCompositingMedicaoScenario(sessionId, appPath) {
       presentedCounter: "data-rendered-frames (pump do ViewportPanel; quantizado x10; leitura IPC de 1 Hz afama levemente o pump — medição grosseira assumida)",
       emulatedCounter: "emulator_observe.frames_run (exato, no core, não perturbado)",
       cpuSource: "cpu-sample.py externo (fora do processo), alinhado por t_start_ms/t_end_ms epoch de cada janela",
+      responseApproach: "primario: round-trip de uma ida ao main thread durante o pump (sempre disponivel); secundario: latencia de ack do joypad via START nativo (so com sessao de input viva — no title screen fica lacuna)",
       nodegraphRepaintTick: "LACUNA — NodeGraph não tem hook de contagem de re-pintura (evento-driven, sem RAF)",
       mugenPreview: "LACUNA neste probe — prévia MUGEN exige jornada de import completa; fora de escopo de um probe de perf",
     },
@@ -10795,14 +10796,26 @@ async function runCompositingMedicaoScenario(sessionId, appPath) {
 
   const windows = [];
   for (let w = 0; w < windowsCount; w += 1) {
-    const start = await sample();
+    // Amostra com medição de round-trip: o tempo de parede de uma única ida ao
+    // main thread (executeAsyncScript) enquanto o pump re-pinta é a métrica de
+    // "resposta às interações" SEMPRE disponível — sob render por software
+    // (compositing-off) o main thread pode ficar mais ocupado pelo paint e o
+    // round-trip aumenta. É o proxy de fluidez de resposta; a latência de ack do
+    // joypad é secundária (só existe com sessão de input viva, não no title).
+    const timedSample = async () => {
+      const t0 = Date.now();
+      const s = await sample();
+      s.roundtrip_ms = Date.now() - t0;
+      return s;
+    };
+    const start = await timedSample();
     const series = [start];
     let last = start;
     const deadline = start.nowMs + windowMs;
     while (Date.now() < deadline) {
       const elapsedSinceLast = Date.now() - last.nowMs;
       await sleep(Math.max(50, sampleMs - elapsedSinceLast));
-      last = await sample();
+      last = await timedSample();
       series.push(last);
     }
     const wallMs = last.nowMs - start.nowMs;
@@ -10810,6 +10823,10 @@ async function runCompositingMedicaoScenario(sessionId, appPath) {
     const framesRunDelta = Number.isFinite(start.framesRun) && Number.isFinite(last.framesRun) ? last.framesRun - start.framesRun : null;
     const presentedFps = renderedDelta != null && wallMs > 0 ? +(renderedDelta / (wallMs / 1000)).toFixed(2) : null;
     const emulatedFps = framesRunDelta != null && wallMs > 0 ? +(framesRunDelta / (wallMs / 1000)).toFixed(2) : null;
+    const roundtrips = series.map((x) => x.roundtrip_ms).filter((v) => Number.isFinite(v));
+    const uiResponseMedianMs = roundtrips.length
+      ? +([...roundtrips].sort((a, b) => a - b)[Math.floor(roundtrips.length / 2)]).toFixed(2)
+      : null;
 
     // Resposta à interação: START nativo (Enter) no canvas focado; latência =
     // tempo até o ack do pipeline de joypad avançar. Métrica disponível apenas
@@ -10849,11 +10866,14 @@ async function runCompositingMedicaoScenario(sessionId, appPath) {
       emulated_fps: emulatedFps,
       validity_frames_run_advanced: framesRunDelta != null ? framesRunDelta > 0 : null,
       interaction_latency_ms: interactionLatencyMs,
+      ui_response_median_ms: uiResponseMedianMs,
+      roundtrip_samples: roundtrips,
       samples: series,
     });
     console.log(
       `[compositing-medicao] BRAÇO ${arm} janela ${w + 1}/${windowsCount}: `
       + `emulado=${emulatedFps} fps (Δ${framesRunDelta}) apresentado=${presentedFps} fps (Δ${renderedDelta}) `
+      + `resposta_ui=${uiResponseMedianMs != null ? `${uiResponseMedianMs}ms` : "n/d"} `
       + `START=${interactionLatencyMs != null ? `${interactionLatencyMs}ms` : "lacuna"}`
     );
   }
@@ -10865,11 +10885,13 @@ async function runCompositingMedicaoScenario(sessionId, appPath) {
     const mid = Math.floor(sorted.length / 2);
     return sorted.length % 2 ? sorted[mid] : +((sorted[mid - 1] + sorted[mid]) / 2).toFixed(2);
   };
+  const pooledRoundtrips = windows.flatMap((x) => x.roundtrip_samples || []);
   result.surfaceResults.game = {
     status: validWindows.length ? "medido" : "INCONCLUSIVE (nenhuma janela com frames_run>0)",
     windows,
     emulated_fps_median: median(windows.map((x) => x.emulated_fps).filter((v) => v != null)),
     presented_fps_median: median(windows.map((x) => x.presented_fps).filter((v) => v != null)),
+    ui_response_median_ms: median(pooledRoundtrips),
     interaction_latency_median_ms: median(windows.map((x) => x.interaction_latency_ms).filter((v) => v != null)),
     frames_run_advanced_in_all_windows: windows.every((x) => x.validity_frames_run_advanced === true),
   };
